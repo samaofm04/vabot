@@ -611,6 +611,26 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="testrandompick", description="[ADMIN] Debug: pick 10 random identités pour vérifier la distribution")
+    async def testrandompick(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.response.send_message("❌ Aucune identité dispo.", ephemeral=True)
+            return
+        picks = [random.choice(identities) for _ in range(10)]
+        from collections import Counter
+        counts = Counter(picks)
+        msg = (
+            f"🎲 **Test random** sur 10 picks parmi `{', '.join(identities)}`\n\n"
+            f"**Résultats:** {' → '.join(picks)}\n\n"
+            f"**Distribution:**\n"
+        )
+        for name, n in counts.most_common():
+            msg += f"• `{name}` : {n}/10\n"
+        await interaction.response.send_message(msg, ephemeral=True)
+
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")
     async def welcometest(self, interaction: discord.Interaction, user: discord.Member = None):
