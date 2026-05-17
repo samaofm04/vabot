@@ -31,14 +31,11 @@ RANDOM_PORTRAIT_DIMS = [
 ]
 
 RANDOM_STORY_DIMS = [
-    (1080, 1920),
-    (1080, 1920),
-    (720, 1280),
+    (1080, 1920),  # Instagram story format obligatoire
 ]
 
 RANDOM_POST_DIMS = [
-    (1080, 1080),
-    (1080, 1350),
+    (1080, 1350),  # Instagram feed post 4:5
 ]
 
 
