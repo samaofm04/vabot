@@ -1208,6 +1208,58 @@ class Admin(commands.Cog):
             return
         await self._add_image_content(interaction, identity, photo, example_photo, caption, description, "posts", "Post")
 
+    async def _bulk_upload_images(self, interaction, identity, photos_zip, subdir, label):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not photos_zip.filename.lower().endswith(".zip"):
+            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
+            return
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        target_dir = IDENTITIES_DIR / safe / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_bytes = await photos_zip.read()
+        added = 0
+        skipped = 0
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(zip_bytes)
+            tmp_path = tmp.name
+        try:
+            with zipfile.ZipFile(tmp_path) as zf:
+                for member in zf.namelist():
+                    base = os.path.basename(member)
+                    if not base:
+                        continue
+                    ext = os.path.splitext(base)[1].lower()
+                    if ext not in IMAGE_EXTS:
+                        continue
+                    target = target_dir / base
+                    if target.exists():
+                        skipped += 1
+                        continue
+                    with zf.open(member) as src, target.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    added += 1
+        finally:
+            os.unlink(tmp_path)
+        msg = f"✅ {added} {label}(s) ajouté(s) à `{safe}`."
+        if skipped:
+            msg += f" ({skipped} ignoré(s) car nom déjà pris)"
+        await interaction.followup.send(msg, ephemeral=True)
+
+    @app_commands.command(name="addposts", description="Mass upload de posts via zip")
+    @app_commands.describe(identity="Nom de l'identité", photos_zip="Fichier .zip contenant les photos")
+    async def addposts(self, interaction: discord.Interaction, identity: str, photos_zip: discord.Attachment):
+        await self._bulk_upload_images(interaction, identity, photos_zip, "posts", "post")
+
+    @app_commands.command(name="addstories", description="Mass upload de stories via zip")
+    @app_commands.describe(identity="Nom de l'identité", photos_zip="Fichier .zip contenant les photos")
+    async def addstories(self, interaction: discord.Interaction, identity: str, photos_zip: discord.Attachment):
+        await self._bulk_upload_images(interaction, identity, photos_zip, "stories", "story")
+
     async def _list_image_items(self, interaction, identity, subdir, label):
         if not await self.require_admin(interaction):
             return
