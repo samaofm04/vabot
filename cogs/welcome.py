@@ -206,7 +206,7 @@ class WelcomeContinueView(discord.ui.View):
 
         # Envoyer le message intro dans le salon
         cfg = load_welcome_config()
-        intro_text = cfg["ticket_intro_message"].format(mention=interaction.user.mention)
+        intro_text = cfg["ticket_intro_message"].replace("\\n", "\n").format(mention=interaction.user.mention)
         await channel.send(content=intro_text, view=StartOnboardingView())
 
         # IMPORTANT: cacher TOUS les salons au VA sauf son ticket (anonymat total)
@@ -296,7 +296,7 @@ class Welcome(commands.Cog):
             log.warning(f"on_member_join: welcome_channel_id={channel_id} introuvable")
             return
         try:
-            text = cfg["welcome_public_message"].format(mention=member.mention)
+            text = cfg["welcome_public_message"].replace("\\n", "\n").format(mention=member.mention)
             await channel.send(content=text, view=WelcomeContinueView())
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")
@@ -375,6 +375,52 @@ class Welcome(commands.Cog):
         save_welcome_config(cfg)
         await interaction.response.send_message(
             f"✅ Salon welcome auto : {target.mention}", ephemeral=True
+        )
+
+    @app_commands.command(name="setticketintro", description="[ADMIN] Modifie le message d'intro dans le ticket VA (\\n pour retour ligne, {mention} pour @user)")
+    @app_commands.describe(message="Nouveau message complet du ticket")
+    async def setticketintro(self, interaction: discord.Interaction, message: str):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        cfg["ticket_intro_message"] = message
+        save_welcome_config(cfg)
+        preview = message.replace("\\n", "\n").replace("{mention}", interaction.user.mention)
+        await interaction.response.send_message(
+            f"✅ Message ticket mis à jour. Preview :\n\n{preview[:1800]}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="setwelcomemessage", description="[ADMIN] Modifie le message de bienvenue public (\\n pour retour ligne)")
+    @app_commands.describe(message="Nouveau message complet du welcome public")
+    async def setwelcomemessage(self, interaction: discord.Interaction, message: str):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        cfg["welcome_public_message"] = message
+        save_welcome_config(cfg)
+        preview = message.replace("\\n", "\n").replace("{mention}", interaction.user.mention)
+        await interaction.response.send_message(
+            f"✅ Message welcome mis à jour. Preview :\n\n{preview[:1800]}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="setticketintrofile", description="[ADMIN] Modifie le message d'intro du ticket via fichier .txt (pratique pour long texte)")
+    @app_commands.describe(file="Fichier .txt avec le texte complet (\\n = retour ligne automatique)")
+    async def setticketintrofile(self, interaction: discord.Interaction, file: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        if not file.filename.lower().endswith(".txt"):
+            await interaction.response.send_message("Le fichier doit être un .txt", ephemeral=True)
+            return
+        content = (await file.read()).decode("utf-8", errors="ignore").strip()
+        cfg = load_welcome_config()
+        cfg["ticket_intro_message"] = content
+        save_welcome_config(cfg)
+        preview = content.replace("\\n", "\n").replace("{mention}", interaction.user.mention)
+        await interaction.response.send_message(
+            f"✅ Message ticket mis à jour depuis fichier. Preview :\n\n{preview[:1800]}",
+            ephemeral=True,
         )
 
     @app_commands.command(name="welcomesettings", description="[ADMIN] Voir la config du welcome")
