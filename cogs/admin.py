@@ -1337,8 +1337,16 @@ class Admin(commands.Cog):
             ),
         }
         base_name = f"va-{user.name}".lower().replace(" ", "-")[:90]
+        # Chercher la categorie portant le nom de l'identite (case-insensitive)
+        target_cat_name = identity.lower().strip()
+        category = next(
+            (c for c in guild.categories if c.name.lower().strip() == target_cat_name),
+            None,
+        )
         try:
-            channel = await guild.create_text_channel(name=base_name, overwrites=overwrites)
+            channel = await guild.create_text_channel(
+                name=base_name, overwrites=overwrites, category=category
+            )
         except discord.Forbidden:
             await interaction.followup.send(
                 "Le bot n'a pas la permission de créer des salons. Active 'Manage Channels' pour le bot.",

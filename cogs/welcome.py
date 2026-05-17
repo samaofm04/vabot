@@ -97,6 +97,15 @@ def list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+def find_identity_category(guild, identity):
+    """Trouve la categorie portant le nom de l'identite (case-insensitive)."""
+    target = identity.lower().strip()
+    for cat in guild.categories:
+        if cat.name.lower().strip() == target:
+            return cat
+    return None
+
+
 async def create_va_channel(guild, member, identity):
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -108,8 +117,11 @@ async def create_va_channel(guild, member, identity):
         ),
     }
     base_name = f"va-{member.name}".lower().replace(" ", "-")[:90]
+    category = find_identity_category(guild, identity)
     try:
-        return await guild.create_text_channel(name=base_name, overwrites=overwrites)
+        return await guild.create_text_channel(
+            name=base_name, overwrites=overwrites, category=category
+        )
     except discord.Forbidden:
         return None
 
