@@ -64,5 +64,5 @@ async def sync_slash(interaction: discord.Interaction):
 if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN manquant dans .env")
-    log.info("=== Demarrage du bot ===")
+    log.info("=== Demarrage du bot (force-resync v2) ===")
     bot.run(TOKEN, log_handler=None)
