@@ -1051,6 +1051,62 @@ class Admin(commands.Cog):
 
     # ---------- ADDUSER ----------
 
+    @app_commands.command(name="listvas", description="Liste les VAs groupés par identité")
+    @app_commands.describe(identity="Optionnel: filtrer sur une identité")
+    async def listvas(self, interaction: discord.Interaction, identity: str = None):
+        if not await self.require_admin(interaction):
+            return
+        users = load_json(USERS_FILE, {})  # {discord_id_str: identity_name}
+        if not users:
+            await interaction.response.send_message("Aucun VA assigné pour l'instant.", ephemeral=True)
+            return
+        # Group by identity
+        by_identity = {}
+        for user_id, ident in users.items():
+            by_identity.setdefault(ident, []).append(user_id)
+        if identity:
+            safe = sanitize_identity_name(identity)
+            vas = by_identity.get(safe, [])
+            if not vas:
+                await interaction.response.send_message(
+                    f"Aucun VA assigné à `{safe}`.", ephemeral=True
+                )
+                return
+            mentions = "\n".join(f"• <@{uid}>" for uid in vas)
+            await interaction.response.send_message(
+                f"**VAs sur l'identité `{safe}`** ({len(vas)})\n{mentions}",
+                ephemeral=True,
+            )
+            return
+        # Vue complète
+        lines = []
+        all_idents = list_identities()
+        for ident in sorted(set(list(by_identity.keys()) + all_idents)):
+            vas = by_identity.get(ident, [])
+            if vas:
+                mentions = ", ".join(f"<@{uid}>" for uid in vas)
+                lines.append(f"**`{ident}`** ({len(vas)}) — {mentions}")
+            else:
+                lines.append(f"**`{ident}`** (0) — *aucun VA*")
+        text = f"**VAs par identité** ({len(users)} VAs assignés)\n\n" + "\n".join(lines)
+        if len(text) <= 1990:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            buf = io.BytesIO()
+            buf.write(f"VAs par identité ({len(users)} VAs)\n\n".encode("utf-8"))
+            for ident in sorted(set(list(by_identity.keys()) + all_idents)):
+                vas = by_identity.get(ident, [])
+                buf.write(f"=== {ident} ({len(vas)}) ===\n".encode("utf-8"))
+                for uid in vas:
+                    buf.write(f"  - <@{uid}> (id: {uid})\n".encode("utf-8"))
+                buf.write(b"\n")
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**VAs par identité** ({len(users)} VAs) — voir fichier",
+                file=discord.File(buf, filename="vas_by_identity.txt"),
+                ephemeral=True,
+            )
+
     @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding")
     @app_commands.describe(user="Le VA à onboarder")
     async def adduser(self, interaction: discord.Interaction, user: discord.Member):
