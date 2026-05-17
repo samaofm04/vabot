@@ -479,18 +479,15 @@ class Admin(commands.Cog):
 
     # ---------- IDENTITES ----------
 
-    @app_commands.command(name="addidentite", description="Crée une identité avec un zip (vidéos + captions + descriptions)")
+    @app_commands.command(name="addidentite", description="Crée une identité (avec ou sans zip de vidéos)")
     @app_commands.describe(
         name="Nom de l'identité",
-        videos_zip="Zip avec vidéos. Pour pair: video.txt = caption (overlay), video.desc.txt = description (post)"
+        videos_zip="Optionnel: zip avec vidéos (+ .txt caption + .desc.txt + .example.mp4). Sinon: identité créée vide."
     )
-    async def addidentite(self, interaction: discord.Interaction, name: str, videos_zip: discord.Attachment):
+    async def addidentite(self, interaction: discord.Interaction, name: str, videos_zip: discord.Attachment = None):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
-        if not videos_zip.filename.lower().endswith(".zip"):
-            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
-            return
         safe_name = sanitize_identity_name(name)
         if not safe_name:
             await interaction.followup.send("Nom invalide.", ephemeral=True)
@@ -501,6 +498,19 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"L'identité `{safe_name}` existe déjà.", ephemeral=True)
             return
         videos_dir.mkdir(parents=True, exist_ok=True)
+        # Si pas de zip, identite vide
+        if videos_zip is None:
+            await interaction.followup.send(
+                f"✅ Identité `{safe_name}` créée (vide).\n"
+                f"Pense à créer une catégorie Discord nommée `{safe_name}` pour les tickets.\n"
+                f"Ajoute des reels avec `/addreel`, posts avec `/addpost`, etc.",
+                ephemeral=True,
+            )
+            return
+        if not videos_zip.filename.lower().endswith(".zip"):
+            shutil.rmtree(identity_dir)
+            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
+            return
         zip_bytes = await videos_zip.read()
         videos = 0
         examples = 0
