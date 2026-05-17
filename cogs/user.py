@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from video_transform import transform_video, load_config as load_transform_config
+from image_transform import transform_image, load_config as load_image_config
 
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
@@ -106,6 +107,40 @@ def random_profile_pic():
     return random.choice(pics) if pics else None
 
 
+def random_image_with_pair(directory):
+    """Pick a random clean image + caption + description + example. Skips .example.* files."""
+    if not directory.exists():
+        return None, None, None, None
+    images = [
+        p for p in directory.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in IMAGE_EXTS
+        and not p.stem.lower().endswith(".example")
+    ]
+    if not images:
+        return None, None, None, None
+    image = random.choice(images)
+    cap_path = image.with_suffix(".txt")
+    desc_path = image.with_suffix(".desc.txt")
+    caption = unescape_newlines(cap_path.read_text(encoding="utf-8").strip()) if cap_path.exists() else None
+    description = unescape_newlines(desc_path.read_text(encoding="utf-8").strip()) if desc_path.exists() else None
+    example = None
+    for ext in IMAGE_EXTS:
+        candidate = directory / f"{image.stem}.example{ext}"
+        if candidate.exists():
+            example = candidate
+            break
+    return image, caption, description, example
+
+
+def random_post_for(identity):
+    return random_image_with_pair(IDENTITIES_DIR / identity / "posts")
+
+
+def random_story_for(identity):
+    return random_image_with_pair(IDENTITIES_DIR / identity / "stories")
+
+
 def get_user_identity(user_id):
     users = load_json(USERS_FILE, {})
     return users.get(str(user_id))
@@ -155,7 +190,7 @@ class UserCog(commands.Cog):
             f"📝 **Bio (identité `{identity}`) :**\n```\n{b}\n```\n*Copie-colle dans la bio Instagram.*"
         )
 
-    @app_commands.command(name="profilepic", description="Donne une photo de profil aléatoire")
+    @app_commands.command(name="profilepic", description="Donne une photo de profil aléatoire (transformée)")
     async def profilepic(self, interaction: discord.Interaction):
         pic = random_profile_pic()
         if not pic:
@@ -164,10 +199,93 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(
-            "📸 **Photo de profil**\n*Télécharge et upload sur Instagram.*",
-            file=discord.File(pic),
-        )
+        await interaction.response.defer()
+        # Transformer
+        cfg = load_image_config()
+        tmp_dir = None
+        send_path = pic
+        try:
+            if cfg.get("enabled", True):
+                tmp_dir = tempfile.mkdtemp(prefix="pp_")
+                tmp_path = Path(tmp_dir) / pic.name
+                if transform_image(pic, tmp_path, cfg, target="profile"):
+                    send_path = tmp_path
+            await interaction.followup.send(
+                "📸 **Photo de profil**\n*Télécharge et upload sur Instagram.*",
+                file=discord.File(send_path),
+            )
+        finally:
+            if tmp_dir:
+                try:
+                    import shutil
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+    async def _send_image_content(self, interaction, kind_label, kind_target, random_fn, transform_cfg):
+        """Generic handler for /post and /story commands."""
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin de faire `/adduser` sur toi.",
+                ephemeral=True,
+            )
+            return
+        image, caption, description, example = random_fn(identity)
+        if not image:
+            await interaction.response.send_message(
+                f"Aucun {kind_label} pour ton identité `{identity}`. Demande à un admin.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        tmp_dir = None
+        send_path = image
+        try:
+            if transform_cfg.get("enabled", True):
+                tmp_dir = tempfile.mkdtemp(prefix=f"{kind_target}_")
+                tmp_path = Path(tmp_dir) / image.name
+                if transform_image(image, tmp_path, transform_cfg, target=kind_target):
+                    send_path = tmp_path
+            parts = [f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n"]
+            if caption:
+                parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la photo) :**\n```\n{caption}\n```")
+            else:
+                parts.append("*(Pas de caption recommandée)*")
+            if description:
+                parts.append(f"📄 **Description (texte du {kind_label}) :**\n```\n{description}\n```")
+            else:
+                parts.append(f"*(Pas de description recommandée)*")
+            parts.append(f"\n📥 **Télécharge la photo CLEAN** (1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
+            if example:
+                parts.append("👁️ La 2e pièce jointe est l'**EXEMPLE** de rendu final — NE PAS la télécharger pour poster.")
+            message = "\n".join(parts)
+            files = [discord.File(send_path, filename=image.name)]
+            if example:
+                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+            try:
+                await interaction.followup.send(content=message, files=files)
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"Erreur d'envoi : {e}", ephemeral=True,
+                )
+        finally:
+            if tmp_dir:
+                try:
+                    import shutil
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+    @app_commands.command(name="post", description="Génère un post photo (photo + caption + description)")
+    async def post(self, interaction: discord.Interaction):
+        cfg = load_image_config()
+        await self._send_image_content(interaction, "post", "post", random_post_for, cfg)
+
+    @app_commands.command(name="story", description="Génère une story (photo + caption + description)")
+    async def story(self, interaction: discord.Interaction):
+        cfg = load_image_config()
+        await self._send_image_content(interaction, "story", "story", random_story_for, cfg)
 
     @app_commands.command(name="reel", description="Génère un reel: vidéo clean (transformée) + caption + description + exemple")
     async def reel(self, interaction: discord.Interaction):

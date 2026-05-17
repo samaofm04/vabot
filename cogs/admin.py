@@ -17,6 +17,13 @@ from video_transform import (
     config_summary_text as transform_config_summary,
     is_ffmpeg_available,
 )
+from image_transform import (
+    load_config as load_image_config,
+    save_config as save_image_config,
+    reset_config as reset_image_config,
+    config_summary_text as image_config_summary,
+    is_pillow_available,
+)
 
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
@@ -122,6 +129,49 @@ def example_video_path_for(video_path):
         if candidate.exists():
             return candidate
     return None
+
+
+def example_image_path_for(image_path):
+    """Find example image file (same stem + .example + any image ext)."""
+    folder = image_path.parent
+    for ext in IMAGE_EXTS:
+        candidate = folder / f"{image_path.stem}.example{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def is_example_image_filename(filename):
+    name_lower = filename.lower()
+    stem, ext = os.path.splitext(name_lower)
+    return ext in IMAGE_EXTS and stem.endswith(".example")
+
+
+def identity_posts_dir(name):
+    return IDENTITIES_DIR / name / "posts"
+
+
+def identity_stories_dir(name):
+    return IDENTITIES_DIR / name / "stories"
+
+
+def list_image_items(directory):
+    """Return list of (filename, caption, description, has_example) for clean images."""
+    if not directory.exists():
+        return []
+    out = []
+    for p in sorted(directory.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        if p.stem.lower().endswith(".example"):
+            continue
+        cap = p.with_suffix(".txt")
+        desc = p.with_suffix(".desc.txt")
+        caption = cap.read_text(encoding="utf-8").strip() if cap.exists() else None
+        description = desc.read_text(encoding="utf-8").strip() if desc.exists() else None
+        has_example = example_image_path_for(p) is not None
+        out.append((p.name, caption, description, has_example))
+    return out
 
 
 def is_example_video_filename(filename):
@@ -1028,6 +1078,227 @@ class Admin(commands.Cog):
             return
         reset_transform_config()
         await interaction.response.send_message("✅ Config transfo réinitialisée aux valeurs par défaut.", ephemeral=True)
+
+    # ---------- TRANSFORMATIONS IMAGE ----------
+
+    @app_commands.command(name="imagetransformsettings", description="Affiche la config des transformations images")
+    async def imagetransformsettings(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_image_config()
+        text = image_config_summary(cfg)
+        pillow_ok = "✅ Pillow installé" if is_pillow_available() else "❌ Pillow MANQUANT"
+        await interaction.response.send_message(
+            f"⚙️ **Config transformations images**\n{pillow_ok}\n\n{text}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="imagetransformenable", description="Active/désactive les transformations images")
+    @app_commands.describe(enabled="True ou False")
+    async def imagetransformenable(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_image_config()
+        cfg["enabled"] = enabled
+        save_image_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Transfo images : {'activées' if enabled else 'désactivées'}", ephemeral=True
+        )
+
+    @app_commands.command(name="imagetransformtoggle", description="Active/désactive une option de transfo image")
+    @app_commands.describe(option="Nom (rotation_degrees, saturation, brightness...)", enabled="True ou False")
+    async def imagetransformtoggle(self, interaction: discord.Interaction, option: str, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_image_config()
+        if option not in cfg or not isinstance(cfg[option], dict):
+            await interaction.response.send_message(f"Option `{option}` inconnue.", ephemeral=True)
+            return
+        cfg[option]["enabled"] = enabled
+        save_image_config(cfg)
+        await interaction.response.send_message(
+            f"✅ `{option}` : {'activée' if enabled else 'désactivée'}", ephemeral=True
+        )
+
+    @app_commands.command(name="imagetransformset", description="Modifie min/max d'une option de transfo image")
+    @app_commands.describe(option="Nom de l'option", min_value="Min", max_value="Max")
+    async def imagetransformset(self, interaction: discord.Interaction, option: str, min_value: float, max_value: float):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_image_config()
+        if option not in cfg or not isinstance(cfg[option], dict):
+            await interaction.response.send_message(f"Option `{option}` inconnue.", ephemeral=True)
+            return
+        if "min" not in cfg[option]:
+            await interaction.response.send_message(f"L'option `{option}` n'a pas de min/max.", ephemeral=True)
+            return
+        if min_value > max_value:
+            await interaction.response.send_message("min > max impossible.", ephemeral=True)
+            return
+        cfg[option]["min"] = min_value
+        cfg[option]["max"] = max_value
+        save_image_config(cfg)
+        await interaction.response.send_message(
+            f"✅ `{option}` : min={min_value} max={max_value}", ephemeral=True
+        )
+
+    @app_commands.command(name="imagetransformreset", description="Reset config transfo images aux defaults")
+    async def imagetransformreset(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        reset_image_config()
+        await interaction.response.send_message("✅ Config transfo images réinitialisée.", ephemeral=True)
+
+    # ---------- POSTS (photos pour le feed) ----------
+
+    async def _add_image_content(
+        self, interaction, identity, photo, example_photo, caption, description, subdir_name, label
+    ):
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        ext = os.path.splitext(photo.filename)[1].lower()
+        if ext not in IMAGE_EXTS:
+            await interaction.followup.send("Format image non supporté.", ephemeral=True)
+            return
+        target_dir = IDENTITIES_DIR / safe / subdir_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / photo.filename
+        if target.exists():
+            await interaction.followup.send(f"Fichier `{photo.filename}` existe déjà.", ephemeral=True)
+            return
+        target.write_bytes(await photo.read())
+        extras = []
+        if caption:
+            target.with_suffix(".txt").write_text(caption, encoding="utf-8")
+            extras.append("caption")
+        if description:
+            target.with_suffix(".desc.txt").write_text(description, encoding="utf-8")
+            extras.append("description")
+        if example_photo:
+            ex_ext = os.path.splitext(example_photo.filename)[1].lower()
+            if ex_ext not in IMAGE_EXTS:
+                await interaction.followup.send("Format example_photo non supporté.", ephemeral=True)
+                return
+            ex_target = target_dir / f"{target.stem}.example{ex_ext}"
+            ex_target.write_bytes(await example_photo.read())
+            extras.append("exemple")
+        suffix = f" + {' + '.join(extras)}" if extras else ""
+        await interaction.followup.send(
+            f"✅ {label} `{photo.filename}` ajouté à `{safe}`{suffix}.", ephemeral=True
+        )
+
+    @app_commands.command(name="addpost", description="Ajoute un post photo à une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        photo="Photo CLEAN (à télécharger par le VA)",
+        example_photo="Photo EXEMPLE du rendu final (optionnel)",
+        caption="Caption à mettre en overlay (optionnel, \\n = retour ligne)",
+        description="Description du post (optionnel, \\n = retour ligne)"
+    )
+    async def addpost(
+        self, interaction: discord.Interaction, identity: str,
+        photo: discord.Attachment,
+        example_photo: discord.Attachment = None,
+        caption: str = None, description: str = None,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        await self._add_image_content(interaction, identity, photo, example_photo, caption, description, "posts", "Post")
+
+    async def _list_image_items(self, interaction, identity, subdir, label):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = list_image_items(IDENTITIES_DIR / safe / subdir)
+        if not items:
+            await interaction.response.send_message(f"Aucun {label.lower()} pour `{safe}`.", ephemeral=True)
+            return
+        lines = []
+        for i, (filename, cap, desc, has_ex) in enumerate(items):
+            cap_s = truncate_for_display(cap, 40) if cap else "❌"
+            desc_s = truncate_for_display(desc, 40) if desc else "❌"
+            ex_s = "🖼️" if has_ex else "❌"
+            lines.append(f"`{i}` **{filename}** • cap: {cap_s} • desc: {desc_s} • ex: {ex_s}")
+        text = f"**{label} de `{safe}`** ({len(items)})\n" + "\n".join(lines)
+        if len(text) <= 1900:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            buf = io.BytesIO()
+            buf.write(f"{label} de {safe}\n\n".encode("utf-8"))
+            for i, (filename, cap, desc, has_ex) in enumerate(items):
+                buf.write(f"=== [{i}] {filename} ===\nCAPTION: {cap or '(aucune)'}\nDESC: {desc or '(aucune)'}\nEX: {'oui' if has_ex else 'non'}\n\n".encode("utf-8"))
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**{label} de `{safe}`** ({len(items)})",
+                file=discord.File(buf, filename=f"{label.lower()}_{safe}.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="listposts", description="Liste les posts d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def listposts(self, interaction: discord.Interaction, identity: str):
+        await self._list_image_items(interaction, identity, "posts", "Posts")
+
+    async def _delete_image_item(self, interaction, identity, subdir, index, label):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = list_image_items(IDENTITIES_DIR / safe / subdir)
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide (0-{len(items)-1}).", ephemeral=True
+            )
+            return
+        filename = items[index][0]
+        target_dir = IDENTITIES_DIR / safe / subdir
+        target = target_dir / filename
+        target.unlink(missing_ok=True)
+        target.with_suffix(".txt").unlink(missing_ok=True)
+        target.with_suffix(".desc.txt").unlink(missing_ok=True)
+        ex = example_image_path_for(target)
+        if ex:
+            ex.unlink(missing_ok=True)
+        await interaction.response.send_message(
+            f"✅ {label} `{filename}` supprimé de `{safe}`.", ephemeral=True
+        )
+
+    @app_commands.command(name="deletepost", description="Supprime un post par son index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listposts)")
+    async def deletepost(self, interaction: discord.Interaction, identity: str, index: int):
+        await self._delete_image_item(interaction, identity, "posts", index, "Post")
+
+    # ---------- STORIES ----------
+
+    @app_commands.command(name="addstory", description="Ajoute une story photo à une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        photo="Photo CLEAN",
+        example_photo="Photo EXEMPLE du rendu final (optionnel)",
+        caption="Caption à mettre en overlay (optionnel, \\n = retour ligne)",
+        description="Description (optionnel)"
+    )
+    async def addstory(
+        self, interaction: discord.Interaction, identity: str,
+        photo: discord.Attachment,
+        example_photo: discord.Attachment = None,
+        caption: str = None, description: str = None,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        await self._add_image_content(interaction, identity, photo, example_photo, caption, description, "stories", "Story")
+
+    @app_commands.command(name="liststories", description="Liste les stories d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def liststories(self, interaction: discord.Interaction, identity: str):
+        await self._list_image_items(interaction, identity, "stories", "Stories")
+
+    @app_commands.command(name="deletestory", description="Supprime une story par son index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /liststories)")
+    async def deletestory(self, interaction: discord.Interaction, identity: str, index: int):
+        await self._delete_image_item(interaction, identity, "stories", index, "Story")
 
 
 async def setup(bot):
