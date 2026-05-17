@@ -17,6 +17,7 @@ logging.basicConfig(
 log = logging.getLogger("vabot")
 
 intents = discord.Intents.default()
+intents.members = True  # necessaire pour on_member_join (welcome auto)
 
 
 class VABot(commands.Bot):
