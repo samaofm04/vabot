@@ -15,8 +15,8 @@ DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "transform_config.json"
 
 DEFAULT_CONFIG = {
-    "enabled": True,
-    "metadata_only": True,  # True = remux instantané (juste metadata). False = full transfo
+    "enabled": False,  # desactive par defaut : envoie la video telle quelle
+    "metadata_only": True,
     "delete_source_after_use": False,
     "framerate":      {"enabled": True,  "min": 30,   "max": 60},
     "video_bitrate_kbps": {"enabled": True, "min": 5000, "max": 6000},
