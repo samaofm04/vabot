@@ -13,9 +13,6 @@ from discord.ext import commands
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
-CAPTIONS_FILE = DATA_DIR / "captions.txt"
-BIOS_FILE = DATA_DIR / "bios.txt"
-USERNAMES_FILE = DATA_DIR / "usernames.txt"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 USERS_FILE = DATA_DIR / "users.json"
 
@@ -43,6 +40,18 @@ def list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+def identity_videos_dir(name):
+    return IDENTITIES_DIR / name / "videos"
+
+
+def identity_bios_file(name):
+    return IDENTITIES_DIR / name / "bios.txt"
+
+
+def identity_usernames_file(name):
+    return IDENTITIES_DIR / name / "usernames.txt"
+
+
 def read_lines(path):
     if not path.exists():
         return []
@@ -57,28 +66,44 @@ def write_lines(path, lines):
         path.write_text("", encoding="utf-8")
 
 
-def read_bios():
-    if not BIOS_FILE.exists():
+def read_bios(name):
+    path = identity_bios_file(name)
+    if not path.exists():
         return []
-    content = BIOS_FILE.read_text(encoding="utf-8")
+    content = path.read_text(encoding="utf-8")
     return [b.strip() for b in content.split("---") if b.strip()]
 
 
-def write_bios(bios):
-    BIOS_FILE.parent.mkdir(parents=True, exist_ok=True)
+def write_bios(name, bios):
+    path = identity_bios_file(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if bios:
-        BIOS_FILE.write_text("\n---\n".join(bios) + "\n", encoding="utf-8")
+        path.write_text("\n---\n".join(bios) + "\n", encoding="utf-8")
     else:
-        BIOS_FILE.write_text("", encoding="utf-8")
+        path.write_text("", encoding="utf-8")
 
 
-def display_with_newlines(text: str) -> str:
-    """Convert literal \\n in stored text to real newlines for display."""
-    return text.replace("\\n", "\n") if text else text
+def list_reels(name):
+    """Return list of (video_filename, caption_or_None) tuples."""
+    videos_dir = identity_videos_dir(name)
+    if not videos_dir.exists():
+        return []
+    out = []
+    for p in sorted(videos_dir.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in VIDEO_EXTS:
+            continue
+        caption_path = p.with_suffix(".txt")
+        caption = caption_path.read_text(encoding="utf-8").strip() if caption_path.exists() else None
+        out.append((p.name, caption))
+    return out
+
+
+def sanitize_identity_name(name):
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name).strip("_-").lower()
 
 
 def truncate_for_display(s, max_len=80):
-    s = s.replace("\n", " ⏎ ")  # show newlines as a symbol on one line
+    s = (s or "").replace("\n", " ⏎ ")
     return s if len(s) <= max_len else s[: max_len - 3] + "..."
 
 
@@ -103,7 +128,7 @@ class Admin(commands.Cog):
 
     async def require_admin(self, interaction):
         if not await self.is_admin(interaction.user.id):
-            msg = "Tu n'es pas autorisé à utiliser cette commande."
+            msg = "Tu n'es pas autorisé."
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
             else:
@@ -111,75 +136,374 @@ class Admin(commands.Cog):
             return False
         return True
 
+    async def identity_autocomplete(self, interaction, current):
+        return [
+            app_commands.Choice(name=n, value=n)
+            for n in list_identities()
+            if current.lower() in n.lower()
+        ][:25]
+
+    # ---------- WHITELIST ----------
+
     @app_commands.command(name="whitelist", description="[OWNER] Whitelist un utilisateur pour les commandes admin")
     @app_commands.describe(user="L'utilisateur à autoriser")
     async def whitelist(self, interaction: discord.Interaction, user: discord.User):
         if not await self.is_owner(interaction.user.id):
-            await interaction.response.send_message(
-                "Seul le propriétaire du bot peut whitelist des utilisateurs.", ephemeral=True
-            )
+            await interaction.response.send_message("Owner only.", ephemeral=True)
             return
         wl = load_json(WHITELIST_FILE, [])
         if user.id in wl:
-            await interaction.response.send_message(f"{user.mention} est déjà whitelisté.", ephemeral=True)
+            await interaction.response.send_message(f"{user.mention} déjà whitelisté.", ephemeral=True)
             return
         wl.append(user.id)
         save_json(WHITELIST_FILE, wl)
         await interaction.response.send_message(f"✅ {user.mention} ajouté à la whitelist.", ephemeral=True)
 
-    async def _append_lines_from_attachment(self, attachment: discord.Attachment, target: Path) -> int:
-        content = (await attachment.read()).decode("utf-8", errors="ignore")
-        lines = [l.strip() for l in content.splitlines() if l.strip()]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("a", encoding="utf-8") as f:
-            for line in lines:
-                f.write(line + "\n")
-        return len(lines)
+    # ---------- IDENTITES ----------
 
-    @app_commands.command(name="addcaptions", description="Ajoute des captions (fichier .txt, 1 par ligne)")
-    @app_commands.describe(file="Fichier .txt avec une caption par ligne")
-    async def addcaptions(self, interaction: discord.Interaction, file: discord.Attachment):
+    @app_commands.command(name="addidentite", description="Crée une identité avec un zip (vidéos + captions paires)")
+    @app_commands.describe(
+        name="Nom de l'identité",
+        videos_zip="Fichier .zip avec vidéos. Pour les captions: mettre un .txt du même nom que la vidéo dans le zip."
+    )
+    async def addidentite(self, interaction: discord.Interaction, name: str, videos_zip: discord.Attachment):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
-        if not file.filename.lower().endswith(".txt"):
-            await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
+        if not videos_zip.filename.lower().endswith(".zip"):
+            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
             return
-        n = await self._append_lines_from_attachment(file, CAPTIONS_FILE)
-        await interaction.followup.send(f"✅ {n} caption(s) ajoutée(s).", ephemeral=True)
+        safe_name = sanitize_identity_name(name)
+        if not safe_name:
+            await interaction.followup.send("Nom invalide.", ephemeral=True)
+            return
+        identity_dir = IDENTITIES_DIR / safe_name
+        videos_dir = identity_dir / "videos"
+        if identity_dir.exists():
+            await interaction.followup.send(f"L'identité `{safe_name}` existe déjà.", ephemeral=True)
+            return
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        zip_bytes = await videos_zip.read()
+        videos = 0
+        captions = 0
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(zip_bytes)
+            tmp_path = tmp.name
+        try:
+            with zipfile.ZipFile(tmp_path) as zf:
+                for member in zf.namelist():
+                    base = os.path.basename(member)
+                    if not base:
+                        continue
+                    ext = os.path.splitext(base)[1].lower()
+                    if ext in VIDEO_EXTS:
+                        with zf.open(member) as src, (videos_dir / base).open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        videos += 1
+                    elif ext == ".txt":
+                        with zf.open(member) as src:
+                            (videos_dir / base).write_bytes(src.read())
+                        captions += 1
+        finally:
+            os.unlink(tmp_path)
+        if videos == 0:
+            shutil.rmtree(identity_dir)
+            await interaction.followup.send("Aucune vidéo trouvée dans le zip.", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Identité `{safe_name}` créée: **{videos}** vidéo(s), **{captions}** caption(s) paire(s).",
+            ephemeral=True,
+        )
 
-    @app_commands.command(name="addusernames", description="Ajoute des usernames (fichier .txt, 1 par ligne)")
-    @app_commands.describe(file="Fichier .txt avec un username par ligne")
-    async def addusernames(self, interaction: discord.Interaction, file: discord.Attachment):
+    @app_commands.command(name="listidentites", description="Liste les identités + nb de reels et VA assignés")
+    async def listidentites(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.response.send_message("Aucune identité.", ephemeral=True)
+            return
+        users = load_json(USERS_FILE, {})
+        lines = []
+        for n in identities:
+            reels = list_reels(n)
+            n_reels = len(reels)
+            n_captions = sum(1 for _, c in reels if c)
+            assigned = sum(1 for v in users.values() if v == n)
+            n_bios = len(read_bios(n))
+            n_usernames = len(read_lines(identity_usernames_file(n)))
+            lines.append(
+                f"• `{n}` — 🎬{n_reels} reels ({n_captions} cap) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA"
+            )
+        await interaction.response.send_message(
+            f"**Identités** ({len(identities)})\n" + "\n".join(lines), ephemeral=True
+        )
+
+    @app_commands.command(name="deleteidentite", description="Supprime une identité et tout son contenu")
+    @app_commands.describe(name="Nom exact de l'identité")
+    async def deleteidentite(self, interaction: discord.Interaction, name: str):
+        if not await self.require_admin(interaction):
+            return
+        identity_dir = IDENTITIES_DIR / sanitize_identity_name(name)
+        if not identity_dir.exists():
+            await interaction.response.send_message(f"Identité introuvable.", ephemeral=True)
+            return
+        shutil.rmtree(identity_dir)
+        users = load_json(USERS_FILE, {})
+        detached = [uid for uid, ident in users.items() if ident == sanitize_identity_name(name)]
+        for uid in detached:
+            del users[uid]
+        save_json(USERS_FILE, users)
+        await interaction.response.send_message(
+            f"✅ Identité supprimée. {len(detached)} VA détaché(s).", ephemeral=True
+        )
+
+    # ---------- REELS (vidéo + caption pair) ----------
+
+    @app_commands.command(name="addreel", description="Ajoute une vidéo + caption à une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        video="Fichier vidéo (mp4/mov/webm)",
+        caption="Caption recommandée (utilise \\n pour retour à la ligne, optionnel)"
+    )
+    async def addreel(
+        self,
+        interaction: discord.Interaction,
+        identity: str,
+        video: discord.Attachment,
+        caption: str = None,
+    ):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
-        if not file.filename.lower().endswith(".txt"):
-            await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable. Crée-la avec /addidentite.", ephemeral=True)
             return
-        n = await self._append_lines_from_attachment(file, USERNAMES_FILE)
-        await interaction.followup.send(f"✅ {n} username(s) ajouté(s).", ephemeral=True)
+        ext = os.path.splitext(video.filename)[1].lower()
+        if ext not in VIDEO_EXTS:
+            await interaction.followup.send("Format vidéo non supporté.", ephemeral=True)
+            return
+        videos_dir = identity_videos_dir(safe)
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        target = videos_dir / video.filename
+        if target.exists():
+            await interaction.followup.send(f"Fichier `{video.filename}` existe déjà dans cette identité.", ephemeral=True)
+            return
+        target.write_bytes(await video.read())
+        caption_msg = ""
+        if caption:
+            (videos_dir / (target.stem + ".txt")).write_text(caption, encoding="utf-8")
+            caption_msg = " + caption"
+        await interaction.followup.send(
+            f"✅ Reel `{video.filename}` ajouté à `{safe}`{caption_msg}.", ephemeral=True
+        )
 
-    @app_commands.command(name="addbios", description="Ajoute des bios (fichier .txt, séparées par '---' sur une ligne)")
-    @app_commands.describe(file="Fichier .txt avec les bios séparées par '---'")
-    async def addbios(self, interaction: discord.Interaction, file: discord.Attachment):
+    @app_commands.command(name="setreelcaption", description="Définit/modifie la caption d'un reel existant")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        video_filename="Nom exact du fichier vidéo (voir /listreels)",
+        caption="Nouvelle caption (\\n pour retour à la ligne)"
+    )
+    async def setreelcaption(
+        self,
+        interaction: discord.Interaction,
+        identity: str,
+        video_filename: str,
+        caption: str,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        videos_dir = identity_videos_dir(safe)
+        video_path = videos_dir / video_filename
+        if not video_path.exists():
+            await interaction.response.send_message(f"Vidéo introuvable.", ephemeral=True)
+            return
+        (videos_dir / (video_path.stem + ".txt")).write_text(caption, encoding="utf-8")
+        await interaction.response.send_message(
+            f"✅ Caption mise à jour pour `{video_filename}`.", ephemeral=True
+        )
+
+    @app_commands.command(name="listreels", description="Liste les reels d'une identité avec leur caption")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def listreels(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        reels = list_reels(safe)
+        if not reels:
+            await interaction.response.send_message(f"Aucun reel pour `{safe}`.", ephemeral=True)
+            return
+        lines = []
+        for i, (filename, cap) in enumerate(reels):
+            cap_str = truncate_for_display(cap, 60) if cap else "*(pas de caption)*"
+            lines.append(f"`{i}` — **{filename}** — {cap_str}")
+        text = f"**Reels de `{safe}`** ({len(reels)})\n" + "\n".join(lines)
+        if len(text) <= 1900:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            buf = io.BytesIO()
+            buf.write(f"Reels de {safe} ({len(reels)})\n\n".encode("utf-8"))
+            for i, (filename, cap) in enumerate(reels):
+                buf.write(f"=== [{i}] {filename} ===\n{cap or '(pas de caption)'}\n\n".encode("utf-8"))
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**Reels de `{safe}`** ({len(reels)}) — voir fichier",
+                file=discord.File(buf, filename=f"reels_{safe}.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="deletereel", description="Supprime un reel (vidéo + sa caption) d'une identité")
+    @app_commands.describe(identity="Nom de l'identité", index="Index du reel (voir /listreels)")
+    async def deletereel(self, interaction: discord.Interaction, identity: str, index: int):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        reels = list_reels(safe)
+        if index < 0 or index >= len(reels):
+            await interaction.response.send_message(
+                f"Index invalide (0-{len(reels)-1}).", ephemeral=True
+            )
+            return
+        filename, _ = reels[index]
+        videos_dir = identity_videos_dir(safe)
+        (videos_dir / filename).unlink(missing_ok=True)
+        (videos_dir / (Path(filename).stem + ".txt")).unlink(missing_ok=True)
+        await interaction.response.send_message(
+            f"✅ Reel `{filename}` supprimé de `{safe}`.", ephemeral=True
+        )
+
+    # ---------- BIOS (par identité) ----------
+
+    @app_commands.command(name="addbios", description="Ajoute des bios à une identité (.txt, séparées par '---')")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        file="Fichier .txt avec bios séparées par '---' sur leur propre ligne"
+    )
+    async def addbios(self, interaction: discord.Interaction, identity: str, file: discord.Attachment):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
         if not file.filename.lower().endswith(".txt"):
             await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
             return
         content = (await file.read()).decode("utf-8", errors="ignore")
-        bios = [b.strip() for b in content.split("---") if b.strip()]
-        BIOS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        existing = BIOS_FILE.read_text(encoding="utf-8") if BIOS_FILE.exists() else ""
-        with BIOS_FILE.open("w", encoding="utf-8") as f:
-            if existing.strip():
-                f.write(existing.rstrip() + "\n---\n")
-            f.write("\n---\n".join(bios) + "\n")
-        await interaction.followup.send(f"✅ {len(bios)} bio(s) ajoutée(s).", ephemeral=True)
+        new_bios = [b.strip() for b in content.split("---") if b.strip()]
+        existing = read_bios(safe)
+        write_bios(safe, existing + new_bios)
+        await interaction.followup.send(
+            f"✅ {len(new_bios)} bio(s) ajoutée(s) à `{safe}` (total: {len(existing) + len(new_bios)}).",
+            ephemeral=True,
+        )
 
-    @app_commands.command(name="addprofilepic", description="Ajoute une photo de profil au pool")
+    @app_commands.command(name="listbios", description="Liste les bios d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def listbios(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        bios = read_bios(safe)
+        if not bios:
+            await interaction.response.send_message(f"Aucune bio pour `{safe}`.", ephemeral=True)
+            return
+        lines = [f"`{i}` — {truncate_for_display(b)}" for i, b in enumerate(bios)]
+        text = f"**Bios de `{safe}`** ({len(bios)})\n" + "\n".join(lines)
+        if len(text) <= 1900:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            buf = io.BytesIO()
+            buf.write(f"Bios de {safe}\n\n".encode("utf-8"))
+            for i, b in enumerate(bios):
+                buf.write(f"=== [{i}] ===\n{b}\n\n".encode("utf-8"))
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**Bios de `{safe}`** ({len(bios)})",
+                file=discord.File(buf, filename=f"bios_{safe}.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="deletebio", description="Supprime une bio d'une identité par son index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listbios)")
+    async def deletebio(self, interaction: discord.Interaction, identity: str, index: int):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        bios = read_bios(safe)
+        if index < 0 or index >= len(bios):
+            await interaction.response.send_message(
+                f"Index invalide (0-{len(bios)-1}).", ephemeral=True
+            )
+            return
+        removed = bios.pop(index)
+        write_bios(safe, bios)
+        await interaction.response.send_message(
+            f"✅ Bio supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
+        )
+
+    # ---------- USERNAMES (par identité) ----------
+
+    @app_commands.command(name="addusernames", description="Ajoute des usernames à une identité (.txt, 1 par ligne)")
+    @app_commands.describe(identity="Nom de l'identité", file="Fichier .txt, 1 username par ligne")
+    async def addusernames(self, interaction: discord.Interaction, identity: str, file: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        if not file.filename.lower().endswith(".txt"):
+            await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
+            return
+        content = (await file.read()).decode("utf-8", errors="ignore")
+        new_usernames = [l.strip() for l in content.splitlines() if l.strip()]
+        existing = read_lines(identity_usernames_file(safe))
+        write_lines(identity_usernames_file(safe), existing + new_usernames)
+        await interaction.followup.send(
+            f"✅ {len(new_usernames)} username(s) ajouté(s) à `{safe}` (total: {len(existing) + len(new_usernames)}).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="listusernames", description="Liste les usernames d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def listusernames(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = read_lines(identity_usernames_file(safe))
+        if not items:
+            await interaction.response.send_message(f"Aucun username pour `{safe}`.", ephemeral=True)
+            return
+        lines = [f"`{i}` — {truncate_for_display(x)}" for i, x in enumerate(items)]
+        text = f"**Usernames de `{safe}`** ({len(items)})\n" + "\n".join(lines)
+        await interaction.response.send_message(text[:1990], ephemeral=True)
+
+    @app_commands.command(name="deleteusername", description="Supprime un username d'une identité par index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listusernames)")
+    async def deleteusername(self, interaction: discord.Interaction, identity: str, index: int):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = read_lines(identity_usernames_file(safe))
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide (0-{len(items)-1}).", ephemeral=True
+            )
+            return
+        removed = items.pop(index)
+        write_lines(identity_usernames_file(safe), items)
+        await interaction.response.send_message(
+            f"✅ Username supprimé: `{removed}`", ephemeral=True
+        )
+
+    # ---------- PROFILE PICS (shared) ----------
+
+    @app_commands.command(name="addprofilepic", description="Ajoute une photo de profil au pool partagé")
     @app_commands.describe(image="Photo de profil (jpg/png/webp)")
     async def addprofilepic(self, interaction: discord.Interaction, image: discord.Attachment):
         if not await self.require_admin(interaction):
@@ -193,174 +517,9 @@ class Admin(commands.Cog):
         existing = list(PROFILE_PICS_DIR.glob("*"))
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         target.write_bytes(await image.read())
-        await interaction.followup.send(f"✅ Photo de profil ajoutée ({target.name}).", ephemeral=True)
+        await interaction.followup.send(f"✅ Photo de profil `{target.name}` ajoutée.", ephemeral=True)
 
-    @app_commands.command(name="addidentite", description="Crée une identité avec un zip de vidéos")
-    @app_commands.describe(name="Nom de l'identité (sera nettoyé)", videos_zip="Fichier .zip contenant les vidéos")
-    async def addidentite(self, interaction: discord.Interaction, name: str, videos_zip: discord.Attachment):
-        if not await self.require_admin(interaction):
-            return
-        await interaction.response.defer(ephemeral=True)
-        if not videos_zip.filename.lower().endswith(".zip"):
-            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
-            return
-        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name).strip("_-").lower()
-        if not safe_name:
-            await interaction.followup.send("Nom d'identité invalide.", ephemeral=True)
-            return
-        identity_dir = IDENTITIES_DIR / safe_name
-        videos_dir = identity_dir / "videos"
-        if identity_dir.exists():
-            await interaction.followup.send(f"L'identité `{safe_name}` existe déjà.", ephemeral=True)
-            return
-        videos_dir.mkdir(parents=True, exist_ok=True)
-        zip_bytes = await videos_zip.read()
-        count = 0
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-            tmp.write(zip_bytes)
-            tmp_path = tmp.name
-        try:
-            with zipfile.ZipFile(tmp_path) as zf:
-                for member in zf.namelist():
-                    base = os.path.basename(member)
-                    if not base:
-                        continue
-                    if os.path.splitext(base)[1].lower() not in VIDEO_EXTS:
-                        continue
-                    with zf.open(member) as src, (videos_dir / base).open("wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    count += 1
-        finally:
-            os.unlink(tmp_path)
-        if count == 0:
-            shutil.rmtree(identity_dir)
-            await interaction.followup.send("Aucune vidéo trouvée dans le zip.", ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"✅ Identité `{safe_name}` créée avec {count} vidéo(s).", ephemeral=True
-        )
-
-    @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding")
-    @app_commands.describe(user="Le VA à onboarder")
-    async def adduser(self, interaction: discord.Interaction, user: discord.Member):
-        if not await self.require_admin(interaction):
-            return
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        if guild is None:
-            await interaction.followup.send("Cette commande s'utilise dans un serveur.", ephemeral=True)
-            return
-
-        identities = list_identities()
-        if not identities:
-            await interaction.followup.send(
-                "Aucune identité disponible. Crée-en une avec `/addidentite` d'abord.", ephemeral=True
-            )
-            return
-        identity = random.choice(identities)
-
-        users = load_json(USERS_FILE, {})
-        users[str(user.id)] = identity
-        save_json(USERS_FILE, users)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            user: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True, attach_files=True
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_messages=True, attach_files=True
-            ),
-        }
-
-        base_name = f"va-{user.name}".lower().replace(" ", "-")[:90]
-        try:
-            channel = await guild.create_text_channel(name=base_name, overwrites=overwrites)
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "Le bot n'a pas la permission de créer des salons. Donne-lui le rôle `Manage Channels`.",
-                ephemeral=True,
-            )
-            return
-
-        from cogs.onboarding import step_embed, OnboardingView
-        embed = step_embed(0)
-        await channel.send(content=user.mention, embed=embed, view=OnboardingView())
-
-        await interaction.followup.send(
-            f"✅ Salon {channel.mention} créé pour {user.mention}. Identité assignée: `{identity}`",
-            ephemeral=True,
-        )
-
-    # ---------- LIST commands ----------
-
-    async def _send_list(self, interaction, title, items, formatter=None):
-        if not items:
-            await interaction.response.send_message(
-                f"**{title}** — aucune entrée.", ephemeral=True
-            )
-            return
-        formatter = formatter or (lambda i, x: f"`{i}` — {truncate_for_display(x)}")
-        lines = [formatter(i, item) for i, item in enumerate(items)]
-        text = f"**{title}** ({len(items)} entrée(s))\n" + "\n".join(lines)
-        if len(text) <= 1900:
-            await interaction.response.send_message(text, ephemeral=True)
-        else:
-            # Trop long, envoyer comme fichier
-            buf = io.BytesIO()
-            buf.write(f"{title} ({len(items)} entrées)\n\n".encode("utf-8"))
-            for i, item in enumerate(items):
-                buf.write(f"=== [{i}] ===\n{item}\n\n".encode("utf-8"))
-            buf.seek(0)
-            await interaction.response.send_message(
-                f"**{title}** ({len(items)} entrées) — voir le fichier joint",
-                file=discord.File(buf, filename=f"{title.lower().replace(' ', '_')}.txt"),
-                ephemeral=True,
-            )
-
-    @app_commands.command(name="listcaptions", description="Liste toutes les captions avec leur index")
-    async def listcaptions(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        items = read_lines(CAPTIONS_FILE)
-        await self._send_list(interaction, "Captions", items)
-
-    @app_commands.command(name="listbios", description="Liste toutes les bios avec leur index")
-    async def listbios(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        items = read_bios()
-        await self._send_list(interaction, "Bios", items)
-
-    @app_commands.command(name="listusernames", description="Liste tous les usernames avec leur index")
-    async def listusernames(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        items = read_lines(USERNAMES_FILE)
-        await self._send_list(interaction, "Usernames", items)
-
-    @app_commands.command(name="listidentites", description="Liste les identités + nombre de vidéos et VA assignés")
-    async def listidentites(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        identities = list_identities()
-        if not identities:
-            await interaction.response.send_message("Aucune identité.", ephemeral=True)
-            return
-        users = load_json(USERS_FILE, {})
-        lines = []
-        for name in identities:
-            videos_dir = IDENTITIES_DIR / name / "videos"
-            count = len([f for f in videos_dir.iterdir() if f.suffix.lower() in VIDEO_EXTS]) if videos_dir.exists() else 0
-            assigned = sum(1 for v in users.values() if v == name)
-            lines.append(f"• `{name}` — **{count}** vidéo(s), **{assigned}** VA assigné(s)")
-        await interaction.response.send_message(
-            f"**Identités** ({len(identities)} totale(s))\n" + "\n".join(lines),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="listprofilepics", description="Liste les photos de profil dispo")
+    @app_commands.command(name="listprofilepics", description="Liste les photos de profil")
     async def listprofilepics(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
             return
@@ -373,101 +532,68 @@ class Admin(commands.Cog):
             return
         lines = [f"• `{name}`" for name in pics]
         await interaction.response.send_message(
-            f"**Photos de profil** ({len(pics)} totale(s))\n" + "\n".join(lines),
+            f"**Photos de profil** ({len(pics)})\n" + "\n".join(lines)[:1900],
             ephemeral=True,
         )
 
-    # ---------- DELETE commands ----------
-
-    @app_commands.command(name="deletecaption", description="Supprime une caption par son index")
-    @app_commands.describe(index="L'index visible avec /listcaptions")
-    async def deletecaption(self, interaction: discord.Interaction, index: int):
-        if not await self.require_admin(interaction):
-            return
-        items = read_lines(CAPTIONS_FILE)
-        if index < 0 or index >= len(items):
-            await interaction.response.send_message(
-                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
-            )
-            return
-        removed = items.pop(index)
-        write_lines(CAPTIONS_FILE, items)
-        await interaction.response.send_message(
-            f"✅ Caption supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
-        )
-
-    @app_commands.command(name="deletebio", description="Supprime une bio par son index")
-    @app_commands.describe(index="L'index visible avec /listbios")
-    async def deletebio(self, interaction: discord.Interaction, index: int):
-        if not await self.require_admin(interaction):
-            return
-        items = read_bios()
-        if index < 0 or index >= len(items):
-            await interaction.response.send_message(
-                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
-            )
-            return
-        removed = items.pop(index)
-        write_bios(items)
-        await interaction.response.send_message(
-            f"✅ Bio supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
-        )
-
-    @app_commands.command(name="deleteusername", description="Supprime un username par son index")
-    @app_commands.describe(index="L'index visible avec /listusernames")
-    async def deleteusername(self, interaction: discord.Interaction, index: int):
-        if not await self.require_admin(interaction):
-            return
-        items = read_lines(USERNAMES_FILE)
-        if index < 0 or index >= len(items):
-            await interaction.response.send_message(
-                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
-            )
-            return
-        removed = items.pop(index)
-        write_lines(USERNAMES_FILE, items)
-        await interaction.response.send_message(
-            f"✅ Username supprimé: `{truncate_for_display(removed, 100)}`", ephemeral=True
-        )
-
-    @app_commands.command(name="deleteidentite", description="Supprime une identité (+ ses vidéos) par son nom")
-    @app_commands.describe(name="Nom exact de l'identité (voir /listidentites)")
-    async def deleteidentite(self, interaction: discord.Interaction, name: str):
-        if not await self.require_admin(interaction):
-            return
-        safe_name = name.lower().strip()
-        identity_dir = IDENTITIES_DIR / safe_name
-        if not identity_dir.exists():
-            await interaction.response.send_message(
-                f"Identité `{safe_name}` introuvable.", ephemeral=True
-            )
-            return
-        shutil.rmtree(identity_dir)
-        # Detacher les VA qui avaient cette identite
-        users = load_json(USERS_FILE, {})
-        detached = [uid for uid, ident in users.items() if ident == safe_name]
-        for uid in detached:
-            del users[uid]
-        save_json(USERS_FILE, users)
-        await interaction.response.send_message(
-            f"✅ Identité `{safe_name}` supprimée. {len(detached)} VA détaché(s).",
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="deleteprofilepic", description="Supprime une photo de profil par son nom de fichier")
+    @app_commands.command(name="deleteprofilepic", description="Supprime une photo de profil par nom de fichier")
     @app_commands.describe(filename="Nom de fichier exact (voir /listprofilepics)")
     async def deleteprofilepic(self, interaction: discord.Interaction, filename: str):
         if not await self.require_admin(interaction):
             return
         target = PROFILE_PICS_DIR / filename
         if not target.exists() or not target.is_file():
-            await interaction.response.send_message(
-                f"Fichier `{filename}` introuvable.", ephemeral=True
-            )
+            await interaction.response.send_message(f"Fichier `{filename}` introuvable.", ephemeral=True)
             return
         target.unlink()
-        await interaction.response.send_message(
-            f"✅ Photo de profil `{filename}` supprimée.", ephemeral=True
+        await interaction.response.send_message(f"✅ `{filename}` supprimée.", ephemeral=True)
+
+    # ---------- ADDUSER ----------
+
+    @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding")
+    @app_commands.describe(user="Le VA à onboarder")
+    async def adduser(self, interaction: discord.Interaction, user: discord.Member):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.followup.send(
+                "Aucune identité. Crée-en une avec /addidentite.", ephemeral=True
+            )
+            return
+        identity = random.choice(identities)
+        users = load_json(USERS_FILE, {})
+        users[str(user.id)] = identity
+        save_json(USERS_FILE, users)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_messages=True, attach_files=True
+            ),
+        }
+        base_name = f"va-{user.name}".lower().replace(" ", "-")[:90]
+        try:
+            channel = await guild.create_text_channel(name=base_name, overwrites=overwrites)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "Le bot n'a pas la permission de créer des salons. Active 'Manage Channels' pour le bot.",
+                ephemeral=True,
+            )
+            return
+        from cogs.onboarding import step_embed, OnboardingView
+        embed = step_embed(0)
+        await channel.send(content=user.mention, embed=embed, view=OnboardingView())
+        await interaction.followup.send(
+            f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`",
+            ephemeral=True,
         )
 
 
