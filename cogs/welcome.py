@@ -557,6 +557,60 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="resetva", description="[ADMIN] Reset complet d'un VA: efface assignation + supprime son salon")
+    @app_commands.describe(
+        user="Le VA à reset",
+        delete_channel="True = supprime aussi son salon (défaut True)"
+    )
+    async def resetva(self, interaction: discord.Interaction, user: discord.Member, delete_channel: bool = True):
+        if not await self.require_admin(interaction):
+            return
+        users = load_users()
+        existing = users.get(str(user.id))
+        deleted = False
+        if delete_channel and isinstance(existing, dict) and existing.get("channel_id"):
+            channel = interaction.guild.get_channel(existing["channel_id"])
+            if channel:
+                try:
+                    await channel.delete(reason="Reset VA")
+                    deleted = True
+                except Exception:
+                    pass
+        users.pop(str(user.id), None)
+        save_users(users)
+        # Aussi clear les pending deletions
+        pending = load_pending()
+        pending.pop(str(user.id), None)
+        save_pending(pending)
+        msg = f"✅ {user.mention} reseté complètement."
+        if deleted:
+            msg += " Salon supprimé."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @app_commands.command(name="forcerandomidentity", description="[ADMIN] Réassigne aléatoirement l'identité d'un VA")
+    @app_commands.describe(user="Le VA")
+    async def forcerandomidentity(self, interaction: discord.Interaction, user: discord.Member):
+        if not await self.require_admin(interaction):
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.response.send_message("Aucune identité disponible.", ephemeral=True)
+            return
+        new_identity = random.choice(identities)
+        users = load_users()
+        existing = users.get(str(user.id))
+        if isinstance(existing, dict):
+            existing["identity"] = new_identity
+            users[str(user.id)] = existing
+        else:
+            users[str(user.id)] = {"identity": new_identity, "channel_id": None, "auto_post": True}
+        save_users(users)
+        await interaction.response.send_message(
+            f"✅ {user.mention} réassigné à `{new_identity}` (aléatoire parmi {len(identities)} identités).\n"
+            f"⚠️ Son salon existant reste où il est. Pour le déplacer dans la nouvelle catégorie, refais /adduser ou déplace manuellement.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")
     async def welcometest(self, interaction: discord.Interaction, user: discord.Member = None):
