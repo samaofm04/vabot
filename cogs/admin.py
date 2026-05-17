@@ -144,6 +144,103 @@ def truncate_for_display(s, max_len=80):
     return s if len(s) <= max_len else s[: max_len - 3] + "..."
 
 
+def reel_preview_text(identity, current_index, reels):
+    """Build the preview text for a reel in the manage view."""
+    if not reels:
+        return f"Aucun reel pour `{identity}`."
+    if current_index >= len(reels):
+        current_index = len(reels) - 1
+    filename, cap, desc, has_ex = reels[current_index]
+    parts = [
+        f"**Reel {current_index + 1}/{len(reels)}** — identité `{identity}`",
+        f"📁 `{filename}`",
+        "",
+        f"📝 **Caption :**\n```\n{cap}\n```" if cap else "📝 *(pas de caption)*",
+        f"📄 **Description :**\n```\n{desc}\n```" if desc else "📄 *(pas de description)*",
+        f"🎥 Vidéo exemple : {'✅' if has_ex else '❌'}",
+    ]
+    return "\n".join(parts)
+
+
+def preview_video_for(identity, filename):
+    """Return path of example video if exists, else clean video."""
+    videos_dir = identity_videos_dir(identity)
+    video_path = videos_dir / filename
+    ex = example_video_path_for(video_path)
+    return ex if ex else video_path
+
+
+class ReelManagerView(discord.ui.View):
+    def __init__(self, identity, current_index=0):
+        super().__init__(timeout=600)
+        self.identity = identity
+        self.current_index = current_index
+
+    async def _refresh(self, interaction):
+        reels = list_reels(self.identity)
+        if not reels:
+            await interaction.response.edit_message(
+                content=f"Plus aucun reel pour `{self.identity}`.",
+                view=None,
+                attachments=[],
+            )
+            self.stop()
+            return
+        if self.current_index >= len(reels):
+            self.current_index = len(reels) - 1
+        if self.current_index < 0:
+            self.current_index = 0
+        filename = reels[self.current_index][0]
+        text = reel_preview_text(self.identity, self.current_index, reels)
+        video_path = preview_video_for(self.identity, filename)
+        try:
+            await interaction.response.edit_message(
+                content=text,
+                view=self,
+                attachments=[discord.File(video_path)],
+            )
+        except discord.HTTPException:
+            # Si la video est trop lourde
+            await interaction.response.edit_message(
+                content=text + "\n\n⚠️ *(Vidéo trop lourde pour preview)*",
+                view=self,
+                attachments=[],
+            )
+
+    @discord.ui.button(label="◀ Précédent", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index -= 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Suivant ▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index += 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="🗑️ Supprimer ce reel", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        reels = list_reels(self.identity)
+        if not reels:
+            await interaction.response.send_message("Plus aucun reel.", ephemeral=True)
+            return
+        if self.current_index >= len(reels):
+            self.current_index = len(reels) - 1
+        filename = reels[self.current_index][0]
+        videos_dir = identity_videos_dir(self.identity)
+        video_path = videos_dir / filename
+        video_path.unlink(missing_ok=True)
+        caption_path_for(video_path).unlink(missing_ok=True)
+        description_path_for(video_path).unlink(missing_ok=True)
+        ex = example_video_path_for(video_path)
+        if ex:
+            ex.unlink(missing_ok=True)
+        # Refresh: if current index now out of range, decrement
+        new_reels = list_reels(self.identity)
+        if self.current_index >= len(new_reels):
+            self.current_index = max(0, len(new_reels) - 1)
+        await self._refresh(interaction)
+
+
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -467,6 +564,31 @@ class Admin(commands.Cog):
             await interaction.response.send_message(
                 f"**Reels de `{safe}`** ({len(reels)}) — voir fichier",
                 file=discord.File(buf, filename=f"reels_{safe}.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="managereels", description="Menu interactif: voir + supprimer les reels page par page")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def managereels(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        reels = list_reels(safe)
+        if not reels:
+            await interaction.response.send_message(f"Aucun reel pour `{safe}`.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        view = ReelManagerView(safe, 0)
+        text = reel_preview_text(safe, 0, reels)
+        video_path = preview_video_for(safe, reels[0][0])
+        try:
+            await interaction.followup.send(
+                content=text, view=view, file=discord.File(video_path), ephemeral=True
+            )
+        except discord.HTTPException:
+            await interaction.followup.send(
+                content=text + "\n\n⚠️ *(Vidéo trop lourde pour preview)*",
+                view=view,
                 ephemeral=True,
             )
 
