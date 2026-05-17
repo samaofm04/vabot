@@ -43,6 +43,45 @@ def list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+def read_lines(path):
+    if not path.exists():
+        return []
+    return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def write_lines(path, lines):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if lines:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    else:
+        path.write_text("", encoding="utf-8")
+
+
+def read_bios():
+    if not BIOS_FILE.exists():
+        return []
+    content = BIOS_FILE.read_text(encoding="utf-8")
+    return [b.strip() for b in content.split("---") if b.strip()]
+
+
+def write_bios(bios):
+    BIOS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if bios:
+        BIOS_FILE.write_text("\n---\n".join(bios) + "\n", encoding="utf-8")
+    else:
+        BIOS_FILE.write_text("", encoding="utf-8")
+
+
+def display_with_newlines(text: str) -> str:
+    """Convert literal \\n in stored text to real newlines for display."""
+    return text.replace("\\n", "\n") if text else text
+
+
+def truncate_for_display(s, max_len=80):
+    s = s.replace("\n", " ⏎ ")  # show newlines as a symbol on one line
+    return s if len(s) <= max_len else s[: max_len - 3] + "..."
+
+
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -252,6 +291,183 @@ class Admin(commands.Cog):
         await interaction.followup.send(
             f"✅ Salon {channel.mention} créé pour {user.mention}. Identité assignée: `{identity}`",
             ephemeral=True,
+        )
+
+    # ---------- LIST commands ----------
+
+    async def _send_list(self, interaction, title, items, formatter=None):
+        if not items:
+            await interaction.response.send_message(
+                f"**{title}** — aucune entrée.", ephemeral=True
+            )
+            return
+        formatter = formatter or (lambda i, x: f"`{i}` — {truncate_for_display(x)}")
+        lines = [formatter(i, item) for i, item in enumerate(items)]
+        text = f"**{title}** ({len(items)} entrée(s))\n" + "\n".join(lines)
+        if len(text) <= 1900:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            # Trop long, envoyer comme fichier
+            buf = io.BytesIO()
+            buf.write(f"{title} ({len(items)} entrées)\n\n".encode("utf-8"))
+            for i, item in enumerate(items):
+                buf.write(f"=== [{i}] ===\n{item}\n\n".encode("utf-8"))
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**{title}** ({len(items)} entrées) — voir le fichier joint",
+                file=discord.File(buf, filename=f"{title.lower().replace(' ', '_')}.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="listcaptions", description="Liste toutes les captions avec leur index")
+    async def listcaptions(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(CAPTIONS_FILE)
+        await self._send_list(interaction, "Captions", items)
+
+    @app_commands.command(name="listbios", description="Liste toutes les bios avec leur index")
+    async def listbios(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        items = read_bios()
+        await self._send_list(interaction, "Bios", items)
+
+    @app_commands.command(name="listusernames", description="Liste tous les usernames avec leur index")
+    async def listusernames(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(USERNAMES_FILE)
+        await self._send_list(interaction, "Usernames", items)
+
+    @app_commands.command(name="listidentites", description="Liste les identités + nombre de vidéos et VA assignés")
+    async def listidentites(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.response.send_message("Aucune identité.", ephemeral=True)
+            return
+        users = load_json(USERS_FILE, {})
+        lines = []
+        for name in identities:
+            videos_dir = IDENTITIES_DIR / name / "videos"
+            count = len([f for f in videos_dir.iterdir() if f.suffix.lower() in VIDEO_EXTS]) if videos_dir.exists() else 0
+            assigned = sum(1 for v in users.values() if v == name)
+            lines.append(f"• `{name}` — **{count}** vidéo(s), **{assigned}** VA assigné(s)")
+        await interaction.response.send_message(
+            f"**Identités** ({len(identities)} totale(s))\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="listprofilepics", description="Liste les photos de profil dispo")
+    async def listprofilepics(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        if not PROFILE_PICS_DIR.exists():
+            await interaction.response.send_message("Aucune photo de profil.", ephemeral=True)
+            return
+        pics = sorted(p.name for p in PROFILE_PICS_DIR.iterdir() if p.suffix.lower() in IMAGE_EXTS)
+        if not pics:
+            await interaction.response.send_message("Aucune photo de profil.", ephemeral=True)
+            return
+        lines = [f"• `{name}`" for name in pics]
+        await interaction.response.send_message(
+            f"**Photos de profil** ({len(pics)} totale(s))\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
+    # ---------- DELETE commands ----------
+
+    @app_commands.command(name="deletecaption", description="Supprime une caption par son index")
+    @app_commands.describe(index="L'index visible avec /listcaptions")
+    async def deletecaption(self, interaction: discord.Interaction, index: int):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(CAPTIONS_FILE)
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
+            )
+            return
+        removed = items.pop(index)
+        write_lines(CAPTIONS_FILE, items)
+        await interaction.response.send_message(
+            f"✅ Caption supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
+        )
+
+    @app_commands.command(name="deletebio", description="Supprime une bio par son index")
+    @app_commands.describe(index="L'index visible avec /listbios")
+    async def deletebio(self, interaction: discord.Interaction, index: int):
+        if not await self.require_admin(interaction):
+            return
+        items = read_bios()
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
+            )
+            return
+        removed = items.pop(index)
+        write_bios(items)
+        await interaction.response.send_message(
+            f"✅ Bio supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
+        )
+
+    @app_commands.command(name="deleteusername", description="Supprime un username par son index")
+    @app_commands.describe(index="L'index visible avec /listusernames")
+    async def deleteusername(self, interaction: discord.Interaction, index: int):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(USERNAMES_FILE)
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide. Valides: 0 à {len(items) - 1}.", ephemeral=True
+            )
+            return
+        removed = items.pop(index)
+        write_lines(USERNAMES_FILE, items)
+        await interaction.response.send_message(
+            f"✅ Username supprimé: `{truncate_for_display(removed, 100)}`", ephemeral=True
+        )
+
+    @app_commands.command(name="deleteidentite", description="Supprime une identité (+ ses vidéos) par son nom")
+    @app_commands.describe(name="Nom exact de l'identité (voir /listidentites)")
+    async def deleteidentite(self, interaction: discord.Interaction, name: str):
+        if not await self.require_admin(interaction):
+            return
+        safe_name = name.lower().strip()
+        identity_dir = IDENTITIES_DIR / safe_name
+        if not identity_dir.exists():
+            await interaction.response.send_message(
+                f"Identité `{safe_name}` introuvable.", ephemeral=True
+            )
+            return
+        shutil.rmtree(identity_dir)
+        # Detacher les VA qui avaient cette identite
+        users = load_json(USERS_FILE, {})
+        detached = [uid for uid, ident in users.items() if ident == safe_name]
+        for uid in detached:
+            del users[uid]
+        save_json(USERS_FILE, users)
+        await interaction.response.send_message(
+            f"✅ Identité `{safe_name}` supprimée. {len(detached)} VA détaché(s).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="deleteprofilepic", description="Supprime une photo de profil par son nom de fichier")
+    @app_commands.describe(filename="Nom de fichier exact (voir /listprofilepics)")
+    async def deleteprofilepic(self, interaction: discord.Interaction, filename: str):
+        if not await self.require_admin(interaction):
+            return
+        target = PROFILE_PICS_DIR / filename
+        if not target.exists() or not target.is_file():
+            await interaction.response.send_message(
+                f"Fichier `{filename}` introuvable.", ephemeral=True
+            )
+            return
+        target.unlink()
+        await interaction.response.send_message(
+            f"✅ Photo de profil `{filename}` supprimée.", ephemeral=True
         )
 
 
