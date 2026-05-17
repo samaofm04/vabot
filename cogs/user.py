@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import random
@@ -226,7 +227,7 @@ class UserCog(commands.Cog):
             if cfg.get("enabled", True):
                 tmp_dir = tempfile.mkdtemp(prefix="pp_")
                 tmp_path = Path(tmp_dir) / pic.name
-                if transform_image(pic, tmp_path, cfg, target="profile"):
+                if await asyncio.to_thread(transform_image, pic, tmp_path, cfg, "profile"):
                     send_path = tmp_path
             await interaction.followup.send(
                 "📸 **Photo de profil**\n*Télécharge et upload sur Instagram.*",
@@ -263,7 +264,7 @@ class UserCog(commands.Cog):
             if transform_cfg.get("enabled", True):
                 tmp_dir = tempfile.mkdtemp(prefix=f"{kind_target}_")
                 tmp_path = Path(tmp_dir) / image.name
-                if transform_image(image, tmp_path, transform_cfg, target=kind_target):
+                if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
                     send_path = tmp_path
             parts = [f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n"]
             if caption:
@@ -335,7 +336,7 @@ class UserCog(commands.Cog):
             if cfg.get("enabled", True):
                 tmp_dir = tempfile.mkdtemp(prefix="storycta_")
                 tmp_path = Path(tmp_dir) / image.name
-                if transform_image(image, tmp_path, cfg, target="storycta"):
+                if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
                     send_path = tmp_path
             message = (
                 f"📲 **STORY CTA — identité `{identity}`**\n\n"
@@ -372,7 +373,7 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
 
-        # Transformer la vidéo clean (avec gestion d'erreurs)
+        # Transformer la vidéo clean (en thread pour ne pas bloquer le bot)
         transform_cfg = load_transform_config()
         transformed_path = None
         tmp_dir = None
@@ -380,7 +381,7 @@ class UserCog(commands.Cog):
             if transform_cfg.get("enabled", True):
                 tmp_dir = tempfile.mkdtemp(prefix="reel_")
                 transformed_path = Path(tmp_dir) / video.name
-                ok = transform_video(video, transformed_path, transform_cfg)
+                ok = await asyncio.to_thread(transform_video, video, transformed_path, transform_cfg)
                 if not ok or not transformed_path.exists() or transformed_path.stat().st_size == 0:
                     # Échec de transfo : on envoie l'original
                     transformed_path = None

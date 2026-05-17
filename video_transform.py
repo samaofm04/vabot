@@ -270,10 +270,12 @@ def transform_video(input_path, output_path, config=None, timeout=180):
         br = int(_rand(config["video_bitrate_kbps"]["min"], config["video_bitrate_kbps"]["max"]))
         cmd.extend(["-b:v", f"{br}k"])
 
-    # Codec settings (good quality)
+    # Codec settings (rapid + bonne qualite)
     cmd.extend([
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-threads", "0",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
