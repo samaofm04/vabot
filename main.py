@@ -1,13 +1,9 @@
 import os
-import sys
-import faulthandler
 import logging
 import traceback
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-
-faulthandler.enable(file=open("crash.log", "a", encoding="utf-8"))
 
 load_dotenv()
 
@@ -17,10 +13,6 @@ PREFIX = os.getenv("PREFIX", "!")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log", mode="a", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
 )
 log = logging.getLogger("vabot")
 
@@ -32,14 +24,19 @@ class VABot(commands.Bot):
         super().__init__(command_prefix=PREFIX, intents=intents)
 
     async def setup_hook(self):
-        for filename in os.listdir("./cogs"):
+        for filename in sorted(os.listdir("./cogs")):
             if filename.endswith(".py") and not filename.startswith("_"):
                 try:
                     await self.load_extension(f"cogs.{filename[:-3]}")
-                    log.info(f"Cog chargé: {filename}")
+                    log.info(f"Cog charge: {filename}")
                 except Exception as e:
                     log.error(f"Erreur chargement {filename}: {e}")
                     log.error(traceback.format_exc())
+        try:
+            synced = await self.tree.sync()
+            log.info(f"{len(synced)} slash commands synchronisees")
+        except Exception as e:
+            log.warning(f"Sync au demarrage echoue (rate-limit ?): {e}")
 
 
 bot = VABot()
@@ -47,38 +44,25 @@ bot = VABot()
 
 @bot.event
 async def on_ready():
-    log.info(f"Bot connecté en tant que {bot.user} (id: {bot.user.id})")
-    log.info("Bot prêt - en attente de commandes")
+    log.info(f"Bot connecte en tant que {bot.user} (id: {bot.user.id})")
 
 
-@bot.event
-async def on_disconnect():
-    log.warning("Bot déconnecté du gateway")
-
-
-@bot.event
-async def on_resumed():
-    log.info("Bot reconnecté au gateway")
-
-
-@bot.command(name="sync")
-@commands.is_owner()
-async def sync_cmd(ctx):
-    """Resynchronise les slash commands (à utiliser après avoir ajouté de nouvelles commandes)."""
+@bot.tree.command(name="sync", description="[OWNER] Resync les slash commands")
+async def sync_slash(interaction: discord.Interaction):
+    app = await bot.application_info()
+    if interaction.user.id != app.owner.id:
+        await interaction.response.send_message("Owner only.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
     try:
         synced = await bot.tree.sync()
-        await ctx.send(f"{len(synced)} commandes synchronisées.")
+        await interaction.followup.send(f"OK {len(synced)} commandes synchronisees.", ephemeral=True)
     except Exception as e:
-        await ctx.send(f"Erreur: {e}")
+        await interaction.followup.send(f"Erreur: {e}", ephemeral=True)
 
 
 if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN manquant dans .env")
-    log.info("=== Démarrage du bot ===")
-    try:
-        bot.run(TOKEN, log_handler=None)
-    except Exception:
-        log.error("CRASH:")
-        log.error(traceback.format_exc())
-    log.info("=== Bot arrêté ===")
+    log.info("=== Demarrage du bot ===")
+    bot.run(TOKEN, log_handler=None)
