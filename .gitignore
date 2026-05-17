@@ -1,0 +1,25 @@
+# Secrets
+.env
+.github-token
+
+# Donnees du bot (specifiques au VPS)
+data/
+assets/
+bot.log
+crash.log
+*.err
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Scripts de deploiement (legacy)
+install_on_vps.sh
+deploy_v2.sh
+update_user_cog.sh
+
+# IDE
+.vscode/
+.idea/
