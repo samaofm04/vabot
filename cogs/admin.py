@@ -470,6 +470,77 @@ class Admin(commands.Cog):
                 ephemeral=True,
             )
 
+    @app_commands.command(name="clearreels", description="Supprime TOUS les reels d'une identité (irréversible)")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        confirm="Tape exactement le nom de l'identité pour confirmer"
+    )
+    async def clearreels(self, interaction: discord.Interaction, identity: str, confirm: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        if confirm != safe:
+            await interaction.response.send_message(
+                f"⚠️ Pour confirmer la suppression de **TOUS** les reels de `{safe}`, refais la commande avec `confirm:{safe}`.",
+                ephemeral=True,
+            )
+            return
+        videos_dir = identity_videos_dir(safe)
+        if not videos_dir.exists():
+            await interaction.response.send_message(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        deleted = 0
+        for p in list(videos_dir.iterdir()):
+            if p.is_file():
+                p.unlink(missing_ok=True)
+                deleted += 1
+        await interaction.response.send_message(
+            f"✅ {deleted} fichier(s) supprimé(s) de l'identité `{safe}`.", ephemeral=True
+        )
+
+    @app_commands.command(name="clearbios", description="Supprime TOUTES les bios d'une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        confirm="Tape exactement le nom de l'identité pour confirmer"
+    )
+    async def clearbios(self, interaction: discord.Interaction, identity: str, confirm: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        if confirm != safe:
+            await interaction.response.send_message(
+                f"⚠️ Refais la commande avec `confirm:{safe}` pour confirmer.",
+                ephemeral=True,
+            )
+            return
+        n = len(read_bios(safe))
+        write_bios(safe, [])
+        await interaction.response.send_message(
+            f"✅ {n} bio(s) supprimée(s) de `{safe}`.", ephemeral=True
+        )
+
+    @app_commands.command(name="clearusernames", description="Supprime TOUS les usernames d'une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        confirm="Tape exactement le nom de l'identité pour confirmer"
+    )
+    async def clearusernames(self, interaction: discord.Interaction, identity: str, confirm: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        if confirm != safe:
+            await interaction.response.send_message(
+                f"⚠️ Refais la commande avec `confirm:{safe}` pour confirmer.",
+                ephemeral=True,
+            )
+            return
+        path = identity_usernames_file(safe)
+        n = len(read_lines(path))
+        write_lines(path, [])
+        await interaction.response.send_message(
+            f"✅ {n} username(s) supprimé(s) de `{safe}`.", ephemeral=True
+        )
+
     @app_commands.command(name="deletereel", description="Supprime un reel (vidéo + caption + description + exemple)")
     @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listreels)")
     async def deletereel(self, interaction: discord.Interaction, identity: str, index: int):
