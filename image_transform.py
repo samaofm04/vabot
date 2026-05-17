@@ -131,17 +131,16 @@ def transform_image(input_path, output_path, config=None, target="post"):
             f = _rand(config["sharpness"]["min"], config["sharpness"]["max"])
             img = ImageEnhance.Sharpness(img).enhance(f)
 
-        # Resize
+        # Resize (only for targets that NEED a specific size)
         if config.get("random_dimensions", {}).get("enabled"):
-            if target == "story":
-                w, h = random.choice(RANDOM_STORY_DIMS)
+            if target == "storycta":
+                # Force 1080x1920 for story CTAs
+                img = img.resize((1080, 1920), Image.LANCZOS)
             elif target == "profile":
-                # square for profile
+                # Square for profile pic
                 size = random.choice([512, 720, 1080])
-                w, h = size, size
-            else:  # post
-                w, h = random.choice(RANDOM_POST_DIMS)
-            img = img.resize((w, h), Image.LANCZOS)
+                img = img.resize((size, size), Image.LANCZOS)
+            # post & story: pas de resize, on garde la taille originale
 
         # JPEG quality
         quality = 90

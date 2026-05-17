@@ -335,7 +335,7 @@ class UserCog(commands.Cog):
             if cfg.get("enabled", True):
                 tmp_dir = tempfile.mkdtemp(prefix="storycta_")
                 tmp_path = Path(tmp_dir) / image.name
-                if transform_image(image, tmp_path, cfg, target="story"):
+                if transform_image(image, tmp_path, cfg, target="storycta"):
                     send_path = tmp_path
             message = (
                 f"📲 **STORY CTA — identité `{identity}`**\n\n"
