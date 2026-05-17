@@ -1051,6 +1051,18 @@ class Admin(commands.Cog):
 
     # ---------- ADDUSER ----------
 
+    @app_commands.command(name="restartonboarding", description="[ADMIN] Renvoie l'étape 1 du welcome dans ce salon")
+    @app_commands.describe(user="Optionnel: pour qui (défaut: toi)")
+    async def restartonboarding(self, interaction: discord.Interaction, user: discord.Member = None):
+        if not await self.require_admin(interaction):
+            return
+        target = user or interaction.user
+        from cogs.onboarding import step_embed, OnboardingView
+        embed = step_embed(0)
+        await interaction.response.send_message(
+            content=target.mention, embed=embed, view=OnboardingView()
+        )
+
     @app_commands.command(name="testas", description="[ADMIN] Assigne-toi (toi-même) à une identité pour tester comme VA")
     @app_commands.describe(
         identity="Nom de l'identité (laisse vide pour te retirer toute assignation)"
