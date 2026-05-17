@@ -5,10 +5,11 @@ Click → posts step 1 of onboarding.
 import json
 import logging
 import random
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 log = logging.getLogger("vabot.welcome")
 
@@ -17,9 +18,11 @@ IDENTITIES_DIR = DATA_DIR / "identities"
 USERS_FILE = DATA_DIR / "users.json"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 WELCOME_CONFIG_FILE = DATA_DIR / "welcome_config.json"
+PENDING_DELETIONS_FILE = DATA_DIR / "pending_deletions.json"
 
 DEFAULT_WELCOME_CONFIG = {
     "welcome_channel_id": None,
+    "cleanup_days_after_leave": 7,
     "welcome_public_message": (
         "👋 **Bienvenue dans l'agence {mention} !**\n\n"
         "Tu es là parce que tu vas bosser avec nous comme VA. "
@@ -70,6 +73,20 @@ def load_users():
 def save_users(users):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def load_pending():
+    if not PENDING_DELETIONS_FILE.exists():
+        return {}
+    try:
+        return json.loads(PENDING_DELETIONS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_pending(pending):
+    PENDING_DELETIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PENDING_DELETIONS_FILE.write_text(json.dumps(pending, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def list_identities():
@@ -134,15 +151,25 @@ class WelcomeContinueView(discord.ui.View):
         users = load_users()
         existing = users.get(str(interaction.user.id))
 
-        # Si user a deja un salon, l'envoyer là
+        # Si user a deja un salon, regarantir l'acces et l'y envoyer
         if isinstance(existing, dict) and existing.get("channel_id"):
             existing_channel = guild.get_channel(existing["channel_id"])
             if existing_channel:
+                # Reactiver les permissions au cas ou
+                try:
+                    await existing_channel.set_permissions(
+                        interaction.user,
+                        view_channel=True, send_messages=True,
+                        read_message_history=True, attach_files=True,
+                    )
+                except Exception:
+                    pass
                 await interaction.followup.send(
                     f"Tu as deja un salon : {existing_channel.mention}. Rends-toi la-bas pour commencer.",
                     ephemeral=True,
                 )
                 return
+            # Le salon stocke n'existe plus, on continue pour en creer un nouveau
 
         # Determiner l'identite : garder existante OU random
         if isinstance(existing, dict) and existing.get("identity"):
@@ -191,6 +218,10 @@ class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._owner_id = None
+        self.check_pending_deletions.start()
+
+    def cog_unload(self):
+        self.check_pending_deletions.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -229,6 +260,12 @@ class Welcome(commands.Cog):
         """Quand un nouveau membre rejoint, envoyer le message de bienvenue avec bouton."""
         if member.bot:
             return
+        # Si l'user avait une suppression planifiee, l'annuler (il est revenu)
+        pending = load_pending()
+        if str(member.id) in pending:
+            del pending[str(member.id)]
+            save_pending(pending)
+            log.info(f"on_member_join: suppression annulee pour {member.id} (revenu sur le serveur)")
         cfg = load_welcome_config()
         channel_id = cfg.get("welcome_channel_id")
         if not channel_id:
@@ -243,6 +280,69 @@ class Welcome(commands.Cog):
             await channel.send(content=text, view=WelcomeContinueView())
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """Quand un membre quitte, planifier la suppression de son salon dans N jours."""
+        if member.bot:
+            return
+        users = load_users()
+        data = users.get(str(member.id))
+        if not isinstance(data, dict) or not data.get("channel_id"):
+            return
+        cfg = load_welcome_config()
+        days = cfg.get("cleanup_days_after_leave", 7)
+        delete_at = datetime.now(timezone.utc) + timedelta(days=days)
+        pending = load_pending()
+        pending[str(member.id)] = {
+            "channel_id": data["channel_id"],
+            "guild_id": member.guild.id,
+            "delete_at": delete_at.isoformat(),
+            "user_name": str(member),
+        }
+        save_pending(pending)
+        log.info(f"on_member_remove: suppression de {data['channel_id']} planifiee pour {member.id} a {delete_at.isoformat()}")
+
+    @tasks.loop(hours=1)
+    async def check_pending_deletions(self):
+        """Verifie chaque heure les suppressions a effectuer."""
+        pending = load_pending()
+        if not pending:
+            return
+        now = datetime.now(timezone.utc)
+        to_remove = []
+        for user_id, data in list(pending.items()):
+            try:
+                delete_at = datetime.fromisoformat(data["delete_at"])
+            except Exception:
+                to_remove.append(user_id)
+                continue
+            if delete_at > now:
+                continue
+            # Suppression
+            guild = self.bot.get_guild(data.get("guild_id"))
+            if guild:
+                channel = guild.get_channel(data.get("channel_id"))
+                if channel:
+                    try:
+                        await channel.delete(reason="Auto-cleanup : VA a quitte le serveur depuis trop longtemps")
+                        log.info(f"Salon {channel.id} supprime (VA {user_id} parti)")
+                    except Exception as e:
+                        log.error(f"Erreur suppression salon {data.get('channel_id')}: {e}")
+            # Nettoyer users.json
+            users = load_users()
+            if user_id in users:
+                del users[user_id]
+                save_users(users)
+            to_remove.append(user_id)
+        for uid in to_remove:
+            pending.pop(uid, None)
+        if to_remove:
+            save_pending(pending)
+
+    @check_pending_deletions.before_loop
+    async def before_check_deletions(self):
+        await self.bot.wait_until_ready()
 
     @app_commands.command(name="setwelcomechannel", description="[ADMIN] Définit le salon où arrivera le welcome auto")
     @app_commands.describe(channel="Le salon (laisse vide pour utiliser le salon courant)")
@@ -273,6 +373,65 @@ class Welcome(commands.Cog):
             f"```\n{cfg.get('ticket_intro_message', '')[:500]}\n```"
         )
         await interaction.response.send_message(text, ephemeral=True)
+
+    @app_commands.command(name="cleanupdays", description="[ADMIN] Délai avant suppression auto du salon quand un VA quitte")
+    @app_commands.describe(days="Nombre de jours (défaut: 7)")
+    async def cleanupdays(self, interaction: discord.Interaction, days: int):
+        if not await self.require_admin(interaction):
+            return
+        if days < 0 or days > 365:
+            await interaction.response.send_message("Doit être entre 0 et 365.", ephemeral=True)
+            return
+        cfg = load_welcome_config()
+        cfg["cleanup_days_after_leave"] = days
+        save_welcome_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Suppression auto : **{days} jour(s)** après le départ d'un VA.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="pendingdeletions", description="[ADMIN] Liste les VAs partis dont le salon va être supprimé")
+    async def pendingdeletions(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        pending = load_pending()
+        if not pending:
+            await interaction.response.send_message("Aucune suppression planifiée.", ephemeral=True)
+            return
+        lines = []
+        for uid, data in pending.items():
+            try:
+                delete_at = datetime.fromisoformat(data["delete_at"])
+                delta = delete_at - datetime.now(timezone.utc)
+                days_left = max(0, delta.days)
+                hours_left = max(0, int(delta.total_seconds() / 3600))
+            except Exception:
+                days_left = "?"
+                hours_left = "?"
+            name = data.get("user_name", uid)
+            lines.append(f"• `{name}` (id: {uid}) → suppression dans **{days_left}j** ({hours_left}h)")
+        await interaction.response.send_message(
+            f"**Suppressions planifiées** ({len(pending)})\n" + "\n".join(lines[:20]),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="canceldeletion", description="[ADMIN] Annule la suppression planifiée pour un VA")
+    @app_commands.describe(user="Le VA dont annuler la suppression")
+    async def canceldeletion(self, interaction: discord.Interaction, user: discord.User):
+        if not await self.require_admin(interaction):
+            return
+        pending = load_pending()
+        if str(user.id) not in pending:
+            await interaction.response.send_message(
+                f"Aucune suppression planifiée pour {user.mention}.", ephemeral=True
+            )
+            return
+        del pending[str(user.id)]
+        save_pending(pending)
+        await interaction.response.send_message(
+            f"✅ Suppression annulée pour {user.mention}. Son salon est conservé.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")
