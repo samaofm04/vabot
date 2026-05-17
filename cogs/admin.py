@@ -1112,6 +1112,19 @@ class Admin(commands.Cog):
             f"✅ Transfo images : {'activées' if enabled else 'désactivées'}", ephemeral=True
         )
 
+    @app_commands.command(name="imagemetadataonly", description="Bascule mode metadata only (ne change que les EXIF, pas le rendu)")
+    @app_commands.describe(enabled="True = juste metadata (recommandé). False = aussi rotation/couleurs/resize")
+    async def imagemetadataonly(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_image_config()
+        cfg["metadata_only"] = enabled
+        save_image_config(cfg)
+        msg = "metadata uniquement" if enabled else "transfos visuelles activables"
+        await interaction.response.send_message(
+            f"✅ Mode : {msg}", ephemeral=True
+        )
+
     @app_commands.command(name="imagetransformtoggle", description="Active/désactive une option de transfo image")
     @app_commands.describe(option="Nom (rotation_degrees, saturation, brightness...)", enabled="True ou False")
     async def imagetransformtoggle(self, interaction: discord.Interaction, option: str, enabled: bool):
