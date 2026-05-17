@@ -34,28 +34,63 @@ DEFAULT_CONFIG = {
     "random_9_16_dimensions": {"enabled": True},
 }
 
-US_METADATA_PRESETS = [
-    {"location": "Paris, France",       "make": "Apple", "model": "iPhone 15",            "software": "17.5"},
-    {"location": "Lyon, France",        "make": "Apple", "model": "iPhone 15 Plus",       "software": "17.6"},
-    {"location": "Marseille, France",   "make": "Apple", "model": "iPhone 15 Pro",        "software": "18.0"},
-    {"location": "Toulouse, France",    "make": "Apple", "model": "iPhone 15 Pro Max",    "software": "18.1"},
-    {"location": "Nice, France",        "make": "Apple", "model": "iPhone 16",            "software": "18.2"},
-    {"location": "Nantes, France",      "make": "Apple", "model": "iPhone 16 Plus",       "software": "18.3"},
-    {"location": "Bordeaux, France",    "make": "Apple", "model": "iPhone 16 Pro",        "software": "18.4"},
-    {"location": "Lille, France",       "make": "Apple", "model": "iPhone 16 Pro Max",    "software": "18.5"},
-    {"location": "Strasbourg, France",  "make": "Apple", "model": "iPhone 17",            "software": "19.0"},
-    {"location": "Montpellier, France", "make": "Apple", "model": "iPhone 17 Plus",       "software": "19.1"},
-    {"location": "Rennes, France",      "make": "Apple", "model": "iPhone 17 Pro",        "software": "19.2"},
-    {"location": "Reims, France",       "make": "Apple", "model": "iPhone 17 Pro Max",    "software": "19.3"},
-    {"location": "Grenoble, France",    "make": "Apple", "model": "iPhone 15 Pro",        "software": "17.7"},
-    {"location": "Annecy, France",      "make": "Apple", "model": "iPhone 16 Pro Max",    "software": "18.6"},
-    {"location": "Le Havre, France",    "make": "Apple", "model": "iPhone 17 Pro Max",    "software": "19.0"},
-    {"location": "Saint-Étienne, France","make":"Apple","model": "iPhone 15 Pro Max",     "software": "18.0"},
-    {"location": "Aix-en-Provence, France","make":"Apple","model": "iPhone 16",           "software": "18.1"},
-    {"location": "Toulon, France",      "make": "Apple", "model": "iPhone 17 Pro",        "software": "19.2"},
-    {"location": "Dijon, France",       "make": "Apple", "model": "iPhone 16 Plus",       "software": "18.4"},
-    {"location": "Angers, France",      "make": "Apple", "model": "iPhone 17",            "software": "19.1"},
+IPHONE_MODELS = [
+    "iPhone 15", "iPhone 15 Plus", "iPhone 15 Pro", "iPhone 15 Pro Max",
+    "iPhone 16", "iPhone 16 Plus", "iPhone 16 Pro", "iPhone 16 Pro Max",
+    "iPhone 17", "iPhone 17 Plus", "iPhone 17 Pro", "iPhone 17 Pro Max",
 ]
+
+FRENCH_CITIES = [
+    "Paris", "Marseille", "Lyon", "Toulouse", "Nice", "Nantes", "Strasbourg",
+    "Montpellier", "Bordeaux", "Lille", "Rennes", "Reims", "Le Havre", "Toulon",
+    "Saint-Étienne", "Grenoble", "Dijon", "Angers", "Nîmes", "Villeurbanne",
+    "Saint-Denis", "Le Mans", "Aix-en-Provence", "Clermont-Ferrand", "Brest",
+    "Tours", "Limoges", "Amiens", "Perpignan", "Metz", "Besançon",
+    "Boulogne-Billancourt", "Orléans", "Mulhouse", "Rouen", "Caen", "Nancy",
+    "Argenteuil", "Montreuil", "Roubaix", "Dunkerque", "Tourcoing", "Nanterre",
+    "Avignon", "Vitry-sur-Seine", "Créteil", "Versailles", "Courbevoie",
+    "Asnières-sur-Seine", "Poitiers", "Colombes", "Aulnay-sous-Bois",
+    "La Rochelle", "Calais", "Cannes", "Antibes", "Béziers", "Champigny-sur-Marne",
+    "Bourges", "La Seyne-sur-Mer", "Mérignac", "Rueil-Malmaison", "Pessac",
+    "Saint-Nazaire", "Saint-Quentin", "Tarbes", "Quimper", "Annecy", "Niort",
+    "Beauvais", "Cholet", "Valence", "Vannes", "Chambéry", "Évreux", "Pau",
+    "Bayonne", "Biarritz", "Lorient", "Saint-Malo", "Charleville-Mézières",
+    "Albi", "Castres", "Carcassonne", "Sète", "Arles", "Fréjus", "Cagnes-sur-Mer",
+    "Hyères", "Salon-de-Provence", "Saint-Brieuc", "Beauvais", "Châteauroux",
+    "Lourdes", "Cherbourg", "Saint-Tropez", "Deauville", "La Baule", "Honfleur",
+]
+
+_IOS_BY_MODEL = {
+    "iPhone 15":         ["17.0", "17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "18.0", "18.1", "18.2"],
+    "iPhone 15 Plus":    ["17.0", "17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "18.0", "18.1", "18.2", "18.3"],
+    "iPhone 15 Pro":     ["17.0", "17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "18.0", "18.1", "18.2", "18.3", "18.4"],
+    "iPhone 15 Pro Max": ["17.0", "17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "18.0", "18.1", "18.2", "18.3", "18.4", "18.5"],
+    "iPhone 16":         ["18.0", "18.1", "18.2", "18.3", "18.4", "18.5", "19.0", "19.1"],
+    "iPhone 16 Plus":    ["18.0", "18.1", "18.2", "18.3", "18.4", "18.5", "18.6", "19.0", "19.1"],
+    "iPhone 16 Pro":     ["18.0", "18.1", "18.2", "18.3", "18.4", "18.5", "18.6", "19.0", "19.1", "19.2"],
+    "iPhone 16 Pro Max": ["18.0", "18.1", "18.2", "18.3", "18.4", "18.5", "18.6", "19.0", "19.1", "19.2", "19.3"],
+    "iPhone 17":         ["19.0", "19.1", "19.2", "19.3"],
+    "iPhone 17 Plus":    ["19.0", "19.1", "19.2", "19.3", "19.4"],
+    "iPhone 17 Pro":     ["19.0", "19.1", "19.2", "19.3", "19.4"],
+    "iPhone 17 Pro Max": ["19.0", "19.1", "19.2", "19.3", "19.4", "19.5"],
+}
+
+
+def random_metadata_preset():
+    """Generate a random preset on the fly. Variety = 12 models x 95 cities x ~10 iOS = 11000+."""
+    model = random.choice(IPHONE_MODELS)
+    city = random.choice(FRENCH_CITIES)
+    software = random.choice(_IOS_BY_MODEL.get(model, ["18.0"]))
+    return {
+        "make": "Apple",
+        "model": model,
+        "software": software,
+        "location": f"{city}, France",
+    }
+
+
+# Backward compat: keep a small sample for any code that imports the constant
+US_METADATA_PRESETS = [random_metadata_preset() for _ in range(20)]
 
 # Common phone resolutions in 9:16 portrait
 RANDOM_9_16_DIMS = [
@@ -245,16 +280,16 @@ def transform_video(input_path, output_path, config=None, timeout=180):
         "-movflags", "+faststart",
     ])
 
-    # Random US metadata
+    # Random metadata (iPhone + ville française)
     if config.get("random_us_metadata", {}).get("enabled"):
-        meta = random.choice(US_METADATA_PRESETS)
+        meta = random_metadata_preset()
         cmd.extend([
             "-metadata", f"location={meta['location']}",
             "-metadata", f"make={meta['make']}",
             "-metadata", f"model={meta['model']}",
             "-metadata", f"software={meta['software']}",
             "-metadata", f"comment=Shot on {meta['model']}",
-            "-map_metadata", "-1",  # strip original
+            "-map_metadata", "-1",
         ])
     else:
         cmd.extend(["-map_metadata", "-1"])
