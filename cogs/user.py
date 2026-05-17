@@ -186,9 +186,9 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            f"📝 **Username** (identité `{identity}`) — utilise le bouton copy du bloc ⬇️"
+            f"📝 **Username** (identité `{identity}`) — sur mobile : **appui long → Copier** sur le message ⬇️"
         )
-        await interaction.followup.send(f"```\n{u}\n```")
+        await interaction.followup.send(u)
 
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
@@ -207,9 +207,9 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            f"📝 **Bio** (identité `{identity}`) — utilise le bouton copy du bloc ⬇️"
+            f"📝 **Bio** (identité `{identity}`) — sur mobile : **appui long → Copier** sur le message ⬇️"
         )
-        await interaction.followup.send(f"```\n{b}\n```")
+        await interaction.followup.send(b)
 
     @app_commands.command(name="profilepic", description="Donne une photo de profil aléatoire (transformée)")
     async def profilepic(self, interaction: discord.Interaction):
@@ -287,9 +287,9 @@ class UserCog(commands.Cog):
                 await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                 return
             if caption:
-                await interaction.followup.send(f"```\n{caption}\n```")
+                await interaction.followup.send(caption)
             if description:
-                await interaction.followup.send(f"```\n{description}\n```")
+                await interaction.followup.send(description)
         finally:
             if tmp_dir:
                 try:
@@ -350,7 +350,7 @@ class UserCog(commands.Cog):
             except discord.HTTPException as e:
                 await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                 return
-            await interaction.followup.send(f"```\n{caption}\n```")
+            await interaction.followup.send(caption)
         finally:
             if tmp_dir:
                 try:
@@ -422,9 +422,9 @@ class UserCog(commands.Cog):
                     return
             # Messages séparés pour copier facilement sur mobile
             if caption:
-                await interaction.followup.send(f"```\n{caption}\n```")
+                await interaction.followup.send(caption)
             if description:
-                await interaction.followup.send(f"```\n{description}\n```")
+                await interaction.followup.send(description)
 
             # Suppression de la source si configuré
             if transform_cfg.get("delete_source_after_use", False):
