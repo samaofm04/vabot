@@ -48,19 +48,23 @@ def random_bio_for(identity):
 
 
 def random_reel_for(identity):
-    """Pick a random video + its paired caption. Returns (Path, caption_str|None)."""
+    """Pick a random video + paired caption + description. Returns (Path, caption|None, description|None)."""
     videos_dir = IDENTITIES_DIR / identity / "videos"
     if not videos_dir.exists():
-        return None, None
+        return None, None, None
     videos = [p for p in videos_dir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXTS]
     if not videos:
-        return None, None
+        return None, None, None
     video = random.choice(videos)
     caption_path = video.with_suffix(".txt")
+    desc_path = video.with_suffix(".desc.txt")
     caption = None
+    description = None
     if caption_path.exists():
         caption = unescape_newlines(caption_path.read_text(encoding="utf-8").strip())
-    return video, caption
+    if desc_path.exists():
+        description = unescape_newlines(desc_path.read_text(encoding="utf-8").strip())
+    return video, caption, description
 
 
 def random_profile_pic():
@@ -133,7 +137,7 @@ class UserCog(commands.Cog):
             file=discord.File(pic),
         )
 
-    @app_commands.command(name="reel", description="Génère un reel: vidéo de ton identité + sa caption associée")
+    @app_commands.command(name="reel", description="Génère un reel: vidéo + caption (overlay) + description (post)")
     async def reel(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -142,7 +146,7 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        video, caption = random_reel_for(identity)
+        video, caption, description = random_reel_for(identity)
         if not video:
             await interaction.response.send_message(
                 f"Aucune vidéo pour ton identité `{identity}`. Demande à un admin.",
@@ -150,18 +154,17 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.defer()
+        parts = [f"🎬 **REEL — identité `{identity}`**\n"]
         if caption:
-            message = (
-                f"🎬 **REEL — identité `{identity}`**\n\n"
-                f"📝 **Caption recommandée (à mettre en overlay sur la vidéo) :**\n```\n{caption}\n```\n"
-                "📥 Télécharge la vidéo, ajoute la caption par-dessus, poste sur Instagram."
-            )
+            parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la vidéo) :**\n```\n{caption}\n```")
         else:
-            message = (
-                f"🎬 **REEL — identité `{identity}`**\n\n"
-                "*(Aucune caption recommandée pour ce reel — choisis-en une toi-même)*\n"
-                "📥 Télécharge la vidéo, poste sur Instagram."
-            )
+            parts.append("*(Pas de caption recommandée — choisis-en une toi-même)*")
+        if description:
+            parts.append(f"📄 **Description (À METTRE COMME TEXTE DU POST) :**\n```\n{description}\n```")
+        else:
+            parts.append("*(Pas de description recommandée — écris-en une toi-même)*")
+        parts.append("\n📥 Télécharge la vidéo, ajoute la caption en overlay, poste avec la description.")
+        message = "\n".join(parts)
         try:
             await interaction.followup.send(content=message, file=discord.File(video))
         except discord.HTTPException as e:
