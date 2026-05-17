@@ -29,18 +29,26 @@ DEFAULT_CONFIG = {
 }
 
 US_METADATA_PRESETS = [
-    {"make": "Apple",   "model": "iPhone 14 Pro",      "software": "16.0",  "location": "New York, NY, USA"},
-    {"make": "Apple",   "model": "iPhone 13",          "software": "15.4",  "location": "Los Angeles, CA, USA"},
-    {"make": "Samsung", "model": "Galaxy S23",         "software": "13.0",  "location": "Miami, FL, USA"},
-    {"make": "Apple",   "model": "iPhone 14",          "software": "16.2",  "location": "Chicago, IL, USA"},
-    {"make": "Google",  "model": "Pixel 7",            "software": "13.0",  "location": "Austin, TX, USA"},
-    {"make": "Apple",   "model": "iPhone 12 Pro Max",  "software": "15.7",  "location": "Seattle, WA, USA"},
-    {"make": "Samsung", "model": "Galaxy S22",         "software": "12.0",  "location": "San Francisco, CA, USA"},
-    {"make": "Apple",   "model": "iPhone 14 Plus",     "software": "16.1",  "location": "Boston, MA, USA"},
-    {"make": "Apple",   "model": "iPhone 13 Pro",      "software": "15.6",  "location": "Houston, TX, USA"},
-    {"make": "Samsung", "model": "Galaxy Note 20",     "software": "11.0",  "location": "Phoenix, AZ, USA"},
-    {"make": "Apple",   "model": "iPhone 15",          "software": "17.0",  "location": "Denver, CO, USA"},
-    {"make": "Google",  "model": "Pixel 8",            "software": "14.0",  "location": "Atlanta, GA, USA"},
+    {"make": "Apple", "model": "iPhone 15",          "software": "17.5", "location": "Paris, France"},
+    {"make": "Apple", "model": "iPhone 15 Plus",     "software": "17.6", "location": "Lyon, France"},
+    {"make": "Apple", "model": "iPhone 15 Pro",      "software": "18.0", "location": "Marseille, France"},
+    {"make": "Apple", "model": "iPhone 15 Pro Max",  "software": "18.1", "location": "Toulouse, France"},
+    {"make": "Apple", "model": "iPhone 16",          "software": "18.2", "location": "Nice, France"},
+    {"make": "Apple", "model": "iPhone 16 Plus",     "software": "18.3", "location": "Nantes, France"},
+    {"make": "Apple", "model": "iPhone 16 Pro",      "software": "18.4", "location": "Bordeaux, France"},
+    {"make": "Apple", "model": "iPhone 16 Pro Max",  "software": "18.5", "location": "Lille, France"},
+    {"make": "Apple", "model": "iPhone 17",          "software": "19.0", "location": "Strasbourg, France"},
+    {"make": "Apple", "model": "iPhone 17 Plus",     "software": "19.1", "location": "Montpellier, France"},
+    {"make": "Apple", "model": "iPhone 17 Pro",      "software": "19.2", "location": "Rennes, France"},
+    {"make": "Apple", "model": "iPhone 17 Pro Max",  "software": "19.3", "location": "Reims, France"},
+    {"make": "Apple", "model": "iPhone 15 Pro",      "software": "17.7", "location": "Grenoble, France"},
+    {"make": "Apple", "model": "iPhone 16 Pro Max",  "software": "18.6", "location": "Annecy, France"},
+    {"make": "Apple", "model": "iPhone 17 Pro Max",  "software": "19.0", "location": "Le Havre, France"},
+    {"make": "Apple", "model": "iPhone 15 Pro Max",  "software": "18.0", "location": "Saint-Étienne, France"},
+    {"make": "Apple", "model": "iPhone 16",          "software": "18.1", "location": "Aix-en-Provence, France"},
+    {"make": "Apple", "model": "iPhone 17 Pro",      "software": "19.2", "location": "Toulon, France"},
+    {"make": "Apple", "model": "iPhone 16 Plus",     "software": "18.4", "location": "Dijon, France"},
+    {"make": "Apple", "model": "iPhone 17",          "software": "19.1", "location": "Angers, France"},
 ]
 
 
