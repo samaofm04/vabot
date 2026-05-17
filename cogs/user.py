@@ -373,19 +373,12 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
 
-        # Transformer la vidéo clean (en thread pour ne pas bloquer le bot)
+        # Transformation video DESACTIVEE - envoi de la video originale telle quelle
         transform_cfg = load_transform_config()
         transformed_path = None
         tmp_dir = None
         try:
-            if transform_cfg.get("enabled", True):
-                tmp_dir = tempfile.mkdtemp(prefix="reel_")
-                transformed_path = Path(tmp_dir) / video.name
-                ok = await asyncio.to_thread(transform_video, video, transformed_path, transform_cfg)
-                if not ok or not transformed_path.exists() or transformed_path.stat().st_size == 0:
-                    # Échec de transfo : on envoie l'original
-                    transformed_path = None
-            video_to_send = transformed_path if transformed_path else video
+            video_to_send = video  # toujours envoyer l'original
 
             parts = [f"🎬 **REEL — identité `{identity}`**\n"]
             if caption:
