@@ -1051,6 +1051,37 @@ class Admin(commands.Cog):
 
     # ---------- ADDUSER ----------
 
+    @app_commands.command(name="testas", description="[ADMIN] Assigne-toi (toi-même) à une identité pour tester comme VA")
+    @app_commands.describe(
+        identity="Nom de l'identité (laisse vide pour te retirer toute assignation)"
+    )
+    async def testas(self, interaction: discord.Interaction, identity: str = None):
+        if not await self.require_admin(interaction):
+            return
+        users = load_json(USERS_FILE, {})
+        if not identity:
+            users.pop(str(interaction.user.id), None)
+            save_json(USERS_FILE, users)
+            await interaction.response.send_message(
+                "✅ Assignation retirée. /reel, /bio, /username te diront que t'as pas d'identité.",
+                ephemeral=True,
+            )
+            return
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.response.send_message(
+                f"Identité `{safe}` introuvable. Tape /listidentites pour voir les dispo.",
+                ephemeral=True,
+            )
+            return
+        users[str(interaction.user.id)] = safe
+        save_json(USERS_FILE, users)
+        await interaction.response.send_message(
+            f"✅ Tu es maintenant assigné à `{safe}`.\n"
+            f"Tu peux tester `/reel`, `/bio`, `/username`, `/post`, `/story`, `/storycta` comme si t'étais un VA.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="listvas", description="Liste les VAs groupés par identité")
     @app_commands.describe(identity="Optionnel: filtrer sur une identité")
     async def listvas(self, interaction: discord.Interaction, identity: str = None):
