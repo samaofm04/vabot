@@ -10,6 +10,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from video_transform import (
+    load_config as load_transform_config,
+    save_config as save_transform_config,
+    reset_config as reset_transform_config,
+    config_summary_text as transform_config_summary,
+    is_ffmpeg_available,
+)
+
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
@@ -931,6 +939,95 @@ class Admin(commands.Cog):
             f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`",
             ephemeral=True,
         )
+
+
+    # ---------- TRANSFORMATIONS VIDEO ----------
+
+    @app_commands.command(name="transformsettings", description="Affiche la config actuelle des transformations vidéo")
+    async def transformsettings(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        text = transform_config_summary(cfg)
+        ffmpeg_ok = "✅ ffmpeg installé" if is_ffmpeg_available() else "❌ ffmpeg MANQUANT (transfos désactivées)"
+        await interaction.response.send_message(
+            f"⚙️ **Config transformations**\n{ffmpeg_ok}\n\n{text}\n\n*Pour modifier : `/transformset`, `/transformtoggle`, `/transformreset`, `/transformenable`*",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="transformenable", description="Active/désactive complètement les transformations")
+    @app_commands.describe(enabled="True pour activer, False pour désactiver")
+    async def transformenable(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        cfg["enabled"] = enabled
+        save_transform_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Transformations globales : {'activées' if enabled else 'désactivées'}", ephemeral=True
+        )
+
+    @app_commands.command(name="transformdeletesource", description="Active/désactive la suppression de la vidéo après envoi")
+    @app_commands.describe(enabled="True = supprime la source après /reel, False = garde")
+    async def transformdeletesource(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        cfg["delete_source_after_use"] = enabled
+        save_transform_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Suppression source après /reel : {'activée' if enabled else 'désactivée'}", ephemeral=True
+        )
+
+    @app_commands.command(name="transformtoggle", description="Active/désactive une option spécifique de transformation")
+    @app_commands.describe(option="Nom de l'option (voir /transformsettings)", enabled="True ou False")
+    async def transformtoggle(self, interaction: discord.Interaction, option: str, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        if option not in cfg or not isinstance(cfg[option], dict):
+            await interaction.response.send_message(
+                f"Option `{option}` inconnue. Voir /transformsettings pour la liste.", ephemeral=True
+            )
+            return
+        cfg[option]["enabled"] = enabled
+        save_transform_config(cfg)
+        await interaction.response.send_message(
+            f"✅ `{option}` : {'activée' if enabled else 'désactivée'}", ephemeral=True
+        )
+
+    @app_commands.command(name="transformset", description="Modifie min/max d'une option")
+    @app_commands.describe(
+        option="Nom de l'option (ex: speed, brightness, framerate)",
+        min_value="Valeur minimale",
+        max_value="Valeur maximale"
+    )
+    async def transformset(self, interaction: discord.Interaction, option: str, min_value: float, max_value: float):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        if option not in cfg or not isinstance(cfg[option], dict):
+            await interaction.response.send_message(f"Option `{option}` inconnue.", ephemeral=True)
+            return
+        if "min" not in cfg[option]:
+            await interaction.response.send_message(f"L'option `{option}` n'a pas de min/max.", ephemeral=True)
+            return
+        if min_value > max_value:
+            await interaction.response.send_message("min ne peut pas être supérieur à max.", ephemeral=True)
+            return
+        cfg[option]["min"] = min_value
+        cfg[option]["max"] = max_value
+        save_transform_config(cfg)
+        await interaction.response.send_message(
+            f"✅ `{option}` : min={min_value} max={max_value}", ephemeral=True
+        )
+
+    @app_commands.command(name="transformreset", description="Réinitialise la config transfo aux valeurs par défaut")
+    async def transformreset(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        reset_transform_config()
+        await interaction.response.send_message("✅ Config transfo réinitialisée aux valeurs par défaut.", ephemeral=True)
 
 
 async def setup(bot):

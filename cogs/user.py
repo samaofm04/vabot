@@ -1,9 +1,13 @@
 import json
+import os
 import random
+import tempfile
 from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from video_transform import transform_video, load_config as load_transform_config
 
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
@@ -165,7 +169,7 @@ class UserCog(commands.Cog):
             file=discord.File(pic),
         )
 
-    @app_commands.command(name="reel", description="Génère un reel: vidéo clean + caption + description + vidéo exemple")
+    @app_commands.command(name="reel", description="Génère un reel: vidéo clean (transformée) + caption + description + exemple")
     async def reel(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -182,39 +186,79 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.defer()
-        parts = [f"🎬 **REEL — identité `{identity}`**\n"]
-        if caption:
-            parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la vidéo) :**\n```\n{caption}\n```")
-        else:
-            parts.append("*(Pas de caption recommandée — choisis-en une toi-même)*")
-        if description:
-            parts.append(f"📄 **Description (À METTRE COMME TEXTE DU POST) :**\n```\n{description}\n```")
-        else:
-            parts.append("*(Pas de description recommandée — écris-en une toi-même)*")
-        parts.append("\n📥 **Télécharge la vidéo CLEAN** (la 1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
-        if example:
-            parts.append("👁️ La 2e pièce jointe est juste un **EXEMPLE** de rendu final — NE PAS la télécharger pour poster, c'est juste pour voir à quoi le résultat doit ressembler.")
-        message = "\n".join(parts)
-        files = [discord.File(video, filename=video.name)]
-        if example:
-            files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+
+        # Transformer la vidéo clean (avec gestion d'erreurs)
+        transform_cfg = load_transform_config()
+        transformed_path = None
+        tmp_dir = None
         try:
-            await interaction.followup.send(content=message, files=files)
-        except discord.HTTPException as e:
-            # Si trop lourd, retenter sans l'exemple
-            if example and len(files) == 2:
+            if transform_cfg.get("enabled", True):
+                tmp_dir = tempfile.mkdtemp(prefix="reel_")
+                transformed_path = Path(tmp_dir) / video.name
+                ok = transform_video(video, transformed_path, transform_cfg)
+                if not ok or not transformed_path.exists() or transformed_path.stat().st_size == 0:
+                    # Échec de transfo : on envoie l'original
+                    transformed_path = None
+            video_to_send = transformed_path if transformed_path else video
+
+            parts = [f"🎬 **REEL — identité `{identity}`**\n"]
+            if caption:
+                parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la vidéo) :**\n```\n{caption}\n```")
+            else:
+                parts.append("*(Pas de caption recommandée — choisis-en une toi-même)*")
+            if description:
+                parts.append(f"📄 **Description (À METTRE COMME TEXTE DU POST) :**\n```\n{description}\n```")
+            else:
+                parts.append("*(Pas de description recommandée — écris-en une toi-même)*")
+            parts.append("\n📥 **Télécharge la vidéo CLEAN** (la 1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
+            if example:
+                parts.append("👁️ La 2e pièce jointe est juste un **EXEMPLE** de rendu final — NE PAS la télécharger pour poster.")
+            message = "\n".join(parts)
+
+            files = [discord.File(video_to_send, filename=video.name)]
+            if example:
+                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+            try:
+                await interaction.followup.send(content=message, files=files)
+            except discord.HTTPException as e:
+                # Retry sans l'exemple si c'est trop lourd
+                if example and len(files) == 2:
+                    try:
+                        await interaction.followup.send(
+                            content=message + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
+                            file=discord.File(video_to_send, filename=video.name),
+                        )
+                        return
+                    except discord.HTTPException:
+                        pass
+                await interaction.followup.send(
+                    f"Impossible d'envoyer la vidéo (probablement trop lourde): {e}",
+                    ephemeral=True,
+                )
+                return
+
+            # Suppression de la source si configuré
+            if transform_cfg.get("delete_source_after_use", False):
                 try:
-                    await interaction.followup.send(
-                        content=message + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
-                        file=discord.File(video, filename=video.name),
-                    )
-                    return
-                except discord.HTTPException:
+                    video.unlink(missing_ok=True)
+                    # Supprimer aussi caption/description associées
+                    cap_p = video.with_suffix(".txt")
+                    desc_p = video.with_suffix(".desc.txt")
+                    cap_p.unlink(missing_ok=True)
+                    desc_p.unlink(missing_ok=True)
+                    # Supprimer l'exemple paire si existe
+                    if example:
+                        example.unlink(missing_ok=True)
+                except Exception:
                     pass
-            await interaction.followup.send(
-                f"Impossible d'envoyer la vidéo (probablement trop lourde): {e}",
-                ephemeral=True,
-            )
+        finally:
+            # Nettoyage du fichier transformé temporaire
+            if tmp_dir:
+                try:
+                    import shutil
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
