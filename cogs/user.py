@@ -48,13 +48,21 @@ def random_bio_for(identity):
 
 
 def random_reel_for(identity):
-    """Pick a random video + paired caption + description. Returns (Path, caption|None, description|None)."""
+    """Pick random clean video + caption + description + example_path|None.
+    Returns (Path, caption|None, description|None, example_Path|None).
+    """
     videos_dir = IDENTITIES_DIR / identity / "videos"
     if not videos_dir.exists():
-        return None, None, None
-    videos = [p for p in videos_dir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXTS]
+        return None, None, None, None
+    # Filtrer les videos clean (pas les .example.*)
+    videos = [
+        p for p in videos_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in VIDEO_EXTS
+        and not p.stem.lower().endswith(".example")
+    ]
     if not videos:
-        return None, None, None
+        return None, None, None, None
     video = random.choice(videos)
     caption_path = video.with_suffix(".txt")
     desc_path = video.with_suffix(".desc.txt")
@@ -64,7 +72,14 @@ def random_reel_for(identity):
         caption = unescape_newlines(caption_path.read_text(encoding="utf-8").strip())
     if desc_path.exists():
         description = unescape_newlines(desc_path.read_text(encoding="utf-8").strip())
-    return video, caption, description
+    # Chercher la video exemple
+    example = None
+    for ext in VIDEO_EXTS:
+        candidate = videos_dir / f"{video.stem}.example{ext}"
+        if candidate.exists():
+            example = candidate
+            break
+    return video, caption, description, example
 
 
 def random_profile_pic():
@@ -137,7 +152,7 @@ class UserCog(commands.Cog):
             file=discord.File(pic),
         )
 
-    @app_commands.command(name="reel", description="Génère un reel: vidéo + caption (overlay) + description (post)")
+    @app_commands.command(name="reel", description="Génère un reel: vidéo clean + caption + description + vidéo exemple")
     async def reel(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -146,7 +161,7 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        video, caption, description = random_reel_for(identity)
+        video, caption, description, example = random_reel_for(identity)
         if not video:
             await interaction.response.send_message(
                 f"Aucune vidéo pour ton identité `{identity}`. Demande à un admin.",
@@ -163,11 +178,26 @@ class UserCog(commands.Cog):
             parts.append(f"📄 **Description (À METTRE COMME TEXTE DU POST) :**\n```\n{description}\n```")
         else:
             parts.append("*(Pas de description recommandée — écris-en une toi-même)*")
-        parts.append("\n📥 Télécharge la vidéo, ajoute la caption en overlay, poste avec la description.")
+        parts.append("\n📥 **Télécharge la vidéo CLEAN** (la 1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
+        if example:
+            parts.append("👁️ La 2e pièce jointe est juste un **EXEMPLE** de rendu final — NE PAS la télécharger pour poster, c'est juste pour voir à quoi le résultat doit ressembler.")
         message = "\n".join(parts)
+        files = [discord.File(video, filename=video.name)]
+        if example:
+            files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
         try:
-            await interaction.followup.send(content=message, file=discord.File(video))
+            await interaction.followup.send(content=message, files=files)
         except discord.HTTPException as e:
+            # Si trop lourd, retenter sans l'exemple
+            if example and len(files) == 2:
+                try:
+                    await interaction.followup.send(
+                        content=message + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
+                        file=discord.File(video, filename=video.name),
+                    )
+                    return
+                except discord.HTTPException:
+                    pass
             await interaction.followup.send(
                 f"Impossible d'envoyer la vidéo (probablement trop lourde): {e}",
                 ephemeral=True,

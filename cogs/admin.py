@@ -91,20 +91,47 @@ def description_path_for(video_path):
     return video_path.with_suffix(".desc.txt")
 
 
+def example_video_path_for(video_path):
+    """Find example video file (same stem + .example + any video ext)."""
+    folder = video_path.parent
+    for ext in VIDEO_EXTS:
+        candidate = folder / f"{video_path.stem}.example{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def is_example_video_filename(filename):
+    """True if filename looks like 'something.example.<vid_ext>'."""
+    name_lower = filename.lower()
+    stem, ext = os.path.splitext(name_lower)
+    return ext in VIDEO_EXTS and stem.endswith(".example")
+
+
+def is_clean_video_file(p):
+    """True if p is a video and NOT an example video."""
+    return (
+        p.is_file()
+        and p.suffix.lower() in VIDEO_EXTS
+        and not p.stem.lower().endswith(".example")
+    )
+
+
 def list_reels(name):
-    """Return list of (video_filename, caption_or_None, description_or_None) tuples."""
+    """Return list of (filename, caption, description, has_example) tuples."""
     videos_dir = identity_videos_dir(name)
     if not videos_dir.exists():
         return []
     out = []
     for p in sorted(videos_dir.iterdir()):
-        if not p.is_file() or p.suffix.lower() not in VIDEO_EXTS:
+        if not is_clean_video_file(p):
             continue
         cap_path = caption_path_for(p)
         desc_path = description_path_for(p)
         caption = cap_path.read_text(encoding="utf-8").strip() if cap_path.exists() else None
         description = desc_path.read_text(encoding="utf-8").strip() if desc_path.exists() else None
-        out.append((p.name, caption, description))
+        has_example = example_video_path_for(p) is not None
+        out.append((p.name, caption, description, has_example))
     return out
 
 
@@ -195,6 +222,7 @@ class Admin(commands.Cog):
         videos_dir.mkdir(parents=True, exist_ok=True)
         zip_bytes = await videos_zip.read()
         videos = 0
+        examples = 0
         captions = 0
         descriptions = 0
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
@@ -215,6 +243,10 @@ class Admin(commands.Cog):
                         with zf.open(member) as src:
                             (videos_dir / base).write_bytes(src.read())
                         captions += 1
+                    elif is_example_video_filename(base):
+                        with zf.open(member) as src, (videos_dir / base).open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        examples += 1
                     else:
                         ext = os.path.splitext(base)[1].lower()
                         if ext in VIDEO_EXTS:
@@ -228,7 +260,7 @@ class Admin(commands.Cog):
             await interaction.followup.send("Aucune vidéo trouvée dans le zip.", ephemeral=True)
             return
         await interaction.followup.send(
-            f"✅ Identité `{safe_name}` créée: **{videos}** vidéo(s), **{captions}** caption(s), **{descriptions}** description(s).",
+            f"✅ Identité `{safe_name}` créée: **{videos}** clean / **{examples}** exemples / **{captions}** caption(s) / **{descriptions}** description(s).",
             ephemeral=True,
         )
 
@@ -245,12 +277,14 @@ class Admin(commands.Cog):
         for n in identities:
             reels = list_reels(n)
             n_reels = len(reels)
-            n_captions = sum(1 for _, c in reels if c)
+            n_captions = sum(1 for r in reels if r[1])
+            n_descs = sum(1 for r in reels if r[2])
+            n_examples = sum(1 for r in reels if r[3])
             assigned = sum(1 for v in users.values() if v == n)
             n_bios = len(read_bios(n))
             n_usernames = len(read_lines(identity_usernames_file(n)))
             lines.append(
-                f"• `{n}` — 🎬{n_reels} reels ({n_captions} cap) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA"
+                f"• `{n}` — 🎬{n_reels} reels ({n_captions}cap/{n_descs}desc/{n_examples}ex) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA"
             )
         await interaction.response.send_message(
             f"**Identités** ({len(identities)})\n" + "\n".join(lines), ephemeral=True
@@ -277,12 +311,13 @@ class Admin(commands.Cog):
 
     # ---------- REELS (vidéo + caption pair) ----------
 
-    @app_commands.command(name="addreel", description="Ajoute une vidéo + caption (overlay) + description (post) à une identité")
+    @app_commands.command(name="addreel", description="Ajoute un reel: vidéo clean + caption + description + vidéo exemple")
     @app_commands.describe(
         identity="Nom de l'identité",
-        video="Fichier vidéo (mp4/mov/webm)",
-        caption="Caption à mettre EN OVERLAY sur la vidéo (optionnel, \\n = retour ligne)",
-        description="Description du post Instagram (optionnel, \\n = retour ligne)"
+        video="Vidéo CLEAN (à télécharger par le VA)",
+        caption="Caption à mettre EN OVERLAY (optionnel, \\n = retour ligne)",
+        description="Description du post Instagram (optionnel, \\n = retour ligne)",
+        example_video="Vidéo EXEMPLE du rendu final (optionnel, sert juste de référence visuelle)"
     )
     async def addreel(
         self,
@@ -291,6 +326,7 @@ class Admin(commands.Cog):
         video: discord.Attachment,
         caption: str = None,
         description: str = None,
+        example_video: discord.Attachment = None,
     ):
         if not await self.require_admin(interaction):
             return
@@ -317,9 +353,50 @@ class Admin(commands.Cog):
         if description:
             description_path_for(target).write_text(description, encoding="utf-8")
             extras.append("description")
+        if example_video:
+            ex_ext = os.path.splitext(example_video.filename)[1].lower()
+            if ex_ext not in VIDEO_EXTS:
+                await interaction.followup.send(
+                    f"Vidéo enregistrée mais format de la vidéo exemple ({ex_ext}) non supporté.",
+                    ephemeral=True,
+                )
+                return
+            ex_target = videos_dir / f"{target.stem}.example{ex_ext}"
+            ex_target.write_bytes(await example_video.read())
+            extras.append("exemple")
         suffix = f" + {' + '.join(extras)}" if extras else ""
         await interaction.followup.send(
             f"✅ Reel `{video.filename}` ajouté à `{safe}`{suffix}.", ephemeral=True
+        )
+
+    @app_commands.command(name="setreelexample", description="Ajoute/remplace la vidéo exemple d'un reel")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        video_filename="Nom exact de la vidéo (voir /listreels)",
+        example_video="Vidéo EXEMPLE du rendu final"
+    )
+    async def setreelexample(self, interaction: discord.Interaction, identity: str, video_filename: str, example_video: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        videos_dir = identity_videos_dir(safe)
+        video_path = videos_dir / video_filename
+        if not video_path.exists():
+            await interaction.followup.send("Vidéo introuvable.", ephemeral=True)
+            return
+        ex_ext = os.path.splitext(example_video.filename)[1].lower()
+        if ex_ext not in VIDEO_EXTS:
+            await interaction.followup.send("Format de la vidéo exemple non supporté.", ephemeral=True)
+            return
+        # Supprimer ancienne example si existait (autre extension)
+        old_example = example_video_path_for(video_path)
+        if old_example:
+            old_example.unlink(missing_ok=True)
+        ex_target = videos_dir / f"{video_path.stem}.example{ex_ext}"
+        ex_target.write_bytes(await example_video.read())
+        await interaction.followup.send(
+            f"✅ Vidéo exemple mise à jour pour `{video_filename}`.", ephemeral=True
         )
 
     @app_commands.command(name="setreelcaption", description="Définit la caption (overlay) d'un reel")
@@ -360,7 +437,7 @@ class Admin(commands.Cog):
             f"✅ Description mise à jour pour `{video_filename}`.", ephemeral=True
         )
 
-    @app_commands.command(name="listreels", description="Liste les reels d'une identité (caption + description)")
+    @app_commands.command(name="listreels", description="Liste les reels d'une identité")
     @app_commands.describe(identity="Nom de l'identité")
     async def listreels(self, interaction: discord.Interaction, identity: str):
         if not await self.require_admin(interaction):
@@ -371,18 +448,19 @@ class Admin(commands.Cog):
             await interaction.response.send_message(f"Aucun reel pour `{safe}`.", ephemeral=True)
             return
         lines = []
-        for i, (filename, cap, desc) in enumerate(reels):
-            cap_s = truncate_for_display(cap, 50) if cap else "❌"
-            desc_s = truncate_for_display(desc, 50) if desc else "❌"
-            lines.append(f"`{i}` **{filename}** • cap: {cap_s} • desc: {desc_s}")
+        for i, (filename, cap, desc, has_ex) in enumerate(reels):
+            cap_s = truncate_for_display(cap, 40) if cap else "❌"
+            desc_s = truncate_for_display(desc, 40) if desc else "❌"
+            ex_s = "🎥" if has_ex else "❌"
+            lines.append(f"`{i}` **{filename}** • cap: {cap_s} • desc: {desc_s} • ex: {ex_s}")
         text = f"**Reels de `{safe}`** ({len(reels)})\n" + "\n".join(lines)
         if len(text) <= 1900:
             await interaction.response.send_message(text, ephemeral=True)
         else:
             buf = io.BytesIO()
             buf.write(f"Reels de {safe} ({len(reels)})\n\n".encode("utf-8"))
-            for i, (filename, cap, desc) in enumerate(reels):
-                buf.write(f"=== [{i}] {filename} ===\n".encode("utf-8"))
+            for i, (filename, cap, desc, has_ex) in enumerate(reels):
+                buf.write(f"=== [{i}] {filename} (example: {'oui' if has_ex else 'non'}) ===\n".encode("utf-8"))
                 buf.write(f"-- CAPTION --\n{cap or '(aucune)'}\n".encode("utf-8"))
                 buf.write(f"-- DESCRIPTION --\n{desc or '(aucune)'}\n\n".encode("utf-8"))
             buf.seek(0)
@@ -392,7 +470,7 @@ class Admin(commands.Cog):
                 ephemeral=True,
             )
 
-    @app_commands.command(name="deletereel", description="Supprime un reel (vidéo + caption + description)")
+    @app_commands.command(name="deletereel", description="Supprime un reel (vidéo + caption + description + exemple)")
     @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listreels)")
     async def deletereel(self, interaction: discord.Interaction, identity: str, index: int):
         if not await self.require_admin(interaction):
@@ -404,12 +482,15 @@ class Admin(commands.Cog):
                 f"Index invalide (0-{len(reels)-1}).", ephemeral=True
             )
             return
-        filename, _, _ = reels[index]
+        filename = reels[index][0]
         videos_dir = identity_videos_dir(safe)
         video_path = videos_dir / filename
         video_path.unlink(missing_ok=True)
         caption_path_for(video_path).unlink(missing_ok=True)
         description_path_for(video_path).unlink(missing_ok=True)
+        ex = example_video_path_for(video_path)
+        if ex:
+            ex.unlink(missing_ok=True)
         await interaction.response.send_message(
             f"✅ Reel `{filename}` supprimé de `{safe}`.", ephemeral=True
         )
