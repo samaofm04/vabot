@@ -155,6 +155,13 @@ def identity_stories_dir(name):
     return IDENTITIES_DIR / name / "stories"
 
 
+def identity_story_ctas_dir(name):
+    return IDENTITIES_DIR / name / "storyctas"
+
+
+STORY_CTA_CAPTIONS_FILE = DATA_DIR / "story_cta_captions.txt"
+
+
 def list_image_items(directory):
     """Return list of (filename, caption, description, has_example) for clean images."""
     if not directory.exists():
@@ -1259,6 +1266,135 @@ class Admin(commands.Cog):
     @app_commands.describe(identity="Nom de l'identité", photos_zip="Fichier .zip contenant les photos")
     async def addstories(self, interaction: discord.Interaction, identity: str, photos_zip: discord.Attachment):
         await self._bulk_upload_images(interaction, identity, photos_zip, "stories", "story")
+
+    # ---------- STORY CTAs (photos 1080x1920 + captions partagées) ----------
+
+    @app_commands.command(name="addstorycta", description="Ajoute une story CTA (photo 1080x1920) à une identité")
+    @app_commands.describe(identity="Nom de l'identité", photo="Photo CLEAN (sera redimensionnée en 1080x1920)")
+    async def addstorycta(self, interaction: discord.Interaction, identity: str, photo: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        ext = os.path.splitext(photo.filename)[1].lower()
+        if ext not in IMAGE_EXTS:
+            await interaction.followup.send("Format image non supporté.", ephemeral=True)
+            return
+        target_dir = identity_story_ctas_dir(safe)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / photo.filename
+        if target.exists():
+            await interaction.followup.send(f"Fichier `{photo.filename}` existe déjà.", ephemeral=True)
+            return
+        target.write_bytes(await photo.read())
+        await interaction.followup.send(
+            f"✅ Story CTA `{photo.filename}` ajoutée à `{safe}`.", ephemeral=True
+        )
+
+    @app_commands.command(name="addstoryctas", description="Mass upload de story CTAs via zip")
+    @app_commands.describe(identity="Nom de l'identité", photos_zip="Fichier .zip contenant les photos")
+    async def addstoryctas(self, interaction: discord.Interaction, identity: str, photos_zip: discord.Attachment):
+        await self._bulk_upload_images(interaction, identity, photos_zip, "storyctas", "story CTA")
+
+    @app_commands.command(name="liststoryctas", description="Liste les story CTAs d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def liststoryctas(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        d = identity_story_ctas_dir(safe)
+        if not d.exists():
+            await interaction.response.send_message(f"Aucune story CTA pour `{safe}`.", ephemeral=True)
+            return
+        items = sorted(p.name for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
+        if not items:
+            await interaction.response.send_message(f"Aucune story CTA pour `{safe}`.", ephemeral=True)
+            return
+        lines = [f"`{i}` — {name}" for i, name in enumerate(items)]
+        text = f"**Story CTAs de `{safe}`** ({len(items)})\n" + "\n".join(lines)
+        await interaction.response.send_message(text[:1990], ephemeral=True)
+
+    @app_commands.command(name="deletestorycta", description="Supprime une story CTA par index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /liststoryctas)")
+    async def deletestorycta(self, interaction: discord.Interaction, identity: str, index: int):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        d = identity_story_ctas_dir(safe)
+        if not d.exists():
+            await interaction.response.send_message("Identité ou dossier introuvable.", ephemeral=True)
+            return
+        items = sorted(p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(f"Index invalide (0-{len(items)-1}).", ephemeral=True)
+            return
+        target = items[index]
+        target.unlink(missing_ok=True)
+        await interaction.response.send_message(
+            f"✅ Story CTA `{target.name}` supprimée.", ephemeral=True
+        )
+
+    # Captions partagees pour les story CTAs
+
+    @app_commands.command(name="addstoryctacaptions", description="Ajoute des captions partagées pour les story CTAs")
+    @app_commands.describe(file="Fichier .txt avec 1 caption par ligne (\\n pour retour ligne dans une caption)")
+    async def addstoryctacaptions(self, interaction: discord.Interaction, file: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not file.filename.lower().endswith(".txt"):
+            await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
+            return
+        content = (await file.read()).decode("utf-8", errors="ignore")
+        new_caps = [l.strip() for l in content.splitlines() if l.strip()]
+        existing = read_lines(STORY_CTA_CAPTIONS_FILE)
+        write_lines(STORY_CTA_CAPTIONS_FILE, existing + new_caps)
+        await interaction.followup.send(
+            f"✅ {len(new_caps)} caption(s) ajoutée(s) (total: {len(existing) + len(new_caps)}).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="liststoryctacaptions", description="Liste les captions partagées des story CTAs")
+    async def liststoryctacaptions(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(STORY_CTA_CAPTIONS_FILE)
+        if not items:
+            await interaction.response.send_message("Aucune caption story CTA.", ephemeral=True)
+            return
+        lines = [f"`{i}` — {truncate_for_display(c)}" for i, c in enumerate(items)]
+        text = f"**Captions Story CTA** ({len(items)})\n" + "\n".join(lines)
+        if len(text) <= 1900:
+            await interaction.response.send_message(text, ephemeral=True)
+        else:
+            buf = io.BytesIO()
+            buf.write(f"Captions Story CTA ({len(items)})\n\n".encode("utf-8"))
+            for i, c in enumerate(items):
+                buf.write(f"=== [{i}] ===\n{c}\n\n".encode("utf-8"))
+            buf.seek(0)
+            await interaction.response.send_message(
+                f"**Captions Story CTA** ({len(items)})",
+                file=discord.File(buf, filename="story_cta_captions.txt"),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="deletestoryctacaption", description="Supprime une caption story CTA par index")
+    @app_commands.describe(index="Index (voir /liststoryctacaptions)")
+    async def deletestoryctacaption(self, interaction: discord.Interaction, index: int):
+        if not await self.require_admin(interaction):
+            return
+        items = read_lines(STORY_CTA_CAPTIONS_FILE)
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(f"Index invalide (0-{len(items)-1}).", ephemeral=True)
+            return
+        removed = items.pop(index)
+        write_lines(STORY_CTA_CAPTIONS_FILE, items)
+        await interaction.response.send_message(
+            f"✅ Caption supprimée: `{truncate_for_display(removed, 100)}`", ephemeral=True
+        )
 
     async def _list_image_items(self, interaction, identity, subdir, label):
         if not await self.require_admin(interaction):

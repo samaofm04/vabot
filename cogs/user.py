@@ -141,6 +141,24 @@ def random_story_for(identity):
     return random_image_with_pair(IDENTITIES_DIR / identity / "stories")
 
 
+STORY_CTA_CAPTIONS_FILE = DATA_DIR / "story_cta_captions.txt"
+
+
+def random_story_cta_caption():
+    if not STORY_CTA_CAPTIONS_FILE.exists():
+        return None
+    lines = [l.strip() for l in STORY_CTA_CAPTIONS_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return unescape_newlines(random.choice(lines)) if lines else None
+
+
+def random_story_cta_image_for(identity):
+    d = IDENTITIES_DIR / identity / "storyctas"
+    if not d.exists():
+        return None
+    images = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+    return random.choice(images) if images else None
+
+
 def get_user_identity(user_id):
     users = load_json(USERS_FILE, {})
     return users.get(str(user_id))
@@ -286,6 +304,55 @@ class UserCog(commands.Cog):
     async def story(self, interaction: discord.Interaction):
         cfg = load_image_config()
         await self._send_image_content(interaction, "story", "story", random_story_for, cfg)
+
+    @app_commands.command(name="storycta", description="Génère une story CTA: photo 1080x1920 + caption à écrire dessus")
+    async def storycta(self, interaction: discord.Interaction):
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True
+            )
+            return
+        image = random_story_cta_image_for(identity)
+        if not image:
+            await interaction.response.send_message(
+                f"Aucune story CTA pour ton identité `{identity}`. Demande à un admin (`/addstorycta`).",
+                ephemeral=True,
+            )
+            return
+        caption = random_story_cta_caption()
+        if not caption:
+            await interaction.response.send_message(
+                "Aucune caption disponible. Demande à un admin (`/addstoryctacaptions`).",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        cfg = load_image_config()
+        tmp_dir = None
+        send_path = image
+        try:
+            if cfg.get("enabled", True):
+                tmp_dir = tempfile.mkdtemp(prefix="storycta_")
+                tmp_path = Path(tmp_dir) / image.name
+                if transform_image(image, tmp_path, cfg, target="story"):
+                    send_path = tmp_path
+            message = (
+                f"📲 **STORY CTA — identité `{identity}`**\n\n"
+                f"📝 **Caption (À ÉCRIRE EN OVERLAY sur la photo) :**\n```\n{caption}\n```\n"
+                "📥 Télécharge la photo, écris la caption dessus avec l'éditeur Instagram, poste en story."
+            )
+            try:
+                await interaction.followup.send(content=message, file=discord.File(send_path))
+            except discord.HTTPException as e:
+                await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
+        finally:
+            if tmp_dir:
+                try:
+                    import shutil
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     @app_commands.command(name="reel", description="Génère un reel: vidéo clean (transformée) + caption + description + exemple")
     async def reel(self, interaction: discord.Interaction):
