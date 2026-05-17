@@ -1180,6 +1180,17 @@ class Admin(commands.Cog):
             f"✅ Transformations globales : {'activées' if enabled else 'désactivées'}", ephemeral=True
         )
 
+    @app_commands.command(name="videometadataonly", description="Bascule mode metadata only pour vidéos (rapide, défaut)")
+    @app_commands.describe(enabled="True = juste metadata (rapide). False = re-encode avec tous les filtres (lent)")
+    async def videometadataonly(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_transform_config()
+        cfg["metadata_only"] = enabled
+        save_transform_config(cfg)
+        msg = "metadata uniquement (rapide)" if enabled else "transfos visuelles + re-encode (lent)"
+        await interaction.response.send_message(f"✅ Mode vidéo : {msg}", ephemeral=True)
+
     @app_commands.command(name="transformdeletesource", description="Active/désactive la suppression de la vidéo après envoi")
     @app_commands.describe(enabled="True = supprime la source après /reel, False = garde")
     async def transformdeletesource(self, interaction: discord.Interaction, enabled: bool):

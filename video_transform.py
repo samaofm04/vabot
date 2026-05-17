@@ -16,6 +16,7 @@ CONFIG_FILE = DATA_DIR / "transform_config.json"
 
 DEFAULT_CONFIG = {
     "enabled": True,
+    "metadata_only": True,  # True = remux instantané (juste metadata). False = full transfo
     "delete_source_after_use": False,
     "framerate":      {"enabled": True,  "min": 30,   "max": 60},
     "video_bitrate_kbps": {"enabled": True, "min": 5000, "max": 6000},
@@ -156,6 +157,43 @@ def _ffprobe_duration(path):
         return None
 
 
+def _transform_metadata_only(input_path, output_path, config, timeout):
+    """Mode rapide: remux + changement de metadata, pas de re-encodage."""
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(input_path)]
+    cmd.extend(["-c", "copy", "-map_metadata", "-1"])
+    if config.get("random_us_metadata", {}).get("enabled"):
+        from datetime import datetime, timedelta
+        meta = random_metadata_preset()
+        rand_date = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(0, 23))
+        creation_time = rand_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+        lat_sign = "+" if meta["lat"] >= 0 else "-"
+        lon_sign = "+" if meta["lon"] >= 0 else "-"
+        iso6709 = f"{lat_sign}{abs(meta['lat']):08.4f}{lon_sign}{abs(meta['lon']):09.4f}+{meta['alt']:.3f}/"
+        cmd.extend([
+            "-metadata", f"title=IMG_{random.randint(1000, 9999)}",
+            "-metadata", f"location={meta['location_str']}",
+            "-metadata", f"location-eng={meta['location_str']}",
+            "-metadata", f"com.apple.quicktime.location.ISO6709={iso6709}",
+            "-metadata", f"com.apple.quicktime.make={meta['make']}",
+            "-metadata", f"com.apple.quicktime.model={meta['model']}",
+            "-metadata", f"com.apple.quicktime.software={meta['software']}",
+            "-metadata", f"com.apple.quicktime.creationdate={creation_time}",
+            "-metadata", f"make={meta['make']}",
+            "-metadata", f"model={meta['model']}",
+            "-metadata", f"software={meta['software']}",
+            "-metadata", f"creation_time={creation_time}",
+            "-metadata", f"date={rand_date.strftime('%Y-%m-%d')}",
+            "-metadata", f"comment=Shot on {meta['model']}",
+            "-metadata", f"encoder=Apple {meta['model']}",
+        ])
+    cmd.extend(["-movflags", "+faststart", str(output_path)])
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def transform_video(input_path, output_path, config=None, timeout=180):
     """Apply transformations to a video using ffmpeg. Returns True on success, False on failure."""
     input_path = Path(input_path)
@@ -169,10 +207,22 @@ def transform_video(input_path, output_path, config=None, timeout=180):
         return True
 
     if not is_ffmpeg_available():
-        # ffmpeg missing: fallback to direct copy
         shutil.copy2(input_path, output_path)
         return True
 
+    # Mode rapide: remux + metadata seulement (defaut)
+    if config.get("metadata_only", True):
+        ok = _transform_metadata_only(input_path, output_path, config, timeout=30)
+        if ok:
+            return True
+        # Si echec, fallback copie directe
+        try:
+            shutil.copy2(input_path, output_path)
+            return True
+        except Exception:
+            return False
+
+    # Mode complet (re-encodage avec tous les filtres)
     video_filters = []
     audio_filters = []
 
