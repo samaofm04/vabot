@@ -70,17 +70,111 @@ _IOS_BY_MODEL = {
 }
 
 
+CITY_COORDS = {
+    "Paris": (48.8566, 2.3522, 35),
+    "Marseille": (43.2965, 5.3698, 12),
+    "Lyon": (45.7640, 4.8357, 173),
+    "Toulouse": (43.6047, 1.4442, 146),
+    "Nice": (43.7102, 7.2620, 9),
+    "Nantes": (47.2184, -1.5536, 20),
+    "Strasbourg": (48.5734, 7.7521, 142),
+    "Montpellier": (43.6108, 3.8767, 27),
+    "Bordeaux": (44.8378, -0.5792, 8),
+    "Lille": (50.6292, 3.0573, 22),
+    "Rennes": (48.1173, -1.6778, 30),
+    "Reims": (49.2583, 4.0317, 82),
+    "Le Havre": (49.4944, 0.1079, 5),
+    "Toulon": (43.1242, 5.9280, 11),
+    "Saint-Étienne": (45.4397, 4.3872, 510),
+    "Grenoble": (45.1885, 5.7245, 215),
+    "Dijon": (47.3220, 5.0415, 245),
+    "Angers": (47.4784, -0.5632, 30),
+    "Nîmes": (43.8367, 4.3601, 39),
+    "Villeurbanne": (45.7702, 4.8895, 168),
+    "Le Mans": (48.0061, 0.1996, 46),
+    "Aix-en-Provence": (43.5297, 5.4474, 173),
+    "Clermont-Ferrand": (45.7772, 3.0870, 396),
+    "Brest": (48.3905, -4.4860, 35),
+    "Tours": (47.3941, 0.6848, 53),
+    "Limoges": (45.8336, 1.2611, 209),
+    "Amiens": (49.8941, 2.2958, 30),
+    "Perpignan": (42.6886, 2.8949, 32),
+    "Metz": (49.1193, 6.1757, 173),
+    "Besançon": (47.2378, 6.0241, 250),
+    "Annecy": (45.8992, 6.1294, 448),
+    "Cannes": (43.5528, 7.0174, 5),
+    "Antibes": (43.5808, 7.1239, 8),
+    "Biarritz": (43.4832, -1.5586, 19),
+    "Bayonne": (43.4929, -1.4748, 12),
+    "Saint-Tropez": (43.2727, 6.6406, 5),
+    "Deauville": (49.3589, 0.0764, 5),
+    "Avignon": (43.9493, 4.8055, 23),
+    "La Rochelle": (46.1591, -1.1520, 4),
+    "Chambéry": (45.5646, 5.9178, 270),
+    "Pau": (43.2951, -0.3708, 207),
+    "Quimper": (47.9960, -4.0978, 50),
+    "Saint-Malo": (48.6493, -2.0258, 5),
+    "Honfleur": (49.4197, 0.2330, 5),
+    "Lorient": (47.7482, -3.3702, 12),
+}
+
+
+def _city_coords(city):
+    if city in CITY_COORDS:
+        return CITY_COORDS[city]
+    # Random French coords for cities not in the dict
+    return (
+        round(random.uniform(43.0, 50.5), 4),
+        round(random.uniform(-4.0, 7.5), 4),
+        round(random.uniform(5, 400)),
+    )
+
+
 def random_metadata_preset():
-    """Generate a random preset on the fly. Variety = 12 models x 95 cities x ~10 iOS."""
+    """Generate a random preset with realistic camera+GPS data."""
     model = random.choice(IPHONE_MODELS)
     city = random.choice(FRENCH_CITIES)
     software = random.choice(_IOS_BY_MODEL.get(model, ["18.0"]))
+    lat, lon, alt = _city_coords(city)
+    # Add slight random offset to GPS (within ~500m)
+    lat += random.uniform(-0.005, 0.005)
+    lon += random.uniform(-0.005, 0.005)
+    alt += random.randint(-5, 10)
+    # Camera specs
+    is_pro = "Pro" in model
+    iso = random.choice([32, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000])
+    exposure_num, exposure_denom = random.choice([
+        (1, 30), (1, 50), (1, 60), (1, 100), (1, 120),
+        (1, 200), (1, 250), (1, 500), (1, 1000)
+    ])
+    f_number = (178, 100) if is_pro else (160, 100)  # f/1.78 or f/1.6
+    focal_length = (57, 10) if is_pro else (51, 10)   # 5.7mm or 5.1mm
     return {
         "make": "Apple",
         "model": model,
         "software": software,
-        "location": f"{city}, France",
+        "location_str": f"{city}, France",
+        "city": city,
+        "lat": lat,
+        "lon": lon,
+        "alt": alt,
+        "iso": iso,
+        "exposure_time": (exposure_num, exposure_denom),
+        "f_number": f_number,
+        "focal_length": focal_length,
+        "lens_model": f"{model} back camera 6.86mm f/{f_number[0]/f_number[1]:.2f}" if is_pro else f"{model} back camera 5.7mm f/{f_number[0]/f_number[1]:.2f}",
     }
+
+
+def _to_gps_rational(decimal_value):
+    """Convert decimal degrees to (deg, min, sec) rational tuple."""
+    abs_value = abs(decimal_value)
+    degrees = int(abs_value)
+    remainder = (abs_value - degrees) * 60
+    minutes = int(remainder)
+    seconds = (remainder - minutes) * 60
+    # Use 100x precision for seconds
+    return ((degrees, 1), (minutes, 1), (int(seconds * 100), 100))
 
 
 # Backward compat
@@ -126,21 +220,99 @@ def is_pillow_available():
         return False
 
 
-def _build_random_exif(preset):
-    """Build an Image.Exif object with random US metadata."""
-    from PIL import Image
-    exif = Image.Exif()
-    random_date = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(0, 23))
+def _build_random_exif_bytes(preset):
+    """Build EXIF bytes with comprehensive metadata using piexif."""
+    try:
+        import piexif
+    except ImportError:
+        return None
+    random_date = datetime.now() - timedelta(
+        days=random.randint(1, 60),
+        hours=random.randint(0, 23),
+        minutes=random.randint(0, 59),
+    )
     date_str = random_date.strftime("%Y:%m:%d %H:%M:%S")
-    # Standard EXIF tags
-    exif[271] = preset["make"]            # Make
-    exif[272] = preset["model"]           # Model
-    exif[305] = preset["software"]        # Software
-    exif[306] = date_str                  # DateTime
-    exif[36867] = date_str                # DateTimeOriginal
-    exif[36868] = date_str                # DateTimeDigitized
-    exif[270] = f"Shot on {preset['model']}"  # ImageDescription
-    return exif
+    offset_str = "+01:00"  # CET
+    lat = preset["lat"]
+    lon = preset["lon"]
+    alt = preset["alt"]
+    lat_ref = "N" if lat >= 0 else "S"
+    lon_ref = "E" if lon >= 0 else "W"
+    alt_ref = 0 if alt >= 0 else 1
+    exif_dict = {
+        "0th": {
+            piexif.ImageIFD.Make: preset["make"].encode("utf-8"),
+            piexif.ImageIFD.Model: preset["model"].encode("utf-8"),
+            piexif.ImageIFD.Software: preset["software"].encode("utf-8"),
+            piexif.ImageIFD.DateTime: date_str.encode("utf-8"),
+            piexif.ImageIFD.ImageDescription: f"Shot on {preset['model']}".encode("utf-8"),
+            piexif.ImageIFD.Orientation: 1,
+            piexif.ImageIFD.XResolution: (72, 1),
+            piexif.ImageIFD.YResolution: (72, 1),
+            piexif.ImageIFD.ResolutionUnit: 2,
+            piexif.ImageIFD.YCbCrPositioning: 1,
+            piexif.ImageIFD.HostComputer: f"{preset['model']}".encode("utf-8"),
+        },
+        "Exif": {
+            piexif.ExifIFD.DateTimeOriginal: date_str.encode("utf-8"),
+            piexif.ExifIFD.DateTimeDigitized: date_str.encode("utf-8"),
+            piexif.ExifIFD.OffsetTime: offset_str.encode("utf-8"),
+            piexif.ExifIFD.OffsetTimeOriginal: offset_str.encode("utf-8"),
+            piexif.ExifIFD.OffsetTimeDigitized: offset_str.encode("utf-8"),
+            piexif.ExifIFD.ExposureTime: preset["exposure_time"],
+            piexif.ExifIFD.FNumber: preset["f_number"],
+            piexif.ExifIFD.ExposureProgram: 2,  # Normal program
+            piexif.ExifIFD.ISOSpeedRatings: preset["iso"],
+            piexif.ExifIFD.SensitivityType: 2,
+            piexif.ExifIFD.ExifVersion: b"0232",
+            piexif.ExifIFD.ComponentsConfiguration: b"\x01\x02\x03\x00",
+            piexif.ExifIFD.ShutterSpeedValue: preset["exposure_time"],
+            piexif.ExifIFD.ApertureValue: preset["f_number"],
+            piexif.ExifIFD.BrightnessValue: (random.randint(0, 50), 10),
+            piexif.ExifIFD.ExposureBiasValue: (0, 1),
+            piexif.ExifIFD.MeteringMode: 5,  # Pattern
+            piexif.ExifIFD.Flash: 16,  # Flash did not fire (compulsory)
+            piexif.ExifIFD.FocalLength: preset["focal_length"],
+            piexif.ExifIFD.SubjectArea: (random.randint(1000, 3000), random.randint(1500, 4000), 2000, 2000),
+            piexif.ExifIFD.SubSecTimeOriginal: str(random.randint(100, 999)).encode("utf-8"),
+            piexif.ExifIFD.SubSecTimeDigitized: str(random.randint(100, 999)).encode("utf-8"),
+            piexif.ExifIFD.ColorSpace: 1,  # sRGB
+            piexif.ExifIFD.SensingMethod: 2,  # One-chip color area sensor
+            piexif.ExifIFD.SceneType: b"\x01",
+            piexif.ExifIFD.ExposureMode: 0,  # Auto
+            piexif.ExifIFD.WhiteBalance: 0,  # Auto
+            piexif.ExifIFD.FocalLengthIn35mmFilm: 24 if "Pro" in preset["model"] else 26,
+            piexif.ExifIFD.SceneCaptureType: 0,  # Standard
+            piexif.ExifIFD.LensSpecification: (preset["focal_length"], preset["focal_length"], preset["f_number"], preset["f_number"]),
+            piexif.ExifIFD.LensMake: b"Apple",
+            piexif.ExifIFD.LensModel: preset["lens_model"].encode("utf-8"),
+        },
+        "GPS": {
+            piexif.GPSIFD.GPSVersionID: (2, 3, 0, 0),
+            piexif.GPSIFD.GPSLatitudeRef: lat_ref.encode("utf-8"),
+            piexif.GPSIFD.GPSLatitude: _to_gps_rational(lat),
+            piexif.GPSIFD.GPSLongitudeRef: lon_ref.encode("utf-8"),
+            piexif.GPSIFD.GPSLongitude: _to_gps_rational(lon),
+            piexif.GPSIFD.GPSAltitudeRef: alt_ref,
+            piexif.GPSIFD.GPSAltitude: (max(0, int(alt * 100)), 100),
+            piexif.GPSIFD.GPSTimeStamp: (
+                (random_date.hour, 1),
+                (random_date.minute, 1),
+                (random_date.second, 1),
+            ),
+            piexif.GPSIFD.GPSDateStamp: random_date.strftime("%Y:%m:%d").encode("utf-8"),
+            piexif.GPSIFD.GPSImgDirectionRef: b"T",  # True north
+            piexif.GPSIFD.GPSImgDirection: (random.randint(0, 35900), 100),  # 0-359° with 2 decimals
+            piexif.GPSIFD.GPSSpeedRef: b"K",  # km/h
+            piexif.GPSIFD.GPSSpeed: (0, 1),
+        },
+        "1st": {},
+        "thumbnail": None,
+    }
+    try:
+        return piexif.dump(exif_dict)
+    except Exception:
+        return None
 
 
 def transform_image(input_path, output_path, config=None, target="post"):
@@ -205,13 +377,12 @@ def transform_image(input_path, output_path, config=None, target="post"):
         if not metadata_only and config.get("jpeg_quality", {}).get("enabled"):
             quality = int(_rand(config["jpeg_quality"]["min"], config["jpeg_quality"]["max"]))
 
-        # EXIF metadata
+        # EXIF metadata (comprehensive with piexif)
         exif_bytes = None
         if config.get("random_us_metadata", {}).get("enabled"):
             try:
                 preset = random_metadata_preset()
-                exif = _build_random_exif(preset)
-                exif_bytes = exif.tobytes()
+                exif_bytes = _build_random_exif_bytes(preset)
             except Exception:
                 exif_bytes = None
 

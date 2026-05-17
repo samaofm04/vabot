@@ -280,16 +280,33 @@ def transform_video(input_path, output_path, config=None, timeout=180):
         "-movflags", "+faststart",
     ])
 
-    # Random metadata (iPhone + ville française)
+    # Random metadata (iPhone + ville française + GPS + dates)
     if config.get("random_us_metadata", {}).get("enabled"):
         meta = random_metadata_preset()
+        from datetime import datetime, timedelta
+        rand_date = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(0, 23))
+        creation_time = rand_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+        # ISO 6709 format pour la localisation Apple: +48.8566+002.3522/
+        lat_sign = "+" if meta["lat"] >= 0 else "-"
+        lon_sign = "+" if meta["lon"] >= 0 else "-"
+        iso6709 = f"{lat_sign}{abs(meta['lat']):08.4f}{lon_sign}{abs(meta['lon']):09.4f}+{meta['alt']:.3f}/"
         cmd.extend([
+            "-map_metadata", "-1",
+            "-metadata", f"title=IMG_{random.randint(1000, 9999)}",
             "-metadata", f"location={meta['location']}",
+            "-metadata", f"location-eng={meta['location']}",
+            "-metadata", f"com.apple.quicktime.location.ISO6709={iso6709}",
+            "-metadata", f"com.apple.quicktime.make={meta['make']}",
+            "-metadata", f"com.apple.quicktime.model={meta['model']}",
+            "-metadata", f"com.apple.quicktime.software={meta['software']}",
+            "-metadata", f"com.apple.quicktime.creationdate={creation_time}",
             "-metadata", f"make={meta['make']}",
             "-metadata", f"model={meta['model']}",
             "-metadata", f"software={meta['software']}",
+            "-metadata", f"creation_time={creation_time}",
+            "-metadata", f"date={rand_date.strftime('%Y-%m-%d')}",
             "-metadata", f"comment=Shot on {meta['model']}",
-            "-map_metadata", "-1",
+            "-metadata", f"encoder=Apple {meta['model']}",
         ])
     else:
         cmd.extend(["-map_metadata", "-1"])
