@@ -311,22 +311,22 @@ class Admin(commands.Cog):
 
     # ---------- REELS (vidéo + caption pair) ----------
 
-    @app_commands.command(name="addreel", description="Ajoute un reel: vidéo clean + caption + description + vidéo exemple")
+    @app_commands.command(name="addreel", description="Ajoute un reel à une identité")
     @app_commands.describe(
         identity="Nom de l'identité",
         video="Vidéo CLEAN (à télécharger par le VA)",
-        caption="Caption à mettre EN OVERLAY (optionnel, \\n = retour ligne)",
-        description="Description du post Instagram (optionnel, \\n = retour ligne)",
-        example_video="Vidéo EXEMPLE du rendu final (optionnel, sert juste de référence visuelle)"
+        example_video="Vidéo EXEMPLE du rendu final (optionnel)",
+        caption="Caption à mettre EN OVERLAY sur la vidéo (optionnel, \\n = retour ligne)",
+        description="Description du post Instagram (optionnel, \\n = retour ligne)"
     )
     async def addreel(
         self,
         interaction: discord.Interaction,
         identity: str,
         video: discord.Attachment,
+        example_video: discord.Attachment = None,
         caption: str = None,
         description: str = None,
-        example_video: discord.Attachment = None,
     ):
         if not await self.require_admin(interaction):
             return
