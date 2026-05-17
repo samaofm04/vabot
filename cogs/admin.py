@@ -67,6 +67,10 @@ def identity_usernames_file(name):
     return IDENTITIES_DIR / name / "usernames.txt"
 
 
+def identity_names_file(name):
+    return IDENTITIES_DIR / name / "names.txt"
+
+
 SHARED_BIOS_FILE = DATA_DIR / "bios.txt"
 
 
@@ -1015,6 +1019,82 @@ class Admin(commands.Cog):
         write_lines(identity_usernames_file(safe), items)
         await interaction.response.send_message(
             f"✅ Username supprimé: `{removed}`", ephemeral=True
+        )
+
+    # ---------- NAMES (prénoms display Instagram, par identité) ----------
+
+    @app_commands.command(name="addnames", description="Ajoute des prénoms (display) à une identité (.txt 1 par ligne)")
+    @app_commands.describe(identity="Nom de l'identité", file="Fichier .txt, 1 prénom par ligne")
+    async def addnames(self, interaction: discord.Interaction, identity: str, file: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        if not file.filename.lower().endswith(".txt"):
+            await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
+            return
+        content = (await file.read()).decode("utf-8", errors="ignore")
+        new_items = [l.strip() for l in content.splitlines() if l.strip()]
+        existing = read_lines(identity_names_file(safe))
+        write_lines(identity_names_file(safe), existing + new_items)
+        await interaction.followup.send(
+            f"✅ {len(new_items)} prénom(s) ajouté(s) à `{safe}` (total: {len(existing) + len(new_items)}).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="listnames", description="Liste les prénoms display d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def listnames(self, interaction: discord.Interaction, identity: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = read_lines(identity_names_file(safe))
+        if not items:
+            await interaction.response.send_message(f"Aucun prénom pour `{safe}`.", ephemeral=True)
+            return
+        lines = [f"`{i}` — {truncate_for_display(x)}" for i, x in enumerate(items)]
+        text = f"**Prénoms de `{safe}`** ({len(items)})\n" + "\n".join(lines)
+        await interaction.response.send_message(text[:1990], ephemeral=True)
+
+    @app_commands.command(name="deletename", description="Supprime un prénom d'une identité par index")
+    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listnames)")
+    async def deletename(self, interaction: discord.Interaction, identity: str, index: int):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        items = read_lines(identity_names_file(safe))
+        if index < 0 or index >= len(items):
+            await interaction.response.send_message(
+                f"Index invalide (0-{len(items)-1}).", ephemeral=True
+            )
+            return
+        removed = items.pop(index)
+        write_lines(identity_names_file(safe), items)
+        await interaction.response.send_message(
+            f"✅ Prénom supprimé: `{removed}`", ephemeral=True
+        )
+
+    @app_commands.command(name="clearnames", description="Supprime TOUS les prénoms d'une identité")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        confirm="Tape le nom de l'identité pour confirmer"
+    )
+    async def clearnames(self, interaction: discord.Interaction, identity: str, confirm: str):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        if confirm != safe:
+            await interaction.response.send_message(
+                f"⚠️ Refais avec `confirm:{safe}` pour confirmer.", ephemeral=True
+            )
+            return
+        n = len(read_lines(identity_names_file(safe)))
+        write_lines(identity_names_file(safe), [])
+        await interaction.response.send_message(
+            f"✅ {n} prénom(s) supprimé(s) de `{safe}`.", ephemeral=True
         )
 
     # ---------- PROFILE PICS (shared) ----------

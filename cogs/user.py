@@ -44,6 +44,11 @@ def random_username_for(identity):
     return unescape_newlines(random.choice(items)) if items else None
 
 
+def random_name_for(identity):
+    items = read_lines(IDENTITIES_DIR / identity / "names.txt")
+    return unescape_newlines(random.choice(items)) if items else None
+
+
 SHARED_BIOS_FILE = DATA_DIR / "bios.txt"
 
 
@@ -197,6 +202,23 @@ class UserCog(commands.Cog):
             "❌ Pas de chiffres, pas de points, pas de tirets — **juste des lettres**."
         )
         await interaction.followup.send(u)
+
+    @app_commands.command(name="name", description="Donne un prénom (display Instagram) aléatoire de ton identité")
+    async def name(self, interaction: discord.Interaction):
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True
+            )
+            return
+        n = random_name_for(identity)
+        if not n:
+            await interaction.response.send_message(
+                f"Aucun prénom pour ton identité `{identity}`. Demande à un admin (`/addnames`).",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(n)
 
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
