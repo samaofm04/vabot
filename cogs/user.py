@@ -186,10 +186,8 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            f"📝 **Username** (identité `{identity}`)\n"
-            "Sur iOS : **appui long sur le bloc ⬇️ → Copier le code**"
+            f"📝 **Username (identité `{identity}`) :**\n```\n{u}\n```\n*Copie-colle dans Instagram.*"
         )
-        await interaction.followup.send(f"```\n{u}\n```")
 
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
@@ -208,10 +206,8 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            f"📝 **Bio** (identité `{identity}`)\n"
-            "Sur iOS : **appui long sur le bloc ⬇️ → Copier le code**"
+            f"📝 **Bio (identité `{identity}`) :**\n```\n{b}\n```\n*Copie-colle dans la bio Instagram.*"
         )
-        await interaction.followup.send(f"```\n{b}\n```")
 
     @app_commands.command(name="profilepic", description="Donne une photo de profil aléatoire (transformée)")
     async def profilepic(self, interaction: discord.Interaction):
@@ -270,28 +266,26 @@ class UserCog(commands.Cog):
                 tmp_path = Path(tmp_dir) / image.name
                 if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
                     send_path = tmp_path
-            intro = (
-                f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n"
-                f"📥 Télécharge la photo CLEAN (1ère pièce jointe), ajoute la caption en overlay, poste avec la description."
-            )
-            if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE du rendu final — NE PAS la télécharger pour poster."
+            parts = [f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n"]
             if caption:
-                intro += "\n\n📝 **Caption** ⬇️ (long-press pour copier)"
+                parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la photo) :**\n```\n{caption}\n```")
+            else:
+                parts.append("*(Pas de caption recommandée)*")
             if description:
-                intro += "\n📄 **Description** ⬇️ (long-press pour copier)"
+                parts.append(f"📄 **Description (texte du {kind_label}) :**\n```\n{description}\n```")
+            else:
+                parts.append(f"*(Pas de description recommandée)*")
+            parts.append(f"\n📥 Télécharge la photo CLEAN (1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
+            if example:
+                parts.append("👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger pour poster.")
+            message = "\n".join(parts)
             files = [discord.File(send_path, filename=image.name)]
             if example:
                 files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
             try:
-                await interaction.followup.send(content=intro, files=files)
+                await interaction.followup.send(content=message, files=files)
             except discord.HTTPException as e:
                 await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
-                return
-            if caption:
-                await interaction.followup.send(f"```\n{caption}\n```")
-            if description:
-                await interaction.followup.send(f"```\n{description}\n```")
         finally:
             if tmp_dir:
                 try:
@@ -342,17 +336,15 @@ class UserCog(commands.Cog):
                 tmp_path = Path(tmp_dir) / image.name
                 if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
                     send_path = tmp_path
-            intro = (
-                f"📲 **STORY CTA — identité `{identity}`**\n"
-                "📥 Télécharge la photo, écris la caption dessus avec l'éditeur Instagram, poste en story.\n\n"
-                "📝 **Caption** ⬇️ (long-press pour la copier)"
+            message = (
+                f"📲 **STORY CTA — identité `{identity}`**\n\n"
+                f"📝 **Caption (À ÉCRIRE EN OVERLAY sur la photo) :**\n```\n{caption}\n```\n"
+                "📥 Télécharge la photo, écris la caption dessus avec l'éditeur Instagram, poste en story."
             )
             try:
-                await interaction.followup.send(content=intro, file=discord.File(send_path))
+                await interaction.followup.send(content=message, file=discord.File(send_path))
             except discord.HTTPException as e:
                 await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
-                return
-            await interaction.followup.send(f"```\n{caption}\n```")
         finally:
             if tmp_dir:
                 try:
@@ -386,28 +378,29 @@ class UserCog(commands.Cog):
         try:
             video_to_send = video  # toujours envoyer l'original
 
-            intro = (
-                f"🎬 **REEL — identité `{identity}`**\n"
-                "📥 Télécharge la vidéo CLEAN (1ère pièce jointe), ajoute la caption en overlay, poste avec la description."
-            )
-            if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE du rendu final — NE PAS la télécharger pour poster."
+            parts = [f"🎬 **REEL — identité `{identity}`**\n"]
             if caption:
-                intro += "\n\n📝 **Caption** ⬇️ (long-press le message pour la copier)"
+                parts.append(f"📝 **Caption (À METTRE EN OVERLAY sur la vidéo) :**\n```\n{caption}\n```")
+            else:
+                parts.append("*(Pas de caption recommandée)*")
             if description:
-                intro += "\n📄 **Description** ⬇️ (long-press l'autre message pour la copier)"
-
+                parts.append(f"📄 **Description (À METTRE COMME TEXTE DU POST) :**\n```\n{description}\n```")
+            else:
+                parts.append("*(Pas de description recommandée)*")
+            parts.append("\n📥 Télécharge la vidéo CLEAN (1ère pièce jointe), ajoute la caption en overlay, poste avec la description.")
+            if example:
+                parts.append("👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger pour poster.")
+            message = "\n".join(parts)
             files = [discord.File(video_to_send, filename=video.name)]
             if example:
                 files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
             try:
-                await interaction.followup.send(content=intro, files=files)
+                await interaction.followup.send(content=message, files=files)
             except discord.HTTPException as e:
-                # Retry sans l'exemple si c'est trop lourd
                 if example and len(files) == 2:
                     try:
                         await interaction.followup.send(
-                            content=intro + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
+                            content=message + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
                             file=discord.File(video_to_send, filename=video.name),
                         )
                     except discord.HTTPException:
@@ -422,11 +415,6 @@ class UserCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
-            # Messages séparés pour copier facilement sur mobile
-            if caption:
-                await interaction.followup.send(f"```\n{caption}\n```")
-            if description:
-                await interaction.followup.send(f"```\n{description}\n```")
 
             # Suppression de la source si configuré
             if transform_cfg.get("delete_source_after_use", False):
