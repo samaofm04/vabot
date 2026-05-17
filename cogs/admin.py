@@ -1078,6 +1078,46 @@ class Admin(commands.Cog):
             content=target.mention, embed=embed, view=OnboardingView()
         )
 
+    @app_commands.command(name="setidentity", description="[ADMIN] Force l'assignation d'un user à une identité (sans créer de salon)")
+    @app_commands.describe(
+        user="L'utilisateur à assigner",
+        identity="Nom de l'identité",
+        channel="Optionnel: salon pour l'auto-post (sinon aucun)"
+    )
+    async def setidentity(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        identity: str,
+        channel: discord.TextChannel = None,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.response.send_message(
+                f"Identité `{safe}` introuvable. Voir /listidentites.", ephemeral=True
+            )
+            return
+        users = load_json(USERS_FILE, {})
+        existing = users.get(str(user.id))
+        if isinstance(existing, dict):
+            existing["identity"] = safe
+            if channel:
+                existing["channel_id"] = channel.id
+            users[str(user.id)] = existing
+        else:
+            users[str(user.id)] = {
+                "identity": safe,
+                "channel_id": channel.id if channel else None,
+                "auto_post": True,
+            }
+        save_json(USERS_FILE, users)
+        chan_str = f" • salon: {channel.mention}" if channel else " • pas de salon (pas d'auto-post tant qu'aucun salon)"
+        await interaction.response.send_message(
+            f"✅ {user.mention} assigné à `{safe}`{chan_str}.", ephemeral=True
+        )
+
     @app_commands.command(name="testas", description="[ADMIN] Assigne-toi (toi-même) à une identité pour tester comme VA")
     @app_commands.describe(
         identity="Nom de l'identité (laisse vide pour te retirer toute assignation)"
