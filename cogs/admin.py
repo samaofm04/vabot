@@ -1229,10 +1229,23 @@ class Admin(commands.Cog):
                 "Aucune identité. Crée-en une avec /addidentite.", ephemeral=True
             )
             return
-        identity = random.choice(identities)
         users = load_json(USERS_FILE, {})
-        # Stocker au format dict (identity + channel_id + auto_post pour l'auto-post quotidien)
-        users[str(user.id)] = {"identity": identity, "channel_id": None, "auto_post": True}
+        # Si user a deja une identite, on la garde. Sinon, random.
+        existing = users.get(str(user.id))
+        if isinstance(existing, dict) and existing.get("identity"):
+            identity = existing["identity"]
+            existing_data = existing
+        elif isinstance(existing, str):
+            identity = existing
+            existing_data = None
+        else:
+            identity = random.choice(identities)
+            existing_data = None
+        users[str(user.id)] = {
+            "identity": identity,
+            "channel_id": existing_data.get("channel_id") if existing_data else None,
+            "auto_post": existing_data.get("auto_post", True) if existing_data else True,
+        }
         save_json(USERS_FILE, users)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
