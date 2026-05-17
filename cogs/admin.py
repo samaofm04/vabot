@@ -250,6 +250,106 @@ def preview_video_for(identity, filename):
     return ex if ex else video_path
 
 
+class ImageManagerView(discord.ui.View):
+    """Generic paginated manager for posts, stories, storyctas."""
+    def __init__(self, identity, subdir, label, current_index=0):
+        super().__init__(timeout=600)
+        self.identity = identity
+        self.subdir = subdir
+        self.label = label
+        self.current_index = current_index
+
+    def _get_items(self):
+        d = IDENTITIES_DIR / self.identity / self.subdir
+        if not d.exists():
+            return []
+        if self.subdir in ("posts", "stories"):
+            return list_image_items(d)  # (filename, cap, desc, has_ex)
+        # storyctas: just photos
+        return [
+            (p.name, None, None, False)
+            for p in sorted(d.iterdir())
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        ]
+
+    async def _refresh(self, interaction):
+        items = self._get_items()
+        if not items:
+            await interaction.response.edit_message(
+                content=f"Plus aucun {self.label} pour `{self.identity}`.",
+                view=None, attachments=[],
+            )
+            self.stop()
+            return
+        if self.current_index >= len(items):
+            self.current_index = len(items) - 1
+        if self.current_index < 0:
+            self.current_index = 0
+        filename, cap, desc, has_ex = items[self.current_index]
+        d = IDENTITIES_DIR / self.identity / self.subdir
+        image_path = d / filename
+        text = (
+            f"**{self.label} {self.current_index + 1}/{len(items)}** — identité `{self.identity}`\n"
+            f"📁 `{filename}`\n"
+        )
+        if cap:
+            text += f"\n📝 **Caption :**\n```\n{cap}\n```"
+        if desc:
+            text += f"\n📄 **Description :**\n```\n{desc}\n```"
+        if self.subdir in ("posts", "stories") and not cap and not desc:
+            text += "\n*(Pas de caption ni description)*"
+        if has_ex:
+            text += "\n🎨 *Exemple dispo (affiché en preview)*"
+        # Preview: exemple si dispo, sinon clean
+        preview = image_path
+        if has_ex:
+            ex = example_image_path_for(image_path)
+            if ex:
+                preview = ex
+        try:
+            await interaction.response.edit_message(
+                content=text, view=self, attachments=[discord.File(preview)],
+            )
+        except discord.HTTPException:
+            await interaction.response.edit_message(
+                content=text + "\n\n⚠️ *(image trop lourde pour preview)*",
+                view=self, attachments=[],
+            )
+
+    @discord.ui.button(label="◀ Précédent", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index -= 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Suivant ▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index += 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        items = self._get_items()
+        if not items:
+            await interaction.response.send_message("Plus aucun.", ephemeral=True)
+            return
+        if self.current_index >= len(items):
+            self.current_index = len(items) - 1
+        filename = items[self.current_index][0]
+        d = IDENTITIES_DIR / self.identity / self.subdir
+        target = d / filename
+        target.unlink(missing_ok=True)
+        if self.subdir in ("posts", "stories"):
+            target.with_suffix(".txt").unlink(missing_ok=True)
+            target.with_suffix(".desc.txt").unlink(missing_ok=True)
+            ex = example_image_path_for(target)
+            if ex:
+                ex.unlink(missing_ok=True)
+        new_items = self._get_items()
+        if self.current_index >= len(new_items):
+            self.current_index = max(0, len(new_items) - 1)
+        await self._refresh(interaction)
+
+
 class ReelManagerView(discord.ui.View):
     def __init__(self, identity, current_index=0):
         super().__init__(timeout=600)
@@ -1500,6 +1600,58 @@ class Admin(commands.Cog):
     @app_commands.describe(identity="Nom de l'identité", index="Index (voir /liststories)")
     async def deletestory(self, interaction: discord.Interaction, identity: str, index: int):
         await self._delete_image_item(interaction, identity, "stories", index, "Story")
+
+    async def _manage_images(self, interaction, identity, subdir, label):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity)
+        d = IDENTITIES_DIR / safe / subdir
+        view_tmp = ImageManagerView(safe, subdir, label, 0)
+        items = view_tmp._get_items()
+        if not items:
+            await interaction.response.send_message(f"Aucun {label.lower()} pour `{safe}`.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        view = ImageManagerView(safe, subdir, label, 0)
+        filename, cap, desc, has_ex = items[0]
+        image_path = d / filename
+        preview = image_path
+        if has_ex:
+            ex = example_image_path_for(image_path)
+            if ex:
+                preview = ex
+        text = (
+            f"**{label} 1/{len(items)}** — identité `{safe}`\n"
+            f"📁 `{filename}`\n"
+        )
+        if cap:
+            text += f"\n📝 **Caption :**\n```\n{cap}\n```"
+        if desc:
+            text += f"\n📄 **Description :**\n```\n{desc}\n```"
+        if subdir in ("posts", "stories") and not cap and not desc:
+            text += "\n*(Pas de caption ni description)*"
+        try:
+            await interaction.followup.send(content=text, view=view, file=discord.File(preview), ephemeral=True)
+        except discord.HTTPException:
+            await interaction.followup.send(
+                content=text + "\n\n⚠️ *(image trop lourde pour preview)*",
+                view=view, ephemeral=True,
+            )
+
+    @app_commands.command(name="manageposts", description="Menu interactif: navigue + supprime les posts d'une identité")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def manageposts(self, interaction: discord.Interaction, identity: str):
+        await self._manage_images(interaction, identity, "posts", "Post")
+
+    @app_commands.command(name="managestories", description="Menu interactif: navigue + supprime les stories")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def managestories(self, interaction: discord.Interaction, identity: str):
+        await self._manage_images(interaction, identity, "stories", "Story")
+
+    @app_commands.command(name="managestoryctas", description="Menu interactif: navigue + supprime les story CTAs")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def managestoryctas(self, interaction: discord.Interaction, identity: str):
+        await self._manage_images(interaction, identity, "storyctas", "Story CTA")
 
 
 async def setup(bot):
