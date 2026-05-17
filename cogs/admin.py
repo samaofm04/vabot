@@ -52,6 +52,14 @@ def identity_usernames_file(name):
     return IDENTITIES_DIR / name / "usernames.txt"
 
 
+SHARED_BIOS_FILE = DATA_DIR / "bios.txt"
+
+
+def bios_file_for(identity):
+    """Per-identity bios path if identity given, else shared path."""
+    return identity_bios_file(identity) if identity else SHARED_BIOS_FILE
+
+
 def read_lines(path):
     if not path.exists():
         return []
@@ -66,21 +74,28 @@ def write_lines(path, lines):
         path.write_text("", encoding="utf-8")
 
 
-def read_bios(name):
-    path = identity_bios_file(name)
+def read_bios_from(path):
     if not path.exists():
         return []
     content = path.read_text(encoding="utf-8")
     return [b.strip() for b in content.split("---") if b.strip()]
 
 
-def write_bios(name, bios):
-    path = identity_bios_file(name)
+def write_bios_to(path, bios):
     path.parent.mkdir(parents=True, exist_ok=True)
     if bios:
         path.write_text("\n---\n".join(bios) + "\n", encoding="utf-8")
     else:
         path.write_text("", encoding="utf-8")
+
+
+def read_bios(identity):
+    """Backward-compat: read bios for an identity."""
+    return read_bios_from(bios_file_for(identity))
+
+
+def write_bios(identity, bios):
+    write_bios_to(bios_file_for(identity), bios)
 
 
 def caption_path_for(video_path):
@@ -620,25 +635,27 @@ class Admin(commands.Cog):
             f"✅ {deleted} fichier(s) supprimé(s) de l'identité `{safe}`.", ephemeral=True
         )
 
-    @app_commands.command(name="clearbios", description="Supprime TOUTES les bios d'une identité")
+    @app_commands.command(name="clearbios", description="Supprime TOUTES les bios. Sans identité: les partagées.")
     @app_commands.describe(
-        identity="Nom de l'identité",
-        confirm="Tape exactement le nom de l'identité pour confirmer"
+        confirm="Tape 'shared' (pour partagées) ou le nom de l'identité pour confirmer",
+        identity="Optionnel: identité spécifique"
     )
-    async def clearbios(self, interaction: discord.Interaction, identity: str, confirm: str):
+    async def clearbios(self, interaction: discord.Interaction, confirm: str, identity: str = None):
         if not await self.require_admin(interaction):
             return
-        safe = sanitize_identity_name(identity)
-        if confirm != safe:
+        safe = sanitize_identity_name(identity) if identity else None
+        expected = safe if safe else "shared"
+        if confirm != expected:
             await interaction.response.send_message(
-                f"⚠️ Refais la commande avec `confirm:{safe}` pour confirmer.",
+                f"⚠️ Refais la commande avec `confirm:{expected}` pour confirmer.",
                 ephemeral=True,
             )
             return
         n = len(read_bios(safe))
         write_bios(safe, [])
+        label = f"`{safe}`" if safe else "partagées"
         await interaction.response.send_message(
-            f"✅ {n} bio(s) supprimée(s) de `{safe}`.", ephemeral=True
+            f"✅ {n} bio(s) {label} supprimée(s).", ephemeral=True
         )
 
     @app_commands.command(name="clearusernames", description="Supprime TOUS les usernames d'une identité")
@@ -690,63 +707,68 @@ class Admin(commands.Cog):
 
     # ---------- BIOS (par identité) ----------
 
-    @app_commands.command(name="addbios", description="Ajoute des bios à une identité (.txt, séparées par '---')")
+    @app_commands.command(name="addbios", description="Ajoute des bios. Sans identité: partagées. Avec identité: spécifiques.")
     @app_commands.describe(
-        identity="Nom de l'identité",
-        file="Fichier .txt avec bios séparées par '---' sur leur propre ligne"
+        file="Fichier .txt avec bios séparées par '---' sur leur propre ligne",
+        identity="Optionnel: identité spécifique. Sans, les bios sont partagées entre toutes les identités."
     )
-    async def addbios(self, interaction: discord.Interaction, identity: str, file: discord.Attachment):
+    async def addbios(self, interaction: discord.Interaction, file: discord.Attachment, identity: str = None):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
-        safe = sanitize_identity_name(identity)
-        if not (IDENTITIES_DIR / safe).exists():
-            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
-            return
         if not file.filename.lower().endswith(".txt"):
             await interaction.followup.send("Le fichier doit être un .txt", ephemeral=True)
             return
+        safe = None
+        target_label = "partagées"
+        if identity:
+            safe = sanitize_identity_name(identity)
+            if not (IDENTITIES_DIR / safe).exists():
+                await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+                return
+            target_label = f"`{safe}`"
         content = (await file.read()).decode("utf-8", errors="ignore")
         new_bios = [b.strip() for b in content.split("---") if b.strip()]
         existing = read_bios(safe)
         write_bios(safe, existing + new_bios)
         await interaction.followup.send(
-            f"✅ {len(new_bios)} bio(s) ajoutée(s) à `{safe}` (total: {len(existing) + len(new_bios)}).",
+            f"✅ {len(new_bios)} bio(s) ajoutée(s) {target_label} (total: {len(existing) + len(new_bios)}).",
             ephemeral=True,
         )
 
-    @app_commands.command(name="listbios", description="Liste les bios d'une identité")
-    @app_commands.describe(identity="Nom de l'identité")
-    async def listbios(self, interaction: discord.Interaction, identity: str):
+    @app_commands.command(name="listbios", description="Liste les bios. Sans identité: bios partagées.")
+    @app_commands.describe(identity="Optionnel: identité spécifique. Sans, montre les bios partagées.")
+    async def listbios(self, interaction: discord.Interaction, identity: str = None):
         if not await self.require_admin(interaction):
             return
-        safe = sanitize_identity_name(identity)
+        safe = sanitize_identity_name(identity) if identity else None
         bios = read_bios(safe)
+        label = f"de `{safe}`" if safe else "partagées"
         if not bios:
-            await interaction.response.send_message(f"Aucune bio pour `{safe}`.", ephemeral=True)
+            await interaction.response.send_message(f"Aucune bio {label}.", ephemeral=True)
             return
         lines = [f"`{i}` — {truncate_for_display(b)}" for i, b in enumerate(bios)]
-        text = f"**Bios de `{safe}`** ({len(bios)})\n" + "\n".join(lines)
+        text = f"**Bios {label}** ({len(bios)})\n" + "\n".join(lines)
         if len(text) <= 1900:
             await interaction.response.send_message(text, ephemeral=True)
         else:
             buf = io.BytesIO()
-            buf.write(f"Bios de {safe}\n\n".encode("utf-8"))
+            buf.write(f"Bios {label}\n\n".encode("utf-8"))
             for i, b in enumerate(bios):
                 buf.write(f"=== [{i}] ===\n{b}\n\n".encode("utf-8"))
             buf.seek(0)
             await interaction.response.send_message(
-                f"**Bios de `{safe}`** ({len(bios)})",
-                file=discord.File(buf, filename=f"bios_{safe}.txt"),
+                f"**Bios {label}** ({len(bios)})",
+                file=discord.File(buf, filename=f"bios_{safe or 'shared'}.txt"),
                 ephemeral=True,
             )
 
-    @app_commands.command(name="deletebio", description="Supprime une bio d'une identité par son index")
-    @app_commands.describe(identity="Nom de l'identité", index="Index (voir /listbios)")
-    async def deletebio(self, interaction: discord.Interaction, identity: str, index: int):
+    @app_commands.command(name="deletebio", description="Supprime une bio par son index. Sans identité: bios partagées.")
+    @app_commands.describe(index="Index (voir /listbios)", identity="Optionnel: identité spécifique")
+    async def deletebio(self, interaction: discord.Interaction, index: int, identity: str = None):
         if not await self.require_admin(interaction):
             return
-        safe = sanitize_identity_name(identity)
+        safe = sanitize_identity_name(identity) if identity else None
         bios = read_bios(safe)
         if index < 0 or index >= len(bios):
             await interaction.response.send_message(

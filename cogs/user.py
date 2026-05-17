@@ -38,13 +38,26 @@ def random_username_for(identity):
     return unescape_newlines(random.choice(items)) if items else None
 
 
-def random_bio_for(identity):
-    path = IDENTITIES_DIR / identity / "bios.txt"
+SHARED_BIOS_FILE = DATA_DIR / "bios.txt"
+
+
+def _read_bios_at(path):
     if not path.exists():
-        return None
+        return []
     content = path.read_text(encoding="utf-8")
-    bios = [b.strip() for b in content.split("---") if b.strip()]
-    return unescape_newlines(random.choice(bios)) if bios else None
+    return [b.strip() for b in content.split("---") if b.strip()]
+
+
+def random_bio_for(identity):
+    """Try identity-specific bios first, fallback to shared bios."""
+    if identity:
+        bios = _read_bios_at(IDENTITIES_DIR / identity / "bios.txt")
+        if bios:
+            return unescape_newlines(random.choice(bios))
+    bios = _read_bios_at(SHARED_BIOS_FILE)
+    if bios:
+        return unescape_newlines(random.choice(bios))
+    return None
 
 
 def random_reel_for(identity):
