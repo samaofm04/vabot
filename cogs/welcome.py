@@ -23,6 +23,8 @@ PENDING_DELETIONS_FILE = DATA_DIR / "pending_deletions.json"
 DEFAULT_WELCOME_CONFIG = {
     "welcome_channel_id": None,
     "cleanup_days_after_leave": 7,
+    "hide_all_channels_from_va": True,  # cache tous les salons aux VAs sauf leur ticket
+    "extra_visible_channel_ids": [],  # exceptions: salons que les VAs peuvent voir
     "welcome_public_message": (
         "👋 **Bienvenue dans l'agence {mention} !**\n\n"
         "Tu es là parce que tu vas bosser avec nous comme VA. "
@@ -206,6 +208,24 @@ class WelcomeContinueView(discord.ui.View):
         cfg = load_welcome_config()
         intro_text = cfg["ticket_intro_message"].format(mention=interaction.user.mention)
         await channel.send(content=intro_text, view=StartOnboardingView())
+
+        # IMPORTANT: cacher TOUS les salons au VA sauf son ticket (anonymat total)
+        if cfg.get("hide_all_channels_from_va", True):
+            own_id = channel.id
+            extra_visible = set(cfg.get("extra_visible_channel_ids", []))
+            for ch in guild.channels:
+                if ch.id == own_id or ch.id in extra_visible:
+                    continue
+                if isinstance(ch, discord.CategoryChannel):
+                    continue
+                try:
+                    await ch.set_permissions(
+                        interaction.user,
+                        view_channel=False,
+                        reason="VA isolation - anonymat",
+                    )
+                except Exception:
+                    pass
 
         # Confirmer au VA
         await interaction.followup.send(
@@ -430,6 +450,52 @@ class Welcome(commands.Cog):
         save_pending(pending)
         await interaction.response.send_message(
             f"✅ Suppression annulée pour {user.mention}. Son salon est conservé.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="addvavisiblechannel", description="[ADMIN] Salon que les VAs PEUVENT voir (exception à l'isolation)")
+    @app_commands.describe(channel="Salon à rendre visible aux VAs")
+    async def addvavisiblechannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        lst = cfg.get("extra_visible_channel_ids", [])
+        if channel.id not in lst:
+            lst.append(channel.id)
+        cfg["extra_visible_channel_ids"] = lst
+        save_welcome_config(cfg)
+        await interaction.response.send_message(
+            f"✅ {channel.mention} est maintenant visible aux VAs.\n"
+            f"⚠️ Ne s'applique qu'aux **futurs** VAs. Pour les actuels, fais `/grantvavisibility channel:#x` ou modifie manuellement.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="removevavisiblechannel", description="[ADMIN] Retire un salon de la liste visible par les VAs")
+    @app_commands.describe(channel="Salon à cacher de nouveau")
+    async def removevavisiblechannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        lst = cfg.get("extra_visible_channel_ids", [])
+        if channel.id in lst:
+            lst.remove(channel.id)
+        cfg["extra_visible_channel_ids"] = lst
+        save_welcome_config(cfg)
+        await interaction.response.send_message(
+            f"✅ {channel.mention} ne sera plus visible par défaut aux nouveaux VAs.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="toggleisolation", description="[ADMIN] Active/désactive l'isolation totale des VAs")
+    @app_commands.describe(enabled="True = VAs voient que leur ticket, False = VAs voient tout par défaut")
+    async def toggleisolation(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        cfg["hide_all_channels_from_va"] = enabled
+        save_welcome_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Isolation VA : {'activée (anonymat total)' if enabled else 'désactivée'}",
             ephemeral=True,
         )
 
