@@ -185,7 +185,11 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(u)
+        await interaction.response.send_message(
+            "⚠️ Si l'username n'est pas disponible sur Instagram, **ajoute 1 ou 2 lettres** pour en trouver un libre.\n"
+            "❌ Pas de chiffres, pas de points, pas de tirets — **juste des lettres**."
+        )
+        await interaction.followup.send(u)
 
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
