@@ -550,6 +550,14 @@ class Admin(commands.Cog):
             await interaction.response.send_message("Aucune identité.", ephemeral=True)
             return
         users = load_json(USERS_FILE, {})
+
+        def _va_identity(v):
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                return v.get("identity")
+            return None
+
         lines = []
         for n in identities:
             reels = list_reels(n)
@@ -557,7 +565,7 @@ class Admin(commands.Cog):
             n_captions = sum(1 for r in reels if r[1])
             n_descs = sum(1 for r in reels if r[2])
             n_examples = sum(1 for r in reels if r[3])
-            assigned = sum(1 for v in users.values() if v == n)
+            assigned = sum(1 for v in users.values() if _va_identity(v) == n)
             n_bios = len(read_bios(n))
             n_usernames = len(read_lines(identity_usernames_file(n)))
             lines.append(
@@ -578,7 +586,14 @@ class Admin(commands.Cog):
             return
         shutil.rmtree(identity_dir)
         users = load_json(USERS_FILE, {})
-        detached = [uid for uid, ident in users.items() if ident == sanitize_identity_name(name)]
+        target_ident = sanitize_identity_name(name)
+        def _va_id(v):
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                return v.get("identity")
+            return None
+        detached = [uid for uid, data in users.items() if _va_id(data) == target_ident]
         for uid in detached:
             del users[uid]
         save_json(USERS_FILE, users)
@@ -1086,7 +1101,13 @@ class Admin(commands.Cog):
                 ephemeral=True,
             )
             return
-        users[str(interaction.user.id)] = safe
+        # Preserver channel_id si deja set
+        existing = users.get(str(interaction.user.id))
+        if isinstance(existing, dict):
+            existing["identity"] = safe
+            users[str(interaction.user.id)] = existing
+        else:
+            users[str(interaction.user.id)] = {"identity": safe, "channel_id": None, "auto_post": True}
         save_json(USERS_FILE, users)
         await interaction.response.send_message(
             f"✅ Tu es maintenant assigné à `{safe}`.\n"
@@ -1099,14 +1120,16 @@ class Admin(commands.Cog):
     async def listvas(self, interaction: discord.Interaction, identity: str = None):
         if not await self.require_admin(interaction):
             return
-        users = load_json(USERS_FILE, {})  # {discord_id_str: identity_name}
+        users = load_json(USERS_FILE, {})
         if not users:
             await interaction.response.send_message("Aucun VA assigné pour l'instant.", ephemeral=True)
             return
-        # Group by identity
+        # Group by identity (handle legacy string + new dict formats)
         by_identity = {}
-        for user_id, ident in users.items():
-            by_identity.setdefault(ident, []).append(user_id)
+        for user_id, data in users.items():
+            ident = data if isinstance(data, str) else data.get("identity") if isinstance(data, dict) else None
+            if ident:
+                by_identity.setdefault(ident, []).append(user_id)
         if identity:
             safe = sanitize_identity_name(identity)
             vas = by_identity.get(safe, [])
@@ -1168,7 +1191,8 @@ class Admin(commands.Cog):
             return
         identity = random.choice(identities)
         users = load_json(USERS_FILE, {})
-        users[str(user.id)] = identity
+        # Stocker au format dict (identity + channel_id + auto_post pour l'auto-post quotidien)
+        users[str(user.id)] = {"identity": identity, "channel_id": None, "auto_post": True}
         save_json(USERS_FILE, users)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -1191,6 +1215,9 @@ class Admin(commands.Cog):
         from cogs.onboarding import step_embed, OnboardingView
         embed = step_embed(0)
         await channel.send(content=user.mention, embed=embed, view=OnboardingView())
+        # Sauvegarder le channel_id pour l'auto-post quotidien
+        users[str(user.id)]["channel_id"] = channel.id
+        save_json(USERS_FILE, users)
         await interaction.followup.send(
             f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`",
             ephemeral=True,

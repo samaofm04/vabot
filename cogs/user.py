@@ -162,7 +162,14 @@ def random_story_cta_image_for(identity):
 
 def get_user_identity(user_id):
     users = load_json(USERS_FILE, {})
-    return users.get(str(user_id))
+    data = users.get(str(user_id))
+    if data is None:
+        return None
+    if isinstance(data, str):
+        return data  # legacy format
+    if isinstance(data, dict):
+        return data.get("identity")
+    return None
 
 
 class UserCog(commands.Cog):
