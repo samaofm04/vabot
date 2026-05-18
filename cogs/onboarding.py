@@ -8,73 +8,107 @@ STEPS = [
         "description": (
             "Voici une vidéo explicative qui va te montrer comment va se dérouler ton job "
             "en tant que VA dans l'agence.\n\n"
-            "Tout va t'être expliqué étape par étape par le bot. Suis simplement les "
-            "instructions et clique sur le bouton **→** pour passer à l'étape suivante.\n\n"
+            "Tout va t'être expliqué étape par étape par le bot.\n\n"
             "*(La vidéo d'explication sera ajoutée ici par le boss bientôt.)*\n\n"
             "Quand tu es prêt, clique sur **→**."
         ),
     },
     {
-        "title": "Étape 2 — Création du compte Instagram",
+        "title": "📆 JOUR 0 — Création du compte Instagram",
         "description": (
-            "Pour créer le compte Instagram, tu dois utiliser un **numéro US**. "
-            "Demande-le au boss avant de continuer.\n\n"
-            "Une fois prêt, fais la commande `/username` ici — le bot te donnera un "
-            "username aléatoire à utiliser pour le compte.\n\n"
-            "Quand le compte est créé, clique sur **→**."
+            "**Sur ton téléphone, fais cette séquence :**\n\n"
+            "1️⃣ **Rotate l'IP** : mode avion 10 sec → enlève → remets la 5G\n"
+            "2️⃣ **Crée un Gmail** qui aura comme base le futur nom Insta\n"
+            "3️⃣ **Inscris le Gmail** sur Instagram\n"
+            "4️⃣ **Mets le code reçu** par mail\n"
+            "5️⃣ **Crée un mot de passe** fort\n"
+            "6️⃣ **Mets un name (display)** → fais `/name` ici, je t'en donne un\n"
+            "7️⃣ **Mets un username** → fais `/username` ici, je t'en donne un\n\n"
+            "⚠️ **Numéro US requis** — demande au boss.\n\n"
+            "Quand le compte est créé → clique sur **→** pour passer à la suite."
         ),
     },
     {
-        "title": "Étape 3 — Bio du profil",
+        "title": "⏳ ATTENDRE 24H à 48H",
         "description": (
-            "Fais la commande `/bio` ici.\n\n"
-            "Le bot te donnera une bio aléatoire. Copie-colle-la dans la bio Instagram "
-            "(modifier le profil → bio).\n\n"
-            "Quand c'est fait, clique sur **→**."
+            "**NE FAIS RIEN sur le compte pendant 24 à 48h.**\n\n"
+            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite, "
+            "shadowban garanti.\n\n"
+            "Reviens cliquer sur **→** quand 24-48h sont passées."
         ),
     },
     {
-        "title": "Étape 4 — Photo de profil",
+        "title": "📆 JOUR 1 — Premier engagement + photo de profil",
         "description": (
-            "Fais la commande `/profilepic` ici.\n\n"
-            "Le bot t'enverra une photo. Télécharge-la sur ton téléphone et "
-            "définis-la comme photo de profil Instagram.\n\n"
-            "Quand c'est fait, clique sur **→**."
+            "**Engagement (10-15 min) :**\n"
+            "• Va sur les reels et **swipe naturellement** comme un humain\n"
+            "• Like seulement des **filles** au début (algo doit comprendre ton feed)\n"
+            "• Quand tu tombes sur une **fille OnlyFans**, va sur son profil :\n"
+            "  - Like ses reels\n"
+            "  - Mets un **commentaire humain** (pas \"trop belle mv\" générique — adapte au contenu)\n"
+            "  - Regarde ses stories\n"
+            "  - **Abonne-toi**\n\n"
+            "⚠️ Max **3 abonnements** + max **5-6 commentaires** aujourd'hui.\n\n"
+            "**Photo de profil :** fais `/profilepic` ici → upload sur ton compte Insta.\n\n"
+            "Ferme Insta. Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "Étape 5 — Suivre 5 comptes",
+        "title": "📆 JOUR 2 — Bio + première story + premier post",
         "description": (
-            "Suis **5 comptes** pour amorcer ton profil :\n"
-            "• **Marché FR** si ton audience cible est francophone\n"
-            "• **Marché US** si ton audience cible est anglophone\n\n"
-            "Choisis selon le type de contenu que tu vas publier. Demande au boss "
-            "si tu ne sais pas quel marché viser.\n\n"
-            "Quand c'est fait, clique sur **→**."
+            "• **Interagis 10 min** (5-6 commentaires + max 3 abonnements)\n"
+            "• Ajoute la **bio** → fais `/bio` ici, je t'en donne une\n"
+            "• Poste **1 story** simple (photo ou vidéo neutre)\n"
+            "• **Crée une bulle à la une** appelée **\"me\"** + ajoute ta story dedans\n"
+            "• Poste **1 publication photo** sur le feed avec musique → fais `/post`\n\n"
+            "Quand c'est fait, clique **→**."
         ),
     },
     {
-        "title": "Étape 6 — Warmup",
+        "title": "📆 JOUR 3 — Story + post + premier reel",
         "description": (
-            "Avant de poster, fais un **warmup** pendant 2-3 jours pour que ton compte "
-            "ait l'air naturel :\n\n"
-            "• Like 10-20 posts par jour\n"
-            "• Suis 5-10 nouveaux comptes par jour\n"
-            "• Scrolle des reels naturellement\n"
-            "• Regarde des stories\n\n"
-            "Quand tu es prêt à poster ton premier reel, clique sur **→**."
+            "• **Interagis 10 min** (5-6 commentaires + 3 abonnements)\n"
+            "• Poste **1 story** simple\n"
+            "• **Crée une bulle à la une** appelée **\"life\"** + ajoute ta story dedans\n"
+            "• Poste **1 publication photo** avec musique → fais `/post`\n"
+            "• 🎬 **PUBLIE TON PREMIER REEL entre 18h et 21h** → fais `/reel`\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "Étape 7 — Génération du premier reel 🚀",
+        "title": "📆 JOUR 4 — Carousels + bulle à la une",
         "description": (
-            "Tu y es ! Fais la commande `/reel` ici.\n\n"
-            "Le bot va te générer :\n"
-            "• Une **vidéo** (tirée de ton identité)\n"
-            "• Une **caption** (à mettre par-dessus la vidéo dans Instagram)\n\n"
-            "Télécharge la vidéo, ajoute la caption en overlay (texte dans l'éditeur "
-            "Instagram), publie-la en reel.\n\n"
-            "Tu peux refaire `/reel` à chaque fois que tu veux publier un nouveau reel."
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• Poste **1 story** simple\n"
+            "• **Crée une bulle à la une** appelée **\"travel\"** + ajoute ta story\n"
+            "• **PIN les 3 carousels** (épingle les 3 derniers posts en haut du profil)\n"
+            "• 🎬 **Publie 1 reel entre 18h et 21h** → fais `/reel`\n\n"
+            "Clique **→**."
+        ),
+    },
+    {
+        "title": "📆 JOUR 5 — Remplissage des stories à la une",
+        "description": (
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• **Poste 12 stories** aujourd'hui\n"
+            "• Répartis-les : **4 stories par bulle à la une** (me / life / travel)\n"
+            "• 🎬 **Publie 1 reel à 20h heure française** → fais `/reel`\n\n"
+            "Clique **→** quand t'as fini."
+        ),
+    },
+    {
+        "title": "📆 JOUR 6+ — Routine quotidienne (warmup terminé)",
+        "description": (
+            "**Routine quotidienne à appliquer chaque jour :**\n\n"
+            "• Interagir 2-3 min/jour (commentaire + 3 abonnements)\n"
+            "• **1 story quotidienne**\n"
+            "• 🎬 **1 reel entre 18h et 21h** → fais `/reel`\n"
+            "• **Repost le reel de la veille en story** avec texte CTA\n"
+            "• 📲 **Story CTA + lien redirection** → fais `/storycta` ici\n"
+            "• **Crée une bulle à la une \"LINKS\"** pour stocker les CTAs\n\n"
+            "🎉 **Le warmup est terminé !** À partir de maintenant tu enchaînes la routine "
+            "et tu utilises `/reel`, `/post`, `/story`, `/storycta` quand tu en as besoin.\n\n"
+            "Bon courage 💪"
         ),
     },
 ]
