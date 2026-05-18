@@ -1109,6 +1109,47 @@ class Admin(commands.Cog):
 
     # ---------- PROFILE PICS (shared) ----------
 
+    @app_commands.command(name="addprofilepics", description="Mass upload de photos de profil via zip (pool partagé)")
+    @app_commands.describe(photos_zip="Fichier .zip contenant les photos de profil")
+    async def addprofilepics(self, interaction: discord.Interaction, photos_zip: discord.Attachment):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not photos_zip.filename.lower().endswith(".zip"):
+            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
+            return
+        PROFILE_PICS_DIR.mkdir(parents=True, exist_ok=True)
+        existing = list(PROFILE_PICS_DIR.glob("*"))
+        idx = len(existing) + 1
+        zip_bytes = await photos_zip.read()
+        added = 0
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(zip_bytes)
+            tmp_path = tmp.name
+        try:
+            with zipfile.ZipFile(tmp_path) as zf:
+                for member in zf.namelist():
+                    base = os.path.basename(member)
+                    if not base:
+                        continue
+                    ext = os.path.splitext(base)[1].lower()
+                    if ext not in IMAGE_EXTS:
+                        continue
+                    target = PROFILE_PICS_DIR / f"pp_{idx}{ext}"
+                    while target.exists():
+                        idx += 1
+                        target = PROFILE_PICS_DIR / f"pp_{idx}{ext}"
+                    with zf.open(member) as src, target.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    added += 1
+                    idx += 1
+        finally:
+            os.unlink(tmp_path)
+        await interaction.followup.send(
+            f"✅ {added} photo(s) de profil ajoutée(s) au pool partagé.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="addprofilepic", description="Ajoute une photo de profil au pool partagé")
     @app_commands.describe(image="Photo de profil (jpg/png/webp)")
     async def addprofilepic(self, interaction: discord.Interaction, image: discord.Attachment):
