@@ -571,51 +571,8 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="addvavisiblechannel", description="[ADMIN] Salon que les VAs PEUVENT voir (exception à l'isolation)")
-    @app_commands.describe(channel="Salon à rendre visible aux VAs")
-    async def addvavisiblechannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        if not await self.require_admin(interaction):
-            return
-        cfg = load_welcome_config()
-        lst = cfg.get("extra_visible_channel_ids", [])
-        if channel.id not in lst:
-            lst.append(channel.id)
-        cfg["extra_visible_channel_ids"] = lst
-        save_welcome_config(cfg)
-        await interaction.response.send_message(
-            f"✅ {channel.mention} est maintenant visible aux VAs.\n"
-            f"⚠️ Ne s'applique qu'aux **futurs** VAs. Pour les actuels, fais `/grantvavisibility channel:#x` ou modifie manuellement.",
-            ephemeral=True,
-        )
 
-    @app_commands.command(name="removevavisiblechannel", description="[ADMIN] Retire un salon de la liste visible par les VAs")
-    @app_commands.describe(channel="Salon à cacher de nouveau")
-    async def removevavisiblechannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        if not await self.require_admin(interaction):
-            return
-        cfg = load_welcome_config()
-        lst = cfg.get("extra_visible_channel_ids", [])
-        if channel.id in lst:
-            lst.remove(channel.id)
-        cfg["extra_visible_channel_ids"] = lst
-        save_welcome_config(cfg)
-        await interaction.response.send_message(
-            f"✅ {channel.mention} ne sera plus visible par défaut aux nouveaux VAs.",
-            ephemeral=True,
-        )
 
-    @app_commands.command(name="toggleisolation", description="[ADMIN] Active/désactive l'isolation totale des VAs")
-    @app_commands.describe(enabled="True = VAs voient que leur ticket, False = VAs voient tout par défaut")
-    async def toggleisolation(self, interaction: discord.Interaction, enabled: bool):
-        if not await self.require_admin(interaction):
-            return
-        cfg = load_welcome_config()
-        cfg["hide_all_channels_from_va"] = enabled
-        save_welcome_config(cfg)
-        await interaction.response.send_message(
-            f"✅ Isolation VA : {'activée (anonymat total)' if enabled else 'désactivée'}",
-            ephemeral=True,
-        )
 
     @app_commands.command(name="resetva", description="[ADMIN] Reset complet d'un VA: efface assignation + supprime son salon")
     @app_commands.describe(
@@ -647,29 +604,6 @@ class Welcome(commands.Cog):
             msg += " Salon supprimé."
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @app_commands.command(name="forcerandomidentity", description="[ADMIN] Réassigne aléatoirement l'identité d'un VA")
-    @app_commands.describe(user="Le VA")
-    async def forcerandomidentity(self, interaction: discord.Interaction, user: discord.Member):
-        if not await self.require_admin(interaction):
-            return
-        identities = list_identities()
-        if not identities:
-            await interaction.response.send_message("Aucune identité disponible.", ephemeral=True)
-            return
-        new_identity = random.choice(identities)
-        users = load_users()
-        existing = users.get(str(user.id))
-        if isinstance(existing, dict):
-            existing["identity"] = new_identity
-            users[str(user.id)] = existing
-        else:
-            users[str(user.id)] = {"identity": new_identity, "channel_id": None, "auto_post": True}
-        save_users(users)
-        await interaction.response.send_message(
-            f"✅ {user.mention} réassigné à `{new_identity}` (aléatoire parmi {len(identities)} identités).\n"
-            f"⚠️ Son salon existant reste où il est. Pour le déplacer dans la nouvelle catégorie, refais /adduser ou déplace manuellement.",
-            ephemeral=True,
-        )
 
     @app_commands.command(name="assignmentmode", description="[ADMIN] Mode d'attribution: round_robin (équitable) ou random (aléatoire)")
     @app_commands.describe(mode="round_robin (chacune une fois avant repetition) ou random (aleatoire pur)")
@@ -757,25 +691,6 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="testrandompick", description="[ADMIN] Debug: pick 10 random identités pour vérifier la distribution")
-    async def testrandompick(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        identities = list_identities()
-        if not identities:
-            await interaction.response.send_message("❌ Aucune identité dispo.", ephemeral=True)
-            return
-        picks = [random.choice(identities) for _ in range(10)]
-        from collections import Counter
-        counts = Counter(picks)
-        msg = (
-            f"🎲 **Test random** sur 10 picks parmi `{', '.join(identities)}`\n\n"
-            f"**Résultats:** {' → '.join(picks)}\n\n"
-            f"**Distribution:**\n"
-        )
-        for name, n in counts.most_common():
-            msg += f"• `{name}` : {n}/10\n"
-        await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")
