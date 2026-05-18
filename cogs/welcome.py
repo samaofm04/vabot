@@ -208,7 +208,10 @@ class WelcomeContinueView(discord.ui.View):
                     ephemeral=True,
                 )
                 return
-            # Le salon stocke n'existe plus, on continue pour en creer un nouveau
+            # Le salon stocke n'existe plus -> on traite comme un nouveau VA (clear entry)
+            users.pop(str(interaction.user.id), None)
+            save_users(users)
+            existing = None
 
         # Determiner l'identite : garder existante OU random
         if isinstance(existing, dict) and existing.get("identity"):
