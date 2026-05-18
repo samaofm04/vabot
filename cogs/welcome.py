@@ -93,16 +93,49 @@ def save_pending(pending):
     PENDING_DELETIONS_FILE.write_text(json.dumps(pending, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
+
+
+def load_identities_config():
+    if not IDENTITIES_CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(IDENTITIES_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_identities_config(cfg):
+    IDENTITIES_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    IDENTITIES_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def is_identity_active(name):
+    cfg = load_identities_config()
+    entry = cfg.get(name)
+    if isinstance(entry, dict):
+        return entry.get("enabled", True)
+    return True  # par defaut actif
+
+
 def list_identities():
+    """Toutes les identités existantes (active ou non)."""
     if not IDENTITIES_DIR.exists():
         return []
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+def list_active_identities():
+    """Seulement les identités activées (utilisées pour les nouvelles assignations)."""
+    return [n for n in list_identities() if is_identity_active(n)]
+
+
 def pick_next_identity():
-    """Pick the next identity based on assignment_mode (round_robin par defaut)."""
+    """Pick the next identity based on assignment_mode (round_robin par defaut).
+    N'utilise que les identités actives (enabled).
+    """
     cfg = load_welcome_config()
-    identities = list_identities()
+    identities = list_active_identities()
     if not identities:
         return None
     mode = cfg.get("assignment_mode", "round_robin")
@@ -110,9 +143,9 @@ def pick_next_identity():
         return random.choice(identities)
     # Round robin
     pool = cfg.get("rotation_pool", [])
-    # Filtrer le pool pour ne garder que les identites qui existent encore
+    # Filtrer le pool pour ne garder que les identites actives
     pool = [p for p in pool if p in identities]
-    # Si pool vide ou trop petit, recharger avec toutes les identites melangees
+    # Si pool vide ou trop petit, recharger avec toutes les identites actives melangees
     if not pool:
         pool = list(identities)
         random.shuffle(pool)
@@ -680,6 +713,49 @@ class Welcome(commands.Cog):
         else:
             msg += "Mode random pur : pas de tour à suivre."
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @app_commands.command(name="toggleidentity", description="[ADMIN] Active/désactive une identité (donnees preservees)")
+    @app_commands.describe(name="Nom de l'identité", enabled="True = active, False = désactivée (skip lors des assignations)")
+    async def toggleidentity(self, interaction: discord.Interaction, name: str, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        safe = name.lower().strip()
+        if safe not in list_identities():
+            await interaction.response.send_message(
+                f"Identité `{safe}` introuvable. Voir /listidentites.", ephemeral=True
+            )
+            return
+        cfg = load_identities_config()
+        cfg.setdefault(safe, {})["enabled"] = enabled
+        save_identities_config(cfg)
+        # Aussi nettoyer le pool de rotation
+        welcome_cfg = load_welcome_config()
+        pool = welcome_cfg.get("rotation_pool", [])
+        if not enabled and safe in pool:
+            pool.remove(safe)
+            welcome_cfg["rotation_pool"] = pool
+            save_welcome_config(welcome_cfg)
+        await interaction.response.send_message(
+            f"✅ Identité `{safe}` : {'**activée**' if enabled else '**désactivée** (skip lors des nouvelles assignations)'}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="identitystatus", description="[ADMIN] Voir le statut activé/désactivé de chaque identité")
+    async def identitystatus(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        identities = list_identities()
+        if not identities:
+            await interaction.response.send_message("Aucune identité.", ephemeral=True)
+            return
+        lines = []
+        for n in identities:
+            status = "✅ Active" if is_identity_active(n) else "❌ Désactivée"
+            lines.append(f"• `{n}` — {status}")
+        await interaction.response.send_message(
+            f"**Statut des identités** ({len(identities)})\n" + "\n".join(lines),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="testrandompick", description="[ADMIN] Debug: pick 10 random identités pour vérifier la distribution")
     async def testrandompick(self, interaction: discord.Interaction):
