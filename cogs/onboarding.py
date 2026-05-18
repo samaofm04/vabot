@@ -58,7 +58,7 @@ STEPS = [
         "description": (
             "• **Interagis 10 min** (5-6 commentaires + max 3 abonnements)\n"
             "• Ajoute la **bio** → fais `/bio` ici, je t'en donne une\n"
-            "• Poste **1 story** simple (photo ou vidéo neutre)\n"
+            "• Poste **1 story** simple (photo ou vidéo neutre) → fais `/story`\n"
             "• **Crée une bulle à la une** appelée **\"me\"** + ajoute ta story dedans\n"
             "• Poste **1 publication photo** sur le feed avec musique → fais `/post`\n\n"
             "Quand c'est fait, clique **→**."
@@ -68,7 +68,7 @@ STEPS = [
         "title": "📆 JOUR 3 — Story + post + premier reel",
         "description": (
             "• **Interagis 10 min** (5-6 commentaires + 3 abonnements)\n"
-            "• Poste **1 story** simple\n"
+            "• Poste **1 story** simple → fais `/story`\n"
             "• **Crée une bulle à la une** appelée **\"life\"** + ajoute ta story dedans\n"
             "• Poste **1 publication photo** avec musique → fais `/post`\n"
             "• 🎬 **PUBLIE TON PREMIER REEL entre 18h et 21h** → fais `/reel`\n\n"
@@ -79,7 +79,7 @@ STEPS = [
         "title": "📆 JOUR 4 — Carousels + bulle à la une",
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
-            "• Poste **1 story** simple\n"
+            "• Poste **1 story** simple → fais `/story`\n"
             "• **Crée une bulle à la une** appelée **\"travel\"** + ajoute ta story\n"
             "• **PIN les 3 carousels** (épingle les 3 derniers posts en haut du profil)\n"
             "• 🎬 **Publie 1 reel entre 18h et 21h** → fais `/reel`\n\n"
@@ -90,7 +90,7 @@ STEPS = [
         "title": "📆 JOUR 5 — Remplissage des stories à la une",
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
-            "• **Poste 12 stories** aujourd'hui\n"
+            "• **Poste 12 stories** aujourd'hui → fais `/story` (refais la commande pour chaque story)\n"
             "• Répartis-les : **4 stories par bulle à la une** (me / life / travel)\n"
             "• 🎬 **Publie 1 reel à 20h heure française** → fais `/reel`\n\n"
             "Clique **→** quand t'as fini."
@@ -101,10 +101,10 @@ STEPS = [
         "description": (
             "**Routine quotidienne à appliquer chaque jour :**\n\n"
             "• Interagir 2-3 min/jour (commentaire + 3 abonnements)\n"
-            "• **1 story quotidienne**\n"
+            "• **1 story quotidienne** → fais `/story`\n"
             "• 🎬 **1 reel entre 18h et 21h** → fais `/reel`\n"
             "• **Repost le reel de la veille en story** avec texte CTA\n"
-            "• 📲 **Story CTA + lien redirection** → fais `/storycta` ici\n"
+            "• 📲 **Story CTA + lien redirection** → fais `/storycta`\n"
             "• **Crée une bulle à la une \"LINKS\"** pour stocker les CTAs\n\n"
             "🎉 **Le warmup est terminé !** À partir de maintenant tu enchaînes la routine "
             "et tu utilises `/reel`, `/post`, `/story`, `/storycta` quand tu en as besoin.\n\n"
