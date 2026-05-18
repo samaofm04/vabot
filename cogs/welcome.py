@@ -25,6 +25,8 @@ DEFAULT_WELCOME_CONFIG = {
     "cleanup_days_after_leave": 7,
     "hide_all_channels_from_va": True,  # cache tous les salons aux VAs sauf leur ticket
     "extra_visible_channel_ids": [],  # exceptions: salons que les VAs peuvent voir
+    "assignment_mode": "round_robin",  # "round_robin" ou "random"
+    "rotation_pool": [],  # identites restantes dans le tour actuel
     "welcome_public_message": (
         "👋 **Bienvenue dans l'agence {mention} !**\n\n"
         "Tu es là parce que tu vas bosser avec nous comme VA. "
@@ -95,6 +97,29 @@ def list_identities():
     if not IDENTITIES_DIR.exists():
         return []
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+
+
+def pick_next_identity():
+    """Pick the next identity based on assignment_mode (round_robin par defaut)."""
+    cfg = load_welcome_config()
+    identities = list_identities()
+    if not identities:
+        return None
+    mode = cfg.get("assignment_mode", "round_robin")
+    if mode == "random":
+        return random.choice(identities)
+    # Round robin
+    pool = cfg.get("rotation_pool", [])
+    # Filtrer le pool pour ne garder que les identites qui existent encore
+    pool = [p for p in pool if p in identities]
+    # Si pool vide ou trop petit, recharger avec toutes les identites melangees
+    if not pool:
+        pool = list(identities)
+        random.shuffle(pool)
+    picked = pool.pop(0)
+    cfg["rotation_pool"] = pool
+    save_welcome_config(cfg)
+    return picked
 
 
 def find_identity_category(guild, identity):
@@ -191,13 +216,12 @@ class WelcomeContinueView(discord.ui.View):
         elif isinstance(existing, str):
             identity = existing
         else:
-            identities = list_identities()
-            if not identities:
+            identity = pick_next_identity()
+            if not identity:
                 await interaction.followup.send(
                     "❌ Aucune identité disponible. Préviens un admin.", ephemeral=True
                 )
                 return
-            identity = random.choice(identities)
 
         # Creer le salon
         channel = await create_va_channel(guild, interaction.user, identity)
@@ -610,6 +634,49 @@ class Welcome(commands.Cog):
             f"⚠️ Son salon existant reste où il est. Pour le déplacer dans la nouvelle catégorie, refais /adduser ou déplace manuellement.",
             ephemeral=True,
         )
+
+    @app_commands.command(name="assignmentmode", description="[ADMIN] Mode d'attribution: round_robin (équitable) ou random (aléatoire)")
+    @app_commands.describe(mode="round_robin (chacune une fois avant repetition) ou random (aleatoire pur)")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="round_robin (équitable)", value="round_robin"),
+        app_commands.Choice(name="random (aléatoire pur)", value="random"),
+    ])
+    async def assignmentmode(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        cfg["assignment_mode"] = mode.value
+        if mode.value == "round_robin":
+            # Reset le pool
+            cfg["rotation_pool"] = []
+        save_welcome_config(cfg)
+        if mode.value == "round_robin":
+            explanation = "Chaque identité sera attribuée une fois avant qu'aucune ne soit ré-utilisée."
+        else:
+            explanation = "Tirage aléatoire pur (peut répéter)."
+        await interaction.response.send_message(
+            f"✅ Mode d'attribution : **{mode.name}**\n{explanation}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="rotationstatus", description="[ADMIN] Voir l'état du round-robin (identités restantes dans le tour)")
+    async def rotationstatus(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        identities = list_identities()
+        pool = cfg.get("rotation_pool", [])
+        pool = [p for p in pool if p in identities]
+        mode = cfg.get("assignment_mode", "round_robin")
+        msg = f"⚙️ **Mode :** `{mode}`\n\n"
+        if mode == "round_robin":
+            if pool:
+                msg += f"**Identités restantes dans ce tour** ({len(pool)}) : `{', '.join(pool)}`"
+            else:
+                msg += "🔄 Pool vide. Au prochain VA, le tour repart avec toutes les identités."
+        else:
+            msg += "Mode random pur : pas de tour à suivre."
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="testrandompick", description="[ADMIN] Debug: pick 10 random identités pour vérifier la distribution")
     async def testrandompick(self, interaction: discord.Interaction):

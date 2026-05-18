@@ -1320,7 +1320,7 @@ class Admin(commands.Cog):
             )
             return
         users = load_json(USERS_FILE, {})
-        # Si user a deja une identite, on la garde. Sinon, random.
+        # Si user a deja une identite, on la garde. Sinon, round-robin via welcome cog.
         existing = users.get(str(user.id))
         if isinstance(existing, dict) and existing.get("identity"):
             identity = existing["identity"]
@@ -1329,7 +1329,8 @@ class Admin(commands.Cog):
             identity = existing
             existing_data = None
         else:
-            identity = random.choice(identities)
+            from cogs.welcome import pick_next_identity
+            identity = pick_next_identity() or random.choice(identities)
             existing_data = None
         users[str(user.id)] = {
             "identity": identity,
