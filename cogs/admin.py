@@ -630,7 +630,7 @@ class Admin(commands.Cog):
             return
         await interaction.response.send_message(
             f"📤 **Étape 1/3 — Vidéo CLEAN**\n"
-            f"Envoie la vidéo CLEAN comme attachement dans ce salon. *(60 sec)*"
+            f"Envoie la vidéo CLEAN comme attachement dans ce salon. *(2 min)*"
         )
         user_id = interaction.user.id
         channel_id = interaction.channel.id
@@ -643,9 +643,54 @@ class Admin(commands.Cog):
                 and len(m.attachments) > 0
             )
 
+        # ----- Helper view: bouton → de confirmation -----
+        class NextView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=180)
+                self.confirmed = False
+
+            @discord.ui.button(label="→ Suivant", style=discord.ButtonStyle.primary)
+            async def next_btn(self, btn_inter: discord.Interaction, button: discord.ui.Button):
+                if btn_inter.user.id != user_id:
+                    await btn_inter.response.send_message("C'est pas pour toi.", ephemeral=True)
+                    return
+                self.confirmed = True
+                await btn_inter.response.defer()
+                self.stop()
+
+        class NextOrSkipView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=180)
+                self.confirmed = False
+                self.skipped = False
+                self.event = _asyncio.Event()
+
+            @discord.ui.button(label="→ Suivant", style=discord.ButtonStyle.primary)
+            async def next_btn(self, btn_inter: discord.Interaction, button: discord.ui.Button):
+                if btn_inter.user.id != user_id:
+                    await btn_inter.response.send_message("Pas pour toi.", ephemeral=True)
+                    return
+                self.confirmed = True
+                await btn_inter.response.defer()
+                self.event.set()
+                self.stop()
+
+            @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.secondary)
+            async def skip_btn(self, btn_inter: discord.Interaction, button: discord.ui.Button):
+                if btn_inter.user.id != user_id:
+                    await btn_inter.response.send_message("Pas pour toi.", ephemeral=True)
+                    return
+                self.skipped = True
+                await btn_inter.response.defer()
+                self.event.set()
+                self.stop()
+
+            async def on_timeout(self):
+                self.event.set()
+
         # ETAPE 1 : video clean
         try:
-            m1 = await self.bot.wait_for("message", check=is_user_attachment, timeout=60)
+            m1 = await self.bot.wait_for("message", check=is_user_attachment, timeout=120)
         except _asyncio.TimeoutError:
             await interaction.followup.send("⏱️ Timeout. Refais /addreel.", ephemeral=True)
             return
@@ -670,24 +715,57 @@ class Admin(commands.Cog):
         except Exception:
             pass
 
-        # ETAPE 2 : video exemple (optionnel)
+        # Confirmation étape 1 avec bouton →
+        view1 = NextView()
+        await interaction.followup.send(
+            f"✅ Vidéo CLEAN reçue : `{clean_video.filename}`\nClique **→ Suivant** pour passer à la vidéo exemple.",
+            view=view1,
+        )
+        await view1.wait()
+        if not view1.confirmed:
+            await interaction.followup.send("⏱️ Timeout. Vidéo clean conservée, mais le reste est annulé.", ephemeral=True)
+            return
+
+        # ETAPE 2 : video exemple (optionnel) - race entre attachment et bouton Skip
+        view2 = NextOrSkipView()
         await interaction.followup.send(
             f"📤 **Étape 2/3 — Vidéo EXEMPLE** (optionnel)\n"
-            f"Envoie la vidéo exemple maintenant OU attends 30 sec pour skip."
+            f"Envoie la vidéo exemple OU clique **⏭️ Skip**.",
+            view=view2,
         )
-        try:
-            m2 = await self.bot.wait_for("message", check=is_user_attachment, timeout=30)
-            ex_video = m2.attachments[0]
-            ex_ext = os.path.splitext(ex_video.filename)[1].lower()
-            if ex_ext in VIDEO_EXTS:
-                ex_target = videos_dir / f"{target.stem}.example{ex_ext}"
-                ex_target.write_bytes(await ex_video.read())
-                try:
-                    await m2.add_reaction("✅")
-                except Exception:
-                    pass
-        except _asyncio.TimeoutError:
-            pass
+
+        msg_task = _asyncio.create_task(
+            self.bot.wait_for("message", check=is_user_attachment, timeout=180)
+        )
+        event_task = _asyncio.create_task(view2.event.wait())
+        done, pending = await _asyncio.wait(
+            {msg_task, event_task}, return_when=_asyncio.FIRST_COMPLETED
+        )
+        for t in pending:
+            t.cancel()
+
+        if msg_task in done:
+            try:
+                m2 = msg_task.result()
+                ex_video = m2.attachments[0]
+                ex_ext = os.path.splitext(ex_video.filename)[1].lower()
+                if ex_ext in VIDEO_EXTS:
+                    ex_target = videos_dir / f"{target.stem}.example{ex_ext}"
+                    ex_target.write_bytes(await ex_video.read())
+                    try:
+                        await m2.add_reaction("✅")
+                    except Exception:
+                        pass
+                    # Confirmer puis demander à passer
+                    view2b = NextView()
+                    await interaction.followup.send(
+                        f"✅ Vidéo EXEMPLE reçue : `{ex_video.filename}`\nClique **→ Suivant**.",
+                        view=view2b,
+                    )
+                    await view2b.wait()
+            except Exception:
+                pass
+        # Sinon skipped ou timeout, on continue
 
         # ETAPE 3 : caption + description via modal
         stem = target.stem
