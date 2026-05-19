@@ -436,7 +436,7 @@ class Welcome(commands.Cog):
     async def before_check_deletions(self):
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="setwelcomechannel", description="[ADMIN] Définit le salon où arrivera le welcome auto")
+    @app_commands.command(name="setwelcomechannel", description="[ADMIN] Définit le salon où arrivera le welcome auto + configure perms")
     @app_commands.describe(channel="Le salon (laisse vide pour utiliser le salon courant)")
     async def setwelcomechannel(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
         if not await self.require_admin(interaction):
@@ -445,8 +445,26 @@ class Welcome(commands.Cog):
         cfg = load_welcome_config()
         cfg["welcome_channel_id"] = target.id
         save_welcome_config(cfg)
+        perms_msg = ""
+        try:
+            await target.set_permissions(
+                target.guild.default_role,
+                view_channel=True,
+                read_message_history=False,
+                send_messages=False,
+                reason="Welcome channel : pas d'historique pour les nouveaux membres",
+            )
+            perms_msg = (
+                "\n✅ Permissions ajustées :\n"
+                "  • @everyone voit le salon\n"
+                "  • @everyone **ne voit PAS l'historique** (les nouveaux VAs ne verront pas les anciens welcomes)\n"
+                "  • @everyone ne peut **pas écrire**"
+            )
+        except Exception as e:
+            perms_msg = f"\n⚠️ Impossible de configurer les permissions : {e}"
         await interaction.response.send_message(
-            f"✅ Salon welcome auto : {target.mention}", ephemeral=True
+            f"✅ Salon welcome auto : {target.mention}{perms_msg}",
+            ephemeral=True,
         )
 
     @app_commands.command(name="setticketintro", description="[ADMIN] Modifie le message d'intro dans le ticket VA (\\n pour retour ligne, {mention} pour @user)")
