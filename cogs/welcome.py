@@ -299,6 +299,13 @@ class WelcomeContinueView(discord.ui.View):
                 except Exception:
                     pass
 
+        # Supprimer le message welcome public maintenant que le VA a son ticket
+        try:
+            if interaction.message:
+                await interaction.message.delete()
+        except Exception:
+            pass
+
         # Confirmer au VA
         await interaction.followup.send(
             f"✅ Ton salon a été créé : {channel.mention}\nRends-toi là-bas pour commencer.",
@@ -450,15 +457,14 @@ class Welcome(commands.Cog):
             await target.set_permissions(
                 target.guild.default_role,
                 view_channel=True,
-                read_message_history=False,
+                read_message_history=True,
                 send_messages=False,
-                reason="Welcome channel : pas d'historique pour les nouveaux membres",
+                reason="Welcome channel: read-only pour @everyone",
             )
             perms_msg = (
-                "\n✅ Permissions ajustées :\n"
-                "  • @everyone voit le salon\n"
-                "  • @everyone **ne voit PAS l'historique** (les nouveaux VAs ne verront pas les anciens welcomes)\n"
-                "  • @everyone ne peut **pas écrire**"
+                "\n✅ Permissions @everyone : voit le salon mais ne peut **pas écrire**.\n"
+                "💡 Les messages de bienvenue s'auto-suppriment quand un VA clique sur Continuer "
+                "→ le salon reste propre, les nouveaux VAs ne voient que leur message."
             )
         except Exception as e:
             perms_msg = f"\n⚠️ Impossible de configurer les permissions : {e}"
@@ -709,6 +715,36 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+
+    @app_commands.command(name="cleanwelcomechannel", description="[ADMIN] Supprime tous les anciens messages du salon welcome")
+    async def cleanwelcomechannel(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        channel_id = cfg.get("welcome_channel_id")
+        if not channel_id:
+            await interaction.response.send_message("Aucun salon welcome configuré.", ephemeral=True)
+            return
+        channel = interaction.guild.get_channel(channel_id)
+        if not channel:
+            await interaction.response.send_message("Salon welcome introuvable.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        deleted = 0
+        try:
+            async for msg in channel.history(limit=200):
+                try:
+                    await msg.delete()
+                    deleted += 1
+                except Exception:
+                    pass
+        except Exception as e:
+            await interaction.followup.send(f"Erreur : {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ {deleted} message(s) supprimés de {channel.mention}.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")
