@@ -617,62 +617,141 @@ class Admin(commands.Cog):
 
     # ---------- REELS (vidéo + caption pair) ----------
 
-    @app_commands.command(name="addreel", description="Ajoute un reel à une identité")
-    @app_commands.describe(
-        identity="Nom de l'identité",
-        video="Vidéo CLEAN (à télécharger par le VA)",
-        example_video="Vidéo EXEMPLE du rendu final (optionnel)",
-        caption="Caption à mettre EN OVERLAY sur la vidéo (optionnel, \\n = retour ligne)",
-        description="Description du post Instagram (optionnel, \\n = retour ligne)"
-    )
-    async def addreel(
-        self,
-        interaction: discord.Interaction,
-        identity: str,
-        video: discord.Attachment,
-        example_video: discord.Attachment = None,
-        caption: str = None,
-        description: str = None,
-    ):
+    @app_commands.command(name="addreel", description="Ajoute un reel étape par étape (guidé)")
+    @app_commands.describe(identity="Nom de l'identité")
+    async def addreel(self, interaction: discord.Interaction, identity: str):
         if not await self.require_admin(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
         safe = sanitize_identity_name(identity)
         if not (IDENTITIES_DIR / safe).exists():
-            await interaction.followup.send(f"Identité `{safe}` introuvable. Crée-la avec /addidentite.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Identité `{safe}` introuvable. Crée-la avec /addidentite.", ephemeral=True
+            )
             return
-        ext = os.path.splitext(video.filename)[1].lower()
+        await interaction.response.send_message(
+            f"📤 **Étape 1/3 — Vidéo CLEAN**\n"
+            f"Envoie la vidéo CLEAN comme attachement dans ce salon. *(60 sec)*"
+        )
+        user_id = interaction.user.id
+        channel_id = interaction.channel.id
+        import asyncio as _asyncio
+
+        def is_user_attachment(m):
+            return (
+                m.author.id == user_id
+                and m.channel.id == channel_id
+                and len(m.attachments) > 0
+            )
+
+        # ETAPE 1 : video clean
+        try:
+            m1 = await self.bot.wait_for("message", check=is_user_attachment, timeout=60)
+        except _asyncio.TimeoutError:
+            await interaction.followup.send("⏱️ Timeout. Refais /addreel.", ephemeral=True)
+            return
+        clean_video = m1.attachments[0]
+        ext = os.path.splitext(clean_video.filename)[1].lower()
         if ext not in VIDEO_EXTS:
-            await interaction.followup.send("Format vidéo non supporté.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Ce n'est pas une vidéo. Refais /addreel.", ephemeral=True
+            )
             return
         videos_dir = identity_videos_dir(safe)
         videos_dir.mkdir(parents=True, exist_ok=True)
-        target = videos_dir / video.filename
+        target = videos_dir / clean_video.filename
         if target.exists():
-            await interaction.followup.send(f"Fichier `{video.filename}` existe déjà.", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ `{clean_video.filename}` existe déjà.", ephemeral=True
+            )
             return
-        target.write_bytes(await video.read())
-        extras = []
-        if caption:
-            caption_path_for(target).write_text(caption, encoding="utf-8")
-            extras.append("caption")
-        if description:
-            description_path_for(target).write_text(description, encoding="utf-8")
-            extras.append("description")
-        if example_video:
-            ex_ext = os.path.splitext(example_video.filename)[1].lower()
-            if ex_ext not in VIDEO_EXTS:
-                await interaction.followup.send(
-                    f"Vidéo enregistrée mais format de la vidéo exemple ({ex_ext}) non supporté.",
+        target.write_bytes(await clean_video.read())
+        try:
+            await m1.add_reaction("✅")
+        except Exception:
+            pass
+
+        # ETAPE 2 : video exemple (optionnel)
+        await interaction.followup.send(
+            f"📤 **Étape 2/3 — Vidéo EXEMPLE** (optionnel)\n"
+            f"Envoie la vidéo exemple maintenant OU attends 30 sec pour skip."
+        )
+        try:
+            m2 = await self.bot.wait_for("message", check=is_user_attachment, timeout=30)
+            ex_video = m2.attachments[0]
+            ex_ext = os.path.splitext(ex_video.filename)[1].lower()
+            if ex_ext in VIDEO_EXTS:
+                ex_target = videos_dir / f"{target.stem}.example{ex_ext}"
+                ex_target.write_bytes(await ex_video.read())
+                try:
+                    await m2.add_reaction("✅")
+                except Exception:
+                    pass
+        except _asyncio.TimeoutError:
+            pass
+
+        # ETAPE 3 : caption + description via modal
+        stem = target.stem
+        clean_filename = clean_video.filename
+
+        class CapDescModal(discord.ui.Modal, title="Caption + Description"):
+            caption_input = discord.ui.TextInput(
+                label="Caption (overlay sur la vidéo)",
+                style=discord.TextStyle.short,
+                placeholder="Ex: POV: j'ai fait la maline...",
+                required=False,
+                max_length=500,
+            )
+            description_input = discord.ui.TextInput(
+                label="Description (texte du post Insta)",
+                style=discord.TextStyle.long,
+                placeholder="Ex: Ouais bon... #fyp",
+                required=False,
+                max_length=2000,
+            )
+
+            async def on_submit(self, modal_interaction: discord.Interaction):
+                cap = self.caption_input.value.strip()
+                desc = self.description_input.value.strip()
+                extras = []
+                if cap:
+                    (videos_dir / f"{stem}.txt").write_text(cap, encoding="utf-8")
+                    extras.append("caption")
+                if desc:
+                    (videos_dir / f"{stem}.desc.txt").write_text(desc, encoding="utf-8")
+                    extras.append("description")
+                suffix = f" + {' + '.join(extras)}" if extras else ""
+                await modal_interaction.response.send_message(
+                    f"✅ Reel `{clean_filename}` ajouté à `{safe}`{suffix} !", ephemeral=True
+                )
+
+        class OpenModalView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=180)
+
+            @discord.ui.button(
+                label="📝 Ajouter caption + description",
+                style=discord.ButtonStyle.primary,
+            )
+            async def open_modal(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                if btn_interaction.user.id != user_id:
+                    await btn_interaction.response.send_message("C'est pas pour toi.", ephemeral=True)
+                    return
+                await btn_interaction.response.send_modal(CapDescModal())
+
+            @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.secondary)
+            async def skip_btn(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                if btn_interaction.user.id != user_id:
+                    await btn_interaction.response.send_message("C'est pas pour toi.", ephemeral=True)
+                    return
+                await btn_interaction.response.send_message(
+                    f"✅ Reel `{clean_filename}` ajouté à `{safe}` (sans caption/description).",
                     ephemeral=True,
                 )
-                return
-            ex_target = videos_dir / f"{target.stem}.example{ex_ext}"
-            ex_target.write_bytes(await example_video.read())
-            extras.append("exemple")
-        suffix = f" + {' + '.join(extras)}" if extras else ""
+
         await interaction.followup.send(
-            f"✅ Reel `{video.filename}` ajouté à `{safe}`{suffix}.", ephemeral=True
+            f"📝 **Étape 3/3 — Caption & Description**\n"
+            f"Clique pour saisir les textes, ou skip.",
+            view=OpenModalView(),
         )
 
     @app_commands.command(name="setreelexample", description="Ajoute/remplace la vidéo exemple d'un reel")
@@ -704,6 +783,120 @@ class Admin(commands.Cog):
         await interaction.followup.send(
             f"✅ Vidéo exemple mise à jour pour `{video_filename}`.", ephemeral=True
         )
+
+    @app_commands.command(name="addreels", description="Bulk upload de reels avec captions/descriptions en fichiers séparés")
+    @app_commands.describe(
+        identity="Nom de l'identité",
+        videos_zip="Zip contenant les vidéos (les .example.mp4 dans le zip sont aussi pris)",
+        captions_file="Optionnel: .txt avec 1 caption par ligne (ou séparées par '---'). Assigné aux vidéos dans l'ordre alphabétique.",
+        descriptions_file="Optionnel: .txt avec les descriptions séparées par '---'. Assigné aux vidéos dans l'ordre alphabétique.",
+    )
+    async def addreels(
+        self,
+        interaction: discord.Interaction,
+        identity: str,
+        videos_zip: discord.Attachment,
+        captions_file: discord.Attachment = None,
+        descriptions_file: discord.Attachment = None,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        safe = sanitize_identity_name(identity)
+        if not (IDENTITIES_DIR / safe).exists():
+            await interaction.followup.send(f"Identité `{safe}` introuvable.", ephemeral=True)
+            return
+        if not videos_zip.filename.lower().endswith(".zip"):
+            await interaction.followup.send("Le fichier doit être un .zip", ephemeral=True)
+            return
+        videos_dir = identity_videos_dir(safe)
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        zip_bytes = await videos_zip.read()
+        videos_added = []  # liste des videos ajoutees (pour pairing avec captions/descriptions)
+        videos = examples = captions = descriptions = skipped = 0
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(zip_bytes)
+            tmp_path = tmp.name
+        try:
+            with zipfile.ZipFile(tmp_path) as zf:
+                for member in zf.namelist():
+                    base = os.path.basename(member)
+                    if not base:
+                        continue
+                    target = videos_dir / base
+                    if target.exists():
+                        skipped += 1
+                        continue
+                    lower = base.lower()
+                    if lower.endswith(".desc.txt"):
+                        target.write_bytes(zf.read(member))
+                        descriptions += 1
+                    elif lower.endswith(".txt"):
+                        target.write_bytes(zf.read(member))
+                        captions += 1
+                    elif is_example_video_filename(base):
+                        with zf.open(member) as src, target.open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        examples += 1
+                    else:
+                        ext = os.path.splitext(base)[1].lower()
+                        if ext in VIDEO_EXTS:
+                            with zf.open(member) as src, target.open("wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                            videos += 1
+                            videos_added.append(target)
+        finally:
+            os.unlink(tmp_path)
+
+        # Helper pour parser un .txt en liste (split par '---' si présent, sinon par lignes)
+        def _parse_list(content):
+            if "\n---\n" in content or content.strip().startswith("---") or "---" in content.splitlines():
+                return [s.strip() for s in content.split("---") if s.strip()]
+            return [l.strip() for l in content.splitlines() if l.strip()]
+
+        # Trier les videos par nom (alphabetique) pour pairing
+        videos_added.sort(key=lambda p: p.name.lower())
+
+        # Pair captions
+        if captions_file:
+            try:
+                cap_content = (await captions_file.read()).decode("utf-8", errors="ignore")
+                cap_list = _parse_list(cap_content)
+                for i, video_path in enumerate(videos_added):
+                    if i >= len(cap_list):
+                        break
+                    cap_path = video_path.with_suffix(".txt")
+                    if not cap_path.exists():
+                        cap_path.write_text(cap_list[i], encoding="utf-8")
+                        captions += 1
+            except Exception:
+                pass
+
+        # Pair descriptions
+        if descriptions_file:
+            try:
+                desc_content = (await descriptions_file.read()).decode("utf-8", errors="ignore")
+                desc_list = _parse_list(desc_content)
+                for i, video_path in enumerate(videos_added):
+                    if i >= len(desc_list):
+                        break
+                    desc_path = video_path.with_suffix(".desc.txt")
+                    if not desc_path.exists():
+                        desc_path.write_text(desc_list[i], encoding="utf-8")
+                        descriptions += 1
+            except Exception:
+                pass
+
+        msg = (
+            f"✅ Ajouté à `{safe}` :\n"
+            f"• **{videos}** vidéo(s) clean\n"
+            f"• **{examples}** vidéo(s) exemple\n"
+            f"• **{captions}** caption(s)\n"
+            f"• **{descriptions}** description(s)"
+        )
+        if skipped:
+            msg += f"\n⚠️ {skipped} fichier(s) ignorés (nom déjà existant)"
+        await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(name="setreelcaption", description="Définit la caption (overlay) d'un reel")
     @app_commands.describe(
