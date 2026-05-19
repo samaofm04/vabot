@@ -66,4 +66,11 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN manquant dans .env")
     log.info("=== Demarrage du bot (force-resync v3) ===")
+    # Lancer le mini site web d'upload dans un thread separe
+    try:
+        from web_upload import start_in_thread
+        start_in_thread()
+        log.info("Mini site web demarre sur le port 8080")
+    except Exception as e:
+        log.warning(f"Impossible de demarrer le mini site web : {e}")
     bot.run(TOKEN, log_handler=None)
