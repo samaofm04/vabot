@@ -1,6 +1,17 @@
 import re
+import os
+import json
+import logging
+from pathlib import Path
 import discord
+from discord import app_commands
 from discord.ext import commands
+
+log = logging.getLogger("vabot.onboarding")
+
+DATA_DIR = Path("data")
+ONBOARDING_MEDIA_DIR = DATA_DIR / "onboarding_media"
+WHITELIST_FILE = DATA_DIR / "whitelist.json"
 
 STEPS = [
     {
@@ -125,6 +136,41 @@ def step_embed(index: int) -> discord.Embed:
     return embed
 
 
+def step_media_dir(index: int) -> Path:
+    """Dossier où sont stockés les médias de l'étape <index>."""
+    d = ONBOARDING_MEDIA_DIR / f"step_{index + 1}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_step_media(index: int) -> list:
+    """Retourne la liste des fichiers média (chemins) pour l'étape <index>."""
+    d = step_media_dir(index)
+    return sorted([p for p in d.iterdir() if p.is_file()])
+
+
+async def send_step_media(channel: discord.abc.Messageable, index: int):
+    """Envoie les médias attachés à l'étape <index> dans le salon (s'il y en a)."""
+    files = list_step_media(index)
+    if not files:
+        return
+    # Discord limite : 10 fichiers max par message
+    batch = []
+    for p in files:
+        try:
+            batch.append(discord.File(str(p), filename=p.name))
+            if len(batch) == 10:
+                await channel.send(files=batch)
+                batch = []
+        except Exception as e:
+            log.error(f"Erreur lecture media {p}: {e}")
+    if batch:
+        try:
+            await channel.send(files=batch)
+        except Exception as e:
+            log.error(f"Erreur envoi medias step {index+1}: {e}")
+
+
 class OnboardingView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -151,14 +197,156 @@ class OnboardingView(discord.ui.View):
         new_embed = step_embed(next_index)
         view = None if next_index == len(STEPS) - 1 else OnboardingView()
         await interaction.response.send_message(embed=new_embed, view=view)
+        # Envoyer les medias de l'etape (si presents)
+        try:
+            await send_step_media(interaction.channel, next_index)
+        except Exception as e:
+            log.error(f"Erreur send_step_media step {next_index+1}: {e}")
 
 
 class Onboarding(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._owner_id = None
 
     async def cog_load(self):
         self.bot.add_view(OnboardingView())
+
+    async def get_owner_id(self):
+        if self._owner_id is None:
+            app = await self.bot.application_info()
+            self._owner_id = app.owner.id
+        return self._owner_id
+
+    async def is_admin(self, user_id):
+        if user_id == await self.get_owner_id():
+            return True
+        if WHITELIST_FILE.exists():
+            try:
+                wl = json.loads(WHITELIST_FILE.read_text(encoding="utf-8"))
+                return user_id in wl
+            except Exception:
+                pass
+        return False
+
+    async def require_admin(self, interaction):
+        if not await self.is_admin(interaction.user.id):
+            msg = "Tu n'es pas autorisé."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
+
+    @app_commands.command(
+        name="setonboardingmedia",
+        description="[ADMIN] Ajoute une vidéo/photo à une étape d'onboarding",
+    )
+    @app_commands.describe(
+        step="Numéro de l'étape (1 = bienvenue, 2 = jour 0, etc.)",
+        media="Le fichier à attacher (vidéo, image)",
+    )
+    async def setonboardingmedia(
+        self,
+        interaction: discord.Interaction,
+        step: int,
+        media: discord.Attachment,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        if step < 1 or step > len(STEPS):
+            await interaction.response.send_message(
+                f"Étape invalide. Doit être entre 1 et {len(STEPS)}.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        index = step - 1
+        d = step_media_dir(index)
+        # Eviter collision de nom
+        target = d / media.filename
+        i = 1
+        while target.exists():
+            stem, ext = os.path.splitext(media.filename)
+            target = d / f"{stem}_{i}{ext}"
+            i += 1
+        try:
+            await media.save(str(target))
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur sauvegarde : {e}", ephemeral=True)
+            return
+        title = STEPS[index]["title"]
+        count = len(list_step_media(index))
+        await interaction.followup.send(
+            f"✅ Média ajouté à l'étape **{step}** ({title})\n"
+            f"📎 `{target.name}`\n"
+            f"📊 Cette étape a maintenant **{count}** média(s).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="listonboardingmedia",
+        description="[ADMIN] Liste les médias attachés à chaque étape d'onboarding",
+    )
+    async def listonboardingmedia(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        lines = []
+        for i, s in enumerate(STEPS):
+            files = list_step_media(i)
+            short_title = s["title"][:55]
+            if files:
+                names = ", ".join(f"`{f.name}`" for f in files)
+                lines.append(f"**{i+1}.** {short_title} — **{len(files)}** média(s) : {names}")
+            else:
+                lines.append(f"**{i+1}.** {short_title} — *aucun média*")
+        msg = "📚 **Médias onboarding par étape**\n\n" + "\n".join(lines)
+        await interaction.response.send_message(msg[:1990], ephemeral=True)
+
+    @app_commands.command(
+        name="clearonboardingmedia",
+        description="[ADMIN] Supprime TOUS les médias d'une étape",
+    )
+    @app_commands.describe(step="Numéro de l'étape à vider")
+    async def clearonboardingmedia(self, interaction: discord.Interaction, step: int):
+        if not await self.require_admin(interaction):
+            return
+        if step < 1 or step > len(STEPS):
+            await interaction.response.send_message(
+                f"Étape invalide. Doit être entre 1 et {len(STEPS)}.", ephemeral=True
+            )
+            return
+        index = step - 1
+        files = list_step_media(index)
+        deleted = 0
+        for p in files:
+            try:
+                p.unlink()
+                deleted += 1
+            except Exception:
+                pass
+        await interaction.response.send_message(
+            f"✅ Étape **{step}** vidée : **{deleted}** média(s) supprimé(s).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="testonboardingstep",
+        description="[ADMIN] Affiche une étape d'onboarding ici (preview avec médias)",
+    )
+    @app_commands.describe(step="Numéro de l'étape à prévisualiser")
+    async def testonboardingstep(self, interaction: discord.Interaction, step: int):
+        if not await self.require_admin(interaction):
+            return
+        if step < 1 or step > len(STEPS):
+            await interaction.response.send_message(
+                f"Étape invalide. Doit être entre 1 et {len(STEPS)}.", ephemeral=True
+            )
+            return
+        index = step - 1
+        embed = step_embed(index)
+        await interaction.response.send_message(embed=embed)
+        await send_step_media(interaction.channel, index)
 
 
 async def setup(bot):

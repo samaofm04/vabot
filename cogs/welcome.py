@@ -196,11 +196,15 @@ class StartOnboardingView(discord.ui.View):
     )
     async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Verifier que c'est bien le VA proprietaire du salon qui clique
-        from cogs.onboarding import step_embed, OnboardingView
+        from cogs.onboarding import step_embed, OnboardingView, send_step_media
         embed = step_embed(0)
         await interaction.response.send_message(
             content=interaction.user.mention, embed=embed, view=OnboardingView()
         )
+        try:
+            await send_step_media(interaction.channel, 0)
+        except Exception:
+            pass
 
 
 class WelcomeContinueView(discord.ui.View):
