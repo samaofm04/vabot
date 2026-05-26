@@ -477,20 +477,6 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="setticketintro", description="[ADMIN] Modifie le message d'intro dans le ticket VA (\\n pour retour ligne, {mention} pour @user)")
-    @app_commands.describe(message="Nouveau message complet du ticket")
-    async def setticketintro(self, interaction: discord.Interaction, message: str):
-        if not await self.require_admin(interaction):
-            return
-        cfg = load_welcome_config()
-        cfg["ticket_intro_message"] = message
-        save_welcome_config(cfg)
-        preview = message.replace("\\n", "\n").replace("{mention}", interaction.user.mention)
-        await interaction.response.send_message(
-            f"✅ Message ticket mis à jour. Preview :\n\n{preview[:1800]}",
-            ephemeral=True,
-        )
-
     @app_commands.command(name="setwelcomemessage", description="[ADMIN] Modifie le message de bienvenue public (\\n pour retour ligne)")
     @app_commands.describe(message="Nouveau message complet du welcome public")
     async def setwelcomemessage(self, interaction: discord.Interaction, message: str):
@@ -719,36 +705,6 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
-
-    @app_commands.command(name="cleanwelcomechannel", description="[ADMIN] Supprime tous les anciens messages du salon welcome")
-    async def cleanwelcomechannel(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        cfg = load_welcome_config()
-        channel_id = cfg.get("welcome_channel_id")
-        if not channel_id:
-            await interaction.response.send_message("Aucun salon welcome configuré.", ephemeral=True)
-            return
-        channel = interaction.guild.get_channel(channel_id)
-        if not channel:
-            await interaction.response.send_message("Salon welcome introuvable.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        deleted = 0
-        try:
-            async for msg in channel.history(limit=200):
-                try:
-                    await msg.delete()
-                    deleted += 1
-                except Exception:
-                    pass
-        except Exception as e:
-            await interaction.followup.send(f"Erreur : {e}", ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"✅ {deleted} message(s) supprimés de {channel.mention}.",
-            ephemeral=True,
-        )
 
     @app_commands.command(name="welcometest", description="[ADMIN] Simule l'arrivée d'un membre")
     @app_commands.describe(user="Sur quel user simuler (défaut: toi)")

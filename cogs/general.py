@@ -12,12 +12,6 @@ class General(commands.Cog):
         latency_ms = round(self.bot.latency * 1000)
         await interaction.response.send_message(f"Pong! {latency_ms}ms")
 
-    @app_commands.command(name="hello", description="Dit bonjour au VA")
-    async def hello(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            f"Salut {interaction.user.mention}, prêt à bosser ?"
-        )
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(General(bot))
