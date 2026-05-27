@@ -71,9 +71,60 @@ def random_bio_for(identity):
     return None
 
 
+def _list_clean_videos(identity):
+    """Liste les videos clean (hors .example) d'une identite."""
+    videos_dir = IDENTITIES_DIR / identity / "videos"
+    if not videos_dir.exists():
+        return []
+    return [
+        p for p in videos_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in VIDEO_EXTS
+        and not p.stem.lower().endswith(".example")
+    ]
+
+
+def _video_meta(video):
+    """Retourne (caption, description, example_path) pour une video donnee."""
+    caption_path = video.with_suffix(".txt")
+    desc_path = video.with_suffix(".desc.txt")
+    caption = None
+    description = None
+    if caption_path.exists():
+        try:
+            caption = caption_path.read_text(encoding="utf-8").strip().replace("\\n", "\n")
+        except Exception:
+            pass
+    if desc_path.exists():
+        try:
+            description = desc_path.read_text(encoding="utf-8").strip().replace("\\n", "\n")
+        except Exception:
+            pass
+    example = None
+    for ext in VIDEO_EXTS:
+        candidate = video.parent / f"{video.stem}.example{ext}"
+        if candidate.exists():
+            example = candidate
+            break
+    return caption, description, example
+
+
+def random_n_reels_for(identity, n: int):
+    """Pioche n reels uniques (sans remise). Retourne une liste de tuples
+    (video, caption, description, example). Liste peut etre plus courte si pas assez.
+    """
+    videos = _list_clean_videos(identity)
+    if not videos:
+        return []
+    n = min(n, len(videos))
+    picked = random.sample(videos, n)
+    return [(v, *_video_meta(v)) for v in picked]
+
+
 def random_reel_for(identity):
     """Pick random clean video + caption + description + example_path|None.
     Returns (Path, caption|None, description|None, example_Path|None).
+    Conserve pour la compatibilite (autopost.send_reel etc.).
     """
     videos_dir = IDENTITIES_DIR / identity / "videos"
     if not videos_dir.exists():
@@ -380,8 +431,13 @@ class UserCog(commands.Cog):
                 except Exception:
                     pass
 
-    @app_commands.command(name="reel", description="Génère un reel: vidéo clean (transformée) + caption + description + exemple")
-    async def reel(self, interaction: discord.Interaction):
+    @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
+    @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
+    async def reel(
+        self,
+        interaction: discord.Interaction,
+        nombre: app_commands.Range[int, 1, 10] = 3,
+    ):
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -389,8 +445,8 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        video, caption, description, example = random_reel_for(identity)
-        if not video:
+        reels = random_n_reels_for(identity, nombre)
+        if not reels:
             await interaction.response.send_message(
                 f"Aucune vidéo pour ton identité `{identity}`. Demande à un admin.",
                 ephemeral=True,
@@ -398,16 +454,22 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
 
-        # Transformation video DESACTIVEE - envoi de la video originale telle quelle
         transform_cfg = load_transform_config()
-        transformed_path = None
-        tmp_dir = None
-        try:
-            video_to_send = video  # toujours envoyer l'original
+        total = len(reels)
+        if total < nombre:
+            await interaction.followup.send(
+                f"ℹ️ Seulement **{total}** reels disponibles pour `{identity}` "
+                f"(tu en as demande {nombre}). Envoi des {total} disponibles."
+            )
 
-            intro = f"🎬 **REEL — identité `{identity}`**\n📥 Télécharge la vidéo CLEAN."
+        for idx, (video, caption, description, example) in enumerate(reels, start=1):
+            intro = (
+                f"🎬 **REEL {idx}/{total} — identité `{identity}`**\n"
+                f"📥 Télécharge la vidéo CLEAN."
+            )
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
+            video_to_send = video  # toujours envoyer l'original
             files = [discord.File(video_to_send, filename=video.name)]
             if example:
                 files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
@@ -422,16 +484,14 @@ class UserCog(commands.Cog):
                         )
                     except discord.HTTPException:
                         await interaction.followup.send(
-                            f"Impossible d'envoyer la vidéo (probablement trop lourde): {e}",
-                            ephemeral=True,
+                            f"⚠️ Reel {idx}: impossible d'envoyer (trop lourd): {e}"
                         )
-                        return
+                        continue
                 else:
                     await interaction.followup.send(
-                        f"Impossible d'envoyer la vidéo (probablement trop lourde): {e}",
-                        ephemeral=True,
+                        f"⚠️ Reel {idx}: impossible d'envoyer (trop lourd): {e}"
                     )
-                    return
+                    continue
             if caption:
                 await interaction.followup.send(caption)
             if description:
@@ -441,22 +501,12 @@ class UserCog(commands.Cog):
             if transform_cfg.get("delete_source_after_use", False):
                 try:
                     video.unlink(missing_ok=True)
-                    # Supprimer aussi caption/description associées
                     cap_p = video.with_suffix(".txt")
                     desc_p = video.with_suffix(".desc.txt")
                     cap_p.unlink(missing_ok=True)
                     desc_p.unlink(missing_ok=True)
-                    # Supprimer l'exemple paire si existe
                     if example:
                         example.unlink(missing_ok=True)
-                except Exception:
-                    pass
-        finally:
-            # Nettoyage du fichier transformé temporaire
-            if tmp_dir:
-                try:
-                    import shutil
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
                 except Exception:
                     pass
 
