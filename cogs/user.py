@@ -457,12 +457,12 @@ class UserCog(commands.Cog):
         transform_cfg = load_transform_config()
         total = len(reels)
 
-        # Message d'intro CLAIR : ce sont des options, pas a poster en serie
+        # Message d'intro CLAIR : la regle des 1 reel par compte
         intro_global = (
-            f"🎬 **{total} reels disponibles pour `{identity}`** — voici tes options du jour.\n\n"
-            f"⚠️ **IMPORTANT : poste UN SEUL reel par compte aujourd'hui, pas plus.**\n"
-            f"Choisis celui que tu prefere parmi les {total}, ignore les autres.\n"
-            f"Si tu en postes plusieurs sur le meme compte, Instagram va shadowban."
+            f"🎬 **{total} options de reels pour `{identity}`**\n\n"
+            f"🚨 **RÈGLE : 1 SEUL REEL PAR COMPTE.**\n"
+            f"Choisis-en 1 parmi les {total}, ignore les autres.\n"
+            f"Plusieurs reels sur le même compte = shadowban."
         )
         await interaction.followup.send(intro_global)
 
