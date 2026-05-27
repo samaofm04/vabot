@@ -457,12 +457,13 @@ class UserCog(commands.Cog):
         transform_cfg = load_transform_config()
         total = len(reels)
 
-        # Message d'intro CLAIR : la regle des 1 reel par compte
+        # Message d'intro CLAIR : 1 reel different par compte
         intro_global = (
-            f"🎬 **{total} options de reels pour `{identity}`**\n\n"
-            f"🚨 **RÈGLE : 1 SEUL REEL PAR COMPTE.**\n"
-            f"Choisis-en 1 parmi les {total}, ignore les autres.\n"
-            f"Plusieurs reels sur le même compte = shadowban."
+            f"🎬 **{total} reels pour `{identity}` — {total} comptes**\n\n"
+            f"🚨 **RÈGLE : 1 reel différent par compte.**\n"
+            f"Poste **REEL 1** sur ton **compte 1**, **REEL 2** sur le **compte 2**, "
+            f"**REEL 3** sur le **compte 3**.\n"
+            f"⚠️ NE POSTE JAMAIS le même reel sur 2 comptes → duplicate content = shadowban."
         )
         await interaction.followup.send(intro_global)
 
@@ -474,8 +475,8 @@ class UserCog(commands.Cog):
 
         for idx, (video, caption, description, example) in enumerate(reels, start=1):
             intro = (
-                f"🎬 **OPTION {idx}/{total}** — identité `{identity}`\n"
-                f"📥 Si tu choisis celui-ci, télécharge la vidéo CLEAN."
+                f"🎬 **REEL {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
+                f"📥 Télécharge la vidéo CLEAN."
             )
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
