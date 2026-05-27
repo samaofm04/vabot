@@ -378,6 +378,12 @@ class Welcome(commands.Cog):
         if not channel:
             log.warning(f"on_member_join: welcome_channel_id={channel_id} introuvable")
             return
+        # Si le member a deja eu un override perso (ex: ancien VA revenu), le supprimer
+        # sinon il ne pourra pas voir l'historique du salon welcome
+        try:
+            await channel.set_permissions(member, overwrite=None, reason="Reset override au rejoin")
+        except Exception:
+            pass
         try:
             text = cfg["welcome_public_message"].replace("\\n", "\n").format(mention=member.mention)
             await channel.send(content=text, view=WelcomeContinueView())
