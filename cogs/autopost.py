@@ -240,7 +240,12 @@ async def send_storycta(channel, identity):
             tmp_path = Path(tmp_dir) / image.name
             if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
                 send_path = tmp_path
-        intro = f"📲 **STORY CTA — identité `{identity}`**\n📥 Télécharge la photo + écris la caption dessus."
+        intro = (
+            f"📲 **STORY CTA — identité `{identity}`**\n"
+            f"📥 Télécharge la photo + écris la caption dessus.\n\n"
+            f"🕖 **À POSTER LE SOIR ENTRE 19H ET 23H** — c'est le créneau "
+            f"où tes clics convertissent le mieux 💰"
+        )
         try:
             await channel.send(content=intro, file=discord.File(send_path))
         except discord.HTTPException:
