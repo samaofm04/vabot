@@ -35,15 +35,38 @@ DEFAULT_WELCOME_CONFIG = {
         "↓"
     ),
     "ticket_intro_message": (
-        "🎫 **Voilà ton salon perso {mention} !**\n\n"
-        "Ici tu auras toutes les infos dont tu as besoin pour bosser :\n"
-        "💰 **Paiement** : 50% par reel posté (à définir avec le boss)\n"
-        "📅 **Rythme** : 1 reel + 1 post + 1 story par jour minimum\n"
-        "📩 **Questions** : DM le boss directement\n\n"
-        "Quand tu es prêt, clique sur **Commencer l'onboarding** pour démarrer le tutoriel "
-        "étape par étape (création du compte, bio, photo de profil, etc.).\n\n"
+        "🎫 **Bienvenue {mention} !**\n\n"
+        "Voici comment fonctionne le **paiement** dans l'agence :\n\n"
+        "💰 **PAIEMENT PRINCIPAL** *(clics FR/jour, payés tous les 1 et 16 du mois)*\n"
+        "• 50 clics/jour → **30 $**\n"
+        "• 100 clics/jour → **50 $**\n"
+        "• 200 clics/jour → **75 $**\n"
+        "• 500 clics/jour → **150 $**\n"
+        "• 1 000 clics/jour → **300 $**\n"
+        "*+ paliers supérieurs pour très gros volumes.*\n\n"
+        "🎁 **BONUS CLICS** *(comptés sur chaque période 1→15 / 16→fin du mois)*\n"
+        "• 500 clics → **+20 $**\n"
+        "• 1 000 clics → **+30 $**\n"
+        "• 2 000 clics → **+50 $**\n"
+        "*Au-delà de 2 000 clics : +20 $ tous les 1 000 clics supplémentaires, sans limite.*\n\n"
+        "📈 **BONUS ABONNÉS**\n"
+        "• 600 abonnés gagnés → **+15 $**\n"
+        "• 2 000 abonnés → **+20 $**\n"
+        "• 5 000 abonnés → **+30 $**\n"
+        "*Et plus de bonus à chaque palier supérieur.*\n\n"
+        "Les primes dépendent des **performances réelles** du compte : publications, reels, "
+        "activité, croissance et engagement. Plus le compte performe grâce à ton travail, "
+        "plus tu débloques de récompenses.\n\n"
+        "**En résumé :**\n"
+        "✅ Tu gagnes grâce aux clics\n"
+        "✅ Tu débloques des bonus grâce aux performances\n"
+        "✅ Plus les chiffres montent, plus les primes augmentent\n\n"
+        "Clique sur **🎬 Commencer l'onboarding** ci-dessous quand tu es prêt.\n\n"
         "↓"
     ),
+    # Version de la config: incrementer pour forcer la mise a jour d'un message
+    # cote VPS au prochain demarrage du bot (migration automatique).
+    "config_version": 2,
 }
 
 
@@ -53,6 +76,17 @@ def load_welcome_config():
         return dict(DEFAULT_WELCOME_CONFIG)
     try:
         cfg = json.loads(WELCOME_CONFIG_FILE.read_text(encoding="utf-8"))
+        # Migration: si la config sauvegardee a une version plus ancienne,
+        # on force la reecriture des champs "message" pour appliquer les nouveaux
+        # textes par defaut. Apres migration on bump la version.
+        current_version = cfg.get("config_version", 1)
+        target_version = DEFAULT_WELCOME_CONFIG.get("config_version", 1)
+        if current_version < target_version:
+            cfg["ticket_intro_message"] = DEFAULT_WELCOME_CONFIG["ticket_intro_message"]
+            cfg["welcome_public_message"] = DEFAULT_WELCOME_CONFIG["welcome_public_message"]
+            cfg["config_version"] = target_version
+            save_welcome_config(cfg)
+            log.info(f"welcome_config migre de v{current_version} -> v{target_version}")
         merged = dict(DEFAULT_WELCOME_CONFIG)
         merged.update(cfg)
         return merged
