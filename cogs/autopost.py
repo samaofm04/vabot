@@ -293,6 +293,55 @@ async def run_autopost_for_all(bot):
     return count, errors
 
 
+async def run_broadcast(
+    bot,
+    identity_filter: str = None,
+    n_reels: int = 0,
+    n_posts: int = 0,
+    n_stories: int = 0,
+    n_storyctas: int = 0,
+):
+    """Envoie N de chaque type a chaque VA correspondant (ou tous si filter=None).
+
+    Retourne (nb_vas_touches, nb_erreurs).
+    """
+    users = load_users()
+    count = 0
+    errors = 0
+    for user_id_str, raw_data in users.items():
+        if isinstance(raw_data, str):
+            identity = raw_data
+            channel_id = None
+            auto_enabled = True
+        else:
+            identity = raw_data.get("identity")
+            channel_id = raw_data.get("channel_id")
+            auto_enabled = raw_data.get("auto_post", True)
+        if not auto_enabled or not channel_id or not identity:
+            continue
+        # Filtre par identite si specifie (comparaison case-insensitive)
+        if identity_filter and identity.lower() != identity_filter.lower():
+            continue
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            log.warning(f"Broadcast: channel {channel_id} introuvable pour {user_id_str}")
+            continue
+        try:
+            for _ in range(n_reels):
+                await send_reel(channel, identity)
+            for _ in range(n_posts):
+                await send_post(channel, identity)
+            for _ in range(n_stories):
+                await send_story(channel, identity)
+            for _ in range(n_storyctas):
+                await send_storycta(channel, identity)
+            count += 1
+        except Exception as e:
+            log.error(f"Broadcast erreur pour user {user_id_str}: {e}")
+            errors += 1
+    return count, errors
+
+
 class AutoPost(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -418,14 +467,60 @@ class AutoPost(commands.Cog):
             f"✅ Auto-post `{content_type}` : {'activé' if enabled else 'désactivé'}", ephemeral=True
         )
 
-    @app_commands.command(name="autoposttest", description="Lance MAINTENANT un run d'auto-post pour tous les VAs")
-    async def autoposttest(self, interaction: discord.Interaction):
+    @app_commands.command(
+        name="broadcast",
+        description="[ADMIN] Envoie N reels/posts/stories/storyctas a tous les VAs (filtre par identite)",
+    )
+    @app_commands.describe(
+        identite="Si specifie, envoie SEULEMENT aux VAs de cette identite (ex: julia). Vide = tous.",
+        reels="Nombre de reels a envoyer a chaque VA (defaut 0)",
+        posts="Nombre de posts photo a envoyer a chaque VA (defaut 0)",
+        stories="Nombre de stories a envoyer a chaque VA (defaut 0)",
+        storyctas="Nombre de story CTAs a envoyer a chaque VA (defaut 0)",
+    )
+    async def broadcast(
+        self,
+        interaction: discord.Interaction,
+        identite: str = None,
+        reels: app_commands.Range[int, 0, 20] = 0,
+        posts: app_commands.Range[int, 0, 20] = 0,
+        stories: app_commands.Range[int, 0, 20] = 0,
+        storyctas: app_commands.Range[int, 0, 20] = 0,
+    ):
         if not await self.require_admin(interaction):
             return
+        total = reels + posts + stories + storyctas
+        if total == 0:
+            await interaction.response.send_message(
+                "Tu dois specifier au moins un type de contenu (reels / posts / stories / storyctas > 0).\n"
+                "Exemple: `/broadcast identite:julia reels:3 stories:3 storyctas:1`",
+                ephemeral=True,
+            )
+            return
+        if total > 30:
+            await interaction.response.send_message(
+                f"Trop d'items demandes ({total}). Limite: 30 par VA pour eviter le spam.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.defer(ephemeral=True)
-        count, errors = await run_autopost_for_all(self.bot)
+        filtre_msg = f"identite **{identite}**" if identite else "**tous les VAs**"
         await interaction.followup.send(
-            f"✅ Auto-post test terminé : **{count}** VAs traités, **{errors}** erreurs.",
+            f"🚀 Broadcast en cours sur {filtre_msg} : "
+            f"{reels} reels + {posts} posts + {stories} stories + {storyctas} CTAs par VA...",
+            ephemeral=True,
+        )
+        count, errors = await run_broadcast(
+            self.bot,
+            identity_filter=identite,
+            n_reels=reels,
+            n_posts=posts,
+            n_stories=stories,
+            n_storyctas=storyctas,
+        )
+        await interaction.followup.send(
+            f"✅ Broadcast termine : **{count}** VAs touches, **{errors}** erreur(s).\n"
+            f"Total envois : ~{count * total} items.",
             ephemeral=True,
         )
 
