@@ -19,6 +19,24 @@ USERS_FILE = DATA_DIR / "users.json"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 WELCOME_CONFIG_FILE = DATA_DIR / "welcome_config.json"
 PENDING_DELETIONS_FILE = DATA_DIR / "pending_deletions.json"
+INTRO_IMAGES_DIR = DATA_DIR / "intro_images"  # photos attachees a l'intro paiement
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+def list_intro_images():
+    """Retourne la liste triee des fichiers image du dossier intro_images."""
+    if not INTRO_IMAGES_DIR.exists():
+        return []
+    return sorted(
+        p for p in INTRO_IMAGES_DIR.iterdir()
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+    )
+
+
+def build_intro_files():
+    """Construit la liste de discord.File pour les photos d'intro (max 10)."""
+    return [discord.File(str(p)) for p in list_intro_images()[:10]]
 
 DEFAULT_WELCOME_CONFIG = {
     "welcome_channel_id": None,
@@ -314,10 +332,11 @@ class WelcomeContinueView(discord.ui.View):
         }
         save_users(users)
 
-        # Envoyer le message intro dans le salon
+        # Envoyer le message intro dans le salon (avec photos optionnelles)
         cfg = load_welcome_config()
         intro_text = cfg["ticket_intro_message"].replace("\\n", "\n").format(mention=interaction.user.mention)
-        await channel.send(content=intro_text, view=StartOnboardingView())
+        files = build_intro_files()
+        await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
 
         # IMPORTANT: cacher TOUS les salons au VA sauf son ticket (anonymat total)
         if cfg.get("hide_all_channels_from_va", True):
@@ -756,6 +775,115 @@ class Welcome(commands.Cog):
         await interaction.response.send_message(
             f"✅ Welcome simulé pour {target.mention}", ephemeral=True
         )
+
+    @app_commands.command(
+        name="intropics",
+        description="[ADMIN] Gere les photos attachees au message intro paiement",
+    )
+    @app_commands.describe(
+        action="Action: add (ajouter), list (lister), remove (supprimer 1), clear (tout effacer)",
+        image="Photo (requis si action=add)",
+        name="Nom de fichier (requis si action=remove, vu via action=list)",
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="add", value="add"),
+        app_commands.Choice(name="list", value="list"),
+        app_commands.Choice(name="remove", value="remove"),
+        app_commands.Choice(name="clear", value="clear"),
+    ])
+    async def intropics(
+        self,
+        interaction: discord.Interaction,
+        action: app_commands.Choice[str],
+        image: discord.Attachment = None,
+        name: str = None,
+    ):
+        if not await self.require_admin(interaction):
+            return
+        act = action.value
+
+        if act == "add":
+            if image is None:
+                await interaction.response.send_message(
+                    "Tu dois fournir une photo dans le parametre `image`.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True)
+            ext = Path(image.filename).suffix.lower()
+            if ext not in IMAGE_EXTS:
+                await interaction.followup.send(
+                    f"Format non supporte. Accepte: {', '.join(sorted(IMAGE_EXTS))}",
+                    ephemeral=True,
+                )
+                return
+            INTRO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+            existing = list_intro_images()
+            if len(existing) >= 10:
+                await interaction.followup.send(
+                    "Max 10 photos (limite Discord). Fais `/intropics action:clear` ou remove.",
+                    ephemeral=True,
+                )
+                return
+            next_index = len(existing) + 1
+            safe_name = f"{next_index:02d}_{Path(image.filename).name}"
+            (INTRO_IMAGES_DIR / safe_name).write_bytes(await image.read())
+            await interaction.followup.send(
+                f"✅ Photo ajoutee: `{safe_name}` ({len(existing) + 1}/10).",
+                ephemeral=True,
+            )
+            return
+
+        if act == "list":
+            images = list_intro_images()
+            if not images:
+                await interaction.response.send_message(
+                    "Aucune photo d'intro configuree.", ephemeral=True
+                )
+                return
+            lines = [
+                f"{i+1}. `{p.name}` ({p.stat().st_size // 1024} Ko)"
+                for i, p in enumerate(images)
+            ]
+            await interaction.response.send_message(
+                f"**Photos intro paiement** ({len(images)}/10):\n" + "\n".join(lines),
+                ephemeral=True,
+            )
+            return
+
+        if act == "remove":
+            if not name:
+                await interaction.response.send_message(
+                    "Tu dois fournir le nom de fichier dans `name`. Vois la liste avec action=list.",
+                    ephemeral=True,
+                )
+                return
+            target = INTRO_IMAGES_DIR / name
+            if not target.exists() or not target.is_file():
+                await interaction.response.send_message(
+                    f"`{name}` introuvable.", ephemeral=True
+                )
+                return
+            try:
+                target.unlink()
+            except Exception as e:
+                await interaction.response.send_message(f"Erreur: {e}", ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f"✅ `{name}` supprimee.", ephemeral=True
+            )
+            return
+
+        if act == "clear":
+            images = list_intro_images()
+            for p in images:
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            await interaction.response.send_message(
+                f"✅ {len(images)} photo(s) supprimee(s).", ephemeral=True
+            )
+            return
 
 
 async def setup(bot):
