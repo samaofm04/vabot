@@ -150,25 +150,39 @@ def list_step_media(index: int) -> list:
 
 
 async def send_step_media(channel: discord.abc.Messageable, index: int):
-    """Envoie les médias attachés à l'étape <index> dans le salon (s'il y en a)."""
+    """Envoie les médias attachés à l'étape <index> dans le salon (s'il y en a).
+
+    Envoie chaque fichier individuellement pour pouvoir reporter precisement
+    quel fichier echoue (taille > 25 Mo, format, etc.) au lieu d'echouer en silence.
+    """
     files = list_step_media(index)
     if not files:
         return
-    # Discord limite : 10 fichiers max par message
-    batch = []
+    # Limite Discord serveur non-boost : 25 Mo. On garde un peu de marge.
+    MAX_SIZE = 25 * 1024 * 1024
     for p in files:
         try:
-            batch.append(discord.File(str(p), filename=p.name))
-            if len(batch) == 10:
-                await channel.send(files=batch)
-                batch = []
+            size = p.stat().st_size
         except Exception as e:
-            log.error(f"Erreur lecture media {p}: {e}")
-    if batch:
+            await channel.send(f"⚠️ Impossible de lire `{p.name}` : {e}")
+            continue
+        if size > MAX_SIZE:
+            await channel.send(
+                f"⚠️ `{p.name}` fait **{size / (1024*1024):.1f} Mo**, "
+                f"au-dessus de la limite Discord (25 Mo). "
+                f"Compresse-la en mp4 (ex: HandBrake) puis ré-upload."
+            )
+            continue
         try:
-            await channel.send(files=batch)
+            await channel.send(file=discord.File(str(p), filename=p.name))
+        except discord.HTTPException as e:
+            await channel.send(
+                f"⚠️ Echec envoi `{p.name}` ({size / (1024*1024):.1f} Mo) : "
+                f"{getattr(e, 'text', str(e))[:200]}"
+            )
         except Exception as e:
-            log.error(f"Erreur envoi medias step {index+1}: {e}")
+            log.error(f"Erreur inattendue envoi media {p}: {e}")
+            await channel.send(f"⚠️ Erreur inattendue sur `{p.name}` : {str(e)[:200]}")
 
 
 class OnboardingView(discord.ui.View):
@@ -291,16 +305,31 @@ class Onboarding(commands.Cog):
     async def listonboardingmedia(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
             return
+        MAX_SIZE = 25 * 1024 * 1024
         lines = []
         for i, s in enumerate(STEPS):
             files = list_step_media(i)
             short_title = s["title"][:55]
             if files:
-                names = ", ".join(f"`{f.name}`" for f in files)
-                lines.append(f"**{i+1}.** {short_title} — **{len(files)}** média(s) : {names}")
+                parts = []
+                for f in files:
+                    try:
+                        size_mo = f.stat().st_size / (1024 * 1024)
+                        marker = "❌" if f.stat().st_size > MAX_SIZE else "✅"
+                        parts.append(f"{marker} `{f.name}` ({size_mo:.1f} Mo)")
+                    except Exception:
+                        parts.append(f"⚠️ `{f.name}` (illisible)")
+                lines.append(
+                    f"**{i+1}.** {short_title} — **{len(files)}** média(s) :\n  "
+                    + "\n  ".join(parts)
+                )
             else:
                 lines.append(f"**{i+1}.** {short_title} — *aucun média*")
-        msg = "📚 **Médias onboarding par étape**\n\n" + "\n".join(lines)
+        msg = (
+            "📚 **Médias onboarding par étape**\n"
+            "✅ = OK pour Discord (≤25 Mo) | ❌ = trop lourd, sera refuse\n\n"
+            + "\n".join(lines)
+        )
         await interaction.response.send_message(msg[:1990], ephemeral=True)
 
     @app_commands.command(
