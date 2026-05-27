@@ -456,16 +456,26 @@ class UserCog(commands.Cog):
 
         transform_cfg = load_transform_config()
         total = len(reels)
+
+        # Message d'intro CLAIR : ce sont des options, pas a poster en serie
+        intro_global = (
+            f"🎬 **{total} reels disponibles pour `{identity}`** — voici tes options du jour.\n\n"
+            f"⚠️ **IMPORTANT : poste UN SEUL reel par compte aujourd'hui, pas plus.**\n"
+            f"Choisis celui que tu prefere parmi les {total}, ignore les autres.\n"
+            f"Si tu en postes plusieurs sur le meme compte, Instagram va shadowban."
+        )
+        await interaction.followup.send(intro_global)
+
         if total < nombre:
             await interaction.followup.send(
                 f"ℹ️ Seulement **{total}** reels disponibles pour `{identity}` "
-                f"(tu en as demande {nombre}). Envoi des {total} disponibles."
+                f"(tu en as demande {nombre})."
             )
 
         for idx, (video, caption, description, example) in enumerate(reels, start=1):
             intro = (
-                f"🎬 **REEL {idx}/{total} — identité `{identity}`**\n"
-                f"📥 Télécharge la vidéo CLEAN."
+                f"🎬 **OPTION {idx}/{total}** — identité `{identity}`\n"
+                f"📥 Si tu choisis celui-ci, télécharge la vidéo CLEAN."
             )
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
