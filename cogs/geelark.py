@@ -1,13 +1,12 @@
 """GeeLark integration : push media (reels/stories/storyctas) to cloud phones.
 
-Le flow simple (V1) :
-- Les medias sont deja stockes sur le VPS (data/identities/{identity}/videos|stories|storyctas/)
-  via les commandes existantes (/setreelexample, /addstory, /addstorycta)
-- /geelark push :
-  1. Pioche au hasard les medias demandes pour l'identite
-  2. Upload chaque fichier sur litterbox.catbox.moe (72h, public, gratuit)
-  3. Passe l'URL litterbox a l'API GeeLark
-  4. Chaque phone du groupe telecharge le fichier via cette URL
+V2 features :
+- /geelarkpush avec autocomplete sur groupe (API GeeLark) et identite (data locales)
+- Si parametres heure/minute fournis : SCHEDULE quotidien (heure de Paris)
+- Mode SEQUENTIEL : start phone -> attend running -> upload -> stop -> phone suivante
+  (contourne le rate-limit "Too many requests for selected phone version")
+- Background loop tasks.loop(minutes=1) qui declenche les schedules
+- Storage litterbox.catbox.moe pour rendre les fichiers locaux du VPS accessibles via URL
 
 Credentials :
 - GEELARK_BEARER dans le .env du VPS
@@ -17,25 +16,41 @@ import json
 import logging
 import os
 import random
+import uuid
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import discord
 import requests
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 log = logging.getLogger("vabot.geelark")
 
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
+SCHEDULES_FILE = DATA_DIR / "geelark_schedules.json"
 
 GEELARK_BASE = "https://openapi.geelark.com"
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
-LITTERBOX_EXPIRY = "72h"  # 1h, 12h, 24h ou 72h
+LITTERBOX_EXPIRY = "72h"
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+# Status GeeLark : 2 = stopped. Les phones running ont un autre code.
+PHONE_STOPPED_STATUS = 2
+
+# Polling / timeouts
+MAX_WAIT_RUNNING_SEC = 90    # combien on attend qu'une phone passe de stopped a running
+POLL_INTERVAL_SEC = 5        # tous les X sec on re-check le statut
+
+try:
+    from zoneinfo import ZoneInfo
+    PARIS_TZ = ZoneInfo("Europe/Paris")
+except ImportError:
+    PARIS_TZ = timezone(timedelta(hours=1))
 
 
 def sanitize_identity_name(name: str) -> str:
@@ -45,14 +60,12 @@ def sanitize_identity_name(name: str) -> str:
 # ---- Selection des fichiers locaux ----------------------------------------
 
 def list_example_reels(identity: str) -> list[Path]:
-    """Liste les fichiers `.example.*` (videos pretes a poster) d'une identite."""
     d = IDENTITIES_DIR / sanitize_identity_name(identity) / "videos"
     if not d.exists():
         return []
     return sorted([
         p for p in d.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in VIDEO_EXTS
+        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
         and p.stem.lower().endswith(".example")
     ])
 
@@ -63,8 +76,7 @@ def list_stories(identity: str) -> list[Path]:
         return []
     return sorted([
         p for p in d.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in IMAGE_EXTS
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
         and not p.stem.lower().endswith(".example")
     ])
 
@@ -90,11 +102,6 @@ def pick_n_unique(items: list[Path], n: int) -> list[Path]:
 # ---- Litterbox upload -----------------------------------------------------
 
 def litterbox_upload_sync(file_path: Path) -> str:
-    """Uploade un fichier local sur litterbox.catbox.moe.
-
-    Retourne l'URL publique du fichier (valide 72h).
-    Raise RuntimeError si l'upload echoue.
-    """
     if not file_path.exists() or not file_path.is_file():
         raise RuntimeError(f"Fichier introuvable : {file_path}")
     size_mo = file_path.stat().st_size / (1024 * 1024)
@@ -164,7 +171,6 @@ def gl_list_phones_in_group(group_name: str, max_count: int = 500) -> list[dict]
 
 
 def gl_list_all_groups() -> list[dict]:
-    """Liste tous les groupes GeeLark (paginated, max 200)."""
     groups = []
     page = 1
     while len(groups) < 200:
@@ -183,21 +189,6 @@ def gl_list_all_groups() -> list[dict]:
     return groups
 
 
-def gl_count_phones_per_group_cache():
-    """Cache local des phones par groupe (TTL court via fonction sync simple)."""
-    counts = {}
-    try:
-        # Recup 1ere page de phones avec gros pageSize (suffit pour la plupart)
-        _, body = gl_call_sync("/open/v1/phone/list", {"page": 1, "pageSize": 200})
-        if body.get("code") == 0:
-            for it in body.get("data", {}).get("items", []):
-                gname = (it.get("group") or {}).get("name") or "(Ungrouped)"
-                counts[gname] = counts.get(gname, 0) + 1
-    except Exception:
-        pass
-    return counts
-
-
 def gl_upload_file_to_phone(phone_id: str, file_url: str, file_name: str | None = None) -> dict:
     payload = {"id": str(phone_id), "fileUrl": file_url}
     if file_name:
@@ -206,12 +197,53 @@ def gl_upload_file_to_phone(phone_id: str, file_url: str, file_name: str | None 
     return body
 
 
+def gl_start_phone(phone_id: str) -> dict:
+    _, body = gl_call_sync("/open/v1/phone/start", {"ids": [str(phone_id)]})
+    return body
+
+
+def gl_stop_phone(phone_id: str) -> dict:
+    _, body = gl_call_sync("/open/v1/phone/stop", {"ids": [str(phone_id)]})
+    return body
+
+
+def gl_get_phone_status(phone_id: str) -> int | None:
+    """Retourne le status int d'un phone (None si pas trouve). Status 2 = stopped."""
+    _, body = gl_call_sync("/open/v1/phone/list", {"page": 1, "pageSize": 200})
+    if body.get("code") != 0:
+        return None
+    for it in body.get("data", {}).get("items", []):
+        if str(it.get("id")) == str(phone_id):
+            return it.get("status")
+    return None
+
+
+# ---- Persistance des schedules --------------------------------------------
+
+def load_schedules() -> list:
+    if not SCHEDULES_FILE.exists():
+        return []
+    try:
+        return json.loads(SCHEDULES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_schedules(items: list):
+    SCHEDULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SCHEDULES_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 # ---- Cog Discord ----------------------------------------------------------
 
 class GeeLark(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._owner_id = None
+        self.scheduler_loop.start()
+
+    def cog_unload(self):
+        self.scheduler_loop.cancel()
 
     async def get_owner_id(self):
         if self._owner_id is None:
@@ -240,16 +272,170 @@ class GeeLark(commands.Cog):
             return False
         return True
 
+    # ============================================================
+    # Coeur : prepare les URLs litterbox a partir de l'identite locale
+    # ============================================================
+
+    async def _prepare_urls(self, identite: str, reels: int, stories: int, storyctas: int) -> tuple[list[tuple[str, str]], str]:
+        """Pioche les fichiers locaux + upload sur litterbox.
+
+        Retourne (list de (url, filename), message d'erreur ou "").
+        """
+        reel_files = pick_n_unique(list_example_reels(identite), reels)
+        story_files = pick_n_unique(list_stories(identite), stories)
+        cta_files = pick_n_unique(list_storyctas(identite), storyctas)
+
+        missing = []
+        safe = sanitize_identity_name(identite)
+        if reels > 0 and not reel_files:
+            missing.append(f"reels example (`data/identities/{safe}/videos/*.example.*`)")
+        if stories > 0 and not story_files:
+            missing.append(f"stories (`data/identities/{safe}/stories/`)")
+        if storyctas > 0 and not cta_files:
+            missing.append(f"storyctas (`data/identities/{safe}/storyctas/`)")
+        if missing:
+            return [], f"Fichiers manquants pour `{identite}` :\n• " + "\n• ".join(missing)
+
+        all_files = reel_files + story_files + cta_files
+        urls = []
+        for f in all_files:
+            try:
+                url = await asyncio.to_thread(litterbox_upload_sync, f)
+                urls.append((url, f.name))
+            except Exception as e:
+                return [], f"Upload litterbox echoue pour `{f.name}` : {str(e)[:300]}"
+        return urls, ""
+
+    # ============================================================
+    # Sequential push : 1 phone a la fois (start -> wait -> upload -> stop)
+    # ============================================================
+
+    async def _push_sequential(
+        self,
+        phones: list[dict],
+        urls: list[tuple[str, str]],
+        progress_send=None,
+    ) -> dict:
+        """Lance les uploads en mode sequentiel (1 phone a la fois).
+
+        progress_send: callable async (str) -> None pour reporter le progress
+        (peut etre None pour mode silencieux).
+
+        Retourne un dict {ok, failed, started_failed, upload_failed, failures}.
+        """
+        async def progress(msg: str):
+            if progress_send:
+                try:
+                    await progress_send(msg)
+                except Exception:
+                    pass
+
+        ok_count = 0
+        upload_failed_count = 0
+        started_failed_count = 0
+        failures = []
+
+        for idx, phone in enumerate(phones, start=1):
+            phone_id = phone["id"]
+            phone_label = phone.get("serialName", phone_id)
+
+            # 1) Demarrer la phone
+            try:
+                start_res = await asyncio.to_thread(gl_start_phone, phone_id)
+            except Exception as e:
+                started_failed_count += 1
+                if len(failures) < 8:
+                    failures.append(f"{phone_label}: start exception ({str(e)[:60]})")
+                continue
+            if start_res.get("code") != 0:
+                started_failed_count += 1
+                if len(failures) < 8:
+                    failures.append(f"{phone_label}: start KO ({start_res.get('msg', '?')[:60]})")
+                continue
+            data = start_res.get("data", {})
+            if data.get("failAmount", 0) > 0:
+                fdets = data.get("failDetails", [{}])
+                started_failed_count += 1
+                if len(failures) < 8:
+                    failures.append(f"{phone_label}: start refuse ({fdets[0].get('msg', '?')[:60]})")
+                continue
+
+            # 2) Attend que la phone soit running (status != 2)
+            running = False
+            elapsed = 0
+            while elapsed < MAX_WAIT_RUNNING_SEC:
+                await asyncio.sleep(POLL_INTERVAL_SEC)
+                elapsed += POLL_INTERVAL_SEC
+                try:
+                    status = await asyncio.to_thread(gl_get_phone_status, phone_id)
+                except Exception:
+                    status = None
+                if status is not None and status != PHONE_STOPPED_STATUS:
+                    running = True
+                    break
+            if not running:
+                started_failed_count += 1
+                # Essayer quand meme stop pour libere la phone
+                try:
+                    await asyncio.to_thread(gl_stop_phone, phone_id)
+                except Exception:
+                    pass
+                if len(failures) < 8:
+                    failures.append(f"{phone_label}: timeout ({MAX_WAIT_RUNNING_SEC}s) pas running")
+                continue
+
+            # 3) Upload tous les fichiers
+            phone_upload_ok = True
+            for url, fname in urls:
+                try:
+                    res = await asyncio.to_thread(gl_upload_file_to_phone, phone_id, url, fname)
+                except Exception as e:
+                    upload_failed_count += 1
+                    phone_upload_ok = False
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label} ({fname}): {str(e)[:60]}")
+                    continue
+                if res.get("code") != 0:
+                    upload_failed_count += 1
+                    phone_upload_ok = False
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label} ({fname}): {res.get('msg', '?')[:60]}")
+
+            # 4) Stop la phone (toujours, meme si upload a echoue)
+            try:
+                await asyncio.to_thread(gl_stop_phone, phone_id)
+            except Exception:
+                pass
+
+            if phone_upload_ok:
+                ok_count += 1
+                await progress(f"✓ {idx}/{len(phones)} `{phone_label}` OK")
+            else:
+                await progress(f"✗ {idx}/{len(phones)} `{phone_label}` upload partiel")
+
+        return {
+            "ok": ok_count,
+            "started_failed": started_failed_count,
+            "upload_failed": upload_failed_count,
+            "failures": failures,
+        }
+
+    # ============================================================
+    # Slash command : /geelarkpush
+    # ============================================================
+
     @app_commands.command(
         name="geelarkpush",
-        description="[ADMIN] Push des medias (reels example/stories/storyctas) vers les phones d'un groupe GeeLark",
+        description="[ADMIN] Push GeeLark : immediate ou planifie (heure Paris)",
     )
     @app_commands.describe(
-        groupe="Groupe GeeLark (autocomplete : tape pour voir les groupes dispo)",
-        identite="Identite locale d'ou piocher les medias (autocomplete)",
-        reels="Nombre de reels example a pousser par phone (defaut 0, max 5)",
-        stories="Nombre de stories par phone (defaut 0, max 10)",
-        storyctas="Nombre de story CTAs par phone (defaut 0, max 5)",
+        groupe="Groupe GeeLark (autocomplete)",
+        identite="Identite locale (autocomplete)",
+        reels="Nb de reels example par phone (defaut 0, max 5)",
+        stories="Nb de stories par phone (defaut 0, max 10)",
+        storyctas="Nb de story CTAs par phone (defaut 0, max 5)",
+        heure="Heure (Paris) du push planifie (0-23). Vide = push immediat.",
+        minute="Minute du push planifie (0-59, defaut 0). Ignore si heure vide.",
     )
     async def geelarkpush(
         self,
@@ -259,10 +445,13 @@ class GeeLark(commands.Cog):
         reels: app_commands.Range[int, 0, 5] = 0,
         stories: app_commands.Range[int, 0, 10] = 0,
         storyctas: app_commands.Range[int, 0, 5] = 0,
+        heure: app_commands.Range[int, 0, 23] = None,
+        minute: app_commands.Range[int, 0, 59] = 0,
     ):
         if not await self.require_admin(interaction):
             return
-        # Nettoyage defensif : enleve les guillemets eventuellement tapes par l'utilisateur
+
+        # Nettoyage
         groupe = groupe.strip().strip('"').strip("'").strip()
         identite = identite.strip()
         total_per_phone = reels + stories + storyctas
@@ -273,36 +462,56 @@ class GeeLark(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        # ============ MODE SCHEDULE ============
+        if heure is not None:
+            schedules = load_schedules()
+            schedule = {
+                "id": uuid.uuid4().hex[:8],
+                "groupe": groupe,
+                "identite": identite,
+                "reels": reels,
+                "stories": stories,
+                "storyctas": storyctas,
+                "hour_paris": heure,
+                "minute_paris": minute,
+                "recurring": True,  # daily by default
+                "channel_id": interaction.channel_id,
+                "created_by": interaction.user.id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "last_run_date": None,
+            }
+            schedules.append(schedule)
+            save_schedules(schedules)
+            await interaction.response.send_message(
+                f"📅 **Push planifie**\n"
+                f"• ID : `{schedule['id']}`\n"
+                f"• Groupe : **{groupe}**\n"
+                f"• Identite : **{identite}**\n"
+                f"• Par phone : {reels} reels + {stories} stories + {storyctas} CTAs\n"
+                f"• Heure (Paris) : **{heure:02d}:{minute:02d}** — chaque jour\n"
+                f"• Mode : sequentiel (1 phone a la fois -> contourne le rate-limit)\n\n"
+                f"💡 Pour annuler : modifie/efface manuellement `data/geelark_schedules.json` "
+                f"(ou demande la commande d'annulation en V3).",
+                ephemeral=True,
+            )
+            return
 
+        # ============ MODE IMMEDIAT ============
+        await interaction.response.defer(ephemeral=True)
         if not gl_bearer():
             await interaction.followup.send(
-                "❌ `GEELARK_BEARER` non configure. Ajoute la ligne dans `/opt/va-bot/.env` "
-                "puis `systemctl restart va-bot`.",
+                "❌ `GEELARK_BEARER` non configure. Ajoute dans /opt/va-bot/.env puis restart va-bot.",
                 ephemeral=True,
             )
             return
 
-        # 1) Pioche les fichiers locaux
-        reel_files = pick_n_unique(list_example_reels(identite), reels)
-        story_files = pick_n_unique(list_stories(identite), stories)
-        cta_files = pick_n_unique(list_storyctas(identite), storyctas)
-
-        missing = []
-        if reels > 0 and not reel_files:
-            missing.append(f"reels example (`data/identities/{sanitize_identity_name(identite)}/videos/*.example.*`)")
-        if stories > 0 and not story_files:
-            missing.append(f"stories (`data/identities/{sanitize_identity_name(identite)}/stories/`)")
-        if storyctas > 0 and not cta_files:
-            missing.append(f"storyctas (`data/identities/{sanitize_identity_name(identite)}/storyctas/`)")
-        if missing:
-            await interaction.followup.send(
-                f"❌ Fichiers manquants pour `{identite}` :\n• " + "\n• ".join(missing),
-                ephemeral=True,
-            )
+        # 1) Prepare URLs (pioche files + litterbox)
+        urls, err = await self._prepare_urls(identite, reels, stories, storyctas)
+        if err:
+            await interaction.followup.send(f"❌ {err}", ephemeral=True)
             return
 
-        # 2) Liste des phones du groupe
+        # 2) Liste phones du groupe
         try:
             phones = await asyncio.to_thread(gl_list_phones_in_group, groupe, 500)
         except Exception as e:
@@ -310,116 +519,60 @@ class GeeLark(commands.Cog):
             return
         if not phones:
             await interaction.followup.send(
-                f"❌ Aucun phone dans le groupe **{groupe}**. Verifie le nom exact "
-                f"(sensible a la casse).",
+                f"❌ Aucun phone dans le groupe **{groupe}**. Verifie le nom exact.",
                 ephemeral=True,
             )
             return
 
-        all_files = reel_files + story_files + cta_files
         await interaction.followup.send(
-            f"🚀 **Push GeeLark**\n"
+            f"🚀 **Push GeeLark (sequentiel)**\n"
             f"• Groupe : **{groupe}** ({len(phones)} phones)\n"
             f"• Identite : **{identite}**\n"
-            f"• Fichiers : {len(reel_files)} reel(s) + {len(story_files)} story(s) + {len(cta_files)} cta(s)\n"
-            f"• Upload sur litterbox (1x par fichier)...",
+            f"• Fichiers : {len(urls)} (deja sur litterbox)\n"
+            f"• Estimation : ~{len(phones) * 90 // 60} min (start + upload + stop par phone)\n\n"
+            f"Le processus tourne en arriere-plan, je te tiendrai au courant...",
             ephemeral=True,
         )
 
-        # 3) Upload chaque fichier sur litterbox (1x) -> obtient les URLs
-        urls = []  # list of (url, filename)
-        for f in all_files:
+        # 3) Sequential
+        async def progress_to_channel(msg: str):
             try:
-                url = await asyncio.to_thread(litterbox_upload_sync, f)
-                urls.append((url, f.name))
-                log.info(f"GeeLark : litterbox OK {f.name} -> {url}")
-            except Exception as e:
-                await interaction.followup.send(
-                    f"❌ Upload litterbox echoue pour `{f.name}` : {str(e)[:300]}",
-                    ephemeral=True,
-                )
-                return
+                ch = interaction.channel
+                if ch:
+                    await ch.send(msg)
+            except Exception:
+                pass
 
-        await interaction.followup.send(
-            f"✅ {len(urls)} fichier(s) sur litterbox. "
-            f"Envoi sur les {len(phones)} phones en cours...",
-            ephemeral=True,
-        )
-
-        # 4) Pour chaque phone, lance les uploads en parallele (semaphore)
-        ok_phones = 0
-        failed_phones = 0
-        total_uploads = 0
-        failed_uploads = 0
-        failures = []
-        first_off = True
-
-        async def upload_for_phone(phone):
-            nonlocal total_uploads, failed_uploads, first_off
-            phone_ok = True
-            phone_id = phone["id"]
-            phone_label = phone.get("serialName", phone_id)
-            for url, fname in urls:
-                total_uploads += 1
-                try:
-                    res = await asyncio.to_thread(gl_upload_file_to_phone, phone_id, url, fname)
-                    if res.get("code") != 0:
-                        failed_uploads += 1
-                        phone_ok = False
-                        if len(failures) < 5:
-                            failures.append(
-                                f"  • `{phone_label}` ({fname}) : {res.get('msg', '?')[:80]}"
-                            )
-                except Exception as e:
-                    failed_uploads += 1
-                    phone_ok = False
-                    if len(failures) < 5:
-                        failures.append(f"  • {phone_label} : {str(e)[:80]}")
-            return phone_ok
-
-        sem = asyncio.Semaphore(5)
-
-        async def with_sem(p):
-            async with sem:
-                return await upload_for_phone(p)
-
-        results = await asyncio.gather(*[with_sem(p) for p in phones])
-        ok_phones = sum(1 for r in results if r)
-        failed_phones = len(phones) - ok_phones
+        result = await self._push_sequential(phones, urls, progress_send=progress_to_channel)
 
         msg = (
-            f"✅ **Push GeeLark termine**\n"
-            f"• Phones OK : **{ok_phones}/{len(phones)}**\n"
-            f"• Phones avec >=1 echec : **{failed_phones}**\n"
-            f"• Uploads tentes : {total_uploads} (echecs : {failed_uploads})"
+            f"✅ **Push termine**\n"
+            f"• Phones OK : **{result['ok']}/{len(phones)}**\n"
+            f"• Echec demarrage : **{result['started_failed']}**\n"
+            f"• Echec upload : **{result['upload_failed']}**"
         )
-        if failures:
-            msg += "\n\n**Premiers echecs :**\n" + "\n".join(failures)
-        if failed_phones > 0:
-            msg += (
-                "\n\n💡 *Si tu vois `env not running` : les phones doivent etre "
-                "demarres sur GeeLark avant la commande. V2 ajoutera l'auto-start.*"
-            )
-        await interaction.followup.send(msg[:1990], ephemeral=True)
-
-    # ---- Autocomplete ----------------------------------------------------
+        if result["failures"]:
+            msg += "\n\n**Premiers echecs :**\n" + "\n".join(f"  • {x}" for x in result["failures"][:8])
+        try:
+            await interaction.followup.send(msg[:1990], ephemeral=True)
+        except Exception:
+            # Si l'interaction est expiree, on poste dans le channel
+            ch = interaction.channel
+            if ch:
+                await ch.send(msg[:1990])
 
     @geelarkpush.autocomplete("groupe")
     async def _groupe_ac(self, interaction: discord.Interaction, current: str):
         if not gl_bearer():
-            return [app_commands.Choice(name="GEELARK_BEARER non configure sur le VPS", value="")]
+            return [app_commands.Choice(name="GEELARK_BEARER non configure", value="")]
         try:
             groups = await asyncio.to_thread(gl_list_all_groups)
         except Exception as e:
             return [app_commands.Choice(name=f"Erreur API : {str(e)[:80]}", value="")]
         q = (current or "").strip().lower()
         matches = [g for g in groups if q in g.get("name", "").lower()] if q else groups
-        # Filtre Ungrouped et Station de recyclage qui sont peu utiles
         matches = [g for g in matches if g.get("name") not in ("Ungrouped", "Station de recyclage")]
-        return [
-            app_commands.Choice(name=g["name"][:100], value=g["name"])
-            for g in matches[:25]
-        ]
+        return [app_commands.Choice(name=g["name"][:100], value=g["name"]) for g in matches[:25]]
 
     @geelarkpush.autocomplete("identite")
     async def _identite_ac(self, interaction: discord.Interaction, current: str):
@@ -430,6 +583,94 @@ class GeeLark(commands.Cog):
         if q:
             names = [n for n in names if q in n.lower()]
         return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+    # ============================================================
+    # Background scheduler
+    # ============================================================
+
+    @tasks.loop(minutes=1)
+    async def scheduler_loop(self):
+        """Tourne toutes les minutes : check si un schedule doit etre declenche."""
+        try:
+            schedules = load_schedules()
+            if not schedules:
+                return
+            now_paris = datetime.now(PARIS_TZ)
+            today_str = now_paris.strftime("%Y-%m-%d")
+            cur_hour = now_paris.hour
+            cur_min = now_paris.minute
+            modified = False
+            for sched in schedules:
+                if sched.get("last_run_date") == today_str:
+                    continue  # deja fait aujourd'hui
+                if sched["hour_paris"] != cur_hour or sched["minute_paris"] != cur_min:
+                    continue
+                # Declencher !
+                log.info(f"GeeLark scheduler : declenche {sched['id']} ({sched['groupe']})")
+                sched["last_run_date"] = today_str
+                modified = True
+                # Run in background pour ne pas bloquer le loop
+                asyncio.create_task(self._run_scheduled(sched))
+            if modified:
+                save_schedules(schedules)
+        except Exception as e:
+            log.error(f"GeeLark scheduler erreur: {e}")
+
+    @scheduler_loop.before_loop
+    async def _scheduler_before(self):
+        await self.bot.wait_until_ready()
+
+    async def _run_scheduled(self, sched: dict):
+        """Execute un schedule en background, notifie le channel a la fin."""
+        channel_id = sched.get("channel_id")
+        channel = self.bot.get_channel(channel_id) if channel_id else None
+
+        async def notify(msg: str):
+            if channel:
+                try:
+                    await channel.send(msg)
+                except Exception:
+                    pass
+
+        await notify(
+            f"🌙 **Push planifie {sched['id']} demarre** (heure Paris {sched['hour_paris']:02d}:{sched['minute_paris']:02d})\n"
+            f"• Groupe : **{sched['groupe']}** / identite : **{sched['identite']}**\n"
+            f"• {sched['reels']} reels + {sched['stories']} stories + {sched['storyctas']} CTAs par phone"
+        )
+
+        if not gl_bearer():
+            await notify("❌ GEELARK_BEARER non configure, push annule.")
+            return
+
+        urls, err = await self._prepare_urls(
+            sched["identite"], sched["reels"], sched["stories"], sched["storyctas"]
+        )
+        if err:
+            await notify(f"❌ {err}")
+            return
+
+        try:
+            phones = await asyncio.to_thread(gl_list_phones_in_group, sched["groupe"], 500)
+        except Exception as e:
+            await notify(f"❌ GeeLark : {str(e)[:500]}")
+            return
+        if not phones:
+            await notify(f"❌ Aucun phone dans le groupe **{sched['groupe']}**.")
+            return
+
+        await notify(f"🚀 {len(phones)} phones a traiter en sequentiel (~{len(phones) * 90 // 60} min estime)...")
+
+        result = await self._push_sequential(phones, urls, progress_send=notify)
+
+        msg = (
+            f"✅ **Push planifie {sched['id']} termine**\n"
+            f"• Phones OK : **{result['ok']}/{len(phones)}**\n"
+            f"• Echec demarrage : **{result['started_failed']}**\n"
+            f"• Echec upload : **{result['upload_failed']}**"
+        )
+        if result["failures"]:
+            msg += "\n\n**Premiers echecs :**\n" + "\n".join(f"  • {x}" for x in result["failures"][:8])
+        await notify(msg[:1990])
 
 
 async def setup(bot):
