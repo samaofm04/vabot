@@ -31,6 +31,10 @@ DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 SCHEDULES_FILE = DATA_DIR / "geelark_schedules.json"
+WATCHERS_FILE = DATA_DIR / "geelark_watchers.json"
+
+# Polling interval pour les watchers (mode surveillance)
+WATCHER_POLL_MIN = 3
 
 GEELARK_BASE = "https://openapi.geelark.com"
 LITTERBOX_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
@@ -234,6 +238,20 @@ def save_schedules(items: list):
     SCHEDULES_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def load_watchers() -> list:
+    if not WATCHERS_FILE.exists():
+        return []
+    try:
+        return json.loads(WATCHERS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_watchers(items: list):
+    WATCHERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WATCHERS_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 # ---- Cog Discord ----------------------------------------------------------
 
 class GeeLark(commands.Cog):
@@ -241,9 +259,11 @@ class GeeLark(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self.scheduler_loop.start()
+        self.watcher_loop.start()
 
     def cog_unload(self):
         self.scheduler_loop.cancel()
+        self.watcher_loop.cancel()
 
     async def get_owner_id(self):
         if self._owner_id is None:
@@ -448,6 +468,7 @@ class GeeLark(commands.Cog):
         storyctas="Nb de story CTAs par phone (defaut 0, max 5)",
         heure="Heure (Paris) du push planifie (0-23). Vide = push immediat.",
         minute="Minute du push planifie (0-59, defaut 0). Ignore si heure vide.",
+        surveillance="True = mode passif: uploade automatiquement des qu'une phone est ON. PRIORITAIRE sur heure.",
     )
     async def geelarkpush(
         self,
@@ -459,6 +480,7 @@ class GeeLark(commands.Cog):
         storyctas: app_commands.Range[int, 0, 5] = 0,
         heure: app_commands.Range[int, 0, 23] = None,
         minute: app_commands.Range[int, 0, 59] = 0,
+        surveillance: bool = False,
     ):
         if not await self.require_admin(interaction):
             return
@@ -470,6 +492,59 @@ class GeeLark(commands.Cog):
         if total_per_phone == 0:
             await interaction.response.send_message(
                 "Tu dois demander au moins 1 media (reels/stories/storyctas > 0).",
+                ephemeral=True,
+            )
+            return
+
+        # ============ MODE SURVEILLANCE (passif) ============
+        if surveillance:
+            watchers = load_watchers()
+            # Eviter doublons : meme groupe+identite
+            existing = [w for w in watchers
+                        if w["groupe"].lower() == groupe.lower()
+                        and w["identite"].lower() == identite.lower()]
+            if existing:
+                # Met a jour les quantites au lieu de creer un doublon
+                w = existing[0]
+                w["reels"] = reels
+                w["stories"] = stories
+                w["storyctas"] = storyctas
+                w["enabled"] = True
+                save_watchers(watchers)
+                await interaction.response.send_message(
+                    f"🔁 **Watcher mis a jour** (existait deja)\n"
+                    f"• Groupe : **{groupe}**\n"
+                    f"• Identite : **{identite}**\n"
+                    f"• Par phone allumee : {reels} reels + {stories} stories + {storyctas} CTAs\n"
+                    f"Le bot uploade automatiquement des qu'une phone est demarree.",
+                    ephemeral=True,
+                )
+                return
+            new_watcher = {
+                "id": uuid.uuid4().hex[:8],
+                "groupe": groupe,
+                "identite": identite,
+                "reels": reels,
+                "stories": stories,
+                "storyctas": storyctas,
+                "enabled": True,
+                "phones_done_today": {},
+                "channel_id": interaction.channel_id,
+                "created_by": interaction.user.id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            watchers.append(new_watcher)
+            save_watchers(watchers)
+            await interaction.response.send_message(
+                f"👁️ **Mode SURVEILLANCE active**\n"
+                f"• ID watcher : `{new_watcher['id']}`\n"
+                f"• Groupe : **{groupe}**\n"
+                f"• Identite : **{identite}**\n"
+                f"• Par phone allumee : {reels} reels + {stories} stories + {storyctas} CTAs\n"
+                f"• Polling : toutes les {WATCHER_POLL_MIN} min\n\n"
+                f"Le bot va surveiller les phones de ce groupe. **Quand l'employe en allume une**, "
+                f"le bot uploade automatiquement le contenu, sans rien faire d'autre.\n"
+                f"Le compteur est remis a zero chaque jour a minuit (heure Paris).",
                 ephemeral=True,
             )
             return
@@ -683,6 +758,101 @@ class GeeLark(commands.Cog):
         if result["failures"]:
             msg += "\n\n**Premiers echecs :**\n" + "\n".join(f"  • {x}" for x in result["failures"][:8])
         await notify(msg[:1990])
+
+
+    # ============================================================
+    # WATCHER LOOP : mode surveillance passif
+    # ============================================================
+
+    @tasks.loop(minutes=WATCHER_POLL_MIN)
+    async def watcher_loop(self):
+        """Tourne toutes les WATCHER_POLL_MIN minutes : check les phones allumees
+        des watchers, uploade dessus si pas encore fait aujourd'hui."""
+        try:
+            watchers = load_watchers()
+            if not watchers:
+                return
+            if not gl_bearer():
+                return  # silence : pas de spam dans les logs si pas configure
+
+            today_str = datetime.now(PARIS_TZ).strftime("%Y-%m-%d")
+
+            for watcher in watchers:
+                if not watcher.get("enabled", True):
+                    continue
+
+                # Cleanup : si on a change de jour, reset le dict phones_done_today
+                last_reset = watcher.get("last_reset_date")
+                if last_reset != today_str:
+                    watcher["phones_done_today"] = {}
+                    watcher["last_reset_date"] = today_str
+
+                groupe = watcher["groupe"]
+                identite = watcher["identite"]
+
+                # Liste les phones du groupe
+                try:
+                    phones = await asyncio.to_thread(gl_list_phones_in_group, groupe, 500)
+                except Exception as e:
+                    log.error(f"watcher {watcher['id']} : erreur list_phones : {e}")
+                    continue
+
+                # Filtre : phones running ET pas encore traitees aujourd'hui
+                done_dict = watcher.get("phones_done_today", {})
+                phones_to_process = [
+                    p for p in phones
+                    if p.get("status") != PHONE_STOPPED_STATUS
+                    and done_dict.get(p["id"]) != today_str
+                ]
+                if not phones_to_process:
+                    continue
+
+                # Prepare les URLs (1x par cycle, pas par phone — option A)
+                urls, err = await self._prepare_urls(
+                    identite, watcher["reels"], watcher["stories"], watcher["storyctas"]
+                )
+                if err:
+                    log.error(f"watcher {watcher['id']} : prepare_urls erreur : {err}")
+                    continue
+
+                channel = self.bot.get_channel(watcher.get("channel_id"))
+
+                # Pour chaque phone running, uploade
+                for phone in phones_to_process:
+                    phone_id = phone["id"]
+                    phone_label = phone.get("serialName", phone_id)
+                    upload_ok = True
+                    for url, fname in urls:
+                        try:
+                            res = await asyncio.to_thread(gl_upload_file_to_phone, phone_id, url, fname)
+                            if res.get("code") != 0:
+                                upload_ok = False
+                                log.warning(f"watcher upload fail : {phone_label} {fname} -> {res.get('msg')}")
+                        except Exception as e:
+                            upload_ok = False
+                            log.error(f"watcher upload exception : {phone_label} -> {e}")
+
+                    if upload_ok:
+                        done_dict[phone_id] = today_str
+                        log.info(f"watcher {watcher['id']} : {phone_label} OK")
+                        if channel:
+                            try:
+                                await channel.send(
+                                    f"📱 **{phone_label}** allumee — "
+                                    f"{len(urls)} fichier(s) uploades ({len(done_dict)} phones traitees aujourd'hui)"
+                                )
+                            except Exception:
+                                pass
+
+                watcher["phones_done_today"] = done_dict
+
+            save_watchers(watchers)
+        except Exception as e:
+            log.error(f"watcher_loop erreur globale : {e}")
+
+    @watcher_loop.before_loop
+    async def _watcher_before(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot):
