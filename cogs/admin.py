@@ -1744,12 +1744,32 @@ class Admin(commands.Cog):
             f"✅ `{option}` : min={min_value} max={max_value}", ephemeral=True
         )
 
-    @app_commands.command(name="transformreset", description="Réinitialise la config transfo aux valeurs par défaut")
-    async def transformreset(self, interaction: discord.Interaction):
+    @app_commands.command(
+        name="transformreset",
+        description="Reset config de transformations (video ou image) aux valeurs par defaut",
+    )
+    @app_commands.describe(cible="Choisis : video (transfo videos) ou image (transfo images)")
+    @app_commands.choices(cible=[
+        app_commands.Choice(name="video", value="video"),
+        app_commands.Choice(name="image", value="image"),
+    ])
+    async def transformreset(
+        self,
+        interaction: discord.Interaction,
+        cible: app_commands.Choice[str],
+    ):
         if not await self.require_admin(interaction):
             return
-        reset_transform_config()
-        await interaction.response.send_message("✅ Config transfo réinitialisée aux valeurs par défaut.", ephemeral=True)
+        if cible.value == "video":
+            reset_transform_config()
+            await interaction.response.send_message(
+                "✅ Config transfo **vidéos** réinitialisée aux valeurs par défaut.", ephemeral=True
+            )
+        else:
+            reset_image_config()
+            await interaction.response.send_message(
+                "✅ Config transfo **images** réinitialisée aux valeurs par défaut.", ephemeral=True
+            )
 
     # ---------- TRANSFORMATIONS IMAGE ----------
 
@@ -1827,12 +1847,7 @@ class Admin(commands.Cog):
             f"✅ `{option}` : min={min_value} max={max_value}", ephemeral=True
         )
 
-    @app_commands.command(name="imagetransformreset", description="Reset config transfo images aux defaults")
-    async def imagetransformreset(self, interaction: discord.Interaction):
-        if not await self.require_admin(interaction):
-            return
-        reset_image_config()
-        await interaction.response.send_message("✅ Config transfo images réinitialisée.", ephemeral=True)
+    # /imagetransformreset a ete fusionne dans /transformreset cible:image
 
     # ---------- POSTS (photos pour le feed) ----------
 
