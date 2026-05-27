@@ -163,6 +163,41 @@ def gl_list_phones_in_group(group_name: str, max_count: int = 500) -> list[dict]
     return phones[:max_count]
 
 
+def gl_list_all_groups() -> list[dict]:
+    """Liste tous les groupes GeeLark (paginated, max 200)."""
+    groups = []
+    page = 1
+    while len(groups) < 200:
+        _, body = gl_call_sync("/open/v1/group/list", {"page": page, "pageSize": 100})
+        if body.get("code") != 0:
+            raise RuntimeError(f"GeeLark list groups erreur : {body.get('msg', body)}")
+        data = body.get("data", {})
+        items = data.get("list", [])
+        if not items:
+            break
+        groups.extend(items)
+        total = data.get("total", 0)
+        if len(groups) >= total:
+            break
+        page += 1
+    return groups
+
+
+def gl_count_phones_per_group_cache():
+    """Cache local des phones par groupe (TTL court via fonction sync simple)."""
+    counts = {}
+    try:
+        # Recup 1ere page de phones avec gros pageSize (suffit pour la plupart)
+        _, body = gl_call_sync("/open/v1/phone/list", {"page": 1, "pageSize": 200})
+        if body.get("code") == 0:
+            for it in body.get("data", {}).get("items", []):
+                gname = (it.get("group") or {}).get("name") or "(Ungrouped)"
+                counts[gname] = counts.get(gname, 0) + 1
+    except Exception:
+        pass
+    return counts
+
+
 def gl_upload_file_to_phone(phone_id: str, file_url: str, file_name: str | None = None) -> dict:
     payload = {"id": str(phone_id), "fileUrl": file_url}
     if file_name:
@@ -210,8 +245,8 @@ class GeeLark(commands.Cog):
         description="[ADMIN] Push des medias (reels example/stories/storyctas) vers les phones d'un groupe GeeLark",
     )
     @app_commands.describe(
-        groupe="Nom EXACT du groupe GeeLark (ex: EMMA ANDRY)",
-        identite="Identite locale d'ou piocher les medias (ex: emma)",
+        groupe="Groupe GeeLark (autocomplete : tape pour voir les groupes dispo)",
+        identite="Identite locale d'ou piocher les medias (autocomplete)",
         reels="Nombre de reels example a pousser par phone (defaut 0, max 5)",
         stories="Nombre de stories par phone (defaut 0, max 10)",
         storyctas="Nombre de story CTAs par phone (defaut 0, max 5)",
@@ -227,6 +262,9 @@ class GeeLark(commands.Cog):
     ):
         if not await self.require_admin(interaction):
             return
+        # Nettoyage defensif : enleve les guillemets eventuellement tapes par l'utilisateur
+        groupe = groupe.strip().strip('"').strip("'").strip()
+        identite = identite.strip()
         total_per_phone = reels + stories + storyctas
         if total_per_phone == 0:
             await interaction.response.send_message(
@@ -363,6 +401,35 @@ class GeeLark(commands.Cog):
                 "demarres sur GeeLark avant la commande. V2 ajoutera l'auto-start.*"
             )
         await interaction.followup.send(msg[:1990], ephemeral=True)
+
+    # ---- Autocomplete ----------------------------------------------------
+
+    @geelarkpush.autocomplete("groupe")
+    async def _groupe_ac(self, interaction: discord.Interaction, current: str):
+        if not gl_bearer():
+            return [app_commands.Choice(name="GEELARK_BEARER non configure sur le VPS", value="")]
+        try:
+            groups = await asyncio.to_thread(gl_list_all_groups)
+        except Exception as e:
+            return [app_commands.Choice(name=f"Erreur API : {str(e)[:80]}", value="")]
+        q = (current or "").strip().lower()
+        matches = [g for g in groups if q in g.get("name", "").lower()] if q else groups
+        # Filtre Ungrouped et Station de recyclage qui sont peu utiles
+        matches = [g for g in matches if g.get("name") not in ("Ungrouped", "Station de recyclage")]
+        return [
+            app_commands.Choice(name=g["name"][:100], value=g["name"])
+            for g in matches[:25]
+        ]
+
+    @geelarkpush.autocomplete("identite")
+    async def _identite_ac(self, interaction: discord.Interaction, current: str):
+        if not IDENTITIES_DIR.exists():
+            return []
+        names = sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+        q = (current or "").strip().lower()
+        if q:
+            names = [n for n in names if q in n.lower()]
+        return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
 
 async def setup(bot):
