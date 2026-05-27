@@ -254,7 +254,7 @@ class StartOnboardingView(discord.ui.View):
             content=interaction.user.mention, embed=embed, view=OnboardingView()
         )
         try:
-            await send_step_media(interaction.channel, 0)
+            await send_step_media(interaction.channel, 0, bot=interaction.client)
         except Exception:
             pass
 

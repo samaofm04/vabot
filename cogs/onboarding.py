@@ -143,23 +143,65 @@ def step_media_dir(index: int) -> Path:
     return d
 
 
-def list_step_media(index: int) -> list:
-    """Retourne la liste des fichiers média (chemins) pour l'étape <index>."""
-    d = step_media_dir(index)
-    return sorted([p for p in d.iterdir() if p.is_file()])
+def step_links_file(index: int) -> Path:
+    """Fichier JSON qui stocke les references de messages Discord (liens) pour l'etape."""
+    return step_media_dir(index) / "_links.json"
 
 
-async def send_step_media(channel: discord.abc.Messageable, index: int):
-    """Envoie les médias attachés à l'étape <index> dans le salon (s'il y en a).
+def load_step_links(index: int) -> list:
+    """Liste des references de messages Discord pour cette etape.
 
-    Envoie chaque fichier individuellement pour pouvoir reporter precisement
-    quel fichier echoue (taille > 25 Mo, format, etc.) au lieu d'echouer en silence.
+    Format: [{"channel_id": int, "message_id": int, "filenames": [str, ...]}, ...]
     """
+    f = step_links_file(index)
+    if not f.exists():
+        return []
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_step_links(index: int, links: list):
+    f = step_links_file(index)
+    f.write_text(json.dumps(links, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def list_step_media(index: int) -> list:
+    """Liste des fichiers media LOCAUX (hors metadata) pour l'etape."""
+    d = step_media_dir(index)
+    return sorted([
+        p for p in d.iterdir()
+        if p.is_file() and not p.name.startswith("_")  # ignore _links.json etc.
+    ])
+
+
+_MSG_LINK_RE = re.compile(
+    r"https?://(?:www\.)?(?:discord|discordapp)\.com/channels/(\d+)/(\d+)/(\d+)"
+)
+
+
+def parse_message_link(link: str):
+    """Parse https://discord.com/channels/GUILD/CHANNEL/MESSAGE -> (guild, channel, msg) ou None."""
+    m = _MSG_LINK_RE.search(link.strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None):
+    """Envoie les médias attachés à l'étape <index> dans le salon.
+
+    Gere 2 sources:
+    - fichiers locaux dans step_media_dir(index) (limite 10 Mo serveur non boost)
+    - liens vers des messages Discord (stockes via /setonboardingmedia lien:...)
+      -> on re-fetch le message pour obtenir une URL CDN fraiche, Discord auto-embed
+    """
+    # Limite Discord serveur non-boost : 10 Mo en pratique (ex 25 Mo officiel)
+    MAX_SIZE = 10 * 1024 * 1024
+
+    # 1) Fichiers locaux
     files = list_step_media(index)
-    if not files:
-        return
-    # Limite Discord serveur non-boost : 25 Mo. On garde un peu de marge.
-    MAX_SIZE = 25 * 1024 * 1024
     for p in files:
         try:
             size = p.stat().st_size
@@ -169,8 +211,9 @@ async def send_step_media(channel: discord.abc.Messageable, index: int):
         if size > MAX_SIZE:
             await channel.send(
                 f"⚠️ `{p.name}` fait **{size / (1024*1024):.1f} Mo**, "
-                f"au-dessus de la limite Discord (25 Mo). "
-                f"Compresse-la en mp4 (ex: HandBrake) puis ré-upload."
+                f"au-dessus de la limite Discord du serveur ({MAX_SIZE // (1024*1024)} Mo). "
+                f"Utilise plutot un **lien de message** (/setonboardingmedia lien:...) "
+                f"si tu veux un fichier plus lourd."
             )
             continue
         try:
@@ -183,6 +226,52 @@ async def send_step_media(channel: discord.abc.Messageable, index: int):
         except Exception as e:
             log.error(f"Erreur inattendue envoi media {p}: {e}")
             await channel.send(f"⚠️ Erreur inattendue sur `{p.name}` : {str(e)[:200]}")
+
+    # 2) Liens vers des messages Discord
+    links = load_step_links(index)
+    if not links:
+        return
+    if bot is None:
+        # On essaie d'extraire le bot via channel
+        bot = getattr(channel, "_state", None) and channel._state._get_client()
+    if bot is None:
+        await channel.send("⚠️ Liens video configures mais le bot ne peut pas les recuperer (context manquant).")
+        return
+    for link_data in links:
+        cid = link_data.get("channel_id")
+        mid = link_data.get("message_id")
+        if not cid or not mid:
+            continue
+        try:
+            src_channel = bot.get_channel(cid) or await bot.fetch_channel(cid)
+            msg = await src_channel.fetch_message(mid)
+        except discord.NotFound:
+            await channel.send(
+                f"⚠️ Lien video casse pour cette etape (message supprime). "
+                f"Demande au boss de refaire la config."
+            )
+            continue
+        except discord.Forbidden:
+            await channel.send(
+                "⚠️ Le bot n'a plus acces au salon source de la video. "
+                "Demande au boss de verifier les permissions."
+            )
+            continue
+        except Exception as e:
+            log.error(f"Erreur fetch message link step {index+1}: {e}")
+            await channel.send(f"⚠️ Erreur recuperation video : {str(e)[:200]}")
+            continue
+        if not msg.attachments:
+            await channel.send(
+                "⚠️ Le message lie ne contient plus de piece jointe."
+            )
+            continue
+        # Re-poster chaque URL d'attachement (Discord auto-embed les videos/images)
+        for att in msg.attachments:
+            try:
+                await channel.send(att.url)
+            except Exception as e:
+                log.error(f"Erreur envoi URL attachement: {e}")
 
 
 class OnboardingView(discord.ui.View):
@@ -213,7 +302,7 @@ class OnboardingView(discord.ui.View):
         await interaction.response.send_message(embed=new_embed, view=view)
         # Envoyer les medias de l'etape (si presents)
         try:
-            await send_step_media(interaction.channel, next_index)
+            await send_step_media(interaction.channel, next_index, bot=interaction.client)
         except Exception as e:
             log.error(f"Erreur send_step_media step {next_index+1}: {e}")
 
@@ -255,48 +344,107 @@ class Onboarding(commands.Cog):
 
     @app_commands.command(
         name="setonboardingmedia",
-        description="[ADMIN] Ajoute une vidéo/photo à une étape d'onboarding",
+        description="[ADMIN] Ajoute une video/photo a une etape (fichier OU lien de message)",
     )
     @app_commands.describe(
-        step="Numéro de l'étape (1 = bienvenue, 2 = jour 0, etc.)",
-        media="Le fichier à attacher (vidéo, image)",
+        step="Numero de l'etape (1 = bienvenue, 2 = jour 0, etc.)",
+        media="Fichier a attacher (max 10 Mo). Utilise plutot 'lien' pour les gros fichiers.",
+        lien="Lien d'un message Discord contenant la video (clic droit -> Copier le lien)",
     )
     async def setonboardingmedia(
         self,
         interaction: discord.Interaction,
         step: int,
-        media: discord.Attachment,
+        media: discord.Attachment = None,
+        lien: str = None,
     ):
         if not await self.require_admin(interaction):
             return
         if step < 1 or step > len(STEPS):
             await interaction.response.send_message(
-                f"Étape invalide. Doit être entre 1 et {len(STEPS)}.", ephemeral=True
+                f"Etape invalide. Doit etre entre 1 et {len(STEPS)}.", ephemeral=True
+            )
+            return
+        if not media and not lien:
+            await interaction.response.send_message(
+                "Tu dois fournir SOIT `media` (fichier) SOIT `lien` (lien de message Discord).\n\n"
+                "**Pour un lien :** dans un salon, clic droit sur le message qui contient la video "
+                "-> 'Copier le lien du message' -> colle-le ici.\n"
+                "**Avantage du lien :** pas de limite 10 Mo (le bot ne re-uploade pas, il reutilise ton upload).",
+                ephemeral=True,
             )
             return
         await interaction.response.defer(ephemeral=True)
         index = step - 1
-        d = step_media_dir(index)
-        # Eviter collision de nom
-        target = d / media.filename
-        i = 1
-        while target.exists():
-            stem, ext = os.path.splitext(media.filename)
-            target = d / f"{stem}_{i}{ext}"
-            i += 1
-        try:
-            await media.save(str(target))
-        except Exception as e:
-            await interaction.followup.send(f"❌ Erreur sauvegarde : {e}", ephemeral=True)
-            return
         title = STEPS[index]["title"]
-        count = len(list_step_media(index))
-        await interaction.followup.send(
-            f"✅ Média ajouté à l'étape **{step}** ({title})\n"
-            f"📎 `{target.name}`\n"
-            f"📊 Cette étape a maintenant **{count}** média(s).",
-            ephemeral=True,
+        messages = []
+
+        # --- Cas 1 : fichier attache ---
+        if media is not None:
+            d = step_media_dir(index)
+            target = d / media.filename
+            i = 1
+            while target.exists():
+                stem, ext = os.path.splitext(media.filename)
+                target = d / f"{stem}_{i}{ext}"
+                i += 1
+            try:
+                await media.save(str(target))
+                messages.append(f"📎 Fichier ajoute : `{target.name}`")
+            except Exception as e:
+                messages.append(f"❌ Erreur sauvegarde fichier : {e}")
+
+        # --- Cas 2 : lien de message ---
+        if lien:
+            parsed = parse_message_link(lien)
+            if not parsed:
+                messages.append(
+                    "❌ Lien invalide. Format attendu : "
+                    "`https://discord.com/channels/SERVER/CHANNEL/MESSAGE`"
+                )
+            else:
+                _gid, cid, mid = parsed
+                # Verifier que le bot a acces et que le message contient un attachement
+                try:
+                    src_channel = self.bot.get_channel(cid) or await self.bot.fetch_channel(cid)
+                    msg = await src_channel.fetch_message(mid)
+                except discord.NotFound:
+                    messages.append("❌ Message introuvable (supprime ou ID invalide).")
+                except discord.Forbidden:
+                    messages.append(
+                        "❌ Le bot n'a pas acces a ce salon. Donne-lui la permission de voir "
+                        "le salon ou se trouve le message."
+                    )
+                except Exception as e:
+                    messages.append(f"❌ Erreur acces message : {str(e)[:200]}")
+                else:
+                    if not msg.attachments:
+                        messages.append(
+                            "❌ Ce message ne contient aucune piece jointe (fichier). "
+                            "Tu dois lier un message contenant une video/image en attachement, "
+                            "pas juste un texte."
+                        )
+                    else:
+                        links = load_step_links(index)
+                        links.append({
+                            "channel_id": cid,
+                            "message_id": mid,
+                            "filenames": [a.filename for a in msg.attachments],
+                        })
+                        save_step_links(index, links)
+                        names = ", ".join(f"`{a.filename}`" for a in msg.attachments)
+                        messages.append(
+                            f"🔗 Lien enregistre — {len(msg.attachments)} fichier(s) : {names}"
+                        )
+
+        local_count = len(list_step_media(index))
+        link_count = len(load_step_links(index))
+        recap = (
+            f"**Etape {step}** ({title})\n"
+            f"{chr(10).join(messages)}\n\n"
+            f"📊 Total maintenant : {local_count} fichier(s) local + {link_count} lien(s)"
         )
+        await interaction.followup.send(recap[:1900], ephemeral=True)
 
     @app_commands.command(
         name="listonboardingmedia",
@@ -305,29 +453,33 @@ class Onboarding(commands.Cog):
     async def listonboardingmedia(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
             return
-        MAX_SIZE = 25 * 1024 * 1024
+        MAX_SIZE = 10 * 1024 * 1024
         lines = []
         for i, s in enumerate(STEPS):
             files = list_step_media(i)
+            links = load_step_links(i)
             short_title = s["title"][:55]
-            if files:
-                parts = []
-                for f in files:
-                    try:
-                        size_mo = f.stat().st_size / (1024 * 1024)
-                        marker = "❌" if f.stat().st_size > MAX_SIZE else "✅"
-                        parts.append(f"{marker} `{f.name}` ({size_mo:.1f} Mo)")
-                    except Exception:
-                        parts.append(f"⚠️ `{f.name}` (illisible)")
+            parts = []
+            for f in files:
+                try:
+                    size_mo = f.stat().st_size / (1024 * 1024)
+                    marker = "❌" if f.stat().st_size > MAX_SIZE else "✅"
+                    parts.append(f"{marker} 📎 `{f.name}` ({size_mo:.1f} Mo)")
+                except Exception:
+                    parts.append(f"⚠️ `{f.name}` (illisible)")
+            for j, lk in enumerate(links):
+                names = ", ".join(lk.get("filenames", []))
+                parts.append(f"🔗 lien #{j+1} → {names or '(no filename)'}")
+            if parts:
                 lines.append(
-                    f"**{i+1}.** {short_title} — **{len(files)}** média(s) :\n  "
+                    f"**{i+1}.** {short_title} — {len(files)} fichier(s) + {len(links)} lien(s) :\n  "
                     + "\n  ".join(parts)
                 )
             else:
-                lines.append(f"**{i+1}.** {short_title} — *aucun média*")
+                lines.append(f"**{i+1}.** {short_title} — *aucun media*")
         msg = (
-            "📚 **Médias onboarding par étape**\n"
-            "✅ = OK pour Discord (≤25 Mo) | ❌ = trop lourd, sera refuse\n\n"
+            "📚 **Medias onboarding par etape**\n"
+            "✅ = fichier OK (≤10 Mo) | ❌ = trop lourd | 🔗 = lien de message (pas de limite)\n\n"
             + "\n".join(lines)
         )
         await interaction.response.send_message(msg[:1990], ephemeral=True)
@@ -347,15 +499,24 @@ class Onboarding(commands.Cog):
             return
         index = step - 1
         files = list_step_media(index)
-        deleted = 0
+        deleted_files = 0
         for p in files:
             try:
                 p.unlink()
-                deleted += 1
+                deleted_files += 1
             except Exception:
                 pass
+        # Aussi supprimer les liens stockes
+        deleted_links = len(load_step_links(index))
+        lf = step_links_file(index)
+        if lf.exists():
+            try:
+                lf.unlink()
+            except Exception:
+                deleted_links = 0
         await interaction.response.send_message(
-            f"✅ Étape **{step}** vidée : **{deleted}** média(s) supprimé(s).",
+            f"✅ Etape **{step}** videe : **{deleted_files}** fichier(s) + "
+            f"**{deleted_links}** lien(s) supprime(s).",
             ephemeral=True,
         )
 
@@ -375,7 +536,7 @@ class Onboarding(commands.Cog):
         index = step - 1
         embed = step_embed(index)
         await interaction.response.send_message(embed=embed)
-        await send_step_media(interaction.channel, index)
+        await send_step_media(interaction.channel, index, bot=self.bot)
 
 
 async def setup(bot):
