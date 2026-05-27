@@ -338,51 +338,60 @@ class GeeLark(commands.Cog):
         for idx, phone in enumerate(phones, start=1):
             phone_id = phone["id"]
             phone_label = phone.get("serialName", phone_id)
+            was_already_running = False
 
-            # 1) Demarrer la phone
+            # 0) Check si deja running (par ex. l'admin a demarre a la main)
             try:
-                start_res = await asyncio.to_thread(gl_start_phone, phone_id)
-            except Exception as e:
-                started_failed_count += 1
-                if len(failures) < 8:
-                    failures.append(f"{phone_label}: start exception ({str(e)[:60]})")
-                continue
-            if start_res.get("code") != 0:
-                started_failed_count += 1
-                if len(failures) < 8:
-                    failures.append(f"{phone_label}: start KO ({start_res.get('msg', '?')[:60]})")
-                continue
-            data = start_res.get("data", {})
-            if data.get("failAmount", 0) > 0:
-                fdets = data.get("failDetails", [{}])
-                started_failed_count += 1
-                if len(failures) < 8:
-                    failures.append(f"{phone_label}: start refuse ({fdets[0].get('msg', '?')[:60]})")
-                continue
+                current_status = await asyncio.to_thread(gl_get_phone_status, phone_id)
+            except Exception:
+                current_status = None
+            if current_status is not None and current_status != PHONE_STOPPED_STATUS:
+                was_already_running = True
+                # Skip start + wait, on attaque direct l'upload
+            else:
+                # 1) Demarrer la phone
+                try:
+                    start_res = await asyncio.to_thread(gl_start_phone, phone_id)
+                except Exception as e:
+                    started_failed_count += 1
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label}: start exception ({str(e)[:60]})")
+                    continue
+                if start_res.get("code") != 0:
+                    started_failed_count += 1
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label}: start KO ({start_res.get('msg', '?')[:60]})")
+                    continue
+                data = start_res.get("data", {})
+                if data.get("failAmount", 0) > 0:
+                    fdets = data.get("failDetails", [{}])
+                    started_failed_count += 1
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label}: start refuse ({fdets[0].get('msg', '?')[:60]})")
+                    continue
 
-            # 2) Attend que la phone soit running (status != 2)
-            running = False
-            elapsed = 0
-            while elapsed < MAX_WAIT_RUNNING_SEC:
-                await asyncio.sleep(POLL_INTERVAL_SEC)
-                elapsed += POLL_INTERVAL_SEC
-                try:
-                    status = await asyncio.to_thread(gl_get_phone_status, phone_id)
-                except Exception:
-                    status = None
-                if status is not None and status != PHONE_STOPPED_STATUS:
-                    running = True
-                    break
-            if not running:
-                started_failed_count += 1
-                # Essayer quand meme stop pour libere la phone
-                try:
-                    await asyncio.to_thread(gl_stop_phone, phone_id)
-                except Exception:
-                    pass
-                if len(failures) < 8:
-                    failures.append(f"{phone_label}: timeout ({MAX_WAIT_RUNNING_SEC}s) pas running")
-                continue
+                # 2) Attend que la phone soit running (status != 2)
+                running = False
+                elapsed = 0
+                while elapsed < MAX_WAIT_RUNNING_SEC:
+                    await asyncio.sleep(POLL_INTERVAL_SEC)
+                    elapsed += POLL_INTERVAL_SEC
+                    try:
+                        status = await asyncio.to_thread(gl_get_phone_status, phone_id)
+                    except Exception:
+                        status = None
+                    if status is not None and status != PHONE_STOPPED_STATUS:
+                        running = True
+                        break
+                if not running:
+                    started_failed_count += 1
+                    try:
+                        await asyncio.to_thread(gl_stop_phone, phone_id)
+                    except Exception:
+                        pass
+                    if len(failures) < 8:
+                        failures.append(f"{phone_label}: timeout ({MAX_WAIT_RUNNING_SEC}s) pas running")
+                    continue
 
             # 3) Upload tous les fichiers
             phone_upload_ok = True
@@ -401,15 +410,18 @@ class GeeLark(commands.Cog):
                     if len(failures) < 8:
                         failures.append(f"{phone_label} ({fname}): {res.get('msg', '?')[:60]}")
 
-            # 4) Stop la phone (toujours, meme si upload a echoue)
-            try:
-                await asyncio.to_thread(gl_stop_phone, phone_id)
-            except Exception:
-                pass
+            # 4) Stop la phone — UNIQUEMENT si on l'a demarree nous-meme
+            # (si l'admin l'avait demarree manuellement, on la laisse running)
+            if not was_already_running:
+                try:
+                    await asyncio.to_thread(gl_stop_phone, phone_id)
+                except Exception:
+                    pass
 
             if phone_upload_ok:
                 ok_count += 1
-                await progress(f"✓ {idx}/{len(phones)} `{phone_label}` OK")
+                mark = "✓" if not was_already_running else "✓ (deja running)"
+                await progress(f"{mark} {idx}/{len(phones)} `{phone_label}` OK")
             else:
                 await progress(f"✗ {idx}/{len(phones)} `{phone_label}` upload partiel")
 
