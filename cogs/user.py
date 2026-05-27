@@ -358,8 +358,14 @@ class UserCog(commands.Cog):
                 await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                 return
             if caption:
+                await interaction.followup.send(
+                    f"📝 **CAPTION {kind_label.upper()}** (à écrire **PAR-DESSUS la photo** dans l'éditeur Insta) :"
+                )
                 await interaction.followup.send(caption)
             if description:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION {kind_label.upper()}** (à coller dans le **champ légende** du post) :"
+                )
                 await interaction.followup.send(description)
         finally:
             if tmp_dir:
@@ -457,13 +463,18 @@ class UserCog(commands.Cog):
         transform_cfg = load_transform_config()
         total = len(reels)
 
-        # Message d'intro CLAIR : 1 reel different par compte
+        # Message d'intro CLAIR : 1 reel different par compte + explication caption/description
         intro_global = (
             f"🎬 **{total} reels pour `{identity}` — {total} comptes**\n\n"
             f"🚨 **RÈGLE : 1 reel différent par compte.**\n"
             f"Poste **REEL 1** sur ton **compte 1**, **REEL 2** sur le **compte 2**, "
             f"**REEL 3** sur le **compte 3**.\n"
-            f"⚠️ NE POSTE JAMAIS le même reel sur 2 comptes → duplicate content = shadowban."
+            f"⚠️ NE POSTE JAMAIS le même reel sur 2 comptes → duplicate content = shadowban.\n\n"
+            f"📝 **Pour chaque reel je vais t'envoyer 2 textes :**\n"
+            f"• **CAPTION** = le texte à écrire **PAR-DESSUS la vidéo** "
+            f"(dans l'éditeur Insta, outil texte, en overlay sur le reel)\n"
+            f"• **DESCRIPTION** = le texte à coller dans **le champ légende** du post "
+            f"(en bas, là où Instagram demande 'Écrire une légende...')"
         )
         await interaction.followup.send(intro_global)
 
@@ -504,8 +515,14 @@ class UserCog(commands.Cog):
                     )
                     continue
             if caption:
+                await interaction.followup.send(
+                    f"📝 **CAPTION REEL {idx}** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :"
+                )
                 await interaction.followup.send(caption)
             if description:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION REEL {idx}** (à coller dans le **champ légende** du post) :"
+                )
                 await interaction.followup.send(description)
 
             # Suppression de la source si configuré

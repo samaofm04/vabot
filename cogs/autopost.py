@@ -173,8 +173,10 @@ async def send_reel(channel, identity):
         except discord.HTTPException:
             return False
     if caption:
+        await channel.send("📝 **CAPTION** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
         await channel.send(caption)
     if description:
+        await channel.send("📄 **DESCRIPTION** (à coller dans le **champ légende** du post) :")
         await channel.send(description)
     return True
 
@@ -202,8 +204,10 @@ async def _send_image(channel, identity, kind_label, kind_target, random_fn, tra
         except discord.HTTPException:
             return False
         if caption:
+            await channel.send(f"📝 **CAPTION {kind_label.upper()}** (à mettre **PAR-DESSUS la photo** dans l'éditeur Insta) :")
             await channel.send(caption)
         if description:
+            await channel.send(f"📄 **DESCRIPTION {kind_label.upper()}** (à coller dans le **champ légende** du post) :")
             await channel.send(description)
         return True
     finally:
