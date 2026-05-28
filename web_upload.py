@@ -1754,10 +1754,23 @@ def _render_insta_accounts_html() -> str:
 def _render_insta_trends_grid_html() -> str:
     """Grille des reels scrapés depuis tous les comptes en watchlist."""
     try:
-        from insta_scraper import get_all_cached_reels
+        from insta_scraper import get_all_cached_reels, load_watchlist
     except Exception:
         return ""
     reels = get_all_cached_reels()
+    wl = load_watchlist()
+    # Si watchlist non vide mais cache vide → afficher CTA pour scrape
+    if not reels and wl:
+        return (
+            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:40px 20px;text-align:center'>"
+            f"<h3 style='margin:0 0 8px;color:#fff'>📥 {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
+            "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
+            "<form method='POST' action='/insta/scrape_all' style='margin:0'>"
+            "<button type='submit' style='padding:14px 28px;background:#5865f2;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0' "
+            "data-confirm='Scraper tous les comptes ? Compte ~10 sec par compte.'>"
+            "🔄 Scraper tous mes comptes maintenant</button>"
+            "</form></div>"
+        )
     if not reels:
         return ""
     # Trier par views décroissant par défaut
@@ -1766,7 +1779,9 @@ def _render_insta_trends_grid_html() -> str:
     for r in reels[:60]:
         thumb = r.get("thumbnail_url") or ""
         owner = r.get("_owner", "?")
+        owner_pic = r.get("_owner_pp") or ""
         url = r.get("url", "#")
+        video_url = r.get("video_url") or ""
         views = r.get("views")
         likes = r.get("likes", 0)
         comments = r.get("comments", 0)
@@ -1775,30 +1790,56 @@ def _render_insta_trends_grid_html() -> str:
         play_badge = ""
         if is_video:
             play_badge = (
-                "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+                "<div class='play-badge' style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
                 "width:44px;height:44px;background:rgba(0,0,0,.65);border-radius:50%;"
-                "display:flex;align-items:center;justify-content:center'>"
+                "display:flex;align-items:center;justify-content:center;transition:opacity .2s'>"
                 "<svg viewBox='0 0 24 24' width='22' height='22' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
                 "</div>"
             )
         views_str = f"{views:,}" if views else "—"
+        # Avatar du créateur en haut à gauche
+        avatar = ""
+        if owner_pic:
+            avatar = f"<img src='{owner_pic}' style='width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #fff'>"
+        # Video preview au hover (mouseenter joue, mouseleave pause)
+        video_html = ""
+        if is_video and video_url:
+            video_html = (
+                f"<video class='reel-video' src='{video_url}' muted loop preload='none' "
+                f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s' "
+                f"onmouseenter='this.play();this.style.opacity=1;this.parentElement.querySelector(\".play-badge\").style.opacity=0' "
+                f"onmouseleave='this.pause();this.style.opacity=0;this.parentElement.querySelector(\".play-badge\").style.opacity=1'></video>"
+            )
         cards.append(
-            f"<a href='{url}' target='_blank' class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;display:block'>"
-            f"<div style='position:relative;width:100%;height:280px;background:#000'>"
+            f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden'>"
+            # Conteneur thumbnail/video avec hover
+            f"<div style='position:relative;width:100%;height:280px;background:#000;cursor:pointer' "
+            f"onmouseenter='var v=this.querySelector(\".reel-video\");if(v){{v.play();v.style.opacity=1;var b=this.querySelector(\".play-badge\");if(b)b.style.opacity=0}}' "
+            f"onmouseleave='var v=this.querySelector(\".reel-video\");if(v){{v.pause();v.style.opacity=0;var b=this.querySelector(\".play-badge\");if(b)b.style.opacity=1}}' "
+            f"onclick='window.open(\"{url}\",\"_blank\")'>"
             f"<img src='{thumb}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
+            f"{video_html}"
             f"{play_badge}"
+            # Avatar superposé
+            f"<div style='position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.5);padding:4px 10px 4px 4px;border-radius:20px;backdrop-filter:blur(8px)'>"
+            f"{avatar}<span style='color:#fff;font-size:12px;font-weight:600'>@{owner}</span>"
+            f"</div>"
             f"</div>"
             f"<div style='padding:10px 12px'>"
-            f"<div style='font-size:13px;color:#fff;font-weight:600;margin-bottom:4px'>@{owner}</div>"
             f"<div style='font-size:11px;color:#888;height:30px;overflow:hidden'>{caption}</div>"
             f"<div style='display:flex;gap:10px;margin-top:8px;font-size:12px;color:#aaa'>"
             f"<span>👁️ {views_str}</span>"
             f"<span>❤️ {likes:,}</span>"
             f"<span>💬 {comments:,}</span>"
-            f"</div></div></a>"
+            f"</div></div></div>"
         )
     cards.append("</div>")
-    cards.append(f"<div style='margin-top:18px'><small>{len(reels)} reel(s) au total — affichage des 60 premiers</small></div>")
+    cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
+                 f"<small>{len(reels)} reel(s) au total — affichage des 60 premiers</small>"
+                 f"<form method='POST' action='/insta/scrape_all' style='margin:0'>"
+                 f"<button type='submit' style='padding:8px 18px;background:#5865f2;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
+                 f"data-confirm='Rafraîchir tous les comptes ?'>"
+                 f"🔄 Rafraîchir</button></form></div>")
     return "".join(cards)
 
 
