@@ -1024,6 +1024,93 @@ class Welcome(commands.Cog):
         )
         _schedule_exit(2.0)
 
+    @app_commands.command(
+        name="postcommands",
+        description="[ADMIN] Poste la liste des commandes de ce bot dans ce salon (à pin)",
+    )
+    async def postcommands(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer()
+        embeds = build_commands_embeds(self.bot)
+        # 1er embed avec interaction.followup, le reste avec channel.send
+        first = embeds[0]
+        await interaction.followup.send(embed=first)
+        for emb in embeds[1:]:
+            await interaction.channel.send(embed=emb)
+
+
+def build_commands_embeds(bot):
+    """Construit 1+ embeds qui listent toutes les slash commands de ce bot.
+
+    Groupe par section (Public / Admin / Owner) basee sur le prefixe de la description.
+    Decoupe automatiquement si depasse les limites Discord (6000 char / embed, 1024 / field).
+    """
+    cmds = list(bot.tree.get_commands())
+    cmds.sort(key=lambda c: c.name)
+    sections = {"🌐 Public (pour les VAs)": [], "🔧 Admin": [], "👑 Owner": []}
+    for cmd in cmds:
+        desc = (cmd.description or "").strip()
+        if desc.startswith("[OWNER]"):
+            sections["👑 Owner"].append((cmd.name, desc.replace("[OWNER]", "").strip()))
+        elif desc.startswith("[ADMIN]"):
+            sections["🔧 Admin"].append((cmd.name, desc.replace("[ADMIN]", "").strip()))
+        else:
+            sections["🌐 Public (pour les VAs)"].append((cmd.name, desc))
+
+    bot_name = bot.user.name if bot.user else "Bot"
+    embeds = []
+    current = discord.Embed(
+        title=f"📚 Commandes — {bot_name}",
+        description=f"Total : **{len(cmds)}** commandes",
+        color=discord.Color.blurple(),
+    )
+
+    def _length(emb):
+        # Approx: sum titles + description + field name+value
+        n = len(emb.title or "") + len(emb.description or "")
+        for f in emb.fields:
+            n += len(f.name) + len(f.value)
+        return n
+
+    def _flush_field(section_name, lines):
+        """Ajoute des fields a l'embed courant, en creant un nouvel embed si trop gros."""
+        nonlocal current
+        if not lines:
+            return
+        # Chunker les lignes pour rester sous 1024 par field
+        chunk = ""
+        chunk_idx = 0
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 1000:
+                # Push le chunk
+                name = section_name + (f" (suite)" if chunk_idx > 0 else f" — {len(lines)}")
+                # Verifier limite embed 6000
+                if _length(current) + len(name) + len(chunk) > 5800 or len(current.fields) >= 24:
+                    embeds.append(current)
+                    current = discord.Embed(color=discord.Color.blurple())
+                current.add_field(name=name, value=chunk, inline=False)
+                chunk_idx += 1
+                chunk = line
+            else:
+                chunk = (chunk + "\n" + line) if chunk else line
+        if chunk:
+            name = section_name + (f" (suite)" if chunk_idx > 0 else f" — {len(lines)}")
+            if _length(current) + len(name) + len(chunk) > 5800 or len(current.fields) >= 24:
+                embeds.append(current)
+                current = discord.Embed(color=discord.Color.blurple())
+            current.add_field(name=name, value=chunk, inline=False)
+
+    for section_name, items in sections.items():
+        if not items:
+            continue
+        lines = [f"`/{n}` — {d[:70]}" for n, d in items]
+        _flush_field(section_name, lines)
+
+    current.set_footer(text="Auto-générée — relance /postcommands pour rafraîchir")
+    embeds.append(current)
+    return embeds
+
 
 async def setup(bot):
     await bot.add_cog(Welcome(bot))

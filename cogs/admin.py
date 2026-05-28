@@ -2233,6 +2233,21 @@ class Admin(commands.Cog):
     async def managestoryctas(self, interaction: discord.Interaction, identity: str):
         await self._manage_images(interaction, identity, "storyctas", "Story CTA")
 
+    @app_commands.command(
+        name="postcommands",
+        description="[ADMIN] Poste la liste des commandes de ce bot dans ce salon (à pin)",
+    )
+    async def postcommands(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer()
+        # Import depuis welcome cog (chargé sur l'autre bot mais le module est accessible)
+        from cogs.welcome import build_commands_embeds
+        embeds = build_commands_embeds(self.bot)
+        await interaction.followup.send(embed=embeds[0])
+        for emb in embeds[1:]:
+            await interaction.channel.send(embed=emb)
+
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
