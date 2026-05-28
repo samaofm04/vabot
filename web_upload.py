@@ -1930,16 +1930,35 @@ def create_app():
         if not is_auth():
             return redirect("/")
         try:
-            from insta_scraper import add_to_watchlist
+            from insta_scraper import add_to_watchlist, scrape_profile, is_auth_configured
         except Exception as e:
             return _render_upload(f"❌ Module indispo: {e}", error=True)
         u = (request.form.get("username") or "").strip()
         if not u:
             return _render_upload("❌ username vide", error=True)
-        ok = add_to_watchlist(u)
-        if ok:
-            return _render_upload(f"✅ <b>@{u}</b> ajouté à la watchlist")
-        return _render_upload(f"⚠️ @{u} déjà dans la watchlist", error=True)
+        added = add_to_watchlist(u)
+        # Si pas de cookies, juste ajouter sans scrape
+        if not is_auth_configured():
+            if added:
+                return _render_upload(
+                    f"✅ <b>@{u}</b> ajouté à la watchlist. "
+                    f"⚠️ Configure tes cookies dans <b>Settings → Cookies Instagram</b> pour pouvoir scraper.",
+                )
+            return _render_upload(f"⚠️ @{u} déjà dans la watchlist", error=True)
+        # Cookies OK -> scrape automatique
+        from insta_scraper import _clean_username
+        clean = _clean_username(u)
+        result = scrape_profile(clean, limit=12)
+        if "error" in result:
+            if added:
+                return _render_upload(
+                    f"✅ <b>@{clean}</b> ajouté, mais le scrape a échoué : {result['error']}",
+                    error=True,
+                )
+            return _render_upload(f"❌ Scrape @{clean} : {result['error']}", error=True)
+        n = len(result.get("reels", []))
+        action = "ajouté + scrapé" if added else "déjà en watchlist, re-scrapé"
+        return _render_upload(f"✅ <b>@{clean}</b> {action} ({n} reels). Va voir <b>Instagram → Trends</b>.")
 
     @app.route("/insta/remove_account", methods=["POST"])
     def insta_remove_account():
