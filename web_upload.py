@@ -23,6 +23,29 @@ IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
 WEB_PASSWORD = os.environ.get("WEB_UPLOAD_PASSWORD", "changeme")
 WEB_PORT = int(os.environ.get("WEB_UPLOAD_PORT", "8080"))
 
+# Reference au bot Discord pour resolver les usernames depuis user_id
+_BOT_REF = None
+
+
+def set_bot_ref(bot):
+    """Appelé depuis main.py pour que le site web puisse lookup les users."""
+    global _BOT_REF
+    _BOT_REF = bot
+
+
+def _resolve_username(user_id) -> str:
+    """Retourne le username Discord depuis l'ID, ou l'ID si pas trouvé."""
+    if _BOT_REF is None:
+        return str(user_id)
+    try:
+        u = _BOT_REF.get_user(int(user_id))
+        if u:
+            # discord.py 2.x : .name (sans tag) ou .display_name
+            return getattr(u, "name", None) or getattr(u, "display_name", None) or str(user_id)
+    except Exception:
+        pass
+    return str(user_id)
+
 
 def _read_env_lines():
     """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
@@ -477,46 +500,68 @@ def _render_va_list_html() -> str:
     users = _load_users()
     if not users:
         return "<p style='color:#888'>Aucun VA assigné pour l'instant.</p>"
-    rows = []
-    rows.append(
-        "<table style='width:100%;border-collapse:collapse;margin-top:12px'>"
-        "<tr style='background:#1a1a1a'>"
-        "<th style='padding:8px;text-align:left'>Discord ID</th>"
-        "<th style='padding:8px;text-align:left'>Identité</th>"
-        "<th style='padding:8px;text-align:left'>Salon</th>"
-        "<th style='padding:8px;text-align:center'>Auto-post</th>"
-        "<th style='padding:8px;text-align:right'>Actions</th>"
-        "</tr>"
-    )
+
+    # Regrouper par identité
+    by_identity = {}
     for uid, data in users.items():
         if isinstance(data, dict):
             identity = data.get("identity", "?")
-            channel_id = data.get("channel_id", "")
-            auto = "✅" if data.get("auto_post", True) else "❌"
         else:
             identity = str(data)
-            channel_id = ""
-            auto = "?"
-        channel_link = (
-            f"<a href='https://discord.com/channels/@me/{channel_id}'>{channel_id}</a>"
-            if channel_id else "<span style='color:#888'>—</span>"
+        by_identity.setdefault(identity, []).append((uid, data))
+
+    rows = []
+    for identity in sorted(by_identity.keys()):
+        members = by_identity[identity]
+        rows.append(
+            f"<div style='margin-top:18px;display:flex;align-items:center;gap:10px'>"
+            f"<h4 style='margin:0;color:#5865f2;font-size:15px'>👤 {identity}</h4>"
+            f"<small style='color:#666'>{len(members)} VA(s)</small>"
+            f"</div>"
         )
         rows.append(
-            f"<tr style='border-bottom:1px solid #333'>"
-            f"<td style='padding:8px'><code>{uid}</code></td>"
-            f"<td style='padding:8px'><b>{identity}</b></td>"
-            f"<td style='padding:8px'>{channel_link}</td>"
-            f"<td style='padding:8px;text-align:center'>{auto}</td>"
-            f"<td style='padding:8px;text-align:right'>"
-            f"<form method='POST' action='/va/reset' style='display:inline'>"
-            f"<input type='hidden' name='user_id' value='{uid}'>"
-            f"<button type='submit' style='padding:6px 12px;background:#d9534f;margin:0;font-size:13px' "
-            f"onclick=\"return confirm('Reset {uid} ?')\">🗑 Reset</button>"
-            f"</form>"
-            f"</td></tr>"
+            "<table style='width:100%;border-collapse:collapse;margin-top:8px'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:8px;text-align:left'>Username Discord</th>"
+            "<th style='padding:8px;text-align:left'>Discord ID</th>"
+            "<th style='padding:8px;text-align:left'>Salon</th>"
+            "<th style='padding:8px;text-align:center'>Auto-post</th>"
+            "<th style='padding:8px;text-align:right'>Actions</th>"
+            "</tr>"
         )
-    rows.append("</table>")
-    rows.append(f"<small>Total : <b>{len(users)}</b> VA(s)</small>")
+        for uid, data in members:
+            if isinstance(data, dict):
+                channel_id = data.get("channel_id", "")
+                auto = "✅" if data.get("auto_post", True) else "❌"
+            else:
+                channel_id = ""
+                auto = "?"
+            username = _resolve_username(uid)
+            # Si username == uid c'est qu'on a pas trouvé l'user dans le cache
+            if username == str(uid):
+                username_html = "<span style='color:#888'>—</span>"
+            else:
+                username_html = f"<b>@{username}</b>"
+            channel_link = (
+                f"<a href='https://discord.com/channels/@me/{channel_id}'>{channel_id}</a>"
+                if channel_id else "<span style='color:#888'>—</span>"
+            )
+            rows.append(
+                f"<tr style='border-bottom:1px solid #333'>"
+                f"<td style='padding:8px'>{username_html}</td>"
+                f"<td style='padding:8px'><code style='font-size:12px'>{uid}</code></td>"
+                f"<td style='padding:8px'>{channel_link}</td>"
+                f"<td style='padding:8px;text-align:center'>{auto}</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/va/reset' style='display:inline'>"
+                f"<input type='hidden' name='user_id' value='{uid}'>"
+                f"<button type='submit' class='danger-btn' "
+                f"onclick=\"return confirm('Reset {username} ?')\">Reset</button>"
+                f"</form>"
+                f"</td></tr>"
+            )
+        rows.append("</table>")
+    rows.append(f"<div style='margin-top:18px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{len(users)}</b> VA(s) sur <b>{len(by_identity)}</b> identité(s)</small></div>")
     return "".join(rows)
 
 

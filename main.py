@@ -127,7 +127,8 @@ async def main_async():
 
     # Mini site web d'upload (lancer une seule fois, dans un thread separe)
     try:
-        from web_upload import start_in_thread
+        from web_upload import start_in_thread, set_bot_ref
+        set_bot_ref(main_bot)
         start_in_thread()
         log.info("Mini site web demarre sur le port 8080")
     except Exception as e:
