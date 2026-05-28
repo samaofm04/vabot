@@ -298,16 +298,36 @@ function igSelectSort(btn, label){
   if(c) c.style.display='block';
   igToggleSort(); // ferme le menu
 }
+function igToggleFilters(){
+  var panel = document.getElementById('ig-filters-panel');
+  if(!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+function igClearFilters(){
+  var panel = document.getElementById('ig-filters-panel');
+  if(!panel) return;
+  panel.querySelectorAll('input[type=number]').forEach(function(i){ i.value=0; });
+  panel.querySelectorAll('input[type=text]').forEach(function(i){ i.value=''; });
+}
 // Fermer le menu si clic à l'extérieur
 document.addEventListener('click', function(e){
+  // Sort menu
   var menu = document.getElementById('ig-sort-menu');
-  if(!menu || menu.style.display !== 'block') return;
-  // Si clic à l'intérieur du bouton ou du menu, ne pas fermer
-  var sortContainer = menu.parentNode;
-  if(sortContainer && !sortContainer.contains(e.target)){
-    menu.style.display = 'none';
-    var arrow = document.getElementById('ig-sort-arrow');
-    if(arrow) arrow.style.transform = 'rotate(0deg)';
+  if(menu && menu.style.display === 'block'){
+    var sortContainer = menu.parentNode;
+    if(sortContainer && !sortContainer.contains(e.target)){
+      menu.style.display = 'none';
+      var arrow = document.getElementById('ig-sort-arrow');
+      if(arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+  }
+  // Filters panel
+  var fpanel = document.getElementById('ig-filters-panel');
+  if(fpanel && fpanel.style.display === 'block'){
+    var fContainer = fpanel.parentNode;
+    if(fContainer && !fContainer.contains(e.target)){
+      fpanel.style.display = 'none';
+    }
   }
 });
 // Hover sur les options du dropdown
@@ -769,9 +789,61 @@ function showTab(group,name,title,subtitle){
     <button onclick="igPeriod(this,'month')" class="ig-period" style="padding:8px 22px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0">Month</button>
   </div>
 
-  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#fff;margin-left:auto">
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-    <span style="font-weight:600;font-size:14px">Filters</span>
+  <div style="position:relative;margin-left:auto">
+    <div onclick="igToggleFilters()" id="ig-filters-btn" style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#fff;user-select:none">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      <span style="font-weight:600;font-size:14px">Filters</span>
+    </div>
+    <div id="ig-filters-panel" style="display:none;position:absolute;top:48px;right:0;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px;width:340px;box-shadow:0 12px 32px rgba(0,0,0,.6);z-index:60;max-height:600px;overflow-y:auto">
+      <h3 style="margin:0 0 16px;font-size:18px">Filters</h3>
+
+      <div class="filter-section" style="margin-bottom:18px">
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Min.</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Max.</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+        </div>
+      </div>
+
+      <div class="filter-section" style="margin-bottom:18px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px">Likes</div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+        </div>
+      </div>
+
+      <div class="filter-section" style="margin-bottom:18px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px">Followers</div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+        </div>
+      </div>
+
+      <div class="filter-section" style="margin-bottom:18px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px">Creators</div>
+        <div style="padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#666;border-radius:6px;font-size:13px;margin-bottom:8px">No creators selected</div>
+        <div style="position:relative">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#666" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" placeholder="Search creators" style="width:100%;padding:9px 10px 9px 32px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px">
+        </div>
+        <div style="margin-top:8px;padding:10px 12px;background:#0f0f0f;border:1px solid #333;border-radius:6px;color:#888;font-size:13px">
+          You haven't added any creators yet.<br>
+          <a href="#" onclick="comingSoon();return false;" style="color:#7289da">Add your first creator</a> now.
+        </div>
+      </div>
+
+      <div class="filter-section" style="margin-bottom:18px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px">Custom Instagram Watchlists</div>
+        <div style="padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#666;border-radius:6px;font-size:13px;margin-bottom:8px">No watchlist selected</div>
+        <div style="padding:10px 12px;background:#0f0f0f;border:1px solid #333;border-radius:6px;color:#888;font-size:13px;margin-bottom:8px">
+          Your Instagram watchlist is empty.<br>Start adding accounts you want to keep an eye on!
+        </div>
+        <button onclick="comingSoon()" style="width:100%;padding:10px;background:none;border:1px dashed #444;color:#aaa;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;margin:0">+ Create new watchlist</button>
+      </div>
+
+      <button onclick="igClearFilters()" style="width:100%;padding:11px;background:#2a2a2a;border:0;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;margin:8px 0 0">Clear Filters</button>
+    </div>
   </div>
 </div>
 
