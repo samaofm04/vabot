@@ -211,9 +211,10 @@ body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;pad
 .sidebar .group .item .badge{padding:2px 6px;font-size:9px;background:#5865f2;color:#fff;border-radius:4px;font-weight:700;letter-spacing:.5px}
 /* Sous-groupes imbriqués (Instagram, TikTok, etc. dans Trends) */
 .sidebar .subgroup{display:flex;flex-direction:column}
-.sidebar .subgroup-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;font-weight:600;border-radius:6px;width:100%;text-align:left;margin:0;transition:all .12s}
+.sidebar .subgroup-head{display:flex;align-items:center;gap:10px;padding:8px 12px;background:none;border:0;color:#bbb;cursor:pointer;font-size:13.5px;font-weight:600;border-radius:6px;width:100%;text-align:left;margin:0;transition:all .12s}
 .sidebar .subgroup-head:hover{background:#181818;color:#fff}
-.sidebar .subgroup-head .emoji{font-size:14px}
+.sidebar .subgroup-head .brand{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.sidebar .subgroup-head .brand svg{width:18px;height:18px;display:block}
 .sidebar .subgroup-head .label{flex:1}
 .sidebar .subgroup-head .arrow{width:12px;height:12px;color:#666;transition:transform .15s}
 .sidebar .subgroup.open .subgroup-head .arrow{transform:rotate(180deg)}
@@ -353,7 +354,20 @@ function showTab(group,name,title,subtitle){
 
     <div class="subgroup" id="sub-instagram">
       <button class="subgroup-head" onclick="toggleSubGroup('instagram')">
-        <span class="emoji">📷</span><span class="label">Instagram</span>
+        <span class="brand">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="igGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#FFC107"/><stop offset="35%" stop-color="#F44336"/>
+                <stop offset="70%" stop-color="#E91E63"/><stop offset="100%" stop-color="#9C27B0"/>
+              </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igGrad)"/>
+            <circle cx="12" cy="12" r="4.2" fill="none" stroke="#fff" stroke-width="2"/>
+            <circle cx="17.5" cy="6.5" r="1.4" fill="#fff"/>
+          </svg>
+        </span>
+        <span class="label">Instagram</span>
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
@@ -364,7 +378,12 @@ function showTab(group,name,title,subtitle){
 
     <div class="subgroup" id="sub-tiktok">
       <button class="subgroup-head" onclick="toggleSubGroup('tiktok')">
-        <span class="emoji">🎵</span><span class="label">TikTok</span>
+        <span class="brand">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+            <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5.3 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.34-.1z"/>
+          </svg>
+        </span>
+        <span class="label">TikTok</span>
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
@@ -375,7 +394,12 @@ function showTab(group,name,title,subtitle){
 
     <div class="subgroup" id="sub-twitter">
       <button class="subgroup-head" onclick="toggleSubGroup('twitter')">
-        <span class="emoji">𝕏</span><span class="label">Twitter / X</span>
+        <span class="brand">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+        </span>
+        <span class="label">Twitter / X</span>
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
@@ -386,7 +410,12 @@ function showTab(group,name,title,subtitle){
 
     <div class="subgroup" id="sub-threads">
       <button class="subgroup-head" onclick="toggleSubGroup('threads')">
-        <span class="emoji">🧵</span><span class="label">Threads</span>
+        <span class="brand">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+            <path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.589 12c.027 3.086.718 5.496 2.057 7.164 1.43 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.31-.71-.873-1.3-1.634-1.75-.192 1.352-.622 2.446-1.284 3.272-.886 1.102-2.14 1.704-3.73 1.79-1.202.065-2.361-.218-3.259-.801-1.063-.689-1.685-1.74-1.752-2.964-.065-1.19.408-2.285 1.33-3.082.88-.76 2.119-1.207 3.583-1.291a13.853 13.853 0 0 1 3.02.142c-.126-.742-.375-1.332-.74-1.757-.512-.595-1.295-.895-2.32-.901h-.024c-.831 0-1.957.221-2.696 1.346L7.36 7.405c.99-1.51 2.6-2.337 4.535-2.337h.036c3.235.02 5.158 2.022 5.348 5.527.108.046.215.094.32.144 1.49.7 2.58 1.761 3.156 3.071.802 1.83.875 4.81-1.553 7.207-1.847 1.835-4.115 2.668-7.045 2.683l-.001-.001zm.972-13.245c-.331 0-.668.011-1.001.026-1.84.106-2.978.946-2.91 2.143.07 1.255 1.45 1.838 2.766 1.767 1.213-.066 2.788-.531 3.05-3.681a10.347 10.347 0 0 0-1.91-.255l.005-.001z"/>
+          </svg>
+        </span>
+        <span class="label">Threads</span>
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
