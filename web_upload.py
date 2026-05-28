@@ -526,18 +526,21 @@ def _render_va_list_html() -> str:
             "<th style='padding:8px;text-align:left'>Discord ID</th>"
             "<th style='padding:8px;text-align:left'>Salon</th>"
             "<th style='padding:8px;text-align:center'>Auto-post</th>"
+            "<th style='padding:8px;text-align:left'>Changer d'identité</th>"
             "<th style='padding:8px;text-align:right'>Actions</th>"
             "</tr>"
         )
+        all_identities = _list_identities()
         for uid, data in members:
             if isinstance(data, dict):
                 channel_id = data.get("channel_id", "")
                 auto = "✅" if data.get("auto_post", True) else "❌"
+                cur_identity = data.get("identity", identity)
             else:
                 channel_id = ""
                 auto = "?"
+                cur_identity = identity
             username = _resolve_username(uid)
-            # Si username == uid c'est qu'on a pas trouvé l'user dans le cache
             if username == str(uid):
                 username_html = "<span style='color:#888'>—</span>"
             else:
@@ -546,12 +549,27 @@ def _render_va_list_html() -> str:
                 f"<a href='https://discord.com/channels/@me/{channel_id}'>{channel_id}</a>"
                 if channel_id else "<span style='color:#888'>—</span>"
             )
+            # Select pour changer l'identité
+            opts = "".join(
+                f"<option value='{i}'{' selected' if i == cur_identity else ''}>{i}</option>"
+                for i in all_identities
+            )
+            change_form = (
+                f"<form method='POST' action='/va/change_identity' style='display:flex;gap:6px;margin:0'>"
+                f"<input type='hidden' name='user_id' value='{uid}'>"
+                f"<select name='identity' style='padding:6px 8px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:4px;font-size:13px;width:auto;flex:1'>"
+                f"{opts}"
+                f"</select>"
+                f"<button type='submit' style='padding:6px 10px;background:#5865f2;color:#fff;border:0;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;margin:0'>OK</button>"
+                f"</form>"
+            )
             rows.append(
                 f"<tr style='border-bottom:1px solid #333'>"
                 f"<td style='padding:8px'>{username_html}</td>"
                 f"<td style='padding:8px'><code style='font-size:12px'>{uid}</code></td>"
                 f"<td style='padding:8px'>{channel_link}</td>"
                 f"<td style='padding:8px;text-align:center'>{auto}</td>"
+                f"<td style='padding:8px;min-width:180px'>{change_form}</td>"
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/va/reset' style='display:inline'>"
                 f"<input type='hidden' name='user_id' value='{uid}'>"
@@ -847,6 +865,38 @@ def create_app():
         return _render_upload(
             f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
             "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer."
+        )
+
+    @app.route("/va/change_identity", methods=["POST"])
+    def va_change_identity():
+        if not is_auth():
+            return redirect("/")
+        uid = (request.form.get("user_id") or "").strip()
+        new_identity = (request.form.get("identity") or "").strip().lower()
+        if not uid or not new_identity:
+            return _render_upload("❌ user_id ou identite manquant", error=True)
+        if new_identity not in _list_identities():
+            return _render_upload(
+                f"❌ Identité <code>{new_identity}</code> introuvable", error=True
+            )
+        users = _load_users()
+        if uid not in users:
+            return _render_upload(f"❌ VA {uid} introuvable", error=True)
+        # Update l'identité (en gardant le reste : channel_id, auto_post...)
+        entry = users[uid]
+        if isinstance(entry, dict):
+            old_identity = entry.get("identity", "?")
+            entry["identity"] = new_identity
+        else:
+            old_identity = str(entry)
+            users[uid] = {"identity": new_identity, "channel_id": None, "auto_post": True}
+        _save_users(users)
+        username = _resolve_username(uid)
+        return _render_upload(
+            f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
+            f"<code>{new_identity}</code>. "
+            f"⚠️ Son salon Discord reste dans la catégorie de l'ancienne identité — "
+            f"déplace-le manuellement sur Discord si besoin."
         )
 
     return app
