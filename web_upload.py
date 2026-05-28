@@ -605,6 +605,12 @@ function showTab(group,name,title,subtitle){
   if(sec)sec.style.display='block';
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
+  // Mettre à jour l'URL pour que le Referer soit conservé après POST
+  try{
+    if(window.history && window.history.replaceState){
+      window.history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
+    }
+  }catch(e){}
 }
 </script>
 </head><body><div class="layout">
@@ -1141,6 +1147,11 @@ function showTab(group,name,title,subtitle){
 <label>x-rapidapi-host (défaut OK)</label>
 <input type="text" name="rapidapi_host" value="instagram-scraper-stable-api.p.rapidapi.com">
 <button type="submit">💾 Sauver la clé RapidAPI</button>
+</form>
+<form method="POST" action="/insta/test_rapidapi" class="box">
+<h4 style="margin-top:0">🧪 Tester ma config RapidAPI</h4>
+<small>Lance un test avec @instagram pour vérifier que ta clé fonctionne.</small>
+<button type="submit" style="background:#00d68f">▶ Tester maintenant</button>
 </form>
 
 <div style="margin:24px 0;border-top:1px solid #2a2a2a;padding-top:20px">
@@ -2226,6 +2237,29 @@ def create_app():
         if ok:
             return _success(f"✅ <b>@{u}</b> retiré")
         return _error(f"⚠️ @{u} introuvable")
+
+    @app.route("/insta/test_rapidapi", methods=["POST"])
+    def insta_test_rapidapi():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import load_auth, _scrape_via_rapidapi
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        auth = load_auth()
+        if not auth.get("rapidapi_key"):
+            return _error("❌ Pas de clé RapidAPI configurée — sauve-la d'abord")
+        # Test avec un profil public connu
+        test_user = "instagram"
+        result = _scrape_via_rapidapi(test_user, limit=3)
+        if "error" in result:
+            return _error(f"❌ Test RapidAPI échoué : {result['error']}")
+        prof = result.get("profile", {})
+        return _success(
+            f"✅ RapidAPI fonctionne ! Test @{test_user} → "
+            f"<b>{prof.get('followers', 0):,}</b> followers, "
+            f"<b>{len(result.get('reels', []))}</b> reels récupérés."
+        )
 
     @app.route("/insta/scrape", methods=["POST"])
     def insta_scrape():

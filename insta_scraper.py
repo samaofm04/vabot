@@ -193,17 +193,31 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             data={"username_or_url": username},
             timeout=20,
         )
+        log.info(f"RapidAPI profile HTTP {r.status_code} pour {username}")
         if r.status_code == 401 or r.status_code == 403:
-            return {"error": f"Clé RapidAPI invalide ou pas abonné (HTTP {r.status_code})"}
+            return {"error": f"Clé RapidAPI invalide ou non-abonné (HTTP {r.status_code}). Vérifie sur RapidAPI."}
         if r.status_code == 429:
-            return {"error": "Quota RapidAPI dépassé (HTTP 429)"}
+            return {"error": "Quota RapidAPI épuisé (HTTP 429). Upgrade ton plan ou attends."}
+        if r.status_code == 404:
+            return {"error": f"Endpoint introuvable (HTTP 404). L'API a peut-être changé."}
         if r.status_code != 200:
-            return {"error": f"RapidAPI profil: HTTP {r.status_code}: {r.text[:200]}"}
-        user = r.json()
-        if "error" in user or "message" in user and not user.get("username"):
-            return {"error": f"API: {user.get('error') or user.get('message')}"}
+            return {"error": f"RapidAPI HTTP {r.status_code}: {r.text[:200]}"}
+        try:
+            user = r.json()
+        except Exception as je:
+            return {"error": f"Réponse non-JSON: {r.text[:150]}"}
+        # Plusieurs APIs renvoient un wrapper {"data": {...}} ou {"user": {...}}
+        if isinstance(user, dict):
+            if "user" in user and isinstance(user["user"], dict):
+                user = user["user"]
+            elif "data" in user and isinstance(user["data"], dict):
+                user = user["data"]
+        # Vérifier qu'on a bien des données utiles
+        if not isinstance(user, dict) or not (user.get("username") or user.get("pk") or user.get("id")):
+            err_msg = user.get("error") or user.get("message") or user.get("detail") if isinstance(user, dict) else str(user)
+            return {"error": f"Réponse vide/invalide. {err_msg or str(user)[:150]}"}
     except Exception as e:
-        return {"error": f"Erreur fetch profil: {e}"}
+        return {"error": f"Erreur fetch profil: {type(e).__name__}: {e}"}
 
     pic = ""
     if isinstance(user.get("hd_profile_pic_url_info"), dict):
@@ -413,35 +427,34 @@ def scrape_profile(username: str, limit: int = 12) -> dict:
     if not username:
         return {"error": "username vide"}
     auth = load_auth()
+    errors = []
 
     # Tentative 0 : RapidAPI (PRIORITAIRE si clé configurée)
     if auth.get("rapidapi_key"):
         result = _scrape_via_rapidapi(username, limit)
         if "error" not in result:
             return result
-        # Note l'erreur RapidAPI mais on tente quand même les autres
-        rapidapi_error = result["error"]
-        log.warning(f"RapidAPI échoué pour {username}: {rapidapi_error}")
-    else:
-        rapidapi_error = None
+        errors.append(f"RapidAPI: {result['error']}")
+        log.warning(f"RapidAPI échoué pour {username}: {result['error']}")
 
     if not auth.get("sessionid"):
-        if rapidapi_error:
-            return {"error": f"RapidAPI: {rapidapi_error} (et pas de session cookie configurée)"}
+        if errors:
+            return {"error": " | ".join(errors)}
         return {"error": "Aucune session ni clé RapidAPI configurée (Settings → Instagram)"}
 
     # Tentative 1 : API web directe (plus fiable)
     result = _scrape_via_web_api(username, limit)
     if "error" not in result:
         return result
-    web_error = result["error"]
+    errors.append(f"Web API: {result['error']}")
 
     # Tentative 2 : instaloader en fallback
     if not INSTALOADER_OK:
-        return {"error": f"API web KO: {web_error}"}
+        return {"error": " | ".join(errors)}
     L = _make_loader()
     if L is None:
-        return {"error": f"API web KO ({web_error}) + instaloader KO"}
+        errors.append("instaloader: pas de session valide")
+        return {"error": " | ".join(errors)}
     try:
         profile = instaloader.Profile.from_username(L.context, username)
         reels = []
@@ -488,11 +501,14 @@ def scrape_profile(username: str, limit: int = 12) -> dict:
         )
         return result
     except instaloader.exceptions.ProfileNotExistsException:
-        return {"error": f"Profil @{username} introuvable"}
+        errors.append(f"instaloader: profil introuvable")
+        return {"error": " | ".join(errors)}
     except instaloader.exceptions.LoginRequiredException:
-        return {"error": "Session expirée — recharge les cookies dans Settings"}
+        errors.append("instaloader: session expirée")
+        return {"error": " | ".join(errors)}
     except Exception as e:
-        return {"error": f"API web KO ({web_error}) + instaloader: {type(e).__name__}: {e}"}
+        errors.append(f"instaloader: {type(e).__name__}: {e}")
+        return {"error": " | ".join(errors)}
 
 
 def get_cached(username: str) -> Optional[dict]:
