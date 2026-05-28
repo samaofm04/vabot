@@ -1,6 +1,7 @@
 import os
 import logging
 import traceback
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -8,7 +9,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
+ADMIN_TOKEN = os.getenv("DISCORD_ADMIN_TOKEN")
 PREFIX = os.getenv("PREFIX", "!")
+
+# Repartition des cogs entre les 2 bots
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user"]
+ADMIN_COGS = ["admin", "geelark"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,61 +22,113 @@ logging.basicConfig(
 )
 log = logging.getLogger("vabot")
 
-intents = discord.Intents.default()
-intents.members = True  # necessaire pour on_member_join (welcome auto)
+
+def make_intents():
+    intents = discord.Intents.default()
+    intents.members = True  # necessaire pour on_member_join
+    return intents
 
 
 class VABot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix=PREFIX, intents=intents)
+    def __init__(self, label: str, cogs_to_load: list):
+        super().__init__(command_prefix=PREFIX, intents=make_intents())
+        self._label = label
+        self._cogs_to_load = cogs_to_load
 
     async def setup_hook(self):
-        for filename in sorted(os.listdir("./cogs")):
-            if filename.endswith(".py") and not filename.startswith("_"):
-                try:
-                    await self.load_extension(f"cogs.{filename[:-3]}")
-                    log.info(f"Cog charge: {filename}")
-                except Exception as e:
-                    log.error(f"Erreur chargement {filename}: {e}")
-                    log.error(traceback.format_exc())
+        for cog_name in self._cogs_to_load:
+            path = f"./cogs/{cog_name}.py"
+            if not os.path.exists(path):
+                log.warning(f"[{self._label}] cog {cog_name} introuvable, skip")
+                continue
+            try:
+                await self.load_extension(f"cogs.{cog_name}")
+                log.info(f"[{self._label}] Cog charge: {cog_name}")
+            except Exception as e:
+                log.error(f"[{self._label}] Erreur chargement {cog_name}: {e}")
+                log.error(traceback.format_exc())
         try:
             synced = await self.tree.sync()
-            log.info(f"{len(synced)} slash commands synchronisees")
+            log.info(f"[{self._label}] {len(synced)} slash commands synchronisees")
         except Exception as e:
-            log.warning(f"Sync au demarrage echoue (rate-limit ?): {e}")
+            log.warning(f"[{self._label}] Sync echoue (rate-limit?): {e}")
 
 
-bot = VABot()
+def register_sync_command(bot: commands.Bot, label: str):
+    """Enregistre /sync sur ce bot."""
+    @bot.tree.command(name="sync", description="[OWNER] Resync les slash commands")
+    async def sync_slash(interaction: discord.Interaction):
+        app = await bot.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            synced = await bot.tree.sync()
+            await interaction.followup.send(
+                f"OK {len(synced)} commandes synchronisees ({label}).", ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"Erreur: {e}", ephemeral=True)
 
 
-@bot.event
+# Bot principal (VAs + onboarding + welcome + autopost)
+main_bot = VABot("main", MAIN_COGS)
+register_sync_command(main_bot, "main")
+
+
+@main_bot.event
 async def on_ready():
-    log.info(f"Bot connecte en tant que {bot.user} (id: {bot.user.id})")
+    log.info(f"[main] Bot connecte: {main_bot.user} (id: {main_bot.user.id})")
 
 
-@bot.tree.command(name="sync", description="[OWNER] Resync les slash commands")
-async def sync_slash(interaction: discord.Interaction):
-    app = await bot.application_info()
-    if interaction.user.id != app.owner.id:
-        await interaction.response.send_message("Owner only.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    try:
-        synced = await bot.tree.sync()
-        await interaction.followup.send(f"OK {len(synced)} commandes synchronisees.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"Erreur: {e}", ephemeral=True)
+# Bot admin (cree dynamiquement si ADMIN_TOKEN dispo)
+admin_bot = None
+if ADMIN_TOKEN:
+    admin_bot = VABot("admin", ADMIN_COGS)
+    register_sync_command(admin_bot, "admin")
+
+    @admin_bot.event
+    async def on_admin_ready():
+        log.info(f"[admin] Bot connecte: {admin_bot.user} (id: {admin_bot.user.id})")
+
+    admin_bot.add_listener(on_admin_ready, "on_ready")
 
 
-if __name__ == "__main__":
+async def main_async():
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN manquant dans .env")
-    log.info("=== Demarrage du bot (force-resync v3) ===")
-    # Lancer le mini site web d'upload dans un thread separe
+
+    log.info("=== Demarrage du bot ===")
+    if ADMIN_TOKEN:
+        log.info("ADMIN_TOKEN detecte -> les 2 bots seront lances")
+    else:
+        log.info("ADMIN_TOKEN absent -> seul le bot principal sera lance")
+
+    # Mini site web d'upload (lancer une seule fois, dans un thread separe)
     try:
         from web_upload import start_in_thread
         start_in_thread()
         log.info("Mini site web demarre sur le port 8080")
     except Exception as e:
         log.warning(f"Impossible de demarrer le mini site web : {e}")
-    bot.run(TOKEN, log_handler=None)
+
+    tasks = [asyncio.create_task(main_bot.start(TOKEN), name="main_bot")]
+    if admin_bot is not None:
+        tasks.append(asyncio.create_task(admin_bot.start(ADMIN_TOKEN), name="admin_bot"))
+
+    # Attendre que les 2 bots tournent. Si l'un crash, l'autre continue.
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+    for t in done:
+        try:
+            exc = t.exception()
+            if exc:
+                log.error(f"Bot {t.get_name()} a crashe: {exc}")
+        except Exception:
+            pass
+    for t in pending:
+        t.cancel()
+
+
+if __name__ == "__main__":
+    asyncio.run(main_async())

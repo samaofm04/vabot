@@ -1076,6 +1076,29 @@ class Admin(commands.Cog):
             f"✅ {deleted} fichier(s) supprimé(s) de l'identité `{safe}`.", ephemeral=True
         )
 
+    @app_commands.command(name="clearbios", description="Supprime TOUTES les bios. Sans identité: les partagées.")
+    @app_commands.describe(
+        confirm="Tape 'shared' (pour partagées) ou le nom de l'identité pour confirmer",
+        identity="Optionnel: identité spécifique"
+    )
+    async def clearbios(self, interaction: discord.Interaction, confirm: str, identity: str = None):
+        if not await self.require_admin(interaction):
+            return
+        safe = sanitize_identity_name(identity) if identity else None
+        expected = safe if safe else "shared"
+        if confirm != expected:
+            await interaction.response.send_message(
+                f"⚠️ Refais la commande avec `confirm:{expected}` pour confirmer.",
+                ephemeral=True,
+            )
+            return
+        n = len(read_bios(safe))
+        write_bios(safe, [])
+        label = f"`{safe}`" if safe else "partagées"
+        await interaction.response.send_message(
+            f"✅ {n} bio(s) {label} supprimée(s).", ephemeral=True
+        )
+
     @app_commands.command(name="clearusernames", description="Supprime TOUS les usernames d'une identité")
     @app_commands.describe(
         identity="Nom de l'identité",
