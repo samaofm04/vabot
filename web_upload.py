@@ -47,6 +47,55 @@ def _resolve_username(user_id) -> str:
     return str(user_id)
 
 
+def _find_identity_category(guild, identity: str):
+    """Trouve la categorie portant le nom de l'identite (case-insensitive)."""
+    target = identity.lower().strip()
+    for cat in guild.categories:
+        if cat.name.lower().strip() == target:
+            return cat
+    return None
+
+
+def _move_channel_to_identity(channel_id: int, new_identity: str):
+    """Déplace le salon <channel_id> dans la catégorie de <new_identity>.
+
+    Tourne dans le thread Flask, mais l'action Discord doit etre dans le loop asyncio.
+    Retourne (success: bool, info: str).
+    """
+    import asyncio
+    if _BOT_REF is None:
+        return False, "bot pas initialisé"
+    if not channel_id:
+        return False, "channel_id vide"
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, "loop bot non actif"
+
+    async def _do_move():
+        for guild in _BOT_REF.guilds:
+            channel = guild.get_channel(int(channel_id))
+            if channel is None:
+                continue
+            category = _find_identity_category(guild, new_identity)
+            if category is None:
+                return False, f"pas de catégorie nommée '{new_identity}' sur le serveur"
+            if channel.category and channel.category.id == category.id:
+                return True, "déjà dans la bonne catégorie"
+            try:
+                await channel.edit(category=category, reason="Web: changement identité VA")
+                return True, "ok"
+            except Exception as e:
+                return False, f"erreur edit: {e}"
+        return False, f"salon {channel_id} introuvable"
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_do_move(), loop)
+        ok, info = fut.result(timeout=10)
+        return ok, info
+    except Exception as e:
+        return False, f"timeout / erreur: {e}"
+
+
 def _read_env_lines():
     """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
     if not ENV_FILE.exists():
@@ -882,21 +931,37 @@ def create_app():
         users = _load_users()
         if uid not in users:
             return _render_upload(f"❌ VA {uid} introuvable", error=True)
-        # Update l'identité (en gardant le reste : channel_id, auto_post...)
+
+        # Update users.json (en gardant le reste : channel_id, auto_post...)
         entry = users[uid]
         if isinstance(entry, dict):
             old_identity = entry.get("identity", "?")
+            channel_id = entry.get("channel_id")
             entry["identity"] = new_identity
         else:
             old_identity = str(entry)
+            channel_id = None
             users[uid] = {"identity": new_identity, "channel_id": None, "auto_post": True}
         _save_users(users)
         username = _resolve_username(uid)
+
+        # Tenter de déplacer le salon Discord dans la catégorie de la nouvelle identité
+        moved_msg = ""
+        if _BOT_REF is not None and channel_id:
+            try:
+                ok, info = _move_channel_to_identity(channel_id, new_identity)
+                if ok:
+                    moved_msg = f" Salon Discord déplacé dans la catégorie <b>{new_identity}</b>."
+                else:
+                    moved_msg = f" ⚠️ Salon non déplacé : {info}"
+            except Exception as e:
+                moved_msg = f" ⚠️ Erreur déplacement salon : {e}"
+        elif not channel_id:
+            moved_msg = " (Pas de salon associé à déplacer.)"
+
         return _render_upload(
             f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
-            f"<code>{new_identity}</code>. "
-            f"⚠️ Son salon Discord reste dans la catégorie de l'ancienne identité — "
-            f"déplace-le manuellement sur Discord si besoin."
+            f"<code>{new_identity}</code>.{moved_msg}"
         )
 
     return app
