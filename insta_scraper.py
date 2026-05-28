@@ -50,15 +50,22 @@ def save_auth(data: dict):
 
 def is_auth_configured() -> bool:
     a = load_auth()
-    return bool(a.get("sessionid"))
+    return bool(a.get("sessionid") or a.get("rapidapi_key"))
 
 
 def auth_status() -> str:
     a = load_auth()
-    if not a.get("sessionid"):
-        return "❌ Non configuré"
-    sid = a["sessionid"]
-    return f"✅ Session active (sessionid {sid[:8]}...{sid[-4:]})"
+    parts = []
+    if a.get("rapidapi_key"):
+        k = a["rapidapi_key"]
+        host = a.get("rapidapi_host", "instagram-scraper-stable-api.p.rapidapi.com")
+        parts.append(f"✅ RapidAPI activé ({k[:6]}...{k[-4:]} via {host})")
+    if a.get("sessionid"):
+        sid = a["sessionid"]
+        parts.append(f"✅ Session cookie ({sid[:8]}...{sid[-4:]})")
+    if not parts:
+        return "❌ Non configuré (ni RapidAPI ni cookies)"
+    return " — ".join(parts)
 
 
 # ============ WATCHLIST ============
@@ -153,6 +160,119 @@ def _make_loader() -> Optional["instaloader.Instaloader"]:
     # Marquer comme connecté (sinon instaloader refuse certaines requêtes)
     L.context.username = auth.get("username") or "_session_user_"
     return L
+
+
+def _scrape_via_rapidapi(username: str, limit: int) -> dict:
+    """Scrape via RapidAPI : Instagram Scraper Stable API.
+
+    Endpoint : instagram-scraper-stable-api.p.rapidapi.com
+    Auth nécessaire : auth['rapidapi_key']
+    """
+    import requests
+    auth = load_auth()
+    api_key = auth.get("rapidapi_key", "").strip()
+    if not api_key:
+        return {"error": "Pas de clé RapidAPI configurée"}
+    host = auth.get("rapidapi_host", "instagram-scraper-stable-api.p.rapidapi.com").strip()
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": host,
+        "Accept": "application/json",
+    }
+    base = f"https://{host}"
+
+    # 1) Profile info
+    try:
+        r = requests.get(
+            f"{base}/get_ig_user_data.php",
+            headers=headers,
+            params={"username_or_url": username},
+            timeout=20,
+        )
+        if r.status_code == 401 or r.status_code == 403:
+            return {"error": f"Clé RapidAPI invalide ou pas abonné (HTTP {r.status_code})"}
+        if r.status_code == 429:
+            return {"error": "Quota RapidAPI dépassé (HTTP 429)"}
+        if r.status_code != 200:
+            return {"error": f"RapidAPI profil: HTTP {r.status_code}"}
+        pdata = r.json()
+        # Format variable selon l'API ; chercher les champs communs
+        user = pdata.get("data") or pdata.get("user") or pdata
+    except Exception as e:
+        return {"error": f"Erreur fetch profil: {e}"}
+
+    profile_data = {
+        "username": user.get("username") or username,
+        "full_name": user.get("full_name") or user.get("fullName") or "",
+        "followers": user.get("follower_count") or user.get("followers") or
+                     user.get("edge_followed_by", {}).get("count", 0) if isinstance(user.get("edge_followed_by"), dict) else 0,
+        "following": user.get("following_count") or user.get("following") or 0,
+        "posts_count": user.get("media_count") or user.get("posts_count") or 0,
+        "profile_pic_url": user.get("profile_pic_url_hd") or user.get("profile_pic_url") or "",
+        "biography": (user.get("biography") or "")[:300],
+        "is_private": user.get("is_private", False),
+        "is_verified": user.get("is_verified", False),
+    }
+
+    # 2) User posts/reels
+    reels = []
+    try:
+        r = requests.get(
+            f"{base}/get_ig_user_posts.php",
+            headers=headers,
+            params={"username_or_url": username},
+            timeout=20,
+        )
+        if r.status_code == 200:
+            posts_data = r.json()
+            items = posts_data.get("data") or posts_data.get("items") or posts_data.get("posts") or []
+            if isinstance(items, dict):
+                items = items.get("items", [])
+            for it in items[:limit]:
+                try:
+                    shortcode = it.get("code") or it.get("shortcode") or ""
+                    is_video = (it.get("media_type") == 2) or it.get("is_video", False)
+                    caption_obj = it.get("caption")
+                    if isinstance(caption_obj, dict):
+                        caption = caption_obj.get("text", "")
+                    else:
+                        caption = caption_obj or ""
+                    # Thumbnail
+                    thumb = ""
+                    iv2 = it.get("image_versions2", {}).get("candidates", [])
+                    if iv2:
+                        thumb = iv2[0].get("url", "")
+                    if not thumb:
+                        thumb = it.get("thumbnail_url") or it.get("display_url") or ""
+                    reel = {
+                        "shortcode": shortcode,
+                        "is_video": is_video,
+                        "views": it.get("play_count") or it.get("video_view_count"),
+                        "likes": it.get("like_count") or it.get("likes") or 0,
+                        "comments": it.get("comment_count") or it.get("comments") or 0,
+                        "caption": str(caption)[:280],
+                        "thumbnail_url": thumb,
+                        "video_url": it.get("video_url"),
+                        "date": "",
+                        "url": f"https://www.instagram.com/p/{shortcode}/",
+                    }
+                    reels.append(reel)
+                except Exception as e:
+                    log.warning(f"Parse RapidAPI post: {e}")
+    except Exception as e:
+        log.warning(f"Fetch posts via RapidAPI: {e}")
+
+    result = {
+        "profile": profile_data,
+        "reels": reels,
+        "scraped_at": time.time(),
+        "source": "rapidapi",
+    }
+    _ensure_dirs()
+    (CACHE_DIR / f"{username}.json").write_text(
+        json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return result
 
 
 def _scrape_via_web_api(username: str, limit: int) -> dict:
@@ -256,14 +376,31 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
 def scrape_profile(username: str, limit: int = 12) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
-    Tente d'abord l'API web (plus stable), puis fallback sur instaloader.
+    Ordre de tentatives :
+    1. RapidAPI (le plus fiable, payant) - si clé configurée
+    2. API web directe avec cookies
+    3. instaloader en dernier fallback
     """
     username = _clean_username(username)
     if not username:
         return {"error": "username vide"}
     auth = load_auth()
+
+    # Tentative 0 : RapidAPI (PRIORITAIRE si clé configurée)
+    if auth.get("rapidapi_key"):
+        result = _scrape_via_rapidapi(username, limit)
+        if "error" not in result:
+            return result
+        # Note l'erreur RapidAPI mais on tente quand même les autres
+        rapidapi_error = result["error"]
+        log.warning(f"RapidAPI échoué pour {username}: {rapidapi_error}")
+    else:
+        rapidapi_error = None
+
     if not auth.get("sessionid"):
-        return {"error": "Aucune session configurée (Settings → Instagram)"}
+        if rapidapi_error:
+            return {"error": f"RapidAPI: {rapidapi_error} (et pas de session cookie configurée)"}
+        return {"error": "Aucune session ni clé RapidAPI configurée (Settings → Instagram)"}
 
     # Tentative 1 : API web directe (plus fiable)
     result = _scrape_via_web_api(username, limit)

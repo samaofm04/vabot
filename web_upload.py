@@ -1008,6 +1008,31 @@ function showTab(group,name,title,subtitle){
 <!-- SETTINGS - INSTAGRAM COOKIES -->
 <div class="form-section" id="form-sinsta" style="display:none">
 
+<!-- RapidAPI - méthode recommandée -->
+<form method="POST" action="/settings/insta_rapidapi" class="box" style="border:2px solid #00d68f">
+<h3 style="margin-top:0">🚀 RapidAPI <span style="background:#00d68f;color:#000;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">RECOMMANDÉ</span></h3>
+<small>Méthode <b>fiable + illimitée</b> (~30€/mois) — pas de rate-limit, pas besoin de cookies, pas de risque ban.</small>
+<details style="margin-top:12px;margin-bottom:14px"><summary style="cursor:pointer;color:#7289da;font-size:14px;font-weight:600">📖 Comment souscrire ?</summary>
+<div style="padding:14px;background:#0f0f0f;border-radius:6px;margin-top:8px;font-size:13px;line-height:1.7;color:#aaa">
+1. Crée un compte sur <a href="https://rapidapi.com/" target="_blank">RapidAPI.com</a> (gratuit)<br>
+2. Va sur l'API : <a href="https://rapidapi.com/social-api1/api/instagram-scraper-stable-api/" target="_blank"><b>Instagram Scraper Stable API</b></a><br>
+3. Clique <b>Subscribe to Test</b> → choisis un plan (commence par <b>BASIC ~$5/mois</b> pour tester)<br>
+4. Dans l'onglet <b>Endpoints</b>, en haut tu vois ta <b>x-rapidapi-key</b> → copie-la<br>
+5. Colle-la ci-dessous → Sauver<br><br>
+<b>Alternative cheap :</b> Tu peux aussi essayer la version gratuite (limite : ~50 requêtes/mois)
+</div>
+</details>
+<label>x-rapidapi-key</label>
+<input type="password" name="rapidapi_key" placeholder="abcdefghijklmnopqrstuvwxyz1234567890..." required>
+<label>x-rapidapi-host (défaut OK)</label>
+<input type="text" name="rapidapi_host" value="instagram-scraper-stable-api.p.rapidapi.com">
+<button type="submit">💾 Sauver la clé RapidAPI</button>
+</form>
+
+<div style="margin:24px 0;border-top:1px solid #2a2a2a;padding-top:20px">
+<h4 style="margin:0 0 8px;color:#888">— OU méthode gratuite (rate-limitée) —</h4>
+</div>
+
 <!-- Import depuis fichier cookies.txt -->
 <form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #5865f2">
 <h3 style="margin-top:0">⚡ Import rapide depuis fichier cookies.txt</h3>
@@ -1913,6 +1938,28 @@ def create_app():
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
         return _render_upload(f"✅ Photo de profil ajoutée ({target.name})")
+
+    @app.route("/settings/insta_rapidapi", methods=["POST"])
+    def settings_insta_rapidapi():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import save_auth, load_auth
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        key = (request.form.get("rapidapi_key") or "").strip()
+        host = (request.form.get("rapidapi_host") or "").strip() or "instagram-scraper-stable-api.p.rapidapi.com"
+        if not key or len(key) < 20:
+            return _render_upload("❌ Clé RapidAPI invalide (trop courte)", error=True)
+        # Garder cookies existants si présents
+        current = load_auth()
+        current["rapidapi_key"] = key
+        current["rapidapi_host"] = host
+        save_auth(current)
+        return _render_upload(
+            "✅ Clé RapidAPI sauvegardée. Tu peux maintenant ajouter des comptes "
+            "à scraper sans limite de rate."
+        )
 
     @app.route("/settings/insta_auth_file", methods=["POST"])
     def settings_insta_auth_file():
