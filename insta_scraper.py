@@ -130,33 +130,153 @@ def _make_loader() -> Optional["instaloader.Instaloader"]:
     L.context._session.cookies.set("sessionid", sessionid, domain=".instagram.com")
     if auth.get("ds_user_id"):
         L.context._session.cookies.set("ds_user_id", auth["ds_user_id"], domain=".instagram.com")
-    if auth.get("csrftoken"):
-        L.context._session.cookies.set("csrftoken", auth["csrftoken"], domain=".instagram.com")
+    csrftoken = auth.get("csrftoken", "")
+    if csrftoken:
+        L.context._session.cookies.set("csrftoken", csrftoken, domain=".instagram.com")
+    # Headers CRITIQUES pour eviter 400 Bad Request sur GraphQL
     L.context._session.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
+        "X-IG-App-ID": "936619743392459",  # OBLIGATOIRE depuis update Insta 2024
+        "X-Requested-With": "XMLHttpRequest",
+        "X-ASBD-ID": "129477",
+        "X-IG-WWW-Claim": "0",
+        "Origin": "https://www.instagram.com",
+        "Referer": "https://www.instagram.com/",
+        "Accept": "*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
     })
+    if csrftoken:
+        L.context._session.headers["X-CSRFToken"] = csrftoken
     # Marquer comme connecté (sinon instaloader refuse certaines requêtes)
     L.context.username = auth.get("username") or "_session_user_"
     return L
 
 
+def _scrape_via_web_api(username: str, limit: int) -> dict:
+    """Scrape via API web Instagram (plus stable que GraphQL ces derniers temps)."""
+    import requests
+    auth = load_auth()
+    sessionid = auth.get("sessionid")
+    if not sessionid:
+        return {"error": "Aucune session"}
+    s = requests.Session()
+    s.cookies.set("sessionid", sessionid, domain=".instagram.com")
+    if auth.get("ds_user_id"):
+        s.cookies.set("ds_user_id", auth["ds_user_id"], domain=".instagram.com")
+    csrftoken = auth.get("csrftoken", "")
+    if csrftoken:
+        s.cookies.set("csrftoken", csrftoken, domain=".instagram.com")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-ASBD-ID": "129477",
+        "X-IG-WWW-Claim": "0",
+        "Accept": "*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": f"https://www.instagram.com/{username}/",
+    }
+    if csrftoken:
+        headers["X-CSRFToken"] = csrftoken
+    # 1) Profil info via endpoint web_profile_info
+    try:
+        r = s.get(
+            f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
+            headers=headers,
+            timeout=15,
+        )
+        if r.status_code == 404:
+            return {"error": f"Profil @{username} introuvable"}
+        if r.status_code != 200:
+            return {"error": f"Erreur profil: HTTP {r.status_code}"}
+        data = r.json()
+        user = data.get("data", {}).get("user", {})
+        if not user:
+            return {"error": "Réponse profil vide"}
+    except Exception as e:
+        return {"error": f"Erreur fetch profil: {e}"}
+
+    profile_data = {
+        "username": user.get("username", username),
+        "full_name": user.get("full_name", ""),
+        "followers": user.get("edge_followed_by", {}).get("count", 0),
+        "following": user.get("edge_follow", {}).get("count", 0),
+        "posts_count": user.get("edge_owner_to_timeline_media", {}).get("count", 0),
+        "profile_pic_url": user.get("profile_pic_url_hd") or user.get("profile_pic_url", ""),
+        "biography": (user.get("biography") or "")[:300],
+        "is_private": user.get("is_private", False),
+        "is_verified": user.get("is_verified", False),
+    }
+
+    # 2) Posts via les edges déjà dans la réponse profil
+    edges = user.get("edge_owner_to_timeline_media", {}).get("edges", [])
+    reels = []
+    for edge in edges[:limit]:
+        node = edge.get("node", {})
+        try:
+            caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
+            caption = caption_edges[0].get("node", {}).get("text", "") if caption_edges else ""
+            shortcode = node.get("shortcode", "")
+            is_video = node.get("is_video", False)
+            reel = {
+                "shortcode": shortcode,
+                "is_video": is_video,
+                "views": node.get("video_view_count") if is_video else None,
+                "likes": node.get("edge_liked_by", {}).get("count")
+                    or node.get("edge_media_preview_like", {}).get("count", 0),
+                "comments": node.get("edge_media_to_comment", {}).get("count", 0),
+                "caption": caption[:280],
+                "thumbnail_url": node.get("display_url", ""),
+                "video_url": node.get("video_url") if is_video else None,
+                "date": "",
+                "url": f"https://www.instagram.com/p/{shortcode}/",
+            }
+            reels.append(reel)
+        except Exception as e:
+            log.warning(f"Parse post: {e}")
+
+    result = {
+        "profile": profile_data,
+        "reels": reels,
+        "scraped_at": time.time(),
+    }
+    _ensure_dirs()
+    (CACHE_DIR / f"{username}.json").write_text(
+        json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return result
+
+
 def scrape_profile(username: str, limit: int = 12) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
-    Retourne {"profile": {...}, "reels": [...], "scraped_at": timestamp}
-    ou {"error": "message"}
+    Tente d'abord l'API web (plus stable), puis fallback sur instaloader.
     """
-    if not INSTALOADER_OK:
-        return {"error": "instaloader pas installé (auto-pull devrait l'installer)"}
     username = _clean_username(username)
     if not username:
         return {"error": "username vide"}
+    auth = load_auth()
+    if not auth.get("sessionid"):
+        return {"error": "Aucune session configurée (Settings → Instagram)"}
+
+    # Tentative 1 : API web directe (plus fiable)
+    result = _scrape_via_web_api(username, limit)
+    if "error" not in result:
+        return result
+    web_error = result["error"]
+
+    # Tentative 2 : instaloader en fallback
+    if not INSTALOADER_OK:
+        return {"error": f"API web KO: {web_error}"}
     L = _make_loader()
     if L is None:
-        return {"error": "Aucune session configurée (Settings → Instagram)"}
+        return {"error": f"API web KO ({web_error}) + instaloader KO"}
     try:
         profile = instaloader.Profile.from_username(L.context, username)
         reels = []
@@ -181,7 +301,7 @@ def scrape_profile(username: str, limit: int = 12) -> dict:
                 count += 1
             except Exception as e:
                 log.warning(f"Erreur lecture post {post.shortcode}: {e}")
-            time.sleep(0.6)  # rate-limit defensif
+            time.sleep(0.6)
         result = {
             "profile": {
                 "username": profile.username,
@@ -206,11 +326,8 @@ def scrape_profile(username: str, limit: int = 12) -> dict:
         return {"error": f"Profil @{username} introuvable"}
     except instaloader.exceptions.LoginRequiredException:
         return {"error": "Session expirée — recharge les cookies dans Settings"}
-    except instaloader.exceptions.ConnectionException as e:
-        return {"error": f"Erreur connexion (rate-limit ?) : {e}"}
     except Exception as e:
-        log.error(f"Scrape {username} échoué: {e}")
-        return {"error": f"Erreur: {type(e).__name__}: {e}"}
+        return {"error": f"API web KO ({web_error}) + instaloader: {type(e).__name__}: {e}"}
 
 
 def get_cached(username: str) -> Optional[dict]:
