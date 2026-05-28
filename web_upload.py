@@ -1865,7 +1865,7 @@ def create_app():
             return _render_login("Mauvais mot de passe")
         if not is_auth():
             return _render_login()
-        return _success()
+        return _render_upload()
 
     @app.route("/logout")
     def logout():
