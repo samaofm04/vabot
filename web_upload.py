@@ -100,27 +100,18 @@ UPLOAD_HTML = """
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
 .layout{display:flex;min-height:100vh}
-/* Sidebar large avec items nommes */
-.sidebar{width:240px;background:#1a1a1a;border-right:1px solid #2a2a2a;padding:14px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
-.sidebar .brand{display:flex;align-items:center;gap:10px;padding:10px 18px;margin:0 8px 8px;background:none;border:0;color:#fff;cursor:pointer;font-size:18px;font-weight:700;border-radius:8px;text-align:left;width:calc(100% - 16px)}
-.sidebar .brand:hover{background:#252525}
-.sidebar .brand .robot{font-size:24px}
-.sidebar .group{margin-bottom:4px}
-.sidebar .group-head{display:flex;align-items:center;gap:10px;padding:11px 20px;background:none;border:0;color:#bbb;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-left:3px solid transparent;transition:all .15s}
-.sidebar .group-head:hover{background:#252525;color:#fff}
-.sidebar .group-head.open{color:#fff}
-.sidebar .group-head .ico{font-size:17px;width:22px;text-align:center}
-.sidebar .group-head .arrow{margin-left:auto;font-size:11px;color:#666;transition:transform .15s}
-.sidebar .group-head.open .arrow{transform:rotate(90deg)}
-.sidebar .group-items{display:none;flex-direction:column;padding:2px 0 6px}
-.sidebar .group.open .group-items{display:flex}
-.sidebar .item{padding:9px 20px 9px 52px;background:none;border:0;color:#999;cursor:pointer;font-size:13.5px;text-align:left;border-left:3px solid transparent;margin:0;font-weight:500}
-.sidebar .item:hover{background:#252525;color:#fff}
-.sidebar .item.active{color:#5865f2;border-left-color:#5865f2;background:#252525}
-.sidebar .sep{height:1px;background:#2a2a2a;margin:6px 16px}
+/* Sidebar ultra-fine icon-only */
+.sidebar{width:56px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:12px 0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.sidebar .ico{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:none;border:0;color:#666;cursor:pointer;font-size:20px;border-radius:8px;transition:all .15s;position:relative;margin:0;text-decoration:none}
+.sidebar .ico:hover{background:#1a1a1a;color:#fff}
+.sidebar .ico.active{color:#fff;background:#1a1a1a}
+.sidebar .ico.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:24px;background:#fff;border-radius:0 2px 2px 0}
+.sidebar .ico .tip{position:absolute;left:50px;top:50%;transform:translateY(-50%);background:#000;color:#fff;padding:6px 12px;border-radius:6px;white-space:nowrap;font-size:13px;pointer-events:none;opacity:0;transition:opacity .15s;font-family:system-ui;font-weight:500;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.5);border:1px solid #333}
+.sidebar .ico:hover .tip{opacity:1}
+.sidebar .sep{width:28px;height:1px;background:#1a1a1a;margin:6px 0}
 .sidebar .spacer{flex:1}
-.sidebar .logout-btn{display:flex;align-items:center;gap:10px;padding:11px 20px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;text-decoration:none;border-left:3px solid transparent;font-weight:500;margin:0}
-.sidebar .logout-btn:hover{background:#252525;color:#f99}
+.sidebar .logout-btn{color:#666}
+.sidebar .logout-btn:hover{color:#f99;background:#2a1a1a}
 
 /* Contenu */
 .main{flex:1;padding:28px 36px;overflow-x:auto}
@@ -153,79 +144,37 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 }
 </style>
 <script>
-function toggleGroup(name){
-  var g=document.getElementById('group-head-'+name);
-  var grp=g.parentNode;
-  grp.classList.toggle('open');
-  g.classList.toggle('open');
-}
-function showTab(group,name){
-  // Ouvrir le groupe parent si fermé
-  var grp=document.getElementById('group-'+group);
-  if(grp && !grp.classList.contains('open')){
-    grp.classList.add('open');
-    document.getElementById('group-head-'+group).classList.add('open');
-  }
-  // Désactiver tous les items
-  document.querySelectorAll('.sidebar .item').forEach(t=>t.classList.remove('active'));
+function showTab(name,title,subtitle){
+  document.querySelectorAll('.sidebar .ico').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.subtab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
-  var btn=document.getElementById('tab-'+name);
+  var btn=document.getElementById('ico-'+name);
   var sec=document.getElementById('form-'+name);
-  if(btn){
-    btn.classList.add('active');
-    document.getElementById('page-title').textContent=btn.dataset.label;
-    document.getElementById('page-subtitle').textContent=btn.dataset.subtitle||'';
-  }
+  if(btn)btn.classList.add('active');
   if(sec)sec.style.display='block';
-}
-function showHome(){
-  document.querySelectorAll('.sidebar .item').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
-  document.getElementById('form-home').style.display='block';
-  document.getElementById('page-title').textContent='🤖 VA Bot Dashboard';
-  document.getElementById('page-subtitle').textContent='Vue d\\'ensemble — clique sur un menu à gauche';
+  // Si l'item appartient à un sous-onglet (subtab), l'activer aussi
+  var sub=document.querySelector('.subtab[data-target="'+name+'"]');
+  if(sub)sub.classList.add('active');
+  document.getElementById('page-title').textContent=title||'';
+  document.getElementById('page-subtitle').textContent=subtitle||'';
 }
 </script>
 </head><body><div class="layout">
 <div class="sidebar">
-  <button class="brand" onclick="showHome()"><span class="robot">🤖</span> VA Bot</button>
-
-  <div class="group open">
-    <button class="group-head open" id="group-head-upload" onclick="toggleGroup('upload')">
-      <span class="ico">📤</span> Upload <span class="arrow">▶</span>
-    </button>
-    <div class="group-items">
-      <button class="item active" id="tab-reel" data-label="🎬 Upload Reel" data-subtitle="Vidéo clean + caption + description (+ exemple optionnel)" onclick="showTab('upload','reel')">🎬 Reel</button>
-      <button class="item" id="tab-post" data-label="📸 Upload Post" data-subtitle="Photo + caption + description" onclick="showTab('upload','post')">📸 Post</button>
-      <button class="item" id="tab-story" data-label="📱 Upload Story" data-subtitle="Photo simple pour story" onclick="showTab('upload','story')">📱 Story</button>
-      <button class="item" id="tab-storycta" data-label="📲 Story CTA" data-subtitle="Photo 1080x1920 pour CTA + lien" onclick="showTab('upload','storycta')">📲 Story CTA</button>
-      <button class="item" id="tab-pp" data-label="👤 Photo de profil" data-subtitle="Pool partagé entre toutes les identités" onclick="showTab('upload','pp')">👤 PP partagé</button>
-    </div>
-  </div>
-
-  <div class="group">
-    <button class="group-head" id="group-head-va" onclick="toggleGroup('va')">
-      <span class="ico">👥</span> VAs <span class="arrow">▶</span>
-    </button>
-    <div class="group-items">
-      <button class="item" id="tab-valist" data-label="👥 Délégations" data-subtitle="VAs assignés à chaque identité" onclick="showTab('va','valist')">📋 Délégations</button>
-      <button class="item" id="tab-vastats" data-label="📊 Statistiques" data-subtitle="Contenus dispo par identité" onclick="showTab('va','vastats')">📊 Stats par identité</button>
-    </div>
-  </div>
-
-  <div class="group">
-    <button class="group-head" id="group-head-settings" onclick="toggleGroup('settings')">
-      <span class="ico">⚙️</span> Settings <span class="arrow">▶</span>
-    </button>
-    <div class="group-items">
-      <button class="item" id="tab-stoken" data-label="🤖 Token bot admin" data-subtitle="Token du 2e bot Discord" onclick="showTab('settings','stoken')">🤖 Token admin</button>
-      <button class="item" id="tab-spwd" data-label="🔐 Mot de passe" data-subtitle="Mot de passe d'accès à ce site" onclick="showTab('settings','spwd')">🔐 Mot de passe site</button>
-    </div>
-  </div>
-
-  <div class="spacer"></div>
+  <button class="ico active" id="ico-reel" onclick="showTab('reel','🎬 Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">🎬<span class="tip">Reel</span></button>
+  <button class="ico" id="ico-post" onclick="showTab('post','📸 Upload Post','Photo + caption + description')">📸<span class="tip">Post</span></button>
+  <button class="ico" id="ico-story" onclick="showTab('story','📱 Upload Story','Photo simple pour story')">📱<span class="tip">Story</span></button>
+  <button class="ico" id="ico-storycta" onclick="showTab('storycta','📲 Story CTA','Photo 1080x1920 pour CTA + lien')">📲<span class="tip">Story CTA</span></button>
+  <button class="ico" id="ico-pp" onclick="showTab('pp','👤 Photo de profil','Pool partagé entre toutes les identités')">👤<span class="tip">PP partagé</span></button>
   <div class="sep"></div>
-  <a href="/logout" class="logout-btn">🚪 Déconnexion</a>
+  <button class="ico" id="ico-home" onclick="showTab('home','🤖 Dashboard','Vue d ensemble')">🤖<span class="tip">Dashboard</span></button>
+  <button class="ico" id="ico-valist" onclick="showTab('valist','👥 Délégations VA','VAs assignés à chaque identité')">👥<span class="tip">Délégations VA</span></button>
+  <button class="ico" id="ico-vastats" onclick="showTab('vastats','📊 Statistiques','Contenus dispo par identité')">📊<span class="tip">Stats par identité</span></button>
+  <div class="sep"></div>
+  <button class="ico" id="ico-stoken" onclick="showTab('stoken','🤖 Token bot admin','Token du 2e bot Discord')">🔑<span class="tip">Token bot admin</span></button>
+  <button class="ico" id="ico-spwd" onclick="showTab('spwd','🔐 Mot de passe site','Mot de passe d accès à ce site')">🔐<span class="tip">Mot de passe site</span></button>
+  <div class="spacer"></div>
+  <a href="/logout" class="ico logout-btn"><span style="font-size:18px">🚪</span><span class="tip">Déconnexion</span></a>
 </div>
 <div class="main">
 <h1 id="page-title">🎬 Upload Reel</h1>
