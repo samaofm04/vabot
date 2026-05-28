@@ -2,9 +2,13 @@
 Click → creates VA channel + assigns random identity + sends intro with payment info + 'Commencer' button.
 Click → posts step 1 of onboarding.
 """
+import os
 import json
+import asyncio
 import logging
 import random
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import discord
@@ -13,11 +17,52 @@ from discord.ext import commands, tasks
 
 log = logging.getLogger("vabot.welcome")
 
+BOT_DIR = Path(__file__).parent.parent.resolve()
+ENV_FILE = BOT_DIR / ".env"
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 USERS_FILE = DATA_DIR / "users.json"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 WELCOME_CONFIG_FILE = DATA_DIR / "welcome_config.json"
+
+
+def _write_env_var(key: str, value: str) -> bool:
+    """Ecrit/remplace une variable dans .env. Retourne True si OK."""
+    try:
+        if ENV_FILE.exists():
+            lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+        else:
+            lines = []
+        found = False
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+                new_lines.append(f"{key}={value}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f"{key}={value}")
+        content = "\n".join(new_lines).rstrip("\n") + "\n"
+        ENV_FILE.write_text(content, encoding="utf-8")
+        try:
+            os.chmod(ENV_FILE, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.error(f"Erreur ecriture .env: {e}")
+        return False
+
+
+def _schedule_exit(delay_sec: float = 3.0):
+    """Exit process apres delay -> systemd auto-restart."""
+    def _do_exit():
+        time.sleep(delay_sec)
+        log.warning("Exit demande -> systemd va relancer le bot")
+        os._exit(0)
+    threading.Thread(target=_do_exit, daemon=True).start()
 PENDING_DELETIONS_FILE = DATA_DIR / "pending_deletions.json"
 INTRO_IMAGES_DIR = DATA_DIR / "intro_images"  # photos attachees a l'intro paiement
 
@@ -931,6 +976,53 @@ class Welcome(commands.Cog):
                 f"✅ {len(images)} photo(s) supprimee(s).", ephemeral=True
             )
             return
+
+    @app_commands.command(
+        name="setadmintoken",
+        description="[OWNER] Configure le token du 2e bot (admin) et restart",
+    )
+    @app_commands.describe(token="Token Discord du bot admin (sera caché immédiatement)")
+    async def setadmintoken(self, interaction: discord.Interaction, token: str):
+        # Owner only (pas whitelist)
+        owner_id = await self.get_owner_id()
+        if interaction.user.id != owner_id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        token = token.strip()
+        if len(token) < 50 or "." not in token:
+            await interaction.response.send_message(
+                "❌ Token invalide (trop court ou format incorrect).", ephemeral=True
+            )
+            return
+        ok = _write_env_var("DISCORD_ADMIN_TOKEN", token)
+        if not ok:
+            await interaction.response.send_message(
+                "❌ Erreur ecriture .env. Verifie les permissions du fichier.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            "✅ Token sauvegardé dans `.env`.\n"
+            "🔄 Le bot redémarre dans 3 sec — systemd va le relancer "
+            "et le bot admin va se connecter automatiquement.\n"
+            "Attends ~15-20 sec puis fais `/sync` sur les 2 bots.",
+            ephemeral=True,
+        )
+        _schedule_exit(3.0)
+
+    @app_commands.command(
+        name="restartbot",
+        description="[OWNER] Force le redémarrage du bot (systemd le relance)",
+    )
+    async def restartbot(self, interaction: discord.Interaction):
+        owner_id = await self.get_owner_id()
+        if interaction.user.id != owner_id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "🔄 Restart dans 2 sec...", ephemeral=True
+        )
+        _schedule_exit(2.0)
 
 
 async def setup(bot):
