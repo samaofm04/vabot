@@ -2240,35 +2240,47 @@ def _render_sfs_html() -> str:
             f"<a href='{today_link}' style='padding:6px 12px;background:#ef4444;color:#fff;"
             f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;margin-right:6px'>Aujourd'hui</a>"
         )
-    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px'>")
-    rows.append(
-        "<h3 style='margin:0;display:flex;align-items:center;gap:10px'>"
-        "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-        "<rect width='18' height='18' x='3' y='4' rx='2' ry='2'/>"
-        "<line x1='16' x2='16' y1='2' y2='6'/>"
-        "<line x1='8' x2='8' y1='2' y2='6'/>"
-        "<line x1='3' x2='21' y1='10' y2='10'/>"
-        "<polyline points='9 14 11 16 15 12'/>"
-        "</svg>"
-        f"<span>{month_name}</span></h3>"
-    )
-    rows.append("<div style='display:flex;align-items:center;gap:6px'>")
-    rows.append(today_btn_html)
+    # Header type "planning OF" : flèches + mois à gauche, bouton today à droite
+    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px'>")
+    rows.append("<div style='display:flex;align-items:center;gap:4px'>")
     rows.append(
         f"<a href='{prev_link}' title='Mois précédent' "
-        f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border-radius:6px;text-decoration:none;font-size:16px;font-weight:600;line-height:1'>‹</a>"
+        f"style='width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:transparent;color:#aaa;border-radius:6px;text-decoration:none;font-size:18px;line-height:1' "
+        f"onmouseover='this.style.background=\"#1a1a1a\";this.style.color=\"#fff\"' onmouseout='this.style.background=\"transparent\";this.style.color=\"#aaa\"'>‹</a>"
     )
     rows.append(
         f"<a href='{next_link}' title='Mois suivant' "
-        f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border-radius:6px;text-decoration:none;font-size:16px;font-weight:600;line-height:1'>›</a>"
+        f"style='width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:transparent;color:#aaa;border-radius:6px;text-decoration:none;font-size:18px;line-height:1' "
+        f"onmouseover='this.style.background=\"#1a1a1a\";this.style.color=\"#fff\"' onmouseout='this.style.background=\"transparent\";this.style.color=\"#aaa\"'>›</a>"
     )
-    rows.append("</div></div>")
-    rows.append("<small style='color:#888;display:block;margin-bottom:12px'>Clique sur une date pour planifier un SFS</small>")
-    rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center'>")
-    for dn in ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"]:
-        rows.append(f"<div style='font-size:12px;color:#888;font-weight:600;padding:6px 0'>{dn}</div>")
-    for _ in range(first_day):
-        rows.append("<div></div>")
+    rows.append(f"<h3 style='margin:0 0 0 12px;font-size:17px;font-weight:600;color:#fff;text-transform:lowercase'>{month_name}</h3>")
+    rows.append("</div>")
+    if not is_current_month:
+        rows.append(
+            f"<a href='{today_link}' style='padding:6px 14px;background:#ef4444;color:#fff;"
+            f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600'>Aujourd'hui</a>"
+        )
+    rows.append("</div>")
+
+    # Header des jours de la semaine (juste lettres comme L M M J V S D)
+    rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr)'>")
+    for dn in ["L", "M", "M", "J", "V", "S", "D"]:
+        rows.append(f"<div style='font-size:11px;color:#888;font-weight:600;padding:8px 12px;text-transform:uppercase'>{dn}</div>")
+    rows.append("</div>")
+
+    # Grille principale du calendrier (sans gap, bordures intégrées)
+    rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid #1a1a1a;border-left:1px solid #1a1a1a;border-radius:8px;overflow:hidden'>")
+
+    # Jours du mois précédent (grisés - style référence)
+    if first_day > 0:
+        _, days_prev = cal.monthrange(prev_year, prev_month)
+        prev_days_to_show = list(range(days_prev - first_day + 1, days_prev + 1))
+        for d in prev_days_to_show:
+            rows.append(
+                f"<div style='min-height:120px;background:transparent;border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:10px 12px;cursor:default'>"
+                f"<div style='font-size:14px;color:#444;font-weight:500'>{d}</div>"
+                f"</div>"
+            )
     for d in range(1, days_in_month + 1):
         date_iso = f"{year:04d}-{month:02d}-{d:02d}"
         is_today = (date_iso == today_iso)
@@ -2276,16 +2288,28 @@ def _render_sfs_html() -> str:
         day_data = sfs_by_date_platform.get(date_iso, {})
         nb_of = len(day_data.get("OF", []))
         nb_mym = len(day_data.get("MYM", []))
-        border = "border:2px solid #ff4757" if is_today else "border:1px solid #2a2a2a"
-        day_color = "#ff4757" if is_today else "#fff"
+        # Style "planning OF" : cellule rectangulaire, num top-left, événements en barres bas
+        cell_bg = "#1f1410" if is_today else "transparent"
+        weight = 700 if is_today else 500
+        # Si c'est le 1er du mois, afficher aussi le nom du mois (style référence "mai 1")
+        day_label_html = f"<span style='color:#888;font-size:12px;margin-right:4px'>{fr_months[month-1][:3].lower()}</span>{d}" if d == 1 else str(d)
         rows.append(
             f"<div class='sfs-day' data-date='{date_iso}' data-of='{nb_of}' data-mym='{nb_mym}' "
             f"onclick='openSfsModal(\"{date_iso}\")' "
-            f"style='aspect-ratio:1;background:#1a1a1a;{border};border-radius:8px;padding:6px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column' "
-            f"onmouseover='this.style.transform=\"scale(1.05)\";this.style.borderColor=\"#ef4444\"' "
-            f"onmouseout='this.style.transform=\"\";this.style.borderColor=\"\"'>"
-            f"<div style='font-size:14px;font-weight:600;color:{day_color}'>{d}</div>"
-            f"<div class='sfs-day-badges' style='margin-top:auto;display:flex;flex-direction:column;gap:2px'></div>"
+            f"style='min-height:120px;background:{cell_bg};border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:10px 12px;cursor:pointer;transition:background .15s;display:flex;flex-direction:column;position:relative' "
+            f"onmouseover='this.style.background=\"#15100d\"' onmouseout='this.style.background=\"{cell_bg}\"'>"
+            f"<div style='font-size:14px;font-weight:{weight};color:#fff'>{day_label_html}</div>"
+            f"<div class='sfs-day-bars' style='margin-top:auto;display:flex;flex-direction:column;gap:3px'></div>"
+            f"</div>"
+        )
+    # Jours du mois suivant (grisés)
+    total_cells_used = first_day + days_in_month
+    total_weeks = (total_cells_used + 6) // 7
+    next_days_to_show = list(range(1, total_weeks * 7 - total_cells_used + 1))
+    for d in next_days_to_show:
+        rows.append(
+            f"<div style='min-height:120px;background:transparent;border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:10px 12px;cursor:default'>"
+            f"<div style='font-size:14px;color:#444;font-weight:500'>{d}</div>"
             f"</div>"
         )
     rows.append("</div></div>")
@@ -2323,29 +2347,27 @@ function switchSfsPlatform(btn, platform){{
 function refreshSfsCalendar(){{
   var platform = window.__currentSfsPlatform;
   document.querySelectorAll('.sfs-day').forEach(function(day){{
-    var badgesEl = day.querySelector('.sfs-day-badges');
-    badgesEl.innerHTML = '';
+    // Vider les anciennes barres (le sélecteur a changé : .sfs-day-bars maintenant)
+    var barsEl = day.querySelector('.sfs-day-bars') || day.querySelector('.sfs-day-badges');
+    if(barsEl) barsEl.innerHTML = '';
     var date = day.dataset.date;
     var allDay = window.__sfsData[date] || [];
     var filtered = allDay.filter(function(x){{ return x.platform === platform; }});
-    if(filtered.length === 0){{
-      day.style.background = '#1a1a1a';
-      return;
-    }}
-    day.style.background = 'linear-gradient(135deg,#1a2a2a,#1a1a1a)';
+    if(filtered.length === 0 || !barsEl) return;
     var nb_sched = filtered.filter(function(x){{ return x.status === 'scheduled'; }}).length;
     var nb_prog = filtered.filter(function(x){{ return x.status === 'to_program'; }}).length;
+    // Barre style référence (orange/rouge) au bas avec un nombre
     if(nb_sched){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#ef4444;color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;font-weight:700';
-      b.textContent = nb_sched + '✓';
-      badgesEl.appendChild(b);
+      b.style.cssText = 'background:#ef4444;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.textContent = nb_sched;
+      barsEl.appendChild(b);
     }}
     if(nb_prog){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#ffb800;color:#000;font-size:9px;padding:1px 4px;border-radius:4px;font-weight:700';
-      b.textContent = nb_prog + '⚙';
-      badgesEl.appendChild(b);
+      b.style.cssText = 'background:#f59e0b;color:#000;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.textContent = nb_prog;
+      barsEl.appendChild(b);
     }}
   }});
   // Filtrer aussi la liste en bas
