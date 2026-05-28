@@ -34,14 +34,29 @@ def set_bot_ref(bot):
 
 
 def _resolve_username(user_id) -> str:
-    """Retourne le username Discord depuis l'ID, ou l'ID si pas trouvé."""
+    """Retourne le username Discord depuis l'ID, ou l'ID si pas trouvé.
+
+    Essaie d'abord le cache global, puis tous les members des guildes.
+    """
     if _BOT_REF is None:
         return str(user_id)
     try:
-        u = _BOT_REF.get_user(int(user_id))
+        uid_int = int(user_id)
+    except Exception:
+        return str(user_id)
+    # 1) Cache global (bot.get_user)
+    try:
+        u = _BOT_REF.get_user(uid_int)
         if u:
-            # discord.py 2.x : .name (sans tag) ou .display_name
             return getattr(u, "name", None) or getattr(u, "display_name", None) or str(user_id)
+    except Exception:
+        pass
+    # 2) Iterer les guildes et chercher dans members (cache populé par intents.members)
+    try:
+        for g in _BOT_REF.guilds:
+            m = g.get_member(uid_int)
+            if m:
+                return getattr(m, "name", None) or getattr(m, "display_name", None) or str(user_id)
     except Exception:
         pass
     return str(user_id)
@@ -172,32 +187,30 @@ UPLOAD_HTML = """
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
 .layout{display:flex;min-height:100vh}
-/* Panneau 1 : Icones étroits */
-.sidebar{width:56px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:12px 0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px}
-.sidebar .ico{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:none;border:0;color:#888;cursor:pointer;border-radius:8px;transition:all .15s;position:relative;margin:0;text-decoration:none;padding:0}
-.sidebar .ico svg{width:20px;height:20px;display:block}
-.sidebar .ico:hover{background:#1a1a1a;color:#fff}
-.sidebar .ico.active{color:#fff;background:#1a1a1a}
-.sidebar .ico.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:24px;background:#fff;border-radius:0 2px 2px 0}
-.sidebar .ico .tip{position:absolute;left:50px;top:50%;transform:translateY(-50%);background:#000;color:#fff;padding:6px 12px;border-radius:6px;white-space:nowrap;font-size:13px;pointer-events:none;opacity:0;transition:opacity .15s;font-family:system-ui;font-weight:500;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.5);border:1px solid #333}
-.sidebar .ico:hover .tip{opacity:1}
-.sidebar .sep{width:28px;height:1px;background:#1a1a1a;margin:6px 0}
+/* Sidebar large avec groupes pliables + flèches */
+.sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
+.sidebar .group{display:flex;flex-direction:column;margin:0 10px}
+.sidebar .group-head{display:flex;align-items:center;gap:12px;padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-radius:8px;transition:all .15s}
+.sidebar .group-head:hover{background:#181818;color:#fff}
+.sidebar .group-head.active{background:#181818;color:#fff}
+.sidebar .group-head svg.lead{width:18px;height:18px;flex-shrink:0;color:#888}
+.sidebar .group-head.active svg.lead{color:#5865f2}
+.sidebar .group-head .label{flex:1}
+.sidebar .group-head .arrow{width:14px;height:14px;color:#666;transition:transform .15s}
+.sidebar .group.open .group-head .arrow{transform:rotate(180deg);color:#fff}
+.sidebar .group .items{display:none;flex-direction:column;gap:1px;padding:2px 0 6px 14px;border-left:1px solid #222;margin:2px 0 2px 24px}
+.sidebar .group.open .items{display:flex}
+.sidebar .group .item{padding:8px 12px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;text-align:left;border-radius:6px;display:flex;align-items:center;gap:10px;font-weight:500;margin:0;transition:all .12s}
+.sidebar .group .item svg{width:14px;height:14px;color:#666}
+.sidebar .group .item:hover{background:#181818;color:#fff}
+.sidebar .group .item:hover svg{color:#fff}
+.sidebar .group .item.active{color:#5865f2;background:#181818}
+.sidebar .group .item.active svg{color:#5865f2}
+.sidebar .sep{height:1px;background:#1a1a1a;margin:8px 16px}
 .sidebar .spacer{flex:1}
-.sidebar .logout-btn{color:#666}
-.sidebar .logout-btn:hover{color:#f99;background:#2a1a1a}
-
-/* Panneau 2 : Sous-navigation */
-.subnav{width:220px;background:#141414;border-right:1px solid #1f1f1f;padding:18px 12px;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
-.subnav h3{margin:0 8px 12px;font-size:12px;text-transform:uppercase;color:#666;letter-spacing:1px;font-weight:700}
-.subnav .panel{display:none;flex-direction:column;gap:2px}
-.subnav .panel.active{display:flex}
-.subnav .item{padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;text-align:left;border-radius:6px;display:flex;align-items:center;gap:10px;font-weight:500;margin:0;transition:all .12s}
-.subnav .item svg{width:16px;height:16px;flex-shrink:0;color:#666}
-.subnav .item:hover{background:#1f1f1f;color:#fff}
-.subnav .item:hover svg{color:#fff}
-.subnav .item.active{background:#1f1f1f;color:#fff}
-.subnav .item.active svg{color:#5865f2}
-.subnav small{display:block;padding:0 8px;margin-top:4px;color:#555;font-size:11px}
+.sidebar .logout-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;background:none;border:0;color:#777;cursor:pointer;font-size:13.5px;text-decoration:none;border-radius:8px;font-weight:500;margin:0 10px 0}
+.sidebar .logout-btn:hover{background:#2a1a1a;color:#f99}
+.sidebar .logout-btn svg{width:16px;height:16px}
 
 /* Contenu */
 .main{flex:1;padding:28px 36px;overflow-x:auto}
@@ -230,106 +243,108 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 }
 </style>
 <script>
-function showGroup(group){
-  document.querySelectorAll('.sidebar .ico[data-group]').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.subnav .panel').forEach(p=>p.classList.remove('active'));
-  var btn=document.getElementById('grp-'+group);
-  var pan=document.getElementById('panel-'+group);
-  if(btn)btn.classList.add('active');
-  if(pan)pan.classList.add('active');
-  // Activer le premier item du panel comme contenu par défaut
-  var first=pan?pan.querySelector('.item'):null;
-  if(first)first.click();
+function toggleGroup(group){
+  var el=document.getElementById('grp-'+group);
+  el.classList.toggle('open');
 }
-function showTab(name,title,subtitle){
-  document.querySelectorAll('.subnav .item').forEach(t=>t.classList.remove('active'));
+function showTab(group,name,title,subtitle){
+  // Ouvrir le groupe parent
+  var grp=document.getElementById('grp-'+group);
+  if(grp && !grp.classList.contains('open'))grp.classList.add('open');
+  // Désactiver tous
+  document.querySelectorAll('.sidebar .item').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.sidebar .group-head').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
+  // Activer
   var btn=document.getElementById('tab-'+name);
   var sec=document.getElementById('form-'+name);
+  var head=grp?grp.querySelector('.group-head'):null;
   if(btn)btn.classList.add('active');
+  if(head)head.classList.add('active');
   if(sec)sec.style.display='block';
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
 }
 </script>
 </head><body><div class="layout">
-<!-- PANNEAU 1 : ICONES -->
+<!-- SIDEBAR : groupes pliables avec flèches -->
 <div class="sidebar">
-  <button class="ico active" id="grp-upload" data-group="upload" onclick="showGroup('upload')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-    <span class="tip">Upload</span>
+
+<div class="group open" id="grp-upload">
+  <button class="group-head active" onclick="toggleGroup('upload')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+    <span class="label">Upload</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
-  <div class="sep"></div>
-  <button class="ico" id="grp-va" data-group="va" onclick="showGroup('va')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-    <span class="tip">VAs</span>
+  <div class="items">
+    <button class="item active" id="tab-reel" onclick="showTab('upload','reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Reel
+    </button>
+    <button class="item" id="tab-post" onclick="showTab('upload','post','Upload Post','Photo + caption + description')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      Post
+    </button>
+    <button class="item" id="tab-story" onclick="showTab('upload','story','Upload Story','Photo simple pour story')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      Story
+    </button>
+    <button class="item" id="tab-storycta" onclick="showTab('upload','storycta','Story CTA','Photo 1080x1920 pour CTA + lien')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+      Story CTA
+    </button>
+    <button class="item" id="tab-pp" onclick="showTab('upload','pp','Photo de profil','Pool partagé entre toutes les identités')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      PP partagé
+    </button>
+  </div>
+</div>
+
+<div class="group" id="grp-va">
+  <button class="group-head" onclick="toggleGroup('va')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <span class="label">VAs</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
-  <div class="sep"></div>
-  <button class="ico" id="grp-settings" data-group="settings" onclick="showGroup('settings')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-    <span class="tip">Settings</span>
+  <div class="items">
+    <button class="item" id="tab-home" onclick="showTab('va','home','Dashboard','Vue d ensemble globale')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+      Dashboard
+    </button>
+    <button class="item" id="tab-valist" onclick="showTab('va','valist','Délégations VA','VAs assignés à chaque identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      Liste VAs
+    </button>
+    <button class="item" id="tab-vastats" onclick="showTab('va','vastats','Statistiques par identité','Contenus dispo par identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
+      Stats par identité
+    </button>
+  </div>
+</div>
+
+<div class="group" id="grp-settings">
+  <button class="group-head" onclick="toggleGroup('settings')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span class="label">Settings</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
-  <div class="spacer"></div>
-  <a href="/logout" class="ico logout-btn">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-    <span class="tip">Déconnexion</span>
-  </a>
+  <div class="items">
+    <button class="item" id="tab-stoken" onclick="showTab('settings','stoken','Token bot admin','Token du 2e bot Discord')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+      Token bot admin
+    </button>
+    <button class="item" id="tab-spwd" onclick="showTab('settings','spwd','Mot de passe site','Mot de passe d accès à ce site')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Mot de passe site
+    </button>
+  </div>
 </div>
 
-<!-- PANNEAU 2 : SOUS-NAVIGATION -->
-<div class="subnav">
-
-<div class="panel active" id="panel-upload">
-<h3>Upload contenu</h3>
-<button class="item active" id="tab-reel" onclick="showTab('reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-  Reel
-</button>
-<button class="item" id="tab-post" onclick="showTab('post','Upload Post','Photo + caption + description')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-  Post
-</button>
-<button class="item" id="tab-story" onclick="showTab('story','Upload Story','Photo simple pour story')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-  Story
-</button>
-<button class="item" id="tab-storycta" onclick="showTab('storycta','Story CTA','Photo 1080x1920 pour CTA + lien')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
-  Story CTA
-</button>
-<button class="item" id="tab-pp" onclick="showTab('pp','Photo de profil','Pool partagé entre toutes les identités')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
-  PP partagé
-</button>
-</div>
-
-<div class="panel" id="panel-va">
-<h3>Délégations VA</h3>
-<button class="item" id="tab-home" onclick="showTab('home','Dashboard','Vue d ensemble globale')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-  Dashboard
-</button>
-<button class="item" id="tab-valist" onclick="showTab('valist','Délégations VA','VAs assignés à chaque identité')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-  Liste VAs
-</button>
-<button class="item" id="tab-vastats" onclick="showTab('vastats','Statistiques par identité','Contenus dispo par identité')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
-  Stats
-</button>
-</div>
-
-<div class="panel" id="panel-settings">
-<h3>Paramètres</h3>
-<button class="item" id="tab-stoken" onclick="showTab('stoken','Token bot admin','Token du 2e bot Discord')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
-  Token bot admin
-</button>
-<button class="item" id="tab-spwd" onclick="showTab('spwd','Mot de passe site','Mot de passe d accès à ce site')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-  Mot de passe site
-</button>
-</div>
+<div class="spacer"></div>
+<a href="/logout" class="logout-btn">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+  Déconnexion
+</a>
 
 </div>
 <div class="main">
