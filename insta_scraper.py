@@ -178,6 +178,19 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     if not api_key:
         return {"error": "Pas de clé RapidAPI configurée"}
     host = auth.get("rapidapi_host", "instagram-scraper-stable-api.p.rapidapi.com").strip()
+    # Auto-correction : si le host est foireux (= contient la clé par accident), fallback default
+    DEFAULT_HOST = "instagram-scraper-stable-api.p.rapidapi.com"
+    if (not host or "." not in host or "/" in host or " " in host
+            or len(host) > 100 or host.startswith("http") or host == api_key
+            or "rapidapi.com" not in host):
+        log.warning(f"Host RapidAPI invalide ('{host[:30]}...') -> utilisation du défaut")
+        host = DEFAULT_HOST
+        # Auto-réparer dans le fichier auth
+        try:
+            auth["rapidapi_host"] = DEFAULT_HOST
+            save_auth(auth)
+        except Exception:
+            pass
     headers = {
         "x-rapidapi-key": api_key,
         "x-rapidapi-host": host,
