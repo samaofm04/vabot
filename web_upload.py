@@ -100,18 +100,25 @@ UPLOAD_HTML = """
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
 .layout{display:flex;min-height:100vh}
-.sidebar{width:230px;background:#1a1a1a;border-right:1px solid #2a2a2a;padding:20px 0;flex-shrink:0;display:flex;flex-direction:column}
-.sidebar h2{margin:0 20px 24px;font-size:18px;display:flex;align-items:center;gap:8px}
-.nav{display:flex;flex-direction:column;flex:1}
-.nav button{display:flex;align-items:center;gap:12px;padding:12px 20px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;text-align:left;border-left:3px solid transparent;margin:0;transition:all .15s;font-weight:500}
-.nav button:hover{background:#252525;color:#fff}
-.nav button.active{background:#252525;color:#5865f2;border-left-color:#5865f2}
-.nav .icon{font-size:18px;width:24px;text-align:center}
-.nav .sep{height:1px;background:#2a2a2a;margin:8px 16px}
-.sidebar .logout-btn{margin:0 16px 0;padding:10px;background:none;border:1px solid #444;color:#888;border-radius:6px;text-decoration:none;text-align:center;font-size:13px;display:block}
-.sidebar .logout-btn:hover{background:#252525;color:#fff}
+/* Sidebar étroite avec juste des icônes */
+.sidebar{width:64px;background:#000;border-right:1px solid #1a1a1a;padding:14px 0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.sidebar .ico-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:#1a1a1a;border:0;color:#aaa;cursor:pointer;font-size:22px;border-radius:14px;transition:all .15s;position:relative;margin:0}
+.sidebar .ico-btn:hover{background:#5865f2;color:#fff;border-radius:12px}
+.sidebar .ico-btn.active{background:#5865f2;color:#fff;border-radius:12px}
+.sidebar .ico-btn .tip{position:absolute;left:55px;top:50%;transform:translateY(-50%);background:#000;color:#fff;padding:6px 12px;border-radius:6px;white-space:nowrap;font-size:13px;pointer-events:none;opacity:0;transition:opacity .15s;font-family:system-ui;font-weight:500;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.sidebar .ico-btn:hover .tip{opacity:1}
+.sidebar .sep{width:32px;height:2px;background:#1a1a1a;border-radius:1px;margin:4px 0}
+.sidebar .spacer{flex:1}
+.sidebar .logout-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#888;border-radius:14px;text-decoration:none;font-size:18px;margin-top:auto;transition:all .15s}
+.sidebar .logout-btn:hover{background:#d9534f;color:#fff;border-radius:12px}
+
+/* Contenu */
 .main{flex:1;padding:28px 36px;overflow-x:auto}
-.main h1{margin:0 0 24px}
+.main h1{margin:0 0 8px;font-size:24px}
+.subtabs{display:flex;gap:6px;margin-bottom:24px;border-bottom:1px solid #2a2a2a;flex-wrap:wrap}
+.subtab{padding:10px 18px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;margin:0;font-weight:500}
+.subtab:hover{color:#fff}
+.subtab.active{color:#5865f2;border-color:#5865f2}
 .box{background:#1a1a1a;padding:24px;border-radius:12px;margin-bottom:16px;border:1px solid #2a2a2a}
 label{display:block;font-weight:600;margin-bottom:8px;margin-top:16px}
 label:first-child{margin-top:0}
@@ -129,46 +136,61 @@ td{padding:10px 8px;border-bottom:1px solid #2a2a2a;font-size:14px}
 code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 .danger-btn{padding:6px 12px;background:#d9534f;font-size:13px;border:0;color:#fff;border-radius:4px;cursor:pointer;margin:0}
 .danger-btn:hover{background:#c9302c}
-@media(max-width:768px){
-  .layout{flex-direction:column}
-  .sidebar{width:100%;border-right:0;border-bottom:1px solid #2a2a2a}
-  .nav{flex-direction:row;flex-wrap:wrap;padding:0 8px}
-  .nav button{border-left:0;border-bottom:3px solid transparent;padding:10px 14px}
-  .nav button.active{border-left-color:transparent;border-bottom-color:#5865f2}
-  .nav .sep{display:none}
-  .main{padding:20px}
+@media(max-width:600px){
+  .main{padding:20px 16px}
+  .subtab{padding:8px 12px;font-size:13px}
 }
 </style>
 <script>
-function showTab(name){
-  document.querySelectorAll('.nav button[data-tab]').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
-  var btn=document.getElementById('tab-'+name);
-  var sec=document.getElementById('form-'+name);
+// Navigation principale (par grand groupe : upload, va, settings)
+function showGroup(group){
+  document.querySelectorAll('.sidebar .ico-btn').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.group-section').forEach(f=>f.style.display='none');
+  var btn=document.getElementById('ico-'+group);
+  var sec=document.getElementById('group-'+group);
   if(btn)btn.classList.add('active');
   if(sec)sec.style.display='block';
-  document.getElementById('page-title').textContent=btn?btn.dataset.label:'Dashboard';
+  // Set title from first subtab of this group
+  var firstSub=sec?sec.querySelector('.subtab.active'):null;
+  document.getElementById('page-title').textContent=firstSub?firstSub.dataset.label:(btn?btn.dataset.label:'');
+  document.getElementById('page-subtitle').textContent=btn?btn.dataset.subtitle:'';
+}
+// Sous-onglets dans un groupe
+function showTab(name){
+  // chercher dans quel group on est
+  var section=document.querySelector('.group-section[style*="block"]')||document.getElementById('group-upload');
+  section.querySelectorAll('.subtab').forEach(t=>t.classList.remove('active'));
+  section.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
+  var btn=document.getElementById('tab-'+name);
+  var sec=document.getElementById('form-'+name);
+  if(btn){btn.classList.add('active');document.getElementById('page-title').textContent=btn.dataset.label;}
+  if(sec)sec.style.display='block';
 }
 </script>
 </head><body><div class="layout">
 <div class="sidebar">
-<h2>🤖 VA Bot</h2>
-<div class="nav">
-  <button data-tab="reel" data-label="🎬 Upload Reel" class="active" id="tab-reel" onclick="showTab('reel')"><span class="icon">🎬</span>Reel</button>
-  <button data-tab="post" data-label="📸 Upload Post" id="tab-post" onclick="showTab('post')"><span class="icon">📸</span>Post</button>
-  <button data-tab="story" data-label="📱 Upload Story" id="tab-story" onclick="showTab('story')"><span class="icon">📱</span>Story</button>
-  <button data-tab="storycta" data-label="📲 Upload Story CTA" id="tab-storycta" onclick="showTab('storycta')"><span class="icon">📲</span>Story CTA</button>
-  <button data-tab="pp" data-label="👤 Photo de profil" id="tab-pp" onclick="showTab('pp')"><span class="icon">👤</span>PP partagé</button>
+  <button class="ico-btn active" id="ico-upload" data-label="📤 Upload contenu" data-subtitle="Reels, Posts, Stories, Story CTAs, PP" onclick="showGroup('upload')">📤<span class="tip">Upload</span></button>
   <div class="sep"></div>
-  <button data-tab="va" data-label="👥 Délégations VA" id="tab-va" onclick="showTab('va')"><span class="icon">👥</span>VAs</button>
+  <button class="ico-btn" id="ico-va" data-label="🤖 Délégations VA" data-subtitle="Liste des VAs et statistiques par identité" onclick="showGroup('va')">🤖<span class="tip">VAs</span></button>
   <div class="sep"></div>
-  <button data-tab="settings" data-label="⚙️ Paramètres" id="tab-settings" onclick="showTab('settings')"><span class="icon">⚙️</span>Settings</button>
-</div>
-<a href="/logout" class="logout-btn">🚪 Déconnexion</a>
+  <button class="ico-btn" id="ico-settings" data-label="⚙️ Paramètres" data-subtitle="Token bot admin et mot de passe du site" onclick="showGroup('settings')">⚙️<span class="tip">Settings</span></button>
+  <div class="spacer"></div>
+  <a href="/logout" class="logout-btn" title="Déconnexion">🚪</a>
 </div>
 <div class="main">
 <h1 id="page-title">🎬 Upload Reel</h1>
+<small id="page-subtitle" style="font-size:13px;margin-bottom:18px">Reels, Posts, Stories, Story CTAs, PP</small>
 {msg_html}
+
+<!-- GROUPE UPLOAD -->
+<div class="group-section" id="group-upload" style="display:block">
+<div class="subtabs">
+  <button class="subtab active" id="tab-reel" data-label="🎬 Upload Reel" onclick="showTab('reel')">🎬 Reel</button>
+  <button class="subtab" id="tab-post" data-label="📸 Upload Post" onclick="showTab('post')">📸 Post</button>
+  <button class="subtab" id="tab-story" data-label="📱 Upload Story" onclick="showTab('story')">📱 Story</button>
+  <button class="subtab" id="tab-storycta" data-label="📲 Upload Story CTA" onclick="showTab('storycta')">📲 Story CTA</button>
+  <button class="subtab" id="tab-pp" data-label="👤 Photo de profil" onclick="showTab('pp')">👤 PP</button>
+</div>
 
 <div class="form-section" id="form-reel">
 <form method="POST" action="/upload/reel" enctype="multipart/form-data" class="box">
@@ -238,10 +260,13 @@ function showTab(name){
 </form>
 </div>
 
-<div class="form-section" id="form-va" style="display:none">
+</div><!-- /group-upload -->
+
+<!-- GROUPE VA -->
+<div class="group-section" id="group-va" style="display:none">
 <div class="box">
 <h3 style="margin-top:0">👥 Délégations VA</h3>
-<small>Liste de tous les VAs assignés. Tu peux reset ou changer leur identité d'ici.</small>
+<small>Liste de tous les VAs assignés. Tu peux reset leur attribution depuis ici.</small>
 {va_list_html}
 </div>
 <div class="box">
@@ -250,7 +275,8 @@ function showTab(name){
 </div>
 </div>
 
-<div class="form-section" id="form-settings" style="display:none">
+<!-- GROUPE SETTINGS -->
+<div class="group-section" id="group-settings" style="display:none">
 <form method="POST" action="/settings/admin_token" class="box">
 <h3 style="margin-top:0">🤖 Token du bot Admin (2e bot)</h3>
 <small>Statut actuel : <b>{admin_token_status}</b></small>
