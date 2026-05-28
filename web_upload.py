@@ -5,16 +5,67 @@ Authentification par mot de passe (env WEB_UPLOAD_PASSWORD ou par défaut "chang
 import os
 import logging
 import threading
+import sys
+import time
 from pathlib import Path
 
 log = logging.getLogger("vabot.web")
 
+BOT_DIR = Path(__file__).parent.resolve()
+ENV_FILE = BOT_DIR / ".env"
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
 
 WEB_PASSWORD = os.environ.get("WEB_UPLOAD_PASSWORD", "changeme")
 WEB_PORT = int(os.environ.get("WEB_UPLOAD_PORT", "8080"))
+
+
+def _read_env_lines():
+    """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
+    if not ENV_FILE.exists():
+        return []
+    try:
+        return ENV_FILE.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+
+
+def _write_env_var(key: str, value: str) -> bool:
+    """Ecrit/remplace la variable <key>=<value> dans le .env. Retourne True si OK."""
+    try:
+        lines = _read_env_lines()
+        found = False
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+                new_lines.append(f"{key}={value}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f"{key}={value}")
+        # Garantir un saut de ligne final
+        content = "\n".join(new_lines).rstrip("\n") + "\n"
+        ENV_FILE.write_text(content, encoding="utf-8")
+        try:
+            os.chmod(ENV_FILE, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.error(f"Erreur ecriture .env: {e}")
+        return False
+
+
+def _schedule_restart(delay_sec: float = 2.0):
+    """Exit le process apres <delay_sec> -> systemd auto-restart."""
+    def _do_exit():
+        time.sleep(delay_sec)
+        log.warning("Exit demande via web UI - systemd va relancer le bot")
+        os._exit(0)
+    threading.Thread(target=_do_exit, daemon=True).start()
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -80,6 +131,7 @@ function showTab(name){
   <button class="tab" id="tab-story" onclick="showTab('story')">Story</button>
   <button class="tab" id="tab-storycta" onclick="showTab('storycta')">Story CTA</button>
   <button class="tab" id="tab-pp" onclick="showTab('pp')">PP partagé</button>
+  <button class="tab" id="tab-settings" onclick="showTab('settings')">⚙️ Settings</button>
 </div>
 
 <div class="form-section" id="form-reel">
@@ -150,6 +202,17 @@ function showTab(name){
 </form>
 </div>
 
+<div class="form-section" id="form-settings" style="display:none">
+<form method="POST" action="/settings/admin_token" class="box">
+<h3 style="margin-top:0">🤖 Token du bot Admin (2e bot)</h3>
+<small>Statut actuel : <b>{admin_token_status}</b></small>
+<label>Token Discord du bot admin</label>
+<input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
+<small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
+<button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
+</form>
+</div>
+
 </div></body></html>
 """
 
@@ -165,6 +228,19 @@ def _render_login(err=""):
     return LOGIN_HTML.replace("{err}", err_html)
 
 
+def _admin_token_status() -> str:
+    """Resume du statut du token admin (sans jamais l'afficher en clair)."""
+    val = os.environ.get("DISCORD_ADMIN_TOKEN")
+    if val:
+        return f"✅ Configuré (token de {len(val)} caractères)"
+    # Re-check .env (au cas ou il a ete ajoute apres le start)
+    for line in _read_env_lines():
+        s = line.strip()
+        if s.startswith("DISCORD_ADMIN_TOKEN=") and len(s) > len("DISCORD_ADMIN_TOKEN="):
+            return "⚠️ Présent dans .env mais bot pas restart (relance via Settings)"
+    return "❌ Non configuré — colle ton token ci-dessous"
+
+
 def _render_upload(msg="", error=False):
     identities = _list_identities()
     opts = "".join(f'<option value="{i}">{i}</option>' for i in identities)
@@ -174,7 +250,12 @@ def _render_upload(msg="", error=False):
     if msg:
         cls = "err" if error else ""
         msg_html = f'<div class="msg {cls}">{msg}</div>'
-    return UPLOAD_HTML.replace("{ident_opts}", opts).replace("{msg_html}", msg_html)
+    return (
+        UPLOAD_HTML
+        .replace("{ident_opts}", opts)
+        .replace("{msg_html}", msg_html)
+        .replace("{admin_token_status}", _admin_token_status())
+    )
 
 
 def create_app():
@@ -296,6 +377,28 @@ def create_app():
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
         return _render_upload(f"✅ Photo de profil ajoutée ({target.name})")
+
+    @app.route("/settings/admin_token", methods=["POST"])
+    def settings_admin_token():
+        if not is_auth():
+            return redirect("/")
+        token = (request.form.get("token") or "").strip()
+        # Validation basique d'un token Discord (format MZ.XX.YY avec base64-like chars)
+        if not token or len(token) < 50 or "." not in token:
+            return _render_upload(
+                "❌ Token invalide (trop court ou format incorrect)", error=True
+            )
+        ok = _write_env_var("DISCORD_ADMIN_TOKEN", token)
+        if not ok:
+            return _render_upload(
+                "❌ Erreur ecriture .env (permissions ?)", error=True
+            )
+        # Programmer le redemarrage (systemd relance le service)
+        _schedule_restart(2.0)
+        return _render_upload(
+            "✅ Token sauvegardé. Le bot redémarre dans 2 sec. "
+            "Recharge cette page dans ~15 sec pour voir le statut."
+        )
 
     return app
 
