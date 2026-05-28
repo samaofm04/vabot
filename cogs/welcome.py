@@ -45,6 +45,7 @@ DEFAULT_WELCOME_CONFIG = {
     "extra_visible_channel_ids": [],  # exceptions: salons que les VAs peuvent voir
     "assignment_mode": "round_robin",  # "round_robin" ou "random"
     "rotation_pool": [],  # identites restantes dans le tour actuel
+    "auto_create_ticket_on_join": True,  # True = ticket cree direct, False = passe par bouton "Continuer"
     "welcome_public_message": (
         "👋 **Bienvenue dans l'agence {mention} !**\n\n"
         "Tu es là parce que tu vas bosser avec nous comme VA. "
@@ -236,6 +237,87 @@ async def create_va_channel(guild, member, identity):
         return None
 
 
+async def setup_va_ticket(guild, member):
+    """Cree le ticket d'un VA: assignation identite + salon + intro.
+
+    Retourne (channel, error_message_or_None).
+    Reutilise une assignation existante si elle existe.
+    Si l'user a deja un salon valide, le renvoie tel quel.
+    """
+    users = load_users()
+    existing = users.get(str(member.id))
+
+    # Si user a deja un salon valide, le re-utiliser
+    if isinstance(existing, dict) and existing.get("channel_id"):
+        existing_channel = guild.get_channel(existing["channel_id"])
+        if existing_channel:
+            try:
+                await existing_channel.set_permissions(
+                    member,
+                    view_channel=True, send_messages=True,
+                    read_message_history=True, attach_files=True,
+                )
+            except Exception:
+                pass
+            return existing_channel, None
+        # Salon supprime -> clear et continuer comme nouveau VA
+        users.pop(str(member.id), None)
+        save_users(users)
+        existing = None
+
+    # Determiner l'identite
+    if isinstance(existing, dict) and existing.get("identity"):
+        identity = existing["identity"]
+    elif isinstance(existing, str):
+        identity = existing
+    else:
+        identity = pick_next_identity()
+        if not identity:
+            return None, "Aucune identité disponible. Préviens un admin."
+
+    # Creer le salon
+    channel = await create_va_channel(guild, member, identity)
+    if not channel:
+        return None, "Le bot n'a pas la permission de créer un salon."
+
+    # Sauvegarder
+    users[str(member.id)] = {
+        "identity": identity,
+        "channel_id": channel.id,
+        "auto_post": True,
+    }
+    save_users(users)
+
+    # Envoyer le message intro (avec photos optionnelles)
+    cfg = load_welcome_config()
+    intro_text = cfg["ticket_intro_message"].replace("\\n", "\n").format(mention=member.mention)
+    files = build_intro_files()
+    try:
+        await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
+    except Exception as e:
+        log.error(f"setup_va_ticket: erreur envoi intro: {e}")
+
+    # Cacher TOUS les salons au VA sauf son ticket (anonymat)
+    if cfg.get("hide_all_channels_from_va", True):
+        own_id = channel.id
+        extra_visible = set(cfg.get("extra_visible_channel_ids", []))
+        for ch in guild.channels:
+            if ch.id == own_id or ch.id in extra_visible:
+                continue
+            if isinstance(ch, discord.CategoryChannel):
+                continue
+            try:
+                await ch.set_permissions(
+                    member,
+                    view_channel=False,
+                    reason="VA isolation - anonymat",
+                )
+            except Exception:
+                pass
+
+    return channel, None
+
+
 class StartOnboardingView(discord.ui.View):
     """2e bouton : dans le salon perso du VA, démarre l'onboarding."""
     def __init__(self):
@@ -276,85 +358,10 @@ class WelcomeContinueView(discord.ui.View):
             await interaction.followup.send("Doit etre utilise dans un serveur.", ephemeral=True)
             return
 
-        users = load_users()
-        existing = users.get(str(interaction.user.id))
-
-        # Si user a deja un salon, regarantir l'acces et l'y envoyer
-        if isinstance(existing, dict) and existing.get("channel_id"):
-            existing_channel = guild.get_channel(existing["channel_id"])
-            if existing_channel:
-                # Reactiver les permissions au cas ou
-                try:
-                    await existing_channel.set_permissions(
-                        interaction.user,
-                        view_channel=True, send_messages=True,
-                        read_message_history=True, attach_files=True,
-                    )
-                except Exception:
-                    pass
-                await interaction.followup.send(
-                    f"Tu as deja un salon : {existing_channel.mention}. Rends-toi la-bas pour commencer.",
-                    ephemeral=True,
-                )
-                return
-            # Le salon stocke n'existe plus -> on traite comme un nouveau VA (clear entry)
-            users.pop(str(interaction.user.id), None)
-            save_users(users)
-            existing = None
-
-        # Determiner l'identite : garder existante OU random
-        if isinstance(existing, dict) and existing.get("identity"):
-            identity = existing["identity"]
-        elif isinstance(existing, str):
-            identity = existing
-        else:
-            identity = pick_next_identity()
-            if not identity:
-                await interaction.followup.send(
-                    "❌ Aucune identité disponible. Préviens un admin.", ephemeral=True
-                )
-                return
-
-        # Creer le salon
-        channel = await create_va_channel(guild, interaction.user, identity)
-        if not channel:
-            await interaction.followup.send(
-                "❌ Le bot n'a pas la permission de créer un salon. Préviens un admin.",
-                ephemeral=True,
-            )
+        channel, error = await setup_va_ticket(guild, interaction.user)
+        if error:
+            await interaction.followup.send(f"❌ {error}", ephemeral=True)
             return
-
-        # Sauvegarder
-        users[str(interaction.user.id)] = {
-            "identity": identity,
-            "channel_id": channel.id,
-            "auto_post": True,
-        }
-        save_users(users)
-
-        # Envoyer le message intro dans le salon (avec photos optionnelles)
-        cfg = load_welcome_config()
-        intro_text = cfg["ticket_intro_message"].replace("\\n", "\n").format(mention=interaction.user.mention)
-        files = build_intro_files()
-        await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
-
-        # IMPORTANT: cacher TOUS les salons au VA sauf son ticket (anonymat total)
-        if cfg.get("hide_all_channels_from_va", True):
-            own_id = channel.id
-            extra_visible = set(cfg.get("extra_visible_channel_ids", []))
-            for ch in guild.channels:
-                if ch.id == own_id or ch.id in extra_visible:
-                    continue
-                if isinstance(ch, discord.CategoryChannel):
-                    continue
-                try:
-                    await ch.set_permissions(
-                        interaction.user,
-                        view_channel=False,
-                        reason="VA isolation - anonymat",
-                    )
-                except Exception:
-                    pass
 
         # Supprimer le message welcome public maintenant que le VA a son ticket
         try:
@@ -363,7 +370,6 @@ class WelcomeContinueView(discord.ui.View):
         except Exception:
             pass
 
-        # Confirmer au VA
         await interaction.followup.send(
             f"✅ Ton salon a été créé : {channel.mention}\nRends-toi là-bas pour commencer.",
             ephemeral=True,
@@ -413,7 +419,10 @@ class Welcome(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        """Quand un nouveau membre rejoint, envoyer le message de bienvenue avec bouton."""
+        """Quand un nouveau membre rejoint:
+        - si auto_create_ticket_on_join=True (defaut): cree direct le ticket
+        - sinon: envoie un message dans le salon welcome avec bouton Continuer
+        """
         if member.bot:
             return
         # Si l'user avait une suppression planifiee, l'annuler (il est revenu)
@@ -423,6 +432,20 @@ class Welcome(commands.Cog):
             save_pending(pending)
             log.info(f"on_member_join: suppression annulee pour {member.id} (revenu sur le serveur)")
         cfg = load_welcome_config()
+
+        # Mode auto-ticket: cree direct le salon, sans passer par le welcome public
+        if cfg.get("auto_create_ticket_on_join", True):
+            try:
+                channel, error = await setup_va_ticket(member.guild, member)
+                if error:
+                    log.error(f"on_member_join auto-ticket: {error} (member={member.id})")
+                else:
+                    log.info(f"on_member_join: ticket cree automatiquement pour {member.id} -> {channel.id}")
+            except Exception as e:
+                log.error(f"on_member_join auto-ticket exception: {e}")
+            return
+
+        # Mode classique: envoyer un message welcome avec bouton Continuer
         channel_id = cfg.get("welcome_channel_id")
         if not channel_id:
             log.warning(f"on_member_join: aucun welcome_channel_id configuré, member={member.id}")
@@ -431,8 +454,7 @@ class Welcome(commands.Cog):
         if not channel:
             log.warning(f"on_member_join: welcome_channel_id={channel_id} introuvable")
             return
-        # Si le member a deja eu un override perso (ex: ancien VA revenu), le supprimer
-        # sinon il ne pourra pas voir l'historique du salon welcome
+        # Reset override perso (ancien VA revenu) sinon ils voient pas le message
         try:
             await channel.set_permissions(member, overwrite=None, reason="Reset override au rejoin")
         except Exception:
@@ -535,6 +557,31 @@ class Welcome(commands.Cog):
             f"✅ Salon welcome auto : {target.mention}{perms_msg}",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="autoticket",
+        description="[ADMIN] True = ticket cree direct quand un VA rejoint, False = bouton Continuer",
+    )
+    @app_commands.describe(enabled="True (defaut) = auto, False = mode classique avec bouton")
+    async def autoticket(self, interaction: discord.Interaction, enabled: bool):
+        if not await self.require_admin(interaction):
+            return
+        cfg = load_welcome_config()
+        cfg["auto_create_ticket_on_join"] = enabled
+        save_welcome_config(cfg)
+        if enabled:
+            msg = (
+                "✅ **Auto-ticket activé**\n\n"
+                "Quand un VA rejoint, son salon est créé **automatiquement** "
+                "sans passer par le salon welcome."
+            )
+        else:
+            msg = (
+                "✅ **Auto-ticket désactivé**\n\n"
+                "Quand un VA rejoint, il reçoit un message dans le salon welcome "
+                "avec le bouton **Continuer** pour créer son ticket."
+            )
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="setwelcomemessage", description="[ADMIN] Modifie le message de bienvenue public (\\n pour retour ligne)")
     @app_commands.describe(message="Nouveau message complet du welcome public")
