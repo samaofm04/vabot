@@ -14,6 +14,54 @@ SFS_FILE = BUSINESS_DIR / "sfs.json"
 EXPENSES_FILE = BUSINESS_DIR / "expenses.json"
 REVENUES_FILE = BUSINESS_DIR / "revenues.json"
 VA_PAYMENTS_FILE = BUSINESS_DIR / "va_payments.json"
+IDENTITY_PLATFORMS_FILE = BUSINESS_DIR / "identity_platforms.json"
+
+# Plateformes par défaut
+DEFAULT_IDENTITY_PLATFORMS = {
+    "julia": ["OF", "MYM"],
+    "lola": ["OF", "MYM"],
+    "amelia": ["OF", "MYM"],
+    "sarah": ["MYM"],
+    "emma": ["MYM"],
+}
+
+PLATFORMS = ["OF", "MYM"]
+
+
+def load_identity_platforms() -> dict:
+    """Retourne un mapping {identity: [platforms]}"""
+    if not IDENTITY_PLATFORMS_FILE.exists():
+        return dict(DEFAULT_IDENTITY_PLATFORMS)
+    try:
+        return json.loads(IDENTITY_PLATFORMS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return dict(DEFAULT_IDENTITY_PLATFORMS)
+
+
+def save_identity_platforms(data: dict):
+    _ensure()
+    IDENTITY_PLATFORMS_FILE.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def set_identity_platform(identity: str, platform: str, active: bool):
+    """Active ou désactive une plateforme pour une identité."""
+    data = load_identity_platforms()
+    identity = identity.lower().strip()
+    if identity not in data:
+        data[identity] = []
+    if active and platform not in data[identity]:
+        data[identity].append(platform)
+    elif not active and platform in data[identity]:
+        data[identity].remove(platform)
+    save_identity_platforms(data)
+
+
+def identities_for_platform(platform: str) -> list:
+    """Liste les identités présentes sur une plateforme."""
+    data = load_identity_platforms()
+    return sorted([ident for ident, plats in data.items() if platform in plats])
 
 
 def _ensure():
@@ -40,16 +88,22 @@ def list_sfs() -> List[Dict]:
     return _load(SFS_FILE)
 
 
-def add_sfs(identity: str, partner: str, date_iso: str, time_str: str, notes: str = ""):
-    """Ajoute une entrée SFS planifiée."""
+def add_sfs(identity: str, partner: str, date_iso: str, time_str: str,
+            platform: str = "OF", status: str = "scheduled", notes: str = ""):
+    """Ajoute une entrée SFS planifiée.
+
+    status: 'scheduled' (confirmé) ou 'to_program' (à programmer)
+    """
     items = _load(SFS_FILE)
     new_id = int(time.time() * 1000)
     items.append({
         "id": new_id,
         "identity": identity.lower().strip(),
         "partner": partner.strip().replace("@", ""),
-        "date": date_iso,  # YYYY-MM-DD
-        "time": time_str,  # HH:MM
+        "date": date_iso,
+        "time": time_str,
+        "platform": platform.upper(),
+        "status": status,  # scheduled | to_program
         "notes": notes.strip()[:200],
         "done": False,
         "created_at": int(time.time()),

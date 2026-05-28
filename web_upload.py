@@ -2048,71 +2048,186 @@ def _render_insta_trends_grid_html() -> str:
 
 def _render_sfs_html() -> str:
     try:
-        from business import list_sfs, sfs_stats
+        from business import list_sfs, sfs_stats, load_identity_platforms, identities_for_platform, PLATFORMS
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    identities = _list_identities()
-    ident_opts = "".join(f"<option value='{i}'>{i}</option>" for i in identities)
-    if not ident_opts:
-        ident_opts = "<option value=''>(aucune identité)</option>"
-    stats = sfs_stats()
-    import datetime
-    today = datetime.date.today().isoformat()
+    import datetime, calendar as cal
+    today = datetime.date.today()
+    today_iso = today.isoformat()
     items = list_sfs()
-    # Formulaire d'ajout
+    stats = sfs_stats()
+    platforms_map = load_identity_platforms()
+
+    # Construire calendrier du mois courant
+    year = today.year
+    month = today.month
+    first_day, days_in_month = cal.monthrange(year, month)
+    month_name = today.strftime("%B %Y")
+
+    # Map des SFS par date pour affichage rapide
+    sfs_by_date = {}
+    for it in items:
+        d = it.get("date", "")
+        if d:
+            sfs_by_date.setdefault(d, []).append(it)
+
     rows = []
+    # Stats
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
         f"<div class='stat'><div class='v'>{stats['total']}</div><div class='l'>Total SFS</div></div>"
         f"<div class='stat'><div class='v'>{stats['today']}</div><div class='l'>Aujourd'hui</div></div>"
-        f"<div class='stat'><div class='v'>{stats['pending']}</div><div class='l'>À faire</div></div>"
-        f"<div class='stat'><div class='v'>{stats['done']}</div><div class='l'>Faits</div></div>"
+        f"<div class='stat'><div class='v' style='color:#ffb800'>{stats['pending']}</div><div class='l'>À faire</div></div>"
+        f"<div class='stat'><div class='v' style='color:#00d68f'>{stats['done']}</div><div class='l'>Faits</div></div>"
         "</div>"
     )
-    rows.append(
-        f"<form method='POST' action='/business/sfs/add' class='box'>"
-        f"<h4 style='margin-top:0'>➕ Nouvel SFS</h4>"
-        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px'>"
-        f"<div><label>Identité</label><select name='identity' required>{ident_opts}</select></div>"
-        f"<div><label>Partenaire @</label><input type='text' name='partner' placeholder='partner_username' required></div>"
-        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
-        f"<div><label>Heure</label><input type='time' name='time' value='19:00' required></div>"
-        f"</div>"
-        f"<label>Notes (optionnel)</label>"
-        f"<input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>"
-        f"<button type='submit'>Ajouter</button>"
-        f"</form>"
-    )
-    # Liste des SFS
-    if not items:
-        rows.append("<p style='color:#888'>Aucun SFS planifié.</p>")
-    else:
-        rows.append("<div class='box'>")
+
+    # === CALENDRIER ===
+    rows.append("<div class='box'>")
+    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>")
+    rows.append(f"<h3 style='margin:0'>📅 {month_name}</h3>")
+    rows.append("<div style='display:flex;gap:8px'>")
+    rows.append("<button onclick='alert(\"Navigation mois - à venir\")' style='padding:6px 10px;background:#2a2a2a;border:0;border-radius:6px;color:#fff;cursor:pointer;margin:0'>‹</button>")
+    rows.append("<button onclick='alert(\"Navigation mois - à venir\")' style='padding:6px 10px;background:#2a2a2a;border:0;border-radius:6px;color:#fff;cursor:pointer;margin:0'>›</button>")
+    rows.append("</div></div>")
+    # Grille jours de la semaine
+    rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center'>")
+    for dn in ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"]:
+        rows.append(f"<div style='font-size:12px;color:#888;font-weight:600;padding:6px 0'>{dn}</div>")
+    # Cases vides avant le 1er jour
+    for _ in range(first_day):
+        rows.append("<div></div>")
+    # Jours du mois
+    for d in range(1, days_in_month + 1):
+        date_iso = f"{year:04d}-{month:02d}-{d:02d}"
+        is_today = (date_iso == today_iso)
+        day_sfs = sfs_by_date.get(date_iso, [])
+        nb_scheduled = sum(1 for x in day_sfs if x.get("status") == "scheduled")
+        nb_to_prog = sum(1 for x in day_sfs if x.get("status") == "to_program")
+        # Style de la cellule
+        border = "border:2px solid #ff4757" if is_today else "border:1px solid #2a2a2a"
+        bg = "#1a1a1a" if not day_sfs else "linear-gradient(135deg,#1a2a2a,#1a1a1a)"
+        # Badges
+        badges = ""
+        if nb_scheduled:
+            badges += f"<div style='background:#5865f2;color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;margin-top:2px'>{nb_scheduled}✓</div>"
+        if nb_to_prog:
+            badges += f"<div style='background:#ffb800;color:#000;font-size:9px;padding:1px 4px;border-radius:4px;margin-top:2px'>{nb_to_prog}⚙</div>"
+        day_color = "#ff4757" if is_today else "#fff"
+        rows.append(
+            f"<div onclick='selectSfsDate(\"{date_iso}\")' style='aspect-ratio:1;background:{bg};{border};border-radius:8px;padding:6px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column' "
+            f"onmouseover='this.style.transform=\"scale(1.05)\"' onmouseout='this.style.transform=\"\"'>"
+            f"<div style='font-size:14px;font-weight:600;color:{day_color}'>{d}</div>"
+            f"<div style='margin-top:auto'>{badges}</div>"
+            f"</div>"
+        )
+    rows.append("</div></div>")
+
+    # === FORMULAIRE D'AJOUT (avec sélection plateforme + identité dynamique) ===
+    # Construire les options par plateforme pour le JS
+    import json as _json
+    platform_idents_json = _json.dumps({p: identities_for_platform(p) for p in PLATFORMS})
+    of_idents = identities_for_platform("OF")
+    rows.append(f"""
+<div class='box'>
+<h4 style='margin-top:0'>➕ Nouveau SFS</h4>
+<form method='POST' action='/business/sfs/add' id='sfs-form'>
+  <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px'>
+    <div>
+      <label>Plateforme</label>
+      <select name='platform' id='sfs-platform' onchange='updateSfsIdentities()' required>
+        <option value='OF'>OnlyFans (OF)</option>
+        <option value='MYM'>MYM</option>
+      </select>
+    </div>
+    <div>
+      <label>Identité</label>
+      <select name='identity' id='sfs-identity' required>
+        {"".join(f"<option value='{i}'>{i}</option>" for i in of_idents) or "<option value=''>(aucune)</option>"}
+      </select>
+    </div>
+    <div>
+      <label>Statut</label>
+      <select name='status'>
+        <option value='scheduled'>✓ Scheduled (confirmé)</option>
+        <option value='to_program'>⚙ To program (à régler)</option>
+      </select>
+    </div>
+    <div>
+      <label>Date</label>
+      <input type='date' name='date' id='sfs-date' value='{today_iso}' required>
+    </div>
+    <div>
+      <label>Heure</label>
+      <input type='time' name='time' value='19:00' required>
+    </div>
+    <div>
+      <label>Partenaire @</label>
+      <input type='text' name='partner' placeholder='partner_username' required>
+    </div>
+  </div>
+  <label>Notes (optionnel)</label>
+  <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
+  <button type='submit'>Ajouter</button>
+</form>
+</div>
+<script>
+window.__platformIdents = {platform_idents_json};
+function updateSfsIdentities(){{
+  var plat = document.getElementById('sfs-platform').value;
+  var select = document.getElementById('sfs-identity');
+  var idents = window.__platformIdents[plat] || [];
+  select.innerHTML = idents.length
+    ? idents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
+    : '<option value="">(aucune identité sur ' + plat + ')</option>';
+}}
+function selectSfsDate(d){{
+  document.getElementById('sfs-date').value = d;
+  document.getElementById('sfs-date').focus();
+  document.getElementById('sfs-form').scrollIntoView({{behavior:'smooth',block:'center'}});
+}}
+</script>""")
+
+    # === LISTE DES SFS ===
+    if items:
+        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Tous les SFS</h4>")
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
             "<tr style='background:#1a1a1a'>"
-            "<th style='padding:8px;text-align:left'>État</th>"
+            "<th style='padding:8px;text-align:center'>État</th>"
             "<th style='padding:8px;text-align:left'>Date & H</th>"
+            "<th style='padding:8px;text-align:left'>Plateforme</th>"
             "<th style='padding:8px;text-align:left'>Identité</th>"
             "<th style='padding:8px;text-align:left'>Partenaire</th>"
+            "<th style='padding:8px;text-align:left'>Statut</th>"
             "<th style='padding:8px;text-align:left'>Notes</th>"
-            "<th style='padding:8px;text-align:right'>Actions</th>"
+            "<th style='padding:8px'></th>"
             "</tr>"
         )
         for it in items:
             done = it.get("done", False)
             check = "✅" if done else "⏳"
             color_style = "opacity:.5;text-decoration:line-through" if done else ""
+            status = it.get("status", "scheduled")
+            status_badge = (
+                "<span style='background:#5865f2;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>SCHEDULED</span>"
+                if status == "scheduled" else
+                "<span style='background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>TO PROGRAM</span>"
+            )
+            platform = it.get("platform", "OF")
+            platform_color = "#5865f2" if platform == "OF" else "#a855f7"
             rows.append(
                 f"<tr style='border-bottom:1px solid #2a2a2a;{color_style}'>"
-                f"<td style='padding:8px'>"
+                f"<td style='padding:8px;text-align:center'>"
                 f"<form method='POST' action='/business/sfs/toggle' style='display:inline;margin:0'>"
                 f"<input type='hidden' name='id' value='{it['id']}'>"
                 f"<button type='submit' style='background:none;border:0;cursor:pointer;font-size:16px;margin:0;padding:0'>{check}</button>"
                 f"</form></td>"
                 f"<td style='padding:8px;font-size:13px'>{it.get('date','')} <b>{it.get('time','')}</b></td>"
+                f"<td style='padding:8px'><span style='background:{platform_color};color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>{platform}</span></td>"
                 f"<td style='padding:8px'><b>{it.get('identity','')}</b></td>"
                 f"<td style='padding:8px'>@{it.get('partner','')}</td>"
+                f"<td style='padding:8px'>{status_badge}</td>"
                 f"<td style='padding:8px;font-size:13px;color:#aaa'>{it.get('notes','')}</td>"
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/business/sfs/remove' style='display:inline;margin:0'>"
@@ -2121,6 +2236,33 @@ def _render_sfs_html() -> str:
                 f"</form></td></tr>"
             )
         rows.append("</table></div>")
+
+    # === CONFIG des plateformes ===
+    rows.append("<div class='box'>")
+    rows.append("<h4 style='margin-top:0'>⚙️ Mes identités par plateforme</h4>")
+    rows.append("<small>Active/désactive les plateformes pour chaque identité (affecte ce qu'on peut sélectionner dans le form).</small>")
+    rows.append("<form method='POST' action='/business/identity_platforms' style='margin-top:14px'>")
+    rows.append("<table style='width:100%;border-collapse:collapse'>")
+    rows.append("<tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Identité</th>")
+    for p in PLATFORMS:
+        rows.append(f"<th style='padding:8px;text-align:center'>{p}</th>")
+    rows.append("</tr>")
+    all_idents = set(platforms_map.keys()) | set(_list_identities())
+    for ident in sorted(all_idents):
+        rows.append(f"<tr style='border-bottom:1px solid #2a2a2a'><td style='padding:8px;font-weight:600'>{ident}</td>")
+        active_plats = platforms_map.get(ident, [])
+        for p in PLATFORMS:
+            checked = "checked" if p in active_plats else ""
+            rows.append(
+                f"<td style='padding:8px;text-align:center'>"
+                f"<input type='checkbox' name='platform_{ident}' value='{p}' {checked} style='width:18px;height:18px;accent-color:#5865f2'>"
+                f"</td>"
+            )
+        rows.append("</tr>")
+    rows.append("</table>")
+    rows.append("<button type='submit' style='margin-top:14px'>Sauver la config plateformes</button>")
+    rows.append("</form></div>")
+
     return "".join(rows)
 
 
@@ -2835,11 +2977,33 @@ def create_app():
         partner = (request.form.get("partner") or "").strip()
         date = (request.form.get("date") or "").strip()
         time_s = (request.form.get("time") or "").strip()
+        platform = (request.form.get("platform") or "OF").strip().upper()
+        status = (request.form.get("status") or "scheduled").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity or not partner or not date or not time_s:
             return _error("❌ Champs requis manquants")
-        add_sfs(identity, partner, date, time_s, notes)
-        return _success(f"✅ SFS ajouté : <b>{identity}</b> avec <b>@{partner}</b> le {date} à {time_s}")
+        add_sfs(identity, partner, date, time_s, platform, status, notes)
+        return _success(f"✅ SFS ajouté : <b>{identity}</b> ({platform}) avec <b>@{partner}</b> le {date} à {time_s}")
+
+    @app.route("/business/identity_platforms", methods=["POST"])
+    def business_identity_platforms():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import save_identity_platforms, PLATFORMS
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        # Récupérer tous les checkboxes platform_<identity>=<platform>
+        # request.form.getlist permet d'avoir plusieurs valeurs pour la même clé
+        new_map = {}
+        for key in request.form.keys():
+            if key.startswith("platform_"):
+                ident = key[len("platform_"):]
+                vals = request.form.getlist(key)
+                new_map[ident] = [v for v in vals if v in PLATFORMS]
+        # Garder même les identités sans plateforme cochée (liste vide)
+        save_identity_platforms(new_map)
+        return _success(f"✅ Plateformes sauvées pour {len(new_map)} identité(s)")
 
     @app.route("/business/sfs/remove", methods=["POST"])
     def business_sfs_remove():
