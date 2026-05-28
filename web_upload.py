@@ -3,6 +3,7 @@ Tourne dans un thread du process bot. Accès via http://<VPS_IP>:8080
 Authentification par mot de passe (env WEB_UPLOAD_PASSWORD ou par défaut "changeme").
 """
 import os
+import json
 import logging
 import threading
 import sys
@@ -16,6 +17,8 @@ ENV_FILE = BOT_DIR / ".env"
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
+USERS_FILE = DATA_DIR / "users.json"
+IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
 
 WEB_PASSWORD = os.environ.get("WEB_UPLOAD_PASSWORD", "changeme")
 WEB_PORT = int(os.environ.get("WEB_UPLOAD_PORT", "8080"))
@@ -131,6 +134,7 @@ function showTab(name){
   <button class="tab" id="tab-story" onclick="showTab('story')">Story</button>
   <button class="tab" id="tab-storycta" onclick="showTab('storycta')">Story CTA</button>
   <button class="tab" id="tab-pp" onclick="showTab('pp')">PP partagé</button>
+  <button class="tab" id="tab-va" onclick="showTab('va')">👥 VAs</button>
   <button class="tab" id="tab-settings" onclick="showTab('settings')">⚙️ Settings</button>
 </div>
 
@@ -202,12 +206,32 @@ function showTab(name){
 </form>
 </div>
 
+<div class="form-section" id="form-va" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">👥 Délégations VA</h3>
+<small>Liste de tous les VAs assignés. Tu peux reset ou changer leur identité d'ici.</small>
+{va_list_html}
+</div>
+<div class="box">
+<h4 style="margin-top:0">📊 Statistiques par identité</h4>
+{identity_stats_html}
+</div>
+</div>
+
 <div class="form-section" id="form-settings" style="display:none">
 <form method="POST" action="/settings/admin_token" class="box">
 <h3 style="margin-top:0">🤖 Token du bot Admin (2e bot)</h3>
 <small>Statut actuel : <b>{admin_token_status}</b></small>
 <label>Token Discord du bot admin</label>
 <input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
+<small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
+<button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
+</form>
+<form method="POST" action="/settings/web_password" class="box">
+<h3 style="margin-top:0">🔐 Mot de passe du site</h3>
+<small>Statut actuel : <b>{web_password_status}</b></small>
+<label>Nouveau mot de passe</label>
+<input type="password" name="password" placeholder="Choisis un mot de passe fort" required minlength="6">
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
 <button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
 </form>
@@ -226,6 +250,175 @@ def _list_identities():
 def _render_login(err=""):
     err_html = f'<div class="err">{err}</div>' if err else ""
     return LOGIN_HTML.replace("{err}", err_html)
+
+
+def _load_users():
+    if not USERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_users(users):
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_identities_config():
+    if not IDENTITIES_CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(IDENTITIES_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _count_files(d: Path, exts=None) -> int:
+    if not d.exists():
+        return 0
+    if exts is None:
+        return sum(1 for p in d.iterdir() if p.is_file())
+    return sum(
+        1 for p in d.iterdir()
+        if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
+    )
+
+
+def _identity_stats(identity: str) -> dict:
+    """Compte les contenus de cette identité."""
+    base = IDENTITIES_DIR / identity
+    reels = _count_files(base / "videos", VIDEO_EXTS)
+    posts = _count_files(base / "posts", IMAGE_EXTS)
+    stories = _count_files(base / "stories", IMAGE_EXTS)
+    storyctas = _count_files(base / "storyctas", IMAGE_EXTS)
+    # Bios / usernames / names from JSON files
+    def _safe_len(p):
+        if not p.exists():
+            return 0
+        try:
+            return len(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            return 0
+    bios = _safe_len(base / "bios.json")
+    usernames = _safe_len(base / "usernames.json")
+    names = _safe_len(base / "names.json")
+    return {
+        "reels": reels,
+        "posts": posts,
+        "stories": stories,
+        "storyctas": storyctas,
+        "bios": bios,
+        "usernames": usernames,
+        "names": names,
+    }
+
+
+def _render_va_list_html() -> str:
+    users = _load_users()
+    if not users:
+        return "<p style='color:#888'>Aucun VA assigné pour l'instant.</p>"
+    rows = []
+    rows.append(
+        "<table style='width:100%;border-collapse:collapse;margin-top:12px'>"
+        "<tr style='background:#1a1a1a'>"
+        "<th style='padding:8px;text-align:left'>Discord ID</th>"
+        "<th style='padding:8px;text-align:left'>Identité</th>"
+        "<th style='padding:8px;text-align:left'>Salon</th>"
+        "<th style='padding:8px;text-align:center'>Auto-post</th>"
+        "<th style='padding:8px;text-align:right'>Actions</th>"
+        "</tr>"
+    )
+    for uid, data in users.items():
+        if isinstance(data, dict):
+            identity = data.get("identity", "?")
+            channel_id = data.get("channel_id", "")
+            auto = "✅" if data.get("auto_post", True) else "❌"
+        else:
+            identity = str(data)
+            channel_id = ""
+            auto = "?"
+        channel_link = (
+            f"<a href='https://discord.com/channels/@me/{channel_id}'>{channel_id}</a>"
+            if channel_id else "<span style='color:#888'>—</span>"
+        )
+        rows.append(
+            f"<tr style='border-bottom:1px solid #333'>"
+            f"<td style='padding:8px'><code>{uid}</code></td>"
+            f"<td style='padding:8px'><b>{identity}</b></td>"
+            f"<td style='padding:8px'>{channel_link}</td>"
+            f"<td style='padding:8px;text-align:center'>{auto}</td>"
+            f"<td style='padding:8px;text-align:right'>"
+            f"<form method='POST' action='/va/reset' style='display:inline'>"
+            f"<input type='hidden' name='user_id' value='{uid}'>"
+            f"<button type='submit' style='padding:6px 12px;background:#d9534f;margin:0;font-size:13px' "
+            f"onclick=\"return confirm('Reset {uid} ?')\">🗑 Reset</button>"
+            f"</form>"
+            f"</td></tr>"
+        )
+    rows.append("</table>")
+    rows.append(f"<small>Total : <b>{len(users)}</b> VA(s)</small>")
+    return "".join(rows)
+
+
+def _render_identity_stats_html() -> str:
+    identities = _list_identities()
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+    cfg = _load_identities_config()
+    users = _load_users()
+    # Compter VAs par identité
+    va_per_identity = {}
+    for uid, data in users.items():
+        ident = data.get("identity") if isinstance(data, dict) else data
+        if ident:
+            va_per_identity[ident] = va_per_identity.get(ident, 0) + 1
+
+    rows = [
+        "<table style='width:100%;border-collapse:collapse;margin-top:12px;font-size:14px'>"
+        "<tr style='background:#1a1a1a'>"
+        "<th style='padding:6px;text-align:left'>Identité</th>"
+        "<th style='padding:6px'>Statut</th>"
+        "<th style='padding:6px'>Reels</th>"
+        "<th style='padding:6px'>Posts</th>"
+        "<th style='padding:6px'>Stories</th>"
+        "<th style='padding:6px'>StoryCTA</th>"
+        "<th style='padding:6px'>Bios</th>"
+        "<th style='padding:6px'>Usernames</th>"
+        "<th style='padding:6px'>Names</th>"
+        "<th style='padding:6px'>VAs</th>"
+        "</tr>"
+    ]
+    for ident in identities:
+        s = _identity_stats(ident)
+        enabled = True
+        entry = cfg.get(ident)
+        if isinstance(entry, dict):
+            enabled = entry.get("enabled", True)
+        statut = "✅" if enabled else "❌"
+        rows.append(
+            f"<tr style='border-bottom:1px solid #333'>"
+            f"<td style='padding:6px'><b>{ident}</b></td>"
+            f"<td style='padding:6px;text-align:center'>{statut}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['reels']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['posts']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['stories']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['storyctas']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['bios']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['usernames']}</td>"
+            f"<td style='padding:6px;text-align:center'>{s['names']}</td>"
+            f"<td style='padding:6px;text-align:center'><b>{va_per_identity.get(ident, 0)}</b></td>"
+            f"</tr>"
+        )
+    rows.append("</table>")
+    return "".join(rows)
+
+
+def _web_password_status() -> str:
+    if WEB_PASSWORD == "changeme":
+        return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
+    return f"✅ Configuré ({len(WEB_PASSWORD)} caractères)"
 
 
 def _admin_token_status() -> str:
@@ -255,6 +448,9 @@ def _render_upload(msg="", error=False):
         .replace("{ident_opts}", opts)
         .replace("{msg_html}", msg_html)
         .replace("{admin_token_status}", _admin_token_status())
+        .replace("{web_password_status}", _web_password_status())
+        .replace("{va_list_html}", _render_va_list_html())
+        .replace("{identity_stats_html}", _render_identity_stats_html())
     )
 
 
@@ -398,6 +594,42 @@ def create_app():
         return _render_upload(
             "✅ Token sauvegardé. Le bot redémarre dans 2 sec. "
             "Recharge cette page dans ~15 sec pour voir le statut."
+        )
+
+    @app.route("/settings/web_password", methods=["POST"])
+    def settings_web_password():
+        if not is_auth():
+            return redirect("/")
+        pwd = (request.form.get("password") or "").strip()
+        if len(pwd) < 6:
+            return _render_upload(
+                "❌ Mot de passe trop court (min 6 caractères)", error=True
+            )
+        ok = _write_env_var("WEB_UPLOAD_PASSWORD", pwd)
+        if not ok:
+            return _render_upload("❌ Erreur ecriture .env", error=True)
+        _schedule_restart(2.0)
+        return _render_upload(
+            "✅ Mot de passe sauvegardé. Le bot redémarre dans 2 sec. "
+            "Tu seras déco — reconnecte-toi avec le nouveau mot de passe."
+        )
+
+    @app.route("/va/reset", methods=["POST"])
+    def va_reset():
+        if not is_auth():
+            return redirect("/")
+        uid = (request.form.get("user_id") or "").strip()
+        if not uid:
+            return _render_upload("❌ user_id manquant", error=True)
+        users = _load_users()
+        if uid not in users:
+            return _render_upload(f"❌ VA {uid} introuvable", error=True)
+        identity = users[uid].get("identity") if isinstance(users[uid], dict) else users[uid]
+        del users[uid]
+        _save_users(users)
+        return _render_upload(
+            f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
+            "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer."
         )
 
     return app
