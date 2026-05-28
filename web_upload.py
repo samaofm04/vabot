@@ -853,6 +853,28 @@ function showTab(group,name,title,subtitle){
   </div>
 </div>
 
+<div class="group" id="grp-business">
+  <button class="group-head" onclick="toggleGroup('business')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+    <span class="label">Business</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-sfs" onclick="showTab('business','sfs','SFS — Planning','Share For Share planifies par identite')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      SFS Planning
+    </button>
+    <button class="item" id="tab-depenses" onclick="showTab('business','depenses','Dépenses','Suivi des couts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      Dépenses
+    </button>
+    <button class="item" id="tab-bilan" onclick="showTab('business','bilan','Bilan','Synthese de ton activite')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+      Bilan
+    </button>
+  </div>
+</div>
+
 <div class="group" id="grp-settings">
   <button class="group-head" onclick="toggleGroup('settings')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1225,6 +1247,21 @@ function showFeed(btn,name){
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
 <button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
 </form>
+</div>
+
+<!-- BUSINESS - SFS PLANNING -->
+<div class="form-section" id="form-sfs" style="display:none">
+{sfs_html}
+</div>
+
+<!-- BUSINESS - DÉPENSES -->
+<div class="form-section" id="form-depenses" style="display:none">
+{depenses_html}
+</div>
+
+<!-- BUSINESS - BILAN -->
+<div class="form-section" id="form-bilan" style="display:none">
+{bilan_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -1991,6 +2028,193 @@ def _render_insta_trends_grid_html() -> str:
     return "".join(cards)
 
 
+def _render_sfs_html() -> str:
+    try:
+        from business import list_sfs, sfs_stats
+    except Exception as e:
+        return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    identities = _list_identities()
+    ident_opts = "".join(f"<option value='{i}'>{i}</option>" for i in identities)
+    if not ident_opts:
+        ident_opts = "<option value=''>(aucune identité)</option>"
+    stats = sfs_stats()
+    import datetime
+    today = datetime.date.today().isoformat()
+    items = list_sfs()
+    # Formulaire d'ajout
+    rows = []
+    rows.append(
+        "<div class='stat-grid' style='margin-bottom:16px'>"
+        f"<div class='stat'><div class='v'>{stats['total']}</div><div class='l'>Total SFS</div></div>"
+        f"<div class='stat'><div class='v'>{stats['today']}</div><div class='l'>Aujourd'hui</div></div>"
+        f"<div class='stat'><div class='v'>{stats['pending']}</div><div class='l'>À faire</div></div>"
+        f"<div class='stat'><div class='v'>{stats['done']}</div><div class='l'>Faits</div></div>"
+        "</div>"
+    )
+    rows.append(
+        f"<form method='POST' action='/business/sfs/add' class='box'>"
+        f"<h4 style='margin-top:0'>➕ Nouvel SFS</h4>"
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px'>"
+        f"<div><label>Identité</label><select name='identity' required>{ident_opts}</select></div>"
+        f"<div><label>Partenaire @</label><input type='text' name='partner' placeholder='partner_username' required></div>"
+        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
+        f"<div><label>Heure</label><input type='time' name='time' value='19:00' required></div>"
+        f"</div>"
+        f"<label>Notes (optionnel)</label>"
+        f"<input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>"
+        f"<button type='submit'>Ajouter</button>"
+        f"</form>"
+    )
+    # Liste des SFS
+    if not items:
+        rows.append("<p style='color:#888'>Aucun SFS planifié.</p>")
+    else:
+        rows.append("<div class='box'>")
+        rows.append(
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:8px;text-align:left'>État</th>"
+            "<th style='padding:8px;text-align:left'>Date & H</th>"
+            "<th style='padding:8px;text-align:left'>Identité</th>"
+            "<th style='padding:8px;text-align:left'>Partenaire</th>"
+            "<th style='padding:8px;text-align:left'>Notes</th>"
+            "<th style='padding:8px;text-align:right'>Actions</th>"
+            "</tr>"
+        )
+        for it in items:
+            done = it.get("done", False)
+            check = "✅" if done else "⏳"
+            color_style = "opacity:.5;text-decoration:line-through" if done else ""
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a;{color_style}'>"
+                f"<td style='padding:8px'>"
+                f"<form method='POST' action='/business/sfs/toggle' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' style='background:none;border:0;cursor:pointer;font-size:16px;margin:0;padding:0'>{check}</button>"
+                f"</form></td>"
+                f"<td style='padding:8px;font-size:13px'>{it.get('date','')} <b>{it.get('time','')}</b></td>"
+                f"<td style='padding:8px'><b>{it.get('identity','')}</b></td>"
+                f"<td style='padding:8px'>@{it.get('partner','')}</td>"
+                f"<td style='padding:8px;font-size:13px;color:#aaa'>{it.get('notes','')}</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/business/sfs/remove' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' class='danger-btn' data-confirm='Supprimer ce SFS ?'>×</button>"
+                f"</form></td></tr>"
+            )
+        rows.append("</table></div>")
+    return "".join(rows)
+
+
+def _render_depenses_html() -> str:
+    try:
+        from business import list_expenses, expense_stats, CATEGORIES
+    except Exception as e:
+        return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    cat_opts = "".join(f"<option value='{c}'>{c}</option>" for c in CATEGORIES)
+    import datetime
+    today = datetime.date.today().isoformat()
+    items = list_expenses()
+    rows = []
+    rows.append(
+        f"<form method='POST' action='/business/expense/add' class='box'>"
+        f"<h4 style='margin-top:0'>➕ Nouvelle dépense</h4>"
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'>"
+        f"<div><label>Catégorie</label><select name='category' required>{cat_opts}</select></div>"
+        f"<div><label>Montant (€)</label><input type='number' name='amount' step='0.01' min='0' value='29.99' required></div>"
+        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
+        f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='recurring' style='width:auto;margin:0'> Mensuel récurrent</label></div>"
+        f"</div>"
+        f"<label>Description</label>"
+        f"<input type='text' name='description' placeholder='RapidAPI PRO, VPS Hostinger...' required maxlength='200'>"
+        f"<button type='submit'>Ajouter</button>"
+        f"</form>"
+    )
+    if not items:
+        rows.append("<p style='color:#888'>Aucune dépense enregistrée.</p>")
+    else:
+        rows.append("<div class='box'>")
+        rows.append(
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:8px;text-align:left'>Date</th>"
+            "<th style='padding:8px;text-align:left'>Catégorie</th>"
+            "<th style='padding:8px;text-align:left'>Description</th>"
+            "<th style='padding:8px;text-align:right'>Montant</th>"
+            "<th style='padding:8px;text-align:center'>Récurrent</th>"
+            "<th style='padding:8px;text-align:right'></th>"
+            "</tr>"
+        )
+        for it in items:
+            rec_icon = "🔄" if it.get("recurring") else ""
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
+                f"<td style='padding:8px;font-size:13px'>{it.get('category','')}</td>"
+                f"<td style='padding:8px'>{it.get('description','')}</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:600;color:#f99'>-{it.get('amount',0):.2f} €</td>"
+                f"<td style='padding:8px;text-align:center;font-size:18px'>{rec_icon}</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/business/expense/remove' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' class='danger-btn' data-confirm='Supprimer cette dépense ?'>×</button>"
+                f"</form></td></tr>"
+            )
+        rows.append("</table></div>")
+    return "".join(rows)
+
+
+def _render_bilan_html() -> str:
+    try:
+        from business import expense_stats, sfs_stats, list_expenses
+        from insta_scraper import load_watchlist
+    except Exception as e:
+        return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    exp = expense_stats()
+    sfs = sfs_stats()
+    try:
+        nb_va = len(_load_users())
+    except Exception:
+        nb_va = 0
+    nb_ident = len(_list_identities())
+    try:
+        nb_watch = len(load_watchlist())
+    except Exception:
+        nb_watch = 0
+    rows = []
+    # Stats globales
+    rows.append(
+        "<div class='stat-grid'>"
+        f"<div class='stat'><div class='v' style='color:#f99'>-{exp['total_this_month']:.0f}€</div><div class='l'>Dépenses ce mois</div></div>"
+        f"<div class='stat'><div class='v' style='color:#ffb800'>-{exp['monthly_recurring']:.0f}€</div><div class='l'>Récurrent / mois</div></div>"
+        f"<div class='stat'><div class='v'>-{exp['total_all_time']:.0f}€</div><div class='l'>Total dépenses</div></div>"
+        f"<div class='stat'><div class='v'>{nb_va}</div><div class='l'>VAs actifs</div></div>"
+        f"<div class='stat'><div class='v'>{nb_ident}</div><div class='l'>Identités</div></div>"
+        f"<div class='stat'><div class='v'>{sfs['total']}</div><div class='l'>SFS planifiés</div></div>"
+        "</div>"
+    )
+    # Par catégorie
+    rows.append("<div class='box'><h4 style='margin-top:0'>📊 Dépenses par catégorie</h4>")
+    by_cat = exp.get("by_category", {})
+    if not by_cat:
+        rows.append("<p style='color:#888;margin:0'>Aucune dépense enregistrée.</p>")
+    else:
+        max_amount = max(by_cat.values())
+        sorted_cats = sorted(by_cat.items(), key=lambda x: x[1], reverse=True)
+        for cat, amount in sorted_cats:
+            pct = (amount / max_amount) * 100 if max_amount > 0 else 0
+            rows.append(
+                f"<div style='margin-bottom:10px'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px'>"
+                f"<span style='color:#ccc'>{cat}</span><b style='color:#f99'>-{amount:.2f}€</b></div>"
+                f"<div style='background:#0f0f0f;border-radius:4px;height:8px;overflow:hidden'>"
+                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#5865f2,#a855f7);height:100%'></div>"
+                f"</div></div>"
+            )
+    rows.append("</div>")
+    return "".join(rows)
+
+
 def _web_password_status() -> str:
     if WEB_PASSWORD == "changeme":
         return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
@@ -2062,6 +2286,9 @@ def _render_upload(msg=None, error=None):
         .replace("{cloud_posts_html}", _render_cloud_content_html("posts", IMAGE_EXTS))
         .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
         .replace("{cloud_pps_html}", _render_cloud_pps_html())
+        .replace("{sfs_html}", _render_sfs_html())
+        .replace("{depenses_html}", _render_depenses_html())
+        .replace("{bilan_html}", _render_bilan_html())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
         .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
@@ -2353,6 +2580,94 @@ def create_app():
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
         return _success(f"✅ Photo de profil ajoutée ({target.name})")
+
+    # ============ BUSINESS ROUTES ============
+    @app.route("/business/sfs/add", methods=["POST"])
+    def business_sfs_add():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import add_sfs
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        identity = (request.form.get("identity") or "").strip()
+        partner = (request.form.get("partner") or "").strip()
+        date = (request.form.get("date") or "").strip()
+        time_s = (request.form.get("time") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        if not identity or not partner or not date or not time_s:
+            return _error("❌ Champs requis manquants")
+        add_sfs(identity, partner, date, time_s, notes)
+        return _success(f"✅ SFS ajouté : <b>{identity}</b> avec <b>@{partner}</b> le {date} à {time_s}")
+
+    @app.route("/business/sfs/remove", methods=["POST"])
+    def business_sfs_remove():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import remove_sfs
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if remove_sfs(iid):
+            return _success("✅ SFS supprimé")
+        return _error("❌ SFS introuvable")
+
+    @app.route("/business/sfs/toggle", methods=["POST"])
+    def business_sfs_toggle():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import toggle_sfs_done
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if toggle_sfs_done(iid):
+            return _success("✅ Statut SFS modifié")
+        return _error("❌ SFS introuvable")
+
+    @app.route("/business/expense/add", methods=["POST"])
+    def business_expense_add():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import add_expense
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        category = (request.form.get("category") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        date = (request.form.get("date") or "").strip()
+        try:
+            amount = float(request.form.get("amount") or "0")
+        except Exception:
+            return _error("❌ Montant invalide")
+        recurring = request.form.get("recurring") == "on"
+        if not category or not description or not date or amount <= 0:
+            return _error("❌ Champs requis manquants ou invalides")
+        add_expense(category, description, amount, date, recurring)
+        return _success(f"✅ Dépense ajoutée : <b>{description}</b> ({amount:.2f}€)")
+
+    @app.route("/business/expense/remove", methods=["POST"])
+    def business_expense_remove():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import remove_expense
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if remove_expense(iid):
+            return _success("✅ Dépense supprimée")
+        return _error("❌ Dépense introuvable")
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
     def settings_insta_rapidapi():
