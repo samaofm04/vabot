@@ -173,8 +173,8 @@ body{font-family:system-ui,sans-serif;background:#1a1a1a;color:#eee;margin:0;pad
 .box{background:#2a2a2a;padding:32px;border-radius:12px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.3)}
 h1{margin:0 0 24px;text-align:center}
 input{width:100%;padding:12px;margin-bottom:16px;background:#1a1a1a;border:1px solid #444;color:#fff;border-radius:6px;font-size:16px;box-sizing:border-box}
-button{width:100%;padding:14px;background:#ef4444;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer;font-weight:600}
-button:hover{background:#dc2626}
+button{width:100%;padding:14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer;font-weight:600}
+button:hover{background:#2563eb}
 .err{color:#f55;margin-bottom:16px;text-align:center}
 </style></head><body>
 <div class="box">
@@ -227,7 +227,7 @@ body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;pad
 
 /* Boutons - hover lift */
 button[type=submit],.btn,.danger-btn{transition:transform .12s ease,background .15s,box-shadow .15s}
-button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(239,68,68,.3)}
+button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.3)}
 .danger-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(217,83,79,.3)}
 
 /* Tooltip sidebar - smooth */
@@ -248,7 +248,7 @@ button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px
 #page-title,#page-subtitle{transition:opacity .2s}
 
 /* Input focus - glow ring */
-input:focus,select:focus,textarea:focus{outline:0;border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.15);transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15);transition:border-color .15s,box-shadow .15s}
 
 /* Sort options hover */
 .ig-sort-opt{transition:background .12s,color .12s,padding-left .12s}
@@ -259,10 +259,10 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#ef4444;box-shado
 
 /* ============ TOAST NOTIFICATIONS ============ */
 .toast-container{position:fixed;top:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:9999;pointer-events:none;max-width:420px}
-.toast{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #ef4444;border-radius:10px;padding:14px 18px;color:#fff;font-size:14px;box-shadow:0 12px 32px rgba(0,0,0,.6);display:flex;align-items:flex-start;gap:12px;pointer-events:auto;animation:toastIn .4s cubic-bezier(.16,1,.3,1);min-width:280px;backdrop-filter:blur(10px)}
+.toast{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #3b82f6;border-radius:10px;padding:14px 18px;color:#fff;font-size:14px;box-shadow:0 12px 32px rgba(0,0,0,.6);display:flex;align-items:flex-start;gap:12px;pointer-events:auto;animation:toastIn .4s cubic-bezier(.16,1,.3,1);min-width:280px;backdrop-filter:blur(10px)}
 .toast.success{border-left-color:#00d68f;background:#0f1f17}
 .toast.error{border-left-color:#ff4757;background:#1f0f0f}
-.toast.info{border-left-color:#ef4444}
+.toast.info{border-left-color:#3b82f6}
 .toast.warning{border-left-color:#ffb800;background:#1f1a0f}
 .toast .toast-icon{flex-shrink:0;font-size:18px;line-height:1.2}
 .toast .toast-msg{flex:1;line-height:1.5}
@@ -287,12 +287,14 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#ef4444;box-shado
 /* Sidebar large avec groupes pliables + flèches + section labels */
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
 .sidebar .section-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.5px;padding:14px 22px 6px;font-weight:700}
+/* SFS responsive : stack sur petits écrans */
+@media(max-width:1100px){.sfs-layout{grid-template-columns:1fr!important}}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
 .sidebar .group-head{display:flex;align-items:center;gap:12px;padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-radius:8px;transition:all .15s}
 .sidebar .group-head:hover{background:#181818;color:#fff}
 .sidebar .group-head.active{background:#181818;color:#fff}
 .sidebar .group-head svg.lead{width:18px;height:18px;flex-shrink:0;color:#888}
-.sidebar .group-head.active svg.lead{color:#ef4444}
+.sidebar .group-head.active svg.lead{color:#3b82f6}
 .sidebar .group-head .label{flex:1}
 .sidebar .group-head .arrow{width:14px;height:14px;color:#666;transition:transform .15s}
 .sidebar .group.open .group-head .arrow{transform:rotate(180deg);color:#fff}
@@ -303,10 +305,10 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#ef4444;box-shado
 .sidebar .group .item .left{display:flex;align-items:center;gap:10px;flex:1}
 .sidebar .group .item:hover{background:#181818;color:#fff}
 .sidebar .group .item:hover svg{color:#fff}
-.sidebar .group .item.active{color:#ef4444;background:#181818}
-.sidebar .group .item.active svg{color:#ef4444}
+.sidebar .group .item.active{color:#3b82f6;background:#181818}
+.sidebar .group .item.active svg{color:#3b82f6}
 .sidebar .group .item.soon{cursor:not-allowed;opacity:.6}
-.sidebar .group .item .badge{padding:2px 6px;font-size:9px;background:#ef4444;color:#fff;border-radius:4px;font-weight:700;letter-spacing:.5px}
+.sidebar .group .item .badge{padding:2px 6px;font-size:9px;background:#3b82f6;color:#fff;border-radius:4px;font-weight:700;letter-spacing:.5px}
 /* Sous-groupes imbriqués (Instagram, TikTok, etc. dans Trends) */
 .sidebar .subgroup{display:flex;flex-direction:column}
 .sidebar .subgroup-head{display:flex;align-items:center;gap:10px;padding:8px 12px;background:none;border:0;color:#bbb;cursor:pointer;font-size:13.5px;font-weight:600;border-radius:6px;width:100%;text-align:left;margin:0;transition:all .12s}
@@ -334,8 +336,8 @@ label{display:block;font-weight:600;margin-bottom:8px;margin-top:16px}
 label:first-child{margin-top:0}
 input,select,textarea{width:100%;padding:12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:15px;font-family:inherit}
 textarea{min-height:80px;resize:vertical}
-button[type=submit],.btn{padding:12px 24px;background:#ef4444;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer;font-weight:600;margin-top:16px}
-button[type=submit]:hover,.btn:hover{background:#dc2626}
+button[type=submit],.btn{padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer;font-weight:600;margin-top:16px}
+button[type=submit]:hover,.btn:hover{background:#2563eb}
 .msg{padding:12px 16px;border-radius:6px;margin-bottom:16px;background:#1a3a1a;color:#9fe89f;border:1px solid #2a5a2a}
 .err{background:#3a1a1a;color:#f99;border-color:#5a2a2a}
 a{color:#7289da}
@@ -348,7 +350,7 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 .danger-btn:hover{background:#c9302c}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
-.stat .v{font-size:28px;font-weight:700;color:#ef4444}
+.stat .v{font-size:28px;font-weight:700;color:#3b82f6}
 .stat .l{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.5px}
 @media(max-width:768px){
   .layout{flex-direction:column}
@@ -1087,7 +1089,7 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/></svg>
       0
     </span>
-    <div style="width:40px;height:40px;border:2px solid #ec4899;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#ec4899;cursor:pointer">
+    <div style="width:40px;height:40px;border:2px solid #06b6d4;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#06b6d4;cursor:pointer">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>
     </div>
   </div>
@@ -1097,7 +1099,7 @@ function showTab(group,name,title,subtitle){
 
 <!-- Sub-tabs style Insta : Mes suivies / Explorer -->
 <div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
-  <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #ef4444;margin:0">👥 Mes suivies</button>
+  <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #3b82f6;margin:0">👥 Mes suivies</button>
   <button class="ig-feed-tab" onclick="showFeed(this,'explore')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔍 Explorer</button>
 </div>
 <script>
@@ -1107,7 +1109,7 @@ function showFeed(btn,name){
     b.style.borderBottomColor='transparent';
   });
   btn.style.color='#fff';
-  btn.style.borderBottomColor='#ef4444';
+  btn.style.borderBottomColor='#3b82f6';
   document.querySelectorAll('.ig-feed-content').forEach(function(c){ c.style.display='none'; });
   var c=document.getElementById('feed-'+name);
   if(c) c.style.display='block';
@@ -1126,15 +1128,15 @@ function showFeed(btn,name){
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" id="ig-sort-arrow" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div id="ig-sort-menu" style="display:none;position:absolute;top:46px;left:0;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:6px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:50">
-      <button onclick="igSelectSort(this,'Trending')" class="ig-sort-opt selected" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Trending<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Newest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Newest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Oldest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Oldest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Most Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Least Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Most Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Least Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Most Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
-      <button onclick="igSelectSort(this,'Least Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Trending')" class="ig-sort-opt selected" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Trending<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Newest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Newest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Oldest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Oldest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
     </div>
   </div>
 
@@ -1330,7 +1332,7 @@ function showFeed(btn,name){
 </div>
 
 <!-- Import depuis fichier cookies.txt -->
-<form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #ef4444">
+<form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #3b82f6">
 <h3 style="margin-top:0">⚡ Import rapide depuis fichier cookies.txt</h3>
 <small>Méthode la plus simple : uploade le fichier cookies.txt téléchargé via l'extension <b>"Get cookies.txt"</b> de Chrome.</small>
 <label style="margin-top:14px">Fichier cookies.txt</label>
@@ -1510,7 +1512,7 @@ def _render_va_list_html() -> str:
         members = by_identity[identity]
         rows.append(
             f"<div style='margin-top:18px;display:flex;align-items:center;gap:10px'>"
-            f"<h4 style='margin:0;color:#ef4444;font-size:15px'>👤 {identity}</h4>"
+            f"<h4 style='margin:0;color:#3b82f6;font-size:15px'>👤 {identity}</h4>"
             f"<small style='color:#666'>{len(members)} VA(s)</small>"
             f"</div>"
         )
@@ -1555,7 +1557,7 @@ def _render_va_list_html() -> str:
                 f"<select name='identity' style='padding:6px 8px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:4px;font-size:13px;width:auto;flex:1'>"
                 f"{opts}"
                 f"</select>"
-                f"<button type='submit' style='padding:6px 10px;background:#ef4444;color:#fff;border:0;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;margin:0'>OK</button>"
+                f"<button type='submit' style='padding:6px 10px;background:#3b82f6;color:#fff;border:0;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;margin:0'>OK</button>"
                 f"</form>"
             )
             rows.append(
@@ -1720,7 +1722,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
             f"onclick='event.stopPropagation()' "
-            f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#ef4444;background:#000;border-radius:4px'>"
+            f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#3b82f6;background:#000;border-radius:4px'>"
         )
     return (
         f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;position:relative'>"
@@ -1755,7 +1757,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         total += len(files)
         rows.append(
             f"<div style='margin-top:22px;display:flex;align-items:center;gap:10px'>"
-            f"<h4 style='margin:0;color:#ef4444;font-size:15px'>👤 {ident}</h4>"
+            f"<h4 style='margin:0;color:#3b82f6;font-size:15px'>👤 {ident}</h4>"
             f"<small style='color:#666'>{len(files)} fichier(s)</small>"
             f"</div>"
         )
@@ -1807,7 +1809,7 @@ def _render_insta_accounts_html() -> str:
         "<form method='POST' action='/insta/add_account' style='display:flex;gap:8px;margin-bottom:16px'>"
         "<input type='text' name='username' placeholder='@username ou URL profil' required "
         "style='flex:1;padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px'>"
-        "<button type='submit' style='padding:10px 18px;background:#ef4444;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
+        "<button type='submit' style='padding:10px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
         "</form>"
     ]
     if not is_auth_configured():
@@ -1835,19 +1837,19 @@ def _render_insta_accounts_html() -> str:
             pic = it.get("profile_pic_url") or ""
             verified_badge = ""
             if it.get("is_verified"):
-                verified_badge = "<span style='color:#ef4444;font-size:13px' title='Vérifié'>✓</span>"
+                verified_badge = "<span style='color:#3b82f6;font-size:13px' title='Vérifié'>✓</span>"
             # Avatar : image ou initiale colorée
             if pic:
                 avatar_html = (
                     f"<img src='{pic}' loading='lazy' "
                     f"style='width:48px;height:48px;border-radius:50%;object-fit:cover;background:#0f0f0f' "
                     f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='flex'\">"
-                    f"<div style='display:none;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#ef4444,#ec4899);"
+                    f"<div style='display:none;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);"
                     f"align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
                 )
             else:
                 avatar_html = (
-                    f"<div style='width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#ef4444,#ec4899);"
+                    f"<div style='width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);"
                     f"display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
                 )
             rows.append(
@@ -1867,7 +1869,7 @@ def _render_insta_accounts_html() -> str:
                 f"<div style='display:flex;gap:6px;margin-top:auto'>"
                 f"<form method='POST' action='/insta/scrape' style='flex:1;margin:0'>"
                 f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' style='width:100%;padding:8px;background:#ef4444;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
+                f"<button type='submit' style='width:100%;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
                 f"</form>"
                 f"<form method='POST' action='/insta/remove_account' style='margin:0'>"
                 f"<input type='hidden' name='username' value='{u}'>"
@@ -1879,7 +1881,7 @@ def _render_insta_accounts_html() -> str:
         rows.append("</div>")
         rows.append(
             f"<form method='POST' action='/insta/scrape_all' style='margin-top:18px'>"
-            f"<button type='submit' style='padding:12px 24px;background:#ef4444;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
+            f"<button type='submit' style='padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
             f"data-confirm=\"Scraper tous les comptes de la watchlist ? Compte ~10 secondes par compte.\" data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
             f"</form>"
         )
@@ -1938,7 +1940,7 @@ def _render_insta_trends_grid_html() -> str:
             f"<h3 style='margin:0 0 8px;color:#fff'>📥 {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
             "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
             "<form method='POST' action='/insta/scrape_all' style='margin:0'>"
-            "<button type='submit' style='padding:14px 28px;background:#ef4444;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0' "
+            "<button type='submit' style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0' "
             "data-confirm='Scraper tous les comptes ? Compte ~10 sec par compte.'>"
             "🔄 Scraper tous mes comptes maintenant</button>"
             "</form></div>"
@@ -2049,7 +2051,7 @@ def _render_insta_trends_grid_html() -> str:
     cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
                  f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
                  f"<form method='POST' action='/insta/scrape_all' style='margin:0'>"
-                 f"<button type='submit' style='padding:8px 18px;background:#ef4444;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
+                 f"<button type='submit' style='padding:8px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
                  f"data-confirm='Rafraîchir tous les comptes ?'>"
                  f"🔄 Rafraîchir</button></form></div>")
     return "".join(cards)
@@ -2085,7 +2087,7 @@ def _identity_avatar_html(identity: str, size: int = 28) -> str:
     init = (identity[0] if identity else "?").upper()
     return (
         f"<div style='width:{size}px;height:{size}px;border-radius:50%;"
-        f"background:linear-gradient(135deg,#ef4444,#ec4899);display:flex;"
+        f"background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;"
         f"align-items:center;justify-content:center;font-weight:700;color:#fff;"
         f"font-size:{int(size*0.45)}px;flex-shrink:0'>{init}</div>"
     )
@@ -2108,7 +2110,7 @@ def _render_identity_avatars_section() -> str:
             f"<form method='POST' action='/identity/upload_avatar' enctype='multipart/form-data' style='width:100%;margin:0'>"
             f"<input type='hidden' name='identity' value='{ident}'>"
             f"<input type='file' name='avatar' accept='image/*' required style='width:100%;padding:6px;background:#1a1a1a;border:1px solid #333;color:#fff;border-radius:4px;font-size:12px'>"
-            f"<button type='submit' style='width:100%;padding:8px;background:#ef4444;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-top:8px'>Upload</button>"
+            f"<button type='submit' style='width:100%;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-top:8px'>Upload</button>"
             f"</form>"
             f"</div>"
         )
@@ -2219,7 +2221,7 @@ def _render_sfs_html() -> str:
     rows.append(
         "<div style='display:flex;gap:0;border-bottom:2px solid #2a2a2a;margin-bottom:16px'>"
         "<button class='sfs-platform-tab active' data-platform='OF' onclick='switchSfsPlatform(this,\"OF\")' "
-        "style='flex:1;padding:14px;background:none;border:0;color:#fff;cursor:pointer;font-size:16px;font-weight:700;border-bottom:3px solid #ef4444;margin:0'>"
+        "style='flex:1;padding:14px;background:none;border:0;color:#fff;cursor:pointer;font-size:16px;font-weight:700;border-bottom:3px solid #3b82f6;margin:0'>"
         "OnlyFans (OF)</button>"
         "<button class='sfs-platform-tab' data-platform='MYM' onclick='switchSfsPlatform(this,\"MYM\")' "
         "style='flex:1;padding:14px;background:none;border:0;color:#888;cursor:pointer;font-size:16px;font-weight:700;border-bottom:3px solid transparent;margin:0'>"
@@ -2227,7 +2229,8 @@ def _render_sfs_html() -> str:
         "</div>"
     )
 
-    # === CALENDRIER ===
+    # === LAYOUT 2 COLONNES : calendrier + side panel ===
+    rows.append("<div style='display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start' class='sfs-layout'>")
     rows.append("<div class='box'>")
     # Header du calendrier avec navigation
     today_link = f"?tab=sfs&sfs_month={today.year:04d}-{today.month:02d}"
@@ -2237,7 +2240,7 @@ def _render_sfs_html() -> str:
     today_btn_html = ""
     if not is_current_month:
         today_btn_html = (
-            f"<a href='{today_link}' style='padding:6px 12px;background:#ef4444;color:#fff;"
+            f"<a href='{today_link}' style='padding:6px 12px;background:#3b82f6;color:#fff;"
             f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;margin-right:6px'>Aujourd'hui</a>"
         )
     # Header type "planning OF" : flèches + mois à gauche, bouton today à droite
@@ -2257,7 +2260,7 @@ def _render_sfs_html() -> str:
     rows.append("</div>")
     if not is_current_month:
         rows.append(
-            f"<a href='{today_link}' style='padding:6px 14px;background:#ef4444;color:#fff;"
+            f"<a href='{today_link}' style='padding:6px 14px;background:#3b82f6;color:#fff;"
             f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600'>Aujourd'hui</a>"
         )
     rows.append("</div>")
@@ -2289,15 +2292,15 @@ def _render_sfs_html() -> str:
         nb_of = len(day_data.get("OF", []))
         nb_mym = len(day_data.get("MYM", []))
         # Style "planning OF" : cellule rectangulaire, num top-left, événements en barres bas
-        cell_bg = "#1f1410" if is_today else "transparent"
+        cell_bg = "#0f1a2e" if is_today else "transparent"
         weight = 700 if is_today else 500
         # Si c'est le 1er du mois, afficher aussi le nom du mois (style référence "mai 1")
         day_label_html = f"<span style='color:#888;font-size:12px;margin-right:4px'>{fr_months[month-1][:3].lower()}</span>{d}" if d == 1 else str(d)
         rows.append(
             f"<div class='sfs-day' data-date='{date_iso}' data-of='{nb_of}' data-mym='{nb_mym}' "
-            f"onclick='openSfsModal(\"{date_iso}\")' "
+            f"onclick='selectSfsDay(\"{date_iso}\")' ondblclick='openSfsModal(\"{date_iso}\")' "
             f"style='min-height:120px;background:{cell_bg};border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:10px 12px;cursor:pointer;transition:background .15s;display:flex;flex-direction:column;position:relative' "
-            f"onmouseover='this.style.background=\"#15100d\"' onmouseout='this.style.background=\"{cell_bg}\"'>"
+            f"onmouseover='this.style.background=\"#15100d\"' onmouseout='if(window.__selectedSfsDate !== this.dataset.date) this.style.background=\"{cell_bg}\"'>"
             f"<div style='font-size:14px;font-weight:{weight};color:#fff'>{day_label_html}</div>"
             f"<div class='sfs-day-bars' style='margin-top:auto;display:flex;flex-direction:column;gap:3px'></div>"
             f"</div>"
@@ -2312,7 +2315,22 @@ def _render_sfs_html() -> str:
             f"<div style='font-size:14px;color:#444;font-weight:500'>{d}</div>"
             f"</div>"
         )
-    rows.append("</div></div>")
+    rows.append("</div></div>")  # ferme la grille + box du calendrier
+
+    # === PANEL DROITE : DÉTAIL DU JOUR SÉLECTIONNÉ ===
+    rows.append("<div class='box' id='sfs-day-panel' style='position:sticky;top:20px'>")
+    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>")
+    rows.append("<div style='display:flex;align-items:center;gap:4px'>")
+    rows.append("<button onclick='shiftDayPanel(-1)' style='width:28px;height:28px;background:transparent;color:#aaa;border:0;border-radius:6px;cursor:pointer;font-size:16px;padding:0;margin:0'>‹</button>")
+    rows.append("<button onclick='shiftDayPanel(1)' style='width:28px;height:28px;background:transparent;color:#aaa;border:0;border-radius:6px;cursor:pointer;font-size:16px;padding:0;margin:0'>›</button>")
+    rows.append("</div>")
+    rows.append("<div id='sfs-day-panel-title' style='font-weight:600;font-size:14px;color:#fff'>mai 28, 2026</div>")
+    rows.append("<button onclick='openSfsModalFromPanel()' title='Ajouter SFS' style='width:32px;height:32px;background:#3b82f6;border:0;border-radius:8px;color:#fff;cursor:pointer;font-size:18px;font-weight:700;padding:0;margin:0;line-height:1'>+</button>")
+    rows.append("</div>")
+    rows.append("<div id='sfs-day-panel-content' style='min-height:240px'></div>")
+    rows.append("</div>")
+
+    rows.append("</div>")  # ferme le grid 2 cols
 
     # JS pour platform switching + modal
     # Map des avatars pour le JS
@@ -2330,7 +2348,7 @@ function identityAvatarHtml(ident, size){{
     return '<img src="' + url + '" style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;object-fit:cover;border:1px solid #2a2a2a;flex-shrink:0">';
   }}
   var init = (ident && ident.length ? ident[0] : '?').toUpperCase();
-  return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:linear-gradient(135deg,#ef4444,#ec4899);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:' + Math.round(size*0.45) + 'px;flex-shrink:0">' + init + '</div>';
+  return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:' + Math.round(size*0.45) + 'px;flex-shrink:0">' + init + '</div>';
 }}
 
 function switchSfsPlatform(btn, platform){{
@@ -2340,7 +2358,7 @@ function switchSfsPlatform(btn, platform){{
     b.style.borderBottomColor = 'transparent';
   }});
   btn.style.color = '#fff';
-  btn.style.borderBottomColor = (platform === 'OF') ? '#ef4444' : '#ec4899';
+  btn.style.borderBottomColor = (platform === 'OF') ? '#3b82f6' : '#06b6d4';
   refreshSfsCalendar();
 }}
 
@@ -2359,7 +2377,7 @@ function refreshSfsCalendar(){{
     // Barre style référence (orange/rouge) au bas avec un nombre
     if(nb_sched){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#ef4444;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.style.cssText = 'background:#3b82f6;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
       b.textContent = nb_sched;
       barsEl.appendChild(b);
     }}
@@ -2377,7 +2395,60 @@ function refreshSfsCalendar(){{
   }});
 }}
 
+function selectSfsDay(date){{
+  window.__selectedSfsDate = date;
+  refreshSfsDayPanel();
+  // Mettre en évidence visuelle la cellule sélectionnée
+  document.querySelectorAll('.sfs-day').forEach(function(c){{
+    if(c.dataset.date === date){{
+      c.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
+    }} else {{
+      c.style.boxShadow = '';
+    }}
+  }});
+}}
+function refreshSfsDayPanel(){{
+  var date = window.__selectedSfsDate;
+  if(!date) return;
+  var platform = window.__currentSfsPlatform;
+  // Format date en français lisible
+  var d = new Date(date);
+  var months = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
+  var formatted = months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+  document.getElementById('sfs-day-panel-title').textContent = formatted;
+  var items = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform; }});
+  var content = document.getElementById('sfs-day-panel-content');
+  if(items.length === 0){{
+    content.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg><div style="font-size:14px">Aucun SFS prévu</div><div style="font-size:12px;margin-top:8px;color:#555">Pour le ' + platform + ' ce jour-là</div></div>';
+    return;
+  }}
+  var html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  items.forEach(function(x){{
+    var statusBadge = x.status === 'scheduled'
+      ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
+      : '<span style="background:#f59e0b;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
+    html += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">'
+      + '<div style="display:flex;align-items:center;gap:8px">' + identityAvatarHtml(x.identity, 28)
+      + '<div style="flex:1"><div style="font-weight:700;font-size:13px">' + x.identity + '</div><div style="font-size:11px;color:#888">@' + x.partner + '</div></div></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#aaa;font-size:12px">à ' + x.time + '</span>' + statusBadge + '</div>'
+      + (x.notes ? '<div style="font-size:12px;color:#888;border-top:1px solid #2a2a2a;padding-top:6px">' + x.notes + '</div>' : '')
+      + '</div>';
+  }});
+  html += '</div>';
+  content.innerHTML = html;
+}}
+function shiftDayPanel(delta){{
+  if(!window.__selectedSfsDate) return;
+  var d = new Date(window.__selectedSfsDate);
+  d.setDate(d.getDate() + delta);
+  var iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  selectSfsDay(iso);
+}}
+function openSfsModalFromPanel(){{
+  if(window.__selectedSfsDate) openSfsModal(window.__selectedSfsDate);
+}}
 function openSfsModal(date){{
+  selectSfsDay(date);
   var platform = window.__currentSfsPlatform;
   var modal = document.getElementById('sfs-modal');
   document.getElementById('sfs-modal-title').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:8px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><polyline points="9 14 11 16 15 12"/></svg>SFS du ' + date + ' — ' + platform;
@@ -2399,7 +2470,7 @@ function openSfsModal(date){{
     existingHtml = '<h4 style="margin:14px 0 8px">SFS déjà planifiés ce jour</h4><div style="display:flex;flex-direction:column;gap:6px">';
     existing.forEach(function(x){{
       var statusBadge = x.status === 'scheduled'
-        ? '<span style="background:#ef4444;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
+        ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
         : '<span style="background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
       existingHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px">'
         + '<div style="display:flex;align-items:center;gap:10px">' + identityAvatarHtml(x.identity, 32)
@@ -2417,7 +2488,13 @@ function closeSfsModal(){{
 }}
 // Init calendrier au chargement
 window.addEventListener('DOMContentLoaded', function(){{
-  setTimeout(refreshSfsCalendar, 50);
+  setTimeout(function(){{
+    refreshSfsCalendar();
+    // Sélectionner aujourd'hui par défaut
+    var today = new Date();
+    var todayIso = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    selectSfsDay(todayIso);
+  }}, 50);
 }});
 </script>
 
@@ -2458,7 +2535,7 @@ window.addEventListener('DOMContentLoaded', function(){{
       <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
       <div style='display:flex;gap:8px;margin-top:14px;justify-content:flex-end'>
         <button type='button' class='btn-cancel' onclick='closeSfsModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Annuler</button>
-        <button type='submit' style='padding:10px 22px;background:#ef4444;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
+        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
       </div>
     </form>
   </div>
@@ -2487,12 +2564,12 @@ window.addEventListener('DOMContentLoaded', function(){{
             color_style = "opacity:.5;text-decoration:line-through" if done else ""
             status = it.get("status", "scheduled")
             status_badge = (
-                "<span style='background:#ef4444;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>SCHEDULED</span>"
+                "<span style='background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>SCHEDULED</span>"
                 if status == "scheduled" else
                 "<span style='background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>TO PROGRAM</span>"
             )
             platform = it.get("platform", "OF")
-            platform_color = "#ef4444" if platform == "OF" else "#ec4899"
+            platform_color = "#3b82f6" if platform == "OF" else "#06b6d4"
             ident_avatar = _identity_avatar_html(it.get("identity", ""), size=26)
             rows.append(
                 f"<tr class='sfs-row' data-platform='{platform}' style='border-bottom:1px solid #2a2a2a;{color_style}'>"
@@ -2536,7 +2613,7 @@ window.addEventListener('DOMContentLoaded', function(){{
             checked = "checked" if p in active_plats else ""
             rows.append(
                 f"<td style='padding:8px;text-align:center'>"
-                f"<input type='checkbox' name='platform_{ident}' value='{p}' {checked} style='width:18px;height:18px;accent-color:#ef4444'>"
+                f"<input type='checkbox' name='platform_{ident}' value='{p}' {checked} style='width:18px;height:18px;accent-color:#3b82f6'>"
                 f"</td>"
             )
         rows.append("</tr>")
@@ -2821,7 +2898,7 @@ def _render_bilan_html() -> str:
     rows = []
     # Stats GROSSES en haut : profit net
     rows.append(
-        "<div class='box' style='background:linear-gradient(135deg,#1a1a2e,#16213e);text-align:center;border:1px solid #ef4444;margin-bottom:16px'>"
+        "<div class='box' style='background:linear-gradient(135deg,#1a1a2e,#16213e);text-align:center;border:1px solid #3b82f6;margin-bottom:16px'>"
         f"<div style='color:#888;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>Profit net ce mois</div>"
         f"<div style='font-size:48px;font-weight:800;color:{profit_color}'>{profit_sign}{profit_month:.0f}€</div>"
         f"<div style='display:flex;justify-content:center;gap:24px;margin-top:14px;font-size:14px;color:#aaa'>"
@@ -2870,7 +2947,7 @@ def _render_bilan_html() -> str:
                 f"<div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px'>"
                 f"<span style='color:#ccc'>{cat}</span><b style='color:#f99'>-{amount:.2f}€</b></div>"
                 f"<div style='background:#0f0f0f;border-radius:4px;height:8px;overflow:hidden'>"
-                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#f87171,#ef4444);height:100%'></div>"
+                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#f87171,#3b82f6);height:100%'></div>"
                 f"</div></div>"
             )
     rows.append("</div>")
