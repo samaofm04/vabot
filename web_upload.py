@@ -187,6 +187,71 @@ UPLOAD_HTML = """
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
 .layout{display:flex;min-height:100vh}
+
+/* ============ ANIMATIONS ============ */
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideRight{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+@keyframes scaleIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+
+/* Animation sur form-section visible */
+.form-section[style*="block"]{animation:fadeIn .25s ease-out}
+
+/* Animation sur les dropdowns */
+#ig-sort-menu[style*="block"],#ig-filters-panel[style*="block"]{animation:slideDown .18s cubic-bezier(.16,1,.3,1)}
+
+/* Sub-items des groupes */
+.sidebar .group.open .items,.sidebar .subgroup.open .sub-items{animation:slideDown .2s ease-out}
+
+/* Cards de preview - hover scale et shadow */
+.cloud-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+.cloud-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4);border-color:#444!important}
+
+/* Pop quand checkbox sélectionnée */
+.sel-cb:checked{animation:pop .25s ease}
+
+/* Items de la sidebar - smooth hover */
+.sidebar .item,.sidebar .group-head,.sidebar .subgroup-head,.sidebar .logout-btn{transition:background .15s,color .15s,padding-left .15s}
+.sidebar .item:hover{padding-left:14px}
+
+/* Sub-tabs */
+.subtab{transition:color .15s,border-color .15s}
+
+/* Boutons - hover lift */
+button[type=submit],.btn,.danger-btn{transition:transform .12s ease,background .15s,box-shadow .15s}
+button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(88,101,242,.3)}
+.danger-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(217,83,79,.3)}
+
+/* Tooltip sidebar - smooth */
+.sidebar .ico .tip{transition:opacity .12s ease,transform .12s ease;transform:translateY(-50%) translateX(-4px)}
+.sidebar .ico:hover .tip{transform:translateY(-50%) translateX(0)}
+
+/* Flèches qui pivotent */
+.arrow{transition:transform .2s cubic-bezier(.4,0,.2,1)!important}
+
+/* Period buttons Day/Week/Month - smooth */
+.ig-period{transition:background .18s ease,color .18s ease!important}
+
+/* Action bar - slide up */
+#action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
+#action-bar[style*="flex"]{animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
+
+/* Page title - subtle transition */
+#page-title,#page-subtitle{transition:opacity .2s}
+
+/* Input focus - glow ring */
+input:focus,select:focus,textarea:focus{outline:0;border-color:#5865f2;box-shadow:0 0 0 3px rgba(88,101,242,.15);transition:border-color .15s,box-shadow .15s}
+
+/* Sort options hover */
+.ig-sort-opt{transition:background .12s,color .12s,padding-left .12s}
+.ig-sort-opt:hover{padding-left:18px}
+
+/* Loading skeleton effect (utile plus tard) */
+.skeleton{background:linear-gradient(90deg,#1a1a1a 0%,#2a2a2a 50%,#1a1a1a 100%);background-size:200% 100%;animation:shimmer 1.5s infinite}
 /* Sidebar large avec groupes pliables + flèches */
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
@@ -1176,7 +1241,7 @@ def _preview_card(media_url: str, file_path, is_video: bool, file_id: str = "") 
             f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#5865f2;background:#000;border-radius:4px'>"
         )
     return (
-        f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;position:relative'>"
+        f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;position:relative'>"
         f"{checkbox_html}"
         f"{media_html}"
         f"<div style='padding:8px 10px'>"
