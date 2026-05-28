@@ -200,12 +200,26 @@ body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;pad
 .sidebar .group.open .group-head .arrow{transform:rotate(180deg);color:#fff}
 .sidebar .group .items{display:none;flex-direction:column;gap:1px;padding:2px 0 6px 14px;border-left:1px solid #222;margin:2px 0 2px 24px}
 .sidebar .group.open .items{display:flex}
-.sidebar .group .item{padding:8px 12px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;text-align:left;border-radius:6px;display:flex;align-items:center;gap:10px;font-weight:500;margin:0;transition:all .12s}
+.sidebar .group .item{padding:8px 12px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;text-align:left;border-radius:6px;display:flex;align-items:center;gap:10px;font-weight:500;margin:0;transition:all .12s;justify-content:space-between}
 .sidebar .group .item svg{width:14px;height:14px;color:#666}
+.sidebar .group .item .left{display:flex;align-items:center;gap:10px;flex:1}
 .sidebar .group .item:hover{background:#181818;color:#fff}
 .sidebar .group .item:hover svg{color:#fff}
 .sidebar .group .item.active{color:#5865f2;background:#181818}
 .sidebar .group .item.active svg{color:#5865f2}
+.sidebar .group .item.soon{cursor:not-allowed;opacity:.6}
+.sidebar .group .item .badge{padding:2px 6px;font-size:9px;background:#5865f2;color:#fff;border-radius:4px;font-weight:700;letter-spacing:.5px}
+/* Sous-groupes imbriqués (Instagram, TikTok, etc. dans Trends) */
+.sidebar .subgroup{display:flex;flex-direction:column}
+.sidebar .subgroup-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:none;border:0;color:#888;cursor:pointer;font-size:13.5px;font-weight:600;border-radius:6px;width:100%;text-align:left;margin:0;transition:all .12s}
+.sidebar .subgroup-head:hover{background:#181818;color:#fff}
+.sidebar .subgroup-head .emoji{font-size:14px}
+.sidebar .subgroup-head .label{flex:1}
+.sidebar .subgroup-head .arrow{width:12px;height:12px;color:#666;transition:transform .15s}
+.sidebar .subgroup.open .subgroup-head .arrow{transform:rotate(180deg)}
+.sidebar .subgroup .sub-items{display:none;flex-direction:column;padding:2px 0 4px 12px;border-left:1px solid #222;margin:1px 0 1px 16px}
+.sidebar .subgroup.open .sub-items{display:flex}
+.sidebar .subgroup .sub-items .item{padding:6px 10px;font-size:13px}
 .sidebar .sep{height:1px;background:#1a1a1a;margin:8px 16px}
 .sidebar .spacer{flex:1}
 .sidebar .logout-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;background:none;border:0;color:#777;cursor:pointer;font-size:13.5px;text-decoration:none;border-radius:8px;font-weight:500;margin:0 10px 0}
@@ -246,6 +260,13 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 function toggleGroup(group){
   var el=document.getElementById('grp-'+group);
   el.classList.toggle('open');
+}
+function toggleSubGroup(id){
+  var el=document.getElementById('sub-'+id);
+  el.classList.toggle('open');
+}
+function comingSoon(){
+  alert('🚧 Pas encore implémenté — viendra bientôt');
 }
 function showTab(group,name,title,subtitle){
   // Ouvrir le groupe parent
@@ -319,6 +340,61 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
       Stats par identité
     </button>
+  </div>
+</div>
+
+<div class="group" id="grp-trends">
+  <button class="group-head" onclick="toggleGroup('trends')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+    <span class="label">Trends</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+
+    <div class="subgroup" id="sub-instagram">
+      <button class="subgroup-head" onclick="toggleSubGroup('instagram')">
+        <span class="emoji">📷</span><span class="label">Instagram</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sub-items">
+        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+      </div>
+    </div>
+
+    <div class="subgroup" id="sub-tiktok">
+      <button class="subgroup-head" onclick="toggleSubGroup('tiktok')">
+        <span class="emoji">🎵</span><span class="label">TikTok</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sub-items">
+        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+      </div>
+    </div>
+
+    <div class="subgroup" id="sub-twitter">
+      <button class="subgroup-head" onclick="toggleSubGroup('twitter')">
+        <span class="emoji">𝕏</span><span class="label">Twitter / X</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sub-items">
+        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+      </div>
+    </div>
+
+    <div class="subgroup" id="sub-threads">
+      <button class="subgroup-head" onclick="toggleSubGroup('threads')">
+        <span class="emoji">🧵</span><span class="label">Threads</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sub-items">
+        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+      </div>
+    </div>
+
   </div>
 </div>
 
