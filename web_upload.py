@@ -95,48 +95,80 @@ button:hover{background:#4752c4}
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
-<html><head><title>Upload Reel</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><title>VA Bot Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{font-family:system-ui,sans-serif;background:#1a1a1a;color:#eee;margin:0;padding:20px}
-.container{max-width:700px;margin:0 auto}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-h1{margin:0}
-.tabs{display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid #333}
-.tab{padding:12px 20px;background:none;border:0;color:#888;cursor:pointer;font-size:15px;border-bottom:2px solid transparent}
-.tab.active{color:#5865f2;border-color:#5865f2}
-.box{background:#2a2a2a;padding:24px;border-radius:12px;margin-bottom:16px}
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:230px;background:#1a1a1a;border-right:1px solid #2a2a2a;padding:20px 0;flex-shrink:0;display:flex;flex-direction:column}
+.sidebar h2{margin:0 20px 24px;font-size:18px;display:flex;align-items:center;gap:8px}
+.nav{display:flex;flex-direction:column;flex:1}
+.nav button{display:flex;align-items:center;gap:12px;padding:12px 20px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;text-align:left;border-left:3px solid transparent;margin:0;transition:all .15s;font-weight:500}
+.nav button:hover{background:#252525;color:#fff}
+.nav button.active{background:#252525;color:#5865f2;border-left-color:#5865f2}
+.nav .icon{font-size:18px;width:24px;text-align:center}
+.nav .sep{height:1px;background:#2a2a2a;margin:8px 16px}
+.sidebar .logout-btn{margin:0 16px 0;padding:10px;background:none;border:1px solid #444;color:#888;border-radius:6px;text-decoration:none;text-align:center;font-size:13px;display:block}
+.sidebar .logout-btn:hover{background:#252525;color:#fff}
+.main{flex:1;padding:28px 36px;overflow-x:auto}
+.main h1{margin:0 0 24px}
+.box{background:#1a1a1a;padding:24px;border-radius:12px;margin-bottom:16px;border:1px solid #2a2a2a}
 label{display:block;font-weight:600;margin-bottom:8px;margin-top:16px}
 label:first-child{margin-top:0}
-input,select,textarea{width:100%;padding:12px;background:#1a1a1a;border:1px solid #444;color:#fff;border-radius:6px;font-size:15px;box-sizing:border-box;font-family:inherit}
+input,select,textarea{width:100%;padding:12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:15px;font-family:inherit}
 textarea{min-height:80px;resize:vertical}
-button{padding:14px 28px;background:#5865f2;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer;font-weight:600;margin-top:16px}
-button:hover{background:#4752c4}
-.msg{padding:12px;border-radius:6px;margin-bottom:16px;background:#2a4a2a;color:#9fe89f}
-.err{background:#4a2a2a;color:#f99}
+button[type=submit],.btn{padding:12px 24px;background:#5865f2;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer;font-weight:600;margin-top:16px}
+button[type=submit]:hover,.btn:hover{background:#4752c4}
+.msg{padding:12px 16px;border-radius:6px;margin-bottom:16px;background:#1a3a1a;color:#9fe89f;border:1px solid #2a5a2a}
+.err{background:#3a1a1a;color:#f99;border-color:#5a2a2a}
 a{color:#7289da}
-.logout{color:#888;text-decoration:none}
-small{color:#888}
+small{color:#888;display:block;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th{padding:10px 8px;text-align:left;background:#252525;font-weight:600;font-size:13px;text-transform:uppercase;color:#aaa}
+td{padding:10px 8px;border-bottom:1px solid #2a2a2a;font-size:14px}
+code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
+.danger-btn{padding:6px 12px;background:#d9534f;font-size:13px;border:0;color:#fff;border-radius:4px;cursor:pointer;margin:0}
+.danger-btn:hover{background:#c9302c}
+@media(max-width:768px){
+  .layout{flex-direction:column}
+  .sidebar{width:100%;border-right:0;border-bottom:1px solid #2a2a2a}
+  .nav{flex-direction:row;flex-wrap:wrap;padding:0 8px}
+  .nav button{border-left:0;border-bottom:3px solid transparent;padding:10px 14px}
+  .nav button.active{border-left-color:transparent;border-bottom-color:#5865f2}
+  .nav .sep{display:none}
+  .main{padding:20px}
+}
 </style>
 <script>
 function showTab(name){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.nav button[data-tab]').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.form-section').forEach(f=>f.style.display='none');
-  document.getElementById('tab-'+name).classList.add('active');
-  document.getElementById('form-'+name).style.display='block';
+  var btn=document.getElementById('tab-'+name);
+  var sec=document.getElementById('form-'+name);
+  if(btn)btn.classList.add('active');
+  if(sec)sec.style.display='block';
+  document.getElementById('page-title').textContent=btn?btn.dataset.label:'Dashboard';
 }
 </script>
-</head><body><div class="container">
-<div class="header"><h1>🎬 Upload Reels</h1><a href="/logout" class="logout">Déconnexion</a></div>
-{msg_html}
-<div class="tabs">
-  <button class="tab active" id="tab-reel" onclick="showTab('reel')">Reel</button>
-  <button class="tab" id="tab-post" onclick="showTab('post')">Post</button>
-  <button class="tab" id="tab-story" onclick="showTab('story')">Story</button>
-  <button class="tab" id="tab-storycta" onclick="showTab('storycta')">Story CTA</button>
-  <button class="tab" id="tab-pp" onclick="showTab('pp')">PP partagé</button>
-  <button class="tab" id="tab-va" onclick="showTab('va')">👥 VAs</button>
-  <button class="tab" id="tab-settings" onclick="showTab('settings')">⚙️ Settings</button>
+</head><body><div class="layout">
+<div class="sidebar">
+<h2>🤖 VA Bot</h2>
+<div class="nav">
+  <button data-tab="reel" data-label="🎬 Upload Reel" class="active" id="tab-reel" onclick="showTab('reel')"><span class="icon">🎬</span>Reel</button>
+  <button data-tab="post" data-label="📸 Upload Post" id="tab-post" onclick="showTab('post')"><span class="icon">📸</span>Post</button>
+  <button data-tab="story" data-label="📱 Upload Story" id="tab-story" onclick="showTab('story')"><span class="icon">📱</span>Story</button>
+  <button data-tab="storycta" data-label="📲 Upload Story CTA" id="tab-storycta" onclick="showTab('storycta')"><span class="icon">📲</span>Story CTA</button>
+  <button data-tab="pp" data-label="👤 Photo de profil" id="tab-pp" onclick="showTab('pp')"><span class="icon">👤</span>PP partagé</button>
+  <div class="sep"></div>
+  <button data-tab="va" data-label="👥 Délégations VA" id="tab-va" onclick="showTab('va')"><span class="icon">👥</span>VAs</button>
+  <div class="sep"></div>
+  <button data-tab="settings" data-label="⚙️ Paramètres" id="tab-settings" onclick="showTab('settings')"><span class="icon">⚙️</span>Settings</button>
 </div>
+<a href="/logout" class="logout-btn">🚪 Déconnexion</a>
+</div>
+<div class="main">
+<h1 id="page-title">🎬 Upload Reel</h1>
+{msg_html}
 
 <div class="form-section" id="form-reel">
 <form method="POST" action="/upload/reel" enctype="multipart/form-data" class="box">
@@ -237,7 +269,7 @@ function showTab(name){
 </form>
 </div>
 
-</div></body></html>
+</div></div></body></html>
 """
 
 
