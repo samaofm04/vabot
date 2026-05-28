@@ -269,14 +269,16 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     }
 
     # 2) User reels (POST + form data) - structure : {"reels": [{"node": {"media": {...}}}]}
+    # Endpoint correct : /get_ig_user_reels.php (PAS /ig_get_user_reels.php)
     reels = []
     try:
         r = requests.post(
-            f"{base}/ig_get_user_reels.php",
+            f"{base}/get_ig_user_reels.php",
             headers=headers,
             data={"username_or_url": username, "amount": str(limit), "pagination_token": ""},
             timeout=25,
         )
+        log.info(f"RapidAPI reels HTTP {r.status_code} pour {username}")
         if r.status_code == 200:
             posts_data = r.json()
             items = posts_data.get("reels") or posts_data.get("items") or posts_data.get("data") or []
@@ -451,7 +453,7 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
     return result
 
 
-def scrape_profile(username: str, limit: int = 12) -> dict:
+def scrape_profile(username: str, limit: int = 30) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
     Ordre de tentatives :
