@@ -509,6 +509,43 @@ function igSelectSort(btn, label){
   var c = btn.querySelector('.check');
   if(c) c.style.display='block';
   igToggleSort(); // ferme le menu
+  // Appliquer le tri sur les cartes
+  igApplySort(label);
+}
+function igApplySort(label){
+  // Trouver la grille des reels
+  var card = document.querySelector('.reel-card');
+  if(!card) return;
+  var grid = card.parentElement;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.reel-card'));
+  // Définir la fonction de comparaison selon le label
+  var cmp;
+  switch(label){
+    case 'Newest':
+      cmp = function(a,b){ return parseInt(b.dataset.ts||0) - parseInt(a.dataset.ts||0); }; break;
+    case 'Oldest':
+      cmp = function(a,b){ return parseInt(a.dataset.ts||0) - parseInt(b.dataset.ts||0); }; break;
+    case 'Most Views':
+      cmp = function(a,b){ return parseInt(b.dataset.views||0) - parseInt(a.dataset.views||0); }; break;
+    case 'Least Views':
+      cmp = function(a,b){ return parseInt(a.dataset.views||0) - parseInt(b.dataset.views||0); }; break;
+    case 'Most Likes':
+      cmp = function(a,b){ return parseInt(b.dataset.likes||0) - parseInt(a.dataset.likes||0); }; break;
+    case 'Least Likes':
+      cmp = function(a,b){ return parseInt(a.dataset.likes||0) - parseInt(b.dataset.likes||0); }; break;
+    case 'Most Comments':
+      cmp = function(a,b){ return parseInt(b.dataset.comments||0) - parseInt(a.dataset.comments||0); }; break;
+    case 'Least Comments':
+      cmp = function(a,b){ return parseInt(a.dataset.comments||0) - parseInt(b.dataset.comments||0); }; break;
+    case 'Trending':
+    default:
+      cmp = function(a,b){ return parseInt(b.dataset.trending||0) - parseInt(a.dataset.trending||0); }; break;
+  }
+  cards.sort(cmp);
+  // Réordonner dans le DOM (avec fragment pour la perf)
+  var frag = document.createDocumentFragment();
+  cards.forEach(function(c){ frag.appendChild(c); });
+  grid.appendChild(frag);
 }
 function igToggleFilters(){
   var panel = document.getElementById('ig-filters-panel');
@@ -1873,6 +1910,10 @@ def _render_insta_trends_grid_html() -> str:
         is_video = r.get("is_video")
         taken_at = r.get("taken_at", 0) or 0
         time_ago = _time_ago(taken_at)
+        # Données pour le tri JS
+        d_views = int(views or 0)
+        d_likes = int(likes or 0)
+        d_comments = int(comments or 0)
         # Indicateur trending : combien de fois la moyenne du compte
         avg = avg_views_by_owner.get(owner, 0)
         if avg > 0 and views > 0:
@@ -1900,7 +1941,7 @@ def _render_insta_trends_grid_html() -> str:
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
         cards.append(f"""
-<div class="reel-card cloud-card" data-ts="{taken_at}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+<div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.play();v.style.opacity=1}}'
        onmouseleave='var v=this.querySelector(".reel-video");if(v){{v.pause();v.style.opacity=0}}'
