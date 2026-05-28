@@ -606,8 +606,8 @@ function showTab(group,name,title,subtitle){
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
-        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
-        <button class="item" onclick="showTab('trends','igtrends','Instagram Trends','Tendances Instagram')"><span class="left">📈 Trends</span></button>
+        <button class="item" id="tab-igaccounts" onclick="showTab('trends','igaccounts','Instagram Accounts','Watchlist des comptes Instagram à scrape')"><span class="left">👤 Accounts</span></button>
+        <button class="item" id="tab-igtrends" onclick="showTab('trends','igtrends','Instagram Trends','Tendances Instagram')"><span class="left">📈 Trends</span></button>
       </div>
     </div>
 
@@ -676,6 +676,10 @@ function showTab(group,name,title,subtitle){
     <button class="item" id="tab-spwd" onclick="showTab('settings','spwd','Mot de passe site','Mot de passe d accès à ce site')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       Mot de passe site
+    </button>
+    <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
+      Cookies Instagram
     </button>
   </div>
 </div>
@@ -812,6 +816,15 @@ function showTab(group,name,title,subtitle){
 </div>
 </div>
 
+<!-- INSTAGRAM ACCOUNTS (watchlist) -->
+<div class="form-section" id="form-igaccounts" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">👤 Watchlist Instagram</h3>
+<small style="margin-bottom:14px">Ajoute les comptes Instagram dont tu veux scraper les reels. Le scrape utilise les cookies configurés dans Settings → Instagram.</small>
+{insta_accounts_html}
+</div>
+</div>
+
 <!-- INSTAGRAM TRENDS -->
 <div class="form-section" id="form-igtrends" style="display:none">
 
@@ -938,12 +951,7 @@ function showTab(group,name,title,subtitle){
   </div>
 </div>
 
-<!-- Liste vide pour l'instant -->
-<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666">
-  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:14px"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-  <h3 style="margin:0 0 8px;color:#888">Aucune tendance pour l'instant</h3>
-  <p style="margin:0;font-size:14px">La collecte des tendances Instagram sera connectée bientôt.<br>Pour l'instant tu peux utiliser ce dashboard comme structure.</p>
-</div>
+{insta_trends_html_or_empty}
 
 </div>
 
@@ -994,6 +1002,37 @@ function showTab(group,name,title,subtitle){
 <input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
 <button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
+</form>
+</div>
+
+<!-- SETTINGS - INSTAGRAM COOKIES -->
+<div class="form-section" id="form-sinsta" style="display:none">
+<form method="POST" action="/settings/insta_auth" class="box">
+<h3 style="margin-top:0">📷 Cookies Instagram</h3>
+<small>Statut : <b>{insta_auth_status}</b></small>
+<details style="margin-top:14px;margin-bottom:14px"><summary style="cursor:pointer;color:#7289da;font-size:14px;font-weight:600">📖 Comment récupérer mes cookies ?</summary>
+<div style="padding:14px;background:#0f0f0f;border-radius:6px;margin-top:8px;font-size:13px;line-height:1.6;color:#aaa">
+1. Ouvre <a href="https://www.instagram.com" target="_blank">instagram.com</a> dans Chrome/Firefox<br>
+2. Connecte-toi avec un <b>compte secondaire</b> (pas ton compte perso — risque ban)<br>
+3. Appuie sur <b>F12</b> → onglet <b>Application</b> (Chrome) ou <b>Storage</b> (Firefox)<br>
+4. Section <b>Cookies → https://www.instagram.com</b><br>
+5. Copie les valeurs de :<br>
+&nbsp;&nbsp;• <code>sessionid</code> (obligatoire)<br>
+&nbsp;&nbsp;• <code>ds_user_id</code> (recommandé)<br>
+&nbsp;&nbsp;• <code>csrftoken</code> (recommandé)<br>
+6. Colle-les ci-dessous
+</div>
+</details>
+<label>sessionid <span style="color:#f99">*</span></label>
+<input type="password" name="sessionid" placeholder="XXXXXXXXXX%3AYYYY%3A26%3A..." required>
+<label>ds_user_id</label>
+<input type="text" name="ds_user_id" placeholder="123456789">
+<label>csrftoken</label>
+<input type="text" name="csrftoken" placeholder="abc123...">
+<label>Ton username Instagram (optionnel)</label>
+<input type="text" name="username" placeholder="ton_compte_secondaire">
+<small>⚠️ Utilise un <b>compte secondaire</b>. Risque de ban si Instagram détecte le scraping.</small>
+<button type="submit">💾 Sauver les cookies</button>
 </form>
 </div>
 
@@ -1403,6 +1442,136 @@ def _render_cloud_pps_html() -> str:
     return "".join(rows)
 
 
+def _render_insta_auth_status() -> str:
+    try:
+        from insta_scraper import auth_status
+        return auth_status()
+    except Exception:
+        return "❌ Module pas chargé"
+
+
+def _render_insta_accounts_html() -> str:
+    """Render la page Accounts (watchlist + add/remove/scrape)."""
+    try:
+        from insta_scraper import watchlist_status, is_auth_configured
+    except Exception as e:
+        return f"<p style='color:#f99'>Module insta_scraper indisponible : {e}</p>"
+    rows = [
+        "<form method='POST' action='/insta/add_account' style='display:flex;gap:8px;margin-bottom:16px'>"
+        "<input type='text' name='username' placeholder='@username ou URL profil' required "
+        "style='flex:1;padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px'>"
+        "<button type='submit' style='padding:10px 18px;background:#5865f2;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
+        "</form>"
+    ]
+    if not is_auth_configured():
+        rows.append(
+            "<div style='padding:12px;background:#3a1a1a;border:1px solid #5a2a2a;color:#f99;border-radius:8px;margin-bottom:14px;font-size:14px'>"
+            "⚠️ Tu n'as pas configuré tes cookies Instagram — va dans <b>Settings → Instagram</b>."
+            "</div>"
+        )
+    items = watchlist_status()
+    if not items:
+        rows.append("<p style='color:#888'>Aucun compte ajouté pour l'instant.</p>")
+    else:
+        rows.append(
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:10px 8px;text-align:left'>Compte</th>"
+            "<th style='padding:10px 8px;text-align:center'>Followers</th>"
+            "<th style='padding:10px 8px;text-align:center'>Reels en cache</th>"
+            "<th style='padding:10px 8px;text-align:center'>Dernier scrape</th>"
+            "<th style='padding:10px 8px;text-align:right'>Actions</th>"
+            "</tr>"
+        )
+        import datetime
+        for it in items:
+            u = it["username"]
+            scraped = it["scraped_at"]
+            if scraped:
+                dt = datetime.datetime.fromtimestamp(scraped)
+                scraped_str = dt.strftime("%d/%m %H:%M")
+            else:
+                scraped_str = "<span style='color:#888'>jamais</span>"
+            fname = it["full_name"] or ""
+            fname_html = f"<div style='font-size:11px;color:#888'>{fname}</div>" if fname else ""
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:10px 8px'><b>@{u}</b>{fname_html}</td>"
+                f"<td style='padding:10px 8px;text-align:center'>{it['followers']:,}</td>"
+                f"<td style='padding:10px 8px;text-align:center'>{it['nb_reels']}</td>"
+                f"<td style='padding:10px 8px;text-align:center;font-size:13px;color:#aaa'>{scraped_str}</td>"
+                f"<td style='padding:10px 8px;text-align:right'>"
+                f"<form method='POST' action='/insta/scrape' style='display:inline'>"
+                f"<input type='hidden' name='username' value='{u}'>"
+                f"<button type='submit' style='padding:6px 12px;background:#5865f2;color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
+                f"</form>"
+                f"<form method='POST' action='/insta/remove_account' style='display:inline;margin-left:6px'>"
+                f"<input type='hidden' name='username' value='{u}'>"
+                f"<button type='submit' class='danger-btn' onclick=\"return confirm('Retirer @{u} ?')\">Retirer</button>"
+                f"</form>"
+                f"</td></tr>"
+            )
+        rows.append("</table>")
+        rows.append(
+            f"<form method='POST' action='/insta/scrape_all' style='margin-top:18px'>"
+            f"<button type='submit' style='padding:12px 24px;background:#5865f2;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
+            f"onclick=\"return confirm('Scraper tous les comptes ? Ça peut prendre 1-2 min.')\">🔄 Scraper tous les comptes</button>"
+            f"</form>"
+        )
+    return "".join(rows)
+
+
+def _render_insta_trends_grid_html() -> str:
+    """Grille des reels scrapés depuis tous les comptes en watchlist."""
+    try:
+        from insta_scraper import get_all_cached_reels
+    except Exception:
+        return ""
+    reels = get_all_cached_reels()
+    if not reels:
+        return ""
+    # Trier par views décroissant par défaut
+    reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
+    cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:14px'>"]
+    for r in reels[:60]:
+        thumb = r.get("thumbnail_url") or ""
+        owner = r.get("_owner", "?")
+        url = r.get("url", "#")
+        views = r.get("views")
+        likes = r.get("likes", 0)
+        comments = r.get("comments", 0)
+        caption = (r.get("caption") or "")[:80]
+        is_video = r.get("is_video")
+        play_badge = ""
+        if is_video:
+            play_badge = (
+                "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+                "width:44px;height:44px;background:rgba(0,0,0,.65);border-radius:50%;"
+                "display:flex;align-items:center;justify-content:center'>"
+                "<svg viewBox='0 0 24 24' width='22' height='22' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
+                "</div>"
+            )
+        views_str = f"{views:,}" if views else "—"
+        cards.append(
+            f"<a href='{url}' target='_blank' class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;display:block'>"
+            f"<div style='position:relative;width:100%;height:280px;background:#000'>"
+            f"<img src='{thumb}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
+            f"{play_badge}"
+            f"</div>"
+            f"<div style='padding:10px 12px'>"
+            f"<div style='font-size:13px;color:#fff;font-weight:600;margin-bottom:4px'>@{owner}</div>"
+            f"<div style='font-size:11px;color:#888;height:30px;overflow:hidden'>{caption}</div>"
+            f"<div style='display:flex;gap:10px;margin-top:8px;font-size:12px;color:#aaa'>"
+            f"<span>👁️ {views_str}</span>"
+            f"<span>❤️ {likes:,}</span>"
+            f"<span>💬 {comments:,}</span>"
+            f"</div></div></a>"
+        )
+    cards.append("</div>")
+    cards.append(f"<div style='margin-top:18px'><small>{len(reels)} reel(s) au total — affichage des 60 premiers</small></div>")
+    return "".join(cards)
+
+
 def _web_password_status() -> str:
     if WEB_PASSWORD == "changeme":
         return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
@@ -1462,6 +1631,15 @@ def _render_upload(msg="", error=False):
         .replace("{cloud_posts_html}", _render_cloud_content_html("posts", IMAGE_EXTS))
         .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
         .replace("{cloud_pps_html}", _render_cloud_pps_html())
+        .replace("{insta_auth_status}", _render_insta_auth_status())
+        .replace("{insta_accounts_html}", _render_insta_accounts_html())
+        .replace("{insta_trends_html_or_empty}", _render_insta_trends_grid_html() or
+            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
+            "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:14px'><polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/><polyline points='16 7 22 7 22 13'/></svg>"
+            "<h3 style='margin:0 0 8px;color:#888'>Aucun reel scrapé</h3>"
+            "<p style='margin:0;font-size:14px'>Ajoute des comptes dans <b>Instagram → Accounts</b> et lance un scrape.<br>Configure d'abord tes cookies dans <b>Settings → Cookies Instagram</b>.</p>"
+            "</div>"
+        )
     )
 
 
@@ -1724,6 +1902,97 @@ def create_app():
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
         return _render_upload(f"✅ Photo de profil ajoutée ({target.name})")
+
+    @app.route("/settings/insta_auth", methods=["POST"])
+    def settings_insta_auth():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import save_auth, load_auth
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        sessionid = (request.form.get("sessionid") or "").strip()
+        ds_user_id = (request.form.get("ds_user_id") or "").strip()
+        csrftoken = (request.form.get("csrftoken") or "").strip()
+        username = (request.form.get("username") or "").strip()
+        if not sessionid:
+            return _render_upload("❌ sessionid obligatoire", error=True)
+        save_auth({
+            "sessionid": sessionid,
+            "ds_user_id": ds_user_id,
+            "csrftoken": csrftoken,
+            "username": username,
+        })
+        return _render_upload("✅ Cookies Instagram sauvegardés")
+
+    @app.route("/insta/add_account", methods=["POST"])
+    def insta_add_account():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import add_to_watchlist
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        u = (request.form.get("username") or "").strip()
+        if not u:
+            return _render_upload("❌ username vide", error=True)
+        ok = add_to_watchlist(u)
+        if ok:
+            return _render_upload(f"✅ <b>@{u}</b> ajouté à la watchlist")
+        return _render_upload(f"⚠️ @{u} déjà dans la watchlist", error=True)
+
+    @app.route("/insta/remove_account", methods=["POST"])
+    def insta_remove_account():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import remove_from_watchlist
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        u = (request.form.get("username") or "").strip()
+        ok = remove_from_watchlist(u)
+        if ok:
+            return _render_upload(f"✅ <b>@{u}</b> retiré")
+        return _render_upload(f"⚠️ @{u} introuvable", error=True)
+
+    @app.route("/insta/scrape", methods=["POST"])
+    def insta_scrape():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import scrape_profile
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        u = (request.form.get("username") or "").strip()
+        result = scrape_profile(u, limit=12)
+        if "error" in result:
+            return _render_upload(f"❌ Scrape @{u} : {result['error']}", error=True)
+        n = len(result.get("reels", []))
+        return _render_upload(f"✅ <b>@{u}</b> scrapé : {n} post(s) récupéré(s)")
+
+    @app.route("/insta/scrape_all", methods=["POST"])
+    def insta_scrape_all():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import load_watchlist, scrape_profile
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        wl = load_watchlist()
+        if not wl:
+            return _render_upload("⚠️ Watchlist vide", error=True)
+        ok_count = 0
+        errors = []
+        for u in wl:
+            result = scrape_profile(u, limit=12)
+            if "error" in result:
+                errors.append(f"@{u}: {result['error']}")
+            else:
+                ok_count += 1
+        msg = f"✅ {ok_count}/{len(wl)} compte(s) scrapé(s)"
+        if errors:
+            msg += " — erreurs : " + " | ".join(errors[:3])
+        return _render_upload(msg, error=bool(errors) and ok_count == 0)
 
     @app.route("/settings/admin_token", methods=["POST"])
     def settings_admin_token():
