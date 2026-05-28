@@ -269,6 +269,42 @@ function toggleSubGroup(id){
 function comingSoon(){
   alert('🚧 Pas encore implémenté — viendra bientôt');
 }
+// Sélection multiple Cloud
+var selectedFiles = new Set();
+function toggleSelect(fileId, checked){
+  if(checked) selectedFiles.add(fileId);
+  else selectedFiles.delete(fileId);
+  updateActionBar();
+}
+function updateActionBar(){
+  var bar = document.getElementById('action-bar');
+  if(!bar) return;
+  var n = selectedFiles.size;
+  bar.style.display = n === 0 ? 'none' : 'flex';
+  var lbl = document.getElementById('sel-count');
+  if(lbl) lbl.textContent = n + ' fichier(s) sélectionné(s)';
+}
+function clearSelection(){
+  selectedFiles.clear();
+  document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
+  updateActionBar();
+}
+function deleteSelected(){
+  if(selectedFiles.size === 0) return;
+  if(!confirm('Supprimer ' + selectedFiles.size + ' fichier(s) ?\\nCette action est IRRÉVERSIBLE.')) return;
+  var form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/cloud/delete';
+  selectedFiles.forEach(function(fid){
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'files';
+    input.value = fid;
+    form.appendChild(input);
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
 function showTab(group,name,title,subtitle){
   // Ouvrir le groupe parent
   var grp=document.getElementById('grp-'+group);
@@ -669,7 +705,16 @@ function showTab(group,name,title,subtitle){
 </form>
 </div>
 
-</div></div></body></html>
+</div>
+
+<!-- Barre flottante d'actions (apparaît quand items sélectionnés) -->
+<div id="action-bar" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #444;border-radius:14px;padding:12px 18px;box-shadow:0 6px 24px rgba(0,0,0,.6);z-index:200;align-items:center;gap:14px">
+  <span id="sel-count" style="font-weight:600;color:#fff;font-size:14px">0 fichier(s) sélectionné(s)</span>
+  <button onclick="clearSelection()" style="padding:8px 14px;background:#333;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;margin:0">Annuler</button>
+  <button onclick="deleteSelected()" style="padding:8px 18px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0">🗑 Supprimer</button>
+</div>
+
+</div></body></html>
 """
 
 
@@ -895,8 +940,8 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, file_path, is_video: bool) -> str:
-    """Une carte avec preview du fichier."""
+def _preview_card(media_url: str, file_path, is_video: bool, file_id: str = "") -> str:
+    """Une carte avec preview du fichier + checkbox de sélection."""
     name = file_path.name
     size = _fmt_size(file_path)
     if is_video:
@@ -910,8 +955,16 @@ def _preview_card(media_url: str, file_path, is_video: bool) -> str:
             f"<img src='{media_url}' loading='lazy' "
             f"style='width:100%;height:160px;object-fit:cover;border-radius:6px 6px 0 0;background:#000'>"
         )
+    checkbox_html = ""
+    if file_id:
+        checkbox_html = (
+            f"<input type='checkbox' class='sel-cb' "
+            f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
+            f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#5865f2;background:#000;border-radius:4px'>"
+        )
     return (
-        f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden'>"
+        f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;position:relative'>"
+        f"{checkbox_html}"
         f"{media_html}"
         f"<div style='padding:8px 10px'>"
         f"<div style='font-size:12px;color:#ccc;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' title='{name}'>{name}</div>"
@@ -949,7 +1002,8 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:10px'>")
         for p in files:
             url = f"/cloud/file/{ident}/{subdir}/{p.name}"
-            rows.append(_preview_card(url, p, is_video))
+            file_id = f"{ident}|{subdir}|{p.name}"
+            rows.append(_preview_card(url, p, is_video, file_id))
         rows.append("</div>")
     if not rows:
         return "<p style='color:#888'>Aucun fichier stocké.</p>"
@@ -967,7 +1021,8 @@ def _render_cloud_pps_html() -> str:
     rows = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
     for p in files:
         url = f"/cloud/pp/{p.name}"
-        rows.append(_preview_card(url, p, is_video=False))
+        file_id = f"_pp_|pp|{p.name}"
+        rows.append(_preview_card(url, p, is_video=False, file_id=file_id))
     rows.append(f"</div><div style='margin-top:18px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
     return "".join(rows)
 
@@ -1156,6 +1211,66 @@ def create_app():
             return "Not found", 404
         from flask import send_file
         return send_file(str(path))
+
+    @app.route("/cloud/delete", methods=["POST"])
+    def cloud_delete():
+        if not is_auth():
+            return redirect("/")
+        files = request.form.getlist("files")
+        if not files:
+            return _render_upload("❌ Aucun fichier sélectionné", error=True)
+        deleted = []
+        failed = []
+        identities_list = _list_identities()
+        valid_subdirs = {"videos", "posts", "stories", "storyctas"}
+        for fid in files:
+            try:
+                parts = fid.split("|", 2)
+                if len(parts) != 3:
+                    failed.append((fid, "format invalide"))
+                    continue
+                scope, subdir, filename = parts
+                # Path traversal check
+                if "/" in filename or "\\" in filename or ".." in filename or not filename:
+                    failed.append((fid, "filename invalide"))
+                    continue
+                # PP partagée
+                if scope == "_pp_" and subdir == "pp":
+                    path = PROFILE_PICS_DIR / filename
+                # Fichier identité
+                elif scope in identities_list and subdir in valid_subdirs:
+                    path = IDENTITIES_DIR / scope / subdir / filename
+                else:
+                    failed.append((fid, "scope/subdir invalide"))
+                    continue
+                if not path.exists() or not path.is_file():
+                    failed.append((fid, "fichier introuvable"))
+                    continue
+                # Supprimer le fichier ET ses metadata éventuelles (.txt, .desc.txt, .example.*)
+                stem = path.stem
+                parent = path.parent
+                to_delete = [path]
+                for sibling in parent.iterdir():
+                    if sibling.is_file() and sibling.stem.startswith(stem) and sibling != path:
+                        # Métadonnées associées : <name>.txt, <name>.desc.txt, <name>.example.*
+                        n = sibling.name
+                        if (n == f"{stem}.txt" or n == f"{stem}.desc.txt"
+                                or n.startswith(f"{stem}.example.")):
+                            to_delete.append(sibling)
+                for t in to_delete:
+                    try:
+                        t.unlink()
+                    except Exception:
+                        pass
+                deleted.append(filename)
+            except Exception as e:
+                failed.append((fid, str(e)))
+        msg_parts = []
+        if deleted:
+            msg_parts.append(f"✅ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
+        if failed:
+            msg_parts.append(f"❌ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
+        return _render_upload(" • ".join(msg_parts), error=bool(failed) and not deleted)
 
     @app.route("/cloud/pp/<path:filename>")
     def cloud_serve_pp(filename):
