@@ -288,7 +288,8 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
 .sidebar .section-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.5px;padding:14px 22px 6px;font-weight:700}
 /* SFS responsive : stack sur petits écrans */
-@media(max-width:1100px){.sfs-layout{grid-template-columns:1fr!important}}
+@media(max-width:1300px){.sfs-layout{grid-template-columns:200px 1fr!important}.sfs-layout > div:last-child{grid-column:1/-1}}
+@media(max-width:900px){.sfs-layout{grid-template-columns:1fr!important}}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
 .sidebar .group-head{display:flex;align-items:center;gap:12px;padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-radius:8px;transition:all .15s}
 .sidebar .group-head:hover{background:#181818;color:#fff}
@@ -2229,8 +2230,52 @@ def _render_sfs_html() -> str:
         "</div>"
     )
 
-    # === LAYOUT 2 COLONNES : calendrier + side panel ===
-    rows.append("<div style='display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start' class='sfs-layout'>")
+    # === LAYOUT 3 COLONNES : identités | calendrier | détail jour ===
+    rows.append("<div style='display:grid;grid-template-columns:220px 1fr 300px;gap:16px;align-items:start' class='sfs-layout'>")
+
+    # --- COLONNE 1 : LISTE DES IDENTITÉS ---
+    rows.append("<div class='box' style='padding:14px'>")
+    # Filtre "All creators"
+    rows.append(
+        "<div onclick='filterSfsByIdentity(null,this)' "
+        "class='sfs-ident-row sfs-ident-all active' "
+        "style='display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;color:#3b82f6;font-weight:600;font-size:13px;background:rgba(59,130,246,.1)'>"
+        "<span>All creators</span>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='margin-left:auto'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</div>"
+    )
+    # Liste des identités avec compteur de SFS
+    sfs_count_by_ident = {}
+    for it in items:
+        ident = it.get("identity", "")
+        if ident:
+            sfs_count_by_ident[ident] = sfs_count_by_ident.get(ident, 0) + 1
+    for ident in sorted(_list_identities()):
+        avatar = _identity_avatar_html(ident, size=36)
+        count = sfs_count_by_ident.get(ident, 0)
+        badge = ""
+        if count > 0:
+            badge = (
+                f"<span style='background:#ef4444;color:#fff;font-size:10px;padding:2px 6px;"
+                f"border-radius:8px;font-weight:700;margin-left:auto;display:flex;align-items:center;gap:3px'>"
+                f"<svg viewBox='0 0 24 24' width='9' height='9' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9'/><path d='M10.3 21a1.94 1.94 0 0 0 3.4 0'/></svg>{count}</span>"
+            )
+        rows.append(
+            f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
+            f"class='sfs-ident-row' data-ident='{ident}' "
+            f"style='display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
+            f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
+            f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
+            f"<div style='position:relative'>{avatar}"
+            f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
+            f"</div>"
+            f"<span style='font-weight:600;font-size:13px;color:#fff'>{ident}</span>"
+            f"{badge}"
+            f"</div>"
+        )
+    rows.append("</div>")
+
+    # --- COLONNE 2 : CALENDRIER ---
     rows.append("<div class='box'>")
     # Header du calendrier avec navigation
     today_link = f"?tab=sfs&sfs_month={today.year:04d}-{today.month:02d}"
@@ -2362,15 +2407,31 @@ function switchSfsPlatform(btn, platform){{
   refreshSfsCalendar();
 }}
 
+function filterSfsByIdentity(ident, btnEl){{
+  window.__currentSfsIdent = ident; // null = all
+  // Highlight visuel
+  document.querySelectorAll('.sfs-ident-row').forEach(function(r){{
+    r.classList.remove('active');
+    r.style.background = 'transparent';
+    r.style.color = '#fff';
+  }});
+  if(btnEl){{
+    btnEl.classList.add('active');
+    btnEl.style.background = 'rgba(59,130,246,.15)';
+    btnEl.style.color = '#3b82f6';
+  }}
+  refreshSfsCalendar();
+  refreshSfsDayPanel();
+}}
 function refreshSfsCalendar(){{
   var platform = window.__currentSfsPlatform;
+  var ident = window.__currentSfsIdent;
   document.querySelectorAll('.sfs-day').forEach(function(day){{
-    // Vider les anciennes barres (le sélecteur a changé : .sfs-day-bars maintenant)
     var barsEl = day.querySelector('.sfs-day-bars') || day.querySelector('.sfs-day-badges');
     if(barsEl) barsEl.innerHTML = '';
     var date = day.dataset.date;
     var allDay = window.__sfsData[date] || [];
-    var filtered = allDay.filter(function(x){{ return x.platform === platform; }});
+    var filtered = allDay.filter(function(x){{ return x.platform === platform && (!ident || x.identity === ident); }});
     if(filtered.length === 0 || !barsEl) return;
     var nb_sched = filtered.filter(function(x){{ return x.status === 'scheduled'; }}).length;
     var nb_prog = filtered.filter(function(x){{ return x.status === 'to_program'; }}).length;
@@ -2416,7 +2477,8 @@ function refreshSfsDayPanel(){{
   var months = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
   var formatted = months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
   document.getElementById('sfs-day-panel-title').textContent = formatted;
-  var items = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform; }});
+  var ident = window.__currentSfsIdent;
+  var items = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform && (!ident || x.identity === ident); }});
   var content = document.getElementById('sfs-day-panel-content');
   if(items.length === 0){{
     content.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg><div style="font-size:14px">Aucun SFS prévu</div><div style="font-size:12px;margin-top:8px;color:#555">Pour le ' + platform + ' ce jour-là</div></div>';
