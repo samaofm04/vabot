@@ -294,7 +294,7 @@ function showTab(group,name,title,subtitle){
 
 <div class="group open" id="grp-upload">
   <button class="group-head active" onclick="toggleGroup('upload')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
     <span class="label">Upload</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
@@ -318,6 +318,36 @@ function showTab(group,name,title,subtitle){
     <button class="item" id="tab-pp" onclick="showTab('upload','pp','Photo de profil','Pool partagé entre toutes les identités')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       PP partagé
+    </button>
+  </div>
+</div>
+
+<div class="group" id="grp-cloud">
+  <button class="group-head" onclick="toggleGroup('cloud')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+    <span class="label">Cloud</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" onclick="showTab('cloud','cloudoverview','Cloud — Vue d ensemble','Tout ton stockage par type de contenu')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+      Vue d'ensemble
+    </button>
+    <button class="item" onclick="showTab('cloud','cloudreels','Cloud — Reels','Tous les reels stockés par identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Reels
+    </button>
+    <button class="item" onclick="showTab('cloud','cloudposts','Cloud — Posts','Tous les posts stockés')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      Posts
+    </button>
+    <button class="item" onclick="showTab('cloud','cloudstories','Cloud — Stories','Toutes les stories stockées')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      Stories
+    </button>
+    <button class="item" onclick="showTab('cloud','cloudpps','Cloud — Photos de profil','Pool partagé des PPs')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      Photos profil
     </button>
   </div>
 </div>
@@ -523,6 +553,58 @@ function showTab(group,name,title,subtitle){
 <input type="file" name="photo" accept="image/*" required>
 <button type="submit">📤 Uploader la PP</button>
 </form>
+</div>
+
+<!-- CLOUD : vue d'ensemble -->
+<div class="form-section" id="form-cloudoverview" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">☁️ Stockage Cloud</h3>
+<small>Tout ton contenu hébergé sur le VPS</small>
+<div class="stat-grid" style="margin-top:16px">
+  <div class="stat"><div class="v">{stat_reels}</div><div class="l">Reels</div></div>
+  <div class="stat"><div class="v">{stat_posts}</div><div class="l">Posts</div></div>
+  <div class="stat"><div class="v">{stat_stories}</div><div class="l">Stories</div></div>
+  <div class="stat"><div class="v">{stat_storyctas}</div><div class="l">Story CTAs</div></div>
+  <div class="stat"><div class="v">{stat_pps}</div><div class="l">Photos profil</div></div>
+  <div class="stat"><div class="v">{stat_identities}</div><div class="l">Identités</div></div>
+</div>
+</div>
+<div class="box">
+<h4 style="margin-top:0">Répartition par identité</h4>
+{identity_stats_html}
+</div>
+</div>
+
+<!-- CLOUD : reels -->
+<div class="form-section" id="form-cloudreels" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🎬 Reels stockés</h3>
+{cloud_reels_html}
+</div>
+</div>
+
+<!-- CLOUD : posts -->
+<div class="form-section" id="form-cloudposts" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">📸 Posts stockés</h3>
+{cloud_posts_html}
+</div>
+</div>
+
+<!-- CLOUD : stories -->
+<div class="form-section" id="form-cloudstories" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">📱 Stories stockées</h3>
+{cloud_stories_html}
+</div>
+</div>
+
+<!-- CLOUD : PPs -->
+<div class="form-section" id="form-cloudpps" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">👤 Photos de profil (pool partagé)</h3>
+{cloud_pps_html}
+</div>
 </div>
 
 <!-- HOME (clic sur "VA Bot") -->
@@ -805,6 +887,74 @@ def _render_identity_stats_html() -> str:
     return "".join(rows)
 
 
+def _render_cloud_content_html(subdir: str, exts) -> str:
+    """Liste les fichiers de <subdir> par identité (groupes)."""
+    identities = _list_identities()
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+    rows = []
+    total = 0
+    for ident in identities:
+        folder = IDENTITIES_DIR / ident / subdir
+        files = []
+        if folder.exists():
+            files = sorted([
+                p for p in folder.iterdir()
+                if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
+            ])
+        if not files:
+            continue
+        total += len(files)
+        rows.append(
+            f"<div style='margin-top:18px;display:flex;align-items:center;gap:10px'>"
+            f"<h4 style='margin:0;color:#5865f2;font-size:15px'>👤 {ident}</h4>"
+            f"<small style='color:#666'>{len(files)} fichier(s)</small>"
+            f"</div>"
+        )
+        rows.append("<table style='width:100%;border-collapse:collapse;margin-top:6px'><tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Fichier</th><th style='padding:8px;text-align:right'>Taille</th></tr>")
+        for p in files:
+            try:
+                size_kb = p.stat().st_size / 1024
+                size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+            except Exception:
+                size_str = "?"
+            rows.append(
+                f"<tr style='border-bottom:1px solid #333'>"
+                f"<td style='padding:8px'><code style='font-size:12px'>{p.name}</code></td>"
+                f"<td style='padding:8px;text-align:right;color:#888'>{size_str}</td>"
+                f"</tr>"
+            )
+        rows.append("</table>")
+    if not rows:
+        return "<p style='color:#888'>Aucun fichier stocké.</p>"
+    rows.append(f"<div style='margin-top:18px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{total}</b> fichier(s)</small></div>")
+    return "".join(rows)
+
+
+def _render_cloud_pps_html() -> str:
+    """Liste des PPs partagées."""
+    if not PROFILE_PICS_DIR.exists():
+        return "<p style='color:#888'>Aucune PP uploadée.</p>"
+    files = sorted([p for p in PROFILE_PICS_DIR.iterdir() if p.is_file()])
+    if not files:
+        return "<p style='color:#888'>Aucune PP uploadée.</p>"
+    rows = ["<table style='width:100%;border-collapse:collapse'><tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Fichier</th><th style='padding:8px;text-align:right'>Taille</th></tr>"]
+    for p in files:
+        try:
+            size_kb = p.stat().st_size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+        except Exception:
+            size_str = "?"
+        rows.append(
+            f"<tr style='border-bottom:1px solid #333'>"
+            f"<td style='padding:8px'><code style='font-size:12px'>{p.name}</code></td>"
+            f"<td style='padding:8px;text-align:right;color:#888'>{size_str}</td>"
+            f"</tr>"
+        )
+    rows.append(f"</table><div style='margin-top:14px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
+    return "".join(rows)
+
+
 def _web_password_status() -> str:
     if WEB_PASSWORD == "changeme":
         return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
@@ -841,6 +991,10 @@ def _render_upload(msg="", error=False):
     stat_posts = sum(_identity_stats(i)["posts"] for i in identities_list)
     stat_stories = sum(_identity_stats(i)["stories"] for i in identities_list)
     stat_storyctas = sum(_identity_stats(i)["storyctas"] for i in identities_list)
+    # PPs partagées
+    stat_pps = 0
+    if PROFILE_PICS_DIR.exists():
+        stat_pps = sum(1 for p in PROFILE_PICS_DIR.iterdir() if p.is_file())
     return (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
@@ -855,6 +1009,11 @@ def _render_upload(msg="", error=False):
         .replace("{stat_posts}", str(stat_posts))
         .replace("{stat_stories}", str(stat_stories))
         .replace("{stat_storyctas}", str(stat_storyctas))
+        .replace("{stat_pps}", str(stat_pps))
+        .replace("{cloud_reels_html}", _render_cloud_content_html("videos", VIDEO_EXTS))
+        .replace("{cloud_posts_html}", _render_cloud_content_html("posts", IMAGE_EXTS))
+        .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
+        .replace("{cloud_pps_html}", _render_cloud_pps_html())
     )
 
 
