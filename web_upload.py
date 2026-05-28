@@ -887,11 +887,46 @@ def _render_identity_stats_html() -> str:
     return "".join(rows)
 
 
+def _fmt_size(p) -> str:
+    try:
+        size_kb = p.stat().st_size / 1024
+        return f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
+    except Exception:
+        return "?"
+
+
+def _preview_card(media_url: str, file_path, is_video: bool) -> str:
+    """Une carte avec preview du fichier."""
+    name = file_path.name
+    size = _fmt_size(file_path)
+    if is_video:
+        media_html = (
+            f"<video controls preload='metadata' "
+            f"style='width:100%;height:160px;object-fit:cover;background:#000;border-radius:6px 6px 0 0'>"
+            f"<source src='{media_url}'></video>"
+        )
+    else:
+        media_html = (
+            f"<img src='{media_url}' loading='lazy' "
+            f"style='width:100%;height:160px;object-fit:cover;border-radius:6px 6px 0 0;background:#000'>"
+        )
+    return (
+        f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden'>"
+        f"{media_html}"
+        f"<div style='padding:8px 10px'>"
+        f"<div style='font-size:12px;color:#ccc;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' title='{name}'>{name}</div>"
+        f"<div style='font-size:11px;color:#666;margin-top:2px'>{size}</div>"
+        f"</div>"
+        f"</div>"
+    )
+
+
 def _render_cloud_content_html(subdir: str, exts) -> str:
-    """Liste les fichiers de <subdir> par identité (groupes)."""
+    """Liste les fichiers de <subdir> par identité avec previews en grille."""
     identities = _list_identities()
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
+    is_video = subdir == "videos"
     rows = []
     total = 0
     for ident in identities:
@@ -906,52 +941,34 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             continue
         total += len(files)
         rows.append(
-            f"<div style='margin-top:18px;display:flex;align-items:center;gap:10px'>"
+            f"<div style='margin-top:22px;display:flex;align-items:center;gap:10px'>"
             f"<h4 style='margin:0;color:#5865f2;font-size:15px'>👤 {ident}</h4>"
             f"<small style='color:#666'>{len(files)} fichier(s)</small>"
             f"</div>"
         )
-        rows.append("<table style='width:100%;border-collapse:collapse;margin-top:6px'><tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Fichier</th><th style='padding:8px;text-align:right'>Taille</th></tr>")
+        rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:10px'>")
         for p in files:
-            try:
-                size_kb = p.stat().st_size / 1024
-                size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
-            except Exception:
-                size_str = "?"
-            rows.append(
-                f"<tr style='border-bottom:1px solid #333'>"
-                f"<td style='padding:8px'><code style='font-size:12px'>{p.name}</code></td>"
-                f"<td style='padding:8px;text-align:right;color:#888'>{size_str}</td>"
-                f"</tr>"
-            )
-        rows.append("</table>")
+            url = f"/cloud/file/{ident}/{subdir}/{p.name}"
+            rows.append(_preview_card(url, p, is_video))
+        rows.append("</div>")
     if not rows:
         return "<p style='color:#888'>Aucun fichier stocké.</p>"
-    rows.append(f"<div style='margin-top:18px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{total}</b> fichier(s)</small></div>")
+    rows.append(f"<div style='margin-top:22px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{total}</b> fichier(s)</small></div>")
     return "".join(rows)
 
 
 def _render_cloud_pps_html() -> str:
-    """Liste des PPs partagées."""
+    """PPs partagées avec preview en grille."""
     if not PROFILE_PICS_DIR.exists():
         return "<p style='color:#888'>Aucune PP uploadée.</p>"
     files = sorted([p for p in PROFILE_PICS_DIR.iterdir() if p.is_file()])
     if not files:
         return "<p style='color:#888'>Aucune PP uploadée.</p>"
-    rows = ["<table style='width:100%;border-collapse:collapse'><tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Fichier</th><th style='padding:8px;text-align:right'>Taille</th></tr>"]
+    rows = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
     for p in files:
-        try:
-            size_kb = p.stat().st_size / 1024
-            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB"
-        except Exception:
-            size_str = "?"
-        rows.append(
-            f"<tr style='border-bottom:1px solid #333'>"
-            f"<td style='padding:8px'><code style='font-size:12px'>{p.name}</code></td>"
-            f"<td style='padding:8px;text-align:right;color:#888'>{size_str}</td>"
-            f"</tr>"
-        )
-    rows.append(f"</table><div style='margin-top:14px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
+        url = f"/cloud/pp/{p.name}"
+        rows.append(_preview_card(url, p, is_video=False))
+    rows.append(f"</div><div style='margin-top:18px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
     return "".join(rows)
 
 
@@ -1120,6 +1137,37 @@ def create_app():
             return _render_upload(f"Fichier existe déjà", error=True)
         photo.save(str(target))
         return _render_upload(f"✅ Story CTA ajoutée à {identity}")
+
+    @app.route("/cloud/file/<identity>/<subdir>/<path:filename>")
+    def cloud_serve_file(identity, subdir, filename):
+        if not is_auth():
+            return redirect("/")
+        # Sécurité : restreindre aux dossiers valides
+        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+            return "Not found", 404
+        safe_identity = identity.lower().strip()
+        if safe_identity not in _list_identities():
+            return "Not found", 404
+        # Empêcher path traversal
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return "Forbidden", 403
+        path = IDENTITIES_DIR / safe_identity / subdir / filename
+        if not path.exists() or not path.is_file():
+            return "Not found", 404
+        from flask import send_file
+        return send_file(str(path))
+
+    @app.route("/cloud/pp/<path:filename>")
+    def cloud_serve_pp(filename):
+        if not is_auth():
+            return redirect("/")
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return "Forbidden", 403
+        path = PROFILE_PICS_DIR / filename
+        if not path.exists() or not path.is_file():
+            return "Not found", 404
+        from flask import send_file
+        return send_file(str(path))
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
