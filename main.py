@@ -113,21 +113,28 @@ async def main_async():
     except Exception as e:
         log.warning(f"Impossible de demarrer le mini site web : {e}")
 
-    tasks = [asyncio.create_task(main_bot.start(TOKEN), name="main_bot")]
-    if admin_bot is not None:
-        tasks.append(asyncio.create_task(admin_bot.start(ADMIN_TOKEN), name="admin_bot"))
-
-    # Attendre que les 2 bots tournent. Si l'un crash, l'autre continue.
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-    for t in done:
+    async def _run_safe(bot, token, label):
+        """Wrap bot.start dans un try/except pour qu'un bot qui crashe ne tue pas l'autre."""
         try:
-            exc = t.exception()
-            if exc:
-                log.error(f"Bot {t.get_name()} a crashe: {exc}")
-        except Exception:
-            pass
-    for t in pending:
-        t.cancel()
+            await bot.start(token)
+        except discord.LoginFailure as e:
+            log.error(f"[{label}] Token invalide: {e}")
+        except discord.PrivilegedIntentsRequired as e:
+            log.error(
+                f"[{label}] PRIVILEGED INTENTS REQUIS — active 'Server Members Intent' "
+                f"dans le Discord Dev Portal pour ce bot. {e}"
+            )
+        except Exception as e:
+            log.error(f"[{label}] Bot crashe: {type(e).__name__}: {e}")
+
+    tasks = [asyncio.create_task(_run_safe(main_bot, TOKEN, "main"), name="main_bot")]
+    if admin_bot is not None:
+        tasks.append(
+            asyncio.create_task(_run_safe(admin_bot, ADMIN_TOKEN, "admin"), name="admin_bot")
+        )
+
+    # Les deux bots tournent independamment. Si l'un crashe, l'autre continue.
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
