@@ -349,9 +349,22 @@ body.light .danger-btn{background:#ef4444!important;color:#fff!important}
 body.light a{color:#3b82f6}
 body.light .subtabs{border-bottom-color:#e5e7eb}
 /* Calendrier SFS en light mode */
-body.light .sfs-day{border-color:#e5e7eb!important}
+body.light .sfs-day{border-color:#e5e7eb!important;background:#fff!important;color:#111827!important}
 body.light .sfs-day:hover{background:#f3f4f6!important}
+body.light .sfs-day > div:first-child{color:#111827!important}
+body.light .sfs-day[style*="background:#0f1a2e"]{background:#eff6ff!important}
+body.light .sfs-day[style*="background:#1f1410"]{background:#eff6ff!important}
+body.light .sfs-day[style*="background:#15100d"]{background:#f3f4f6!important}
 body.light .sfs-ident-row.active{background:rgba(59,130,246,.1)!important;color:#3b82f6!important}
+
+/* === Selected day (les 2 modes) === */
+.sfs-day.selected{box-shadow:inset 0 0 0 2px #3b82f6}
+body:not(.light) .sfs-day.selected{background:#0f1a2e!important}
+body.light .sfs-day.selected{background:#eff6ff!important}
+
+/* === Today (les 2 modes) === */
+body:not(.light) .sfs-day[style*="background:#0f1a2e"]{background:#0f1a2e!important}
+body.light .sfs-day[style*="background:#0f1a2e"]{background:#eff6ff!important}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
 .sidebar .group-head{display:flex;align-items:center;gap:12px;padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-radius:8px;transition:all .15s}
 .sidebar .group-head:hover{background:#181818;color:#fff}
@@ -2584,16 +2597,17 @@ function refreshSfsCalendar(){{
     if(filtered.length === 0 || !barsEl) return;
     var nb_sched = filtered.filter(function(x){{ return x.status === 'scheduled'; }}).length;
     var nb_prog = filtered.filter(function(x){{ return x.status === 'to_program'; }}).length;
-    // Barre style référence (orange/rouge) au bas avec un nombre
+    // Barre orange #f59e0b pour scheduled (style référence)
     if(nb_sched){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#3b82f6;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.style.cssText = 'background:#f59e0b;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
       b.textContent = nb_sched;
       barsEl.appendChild(b);
     }}
+    // Barre jaune clair #fbbf24 pour to_program (différencier)
     if(nb_prog){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#f59e0b;color:#000;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.style.cssText = 'background:#fbbf24;color:#000;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
       b.textContent = nb_prog;
       barsEl.appendChild(b);
     }}
@@ -2608,13 +2622,9 @@ function refreshSfsCalendar(){{
 function selectSfsDay(date){{
   window.__selectedSfsDate = date;
   refreshSfsDayPanel();
-  // Mettre en évidence visuelle la cellule sélectionnée
+  // Toggle la classe "selected" sur la bonne cellule
   document.querySelectorAll('.sfs-day').forEach(function(c){{
-    if(c.dataset.date === date){{
-      c.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
-    }} else {{
-      c.style.boxShadow = '';
-    }}
+    c.classList.toggle('selected', c.dataset.date === date);
   }});
 }}
 function refreshSfsDayPanel(){{
