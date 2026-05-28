@@ -2432,7 +2432,7 @@ def create_app():
         # Cookies OK -> scrape automatique
         from insta_scraper import _clean_username
         clean = _clean_username(u)
-        result = scrape_profile(clean, limit=30)
+        result = scrape_profile(clean, limit=50)
         if "error" in result:
             if added:
                 return _error(f"✅ <b>@{clean}</b> ajouté, mais le scrape a échoué : {result['error']}",
@@ -2501,7 +2501,7 @@ def create_app():
         except Exception as e:
             return _error(f"❌ Module indispo: {e}")
         u = (request.form.get("username") or "").strip()
-        result = scrape_profile(u, limit=30)
+        result = scrape_profile(u, limit=50)
         if "error" in result:
             return _error(f"❌ Scrape @{u} : {result['error']}")
         n = len(result.get("reels", []))
@@ -2521,7 +2521,7 @@ def create_app():
         ok_count = 0
         errors = []
         for u in wl:
-            result = scrape_profile(u, limit=30)
+            result = scrape_profile(u, limit=50)
             if "error" in result:
                 errors.append(f"@{u}: {result['error']}")
             else:

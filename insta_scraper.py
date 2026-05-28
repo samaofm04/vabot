@@ -268,23 +268,37 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
         "pk": user.get("pk") or user.get("id"),
     }
 
-    # 2) User reels (POST + form data) - structure : {"reels": [{"node": {"media": {...}}}]}
-    # Endpoint correct : /get_ig_user_reels.php (PAS /ig_get_user_reels.php)
+    # 2) User reels - boucle avec pagination jusqu'à avoir 1 mois de contenu
+    # Endpoint correct : /get_ig_user_reels.php
     reels = []
+    one_month_ago = int(time.time()) - 30 * 86400  # 30 jours en secondes
+    max_pages = 5  # Limite max d'API calls par profil
+    pagination_token = ""
+    pages_fetched = 0
     try:
-        r = requests.post(
-            f"{base}/get_ig_user_reels.php",
-            headers=headers,
-            data={"username_or_url": username, "amount": str(limit), "pagination_token": ""},
-            timeout=25,
-        )
-        log.info(f"RapidAPI reels HTTP {r.status_code} pour {username}")
-        if r.status_code == 200:
+        while pages_fetched < max_pages:
+            r = requests.post(
+                f"{base}/get_ig_user_reels.php",
+                headers=headers,
+                data={
+                    "username_or_url": username,
+                    "amount": str(limit),
+                    "pagination_token": pagination_token,
+                },
+                timeout=25,
+            )
+            log.info(f"RapidAPI reels page {pages_fetched+1} HTTP {r.status_code} pour {username}")
+            pages_fetched += 1
+            if r.status_code != 200:
+                log.warning(f"Reels HTTP {r.status_code}: {r.text[:200]}")
+                break
             posts_data = r.json()
             items = posts_data.get("reels") or posts_data.get("items") or posts_data.get("data") or []
-            for it in items[:limit]:
+            if not items:
+                break
+            oldest_taken_at_this_page = None
+            for it in items:
                 try:
-                    # Structure imbriquée : it.node.media
                     node = it.get("node") if isinstance(it, dict) else None
                     if node and isinstance(node, dict):
                         media = node.get("media", node)
@@ -294,33 +308,30 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         continue
                     shortcode = media.get("code") or media.get("shortcode") or ""
                     is_video = media.get("media_type") == 2 or media.get("is_video", True)
-                    # Caption (cette API n'en renvoie pas pour reels)
                     caption_obj = media.get("caption")
                     if isinstance(caption_obj, dict):
                         caption = caption_obj.get("text", "")
                     else:
                         caption = str(caption_obj) if caption_obj else ""
-                    # Thumbnail (prendre la plus petite version pour rapidité)
                     thumb = ""
                     iv2 = media.get("image_versions2", {})
                     candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
                     if candidates:
-                        # Prendre une taille moyenne ou la 1ère
                         thumb = candidates[0].get("url", "")
                     if not thumb:
                         thumb = media.get("thumbnail_url") or media.get("display_url") or ""
-                    # Video URL (1ère = type 101, généralement la meilleure)
                     video_url = None
                     vv = media.get("video_versions", [])
                     if vv:
                         video_url = vv[0].get("url")
                     if not video_url:
                         video_url = media.get("video_url")
-                    # Timestamp : prendre taken_at de l'API si dispo, sinon extraire du pk
                     taken_at = media.get("taken_at") or 0
-                    pk = media.get("pk") or media.get("id", "").split("_")[0] if media.get("id") else ""
+                    pk = media.get("pk") or (media.get("id", "").split("_")[0] if media.get("id") else "")
                     if not taken_at and pk:
                         taken_at = _timestamp_from_pk(pk)
+                    if oldest_taken_at_this_page is None or (taken_at and taken_at < oldest_taken_at_this_page):
+                        oldest_taken_at_this_page = taken_at
                     reel = {
                         "shortcode": shortcode,
                         "is_video": is_video,
@@ -337,8 +348,14 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     reels.append(reel)
                 except Exception as e:
                     log.warning(f"Parse RapidAPI reel: {e}")
-        else:
-            log.warning(f"Reels endpoint HTTP {r.status_code}: {r.text[:200]}")
+            # Pagination : continuer si on n'a pas encore atteint 1 mois OU pas de token
+            next_token = posts_data.get("pagination_token") or posts_data.get("next_max_id") or ""
+            if not next_token:
+                break  # plus de pages
+            if oldest_taken_at_this_page and oldest_taken_at_this_page < one_month_ago:
+                break  # on a déjà 1 mois de contenu
+            pagination_token = next_token
+            time.sleep(0.3)  # petit délai entre les pages
     except Exception as e:
         log.warning(f"Fetch reels via RapidAPI: {e}")
 
@@ -453,7 +470,7 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
     return result
 
 
-def scrape_profile(username: str, limit: int = 30) -> dict:
+def scrape_profile(username: str, limit: int = 50) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
     Ordre de tentatives :
