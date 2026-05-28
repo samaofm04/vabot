@@ -290,6 +290,68 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 /* SFS responsive : stack sur petits écrans */
 @media(max-width:1300px){.sfs-layout{grid-template-columns:200px 1fr!important}.sfs-layout > div:last-child{grid-column:1/-1}}
 @media(max-width:900px){.sfs-layout{grid-template-columns:1fr!important}}
+
+/* =============== LIGHT MODE (DEFAULT) =============== */
+body.light{background:#f9fafb!important;color:#111827!important}
+body.light .sidebar{background:#fff!important;border-right-color:#e5e7eb!important}
+body.light .sidebar .group-head{color:#4b5563}
+body.light .sidebar .item{color:#6b7280}
+body.light .sidebar .group-head:hover,body.light .sidebar .item:hover{background:#f3f4f6!important;color:#111827}
+body.light .sidebar .item.active{background:#dbeafe!important;color:#3b82f6!important}
+body.light .sidebar .item.active svg{color:#3b82f6}
+body.light .sidebar .group-head.active{background:#f3f4f6!important;color:#111827}
+body.light .sidebar .group-head.active svg.lead{color:#3b82f6}
+body.light .sidebar .group .items{border-left-color:#e5e7eb}
+body.light .sidebar .section-label{color:#9ca3af}
+body.light .sidebar .sep{background:#e5e7eb}
+body.light .sidebar .logout-btn{color:#6b7280}
+body.light .sidebar .logout-btn:hover{background:#fef2f2;color:#dc2626}
+body.light .main{color:#111827}
+body.light .main h1,body.light .main h2,body.light .main h3,body.light .main h4{color:#111827}
+body.light .box{background:#fff!important;border-color:#e5e7eb!important;color:#111827;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+body.light label{color:#374151}
+body.light small{color:#6b7280}
+body.light input[type=text],body.light input[type=password],body.light input[type=number],body.light input[type=date],body.light input[type=time],body.light input[type=file],body.light select,body.light textarea{background:#fff!important;border-color:#d1d5db!important;color:#111827!important}
+body.light input:focus,body.light select:focus,body.light textarea:focus{border-color:#3b82f6!important;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+body.light table th{background:#f9fafb!important;color:#374151!important;border-color:#e5e7eb}
+body.light table td{border-color:#e5e7eb!important;color:#374151}
+body.light .stat{background:#fff!important;border-color:#e5e7eb!important;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+body.light .stat .l{color:#6b7280}
+body.light code{background:#f3f4f6!important;color:#111827}
+body.light .subtab{color:#6b7280}
+body.light .subtab.active{color:#3b82f6}
+body.light .reel-card,body.light .cloud-card{background:#fff!important;border-color:#e5e7eb!important;color:#111827}
+body.light .toast{background:#fff!important;border-color:#e5e7eb!important;color:#111827;box-shadow:0 8px 24px rgba(0,0,0,.1)}
+body.light .toast.success{background:#f0fdf4!important;border-left-color:#10b981!important;color:#065f46}
+body.light .toast.error{background:#fef2f2!important;border-left-color:#ef4444!important;color:#991b1b}
+body.light .toast.warning{background:#fffbeb!important;border-left-color:#f59e0b!important;color:#92400e}
+body.light .confirm-box{background:#fff!important;border-color:#e5e7eb!important;color:#111827}
+body.light .confirm-box h3{color:#111827}
+body.light .confirm-box p{color:#6b7280}
+body.light .confirm-box .btn-cancel{background:#f3f4f6!important;color:#374151!important}
+/* Inputs/selects backgrounds qui utilisent #0f0f0f en inline */
+body.light [style*="background:#0f0f0f"]{background:#f9fafb!important}
+body.light [style*="background:#1a1a1a"]{background:#fff!important}
+body.light [style*="background:#0a0a0a"]{background:#fff!important}
+body.light [style*="background:#000"]{background:#fff!important}
+body.light [style*="border:1px solid #2a2a2a"]{border-color:#e5e7eb!important}
+body.light [style*="border:1px solid #1a1a1a"]{border-color:#e5e7eb!important}
+body.light [style*="border:1px solid #333"]{border-color:#d1d5db!important}
+body.light [style*="color:#fff"]:not(.toast):not(button){color:#111827!important}
+body.light [style*="color:#aaa"]{color:#6b7280!important}
+body.light [style*="color:#888"]{color:#9ca3af!important}
+body.light [style*="color:#666"]{color:#9ca3af!important}
+body.light [style*="color:#ccc"]{color:#374151!important}
+body.light [style*="background:rgba(0,0,0,.6)"]{background:rgba(255,255,255,.85)!important}
+body.light [style*="background:rgba(0,0,0,.5)"]{background:rgba(255,255,255,.85)!important}
+body.light .sidebar .ico .tip{background:#111827;color:#fff}
+body.light .danger-btn{background:#ef4444!important;color:#fff!important}
+body.light a{color:#3b82f6}
+body.light .subtabs{border-bottom-color:#e5e7eb}
+/* Calendrier SFS en light mode */
+body.light .sfs-day{border-color:#e5e7eb!important}
+body.light .sfs-day:hover{background:#f3f4f6!important}
+body.light .sfs-ident-row.active{background:rgba(59,130,246,.1)!important;color:#3b82f6!important}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
 .sidebar .group-head{display:flex;align-items:center;gap:12px;padding:10px 12px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;width:100%;text-align:left;margin:0;border-radius:8px;transition:all .15s}
 .sidebar .group-head:hover{background:#181818;color:#fff}
@@ -370,6 +432,50 @@ function toggleSubGroup(id){
 function comingSoon(){
   showToast('🚧 Pas encore implémenté — viendra bientôt', 'warning');
 }
+// === THEME (light/dark) ===
+function setTheme(theme){
+  if(theme === 'light'){
+    document.body.classList.add('light');
+  } else {
+    document.body.classList.remove('light');
+  }
+  try{ localStorage.setItem('vabot_theme', theme); }catch(e){}
+  // Mettre à jour la sélection visuelle des cards
+  document.querySelectorAll('.theme-card').forEach(function(c){
+    if(c.dataset.theme === theme){
+      c.style.outline = '3px solid #3b82f6';
+      c.style.outlineOffset = '2px';
+    } else {
+      c.style.outline = '';
+    }
+  });
+  if(typeof showToast === 'function'){
+    showToast('🎨 Thème ' + (theme === 'light' ? 'clair' : 'sombre') + ' activé', 'success', 2000);
+  }
+}
+// Appliquer le thème au plus tôt (avant render) - défaut : clair
+(function(){
+  try{
+    var saved = localStorage.getItem('vabot_theme') || 'light';
+    if(saved === 'light'){
+      document.documentElement.classList.add('pre-light');
+      document.addEventListener('DOMContentLoaded', function(){
+        document.body.classList.add('light');
+        document.querySelectorAll('.theme-card[data-theme="light"]').forEach(function(c){
+          c.style.outline = '3px solid #3b82f6';
+          c.style.outlineOffset = '2px';
+        });
+      });
+    } else {
+      document.addEventListener('DOMContentLoaded', function(){
+        document.querySelectorAll('.theme-card[data-theme="dark"]').forEach(function(c){
+          c.style.outline = '3px solid #3b82f6';
+          c.style.outlineOffset = '2px';
+        });
+      });
+    }
+  }catch(e){}
+})();
 // === SYSTÈME DE TOASTS ===
 function showToast(message, type, duration){
   type = type || 'info';
@@ -910,6 +1016,10 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       Mot de passe site
     </button>
+    <button class="item" id="tab-stheme" onclick="showTab('settings','stheme','Thème','Clair ou sombre')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      Thème
+    </button>
     <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
       Cookies Instagram
@@ -1369,6 +1479,26 @@ function showFeed(btn,name){
 <small>⚠️ Utilise un <b>compte secondaire</b>. Risque de ban si Instagram détecte le scraping.</small>
 <button type="submit">💾 Sauver les cookies</button>
 </form>
+</div>
+
+<!-- SETTINGS - THÈME -->
+<div class="form-section" id="form-stheme" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🎨 Choisir le thème</h3>
+<small style="margin-bottom:20px;display:block">Choisis entre le mode clair et sombre. Ta préférence est sauvée dans ton navigateur.</small>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:20px;cursor:pointer;transition:all .15s;text-align:center">
+    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+    <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:4px">Clair</div>
+    <div style="font-size:12px;color:#6b7280">Fond blanc, texte sombre</div>
+  </div>
+  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0a0a0a;border:2px solid #2a2a2a;border-radius:12px;padding:20px;cursor:pointer;transition:all .15s;text-align:center">
+    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#a5b4fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px">Sombre</div>
+    <div style="font-size:12px;color:#9ca3af">Fond noir, texte clair</div>
+  </div>
+</div>
+</div>
 </div>
 
 <!-- SETTINGS - MOT DE PASSE -->
