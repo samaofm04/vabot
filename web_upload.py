@@ -1785,6 +1785,43 @@ def _render_insta_accounts_html() -> str:
     return "".join(rows)
 
 
+def _format_count(n) -> str:
+    """1234 -> 1.2k, 1234567 -> 1.2M"""
+    try:
+        n = int(n or 0)
+    except Exception:
+        return "0"
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M".replace(".0M", "M")
+    if n >= 1_000:
+        return f"{n/1_000:.1f}k".replace(".0k", "k")
+    return str(n)
+
+
+def _time_ago(ts) -> str:
+    """Timestamp Unix -> '3 days ago' / 'just now'..."""
+    import time
+    try:
+        ts = int(ts or 0)
+    except Exception:
+        return ""
+    if not ts:
+        return ""
+    delta = int(time.time()) - ts
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{delta // 60} min ago"
+    if delta < 86400:
+        return f"{delta // 3600}h ago"
+    days = delta // 86400
+    if days < 30:
+        return f"{days} day{'s' if days > 1 else ''} ago"
+    if days < 365:
+        return f"{days // 30} month{'s' if days // 30 > 1 else ''} ago"
+    return f"{days // 365} year{'s' if days // 365 > 1 else ''} ago"
+
+
 def _render_insta_trends_grid_html() -> str:
     """Grille des reels scrapés depuis tous les comptes en watchlist."""
     try:
@@ -1807,67 +1844,102 @@ def _render_insta_trends_grid_html() -> str:
         )
     if not reels:
         return ""
+
+    # Calculer la moyenne de views par compte pour l'indicateur "Nx trending"
+    avg_views_by_owner = {}
+    counts_by_owner = {}
+    for r in reels:
+        owner = r.get("_owner", "?")
+        v = r.get("views") or 0
+        avg_views_by_owner[owner] = avg_views_by_owner.get(owner, 0) + v
+        counts_by_owner[owner] = counts_by_owner.get(owner, 0) + 1
+    for owner in avg_views_by_owner:
+        if counts_by_owner[owner] > 0:
+            avg_views_by_owner[owner] = avg_views_by_owner[owner] / counts_by_owner[owner]
     # Trier par views décroissant par défaut
     reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
-    cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:14px'>"]
+    cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
     for r in reels[:60]:
         thumb = r.get("thumbnail_url") or ""
         owner = r.get("_owner", "?")
         owner_pic = r.get("_owner_pp") or ""
         url = r.get("url", "#")
         video_url = r.get("video_url") or ""
-        views = r.get("views")
+        views = r.get("views") or 0
         likes = r.get("likes", 0)
         comments = r.get("comments", 0)
-        caption = (r.get("caption") or "")[:80]
+        caption = (r.get("caption") or "").replace('"', '&quot;')
+        caption_short = caption[:100]
         is_video = r.get("is_video")
-        play_badge = ""
-        if is_video:
-            play_badge = (
-                "<div class='play-badge' style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
-                "width:44px;height:44px;background:rgba(0,0,0,.65);border-radius:50%;"
-                "display:flex;align-items:center;justify-content:center;transition:opacity .2s'>"
-                "<svg viewBox='0 0 24 24' width='22' height='22' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
-                "</div>"
+        taken_at = r.get("taken_at", 0) or 0
+        time_ago = _time_ago(taken_at)
+        # Indicateur trending : combien de fois la moyenne du compte
+        avg = avg_views_by_owner.get(owner, 0)
+        if avg > 0 and views > 0:
+            ratio = views / avg
+            trending_x = f"{ratio:.1f}x" if ratio < 10 else f"{int(ratio)}x"
+        else:
+            trending_x = ""
+        trending_html = ""
+        if trending_x:
+            trending_html = (
+                '<div style="display:flex;align-items:center;gap:4px;color:#5cf266;font-weight:700;font-size:13px;margin-bottom:4px">'
+                '<svg viewBox="0 0 24 24" width="12" height="12" fill="#5cf266">'
+                '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/></svg>'
+                f'{trending_x}</div>'
             )
-        views_str = f"{views:,}" if views else "—"
-        # Avatar du créateur en haut à gauche
+        # Avatar
         avatar = ""
         if owner_pic:
-            avatar = f"<img src='{owner_pic}' style='width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #fff'>"
-        # Video preview au hover (mouseenter joue, mouseleave pause)
+            avatar = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+        # Video preview au hover
         video_html = ""
         if is_video and video_url:
             video_html = (
                 f"<video class='reel-video' src='{video_url}' muted loop preload='none' "
-                f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s' "
-                f"onmouseenter='this.play();this.style.opacity=1;this.parentElement.querySelector(\".play-badge\").style.opacity=0' "
-                f"onmouseleave='this.pause();this.style.opacity=0;this.parentElement.querySelector(\".play-badge\").style.opacity=1'></video>"
+                f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
-        taken_at = r.get("taken_at", 0) or 0
-        cards.append(
-            f"<div class='cloud-card reel-card' data-ts='{taken_at}' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden'>"
-            # Conteneur thumbnail/video avec hover
-            f"<div style='position:relative;width:100%;height:280px;background:#000;cursor:pointer' "
-            f"onmouseenter='var v=this.querySelector(\".reel-video\");if(v){{v.play();v.style.opacity=1;var b=this.querySelector(\".play-badge\");if(b)b.style.opacity=0}}' "
-            f"onmouseleave='var v=this.querySelector(\".reel-video\");if(v){{v.pause();v.style.opacity=0;var b=this.querySelector(\".play-badge\");if(b)b.style.opacity=1}}' "
-            f"onclick='window.open(\"{url}\",\"_blank\")'>"
-            f"<img src='{thumb}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
-            f"{video_html}"
-            f"{play_badge}"
-            # Avatar superposé
-            f"<div style='position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.5);padding:4px 10px 4px 4px;border-radius:20px;backdrop-filter:blur(8px)'>"
-            f"{avatar}<span style='color:#fff;font-size:12px;font-weight:600'>@{owner}</span>"
-            f"</div>"
-            f"</div>"
-            f"<div style='padding:10px 12px'>"
-            f"<div style='font-size:11px;color:#888;height:30px;overflow:hidden'>{caption}</div>"
-            f"<div style='display:flex;gap:10px;margin-top:8px;font-size:12px;color:#aaa'>"
-            f"<span>👁️ {views_str}</span>"
-            f"<span>❤️ {likes:,}</span>"
-            f"<span>💬 {comments:,}</span>"
-            f"</div></div></div>"
-        )
+        cards.append(f"""
+<div class="reel-card cloud-card" data-ts="{taken_at}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+  <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
+       onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.play();v.style.opacity=1}}'
+       onmouseleave='var v=this.querySelector(".reel-video");if(v){{v.pause();v.style.opacity=0}}'
+       onclick='window.open("{url}","_blank")'>
+    <img src="{thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">
+    {video_html}
+    <!-- Top: time ago left, actions right -->
+    <div style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:11px;font-weight:600;padding:5px 10px;border-radius:14px;z-index:2">{time_ago}</div>
+    <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:2" onclick="event.stopPropagation()">
+      <button onclick='this.querySelector("svg").style.color = (this.querySelector("svg").style.color === "rgb(255, 71, 87)" ? "#fff" : "#ff4757")' title="Mute" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+      </button>
+      <a href="{video_url or url}" target="_blank" download title="Télécharger" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </a>
+      <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
+      <button onclick='openLightbox("{video_url or thumb}", {"true" if is_video else "false"}, "@{owner}")' title="Plein écran" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+    </div>
+    <!-- Bottom: caption overlay + stats right -->
+    <div style="position:absolute;bottom:50px;left:10px;right:80px;color:#fff;font-size:12px;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.9);max-height:60px;overflow:hidden;z-index:1;pointer-events:none">{caption_short}</div>
+    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:1;pointer-events:none">
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(views)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
+    </div>
+    <!-- Trending indicator + username at bottom -->
+    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:8px 10px;z-index:2">
+      {trending_html}
+      <a href="https://www.instagram.com/{owner}/" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:6px;color:#fff;text-decoration:none;font-size:12px;font-weight:600">
+        {avatar}@{owner}
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
+      </a>
+    </div>
+  </div>
+</div>""")
     cards.append("</div>")
     cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
                  f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
