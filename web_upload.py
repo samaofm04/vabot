@@ -985,11 +985,10 @@ function showTab(group,name,title,subtitle){
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
 
-<!-- Sub-tabs style Insta : Pour toi / Explorer / Mes suivies -->
+<!-- Sub-tabs style Insta : Mes suivies / Explorer -->
 <div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
-  <button class="ig-feed-tab active" onclick="showFeed(this,'fortoi')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #5865f2;margin:0">⭐ Pour toi</button>
+  <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #5865f2;margin:0">👥 Mes suivies</button>
   <button class="ig-feed-tab" onclick="showFeed(this,'explore')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔍 Explorer</button>
-  <button class="ig-feed-tab" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">👥 Mes suivies</button>
 </div>
 <script>
 function showFeed(btn,name){
@@ -1005,7 +1004,7 @@ function showFeed(btn,name){
 }
 </script>
 
-<div id="feed-fortoi" class="ig-feed-content">
+<div id="feed-suivies" class="ig-feed-content">
 
 <!-- Barre de contrôles : Trending / Day / Week / Month / Filters -->
 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px">
@@ -1095,21 +1094,13 @@ function showFeed(btn,name){
 
 {insta_trends_html_or_empty}
 
-</div><!-- /feed-fortoi -->
+</div><!-- /feed-suivies -->
 
 <div id="feed-explore" class="ig-feed-content" style="display:none">
 <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666">
   <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:14px"><circle cx="12" cy="12" r="10"/><polyline points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
   <h3 style="margin:0 0 8px;color:#888">Explorer — Coming soon</h3>
   <p style="margin:0;font-size:14px">Découverte de comptes Instagram populaires que tu ne suis pas encore.<br>Nécessite l'endpoint <code>Explore Feed</code> de RapidAPI (à brancher).</p>
-</div>
-</div>
-
-<div id="feed-suivies" class="ig-feed-content" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">👥 Mes comptes suivis</h3>
-<small>Tes comptes Instagram en watchlist (clique <b>Accounts</b> dans la sidebar pour ajouter)</small>
-<div id="suivies-content">{insta_accounts_html_for_trends}</div>
 </div>
 </div>
 
