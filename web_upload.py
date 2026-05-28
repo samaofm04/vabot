@@ -2604,10 +2604,10 @@ function refreshSfsCalendar(){{
       b.textContent = nb_sched;
       barsEl.appendChild(b);
     }}
-    // Barre jaune clair #fbbf24 pour to_program (différencier)
+    // Barre grise #6b7280 pour to_program (différencier du orange)
     if(nb_prog){{
       var b = document.createElement('div');
-      b.style.cssText = 'background:#fbbf24;color:#000;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
+      b.style.cssText = 'background:#6b7280;color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;text-align:center;width:100%;box-sizing:border-box';
       b.textContent = nb_prog;
       barsEl.appendChild(b);
     }}
@@ -2647,7 +2647,7 @@ function refreshSfsDayPanel(){{
   items.forEach(function(x){{
     var statusBadge = x.status === 'scheduled'
       ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
-      : '<span style="background:#f59e0b;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
+      : '<span style="background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
     html += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">'
       + '<div style="display:flex;align-items:center;gap:8px">' + identityAvatarHtml(x.identity, 28)
       + '<div style="flex:1"><div style="font-weight:700;font-size:13px">' + x.identity + '</div><div style="font-size:11px;color:#888">@' + x.partner + '</div></div></div>'
@@ -2692,7 +2692,7 @@ function openSfsModal(date){{
     existing.forEach(function(x){{
       var statusBadge = x.status === 'scheduled'
         ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
-        : '<span style="background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
+        : '<span style="background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
       existingHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px">'
         + '<div style="display:flex;align-items:center;gap:10px">' + identityAvatarHtml(x.identity, 32)
         + '<div><b>' + x.identity + '</b> × @' + x.partner + ' <span style="color:#888">à ' + x.time + '</span></div></div>'
@@ -2793,7 +2793,7 @@ window.addEventListener('DOMContentLoaded', function(){{
             status_badge = (
                 "<span style='background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>SCHEDULED</span>"
                 if status == "scheduled" else
-                "<span style='background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>TO PROGRAM</span>"
+                "<span style='background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>TO PROGRAM</span>"
             )
             platform = it.get("platform", "OF")
             platform_color = "#3b82f6" if platform == "OF" else "#06b6d4"
