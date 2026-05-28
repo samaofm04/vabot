@@ -277,6 +277,56 @@ function igPeriod(btn, period){
   btn.style.background='#2a2a2a';
   btn.style.color='#fff';
 }
+function igToggleSort(){
+  var menu = document.getElementById('ig-sort-menu');
+  var arrow = document.getElementById('ig-sort-arrow');
+  var open = menu.style.display === 'block';
+  menu.style.display = open ? 'none' : 'block';
+  if(arrow) arrow.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+}
+function igSelectSort(btn, label){
+  document.getElementById('ig-sort-label').textContent = label;
+  document.querySelectorAll('.ig-sort-opt').forEach(function(b){
+    b.style.color='#aaa';
+    b.classList.remove('selected');
+    var c = b.querySelector('.check');
+    if(c) c.style.display='none';
+  });
+  btn.style.color='#fff';
+  btn.classList.add('selected');
+  var c = btn.querySelector('.check');
+  if(c) c.style.display='block';
+  igToggleSort(); // ferme le menu
+}
+// Fermer le menu si clic à l'extérieur
+document.addEventListener('click', function(e){
+  var menu = document.getElementById('ig-sort-menu');
+  if(!menu || menu.style.display !== 'block') return;
+  // Si clic à l'intérieur du bouton ou du menu, ne pas fermer
+  var sortContainer = menu.parentNode;
+  if(sortContainer && !sortContainer.contains(e.target)){
+    menu.style.display = 'none';
+    var arrow = document.getElementById('ig-sort-arrow');
+    if(arrow) arrow.style.transform = 'rotate(0deg)';
+  }
+});
+// Hover sur les options du dropdown
+document.addEventListener('mouseover', function(e){
+  if(e.target && e.target.classList && e.target.classList.contains('ig-sort-opt')){
+    if(!e.target.classList.contains('selected')){
+      e.target.style.background='#252525';
+      e.target.style.color='#fff';
+    }
+  }
+});
+document.addEventListener('mouseout', function(e){
+  if(e.target && e.target.classList && e.target.classList.contains('ig-sort-opt')){
+    e.target.style.background='none';
+    if(!e.target.classList.contains('selected')){
+      e.target.style.color='#aaa';
+    }
+  }
+});
 // Sélection multiple Cloud
 var selectedFiles = new Set();
 function toggleSelect(fileId, checked){
@@ -694,10 +744,23 @@ function showTab(group,name,title,subtitle){
 <!-- Barre de contrôles : Trending / Day / Week / Month / Filters -->
 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px">
 
-  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:8px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#fff">
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
-    <span style="font-weight:600;font-size:14px">Trending</span>
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+  <div style="position:relative">
+    <div onclick="igToggleSort()" style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:8px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#fff;user-select:none">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+      <span style="font-weight:600;font-size:14px" id="ig-sort-label">Trending</span>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" id="ig-sort-arrow" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div id="ig-sort-menu" style="display:none;position:absolute;top:46px;left:0;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:6px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:50">
+      <button onclick="igSelectSort(this,'Trending')" class="ig-sort-opt selected" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Trending<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Newest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Newest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Oldest')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Oldest<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Views')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Views<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Likes')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Likes<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Most Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Most Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+      <button onclick="igSelectSort(this,'Least Comments')" class="ig-sort-opt" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;border-radius:6px;text-align:left;margin:0;font-weight:500">Least Comments<svg class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg></button>
+    </div>
   </div>
 
   <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:4px;display:flex;gap:2px">
