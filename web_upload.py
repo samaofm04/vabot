@@ -8,6 +8,7 @@ import logging
 import threading
 import sys
 import time
+import subprocess
 from pathlib import Path
 
 log = logging.getLogger("vabot.web")
@@ -19,6 +20,9 @@ IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
 USERS_FILE = DATA_DIR / "users.json"
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
+THUMB_DIR = DATA_DIR / "thumbnails"
+THUMB_SIZE = 360  # largeur max du thumbnail
+THUMB_QUALITY = 72  # qualité JPEG (compromis taille/vitesse)
 
 WEB_PASSWORD = os.environ.get("WEB_UPLOAD_PASSWORD", "changeme")
 WEB_PORT = int(os.environ.get("WEB_UPLOAD_PORT", "8080"))
@@ -432,6 +436,28 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
+// Lightbox pour voir le fichier complet
+function openLightbox(url, isVideo, filename){
+  var modal = document.getElementById('lightbox');
+  var content = document.getElementById('lightbox-content');
+  if(isVideo){
+    content.innerHTML = '<video controls autoplay style="max-width:100%;max-height:80vh;background:#000;border-radius:8px"><source src="'+url+'"></video>';
+  } else {
+    content.innerHTML = '<img src="'+url+'" style="max-width:100%;max-height:80vh;object-fit:contain;display:block;border-radius:8px;background:#000">';
+  }
+  document.getElementById('lightbox-name').textContent = filename;
+  modal.style.display = 'flex';
+}
+function closeLightbox(){
+  var modal = document.getElementById('lightbox');
+  var content = document.getElementById('lightbox-content');
+  modal.style.display = 'none';
+  content.innerHTML = ''; // stoppe la vidéo et libère la mémoire
+}
+// Fermer avec Escape
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeLightbox();
+});
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
   if(!confirm('Supprimer ' + selectedFiles.size + ' fichier(s) ?\\nCette action est IRRÉVERSIBLE.')) return;
@@ -992,6 +1018,15 @@ function showTab(group,name,title,subtitle){
   <button onclick="deleteSelected()" style="padding:8px 18px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0">🗑 Supprimer</button>
 </div>
 
+<!-- Lightbox plein écran -->
+<div id="lightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;align-items:center;justify-content:center;padding:30px;animation:fadeIn .2s">
+  <div style="position:relative;max-width:90vw;max-height:90vh" onclick="event.stopPropagation()">
+    <button onclick="closeLightbox()" style="position:absolute;top:-46px;right:0;background:rgba(255,255,255,.1);border:0;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:22px;line-height:1;padding:0">×</button>
+    <div id="lightbox-content"></div>
+    <div id="lightbox-name" style="text-align:center;margin-top:14px;color:#aaa;font-family:monospace;font-size:13px"></div>
+  </div>
+</div>
+
 </div></body></html>
 """
 
@@ -1210,6 +1245,58 @@ def _render_identity_stats_html() -> str:
     return "".join(rows)
 
 
+def _thumb_path_for(rel_key: str) -> Path:
+    """Chemin du thumbnail pour une clé relative (genre 'amelia/videos/file.mp4')."""
+    return THUMB_DIR / f"{rel_key}.jpg"
+
+
+def _generate_image_thumbnail(src: Path, dest: Path) -> bool:
+    """Génère un thumbnail JPEG à partir d'une image."""
+    try:
+        from PIL import Image
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(src) as img:
+            img = img.convert("RGB")
+            img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
+            img.save(dest, "JPEG", quality=THUMB_QUALITY, optimize=True)
+        return True
+    except Exception as e:
+        log.error(f"Image thumbnail error pour {src}: {e}")
+        return False
+
+
+def _generate_video_thumbnail(src: Path, dest: Path) -> bool:
+    """Extrait une frame de la vidéo comme thumbnail via ffmpeg."""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-ss", "0.5",  # commencer à 0.5 sec
+            "-i", str(src),
+            "-vframes", "1",
+            "-vf", f"scale={THUMB_SIZE}:-2",
+            "-q:v", "5",
+            str(dest),
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=15)
+        return result.returncode == 0 and dest.exists()
+    except Exception as e:
+        log.error(f"Video thumbnail error pour {src}: {e}")
+        return False
+
+
+def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
+    """Retourne le path du thumbnail, en le générant si besoin."""
+    thumb = _thumb_path_for(rel_key)
+    if thumb.exists():
+        return thumb
+    if is_video:
+        ok = _generate_video_thumbnail(src, thumb)
+    else:
+        ok = _generate_image_thumbnail(src, thumb)
+    return thumb if ok else None
+
+
 def _fmt_size(p) -> str:
     try:
         size_kb = p.stat().st_size / 1024
@@ -1218,26 +1305,35 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, file_path, is_video: bool, file_id: str = "") -> str:
-    """Une carte avec preview du fichier + checkbox de sélection."""
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "") -> str:
+    """Une carte avec thumbnail (rapide) + clic pour ouvrir lightbox + checkbox."""
     name = file_path.name
     size = _fmt_size(file_path)
+    # Badge "play" superposé pour les vidéos
+    play_badge = ""
     if is_video:
-        media_html = (
-            f"<video controls preload='metadata' "
-            f"style='width:100%;height:160px;object-fit:cover;background:#000;border-radius:6px 6px 0 0'>"
-            f"<source src='{media_url}'></video>"
+        play_badge = (
+            "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+            "width:44px;height:44px;background:rgba(0,0,0,.65);border-radius:50%;"
+            "display:flex;align-items:center;justify-content:center;pointer-events:none'>"
+            "<svg viewBox='0 0 24 24' width='22' height='22' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
+            "</div>"
         )
-    else:
-        media_html = (
-            f"<img src='{media_url}' loading='lazy' "
-            f"style='width:100%;height:160px;object-fit:cover;border-radius:6px 6px 0 0;background:#000'>"
-        )
+    is_video_js = "true" if is_video else "false"
+    media_html = (
+        f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\")' "
+        f"style='cursor:pointer;position:relative;width:100%;height:160px;background:#000;border-radius:6px 6px 0 0;overflow:hidden'>"
+        f"<img src='{thumb_url}' loading='lazy' "
+        f"style='width:100%;height:100%;object-fit:cover;display:block'>"
+        f"{play_badge}"
+        f"</div>"
+    )
     checkbox_html = ""
     if file_id:
         checkbox_html = (
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
+            f"onclick='event.stopPropagation()' "
             f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#5865f2;background:#000;border-radius:4px'>"
         )
     return (
@@ -1280,8 +1376,9 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:10px'>")
         for p in files:
             url = f"/cloud/file/{ident}/{subdir}/{p.name}"
+            thumb_url = f"/cloud/thumb/{ident}/{subdir}/{p.name}"
             file_id = f"{ident}|{subdir}|{p.name}"
-            rows.append(_preview_card(url, p, is_video, file_id))
+            rows.append(_preview_card(url, thumb_url, p, is_video, file_id))
         rows.append("</div>")
     if not rows:
         return "<p style='color:#888'>Aucun fichier stocké.</p>"
@@ -1299,8 +1396,9 @@ def _render_cloud_pps_html() -> str:
     rows = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
     for p in files:
         url = f"/cloud/pp/{p.name}"
+        thumb_url = f"/cloud/thumb/pp/{p.name}"
         file_id = f"_pp_|pp|{p.name}"
-        rows.append(_preview_card(url, p, is_video=False, file_id=file_id))
+        rows.append(_preview_card(url, thumb_url, p, is_video=False, file_id=file_id))
     rows.append(f"</div><div style='margin-top:18px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
     return "".join(rows)
 
@@ -1470,6 +1568,55 @@ def create_app():
             return _render_upload(f"Fichier existe déjà", error=True)
         photo.save(str(target))
         return _render_upload(f"✅ Story CTA ajoutée à {identity}")
+
+    @app.route("/cloud/thumb/<identity>/<subdir>/<path:filename>")
+    def cloud_thumb_file(identity, subdir, filename):
+        if not is_auth():
+            return redirect("/")
+        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+            return "Not found", 404
+        safe_identity = identity.lower().strip()
+        if safe_identity not in _list_identities():
+            return "Not found", 404
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return "Forbidden", 403
+        src = IDENTITIES_DIR / safe_identity / subdir / filename
+        if not src.exists() or not src.is_file():
+            return "Not found", 404
+        rel_key = f"{safe_identity}/{subdir}/{filename}"
+        is_video = subdir == "videos"
+        thumb = _get_or_create_thumbnail(src, rel_key, is_video)
+        if thumb is None or not thumb.exists():
+            # Fallback : servir le fichier original
+            from flask import send_file
+            response = send_file(str(src))
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            return response
+        from flask import send_file
+        response = send_file(str(thumb))
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
+
+    @app.route("/cloud/thumb/pp/<path:filename>")
+    def cloud_thumb_pp(filename):
+        if not is_auth():
+            return redirect("/")
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return "Forbidden", 403
+        src = PROFILE_PICS_DIR / filename
+        if not src.exists() or not src.is_file():
+            return "Not found", 404
+        rel_key = f"pp/{filename}"
+        thumb = _get_or_create_thumbnail(src, rel_key, is_video=False)
+        if thumb is None or not thumb.exists():
+            from flask import send_file
+            response = send_file(str(src))
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            return response
+        from flask import send_file
+        response = send_file(str(thumb))
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
 
     @app.route("/cloud/file/<identity>/<subdir>/<path:filename>")
     def cloud_serve_file(identity, subdir, filename):
