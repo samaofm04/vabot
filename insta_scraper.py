@@ -224,45 +224,46 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
         "pk": user.get("pk") or user.get("id"),
     }
 
-    # 2) User reels (POST + form data)
+    # 2) User reels (POST + form data) - structure : {"reels": [{"node": {"media": {...}}}]}
     reels = []
     try:
         r = requests.post(
             f"{base}/ig_get_user_reels.php",
             headers=headers,
-            data={"username_or_url": username, "amount": str(limit)},
+            data={"username_or_url": username, "amount": str(limit), "pagination_token": ""},
             timeout=25,
         )
         if r.status_code == 200:
             posts_data = r.json()
-            # Format variable - chercher la liste des items
-            items = (
-                posts_data.get("items")
-                or posts_data.get("data")
-                or posts_data.get("reels")
-                or posts_data.get("posts")
-                or []
-            )
-            if isinstance(items, dict):
-                items = items.get("items") or items.get("reels") or []
+            items = posts_data.get("reels") or posts_data.get("items") or posts_data.get("data") or []
             for it in items[:limit]:
                 try:
-                    media = it.get("media") or it
+                    # Structure imbriquée : it.node.media
+                    node = it.get("node") if isinstance(it, dict) else None
+                    if node and isinstance(node, dict):
+                        media = node.get("media", node)
+                    else:
+                        media = it.get("media") if isinstance(it, dict) else it
+                    if not isinstance(media, dict):
+                        continue
                     shortcode = media.get("code") or media.get("shortcode") or ""
                     is_video = media.get("media_type") == 2 or media.get("is_video", True)
+                    # Caption (cette API n'en renvoie pas pour reels)
                     caption_obj = media.get("caption")
                     if isinstance(caption_obj, dict):
                         caption = caption_obj.get("text", "")
                     else:
-                        caption = caption_obj or ""
-                    # Thumbnail
+                        caption = str(caption_obj) if caption_obj else ""
+                    # Thumbnail (prendre la plus petite version pour rapidité)
                     thumb = ""
-                    iv2 = media.get("image_versions2", {}).get("candidates", [])
-                    if iv2:
-                        thumb = iv2[0].get("url", "")
+                    iv2 = media.get("image_versions2", {})
+                    candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
+                    if candidates:
+                        # Prendre une taille moyenne ou la 1ère
+                        thumb = candidates[0].get("url", "")
                     if not thumb:
                         thumb = media.get("thumbnail_url") or media.get("display_url") or ""
-                    # Video URL
+                    # Video URL (1ère = type 101, généralement la meilleure)
                     video_url = None
                     vv = media.get("video_versions", [])
                     if vv:
@@ -275,7 +276,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         "views": media.get("play_count") or media.get("video_view_count") or media.get("view_count"),
                         "likes": media.get("like_count") or 0,
                         "comments": media.get("comment_count") or 0,
-                        "caption": str(caption)[:280],
+                        "caption": caption[:280],
                         "thumbnail_url": thumb,
                         "video_url": video_url,
                         "date": "",
