@@ -864,9 +864,17 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
       SFS Planning
     </button>
+    <button class="item" id="tab-revenus" onclick="showTab('business','revenus','💬 Revenus chatteurs','Revenus OnlyFans par chatteur et identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      Revenus
+    </button>
     <button class="item" id="tab-depenses" onclick="showTab('business','depenses','Dépenses','Suivi des couts')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Dépenses
+    </button>
+    <button class="item" id="tab-paievas" onclick="showTab('business','paievas','💸 Paie VAs','Ce que tu dois payer aux VAs')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      Paie VAs
     </button>
     <button class="item" id="tab-bilan" onclick="showTab('business','bilan','Bilan','Synthese de ton activite')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
@@ -1254,9 +1262,19 @@ function showFeed(btn,name){
 {sfs_html}
 </div>
 
+<!-- BUSINESS - REVENUS -->
+<div class="form-section" id="form-revenus" style="display:none">
+{revenus_html}
+</div>
+
 <!-- BUSINESS - DÉPENSES -->
 <div class="form-section" id="form-depenses" style="display:none">
 {depenses_html}
+</div>
+
+<!-- BUSINESS - PAIE VAs -->
+<div class="form-section" id="form-paievas" style="display:none">
+{paievas_html}
 </div>
 
 <!-- BUSINESS - BILAN -->
@@ -2164,51 +2182,272 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
+def _render_revenus_html() -> str:
+    try:
+        from business import list_revenues, revenue_stats
+    except Exception as e:
+        return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    identities = _list_identities()
+    ident_opts = "".join(f"<option value='{i}'>{i}</option>" for i in identities)
+    if not ident_opts:
+        ident_opts = "<option value=''>(aucune identité)</option>"
+    import datetime
+    today = datetime.date.today().isoformat()
+    items = list_revenues()
+    stats = revenue_stats()
+    rows = []
+    rows.append(
+        "<div class='stat-grid' style='margin-bottom:16px'>"
+        f"<div class='stat'><div class='v' style='color:#00d68f'>+{stats['total_this_month']:.0f}€</div><div class='l'>Revenus ce mois</div></div>"
+        f"<div class='stat'><div class='v' style='color:#00d68f'>+{stats['total_all_time']:.0f}€</div><div class='l'>Total revenus</div></div>"
+        f"<div class='stat'><div class='v'>{len(stats.get('by_chatter', {}))}</div><div class='l'>Chatteurs uniques</div></div>"
+        f"<div class='stat'><div class='v'>{len(stats.get('by_identity', {}))}</div><div class='l'>Identités sources</div></div>"
+        "</div>"
+    )
+    rows.append(
+        f"<form method='POST' action='/business/revenue/add' class='box'>"
+        f"<h4 style='margin-top:0'>➕ Nouveau revenu</h4>"
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px'>"
+        f"<div><label>Identité</label><select name='identity' required>{ident_opts}</select></div>"
+        f"<div><label>Chatteur</label><input type='text' name='chatter' placeholder='Nom du chatteur' required></div>"
+        f"<div><label>Montant (€)</label><input type='number' name='amount' step='0.01' min='0' value='100' required></div>"
+        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
+        f"<div><label>Source</label><select name='source'><option>OnlyFans</option><option>Fansly</option><option>Snap</option><option>Autre</option></select></div>"
+        f"</div>"
+        f"<label>Notes</label>"
+        f"<input type='text' name='notes' placeholder='PPV, abonnement, tip...' maxlength='200'>"
+        f"<button type='submit'>Ajouter</button>"
+        f"</form>"
+    )
+    # Breakdown par identité et chatteur
+    if stats.get("by_identity"):
+        rows.append("<div class='box'><h4 style='margin-top:0'>💰 Par identité</h4>")
+        max_v = max(stats["by_identity"].values())
+        for ident, amt in sorted(stats["by_identity"].items(), key=lambda x: x[1], reverse=True):
+            pct = (amt / max_v) * 100 if max_v else 0
+            rows.append(
+                f"<div style='margin-bottom:10px'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px'>"
+                f"<span><b>{ident}</b></span><b style='color:#00d68f'>+{amt:.2f}€</b></div>"
+                f"<div style='background:#0f0f0f;border-radius:4px;height:8px;overflow:hidden'>"
+                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#00d68f,#5cf266);height:100%'></div>"
+                f"</div></div>"
+            )
+        rows.append("</div>")
+    # Tableau revenus
+    if not items:
+        rows.append("<p style='color:#888'>Aucun revenu enregistré.</p>")
+    else:
+        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Historique</h4>")
+        rows.append(
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:8px;text-align:left'>Date</th>"
+            "<th style='padding:8px;text-align:left'>Identité</th>"
+            "<th style='padding:8px;text-align:left'>Chatteur</th>"
+            "<th style='padding:8px;text-align:left'>Source</th>"
+            "<th style='padding:8px;text-align:left'>Notes</th>"
+            "<th style='padding:8px;text-align:right'>Montant</th>"
+            "<th style='padding:8px'></th>"
+            "</tr>"
+        )
+        for it in items[:50]:
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
+                f"<td style='padding:8px'><b>{it.get('identity','')}</b></td>"
+                f"<td style='padding:8px'>{it.get('chatter','')}</td>"
+                f"<td style='padding:8px;font-size:12px;color:#aaa'>{it.get('source','')}</td>"
+                f"<td style='padding:8px;font-size:13px;color:#aaa'>{it.get('notes','')}</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:600;color:#00d68f'>+{it.get('amount',0):.2f}€</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/business/revenue/remove' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' class='danger-btn' data-confirm='Supprimer ce revenu ?'>×</button>"
+                f"</form></td></tr>"
+            )
+        rows.append("</table></div>")
+    return "".join(rows)
+
+
+def _render_paievas_html() -> str:
+    try:
+        from business import list_va_payments, va_payment_stats
+    except Exception as e:
+        return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    # Récupérer les VAs depuis users.json
+    users = _load_users()
+    va_opts = []
+    for uid, data in users.items():
+        if isinstance(data, dict):
+            username = _resolve_username(uid)
+            identity = data.get("identity", "?")
+            va_opts.append((uid, username, identity))
+    va_select = ""
+    if va_opts:
+        va_select = "".join(f"<option value='{u}'>@{u} ({i})</option>" for _, u, i in va_opts)
+    else:
+        va_select = "<option value=''>(aucun VA enregistré)</option>"
+    import datetime
+    today = datetime.date.today().isoformat()
+    items = list_va_payments()
+    stats = va_payment_stats()
+    rows = []
+    rows.append(
+        "<div class='stat-grid' style='margin-bottom:16px'>"
+        f"<div class='stat'><div class='v' style='color:#ffb800'>{stats['total_unpaid']:.0f}€</div><div class='l'>À payer (en attente)</div></div>"
+        f"<div class='stat'><div class='v' style='color:#00d68f'>{stats['total_paid']:.0f}€</div><div class='l'>Déjà payé</div></div>"
+        f"<div class='stat'><div class='v'>{stats['total_due']:.0f}€</div><div class='l'>Total dû</div></div>"
+        f"<div class='stat'><div class='v'>{len(stats.get('by_va', {}))}</div><div class='l'>VAs concernés</div></div>"
+        "</div>"
+    )
+    rows.append(
+        f"<form method='POST' action='/business/vapayment/add' class='box'>"
+        f"<h4 style='margin-top:0'>➕ Nouveau paiement VA</h4>"
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'>"
+        f"<div><label>VA</label><select name='va_username' required>{va_select}</select></div>"
+        f"<div><label>Montant (€)</label><input type='number' name='amount' step='0.01' min='0' value='50' required></div>"
+        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
+        f"<div><label>Méthode</label><select name='payment_method'><option value=''>(non spécifié)</option><option>PayPal</option><option>Virement</option><option>Crypto</option><option>Espèces</option><option>Autre</option></select></div>"
+        f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='paid' style='width:auto;margin:0'> Déjà payé</label></div>"
+        f"</div>"
+        f"<label>Description (ce qui est payé)</label>"
+        f"<input type='text' name='description' placeholder='5 reels postés, mois mai...' required maxlength='200'>"
+        f"<button type='submit'>Ajouter</button>"
+        f"</form>"
+    )
+    # Breakdown par VA
+    if stats.get("by_va"):
+        rows.append("<div class='box'><h4 style='margin-top:0'>👥 Par VA</h4>")
+        rows.append("<table style='width:100%;border-collapse:collapse'>")
+        rows.append("<tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>VA</th><th style='padding:8px;text-align:right'>Payé</th><th style='padding:8px;text-align:right'>À payer</th><th style='padding:8px;text-align:right'>Total</th></tr>")
+        for va, v in sorted(stats["by_va"].items(), key=lambda x: x[1]["paid"] + x[1]["unpaid"], reverse=True):
+            total = v["paid"] + v["unpaid"]
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:8px'>@{va}</td>"
+                f"<td style='padding:8px;text-align:right;color:#00d68f'>{v['paid']:.2f}€</td>"
+                f"<td style='padding:8px;text-align:right;color:#ffb800'>{v['unpaid']:.2f}€</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:700'>{total:.2f}€</td>"
+                f"</tr>"
+            )
+        rows.append("</table></div>")
+    # Tableau de tous les paiements
+    if not items:
+        rows.append("<p style='color:#888'>Aucun paiement enregistré.</p>")
+    else:
+        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Historique</h4>")
+        rows.append(
+            "<table style='width:100%;border-collapse:collapse'>"
+            "<tr style='background:#1a1a1a'>"
+            "<th style='padding:8px;text-align:center'>État</th>"
+            "<th style='padding:8px;text-align:left'>Date</th>"
+            "<th style='padding:8px;text-align:left'>VA</th>"
+            "<th style='padding:8px;text-align:left'>Description</th>"
+            "<th style='padding:8px;text-align:left'>Méthode</th>"
+            "<th style='padding:8px;text-align:right'>Montant</th>"
+            "<th style='padding:8px'></th>"
+            "</tr>"
+        )
+        for it in items[:50]:
+            paid = it.get("paid", False)
+            badge = "<span style='background:#00d68f;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700'>PAYÉ</span>" if paid else "<span style='background:#ffb800;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700'>À PAYER</span>"
+            color = "color:#00d68f" if paid else "color:#ffb800"
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:8px;text-align:center'>"
+                f"<form method='POST' action='/business/vapayment/toggle' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' style='background:none;border:0;cursor:pointer;padding:0;margin:0'>{badge}</button>"
+                f"</form></td>"
+                f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
+                f"<td style='padding:8px'>@{it.get('va_username','')}</td>"
+                f"<td style='padding:8px'>{it.get('description','')}</td>"
+                f"<td style='padding:8px;font-size:12px;color:#aaa'>{it.get('payment_method','')}</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:600;{color}'>{it.get('amount',0):.2f}€</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/business/vapayment/remove' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<button type='submit' class='danger-btn' data-confirm='Supprimer ce paiement ?'>×</button>"
+                f"</form></td></tr>"
+            )
+        rows.append("</table></div>")
+    return "".join(rows)
+
+
 def _render_bilan_html() -> str:
     try:
-        from business import expense_stats, sfs_stats, list_expenses
+        from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats
         from insta_scraper import load_watchlist
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
     exp = expense_stats()
+    rev = revenue_stats()
     sfs = sfs_stats()
+    pay = va_payment_stats()
     try:
         nb_va = len(_load_users())
     except Exception:
         nb_va = 0
     nb_ident = len(_list_identities())
-    try:
-        nb_watch = len(load_watchlist())
-    except Exception:
-        nb_watch = 0
+    # Profit net = revenus - dépenses - paie VAs payés
+    profit_month = rev["total_this_month"] - exp["total_this_month"]
+    profit_all = rev["total_all_time"] - exp["total_all_time"] - pay["total_paid"]
+    profit_color = "#00d68f" if profit_month >= 0 else "#f99"
+    profit_sign = "+" if profit_month >= 0 else ""
     rows = []
-    # Stats globales
+    # Stats GROSSES en haut : profit net
     rows.append(
-        "<div class='stat-grid'>"
-        f"<div class='stat'><div class='v' style='color:#f99'>-{exp['total_this_month']:.0f}€</div><div class='l'>Dépenses ce mois</div></div>"
-        f"<div class='stat'><div class='v' style='color:#ffb800'>-{exp['monthly_recurring']:.0f}€</div><div class='l'>Récurrent / mois</div></div>"
-        f"<div class='stat'><div class='v'>-{exp['total_all_time']:.0f}€</div><div class='l'>Total dépenses</div></div>"
-        f"<div class='stat'><div class='v'>{nb_va}</div><div class='l'>VAs actifs</div></div>"
-        f"<div class='stat'><div class='v'>{nb_ident}</div><div class='l'>Identités</div></div>"
-        f"<div class='stat'><div class='v'>{sfs['total']}</div><div class='l'>SFS planifiés</div></div>"
+        "<div class='box' style='background:linear-gradient(135deg,#1a1a2e,#16213e);text-align:center;border:1px solid #5865f2;margin-bottom:16px'>"
+        f"<div style='color:#888;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px'>Profit net ce mois</div>"
+        f"<div style='font-size:48px;font-weight:800;color:{profit_color}'>{profit_sign}{profit_month:.0f}€</div>"
+        f"<div style='display:flex;justify-content:center;gap:24px;margin-top:14px;font-size:14px;color:#aaa'>"
+        f"<span>📈 +{rev['total_this_month']:.0f}€ revenus</span>"
+        f"<span>📉 -{exp['total_this_month']:.0f}€ dépenses</span>"
+        f"</div>"
         "</div>"
     )
-    # Par catégorie
+    # Stats secondaires
+    rows.append(
+        "<div class='stat-grid'>"
+        f"<div class='stat'><div class='v' style='color:#00d68f'>+{rev['total_all_time']:.0f}€</div><div class='l'>Revenus total</div></div>"
+        f"<div class='stat'><div class='v' style='color:#f99'>-{exp['total_all_time']:.0f}€</div><div class='l'>Dépenses total</div></div>"
+        f"<div class='stat'><div class='v' style='color:#ffb800'>{pay['total_unpaid']:.0f}€</div><div class='l'>À payer VAs</div></div>"
+        f"<div class='stat'><div class='v' style='color:#ffb800'>-{exp['monthly_recurring']:.0f}€</div><div class='l'>Récurrent / mois</div></div>"
+        f"<div class='stat'><div class='v'>{nb_va}</div><div class='l'>VAs actifs</div></div>"
+        f"<div class='stat'><div class='v'>{nb_ident}</div><div class='l'>Identités</div></div>"
+        "</div>"
+    )
+    # Top performers : revenus par identité
+    if rev.get("by_identity"):
+        rows.append("<div class='box'><h4 style='margin-top:0'>🏆 Revenus par identité</h4>")
+        max_v = max(rev["by_identity"].values())
+        for ident, amt in sorted(rev["by_identity"].items(), key=lambda x: x[1], reverse=True):
+            pct = (amt / max_v) * 100 if max_v else 0
+            rows.append(
+                f"<div style='margin-bottom:10px'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px'>"
+                f"<b>{ident}</b><b style='color:#00d68f'>+{amt:.2f}€</b></div>"
+                f"<div style='background:#0f0f0f;border-radius:4px;height:8px;overflow:hidden'>"
+                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#00d68f,#5cf266);height:100%'></div>"
+                f"</div></div>"
+            )
+        rows.append("</div>")
+    # Dépenses par catégorie
     rows.append("<div class='box'><h4 style='margin-top:0'>📊 Dépenses par catégorie</h4>")
     by_cat = exp.get("by_category", {})
     if not by_cat:
         rows.append("<p style='color:#888;margin:0'>Aucune dépense enregistrée.</p>")
     else:
         max_amount = max(by_cat.values())
-        sorted_cats = sorted(by_cat.items(), key=lambda x: x[1], reverse=True)
-        for cat, amount in sorted_cats:
+        for cat, amount in sorted(by_cat.items(), key=lambda x: x[1], reverse=True):
             pct = (amount / max_amount) * 100 if max_amount > 0 else 0
             rows.append(
                 f"<div style='margin-bottom:10px'>"
                 f"<div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px'>"
                 f"<span style='color:#ccc'>{cat}</span><b style='color:#f99'>-{amount:.2f}€</b></div>"
                 f"<div style='background:#0f0f0f;border-radius:4px;height:8px;overflow:hidden'>"
-                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#5865f2,#a855f7);height:100%'></div>"
+                f"<div style='width:{pct:.1f}%;background:linear-gradient(90deg,#f87171,#ef4444);height:100%'></div>"
                 f"</div></div>"
             )
     rows.append("</div>")
@@ -2287,7 +2526,9 @@ def _render_upload(msg=None, error=None):
         .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
         .replace("{cloud_pps_html}", _render_cloud_pps_html())
         .replace("{sfs_html}", _render_sfs_html())
+        .replace("{revenus_html}", _render_revenus_html())
         .replace("{depenses_html}", _render_depenses_html())
+        .replace("{paievas_html}", _render_paievas_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
@@ -2668,6 +2909,99 @@ def create_app():
         if remove_expense(iid):
             return _success("✅ Dépense supprimée")
         return _error("❌ Dépense introuvable")
+
+    @app.route("/business/revenue/add", methods=["POST"])
+    def business_revenue_add():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import add_revenue
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        identity = (request.form.get("identity") or "").strip()
+        chatter = (request.form.get("chatter") or "").strip()
+        date = (request.form.get("date") or "").strip()
+        source = (request.form.get("source") or "OnlyFans").strip()
+        notes = (request.form.get("notes") or "").strip()
+        try:
+            amount = float(request.form.get("amount") or "0")
+        except Exception:
+            return _error("❌ Montant invalide")
+        if not identity or not chatter or not date or amount <= 0:
+            return _error("❌ Champs requis manquants")
+        add_revenue(identity, chatter, amount, date, source, notes)
+        return _success(f"✅ Revenu ajouté : <b>+{amount:.2f}€</b> via {chatter} pour {identity}")
+
+    @app.route("/business/revenue/remove", methods=["POST"])
+    def business_revenue_remove():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import remove_revenue
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if remove_revenue(iid):
+            return _success("✅ Revenu supprimé")
+        return _error("❌ Revenu introuvable")
+
+    @app.route("/business/vapayment/add", methods=["POST"])
+    def business_vapayment_add():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import add_va_payment
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        va_username = (request.form.get("va_username") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        date = (request.form.get("date") or "").strip()
+        method = (request.form.get("payment_method") or "").strip()
+        paid = request.form.get("paid") == "on"
+        try:
+            amount = float(request.form.get("amount") or "0")
+        except Exception:
+            return _error("❌ Montant invalide")
+        if not va_username or not description or not date or amount <= 0:
+            return _error("❌ Champs requis manquants")
+        add_va_payment(va_username, amount, date, description, paid, method)
+        status = "payé" if paid else "à payer"
+        return _success(f"✅ Paiement ajouté : <b>@{va_username}</b> {amount:.2f}€ ({status})")
+
+    @app.route("/business/vapayment/toggle", methods=["POST"])
+    def business_vapayment_toggle():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import toggle_va_payment_paid
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if toggle_va_payment_paid(iid):
+            return _success("✅ Statut paiement modifié")
+        return _error("❌ Paiement introuvable")
+
+    @app.route("/business/vapayment/remove", methods=["POST"])
+    def business_vapayment_remove():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import remove_va_payment
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            iid = int(request.form.get("id", "0"))
+        except Exception:
+            return _error("❌ ID invalide")
+        if remove_va_payment(iid):
+            return _success("✅ Paiement supprimé")
+        return _error("❌ Paiement introuvable")
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
     def settings_insta_rapidapi():
