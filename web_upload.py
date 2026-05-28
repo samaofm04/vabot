@@ -1153,6 +1153,11 @@ function showTab(group,name,title,subtitle){
 <small>Lance un test avec @instagram pour vérifier que ta clé fonctionne.</small>
 <button type="submit" style="background:#00d68f">▶ Tester maintenant</button>
 </form>
+<form method="POST" action="/insta/reset_rapidapi_host" class="box">
+<h4 style="margin-top:0">🔄 Reset host (si tu l'as cassé)</h4>
+<small>Réinitialise le host à <code>instagram-scraper-stable-api.p.rapidapi.com</code> (la clé est conservée).</small>
+<button type="submit" style="background:#ffb800;color:#000">↻ Reset host par défaut</button>
+</form>
 
 <div style="margin:24px 0;border-top:1px solid #2a2a2a;padding-top:20px">
 <h4 style="margin:0 0 8px;color:#888">— OU méthode gratuite (rate-limitée) —</h4>
@@ -2119,16 +2124,31 @@ def create_app():
         except Exception as e:
             return _error(f"❌ Module indispo: {e}")
         key = (request.form.get("rapidapi_key") or "").strip()
-        host = (request.form.get("rapidapi_host") or "").strip() or "instagram-scraper-stable-api.p.rapidapi.com"
+        host = (request.form.get("rapidapi_host") or "").strip()
+        # Validation host : doit ressembler à un domaine
+        DEFAULT_HOST = "instagram-scraper-stable-api.p.rapidapi.com"
+        looks_valid_host = (
+            host
+            and "." in host
+            and "/" not in host
+            and ":" not in host
+            and " " not in host
+            and len(host) < 100
+            and not host.startswith("http")
+        )
+        if not looks_valid_host:
+            host = DEFAULT_HOST
         if not key or len(key) < 20:
-            return _error("❌ Clé RapidAPI invalide (trop courte)")
+            return _error("❌ Clé RapidAPI invalide (trop courte). Récupère-la sur RapidAPI → ton API → x-rapidapi-key")
         # Garder cookies existants si présents
         current = load_auth()
         current["rapidapi_key"] = key
         current["rapidapi_host"] = host
         save_auth(current)
-        return _success("✅ Clé RapidAPI sauvegardée. Tu peux maintenant ajouter des comptes "
-            "à scraper sans limite de rate.")
+        return _success(
+            f"✅ Sauvegardé. Host : <code>{host}</code> — Clé : <code>{key[:6]}...{key[-4:]}</code>. "
+            f"Teste avec le bouton ▶ Tester maintenant."
+        )
 
     @app.route("/settings/insta_auth_file", methods=["POST"])
     def settings_insta_auth_file():
@@ -2237,6 +2257,19 @@ def create_app():
         if ok:
             return _success(f"✅ <b>@{u}</b> retiré")
         return _error(f"⚠️ @{u} introuvable")
+
+    @app.route("/insta/reset_rapidapi_host", methods=["POST"])
+    def insta_reset_host():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import load_auth, save_auth
+        except Exception as e:
+            return _error(f"❌ Module indispo: {e}")
+        current = load_auth()
+        current["rapidapi_host"] = "instagram-scraper-stable-api.p.rapidapi.com"
+        save_auth(current)
+        return _success("✅ Host réinitialisé à <code>instagram-scraper-stable-api.p.rapidapi.com</code>")
 
     @app.route("/insta/test_rapidapi", methods=["POST"])
     def insta_test_rapidapi():
