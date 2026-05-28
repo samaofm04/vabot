@@ -165,8 +165,12 @@ def _make_loader() -> Optional["instaloader.Instaloader"]:
 def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     """Scrape via RapidAPI : Instagram Scraper Stable API.
 
-    Endpoint : instagram-scraper-stable-api.p.rapidapi.com
-    Auth nécessaire : auth['rapidapi_key']
+    Endpoints utilisés:
+    - /ig_get_fb_profile_v3.php : profil (Account Data V2)
+    - /ig_get_user_reels.php : reels (User Reels) [à vérifier]
+
+    Method: POST avec body form-urlencoded.
+    Param: username_or_url
     """
     import requests
     auth = load_auth()
@@ -177,16 +181,16 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     headers = {
         "x-rapidapi-key": api_key,
         "x-rapidapi-host": host,
-        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
     }
     base = f"https://{host}"
 
-    # 1) Profile info
+    # 1) Profile info via Account Data V2 endpoint (POST + form data)
     try:
-        r = requests.get(
-            f"{base}/get_ig_user_data.php",
+        r = requests.post(
+            f"{base}/ig_get_fb_profile_v3.php",
             headers=headers,
-            params={"username_or_url": username},
+            data={"username_or_url": username},
             timeout=20,
         )
         if r.status_code == 401 or r.status_code == 403:
@@ -194,73 +198,96 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
         if r.status_code == 429:
             return {"error": "Quota RapidAPI dépassé (HTTP 429)"}
         if r.status_code != 200:
-            return {"error": f"RapidAPI profil: HTTP {r.status_code}"}
-        pdata = r.json()
-        # Format variable selon l'API ; chercher les champs communs
-        user = pdata.get("data") or pdata.get("user") or pdata
+            return {"error": f"RapidAPI profil: HTTP {r.status_code}: {r.text[:200]}"}
+        user = r.json()
+        if "error" in user or "message" in user and not user.get("username"):
+            return {"error": f"API: {user.get('error') or user.get('message')}"}
     except Exception as e:
         return {"error": f"Erreur fetch profil: {e}"}
 
+    pic = ""
+    if isinstance(user.get("hd_profile_pic_url_info"), dict):
+        pic = user["hd_profile_pic_url_info"].get("url", "")
+    if not pic:
+        pic = user.get("profile_pic_url", "")
+
     profile_data = {
         "username": user.get("username") or username,
-        "full_name": user.get("full_name") or user.get("fullName") or "",
-        "followers": user.get("follower_count") or user.get("followers") or
-                     user.get("edge_followed_by", {}).get("count", 0) if isinstance(user.get("edge_followed_by"), dict) else 0,
-        "following": user.get("following_count") or user.get("following") or 0,
-        "posts_count": user.get("media_count") or user.get("posts_count") or 0,
-        "profile_pic_url": user.get("profile_pic_url_hd") or user.get("profile_pic_url") or "",
+        "full_name": user.get("full_name", ""),
+        "followers": user.get("follower_count", 0),
+        "following": user.get("following_count", 0),
+        "posts_count": user.get("media_count", 0),
+        "profile_pic_url": pic,
         "biography": (user.get("biography") or "")[:300],
         "is_private": user.get("is_private", False),
         "is_verified": user.get("is_verified", False),
+        "pk": user.get("pk") or user.get("id"),
     }
 
-    # 2) User posts/reels
+    # 2) User reels (POST + form data)
     reels = []
     try:
-        r = requests.get(
-            f"{base}/get_ig_user_posts.php",
+        r = requests.post(
+            f"{base}/ig_get_user_reels.php",
             headers=headers,
-            params={"username_or_url": username},
-            timeout=20,
+            data={"username_or_url": username, "amount": str(limit)},
+            timeout=25,
         )
         if r.status_code == 200:
             posts_data = r.json()
-            items = posts_data.get("data") or posts_data.get("items") or posts_data.get("posts") or []
+            # Format variable - chercher la liste des items
+            items = (
+                posts_data.get("items")
+                or posts_data.get("data")
+                or posts_data.get("reels")
+                or posts_data.get("posts")
+                or []
+            )
             if isinstance(items, dict):
-                items = items.get("items", [])
+                items = items.get("items") or items.get("reels") or []
             for it in items[:limit]:
                 try:
-                    shortcode = it.get("code") or it.get("shortcode") or ""
-                    is_video = (it.get("media_type") == 2) or it.get("is_video", False)
-                    caption_obj = it.get("caption")
+                    media = it.get("media") or it
+                    shortcode = media.get("code") or media.get("shortcode") or ""
+                    is_video = media.get("media_type") == 2 or media.get("is_video", True)
+                    caption_obj = media.get("caption")
                     if isinstance(caption_obj, dict):
                         caption = caption_obj.get("text", "")
                     else:
                         caption = caption_obj or ""
                     # Thumbnail
                     thumb = ""
-                    iv2 = it.get("image_versions2", {}).get("candidates", [])
+                    iv2 = media.get("image_versions2", {}).get("candidates", [])
                     if iv2:
                         thumb = iv2[0].get("url", "")
                     if not thumb:
-                        thumb = it.get("thumbnail_url") or it.get("display_url") or ""
+                        thumb = media.get("thumbnail_url") or media.get("display_url") or ""
+                    # Video URL
+                    video_url = None
+                    vv = media.get("video_versions", [])
+                    if vv:
+                        video_url = vv[0].get("url")
+                    if not video_url:
+                        video_url = media.get("video_url")
                     reel = {
                         "shortcode": shortcode,
                         "is_video": is_video,
-                        "views": it.get("play_count") or it.get("video_view_count"),
-                        "likes": it.get("like_count") or it.get("likes") or 0,
-                        "comments": it.get("comment_count") or it.get("comments") or 0,
+                        "views": media.get("play_count") or media.get("video_view_count") or media.get("view_count"),
+                        "likes": media.get("like_count") or 0,
+                        "comments": media.get("comment_count") or 0,
                         "caption": str(caption)[:280],
                         "thumbnail_url": thumb,
-                        "video_url": it.get("video_url"),
+                        "video_url": video_url,
                         "date": "",
-                        "url": f"https://www.instagram.com/p/{shortcode}/",
+                        "url": f"https://www.instagram.com/p/{shortcode}/" if shortcode else "",
                     }
                     reels.append(reel)
                 except Exception as e:
-                    log.warning(f"Parse RapidAPI post: {e}")
+                    log.warning(f"Parse RapidAPI reel: {e}")
+        else:
+            log.warning(f"Reels endpoint HTTP {r.status_code}: {r.text[:200]}")
     except Exception as e:
-        log.warning(f"Fetch posts via RapidAPI: {e}")
+        log.warning(f"Fetch reels via RapidAPI: {e}")
 
     result = {
         "profile": profile_data,
