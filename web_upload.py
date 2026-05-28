@@ -861,7 +861,7 @@ function showTab(group,name,title,subtitle){
   </button>
   <div class="items">
     <button class="item" id="tab-sfs" onclick="showTab('business','sfs','SFS — Planning','Share For Share planifies par identite')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><polyline points="9 14 11 16 15 12"/></svg>
       SFS Planning
     </button>
     <button class="item" id="tab-revenus" onclick="showTab('business','revenus','💬 Revenus chatteurs','Revenus OnlyFans par chatteur et identité')">
@@ -2198,7 +2198,17 @@ def _render_sfs_html() -> str:
     # === CALENDRIER ===
     rows.append("<div class='box'>")
     rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>")
-    rows.append(f"<h3 style='margin:0'>📅 {month_name}</h3>")
+    rows.append(
+        "<h3 style='margin:0;display:flex;align-items:center;gap:10px'>"
+        "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+        "<rect width='18' height='18' x='3' y='4' rx='2' ry='2'/>"
+        "<line x1='16' x2='16' y1='2' y2='6'/>"
+        "<line x1='8' x2='8' y1='2' y2='6'/>"
+        "<line x1='3' x2='21' y1='10' y2='10'/>"
+        "<polyline points='9 14 11 16 15 12'/>"
+        "</svg>"
+        f"{month_name}</h3>"
+    )
     rows.append("<small style='color:#888'>Clique sur une date pour planifier un SFS</small>")
     rows.append("</div>")
     rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center'>")
@@ -2295,7 +2305,7 @@ function refreshSfsCalendar(){{
 function openSfsModal(date){{
   var platform = window.__currentSfsPlatform;
   var modal = document.getElementById('sfs-modal');
-  document.getElementById('sfs-modal-title').textContent = '📅 SFS du ' + date + ' — ' + platform;
+  document.getElementById('sfs-modal-title').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:8px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><polyline points="9 14 11 16 15 12"/></svg>SFS du ' + date + ' — ' + platform;
   document.getElementById('sfs-modal-date').value = date;
   document.getElementById('sfs-modal-platform-display').textContent = platform;
   // Hidden input pour la plateforme
