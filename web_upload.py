@@ -454,7 +454,41 @@ function igPeriod(btn, period){
   });
   btn.style.background='#2a2a2a';
   btn.style.color='#fff';
+  // Stocke la période sélectionnée pour la réutiliser lors du tri
+  window.__igCurrentPeriod = period;
+  igApplyPeriodFilter();
 }
+function igApplyPeriodFilter(){
+  var period = window.__igCurrentPeriod || 'week';
+  var now = Math.floor(Date.now() / 1000);
+  var threshold;
+  if(period === 'day') threshold = now - 86400;       // 1 jour
+  else if(period === 'week') threshold = now - 604800; // 7 jours
+  else threshold = now - 2592000;                      // 30 jours
+  var cards = document.querySelectorAll('.reel-card');
+  var visible = 0, hidden = 0;
+  cards.forEach(function(card){
+    var ts = parseInt(card.getAttribute('data-ts')) || 0;
+    if(ts === 0 || ts >= threshold){
+      card.style.display = '';
+      visible++;
+    } else {
+      card.style.display = 'none';
+      hidden++;
+    }
+  });
+  // Affiche un compteur si filtre actif
+  var info = document.getElementById('ig-period-info');
+  if(info){
+    var labels = { 'day': '24 dernières heures', 'week': '7 derniers jours', 'month': '30 derniers jours' };
+    info.textContent = visible + ' reel(s) — ' + (labels[period] || '');
+  }
+}
+// Appliquer le filtre par défaut au chargement (week)
+window.addEventListener('DOMContentLoaded', function(){
+  window.__igCurrentPeriod = 'week';
+  setTimeout(igApplyPeriodFilter, 100);
+});
 function igToggleSort(){
   var menu = document.getElementById('ig-sort-menu');
   var arrow = document.getElementById('ig-sort-arrow');
@@ -1810,8 +1844,9 @@ def _render_insta_trends_grid_html() -> str:
                 f"onmouseenter='this.play();this.style.opacity=1;this.parentElement.querySelector(\".play-badge\").style.opacity=0' "
                 f"onmouseleave='this.pause();this.style.opacity=0;this.parentElement.querySelector(\".play-badge\").style.opacity=1'></video>"
             )
+        taken_at = r.get("taken_at", 0) or 0
         cards.append(
-            f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden'>"
+            f"<div class='cloud-card reel-card' data-ts='{taken_at}' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden'>"
             # Conteneur thumbnail/video avec hover
             f"<div style='position:relative;width:100%;height:280px;background:#000;cursor:pointer' "
             f"onmouseenter='var v=this.querySelector(\".reel-video\");if(v){{v.play();v.style.opacity=1;var b=this.querySelector(\".play-badge\");if(b)b.style.opacity=0}}' "
@@ -1835,7 +1870,7 @@ def _render_insta_trends_grid_html() -> str:
         )
     cards.append("</div>")
     cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
-                 f"<small>{len(reels)} reel(s) au total — affichage des 60 premiers</small>"
+                 f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
                  f"<form method='POST' action='/insta/scrape_all' style='margin:0'>"
                  f"<button type='submit' style='padding:8px 18px;background:#5865f2;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
                  f"data-confirm='Rafraîchir tous les comptes ?'>"

@@ -112,6 +112,23 @@ def _clean_username(u: str) -> str:
     return (u or "").lower().strip().replace("@", "").rstrip("/").split("/")[-1]
 
 
+# Instagram epoch en millisecondes (2011-08-24 21:07:01 UTC)
+INSTAGRAM_EPOCH_MS = 1314220021721
+
+
+def _timestamp_from_pk(pk) -> int:
+    """Extrait le timestamp Unix (secondes) depuis un pk Instagram.
+
+    Le pk encode le timestamp en ms dans ses 41 bits hauts (shift de 23).
+    """
+    try:
+        pk_int = int(pk)
+        ts_ms = (pk_int >> 23) + INSTAGRAM_EPOCH_MS
+        return ts_ms // 1000
+    except Exception:
+        return 0
+
+
 # ============ SCRAPER ============
 
 def _make_loader() -> Optional["instaloader.Instaloader"]:
@@ -297,6 +314,11 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         video_url = vv[0].get("url")
                     if not video_url:
                         video_url = media.get("video_url")
+                    # Timestamp : prendre taken_at de l'API si dispo, sinon extraire du pk
+                    taken_at = media.get("taken_at") or 0
+                    pk = media.get("pk") or media.get("id", "").split("_")[0] if media.get("id") else ""
+                    if not taken_at and pk:
+                        taken_at = _timestamp_from_pk(pk)
                     reel = {
                         "shortcode": shortcode,
                         "is_video": is_video,
@@ -306,6 +328,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         "caption": caption[:280],
                         "thumbnail_url": thumb,
                         "video_url": video_url,
+                        "taken_at": taken_at,
                         "date": "",
                         "url": f"https://www.instagram.com/p/{shortcode}/" if shortcode else "",
                     }
