@@ -2046,6 +2046,67 @@ def _render_insta_trends_grid_html() -> str:
     return "".join(cards)
 
 
+def _identity_avatar_path(identity: str) -> Path:
+    """Retourne le chemin de l'avatar d'une identité (s'il existe), None sinon."""
+    safe = identity.lower().strip()
+    base = IDENTITIES_DIR / safe
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        p = base / f"avatar.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def _identity_avatar_url(identity: str) -> str:
+    """URL publique de l'avatar (ou string vide si pas d'avatar)."""
+    p = _identity_avatar_path(identity)
+    if p:
+        return f"/identity/avatar/{identity.lower().strip()}"
+    return ""
+
+
+def _identity_avatar_html(identity: str, size: int = 28) -> str:
+    """Petit HTML : <img> si avatar, sinon initiale colorée."""
+    url = _identity_avatar_url(identity)
+    if url:
+        return (
+            f"<img src='{url}' style='width:{size}px;height:{size}px;border-radius:50%;"
+            f"object-fit:cover;border:1px solid #2a2a2a;flex-shrink:0'>"
+        )
+    init = (identity[0] if identity else "?").upper()
+    return (
+        f"<div style='width:{size}px;height:{size}px;border-radius:50%;"
+        f"background:linear-gradient(135deg,#5865f2,#a855f7);display:flex;"
+        f"align-items:center;justify-content:center;font-weight:700;color:#fff;"
+        f"font-size:{int(size*0.45)}px;flex-shrink:0'>{init}</div>"
+    )
+
+
+def _render_identity_avatars_section() -> str:
+    """Section UI pour uploader les avatars de chaque identité."""
+    identities = _list_identities()
+    if not identities:
+        return ""
+    rows = ["<div class='box'><h4 style='margin-top:0'>🖼️ Avatars des identités</h4>"]
+    rows.append("<small>Upload une photo de profil pour chaque identité (utilisée dans SFS, VAs, etc.)</small>")
+    rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px'>")
+    for ident in identities:
+        avatar = _identity_avatar_html(ident, size=64)
+        rows.append(
+            f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:12px;display:flex;flex-direction:column;align-items:center;gap:10px'>"
+            f"{avatar}"
+            f"<div style='font-weight:700;font-size:14px'>{ident}</div>"
+            f"<form method='POST' action='/identity/upload_avatar' enctype='multipart/form-data' style='width:100%;margin:0'>"
+            f"<input type='hidden' name='identity' value='{ident}'>"
+            f"<input type='file' name='avatar' accept='image/*' required style='width:100%;padding:6px;background:#1a1a1a;border:1px solid #333;color:#fff;border-radius:4px;font-size:12px'>"
+            f"<button type='submit' style='width:100%;padding:8px;background:#5865f2;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-top:8px'>Upload</button>"
+            f"</form>"
+            f"</div>"
+        )
+    rows.append("</div></div>")
+    return "".join(rows)
+
+
 def _render_sfs_html() -> str:
     try:
         from business import list_sfs, sfs_stats, load_identity_platforms, identities_for_platform, PLATFORMS
@@ -2167,11 +2228,23 @@ def _render_sfs_html() -> str:
     rows.append("</div></div>")
 
     # JS pour platform switching + modal
+    # Map des avatars pour le JS
+    avatar_map = {ident: _identity_avatar_url(ident) for ident in _list_identities()}
+    avatar_map_json = _json.dumps(avatar_map)
     rows.append(f"""
 <script>
 window.__sfsData = {sfs_by_date_json};
 window.__platformIdents = {platform_idents_json};
+window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
+function identityAvatarHtml(ident, size){{
+  var url = window.__identityAvatars[ident];
+  if(url){{
+    return '<img src="' + url + '" style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;object-fit:cover;border:1px solid #2a2a2a;flex-shrink:0">';
+  }}
+  var init = (ident && ident.length ? ident[0] : '?').toUpperCase();
+  return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:linear-gradient(135deg,#5865f2,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:' + Math.round(size*0.45) + 'px;flex-shrink:0">' + init + '</div>';
+}}
 
 function switchSfsPlatform(btn, platform){{
   window.__currentSfsPlatform = platform;
@@ -2243,8 +2316,9 @@ function openSfsModal(date){{
       var statusBadge = x.status === 'scheduled'
         ? '<span style="background:#5865f2;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
         : '<span style="background:#ffb800;color:#000;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
-      existingHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center">'
-        + '<div><b>' + x.identity + '</b> × @' + x.partner + ' <span style="color:#888">à ' + x.time + '</span></div>'
+      existingHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px">'
+        + '<div style="display:flex;align-items:center;gap:10px">' + identityAvatarHtml(x.identity, 32)
+        + '<div><b>' + x.identity + '</b> × @' + x.partner + ' <span style="color:#888">à ' + x.time + '</span></div></div>'
         + '<div>' + statusBadge + '</div>'
         + '</div>';
     }});
@@ -2334,6 +2408,7 @@ window.addEventListener('DOMContentLoaded', function(){{
             )
             platform = it.get("platform", "OF")
             platform_color = "#5865f2" if platform == "OF" else "#a855f7"
+            ident_avatar = _identity_avatar_html(it.get("identity", ""), size=26)
             rows.append(
                 f"<tr class='sfs-row' data-platform='{platform}' style='border-bottom:1px solid #2a2a2a;{color_style}'>"
                 f"<td style='padding:8px;text-align:center'>"
@@ -2343,7 +2418,7 @@ window.addEventListener('DOMContentLoaded', function(){{
                 f"</form></td>"
                 f"<td style='padding:8px;font-size:13px'>{it.get('date','')} <b>{it.get('time','')}</b></td>"
                 f"<td style='padding:8px'><span style='background:{platform_color};color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>{platform}</span></td>"
-                f"<td style='padding:8px'><b>{it.get('identity','')}</b></td>"
+                f"<td style='padding:8px'><div style='display:flex;align-items:center;gap:8px'>{ident_avatar}<b>{it.get('identity','')}</b></div></td>"
                 f"<td style='padding:8px'>@{it.get('partner','')}</td>"
                 f"<td style='padding:8px'>{status_badge}</td>"
                 f"<td style='padding:8px;font-size:13px;color:#aaa'>{it.get('notes','')}</td>"
@@ -2354,6 +2429,9 @@ window.addEventListener('DOMContentLoaded', function(){{
                 f"</form></td></tr>"
             )
         rows.append("</table></div>")
+
+    # === SECTION AVATARS ===
+    rows.append(_render_identity_avatars_section())
 
     # === CONFIG des plateformes ===
     rows.append("<div class='box'>")
@@ -2923,6 +3001,48 @@ def create_app():
             return _error(f"Fichier existe déjà")
         photo.save(str(target))
         return _success(f"✅ Story CTA ajoutée à {identity}")
+
+    @app.route("/identity/avatar/<identity>")
+    def identity_avatar(identity):
+        if not is_auth():
+            return redirect("/")
+        safe = identity.lower().strip()
+        if safe not in _list_identities():
+            return "Not found", 404
+        path = _identity_avatar_path(safe)
+        if not path:
+            return "Not found", 404
+        from flask import send_file
+        response = send_file(str(path))
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+    @app.route("/identity/upload_avatar", methods=["POST"])
+    def identity_upload_avatar():
+        if not is_auth():
+            return redirect("/")
+        identity = (request.form.get("identity") or "").strip().lower()
+        if not identity or identity not in _list_identities():
+            return _error("❌ Identité invalide")
+        f = request.files.get("avatar")
+        if not f or not f.filename:
+            return _error("❌ Pas de fichier")
+        ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
+        if ext not in ("png", "jpg", "jpeg", "webp"):
+            return _error(f"❌ Format non supporté ({ext})")
+        target_dir = IDENTITIES_DIR / identity
+        target_dir.mkdir(parents=True, exist_ok=True)
+        # Supprimer les anciens avatars
+        for old_ext in ("png", "jpg", "jpeg", "webp"):
+            old = target_dir / f"avatar.{old_ext}"
+            if old.exists():
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+        target = target_dir / f"avatar.{ext}"
+        f.save(str(target))
+        return _success(f"✅ Avatar de <b>{identity}</b> uploadé")
 
     @app.route("/cloud/thumb/<identity>/<subdir>/<path:filename>")
     def cloud_thumb_file(identity, subdir, filename):
