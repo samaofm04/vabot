@@ -256,6 +256,34 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#5865f2;box-shado
 
 /* Loading skeleton effect (utile plus tard) */
 .skeleton{background:linear-gradient(90deg,#1a1a1a 0%,#2a2a2a 50%,#1a1a1a 100%);background-size:200% 100%;animation:shimmer 1.5s infinite}
+
+/* ============ TOAST NOTIFICATIONS ============ */
+.toast-container{position:fixed;top:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:9999;pointer-events:none;max-width:420px}
+.toast{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #5865f2;border-radius:10px;padding:14px 18px;color:#fff;font-size:14px;box-shadow:0 12px 32px rgba(0,0,0,.6);display:flex;align-items:flex-start;gap:12px;pointer-events:auto;animation:toastIn .4s cubic-bezier(.16,1,.3,1);min-width:280px;backdrop-filter:blur(10px)}
+.toast.success{border-left-color:#00d68f;background:#0f1f17}
+.toast.error{border-left-color:#ff4757;background:#1f0f0f}
+.toast.info{border-left-color:#5865f2}
+.toast.warning{border-left-color:#ffb800;background:#1f1a0f}
+.toast .toast-icon{flex-shrink:0;font-size:18px;line-height:1.2}
+.toast .toast-msg{flex:1;line-height:1.5}
+.toast .toast-close{background:none;border:0;color:#888;cursor:pointer;font-size:18px;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin:0;flex-shrink:0}
+.toast .toast-close:hover{color:#fff}
+.toast.exit{animation:toastOut .3s ease-in forwards}
+@keyframes toastIn{from{opacity:0;transform:translateX(100%) scale(.9)}to{opacity:1;transform:translateX(0) scale(1)}}
+@keyframes toastOut{to{opacity:0;transform:translateX(120%) scale(.9)}}
+
+/* Custom confirm modal */
+.confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9998;display:none;align-items:center;justify-content:center;animation:fadeIn .2s;backdrop-filter:blur(4px)}
+.confirm-overlay.show{display:flex}
+.confirm-box{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:28px;max-width:420px;width:90%;animation:scaleIn .3s cubic-bezier(.16,1,.3,1);box-shadow:0 24px 48px rgba(0,0,0,.6)}
+.confirm-box h3{margin:0 0 12px;font-size:18px;color:#fff}
+.confirm-box p{margin:0 0 24px;color:#aaa;font-size:14px;line-height:1.5}
+.confirm-box .actions{display:flex;gap:10px;justify-content:flex-end}
+.confirm-box button{padding:10px 22px;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin:0;transition:all .15s}
+.confirm-box .btn-cancel{background:#2a2a2a;color:#fff}
+.confirm-box .btn-cancel:hover{background:#333}
+.confirm-box .btn-confirm{background:#d9534f;color:#fff}
+.confirm-box .btn-confirm:hover{background:#c9302c}
 /* Sidebar large avec groupes pliables + flèches */
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
 .sidebar .group{display:flex;flex-direction:column;margin:0 10px}
@@ -336,8 +364,89 @@ function toggleSubGroup(id){
   el.classList.toggle('open');
 }
 function comingSoon(){
-  alert('🚧 Pas encore implémenté — viendra bientôt');
+  showToast('🚧 Pas encore implémenté — viendra bientôt', 'warning');
 }
+// === SYSTÈME DE TOASTS ===
+function showToast(message, type, duration){
+  type = type || 'info';
+  duration = duration || 4500;
+  var container = document.getElementById('toast-container');
+  if(!container){
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  var icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️';
+  var toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = '<div class="toast-icon">' + icon + '</div>' +
+    '<div class="toast-msg">' + message + '</div>' +
+    '<button class="toast-close" onclick="dismissToast(this.parentElement)">×</button>';
+  container.appendChild(toast);
+  // Auto-dismiss
+  setTimeout(function(){ dismissToast(toast); }, duration);
+}
+function dismissToast(toast){
+  if(!toast || !toast.parentElement) return;
+  toast.classList.add('exit');
+  setTimeout(function(){
+    if(toast.parentElement) toast.parentElement.removeChild(toast);
+  }, 300);
+}
+// === MODALE CONFIRM CUSTOM ===
+function showConfirm(title, message, onConfirm){
+  var overlay = document.getElementById('confirm-overlay');
+  if(!overlay) return;
+  document.getElementById('confirm-title').textContent = title || 'Confirmer';
+  document.getElementById('confirm-message').textContent = message || '';
+  overlay.classList.add('show');
+  var confirmBtn = document.getElementById('confirm-yes');
+  // Reset listener
+  var newBtn = confirmBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+  newBtn.addEventListener('click', function(){
+    overlay.classList.remove('show');
+    if(typeof onConfirm === 'function') onConfirm();
+  });
+}
+function closeConfirm(){
+  var overlay = document.getElementById('confirm-overlay');
+  if(overlay) overlay.classList.remove('show');
+}
+// === INTERCEPT FORMS AVEC data-confirm ===
+document.addEventListener('submit', function(e){
+  var form = e.target;
+  if(!form || !form.querySelector) return;
+  var btn = form.querySelector('button[data-confirm]');
+  if(btn && !form.dataset.confirmed){
+    e.preventDefault();
+    var msg = btn.getAttribute('data-confirm');
+    var title = btn.getAttribute('data-confirm-title') || 'Confirmer cette action ?';
+    showConfirm(title, msg, function(){
+      form.dataset.confirmed = 'true';
+      form.submit();
+    });
+  }
+}, true);
+// === FLASH MESSAGE depuis serveur → TOAST ===
+window.addEventListener('DOMContentLoaded', function(){
+  var data = document.getElementById('flash-data');
+  if(data){
+    var msg = data.getAttribute('data-msg');
+    var type = data.getAttribute('data-type') === 'error' ? 'error' : 'success';
+    if(msg) showToast(msg, type);
+  }
+  // Activer l'onglet depuis query string ?tab=
+  var params = new URLSearchParams(window.location.search);
+  var tabName = params.get('tab');
+  if(tabName){
+    var btn = document.getElementById('tab-' + tabName);
+    if(btn){
+      setTimeout(function(){ btn.click(); }, 50);
+    }
+  }
+});
 function igPeriod(btn, period){
   document.querySelectorAll('.ig-period').forEach(function(b){
     b.style.background='none';
@@ -460,19 +569,24 @@ document.addEventListener('keydown', function(e){
 });
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
-  if(!confirm('Supprimer ' + selectedFiles.size + ' fichier(s) ?\\nCette action est IRRÉVERSIBLE.')) return;
-  var form = document.createElement('form');
-  form.method = 'POST';
-  form.action = '/cloud/delete';
-  selectedFiles.forEach(function(fid){
-    var input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'files';
-    input.value = fid;
-    form.appendChild(input);
-  });
-  document.body.appendChild(form);
-  form.submit();
+  showConfirm(
+    'Supprimer ' + selectedFiles.size + ' fichier(s) ?',
+    'Cette action est IRRÉVERSIBLE. Les vidéos/images seront supprimées du serveur ainsi que leurs metadata.',
+    function(){
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/cloud/delete';
+      selectedFiles.forEach(function(fid){
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'files';
+        input.value = fid;
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      form.submit();
+    }
+  );
 }
 function showTab(group,name,title,subtitle){
   // Ouvrir le groupe parent
@@ -1102,6 +1216,21 @@ function showTab(group,name,title,subtitle){
   </div>
 </div>
 
+<!-- Container pour les toasts -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Modale confirm custom -->
+<div id="confirm-overlay" class="confirm-overlay" onclick="closeConfirm()">
+  <div class="confirm-box" onclick="event.stopPropagation()">
+    <h3 id="confirm-title">Confirmer</h3>
+    <p id="confirm-message">Es-tu sûr ?</p>
+    <div class="actions">
+      <button class="btn-cancel" onclick="closeConfirm()">Annuler</button>
+      <button class="btn-confirm" id="confirm-yes">Confirmer</button>
+    </div>
+  </div>
+</div>
+
 </div></body></html>
 """
 
@@ -1258,7 +1387,7 @@ def _render_va_list_html() -> str:
                 f"<form method='POST' action='/va/reset' style='display:inline'>"
                 f"<input type='hidden' name='user_id' value='{uid}'>"
                 f"<button type='submit' class='danger-btn' "
-                f"onclick=\"return confirm('Reset {username} ?')\">Reset</button>"
+                f"data-confirm=\"Reset @{username} ? Le VA gardera son salon Discord mais perdra son identité assignée.\">Reset</button>"
                 f"</form>"
                 f"</td></tr>"
             )
@@ -1543,7 +1672,7 @@ def _render_insta_accounts_html() -> str:
                 f"</form>"
                 f"<form method='POST' action='/insta/remove_account' style='display:inline;margin-left:6px'>"
                 f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' class='danger-btn' onclick=\"return confirm('Retirer @{u} ?')\">Retirer</button>"
+                f"<button type='submit' class='danger-btn' data-confirm=\"Retirer @{u} de la watchlist Instagram ? Le cache des reels sera conservé.\">Retirer</button>"
                 f"</form>"
                 f"</td></tr>"
             )
@@ -1551,7 +1680,7 @@ def _render_insta_accounts_html() -> str:
         rows.append(
             f"<form method='POST' action='/insta/scrape_all' style='margin-top:18px'>"
             f"<button type='submit' style='padding:12px 24px;background:#5865f2;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
-            f"onclick=\"return confirm('Scraper tous les comptes ? Ça peut prendre 1-2 min.')\">🔄 Scraper tous les comptes</button>"
+            f"data-confirm=\"Scraper tous les comptes de la watchlist ? Compte ~10 secondes par compte.\" data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
             f"</form>"
         )
     return "".join(rows)
@@ -1627,15 +1756,27 @@ def _admin_token_status() -> str:
     return "❌ Non configuré — colle ton token ci-dessous"
 
 
-def _render_upload(msg="", error=False):
+def _render_upload(msg=None, error=None):
+    # Si appelé sans msg, lire depuis session (flash)
+    try:
+        from flask import session
+        if msg is None:
+            msg = session.pop("flash_msg", "")
+        if error is None:
+            error = session.pop("flash_error", False)
+    except Exception:
+        msg = msg or ""
+        error = bool(error)
     identities = _list_identities()
     opts = "".join(f'<option value="{i}">{i}</option>' for i in identities)
     if not opts:
         opts = '<option value="">(aucune identité - crée-en sur Discord)</option>'
     msg_html = ""
     if msg:
-        cls = "err" if error else ""
-        msg_html = f'<div class="msg {cls}">{msg}</div>'
+        # Stocker comme attribut data-* sur un élément invisible, le JS l'animera comme toast
+        msg_safe = str(msg).replace('"', '&quot;')
+        msg_type = "error" if error else "success"
+        msg_html = f'<div id="flash-data" data-msg="{msg_safe}" data-type="{msg_type}" style="display:none"></div>'
     # Stats globales pour le home
     users = _load_users()
     va_count = len(users)
@@ -1687,6 +1828,23 @@ def create_app():
     def is_auth():
         return session.get("auth") is True
 
+    def _success(msg, tab=None):
+        """Pattern POST-Redirect-GET : flash le message + redirige sur GET /."""
+        session["flash_msg"] = msg
+        session["flash_error"] = False
+        url = "/"
+        if tab:
+            url += f"?tab={tab}"
+        return redirect(url)
+
+    def _error(msg, tab=None):
+        session["flash_msg"] = msg
+        session["flash_error"] = True
+        url = "/"
+        if tab:
+            url += f"?tab={tab}"
+        return redirect(url)
+
     @app.route("/", methods=["GET", "POST"])
     def index():
         if request.method == "POST" and not is_auth():
@@ -1696,7 +1854,7 @@ def create_app():
             return _render_login("Mauvais mot de passe")
         if not is_auth():
             return _render_login()
-        return _render_upload()
+        return _success()
 
     @app.route("/logout")
     def logout():
@@ -1706,18 +1864,18 @@ def create_app():
     def _save_image_or_video_with_pair(form_files, form_text, subdir_name, allow_exts):
         identity = form_text.get("identity", "").strip().lower()
         if not identity or identity not in _list_identities():
-            return _render_upload("Identité invalide", error=True)
+            return _error("Identité invalide")
         photo = form_files.get("photo") or form_files.get("video")
         if not photo or not photo.filename:
-            return _render_upload("Fichier manquant", error=True)
+            return _error("Fichier manquant")
         ext = os.path.splitext(photo.filename)[1].lower()
         if ext not in allow_exts:
-            return _render_upload(f"Format non supporté ({ext})", error=True)
+            return _error(f"Format non supporté ({ext})")
         target_dir = IDENTITIES_DIR / identity / subdir_name
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / photo.filename
         if target.exists():
-            return _render_upload(f"Fichier {photo.filename} existe déjà", error=True)
+            return _error(f"Fichier {photo.filename} existe déjà")
         photo.save(str(target))
         stem = target.stem
         caption = form_text.get("caption", "").strip()
@@ -1732,7 +1890,7 @@ def create_app():
             if ex_ext in allow_exts:
                 ex_target = target_dir / f"{stem}.example{ex_ext}"
                 example.save(str(ex_target))
-        return _render_upload(f"✅ Ajouté à {identity}/{subdir_name} : {photo.filename}")
+        return _success(f"✅ Ajouté à {identity}/{subdir_name} : {photo.filename}")
 
     @app.route("/upload/reel", methods=["POST"])
     def upload_reel():
@@ -1768,20 +1926,20 @@ def create_app():
             return redirect("/")
         identity = request.form.get("identity", "").strip().lower()
         if not identity or identity not in _list_identities():
-            return _render_upload("Identité invalide", error=True)
+            return _error("Identité invalide")
         photo = request.files.get("photo")
         if not photo or not photo.filename:
-            return _render_upload("Photo manquante", error=True)
+            return _error("Photo manquante")
         ext = os.path.splitext(photo.filename)[1].lower()
         if ext not in IMAGE_EXTS:
-            return _render_upload(f"Format non supporté ({ext})", error=True)
+            return _error(f"Format non supporté ({ext})")
         target_dir = IDENTITIES_DIR / identity / "storyctas"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / photo.filename
         if target.exists():
-            return _render_upload(f"Fichier existe déjà", error=True)
+            return _error(f"Fichier existe déjà")
         photo.save(str(target))
-        return _render_upload(f"✅ Story CTA ajoutée à {identity}")
+        return _success(f"✅ Story CTA ajoutée à {identity}")
 
     @app.route("/cloud/thumb/<identity>/<subdir>/<path:filename>")
     def cloud_thumb_file(identity, subdir, filename):
@@ -1857,7 +2015,7 @@ def create_app():
             return redirect("/")
         files = request.form.getlist("files")
         if not files:
-            return _render_upload("❌ Aucun fichier sélectionné", error=True)
+            return _error("❌ Aucun fichier sélectionné")
         deleted = []
         failed = []
         identities_list = _list_identities()
@@ -1909,7 +2067,9 @@ def create_app():
             msg_parts.append(f"✅ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
         if failed:
             msg_parts.append(f"❌ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
-        return _render_upload(" • ".join(msg_parts), error=bool(failed) and not deleted)
+        if bool(failed) and not deleted:
+            return _error(" • ".join(msg_parts))
+        return _success(" • ".join(msg_parts))
 
     @app.route("/cloud/pp/<path:filename>")
     def cloud_serve_pp(filename):
@@ -1929,15 +2089,15 @@ def create_app():
             return redirect("/")
         photo = request.files.get("photo")
         if not photo or not photo.filename:
-            return _render_upload("Photo manquante", error=True)
+            return _error("Photo manquante")
         ext = os.path.splitext(photo.filename)[1].lower()
         if ext not in IMAGE_EXTS:
-            return _render_upload(f"Format non supporté ({ext})", error=True)
+            return _error(f"Format non supporté ({ext})")
         PROFILE_PICS_DIR.mkdir(parents=True, exist_ok=True)
         existing = list(PROFILE_PICS_DIR.glob("*"))
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
-        return _render_upload(f"✅ Photo de profil ajoutée ({target.name})")
+        return _success(f"✅ Photo de profil ajoutée ({target.name})")
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
     def settings_insta_rapidapi():
@@ -1946,20 +2106,18 @@ def create_app():
         try:
             from insta_scraper import save_auth, load_auth
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         key = (request.form.get("rapidapi_key") or "").strip()
         host = (request.form.get("rapidapi_host") or "").strip() or "instagram-scraper-stable-api.p.rapidapi.com"
         if not key or len(key) < 20:
-            return _render_upload("❌ Clé RapidAPI invalide (trop courte)", error=True)
+            return _error("❌ Clé RapidAPI invalide (trop courte)")
         # Garder cookies existants si présents
         current = load_auth()
         current["rapidapi_key"] = key
         current["rapidapi_host"] = host
         save_auth(current)
-        return _render_upload(
-            "✅ Clé RapidAPI sauvegardée. Tu peux maintenant ajouter des comptes "
-            "à scraper sans limite de rate."
-        )
+        return _success("✅ Clé RapidAPI sauvegardée. Tu peux maintenant ajouter des comptes "
+            "à scraper sans limite de rate.")
 
     @app.route("/settings/insta_auth_file", methods=["POST"])
     def settings_insta_auth_file():
@@ -1968,14 +2126,14 @@ def create_app():
         try:
             from insta_scraper import save_auth
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         f = request.files.get("cookies_file")
         if not f or not f.filename:
-            return _render_upload("❌ Aucun fichier", error=True)
+            return _error("❌ Aucun fichier")
         try:
             content = f.read().decode("utf-8", errors="ignore")
         except Exception as e:
-            return _render_upload(f"❌ Erreur lecture : {e}", error=True)
+            return _error(f"❌ Erreur lecture : {e}")
         # Parser le format Netscape : domain TRUE path TRUE expiry name value (séparés par tab)
         wanted = {"sessionid": None, "ds_user_id": None, "csrftoken": None}
         for line in content.splitlines():
@@ -1990,11 +2148,9 @@ def create_app():
             if name in wanted and value:
                 wanted[name] = value
         if not wanted["sessionid"]:
-            return _render_upload(
-                "❌ Aucun <code>sessionid</code> trouvé dans le fichier. "
+            return _error("❌ Aucun <code>sessionid</code> trouvé dans le fichier. "
                 "Assure-toi d'être connecté à Instagram avant d'exporter les cookies.",
-                error=True,
-            )
+                error=True,)
         save_auth({
             "sessionid": wanted["sessionid"],
             "ds_user_id": wanted["ds_user_id"] or "",
@@ -2002,9 +2158,7 @@ def create_app():
             "username": "",
         })
         found = [k for k, v in wanted.items() if v]
-        return _render_upload(
-            f"✅ Cookies importés ({', '.join(found)}). Tu peux maintenant ajouter des comptes à scraper."
-        )
+        return _success(f"✅ Cookies importés ({', '.join(found)}). Tu peux maintenant ajouter des comptes à scraper.")
 
     @app.route("/settings/insta_auth", methods=["POST"])
     def settings_insta_auth():
@@ -2013,20 +2167,20 @@ def create_app():
         try:
             from insta_scraper import save_auth, load_auth
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         sessionid = (request.form.get("sessionid") or "").strip()
         ds_user_id = (request.form.get("ds_user_id") or "").strip()
         csrftoken = (request.form.get("csrftoken") or "").strip()
         username = (request.form.get("username") or "").strip()
         if not sessionid:
-            return _render_upload("❌ sessionid obligatoire", error=True)
+            return _error("❌ sessionid obligatoire")
         save_auth({
             "sessionid": sessionid,
             "ds_user_id": ds_user_id,
             "csrftoken": csrftoken,
             "username": username,
         })
-        return _render_upload("✅ Cookies Instagram sauvegardés")
+        return _success("✅ Cookies Instagram sauvegardés")
 
     @app.route("/insta/add_account", methods=["POST"])
     def insta_add_account():
@@ -2035,33 +2189,29 @@ def create_app():
         try:
             from insta_scraper import add_to_watchlist, scrape_profile, is_auth_configured
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         u = (request.form.get("username") or "").strip()
         if not u:
-            return _render_upload("❌ username vide", error=True)
+            return _error("❌ username vide")
         added = add_to_watchlist(u)
         # Si pas de cookies, juste ajouter sans scrape
         if not is_auth_configured():
             if added:
-                return _render_upload(
-                    f"✅ <b>@{u}</b> ajouté à la watchlist. "
-                    f"⚠️ Configure tes cookies dans <b>Settings → Cookies Instagram</b> pour pouvoir scraper.",
-                )
-            return _render_upload(f"⚠️ @{u} déjà dans la watchlist", error=True)
+                return _success(f"✅ <b>@{u}</b> ajouté à la watchlist. "
+                    f"⚠️ Configure tes cookies dans <b>Settings → Cookies Instagram</b> pour pouvoir scraper.",)
+            return _error(f"⚠️ @{u} déjà dans la watchlist")
         # Cookies OK -> scrape automatique
         from insta_scraper import _clean_username
         clean = _clean_username(u)
         result = scrape_profile(clean, limit=12)
         if "error" in result:
             if added:
-                return _render_upload(
-                    f"✅ <b>@{clean}</b> ajouté, mais le scrape a échoué : {result['error']}",
-                    error=True,
-                )
-            return _render_upload(f"❌ Scrape @{clean} : {result['error']}", error=True)
+                return _error(f"✅ <b>@{clean}</b> ajouté, mais le scrape a échoué : {result['error']}",
+                    error=True,)
+            return _error(f"❌ Scrape @{clean} : {result['error']}")
         n = len(result.get("reels", []))
         action = "ajouté + scrapé" if added else "déjà en watchlist, re-scrapé"
-        return _render_upload(f"✅ <b>@{clean}</b> {action} ({n} reels). Va voir <b>Instagram → Trends</b>.")
+        return _success(f"✅ <b>@{clean}</b> {action} ({n} reels). Va voir <b>Instagram → Trends</b>.")
 
     @app.route("/insta/remove_account", methods=["POST"])
     def insta_remove_account():
@@ -2070,12 +2220,12 @@ def create_app():
         try:
             from insta_scraper import remove_from_watchlist
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         u = (request.form.get("username") or "").strip()
         ok = remove_from_watchlist(u)
         if ok:
-            return _render_upload(f"✅ <b>@{u}</b> retiré")
-        return _render_upload(f"⚠️ @{u} introuvable", error=True)
+            return _success(f"✅ <b>@{u}</b> retiré")
+        return _error(f"⚠️ @{u} introuvable")
 
     @app.route("/insta/scrape", methods=["POST"])
     def insta_scrape():
@@ -2084,13 +2234,13 @@ def create_app():
         try:
             from insta_scraper import scrape_profile
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         u = (request.form.get("username") or "").strip()
         result = scrape_profile(u, limit=12)
         if "error" in result:
-            return _render_upload(f"❌ Scrape @{u} : {result['error']}", error=True)
+            return _error(f"❌ Scrape @{u} : {result['error']}")
         n = len(result.get("reels", []))
-        return _render_upload(f"✅ <b>@{u}</b> scrapé : {n} post(s) récupéré(s)")
+        return _success(f"✅ <b>@{u}</b> scrapé : {n} post(s) récupéré(s)")
 
     @app.route("/insta/scrape_all", methods=["POST"])
     def insta_scrape_all():
@@ -2099,10 +2249,10 @@ def create_app():
         try:
             from insta_scraper import load_watchlist, scrape_profile
         except Exception as e:
-            return _render_upload(f"❌ Module indispo: {e}", error=True)
+            return _error(f"❌ Module indispo: {e}")
         wl = load_watchlist()
         if not wl:
-            return _render_upload("⚠️ Watchlist vide", error=True)
+            return _error("⚠️ Watchlist vide")
         ok_count = 0
         errors = []
         for u in wl:
@@ -2114,7 +2264,9 @@ def create_app():
         msg = f"✅ {ok_count}/{len(wl)} compte(s) scrapé(s)"
         if errors:
             msg += " — erreurs : " + " | ".join(errors[:3])
-        return _render_upload(msg, error=bool(errors) and ok_count == 0)
+        if bool(errors) and ok_count == 0:
+            return _error(msg)
+        return _success(msg)
 
     @app.route("/settings/admin_token", methods=["POST"])
     def settings_admin_token():
@@ -2123,20 +2275,14 @@ def create_app():
         token = (request.form.get("token") or "").strip()
         # Validation basique d'un token Discord (format MZ.XX.YY avec base64-like chars)
         if not token or len(token) < 50 or "." not in token:
-            return _render_upload(
-                "❌ Token invalide (trop court ou format incorrect)", error=True
-            )
+            return _error("❌ Token invalide (trop court ou format incorrect)")
         ok = _write_env_var("DISCORD_ADMIN_TOKEN", token)
         if not ok:
-            return _render_upload(
-                "❌ Erreur ecriture .env (permissions ?)", error=True
-            )
+            return _error("❌ Erreur ecriture .env (permissions ?)")
         # Programmer le redemarrage (systemd relance le service)
         _schedule_restart(2.0)
-        return _render_upload(
-            "✅ Token sauvegardé. Le bot redémarre dans 2 sec. "
-            "Recharge cette page dans ~15 sec pour voir le statut."
-        )
+        return _success("✅ Token sauvegardé. Le bot redémarre dans 2 sec. "
+            "Recharge cette page dans ~15 sec pour voir le statut.")
 
     @app.route("/settings/web_password", methods=["POST"])
     def settings_web_password():
@@ -2144,17 +2290,13 @@ def create_app():
             return redirect("/")
         pwd = (request.form.get("password") or "").strip()
         if len(pwd) < 6:
-            return _render_upload(
-                "❌ Mot de passe trop court (min 6 caractères)", error=True
-            )
+            return _error("❌ Mot de passe trop court (min 6 caractères)")
         ok = _write_env_var("WEB_UPLOAD_PASSWORD", pwd)
         if not ok:
-            return _render_upload("❌ Erreur ecriture .env", error=True)
+            return _error("❌ Erreur ecriture .env")
         _schedule_restart(2.0)
-        return _render_upload(
-            "✅ Mot de passe sauvegardé. Le bot redémarre dans 2 sec. "
-            "Tu seras déco — reconnecte-toi avec le nouveau mot de passe."
-        )
+        return _success("✅ Mot de passe sauvegardé. Le bot redémarre dans 2 sec. "
+            "Tu seras déco — reconnecte-toi avec le nouveau mot de passe.")
 
     @app.route("/va/reset", methods=["POST"])
     def va_reset():
@@ -2162,17 +2304,15 @@ def create_app():
             return redirect("/")
         uid = (request.form.get("user_id") or "").strip()
         if not uid:
-            return _render_upload("❌ user_id manquant", error=True)
+            return _error("❌ user_id manquant")
         users = _load_users()
         if uid not in users:
-            return _render_upload(f"❌ VA {uid} introuvable", error=True)
+            return _error(f"❌ VA {uid} introuvable")
         identity = users[uid].get("identity") if isinstance(users[uid], dict) else users[uid]
         del users[uid]
         _save_users(users)
-        return _render_upload(
-            f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
-            "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer."
-        )
+        return _success(f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
+            "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer.")
 
     @app.route("/va/change_identity", methods=["POST"])
     def va_change_identity():
@@ -2181,14 +2321,12 @@ def create_app():
         uid = (request.form.get("user_id") or "").strip()
         new_identity = (request.form.get("identity") or "").strip().lower()
         if not uid or not new_identity:
-            return _render_upload("❌ user_id ou identite manquant", error=True)
+            return _error("❌ user_id ou identite manquant")
         if new_identity not in _list_identities():
-            return _render_upload(
-                f"❌ Identité <code>{new_identity}</code> introuvable", error=True
-            )
+            return _error(f"❌ Identité <code>{new_identity}</code> introuvable")
         users = _load_users()
         if uid not in users:
-            return _render_upload(f"❌ VA {uid} introuvable", error=True)
+            return _error(f"❌ VA {uid} introuvable")
 
         # Update users.json (en gardant le reste : channel_id, auto_post...)
         entry = users[uid]
@@ -2217,10 +2355,8 @@ def create_app():
         elif not channel_id:
             moved_msg = " (Pas de salon associé à déplacer.)"
 
-        return _render_upload(
-            f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
-            f"<code>{new_identity}</code>.{moved_msg}"
-        )
+        return _success(f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
+            f"<code>{new_identity}</code>.{moved_msg}")
 
     return app
 
