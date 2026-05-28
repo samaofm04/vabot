@@ -985,6 +985,28 @@ function showTab(group,name,title,subtitle){
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
 
+<!-- Sub-tabs style Insta : Pour toi / Explorer / Mes suivies -->
+<div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
+  <button class="ig-feed-tab active" onclick="showFeed(this,'fortoi')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #5865f2;margin:0">⭐ Pour toi</button>
+  <button class="ig-feed-tab" onclick="showFeed(this,'explore')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔍 Explorer</button>
+  <button class="ig-feed-tab" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">👥 Mes suivies</button>
+</div>
+<script>
+function showFeed(btn,name){
+  document.querySelectorAll('.ig-feed-tab').forEach(function(b){
+    b.style.color='#888';
+    b.style.borderBottomColor='transparent';
+  });
+  btn.style.color='#fff';
+  btn.style.borderBottomColor='#5865f2';
+  document.querySelectorAll('.ig-feed-content').forEach(function(c){ c.style.display='none'; });
+  var c=document.getElementById('feed-'+name);
+  if(c) c.style.display='block';
+}
+</script>
+
+<div id="feed-fortoi" class="ig-feed-content">
+
 <!-- Barre de contrôles : Trending / Day / Week / Month / Filters -->
 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px">
 
@@ -1073,7 +1095,25 @@ function showTab(group,name,title,subtitle){
 
 {insta_trends_html_or_empty}
 
+</div><!-- /feed-fortoi -->
+
+<div id="feed-explore" class="ig-feed-content" style="display:none">
+<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666">
+  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:14px"><circle cx="12" cy="12" r="10"/><polyline points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+  <h3 style="margin:0 0 8px;color:#888">Explorer — Coming soon</h3>
+  <p style="margin:0;font-size:14px">Découverte de comptes Instagram populaires que tu ne suis pas encore.<br>Nécessite l'endpoint <code>Explore Feed</code> de RapidAPI (à brancher).</p>
 </div>
+</div>
+
+<div id="feed-suivies" class="ig-feed-content" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">👥 Mes comptes suivis</h3>
+<small>Tes comptes Instagram en watchlist (clique <b>Accounts</b> dans la sidebar pour ajouter)</small>
+<div id="suivies-content">{insta_accounts_html_for_trends}</div>
+</div>
+</div>
+
+</div><!-- /form-igtrends -->
 
 <!-- HOME (clic sur "VA Bot") -->
 <div class="form-section" id="form-home" style="display:none">
@@ -1654,17 +1694,9 @@ def _render_insta_accounts_html() -> str:
     if not items:
         rows.append("<p style='color:#888'>Aucun compte ajouté pour l'instant.</p>")
     else:
-        rows.append(
-            "<table style='width:100%;border-collapse:collapse'>"
-            "<tr style='background:#1a1a1a'>"
-            "<th style='padding:10px 8px;text-align:left'>Compte</th>"
-            "<th style='padding:10px 8px;text-align:center'>Followers</th>"
-            "<th style='padding:10px 8px;text-align:center'>Reels en cache</th>"
-            "<th style='padding:10px 8px;text-align:center'>Dernier scrape</th>"
-            "<th style='padding:10px 8px;text-align:right'>Actions</th>"
-            "</tr>"
-        )
         import datetime
+        # Affichage en grille de cards (plus stylé que tableau)
+        rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-top:14px'>")
         for it in items:
             u = it["username"]
             scraped = it["scraped_at"]
@@ -1672,27 +1704,53 @@ def _render_insta_accounts_html() -> str:
                 dt = datetime.datetime.fromtimestamp(scraped)
                 scraped_str = dt.strftime("%d/%m %H:%M")
             else:
-                scraped_str = "<span style='color:#888'>jamais</span>"
+                scraped_str = "jamais"
             fname = it["full_name"] or ""
-            fname_html = f"<div style='font-size:11px;color:#888'>{fname}</div>" if fname else ""
+            pic = it.get("profile_pic_url") or ""
+            verified_badge = ""
+            if it.get("is_verified"):
+                verified_badge = "<span style='color:#5865f2;font-size:13px' title='Vérifié'>✓</span>"
+            # Avatar : image ou initiale colorée
+            if pic:
+                avatar_html = (
+                    f"<img src='{pic}' loading='lazy' "
+                    f"style='width:48px;height:48px;border-radius:50%;object-fit:cover;background:#0f0f0f' "
+                    f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='flex'\">"
+                    f"<div style='display:none;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#5865f2,#a855f7);"
+                    f"align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
+                )
+            else:
+                avatar_html = (
+                    f"<div style='width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#5865f2,#a855f7);"
+                    f"display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
+                )
             rows.append(
-                f"<tr style='border-bottom:1px solid #2a2a2a'>"
-                f"<td style='padding:10px 8px'><b>@{u}</b>{fname_html}</td>"
-                f"<td style='padding:10px 8px;text-align:center'>{it['followers']:,}</td>"
-                f"<td style='padding:10px 8px;text-align:center'>{it['nb_reels']}</td>"
-                f"<td style='padding:10px 8px;text-align:center;font-size:13px;color:#aaa'>{scraped_str}</td>"
-                f"<td style='padding:10px 8px;text-align:right'>"
-                f"<form method='POST' action='/insta/scrape' style='display:inline'>"
+                f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px'>"
+                f"<div style='display:flex;align-items:center;gap:12px'>"
+                f"{avatar_html}"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>@{u}{verified_badge}</div>"
+                f"<div style='font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{fname}</div>"
+                f"</div>"
+                f"</div>"
+                f"<div style='display:flex;gap:14px;font-size:12px;color:#aaa;border-top:1px solid #2a2a2a;padding-top:10px'>"
+                f"<div><b style='color:#fff'>{it['followers']:,}</b> followers</div>"
+                f"<div><b style='color:#fff'>{it['nb_reels']}</b> reels</div>"
+                f"</div>"
+                f"<div style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
+                f"<div style='display:flex;gap:6px;margin-top:auto'>"
+                f"<form method='POST' action='/insta/scrape' style='flex:1;margin:0'>"
                 f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' style='padding:6px 12px;background:#5865f2;color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
+                f"<button type='submit' style='width:100%;padding:8px;background:#5865f2;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
                 f"</form>"
-                f"<form method='POST' action='/insta/remove_account' style='display:inline;margin-left:6px'>"
+                f"<form method='POST' action='/insta/remove_account' style='margin:0'>"
                 f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' class='danger-btn' data-confirm=\"Retirer @{u} de la watchlist Instagram ? Le cache des reels sera conservé.\">Retirer</button>"
+                f"<button type='submit' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ? Le cache sera conservé.\">×</button>"
                 f"</form>"
-                f"</td></tr>"
+                f"</div>"
+                f"</div>"
             )
-        rows.append("</table>")
+        rows.append("</div>")
         rows.append(
             f"<form method='POST' action='/insta/scrape_all' style='margin-top:18px'>"
             f"<button type='submit' style='padding:12px 24px;background:#5865f2;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
@@ -1826,6 +1884,7 @@ def _render_upload(msg=None, error=None):
         .replace("{cloud_pps_html}", _render_cloud_pps_html())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
+        .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
         .replace("{insta_trends_html_or_empty}", _render_insta_trends_grid_html() or
             "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
             "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:14px'><polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/><polyline points='16 7 22 7 22 13'/></svg>"

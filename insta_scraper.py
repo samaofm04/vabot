@@ -558,18 +558,21 @@ def get_all_cached_reels() -> list:
 
 
 def watchlist_status() -> list:
-    """Liste enrichie : username + last_scrape + nb_reels."""
+    """Liste enrichie : username + last_scrape + nb_reels + profile_pic."""
     wl = load_watchlist()
     out = []
     for u in wl:
         data = get_cached(u)
         if data:
+            prof = data.get("profile", {})
             out.append({
                 "username": u,
                 "scraped_at": data.get("scraped_at", 0),
                 "nb_reels": len(data.get("reels", [])),
-                "followers": data.get("profile", {}).get("followers", 0),
-                "full_name": data.get("profile", {}).get("full_name", ""),
+                "followers": prof.get("followers", 0),
+                "full_name": prof.get("full_name", ""),
+                "profile_pic_url": prof.get("profile_pic_url", ""),
+                "is_verified": prof.get("is_verified", False),
             })
         else:
             out.append({
@@ -578,5 +581,7 @@ def watchlist_status() -> list:
                 "nb_reels": 0,
                 "followers": 0,
                 "full_name": "",
+                "profile_pic_url": "",
+                "is_verified": False,
             })
     return out
