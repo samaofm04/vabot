@@ -3278,22 +3278,38 @@ def create_app():
     def is_auth():
         return session.get("auth") is True
 
+    def _redirect_back(tab=None):
+        """Retourne l'URL où rediriger : tab explicite > Referer > /."""
+        if tab:
+            return f"/?tab={tab}"
+        # Use Referer pour rester sur l'onglet actuel
+        ref = request.headers.get("Referer", "")
+        if ref:
+            # Garder uniquement le path+query relatifs (sécurité : pas de redirection externe)
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(ref)
+                # Vérifier que c'est bien notre host (ou un path relatif)
+                if parsed.netloc and request.host and parsed.netloc != request.host:
+                    return "/"
+                relative = parsed.path or "/"
+                if parsed.query:
+                    relative += "?" + parsed.query
+                return relative
+            except Exception:
+                return "/"
+        return "/"
+
     def _success(msg, tab=None):
-        """Pattern POST-Redirect-GET : flash le message + redirige sur GET /."""
+        """Pattern POST-Redirect-GET : flash le message + redirige sur GET."""
         session["flash_msg"] = msg
         session["flash_error"] = False
-        url = "/"
-        if tab:
-            url += f"?tab={tab}"
-        return redirect(url)
+        return redirect(_redirect_back(tab))
 
     def _error(msg, tab=None):
         session["flash_msg"] = msg
         session["flash_error"] = True
-        url = "/"
-        if tab:
-            url += f"?tab={tab}"
-        return redirect(url)
+        return redirect(_redirect_back(tab))
 
     @app.route("/", methods=["GET", "POST"])
     def index():
