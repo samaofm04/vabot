@@ -2122,11 +2122,34 @@ def _render_sfs_html() -> str:
     platform_idents = {p: identities_for_platform(p) for p in PLATFORMS}
     platform_idents_json = _json.dumps(platform_idents)
 
-    # Calendrier
+    # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
+    from flask import request as flask_request
+    month_param = flask_request.args.get("sfs_month", "")
     year = today.year
     month = today.month
+    if month_param:
+        try:
+            parts = month_param.split("-")
+            year = int(parts[0])
+            month = int(parts[1])
+            if month < 1 or month > 12:
+                year, month = today.year, today.month
+        except Exception:
+            year, month = today.year, today.month
+
+    # Calculer mois précédent et suivant
+    prev_year = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
+    next_year = year if month < 12 else year + 1
+    next_month = month + 1 if month < 12 else 1
+
+    # Construire la date du 1er du mois affiché pour le nom
     first_day, days_in_month = cal.monthrange(year, month)
-    month_name = today.strftime("%B %Y")
+    displayed = datetime.date(year, month, 1)
+    # Nom du mois en français
+    fr_months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                 "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+    month_name = f"{fr_months[month-1]} {year}"
 
     # SFS par date + par plateforme pour le rendu
     sfs_by_date_platform = {}  # {date: {OF: [...], MYM: [...]}}
@@ -2197,7 +2220,18 @@ def _render_sfs_html() -> str:
 
     # === CALENDRIER ===
     rows.append("<div class='box'>")
-    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>")
+    # Header du calendrier avec navigation
+    today_link = f"?tab=sfs&sfs_month={today.year:04d}-{today.month:02d}"
+    prev_link = f"?tab=sfs&sfs_month={prev_year:04d}-{prev_month:02d}"
+    next_link = f"?tab=sfs&sfs_month={next_year:04d}-{next_month:02d}"
+    is_current_month = (year == today.year and month == today.month)
+    today_btn_html = ""
+    if not is_current_month:
+        today_btn_html = (
+            f"<a href='{today_link}' style='padding:6px 12px;background:#5865f2;color:#fff;"
+            f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;margin-right:6px'>Aujourd'hui</a>"
+        )
+    rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px'>")
     rows.append(
         "<h3 style='margin:0;display:flex;align-items:center;gap:10px'>"
         "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
@@ -2207,10 +2241,20 @@ def _render_sfs_html() -> str:
         "<line x1='3' x2='21' y1='10' y2='10'/>"
         "<polyline points='9 14 11 16 15 12'/>"
         "</svg>"
-        f"{month_name}</h3>"
+        f"<span>{month_name}</span></h3>"
     )
-    rows.append("<small style='color:#888'>Clique sur une date pour planifier un SFS</small>")
-    rows.append("</div>")
+    rows.append("<div style='display:flex;align-items:center;gap:6px'>")
+    rows.append(today_btn_html)
+    rows.append(
+        f"<a href='{prev_link}' title='Mois précédent' "
+        f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border-radius:6px;text-decoration:none;font-size:16px;font-weight:600;line-height:1'>‹</a>"
+    )
+    rows.append(
+        f"<a href='{next_link}' title='Mois suivant' "
+        f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border-radius:6px;text-decoration:none;font-size:16px;font-weight:600;line-height:1'>›</a>"
+    )
+    rows.append("</div></div>")
+    rows.append("<small style='color:#888;display:block;margin-bottom:12px'>Clique sur une date pour planifier un SFS</small>")
     rows.append("<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center'>")
     for dn in ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"]:
         rows.append(f"<div style='font-size:12px;color:#888;font-weight:600;padding:6px 0'>{dn}</div>")
