@@ -100,9 +100,10 @@ UPLOAD_HTML = """
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh}
 .layout{display:flex;min-height:100vh}
-/* Sidebar ultra-fine icon-only */
+/* Sidebar ultra-fine icon-only avec SVG */
 .sidebar{width:56px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:12px 0;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px}
-.sidebar .ico{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:none;border:0;color:#666;cursor:pointer;font-size:20px;border-radius:8px;transition:all .15s;position:relative;margin:0;text-decoration:none}
+.sidebar .ico{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:none;border:0;color:#888;cursor:pointer;border-radius:8px;transition:all .15s;position:relative;margin:0;text-decoration:none;padding:0}
+.sidebar .ico svg{width:20px;height:20px;display:block}
 .sidebar .ico:hover{background:#1a1a1a;color:#fff}
 .sidebar .ico.active{color:#fff;background:#1a1a1a}
 .sidebar .ico.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:24px;background:#fff;border-radius:0 2px 2px 0}
@@ -161,23 +162,56 @@ function showTab(name,title,subtitle){
 </script>
 </head><body><div class="layout">
 <div class="sidebar">
-  <button class="ico active" id="ico-reel" onclick="showTab('reel','🎬 Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">🎬<span class="tip">Reel</span></button>
-  <button class="ico" id="ico-post" onclick="showTab('post','📸 Upload Post','Photo + caption + description')">📸<span class="tip">Post</span></button>
-  <button class="ico" id="ico-story" onclick="showTab('story','📱 Upload Story','Photo simple pour story')">📱<span class="tip">Story</span></button>
-  <button class="ico" id="ico-storycta" onclick="showTab('storycta','📲 Story CTA','Photo 1080x1920 pour CTA + lien')">📲<span class="tip">Story CTA</span></button>
-  <button class="ico" id="ico-pp" onclick="showTab('pp','👤 Photo de profil','Pool partagé entre toutes les identités')">👤<span class="tip">PP partagé</span></button>
+  <button class="ico active" id="ico-reel" onclick="showTab('reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+    <span class="tip">Reel</span>
+  </button>
+  <button class="ico" id="ico-post" onclick="showTab('post','Upload Post','Photo + caption + description')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+    <span class="tip">Post</span>
+  </button>
+  <button class="ico" id="ico-story" onclick="showTab('story','Upload Story','Photo simple pour story')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+    <span class="tip">Story</span>
+  </button>
+  <button class="ico" id="ico-storycta" onclick="showTab('storycta','Story CTA','Photo 1080x1920 pour CTA + lien')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+    <span class="tip">Story CTA</span>
+  </button>
+  <button class="ico" id="ico-pp" onclick="showTab('pp','Photo de profil','Pool partagé entre toutes les identités')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+    <span class="tip">PP partagé</span>
+  </button>
   <div class="sep"></div>
-  <button class="ico" id="ico-home" onclick="showTab('home','🤖 Dashboard','Vue d ensemble')">🤖<span class="tip">Dashboard</span></button>
-  <button class="ico" id="ico-valist" onclick="showTab('valist','👥 Délégations VA','VAs assignés à chaque identité')">👥<span class="tip">Délégations VA</span></button>
-  <button class="ico" id="ico-vastats" onclick="showTab('vastats','📊 Statistiques','Contenus dispo par identité')">📊<span class="tip">Stats par identité</span></button>
+  <button class="ico" id="ico-home" onclick="showTab('home','Dashboard','Vue d ensemble')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+    <span class="tip">Dashboard</span>
+  </button>
+  <button class="ico" id="ico-valist" onclick="showTab('valist','Délégations VA','VAs assignés à chaque identité')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <span class="tip">Délégations VA</span>
+  </button>
+  <button class="ico" id="ico-vastats" onclick="showTab('vastats','Statistiques','Contenus dispo par identité')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
+    <span class="tip">Stats par identité</span>
+  </button>
   <div class="sep"></div>
-  <button class="ico" id="ico-stoken" onclick="showTab('stoken','🤖 Token bot admin','Token du 2e bot Discord')">🔑<span class="tip">Token bot admin</span></button>
-  <button class="ico" id="ico-spwd" onclick="showTab('spwd','🔐 Mot de passe site','Mot de passe d accès à ce site')">🔐<span class="tip">Mot de passe site</span></button>
+  <button class="ico" id="ico-stoken" onclick="showTab('stoken','Token bot admin','Token du 2e bot Discord')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+    <span class="tip">Token bot admin</span>
+  </button>
+  <button class="ico" id="ico-spwd" onclick="showTab('spwd','Mot de passe site','Mot de passe d accès à ce site')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    <span class="tip">Mot de passe site</span>
+  </button>
   <div class="spacer"></div>
-  <a href="/logout" class="ico logout-btn"><span style="font-size:18px">🚪</span><span class="tip">Déconnexion</span></a>
+  <a href="/logout" class="ico logout-btn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+    <span class="tip">Déconnexion</span>
+  </a>
 </div>
 <div class="main">
-<h1 id="page-title">🎬 Upload Reel</h1>
+<h1 id="page-title">Upload Reel</h1>
 <div class="subtitle" id="page-subtitle">Vidéo clean + caption + description (+ exemple optionnel)</div>
 {msg_html}
 
