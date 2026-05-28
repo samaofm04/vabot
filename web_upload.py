@@ -1007,8 +1007,19 @@ function showTab(group,name,title,subtitle){
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
 <div class="form-section" id="form-sinsta" style="display:none">
+
+<!-- Import depuis fichier cookies.txt -->
+<form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #5865f2">
+<h3 style="margin-top:0">⚡ Import rapide depuis fichier cookies.txt</h3>
+<small>Méthode la plus simple : uploade le fichier cookies.txt téléchargé via l'extension <b>"Get cookies.txt"</b> de Chrome.</small>
+<label style="margin-top:14px">Fichier cookies.txt</label>
+<input type="file" name="cookies_file" accept=".txt,text/plain" required>
+<small>Format Netscape (par défaut dans l'extension)</small>
+<button type="submit">📥 Importer</button>
+</form>
+
 <form method="POST" action="/settings/insta_auth" class="box">
-<h3 style="margin-top:0">📷 Cookies Instagram</h3>
+<h3 style="margin-top:0">🔧 Saisie manuelle des cookies</h3>
 <small>Statut : <b>{insta_auth_status}</b></small>
 <details style="margin-top:14px;margin-bottom:14px"><summary style="cursor:pointer;color:#7289da;font-size:14px;font-weight:600">📖 Comment récupérer mes cookies ?</summary>
 <div style="padding:14px;background:#0f0f0f;border-radius:6px;margin-top:8px;font-size:13px;line-height:1.6;color:#aaa">
@@ -1902,6 +1913,51 @@ def create_app():
         target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
         photo.save(str(target))
         return _render_upload(f"✅ Photo de profil ajoutée ({target.name})")
+
+    @app.route("/settings/insta_auth_file", methods=["POST"])
+    def settings_insta_auth_file():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from insta_scraper import save_auth
+        except Exception as e:
+            return _render_upload(f"❌ Module indispo: {e}", error=True)
+        f = request.files.get("cookies_file")
+        if not f or not f.filename:
+            return _render_upload("❌ Aucun fichier", error=True)
+        try:
+            content = f.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            return _render_upload(f"❌ Erreur lecture : {e}", error=True)
+        # Parser le format Netscape : domain TRUE path TRUE expiry name value (séparés par tab)
+        wanted = {"sessionid": None, "ds_user_id": None, "csrftoken": None}
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            name = parts[5].strip()
+            value = parts[6].strip()
+            if name in wanted and value:
+                wanted[name] = value
+        if not wanted["sessionid"]:
+            return _render_upload(
+                "❌ Aucun <code>sessionid</code> trouvé dans le fichier. "
+                "Assure-toi d'être connecté à Instagram avant d'exporter les cookies.",
+                error=True,
+            )
+        save_auth({
+            "sessionid": wanted["sessionid"],
+            "ds_user_id": wanted["ds_user_id"] or "",
+            "csrftoken": wanted["csrftoken"] or "",
+            "username": "",
+        })
+        found = [k for k, v in wanted.items() if v]
+        return _render_upload(
+            f"✅ Cookies importés ({', '.join(found)}). Tu peux maintenant ajouter des comptes à scraper."
+        )
 
     @app.route("/settings/insta_auth", methods=["POST"])
     def settings_insta_auth():
