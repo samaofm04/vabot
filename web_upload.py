@@ -2383,6 +2383,9 @@ def _render_sfs_html() -> str:
     for ident in sorted(_list_identities()):
         avatar = _identity_avatar_html(ident, size=36)
         count = sfs_count_by_ident.get(ident, 0)
+        # Plateformes auxquelles cette identité appartient
+        ident_platforms = platforms_map.get(ident, [])
+        platforms_attr = ",".join(ident_platforms)
         badge = ""
         if count > 0:
             badge = (
@@ -2392,7 +2395,7 @@ def _render_sfs_html() -> str:
             )
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
-            f"class='sfs-ident-row' data-ident='{ident}' "
+            f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' "
             f"style='display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
             f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
@@ -2534,7 +2537,23 @@ function switchSfsPlatform(btn, platform){{
   }});
   btn.style.color = '#fff';
   btn.style.borderBottomColor = (platform === 'OF') ? '#3b82f6' : '#06b6d4';
-  refreshSfsCalendar();
+  // Filtrer la liste des identités selon la plateforme
+  var currentIdent = window.__currentSfsIdent;
+  var stillVisible = false;
+  document.querySelectorAll('.sfs-ident-row[data-platforms]').forEach(function(row){{
+    var rowPlatforms = (row.dataset.platforms || '').split(',').filter(Boolean);
+    var matches = rowPlatforms.indexOf(platform) !== -1;
+    row.style.display = matches ? '' : 'none';
+    if(matches && row.dataset.ident === currentIdent) stillVisible = true;
+  }});
+  // Si l'identité sélectionnée n'est pas sur cette plateforme, repasser à "All creators"
+  if(currentIdent && !stillVisible){{
+    var allRow = document.querySelector('.sfs-ident-all');
+    if(allRow) filterSfsByIdentity(null, allRow);
+  }} else {{
+    refreshSfsCalendar();
+    refreshSfsDayPanel();
+  }}
 }}
 
 function filterSfsByIdentity(ident, btnEl){{
@@ -2681,6 +2700,12 @@ function closeSfsModal(){{
 // Init calendrier au chargement
 window.addEventListener('DOMContentLoaded', function(){{
   setTimeout(function(){{
+    // Filtrer la liste d'identités pour OF (par défaut)
+    var initialPlatform = window.__currentSfsPlatform || 'OF';
+    document.querySelectorAll('.sfs-ident-row[data-platforms]').forEach(function(row){{
+      var rowPlatforms = (row.dataset.platforms || '').split(',').filter(Boolean);
+      row.style.display = rowPlatforms.indexOf(initialPlatform) !== -1 ? '' : 'none';
+    }});
     refreshSfsCalendar();
     // Sélectionner aujourd'hui par défaut
     var today = new Date();
