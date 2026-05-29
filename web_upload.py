@@ -3780,6 +3780,17 @@ def _render_role_settings_html() -> str:
         r_name_safe = r["name"].replace('"', '\\"')
         r_desc_safe = r["desc"].replace('"', '\\"')
         r_color = r["color"]
+        # Bouton trash seulement pour les rôles custom (pas Owner)
+        trash_btn = ""
+        if key != "owner":
+            trash_btn = (
+                f"<button onclick='deleteRole(\"{key}\",\"{r_name_safe}\")' "
+                f"title='Supprimer le rôle' "
+                f"style='background:transparent;border:0;color:#aaa;cursor:pointer;padding:4px 8px;margin-left:10px;font-size:14px' "
+                f"onmouseover='this.style.color=\"#ef4444\"' onmouseout='this.style.color=\"#aaa\"'>"
+                f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/><path d='M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2'/></svg>"
+                f"</button>"
+            )
         rows.append(
             f"<tr style='border-bottom:1px solid #2a2a2a'>"
             f"<td style='padding:12px 8px'><b style='color:{r_color}'>{r['name']}</b></td>"
@@ -3790,10 +3801,13 @@ def _render_role_settings_html() -> str:
             f"<div style='position:absolute;{toggle_pos};top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div>"
             f"</div></td>"
             f"<td style='padding:12px 8px;text-align:right;white-space:nowrap'>"
-            f"<button onclick='openEditRole(\"{key}\",\"{r_name_safe}\",\"{r_desc_safe}\")' "
-            f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px'>✏️ Edit</button>"
-            f"<button onclick='openPermissions(\"{key}\",\"{r_name_safe}\")' "
-            f"style='padding:6px 12px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>🔒 Permissions</button>"
+            f"<a onclick='openPermissions(\"{key}\",\"{r_name_safe}\")' "
+            f"style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;margin-right:18px;text-decoration:none' "
+            f"onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Set permissions</a>"
+            f"<a onclick='openEditRole(\"{key}\",\"{r_name_safe}\",\"{r_desc_safe}\")' "
+            f"style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none' "
+            f"onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Edit</a>"
+            f"{trash_btn}"
             f"</td></tr>"
         )
     rows.append("</table>")
@@ -3892,6 +3906,20 @@ function openPermissions(key, name){
 }
 function closePermissions(){
   document.getElementById('perm-overlay').classList.remove('show');
+}
+function deleteRole(key, name){
+  showConfirm('Supprimer le rôle ?', 'Supprimer le rôle "' + name + '" ? Les utilisateurs ayant ce rôle ne perdent pas leur compte mais perdent leurs permissions.', function(){
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/settings/role/delete';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'role_key';
+    input.value = key;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  });
 }
 function savePermissions(){
   // Construire l'objet permissions à partir des checkboxes
@@ -4734,6 +4762,25 @@ def create_app():
         users = [u for u in users if u.get("username") != username]
         _save_role_users(users)
         return _success(f"✅ {username} supprimé")
+
+    @app.route("/settings/role/delete", methods=["POST"])
+    def settings_role_delete():
+        if not is_auth():
+            return redirect("/")
+        key = (request.form.get("role_key") or "").strip()
+        if not key or key == "owner":
+            return _error("❌ Impossible de supprimer ce rôle")
+        defs = _load_role_definitions()
+        if key in defs:
+            del defs[key]
+            _save_role_definitions(defs)
+        # Réinitialiser les users qui avaient ce rôle
+        users = _load_role_users()
+        for u in users:
+            if u.get("role") == key:
+                u["role"] = "va"  # downgrade en VA par défaut
+        _save_role_users(users)
+        return _success(f"✅ Rôle <b>{key}</b> supprimé")
 
     @app.route("/settings/role/edit_def", methods=["POST"])
     def settings_role_edit_def():
