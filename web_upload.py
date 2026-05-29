@@ -2878,16 +2878,47 @@ def _render_va_list_html_inner() -> str:
 
     css = """
 <style>
-/* === Vault toolbar (search + filter) === */
-.va-vault-toolbar{display:flex;gap:10px;margin-bottom:18px;align-items:stretch}
-.va-vault-search{flex:1;background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:9px;transition:all .15s}
+/* === Layout Vault 2 panneaux : sidebar liste + détail === */
+.va-vault-layout{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start}
+@media(max-width:1000px){.va-vault-layout{grid-template-columns:1fr}}
+.va-vault-sidebar{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 200px);overflow:hidden;position:sticky;top:18px}
+.va-vault-detail{min-width:0}
+/* Sidebar toolbar */
+.va-vault-toolbar{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+.va-vault-search{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:8px 12px;display:flex;align-items:center;gap:8px;transition:all .15s}
 .va-vault-search:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 .va-vault-search input{flex:1;background:transparent;border:0;color:#fff;outline:none;font-size:13px;font-family:inherit;padding:0;margin:0}
 .va-vault-search input::placeholder{color:#666}
-.va-vault-filter{background:#0f1116;border:1px solid #2a2a2a;color:#aaa;border-radius:10px;padding:0 14px;font-size:13px;font-family:inherit;cursor:pointer;min-width:180px;outline:none}
+.va-vault-filter{background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:9px;padding:8px 12px;font-size:12px;font-family:inherit;cursor:pointer;outline:none}
 .va-vault-filter:focus{border-color:#3b82f6}
-body.light .va-vault-search,body.light .va-vault-filter{background:#fff;border-color:#e5e7eb;color:#111}
+/* Liste sidebar scrollable */
+.va-vault-list{display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;margin:0 -6px;padding:0 6px}
+.va-vlist-section{display:flex;flex-direction:column;gap:3px;margin-bottom:6px}
+.va-vlist-section-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;padding:8px 8px 4px}
+.va-vlist-ident-av{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.va-vlist-section-head > span:nth-child(2){flex:1;color:#aaa;font-size:12px;letter-spacing:-.01em;text-transform:none;font-weight:600}
+.va-vlist-count{background:rgba(59,130,246,.15);color:#60a5fa;padding:2px 7px;border-radius:9px;font-size:10px;font-weight:700}
+.va-vlist-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:all .12s}
+.va-vlist-item:hover{background:rgba(255,255,255,.04)}
+.va-vlist-item.va-vlist-selected{background:linear-gradient(90deg,rgba(59,130,246,.2),rgba(168,85,247,.1));border-color:rgba(59,130,246,.4)}
+.va-vlist-pp-wrap{position:relative;width:36px;height:36px;flex-shrink:0}
+.va-vlist-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;display:block}
+.va-vlist-pp-fallback{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;font-weight:800;font-size:13px}
+.va-vlist-dot{position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;border:2px solid #0f1116}
+.va-vlist-dot-on{background:#22c55e}
+.va-vlist-dot-off{background:#6b7280}
+.va-vlist-info{flex:1;min-width:0}
+.va-vlist-name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+.va-vlist-sub{font-size:11px;color:#888;margin-top:2px;display:flex;gap:4px;align-items:center}
+.va-vlist-mini-badge{font-size:12px;line-height:1}
+/* Détail panel : header guidé */
+.va-detail-hint{padding:60px 20px;text-align:center;color:#666;font-size:13px}
+body.light .va-vault-sidebar{background:#fff;border-color:#e5e7eb}
+body.light .va-vault-search,body.light .va-vault-filter{background:#f9fafb;border-color:#e5e7eb;color:#111}
 body.light .va-vault-search input{color:#111}
+body.light .va-vlist-item:hover{background:#f3f4f6}
+body.light .va-vlist-item.va-vlist-selected{background:linear-gradient(90deg,#dbeafe,#ede9fe);border-color:rgba(59,130,246,.3)}
+body.light .va-vlist-dot{border-color:#fff}
 /* Animation fade quand un VA est masqué/affiché */
 .va-card{opacity:1;transition:opacity .15s}
 .va-card.va-hidden{display:none}
@@ -3022,22 +3053,102 @@ body.light .va-id{color:#9ca3af}
     except Exception:
         pass
 
-    # Vault toolbar : search + filter identité
+    # ===== Sidebar Vault style : liste compacte des VAs par identité =====
     identities_for_filter = sorted(by_identity.keys())
     ident_opts = "".join(
         f"<option value='{i}'>{i.capitalize()}</option>" for i in identities_for_filter
     )
-    vault_toolbar = (
+
+    # Construire la liste sidebar
+    sidebar_rows = []
+    first_uid = ""
+    for identity in identities_for_filter:
+        members = by_identity[identity]
+        ident_avatar = _identity_avatar_url(identity)
+        # Header identité
+        ident_av_html = (
+            f"<img src='{ident_avatar}' class='va-vlist-ident-av' alt='{identity}'>"
+            if ident_avatar else
+            f"<div class='va-vlist-ident-av' style='background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px'>{identity[:1].upper()}</div>"
+        )
+        sidebar_rows.append(
+            f"<div class='va-vlist-section' data-vlist-identity='{identity}'>"
+            f"<div class='va-vlist-section-head'>{ident_av_html}<span>@{identity}</span>"
+            f"<span class='va-vlist-count'>{len(members)}</span></div>"
+        )
+        for uid, data in members:
+            try:
+                uname = _resolve_username(uid)
+                if not isinstance(uname, str):
+                    uname = str(uname)
+                avatar_url = _resolve_avatar_url(uid)
+                if not isinstance(avatar_url, str):
+                    avatar_url = ""
+                if isinstance(data, dict):
+                    is_a = data.get("auto_post", True)
+                else:
+                    is_a = True
+                insta_va_side = _get_va_insta(uid)
+                ig_h_side = insta_va_side.get("handle", "")
+                pay_side = _get_va_payment(uid)
+                pay_has = bool(pay_side.get("kind"))
+                assigned_side = _get_links_for_va(uid)
+
+                pp_side = (
+                    f"<img src='{avatar_url}' class='va-vlist-pp' alt=''>"
+                    if avatar_url else
+                    f"<div class='va-vlist-pp va-vlist-pp-fallback'>{(uname[:1] if uname else '?').upper()}</div>"
+                )
+                status_dot_side = (
+                    "<div class='va-vlist-dot va-vlist-dot-on'></div>"
+                    if is_a else
+                    "<div class='va-vlist-dot va-vlist-dot-off'></div>"
+                )
+                # Mini badges pour les features configurées
+                badges = []
+                if assigned_side:
+                    badges.append(f"<span class='va-vlist-mini-badge' style='color:#a855f7' title='{len(assigned_side)} lien(s) GMS'>🔗</span>")
+                if pay_has:
+                    badges.append("<span class='va-vlist-mini-badge' style='color:#22c55e' title='Paiement configuré'>💳</span>")
+                if ig_h_side:
+                    badges.append("<span class='va-vlist-mini-badge' style='color:#ec4899' title='Instagram lié'>📷</span>")
+                badges_html = "".join(badges) or "<span class='va-vlist-mini-badge' style='color:#444'>—</span>"
+
+                disp_name = uname if uname and uname != str(uid) else "—"
+                search_b = (uname + " " + uid + " " + identity).lower()
+                if not first_uid:
+                    first_uid = str(uid)
+                sidebar_rows.append(
+                    f"<div class='va-vlist-item' data-vlist-uid='{uid}' "
+                    f"data-vlist-search='{search_b}' data-vlist-identity='{identity}' "
+                    f"onclick=\"vaSelectVa('{uid}')\">"
+                    f"<div class='va-vlist-pp-wrap'>{pp_side}{status_dot_side}</div>"
+                    f"<div class='va-vlist-info'>"
+                    f"<div class='va-vlist-name'>{disp_name}</div>"
+                    f"<div class='va-vlist-sub'>{''.join(badges_html if isinstance(badges_html, str) else badges_html)}</div>"
+                    f"</div>"
+                    f"</div>"
+                )
+            except Exception:
+                continue
+        sidebar_rows.append("</div>")  # close section
+
+    vault_sidebar = (
+        "<div class='va-vault-sidebar'>"
         "<div class='va-vault-toolbar'>"
         "<div class='va-vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
         "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' id='va-search' placeholder='Rechercher un VA…' oninput='vaSearch(this.value)'>"
+        "<input type='text' id='va-search' placeholder='Rechercher…' oninput='vaSearch(this.value)'>"
         "</div>"
         "<select id='va-filter-identity' onchange='vaSearch(null)' class='va-vault-filter'>"
         "<option value=''>Toutes les identités</option>"
         + ident_opts +
         "</select>"
+        "</div>"
+        "<div class='va-vault-list' id='va-vault-list'>"
+        + "".join(sidebar_rows)
+        + "</div>"
         "</div>"
     )
 
@@ -3295,7 +3406,7 @@ body.light .va-id{color:#9ca3af}
 
             search_blob = (username + " " + uid + " " + identity).lower()
             cards.append(
-                f"<div class='va-card' data-va-search='{search_blob}' data-va-identity='{identity}'>"
+                f"<div class='va-card' data-va-uid='{uid}' data-va-search='{search_blob}' data-va-identity='{identity}'>"
                 f"{pp_html}"
                 f"<div class='va-info'>"
                 f"{name_display}"
@@ -3832,37 +3943,63 @@ function vaLinksSave(){
 </script>
 """
 
-    vault_search_js = """
-<script>
+    vault_search_js = (
+        "<script>"
+        "var _firstVaUid = " + _json_pay.dumps(first_uid) + ";"
+        + """
 function vaSearch(q){
   if(q === null) q = document.getElementById('va-search').value;
   q = (q || '').toLowerCase().trim();
   var identFilter = (document.getElementById('va-filter-identity').value || '').toLowerCase().trim();
-  var sections = document.querySelectorAll('.va-section');
-  sections.forEach(function(sec){
-    var secIdent = (sec.getAttribute('data-va-section-identity') || '').toLowerCase();
-    // Si filtre identité actif et qu'on n'est pas dans la bonne section → cacher
+  // Sidebar items
+  document.querySelectorAll('.va-vlist-section').forEach(function(sec){
+    var secIdent = (sec.getAttribute('data-vlist-identity') || '').toLowerCase();
     if(identFilter && secIdent !== identFilter){
-      sec.classList.add('va-empty');
+      sec.style.display = 'none';
       return;
     }
     var anyVisible = false;
-    sec.querySelectorAll('.va-card').forEach(function(card){
-      var blob = (card.getAttribute('data-va-search') || '').toLowerCase();
+    sec.querySelectorAll('.va-vlist-item').forEach(function(item){
+      var blob = (item.getAttribute('data-vlist-search') || '').toLowerCase();
       var match = !q || blob.indexOf(q) !== -1;
-      card.classList.toggle('va-hidden', !match);
+      item.style.display = match ? '' : 'none';
       if(match) anyVisible = true;
     });
-    sec.classList.toggle('va-empty', !anyVisible);
+    sec.style.display = anyVisible ? '' : 'none';
   });
 }
+function vaSelectVa(uid){
+  // Highlight sidebar item
+  document.querySelectorAll('.va-vlist-item').forEach(function(it){
+    it.classList.toggle('va-vlist-selected', it.getAttribute('data-vlist-uid') === uid);
+  });
+  // Show only the selected VA card, hide others
+  document.querySelectorAll('.va-card').forEach(function(card){
+    card.style.display = card.getAttribute('data-va-uid') === uid ? '' : 'none';
+  });
+  // Hide section heads if not the selected VA's section
+  document.querySelectorAll('.va-section').forEach(function(sec){
+    var hasVisible = sec.querySelector('.va-card:not([style*="display: none"])');
+    sec.style.display = hasVisible ? '' : 'none';
+  });
+  // Scroll détail panel en haut
+  var detail = document.querySelector('.va-vault-detail');
+  if(detail) detail.scrollTop = 0;
+}
+// Auto-select le premier VA au chargement
+document.addEventListener('DOMContentLoaded', function(){
+  if(_firstVaUid) vaSelectVa(_firstVaUid);
+});
 </script>
 """
+    )
+    detail_content = "".join(sections) + footer
     return (
         css + css_modal + pay_css_js + insta_css_js
-        + vault_toolbar
-        + "".join(sections)
-        + footer
+        + "<div class='va-vault-layout'>"
+        + vault_sidebar
+        + "<div class='va-vault-detail'>" + detail_content + "</div>"
+        + "</div>"
         + modal_html + pay_modal_html + insta_modal_html
         + vault_search_js
     )
