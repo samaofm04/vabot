@@ -941,20 +941,18 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
-// Lightbox style Infloww : navigation prev/next + compteur
-var lbGallery = [];   // {url, isVideo, name} pour les fichiers visibles
+// Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
+var lbGallery = [];   // {url, isVideo, name, fileId}
 var lbIndex = 0;
+var lbEditMode = false;
 function lbCollectGallery(){
-  // Récupère toutes les cartes du gallery courant dans l'ordre du DOM
   lbGallery = [];
   document.querySelectorAll('.cloud-card').forEach(function(card){
-    var img = card.querySelector('img[loading="lazy"]');
-    var wrap = card.querySelector('[onclick^="openLightbox"]');
+    var wrap = card.querySelector('[onclick*="openLightbox"]');
     if(!wrap) return;
     var oc = wrap.getAttribute('onclick') || '';
-    // Match openLightbox("url",bool,"name")
-    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)"\)/);
-    if(m) lbGallery.push({url:m[1], isVideo:m[2]==='true', name:m[3]});
+    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)"(?:,"([^"]*)")?\)/);
+    if(m) lbGallery.push({url:m[1], isVideo:m[2]==='true', name:m[3], fileId:m[4]||''});
   });
 }
 function lbRender(){
@@ -964,7 +962,7 @@ function lbRender(){
   if(!it) return;
   var content = document.getElementById('lightbox-content');
   if(it.isVideo){
-    content.innerHTML = '<video controls autoplay src="'+it.url+'"></video>';
+    content.innerHTML = '<video controls autoplay preload="metadata" src="'+it.url+'"></video>';
   } else {
     content.innerHTML = '<img src="'+it.url+'" alt="'+(it.name||'').replace(/"/g,'')+'">';
   }
@@ -972,33 +970,104 @@ function lbRender(){
   var tot = document.getElementById('lb-total');
   if(pos) pos.textContent = (lbIndex + 1);
   if(tot) tot.textContent = lbGallery.length;
-  // Disable arrows aux extrêmes
   var prev = document.querySelector('.lb-prev');
   var next = document.querySelector('.lb-next');
   if(prev) prev.disabled = (lbIndex === 0);
   if(next) next.disabled = (lbIndex >= lbGallery.length - 1);
+  // Si panneau ouvert, recharger les meta du nouvel item
+  if(lbEditMode) lbLoadMeta();
 }
 function lbPrev(){ if(lbIndex > 0){ lbIndex--; lbRender(); } }
 function lbNext(){ if(lbIndex < lbGallery.length - 1){ lbIndex++; lbRender(); } }
-function openLightbox(url, isVideo, filename){
-  // Rebuild la liste au moment du clic pour avoir l'ordre/contenu courant
+function openLightbox(url, isVideo, filename, fileId){
   lbCollectGallery();
-  // Trouver l'index de l'item cliqué
   lbIndex = 0;
   for(var i = 0; i < lbGallery.length; i++){
     if(lbGallery[i].url === url){ lbIndex = i; break; }
   }
-  // Fallback si jamais on a pas pu collecter (ex. mode test)
   if(lbGallery.length === 0){
-    lbGallery = [{url:url, isVideo:isVideo, name:filename}];
+    lbGallery = [{url:url, isVideo:isVideo, name:filename, fileId:fileId||''}];
     lbIndex = 0;
   }
   var modal = document.getElementById('lightbox');
   modal.classList.add('show');
   lbRender();
-  // Listener clavier
   document.addEventListener('keydown', lbKeyboard);
-  return;
+}
+function lbToggleEdit(){
+  var stage = document.querySelector('.lb-stage');
+  var btn = document.querySelector('.lb-edit-btn');
+  lbEditMode = !lbEditMode;
+  if(lbEditMode){
+    stage.classList.add('with-panel');
+    if(btn) btn.classList.add('active');
+    lbLoadMeta();
+  } else {
+    stage.classList.remove('with-panel');
+    if(btn) btn.classList.remove('active');
+  }
+}
+function lbLoadMeta(){
+  var it = lbGallery[lbIndex];
+  if(!it || !it.fileId) return;
+  var capInput = document.getElementById('lb-caption');
+  var descInput = document.getElementById('lb-description');
+  capInput.value = ''; descInput.value = '';
+  fetch('/cloud/meta/get?file_id=' + encodeURIComponent(it.fileId))
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      capInput.value = data.caption || '';
+      descInput.value = data.description || '';
+      document.getElementById('lb-caption-count').textContent = capInput.value.length;
+      document.getElementById('lb-desc-count').textContent = descInput.value.length;
+    }).catch(function(){});
+}
+function lbSaveMeta(){
+  var it = lbGallery[lbIndex];
+  if(!it || !it.fileId) return;
+  var btn = document.getElementById('lb-save-btn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  var form = new FormData();
+  form.append('file_id', it.fileId);
+  form.append('caption', document.getElementById('lb-caption').value);
+  form.append('description', document.getElementById('lb-description').value);
+  fetch('/cloud/meta/save', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      btn.classList.remove('loading');
+      btn.disabled = false;
+      if(typeof showToast === 'function') showToast(data.ok ? 'Métadonnées sauvegardées' : ('Erreur : ' + (data.error || '?')), data.ok ? 'success' : 'error');
+    }).catch(function(e){
+      btn.classList.remove('loading');
+      btn.disabled = false;
+      if(typeof showToast === 'function') showToast('Erreur réseau', 'error');
+    });
+}
+// Compteur live
+document.addEventListener('input', function(e){
+  if(e.target && e.target.id === 'lb-caption'){
+    document.getElementById('lb-caption-count').textContent = e.target.value.length;
+  }
+  if(e.target && e.target.id === 'lb-description'){
+    document.getElementById('lb-desc-count').textContent = e.target.value.length;
+  }
+});
+function openCaptionEditor(fileId){
+  // Trouver l'item dans la galerie courante par son fileId
+  lbCollectGallery();
+  lbIndex = 0;
+  for(var i = 0; i < lbGallery.length; i++){
+    if(lbGallery[i].fileId === fileId){ lbIndex = i; break; }
+  }
+  var it = lbGallery[lbIndex];
+  if(!it) return;
+  var modal = document.getElementById('lightbox');
+  modal.classList.add('show');
+  lbRender();
+  // Ouvrir direct le panneau
+  if(!lbEditMode) lbToggleEdit();
+  document.addEventListener('keydown', lbKeyboard);
 }
 function closeLightbox(){
   var modal = document.getElementById('lightbox');
@@ -1935,10 +2004,13 @@ body.light .action-icon{color:#666}
 </style>
 
 <!-- Lightbox plein écran -->
-<!-- Lightbox style Infloww : backdrop semi-transparent + nav prev/next + compteur -->
+<!-- Lightbox style Infloww : backdrop semi-transparent + nav + panneau caption -->
 <div id="lightbox" onclick="closeLightbox()">
   <div class="lb-header" onclick="event.stopPropagation()">
     <div class="lb-counter"><span id="lb-pos">1</span> / <span id="lb-total">1</span></div>
+    <button class="lb-edit-btn" onclick="lbToggleEdit()" title="Modifier caption / description">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
     <button class="lb-close-btn" onclick="closeLightbox()" title="Fermer (Esc)">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
@@ -1946,8 +2018,34 @@ body.light .action-icon{color:#666}
   <button class="lb-nav lb-prev" onclick="event.stopPropagation();lbPrev()" title="Précédent (←)">
     <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
   </button>
-  <div class="lb-content-wrap" onclick="event.stopPropagation()">
-    <div id="lightbox-content"></div>
+  <div class="lb-stage" onclick="event.stopPropagation()">
+    <div class="lb-content-wrap">
+      <div id="lightbox-content"></div>
+    </div>
+    <!-- Panneau caption/description à droite, caché par défaut -->
+    <div class="lb-side-panel" id="lb-side-panel">
+      <div class="lb-side-header">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#3b82f6" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Métadonnées média
+      </div>
+      <div class="lb-side-body">
+        <label class="lb-side-label">Caption</label>
+        <textarea id="lb-caption" maxlength="2200" placeholder="Pov : ..."></textarea>
+        <div class="lb-side-count"><span id="lb-caption-count">0</span> / 2200</div>
+
+        <label class="lb-side-label" style="margin-top:14px">Description</label>
+        <textarea id="lb-description" maxlength="500" placeholder="Decris le contexte du media..."></textarea>
+        <div class="lb-side-count"><span id="lb-desc-count">0</span> / 500</div>
+
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="lb-btn-secondary" onclick="lbToggleEdit()">Annuler</button>
+          <button class="lb-btn-primary" id="lb-save-btn" onclick="lbSaveMeta()">
+            <span class="lb-save-label">Enregistrer</span>
+            <span class="lb-save-spinner"></span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
   <button class="lb-nav lb-next" onclick="event.stopPropagation();lbNext()" title="Suivant (→)">
     <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1966,14 +2064,45 @@ body.light .action-icon{color:#666}
 .lb-next{right:18px}
 .lb-nav:hover{background:rgba(255,255,255,.15);transform:translateY(-50%) scale(1.08)}
 .lb-nav:disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
-.lb-content-wrap{display:flex;align-items:center;justify-content:center;max-width:calc(100vw - 220px);max-height:calc(100vh - 120px);width:100%;height:100%}
+.lb-stage{display:flex;align-items:center;gap:16px;max-width:calc(100vw - 220px);width:100%}
+.lb-stage.with-panel .lb-content-wrap{max-width:calc(100% - 380px)}
+.lb-content-wrap{display:flex;align-items:center;justify-content:center;flex:1;max-height:calc(100vh - 120px);height:100%;transition:max-width .25s}
 #lightbox-content{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
 #lightbox-content img,#lightbox-content video{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;display:block;border-radius:10px;background:#000;box-shadow:0 24px 60px rgba(0,0,0,.6)}
-#lightbox-content video{outline:none}
+#lightbox-content video{outline:none;width:auto;min-width:480px}
+/* Bouton edit crayon dans header */
+.lb-edit-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
+.lb-edit-btn:hover,.lb-edit-btn.active{background:#3b82f6;transform:scale(1.08)}
+/* Panneau latéral droite (Caption / Description) */
+.lb-side-panel{width:0;background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;opacity:0;transition:all .25s;display:flex;flex-direction:column;max-height:calc(100vh - 120px)}
+.lb-stage.with-panel .lb-side-panel{width:360px;opacity:1}
+.lb-side-header{padding:16px 20px;border-bottom:1px solid #2a2a2a;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;color:#fff;flex-shrink:0}
+.lb-side-body{padding:18px 20px;overflow-y:auto;flex:1}
+.lb-side-label{display:block;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.lb-side-body textarea{width:100%;min-height:90px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.4}
+.lb-side-body textarea:focus{border-color:#3b82f6;outline:none;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.lb-side-count{text-align:right;font-size:11px;color:#666;margin-top:4px;font-weight:500}
+.lb-btn-primary{flex:1;background:#3b82f6;color:#fff;border:0;padding:11px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;font-family:inherit}
+.lb-btn-primary:hover{background:#2563eb}
+.lb-btn-primary:disabled{cursor:wait;opacity:.85}
+.lb-save-spinner{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.lb-btn-primary.loading .lb-save-label{display:none}
+.lb-btn-primary.loading .lb-save-spinner{display:inline-block}
+.lb-btn-secondary{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:11px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
+.lb-btn-secondary:hover{background:rgba(255,255,255,.05);color:#fff}
+body.light .lb-side-panel{background:#fff;border-color:#e5e7eb}
+body.light .lb-side-header{border-color:#e5e7eb;color:#111}
+body.light .lb-side-body textarea{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .lb-side-label{color:#6b7280}
+body.light .lb-btn-secondary{color:#6b7280;border-color:#e5e7eb}
+body.light .lb-btn-secondary:hover{background:#f3f4f6;color:#111}
 @media(max-width:768px){
   #lightbox{padding:50px 60px}
-  .lb-content-wrap{max-width:calc(100vw - 130px)}
+  .lb-stage{max-width:calc(100vw - 130px)}
+  .lb-stage.with-panel .lb-side-panel{width:280px}
+  .lb-stage.with-panel .lb-content-wrap{max-width:calc(100% - 300px)}
   .lb-nav{width:38px;height:38px}
+  #lightbox-content video{min-width:auto}
 }
 </style>
 
@@ -2355,18 +2484,22 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             "</div>"
         )
 
-    # Badge date en haut à GAUCHE (au-dessus de l'image)
+    # Badge date en haut à GAUCHE — plus solide pour rester lisible en light mode
     date_badge = ""
     if date_short:
         date_badge = (
-            f"<div style='position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);"
-            f"color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;"
-            f"backdrop-filter:blur(4px);letter-spacing:.01em;pointer-events:none;z-index:4'>{date_short}</div>"
+            f"<div class='card-date-badge' style='position:absolute;top:8px;left:8px;"
+            f"background:rgba(0,0,0,.85);color:#fff;font-size:11px;font-weight:600;"
+            f"padding:4px 10px;border-radius:6px;backdrop-filter:blur(6px);"
+            f"letter-spacing:.01em;pointer-events:none;z-index:4;"
+            f"box-shadow:0 2px 6px rgba(0,0,0,.3)'>{date_short}</div>"
         )
 
     is_video_js = "true" if is_video else "false"
+    # file_id contient identity|subdir|name → utile pour fetch/save meta
+    fid_safe = file_id.replace("'", "\\'") if file_id else ""
     media_html = (
-        f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\")' "
+        f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\")' "
         f"title='{name}' "
         f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;background:#000;border-radius:10px;overflow:hidden'>"
         f"<img src='{thumb_url}' loading='lazy' "
@@ -2376,22 +2509,30 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"</div>"
     )
 
-    # Cercle de sélection en haut à DROITE (style Infloww)
-    select_html = ""
+    # Icône crayon (Edit) + cercle de sélection en haut à DROITE
+    actions_html = ""
     if file_id:
-        select_html = (
-            f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' "
-            f"style='position:absolute;top:8px;right:8px;z-index:5;cursor:pointer'>"
+        actions_html = (
+            f"<div class='card-actions' style='position:absolute;top:6px;right:6px;display:flex;gap:6px;align-items:center;z-index:5'>"
+            f"<button onclick='event.stopPropagation();openCaptionEditor(\"{fid_safe}\")' "
+            f"title='Modifier caption / description' "
+            f"style='background:rgba(0,0,0,.7);border:0;color:#fff;width:28px;height:28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s' "
+            f"onmouseover='this.style.background=\"rgba(59,130,246,.85)\"' "
+            f"onmouseout='this.style.background=\"rgba(0,0,0,.7)\"'>"
+            f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
+            f"</button>"
+            f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
             f"style='position:absolute;opacity:0;pointer-events:none'>"
             f"<span class='sel-circle'></span>"
             f"</label>"
+            f"</div>"
         )
 
     return (
         f"<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
-        f"{select_html}"
+        f"{actions_html}"
         f"{media_html}"
         f"</div>"
     )
@@ -6736,6 +6877,67 @@ def create_app():
             return "Not found", 404
         from flask import send_file
         return send_file(str(path))
+
+    def _parse_file_id(file_id: str):
+        """Parse 'identity|subdir|name' avec validation anti-path-traversal."""
+        if not file_id or "|" not in file_id:
+            return None
+        parts = file_id.split("|", 2)
+        if len(parts) != 3:
+            return None
+        ident, subdir, name = parts
+        if ".." in name or "/" in name or "\\" in name:
+            return None
+        if subdir not in ("videos", "posts", "stories", "storyctas"):
+            return None
+        target_dir = IDENTITIES_DIR / ident / subdir
+        target = target_dir / name
+        if not target.exists() or not target.is_file():
+            return None
+        return target_dir, target
+
+    @app.route("/cloud/meta/get")
+    def cloud_meta_get():
+        if not is_auth():
+            return redirect("/")
+        from flask import jsonify, request as r
+        parsed = _parse_file_id(r.args.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "bad file_id"}), 400
+        target_dir, target = parsed
+        stem = target.stem
+        caption_file = target_dir / f"{stem}.txt"
+        desc_file = target_dir / f"{stem}.desc.txt"
+        caption = caption_file.read_text(encoding="utf-8") if caption_file.exists() else ""
+        description = desc_file.read_text(encoding="utf-8") if desc_file.exists() else ""
+        return jsonify({"ok": True, "caption": caption, "description": description})
+
+    @app.route("/cloud/meta/save", methods=["POST"])
+    def cloud_meta_save():
+        if not is_auth():
+            return redirect("/")
+        from flask import jsonify, request as r
+        parsed = _parse_file_id(r.form.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "bad file_id"}), 400
+        target_dir, target = parsed
+        stem = target.stem
+        caption = (r.form.get("caption") or "").strip()[:2200]
+        description = (r.form.get("description") or "").strip()[:500]
+        caption_file = target_dir / f"{stem}.txt"
+        desc_file = target_dir / f"{stem}.desc.txt"
+        try:
+            if caption:
+                caption_file.write_text(caption, encoding="utf-8")
+            elif caption_file.exists():
+                caption_file.unlink()
+            if description:
+                desc_file.write_text(description, encoding="utf-8")
+            elif desc_file.exists():
+                desc_file.unlink()
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True})
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
