@@ -2441,8 +2441,15 @@ body.light .va-id{color:#9ca3af}
                     is_auto = True
                     cur_identity = identity
 
+                # Normaliser channel_id en string (parfois stocké en int Discord)
+                channel_id = str(channel_id) if channel_id else ""
                 username = _resolve_username(uid)
+                # Sécurité : forcer string
+                if not isinstance(username, str):
+                    username = str(username)
                 avatar_url = _resolve_avatar_url(uid)
+                if not isinstance(avatar_url, str):
+                    avatar_url = ""
             except Exception:
                 # Si une entrée VA est corrompue, on skip plutôt que de crasher
                 continue
