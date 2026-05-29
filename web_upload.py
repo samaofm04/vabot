@@ -3111,64 +3111,190 @@ def _render_paievas_html() -> str:
 
 def _render_bilan_html() -> str:
     try:
-        from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues
+        from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
     import datetime
     import json as _json
-    exp = expense_stats()
-    rev = revenue_stats()
+    from flask import request as flask_request
+
+    # Lire la période depuis l'URL
+    today = datetime.date.today()
+    default_from = today - datetime.timedelta(days=6)
+    default_to = today
+    from_str = flask_request.args.get("bilan_from", default_from.isoformat())
+    to_str = flask_request.args.get("bilan_to", default_to.isoformat())
+    try:
+        date_from = datetime.date.fromisoformat(from_str)
+        date_to = datetime.date.fromisoformat(to_str)
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+    except Exception:
+        date_from = default_from
+        date_to = default_to
+
+    all_revenues = list_revenues()
+    all_expenses = list_expenses()
+    # Filtrer par période
+    revenues = [r for r in all_revenues if date_from.isoformat() <= r.get("date", "") <= date_to.isoformat()]
+    expenses = [e for e in all_expenses if date_from.isoformat() <= e.get("date", "") <= date_to.isoformat()]
     pay = va_payment_stats()
     nb_ident = len(_list_identities())
-    revenues = list_revenues()
 
-    # Revenus par source
+    # Calculer les totaux pour la période
+    total_rev_period = sum(r.get("amount", 0) for r in revenues)
+    total_exp_period = sum(e.get("amount", 0) for e in expenses)
+
+    # Revenus par source (sur la période)
     by_source = {}
     for r in revenues:
         src = r.get("source", "Autre")
         by_source[src] = by_source.get(src, 0) + r.get("amount", 0)
-    # Revenus quotidiens (7 derniers jours)
-    today = datetime.date.today()
-    last_7_days = [(today - datetime.timedelta(days=i)) for i in range(6, -1, -1)]
-    daily_revenue = {d.isoformat(): 0 for d in last_7_days}
+
+    # Revenus par identité (sur la période)
+    by_ident_period = {}
+    for r in revenues:
+        ident = r.get("identity", "?")
+        by_ident_period[ident] = by_ident_period.get(ident, 0) + r.get("amount", 0)
+
+    # Dépenses par catégorie (sur la période)
+    by_cat_period = {}
+    for e in expenses:
+        cat = e.get("category", "Autre")
+        by_cat_period[cat] = by_cat_period.get(cat, 0) + e.get("amount", 0)
+
+    # Données quotidiennes (toutes les dates entre from et to)
+    nb_days = (date_to - date_from).days + 1
+    daily_revenue = {}
+    daily_expense = {}
+    for i in range(nb_days):
+        d = (date_from + datetime.timedelta(days=i)).isoformat()
+        daily_revenue[d] = 0
+        daily_expense[d] = 0
     for r in revenues:
         d = r.get("date", "")
         if d in daily_revenue:
             daily_revenue[d] += r.get("amount", 0)
+    for e in expenses:
+        d = e.get("date", "")
+        if d in daily_expense:
+            daily_expense[d] += e.get("amount", 0)
 
-    profit_month = rev["total_this_month"] - exp["total_this_month"]
-    profit_color = "#10b981" if profit_month >= 0 else "#ef4444"
-    profit_sign = "+" if profit_month >= 0 else ""
+    profit_period = total_rev_period - total_exp_period
+    profit_color = "#10b981" if profit_period >= 0 else "#ef4444"
+    profit_sign = "+" if profit_period >= 0 else ""
     daily_data_json = _json.dumps([{"date": k, "amount": v} for k, v in daily_revenue.items()])
-    by_ident_json = _json.dumps(rev.get("by_identity", {}))
-    by_cat_json = _json.dumps(exp.get("by_category", {}))
-    start_label = last_7_days[0].strftime("%d %b")
-    end_label = last_7_days[-1].strftime("%d %b, %Y")
+    by_ident_json = _json.dumps(by_ident_period)
+    by_cat_json = _json.dumps(by_cat_period)
+    start_label = date_from.strftime("%d %b")
+    end_label = date_to.strftime("%d %b, %Y")
+
+    # Globaux (hors période) pour affichage de référence
+    rev = revenue_stats()
+    exp = expense_stats()
     sub_amt = by_source.get("OnlyFans", 0)
     fansly_amt = by_source.get("Fansly", 0)
     snap_amt = by_source.get("Snap", 0)
 
     rows = []
-    # Top : date range + filtres
+    # Top : date range picker interactif + filtres
     rows.append(f"""
-<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:20px'>
-  <div style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px'>
+<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:20px;position:relative'>
+  <div onclick='toggleBilanDatePicker(event)' id='bilan-date-btn' style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px;cursor:pointer;user-select:none'>
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#888" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-    <span style='font-size:13px;color:#fff;font-weight:500'>{start_label} → {end_label}</span>
+    <span style='font-size:13px;font-weight:500'>{start_label} → {end_label}</span>
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
   </div>
   <div style='display:flex;gap:8px'>
     <div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:13px'>Vue: par jour</div>
     <div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:13px'>Filtres</div>
   </div>
+  <!-- Date range picker popover -->
+  <div id='bilan-date-picker' style='display:none;position:absolute;top:48px;left:0;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:16px;z-index:100;box-shadow:0 12px 40px rgba(0,0,0,.5);min-width:340px' onclick='event.stopPropagation()'>
+    <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px'>
+      <div>
+        <div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px'>Du</div>
+        <input type='date' id='bilan-from-input' value='{date_from.isoformat()}' style='width:100%;padding:8px 10px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:13px'>
+      </div>
+      <div>
+        <div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px'>Au</div>
+        <input type='date' id='bilan-to-input' value='{date_to.isoformat()}' style='width:100%;padding:8px 10px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:13px'>
+      </div>
+    </div>
+    <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px'>
+      <button onclick='applyBilanPreset("today")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>Aujourd'hui</button>
+      <button onclick='applyBilanPreset("yesterday")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>Hier</button>
+      <button onclick='applyBilanPreset("last7")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>7 derniers jours</button>
+      <button onclick='applyBilanPreset("last30")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>30 derniers jours</button>
+      <button onclick='applyBilanPreset("thisMonth")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>Ce mois</button>
+      <button onclick='applyBilanPreset("lastMonth")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>Mois dernier</button>
+      <button onclick='applyBilanPreset("last90")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>90 derniers jours</button>
+      <button onclick='applyBilanPreset("ytd")' class='date-preset' style='padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600'>Cette année</button>
+    </div>
+    <div style='display:flex;justify-content:flex-end;gap:8px;padding-top:12px;border-top:1px solid #2a2a2a'>
+      <button onclick='toggleBilanDatePicker()' style='padding:8px 16px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>
+      <button onclick='applyBilanDateRange()' style='padding:8px 18px;background:#3b82f6;border:0;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700'>Appliquer</button>
+    </div>
+  </div>
 </div>
-<h3 style='margin:0 0 14px;font-size:20px;font-weight:700'>Récap des revenus</h3>
+<script>
+function toggleBilanDatePicker(e){{
+  if(e) e.stopPropagation();
+  var p = document.getElementById('bilan-date-picker');
+  if(p) p.style.display = (p.style.display === 'none' ? 'block' : 'none');
+}}
+function applyBilanPreset(preset){{
+  var today = new Date();
+  var from, to;
+  function iso(d){{ return d.toISOString().split('T')[0]; }}
+  switch(preset){{
+    case 'today':
+      from = to = today; break;
+    case 'yesterday':
+      from = to = new Date(today.getTime() - 86400000); break;
+    case 'last7':
+      to = today; from = new Date(today.getTime() - 6*86400000); break;
+    case 'last30':
+      to = today; from = new Date(today.getTime() - 29*86400000); break;
+    case 'thisMonth':
+      from = new Date(today.getFullYear(), today.getMonth(), 1); to = today; break;
+    case 'lastMonth':
+      from = new Date(today.getFullYear(), today.getMonth()-1, 1);
+      to = new Date(today.getFullYear(), today.getMonth(), 0); break;
+    case 'last90':
+      to = today; from = new Date(today.getTime() - 89*86400000); break;
+    case 'ytd':
+      from = new Date(today.getFullYear(), 0, 1); to = today; break;
+  }}
+  document.getElementById('bilan-from-input').value = iso(from);
+  document.getElementById('bilan-to-input').value = iso(to);
+  applyBilanDateRange();
+}}
+function applyBilanDateRange(){{
+  var from = document.getElementById('bilan-from-input').value;
+  var to = document.getElementById('bilan-to-input').value;
+  if(!from || !to) return;
+  // Conserver l'onglet bilan dans l'URL
+  window.location.search = '?tab=bilan&bilan_from=' + from + '&bilan_to=' + to;
+}}
+// Fermer le picker au clic extérieur
+document.addEventListener('click', function(e){{
+  var p = document.getElementById('bilan-date-picker');
+  var btn = document.getElementById('bilan-date-btn');
+  if(p && p.style.display === 'block' && !p.contains(e.target) && !btn.contains(e.target)){{
+    p.style.display = 'none';
+  }}
+}});
+</script>
+<h3 style='margin:0 0 14px;font-size:20px;font-weight:700'>Récap des revenus <span style='font-size:13px;font-weight:400;color:#888'>({start_label} → {end_label})</span></h3>
 <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:20px'>
   <div class='box' style='display:flex;flex-direction:column;justify-content:space-between'>
     <div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>
       <div style='width:48px;height:48px;background:#3b82f6;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>$</div>
-      <div style='font-size:13px;color:#888;font-weight:500'>Revenus totaux</div>
+      <div style='font-size:13px;color:#888;font-weight:500'>Revenus de la période</div>
     </div>
-    <div style='font-size:32px;font-weight:700;color:#3b82f6;letter-spacing:-.02em'>{rev['total_all_time']:.2f}€</div>
+    <div style='font-size:32px;font-weight:700;color:#3b82f6;letter-spacing:-.02em'>{total_rev_period:.2f}€</div>
+    <div style='font-size:11px;color:#888;margin-top:4px'>Total all-time : {rev['total_all_time']:.0f}€</div>
   </div>
   <div class='box'>
     <div style='display:flex;justify-content:space-between;align-items:flex-start'>
@@ -3209,8 +3335,8 @@ def _render_bilan_html() -> str:
   <div class='box'>
     <div style='display:flex;justify-content:space-between;align-items:flex-start'>
       <div>
-        <div style='font-size:22px;font-weight:700;margin-bottom:4px;color:#ef4444'>-{exp['total_all_time']:.2f}€</div>
-        <div style='font-size:12px;color:#888'>Dépenses totales</div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px;color:#ef4444'>-{total_exp_period:.2f}€</div>
+        <div style='font-size:12px;color:#888'>Dépenses de la période</div>
       </div>
       <div style='width:40px;height:40px;background:rgba(239,68,68,.15);border-radius:10px;color:#ef4444;display:flex;align-items:center;justify-content:center;font-weight:700'>−</div>
     </div>
@@ -3219,23 +3345,23 @@ def _render_bilan_html() -> str:
 
 <div class='box' style='display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,rgba(59,130,246,.1),rgba(6,182,212,.05));border-color:#3b82f6;margin-bottom:24px'>
   <div>
-    <div style='font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px'>Profit net ce mois</div>
-    <div style='font-size:36px;font-weight:800;color:{profit_color};letter-spacing:-.02em'>{profit_sign}{profit_month:.2f}€</div>
+    <div style='font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px'>Profit net sur la période</div>
+    <div style='font-size:36px;font-weight:800;color:{profit_color};letter-spacing:-.02em'>{profit_sign}{profit_period:.2f}€</div>
   </div>
   <div style='display:flex;gap:30px;text-align:right'>
     <div>
       <div style='font-size:11px;color:#888;text-transform:uppercase'>Revenus</div>
-      <div style='font-size:18px;font-weight:700;color:#10b981;margin-top:2px'>+{rev['total_this_month']:.0f}€</div>
+      <div style='font-size:18px;font-weight:700;color:#10b981;margin-top:2px'>+{total_rev_period:.0f}€</div>
     </div>
     <div>
       <div style='font-size:11px;color:#888;text-transform:uppercase'>Dépenses</div>
-      <div style='font-size:18px;font-weight:700;color:#ef4444;margin-top:2px'>-{exp['total_this_month']:.0f}€</div>
+      <div style='font-size:18px;font-weight:700;color:#ef4444;margin-top:2px'>-{total_exp_period:.0f}€</div>
     </div>
   </div>
 </div>
 
 <div class='box'>
-  <h4 style='margin:0 0 14px;font-size:16px;font-weight:700'>Tendance des revenus (7 derniers jours)</h4>
+  <h4 style='margin:0 0 14px;font-size:16px;font-weight:700'>Tendance des revenus <span style='font-size:12px;font-weight:400;color:#888'>({nb_days} jour{"s" if nb_days > 1 else ""})</span></h4>
   <div style='height:280px;position:relative'><canvas id='bilan-bar-chart'></canvas></div>
 </div>
 
