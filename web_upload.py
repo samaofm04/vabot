@@ -240,7 +240,13 @@ input::placeholder{color:#9ca3af}
   .right{display:none}
   .layout{justify-content:center}
 }
+/* Page loader global - même style que dashboard */
+#page-loader{position:fixed;inset:0;background:rgba(15,15,15,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+#page-loader.show{display:flex}
+#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
+@keyframes plSpin{to{transform:rotate(360deg)}}
 </style></head><body>
+<div id="page-loader"><div class="pl-ring"></div></div>
 <div class="layout">
   <div class="left">
     <div class="card">
@@ -269,6 +275,14 @@ input::placeholder{color:#9ca3af}
         document.querySelector('form').addEventListener('submit', function(){
           var b = document.getElementById('login-btn');
           if(b){ b.classList.add('loading'); b.disabled = true; }
+          // Afficher aussi le page loader (couvre tout l'écran pendant le chargement du dashboard)
+          var pl = document.getElementById('page-loader');
+          if(pl) setTimeout(function(){ pl.classList.add('show'); }, 300);
+        });
+        // Cacher au load (au cas où on revient en arrière)
+        window.addEventListener('pageshow', function(){
+          var pl = document.getElementById('page-loader');
+          if(pl) pl.classList.remove('show');
         });
       </script>
       <div class="footer-note">Privé · accès réservé</div>
@@ -299,6 +313,13 @@ UPLOAD_HTML = """
 <style>
 *{box-sizing:border-box}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
+
+/* ============ PAGE LOADER GLOBAL (entre 2 navigations) ============ */
+#page-loader{position:fixed;inset:0;background:rgba(15,15,15,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);animation:fadeIn .2s}
+#page-loader.show{display:flex}
+#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
+@keyframes plSpin{to{transform:rotate(360deg)}}
+body.light #page-loader{background:rgba(249,250,251,.92)}
 .layout{display:flex;min-height:100vh}
 
 /* ============ ANIMATIONS ============ */
@@ -683,6 +704,43 @@ document.addEventListener('submit', function(e){
     });
   }
 }, true);
+// === PAGE LOADER GLOBAL ===
+function showPageLoader(){
+  var pl = document.getElementById('page-loader');
+  if(pl) pl.classList.add('show');
+}
+function hidePageLoader(){
+  var pl = document.getElementById('page-loader');
+  if(pl) pl.classList.remove('show');
+}
+// Cacher au load de la page (si visible depuis navigation précédente)
+window.addEventListener('pageshow', hidePageLoader);
+window.addEventListener('load', hidePageLoader);
+// Afficher pendant la navigation (clic sur lien interne, submit form)
+document.addEventListener('click', function(e){
+  var a = e.target.closest('a[href]');
+  if(!a) return;
+  var href = a.getAttribute('href') || '';
+  // Ignorer liens externes, anchors, javascript:, target=_blank
+  if(!href || href.startsWith('#') || href.startsWith('javascript:') || a.target === '_blank') return;
+  // Ignorer si modificateur (ctrl/cmd-click = nouvel onglet)
+  if(e.ctrlKey || e.metaKey || e.shiftKey) return;
+  // Ignorer hosts externes
+  try{
+    var url = new URL(href, window.location.origin);
+    if(url.origin !== window.location.origin) return;
+  }catch(_){}
+  showPageLoader();
+}, true);
+document.addEventListener('submit', function(e){
+  var form = e.target;
+  if(!form || form.dataset.noLoader) return;
+  // Ignorer les forms qui submit-en-ajax (ex: change handlers)
+  if(form.action && form.action.indexOf('javascript:') === 0) return;
+  // Petite latence pour ne pas flicker sur les forms ultra rapides
+  setTimeout(showPageLoader, 150);
+}, true);
+
 // === FLASH MESSAGE depuis serveur → TOAST ===
 window.addEventListener('DOMContentLoaded', function(){
   var data = document.getElementById('flash-data');
@@ -938,7 +996,10 @@ function showTab(group,name,title,subtitle){
   }catch(e){}
 }
 </script>
-</head><body><div class="layout">
+</head><body>
+<!-- Page loader global (affiché pendant la navigation) -->
+<div id="page-loader"><div class="pl-ring"></div></div>
+<div class="layout">
 <!-- SIDEBAR : groupes pliables avec flèches -->
 <div class="sidebar">
 
@@ -996,6 +1057,10 @@ function showTab(group,name,title,subtitle){
     <button class="item" onclick="showTab('cloud','cloudstories','Cloud — Stories','Toutes les stories stockées')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
       Stories
+    </button>
+    <button class="item" onclick="showTab('cloud','cloudstoryctas','Cloud — Story CTA','Toutes les stories CTA stockées')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      Story CTA
     </button>
     <button class="item" onclick="showTab('cloud','cloudpps','Cloud — Photos de profil','Pool partagé des PPs')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
@@ -1311,10 +1376,18 @@ function showTab(group,name,title,subtitle){
 </div>
 </div>
 
+<!-- CLOUD : Story CTAs -->
+<div class="form-section" id="form-cloudstoryctas" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">Story CTA stockées</h3>
+{cloud_storyctas_html}
+</div>
+</div>
+
 <!-- CLOUD : PPs -->
 <div class="form-section" id="form-cloudpps" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">👤 Photos de profil (pool partagé)</h3>
+<h3 style="margin-top:0">Photos de profil (pool partagé)</h3>
 {cloud_pps_html}
 </div>
 </div>
@@ -5574,6 +5647,7 @@ def _render_upload(msg=None, error=None):
         .replace("{cloud_reels_html}", _render_cloud_content_html("videos", VIDEO_EXTS))
         .replace("{cloud_posts_html}", _render_cloud_content_html("posts", IMAGE_EXTS))
         .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
+        .replace("{cloud_storyctas_html}", _render_cloud_content_html("storyctas", IMAGE_EXTS))
         .replace("{cloud_pps_html}", _render_cloud_pps_html())
         .replace("{sfs_html}", _render_sfs_html())
         .replace("{revenus_html}", _render_revenus_html())
