@@ -6652,6 +6652,47 @@ def _admin_token_status() -> str:
 
 
 def _render_upload(msg=None, error=None):
+    try:
+        return _render_upload_inner(msg=msg, error=error)
+    except Exception as e:
+        import traceback as _tb
+        tb_text = _tb.format_exc()
+        # Log côté serveur pour qu'on retrouve la trace
+        try:
+            import logging
+            logging.getLogger("vabot").error(f"_render_upload CRASH: {e}\n{tb_text}")
+        except Exception:
+            pass
+        # Page d'erreur stylée plutôt qu'un 500 brut Flask
+        err_safe = (str(e) or type(e).__name__).replace("<", "&lt;").replace(">", "&gt;")
+        tb_safe = tb_text.replace("<", "&lt;").replace(">", "&gt;")
+        return f"""<!DOCTYPE html>
+<html><head><title>VA Bot — Erreur</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}}
+body{{background:#0a0a0a;color:#eee;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px}}
+.card{{max-width:760px;width:100%;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:32px;box-shadow:0 12px 40px rgba(0,0,0,.4)}}
+h1{{font-size:22px;font-weight:700;color:#ef4444;margin-bottom:6px;letter-spacing:-.02em}}
+.sub{{color:#888;font-size:14px;margin-bottom:24px}}
+pre{{background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:16px;font-size:12px;font-family:'JetBrains Mono',monospace;color:#aaa;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word}}
+.actions{{display:flex;gap:10px;margin-top:20px}}
+a,button{{padding:11px 18px;border-radius:8px;font-weight:600;cursor:pointer;text-decoration:none;font-size:13px;border:0;font-family:inherit}}
+.primary{{background:#3b82f6;color:#fff}}
+.secondary{{background:transparent;border:1px solid #2a2a2a;color:#aaa}}
+</style></head><body>
+<div class="card">
+<h1>⚠ Erreur de rendu</h1>
+<div class="sub">{err_safe}</div>
+<pre>{tb_safe}</pre>
+<div class="actions">
+<a href="/" class="primary">Recharger</a>
+<a href="/logout" class="secondary">Se déconnecter</a>
+</div>
+</div></body></html>"""
+
+
+def _render_upload_inner(msg=None, error=None):
     # Si appelé sans msg, lire depuis session (flash)
     try:
         from flask import session
