@@ -3405,7 +3405,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             # Colonne gauche : type + reseau + adresse
             f"<form method='POST' action='/mypuls/chatter/set_crypto' style='display:flex;flex-direction:column;gap:10px'>"
             f"<input type='hidden' name='name' value='{name_esc}'>"
-            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Crypto</label>"
+            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Réseau</label>"
             f"<select name='crypto_type' class='mp-edit-type' data-row='{i}' onchange='mpUpdateInlineNetworks({i})' style='margin-top:4px;width:100%'>"
             f"<option value=''>—</option>"
             + "".join(
@@ -3413,9 +3413,9 @@ body.light .mypuls-bar{background:#e5e7eb}
                 for t in ["USDC", "ETH", "SOL", "TRX"]
             )
             + f"</select></div>"
-            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Réseau</label>"
+            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Blockchain</label>"
             f"<select name='crypto_network' class='mp-edit-network' data-row='{i}' data-saved=\"{crypto_network.replace(chr(34), '&quot;')}\" style='margin-top:4px;width:100%'>"
-            f"<option value=''>Choisis d'abord une crypto</option>"
+            f"<option value=''>Choisis d'abord un réseau</option>"
             f"</select></div>"
             f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Adresse</label>"
             f"<input type='text' name='crypto_address' value='{crypto_address.replace(chr(39), '&#39;')}' placeholder='0x… / T… / …' style='margin-top:4px;width:100%;font-family:monospace;font-size:12px'></div>"
@@ -3589,7 +3589,7 @@ function mpUpdateInlineNetworks(rowIdx){
   var savedNet = netSel.getAttribute('data-saved') || netSel.value || '';
   netSel.innerHTML = '';
   if(!t){
-    netSel.innerHTML = '<option value="">Choisis d\\'abord une crypto</option>';
+    netSel.innerHTML = '<option value="">Choisis d\\'abord un réseau</option>';
     return;
   }
   nets.forEach(function(n){

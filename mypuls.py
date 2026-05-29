@@ -425,10 +425,9 @@ def get_chatter_meta(name: str) -> dict:
     }
 
 
-# Mapping crypto -> liste de réseaux supportés
+# Mapping réseau (asset) -> liste de blockchains supportées
 CRYPTO_NETWORKS = {
-    "USDC": ["ERC20 (Ethereum)", "TRC20 (Tron)", "SPL (Solana)", "BEP20 (BSC)",
-             "Polygon", "Arbitrum", "Optimism", "Base"],
+    "USDC": ["Ethereum", "Tron", "Solana", "BSC", "Polygon", "Arbitrum", "Optimism", "Base"],
     "ETH": ["Ethereum", "Arbitrum", "Optimism", "Base"],
     "SOL": ["Solana"],
     "TRX": ["Tron"],
