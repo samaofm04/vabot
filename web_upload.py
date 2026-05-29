@@ -2851,17 +2851,28 @@ body.light .va-id{color:#9ca3af}
                 f"</button>"
             )
 
-            # Mini stat clicks 7j AVEC sparkline (à côté du username)
+            # Mini stat clicks AVEC sparkline (à côté du username)
+            # Période = quinzaine en cours (1-15 ou 16-fin du mois, auto)
+            import datetime as _dt_va
+            _today_va = _dt_va.date.today()
+            if _today_va.day <= 15:
+                # 1ère quinzaine en cours
+                _period_days = _today_va.day
+                _period_label = f"1-15 {_today_va.strftime('%b').lower()}"
+            else:
+                # 2nde quinzaine en cours
+                _period_days = _today_va.day - 15
+                _period_label = f"16-fin {_today_va.strftime('%b').lower()}"
             mini_clicks_html = ""
             try:
                 if assigned_links:
-                    clicks_data = _get_links_clicks_period(assigned_links, days=7)
-                    label = "7 jours"
+                    clicks_data = _get_links_clicks_period(assigned_links, days=_period_days)
+                    label = _period_label
                     is_fallback = False
                 else:
                     model_name = (identity or "").strip().capitalize()
-                    clicks_data = _get_model_clicks_period(model_name, days=7)
-                    label = "7 jours · modèle"
+                    clicks_data = _get_model_clicks_period(model_name, days=_period_days)
+                    label = f"{_period_label} · modèle"
                     is_fallback = True
 
                 total = clicks_data.get("total", 0)
@@ -2900,9 +2911,9 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-name'>{name_display} {auto_pill} {salon_html}</div>"
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
+                f"{links_btn_html}"
                 f"{mini_clicks_html}"
                 f"{change_form}"
-                f"{links_btn_html}"
                 f"{reset_form}"
                 f"</div>"
             )
