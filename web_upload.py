@@ -347,6 +347,11 @@ body.light #page-loader{background:rgba(249,250,251,.92)}
 
 /* Pop quand checkbox sélectionnée */
 .sel-cb:checked{animation:pop .25s ease}
+/* Cercle de sélection rond style Infloww */
+.sel-circle{display:block;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.8);backdrop-filter:blur(4px);transition:all .15s;position:relative}
+.sel-circle-wrap:hover .sel-circle{background:rgba(255,255,255,.3);border-color:#fff;transform:scale(1.08)}
+.sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+.sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
 
 /* Items de la sidebar - smooth hover */
 .sidebar .item,.sidebar .group-head,.sidebar .subgroup-head,.sidebar .logout-btn{transition:background .15s,color .15s,padding-left .15s}
@@ -927,9 +932,9 @@ function updateActionBar(){
   var bar = document.getElementById('action-bar');
   if(!bar) return;
   var n = selectedFiles.size;
-  bar.style.display = n === 0 ? 'none' : 'flex';
+  bar.style.display = n === 0 ? 'none' : 'block';
   var lbl = document.getElementById('sel-count');
-  if(lbl) lbl.textContent = n + ' fichier(s) sélectionné(s)';
+  if(lbl) lbl.textContent = n;
 }
 function clearSelection(){
   selectedFiles.clear();
@@ -1851,12 +1856,34 @@ function showFeed(btn,name){
 
 </div>
 
-<!-- Barre flottante d'actions (apparaît quand items sélectionnés) -->
-<div id="action-bar" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #444;border-radius:14px;padding:12px 18px;box-shadow:0 6px 24px rgba(0,0,0,.6);z-index:200;align-items:center;gap:14px">
-  <span id="sel-count" style="font-weight:600;color:#fff;font-size:14px">0 fichier(s) sélectionné(s)</span>
-  <button onclick="clearSelection()" style="padding:8px 14px;background:#333;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;margin:0">Annuler</button>
-  <button onclick="deleteSelected()" style="padding:8px 18px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0">🗑 Supprimer</button>
+<!-- Barre flottante d'actions style Infloww (apparaît quand items sélectionnés) -->
+<div id="action-bar" style="display:none">
+  <div class="action-bar-inner">
+    <button class="action-close" onclick="clearSelection()" title="Annuler la sélection">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="action-count"><span id="sel-count">0</span> Sélectionné</div>
+    <div style="flex:1"></div>
+    <button class="action-icon" onclick="deleteSelected()" title="Supprimer">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+    </button>
+  </div>
 </div>
+<style>
+#action-bar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;animation:slideUp .3s ease}
+@keyframes slideUp{from{transform:translate(-50%,40px);opacity:0}to{transform:translateX(-50%);opacity:1}}
+.action-bar-inner{display:flex;align-items:center;gap:14px;background:#0a0a0a;border:1px solid #222;border-radius:14px;padding:10px 16px 10px 12px;box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04) inset;min-width:300px}
+.action-close{background:transparent;border:0;color:#888;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;transition:all .15s}
+.action-close:hover{background:rgba(255,255,255,.06);color:#fff}
+.action-count{color:#fff;font-weight:600;font-size:14px;letter-spacing:-.01em}
+.action-icon{background:transparent;border:0;color:#aaa;width:36px;height:36px;border-radius:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;transition:all .15s}
+.action-icon:hover{background:rgba(239,68,68,.12);color:#ef4444}
+body.light .action-bar-inner{background:#fff;border-color:#e5e7eb;box-shadow:0 12px 36px rgba(0,0,0,.15)}
+body.light .action-close{color:#666}
+body.light .action-close:hover{background:#f3f4f6;color:#111}
+body.light .action-count{color:#111}
+body.light .action-icon{color:#666}
+</style>
 
 <!-- Lightbox plein écran -->
 <div id="lightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;align-items:center;justify-content:center;padding:30px;animation:fadeIn .2s">
@@ -2245,11 +2272,11 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             "</div>"
         )
 
-    # Badge date en haut à gauche (sous le checkbox)
+    # Badge date en haut à GAUCHE (au-dessus de l'image)
     date_badge = ""
     if date_short:
         date_badge = (
-            f"<div style='position:absolute;top:8px;right:8px;background:rgba(0,0,0,.7);"
+            f"<div style='position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);"
             f"color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;"
             f"backdrop-filter:blur(4px);letter-spacing:.01em;pointer-events:none;z-index:4'>{date_short}</div>"
         )
@@ -2266,18 +2293,22 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"</div>"
     )
 
-    checkbox_html = ""
+    # Cercle de sélection en haut à DROITE (style Infloww)
+    select_html = ""
     if file_id:
-        checkbox_html = (
+        select_html = (
+            f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' "
+            f"style='position:absolute;top:8px;right:8px;z-index:5;cursor:pointer'>"
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
-            f"onclick='event.stopPropagation()' "
-            f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#3b82f6;background:#000;border-radius:4px'>"
+            f"style='position:absolute;opacity:0;pointer-events:none'>"
+            f"<span class='sel-circle'></span>"
+            f"</label>"
         )
 
     return (
         f"<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
-        f"{checkbox_html}"
+        f"{select_html}"
         f"{media_html}"
         f"</div>"
     )
