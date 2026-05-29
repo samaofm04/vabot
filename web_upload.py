@@ -994,11 +994,18 @@ var lbIndex = 0;
 var lbEditMode = false;
 function lbCollectGallery(){
   lbGallery = [];
-  document.querySelectorAll('.cloud-card').forEach(function(card){
+  // IMPORTANT : ne collecter QUE les cartes de l'onglet (form-section) actuellement
+  // visible — sinon on navigue à travers tous les Reels + Posts + Stories de toutes
+  // les identités à la fois (167 fichiers !).
+  var visibleSection = null;
+  document.querySelectorAll('.form-section').forEach(function(sec){
+    if(sec.offsetParent !== null) visibleSection = sec;  // visible (pas display:none)
+  });
+  var scope = visibleSection || document;
+  scope.querySelectorAll('.cloud-card').forEach(function(card){
     var wrap = card.querySelector('[onclick*="openLightbox"]');
     if(!wrap) return;
     var oc = wrap.getAttribute('onclick') || '';
-    // openLightbox("url",isVideo,"name","fileId","exampleUrl")
     var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)",?"?([^"]*)"?,?"?([^"]*)"?\)/);
     if(m) lbGallery.push({
       url: m[1], isVideo: m[2]==='true', name: m[3],
