@@ -410,13 +410,16 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
                 new_link = {}
     new_id = new_link.get("id") if isinstance(new_link, dict) else None
 
-    # Si une nouvelle URL est fournie ET qu'on a bien l'id, on patch le lien
+    # Si une nouvelle URL est fournie ET qu'on a bien l'id, on patch le lien.
+    # update_link exige link_id + url + display_name + typeLink="directlink"
     new_url_clean = (new_url or "").strip()
     if new_url_clean and new_id:
         try:
             upd_res = _call_tool("update_link", {
                 "link_id": new_id,
                 "url": new_url_clean,
+                "display_name": args["display_name"],
+                "typeLink": "directlink",
             })
             if upd_res.get("ok"):
                 new_link = upd_res.get("data") or new_link
