@@ -2220,9 +2220,20 @@ def _fmt_size(p) -> str:
 
 
 def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "") -> str:
-    """Une carte avec thumbnail (rapide) + clic pour ouvrir lightbox + checkbox."""
+    """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
+    en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title)."""
     name = file_path.name
-    size = _fmt_size(file_path)
+    # Date upload courte format français (ex. "27 mai")
+    try:
+        import datetime as _dt_pc
+        mtime = file_path.stat().st_mtime
+        d = _dt_pc.date.fromtimestamp(mtime)
+        fr_months = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
+                     "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+        date_short = f"{d.day} {fr_months[d.month - 1]}"
+    except Exception:
+        date_short = ""
+
     # Badge "play" superposé pour les vidéos
     play_badge = ""
     if is_video:
@@ -2233,15 +2244,28 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             "<svg viewBox='0 0 24 24' width='22' height='22' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
             "</div>"
         )
+
+    # Badge date en haut à gauche (sous le checkbox)
+    date_badge = ""
+    if date_short:
+        date_badge = (
+            f"<div style='position:absolute;top:8px;right:8px;background:rgba(0,0,0,.7);"
+            f"color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;"
+            f"backdrop-filter:blur(4px);letter-spacing:.01em;pointer-events:none;z-index:4'>{date_short}</div>"
+        )
+
     is_video_js = "true" if is_video else "false"
     media_html = (
         f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\")' "
-        f"style='cursor:pointer;position:relative;width:100%;height:160px;background:#000;border-radius:6px 6px 0 0;overflow:hidden'>"
+        f"title='{name}' "
+        f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;background:#000;border-radius:10px;overflow:hidden'>"
         f"<img src='{thumb_url}' loading='lazy' "
         f"style='width:100%;height:100%;object-fit:cover;display:block'>"
         f"{play_badge}"
+        f"{date_badge}"
         f"</div>"
     )
+
     checkbox_html = ""
     if file_id:
         checkbox_html = (
@@ -2250,14 +2274,11 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"onclick='event.stopPropagation()' "
             f"style='position:absolute;top:8px;left:8px;width:20px;height:20px;cursor:pointer;z-index:5;accent-color:#3b82f6;background:#000;border-radius:4px'>"
         )
+
     return (
-        f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;position:relative'>"
+        f"<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
         f"{checkbox_html}"
         f"{media_html}"
-        f"<div style='padding:8px 10px'>"
-        f"<div style='font-size:12px;color:#ccc;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' title='{name}'>{name}</div>"
-        f"<div style='font-size:11px;color:#666;margin-top:2px'>{size}</div>"
-        f"</div>"
         f"</div>"
     )
 
