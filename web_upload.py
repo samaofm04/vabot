@@ -1016,6 +1016,10 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
       Bilan
     </button>
+    <button class="item" id="tab-biolinks" onclick="showTab('business','biolinks','Bio Links','Pages publiques style Linktree par identite')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      Bio Links
+    </button>
   </div>
 </div>
 
@@ -1430,6 +1434,11 @@ function showFeed(btn,name){
 <!-- BUSINESS - BILAN -->
 <div class="form-section" id="form-bilan" style="display:none">
 {bilan_html}
+</div>
+
+<!-- BUSINESS - BIO LINKS -->
+<div class="form-section" id="form-biolinks" style="display:none">
+{biolinks_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -3194,6 +3203,247 @@ def _render_paievas_html() -> str:
     return "".join(rows)
 
 
+def _render_biolinks_html() -> str:
+    """Page de gestion des bio links pour toutes les identités."""
+    try:
+        from bio_links import get_bio, stats
+    except Exception as e:
+        return f"<p style='color:#f99'>Module bio_links indispo : {e}</p>"
+    identities = _list_identities()
+    s = stats()
+    rows = []
+    rows.append(
+        "<div class='stat-grid' style='margin-bottom:18px'>"
+        f"<div class='stat'><div class='v'>{s['nb_idents_with_bio']}</div><div class='l'>Identités avec bio</div></div>"
+        f"<div class='stat'><div class='v'>{s['nb_total_links']}</div><div class='l'>Liens totaux</div></div>"
+        f"<div class='stat'><div class='v'>{len(identities)}</div><div class='l'>Identités disponibles</div></div>"
+        "</div>"
+    )
+    if not identities:
+        rows.append("<p style='color:#888'>Aucune identité créée. Crée-en sur Discord.</p>")
+        return "".join(rows)
+    rows.append(
+        "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px'>"
+    )
+    for ident in identities:
+        bio = get_bio(ident)
+        nb_links = len(bio.get("links", []))
+        avatar = _identity_avatar_html(ident, size=48)
+        display_name = bio.get("display_name") or ident
+        bio_text = bio.get("bio") or ""
+        public_url = f"/bio/{ident}"
+        rows.append(
+            f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:16px'>"
+            f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:12px'>"
+            f"{avatar}"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:15px;color:#fff'>{display_name}</div>"
+            f"<div style='font-size:12px;color:#888'>@{ident}</div>"
+            f"</div>"
+            f"</div>"
+            f"<div style='font-size:13px;color:#aaa;height:36px;overflow:hidden;margin-bottom:12px'>{bio_text or '<span style=color:#666>(Pas de bio)</span>'}</div>"
+            f"<div style='display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#aaa;padding:8px 0;border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;margin-bottom:12px'>"
+            f"<span>🔗 <b>{nb_links}</b> lien(s)</span>"
+            f"<a href='{public_url}' target='_blank' style='color:#3b82f6;text-decoration:none;font-weight:600'>Voir la page →</a>"
+            f"</div>"
+            f"<button onclick='openBioEditor(\"{ident}\")' style='width:100%;padding:10px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin:0'>Éditer la page</button>"
+            f"</div>"
+        )
+    rows.append("</div>")
+
+    # Modal d'édition
+    rows.append("""
+<div id='bio-overlay' class='confirm-overlay' onclick='closeBioEditor()'>
+  <div class='confirm-box' style='max-width:600px;width:95%;max-height:90vh;overflow-y:auto' onclick='event.stopPropagation()'>
+    <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>
+      <h3 style='margin:0' id='bio-modal-title'>Éditer la bio</h3>
+      <button onclick='closeBioEditor()' style='background:none;border:0;color:#888;font-size:20px;cursor:pointer;padding:0;margin:0'>×</button>
+    </div>
+    <form method='POST' action='/biolinks/save_meta' id='bio-meta-form'>
+      <input type='hidden' name='identity' id='bio-identity'>
+      <label>Nom affiché</label>
+      <input type='text' name='display_name' id='bio-display-name' maxlength='60' placeholder='Amelia ✨'>
+      <label>Bio (description)</label>
+      <textarea name='bio' id='bio-text' maxlength='300' rows='3' placeholder='Modèle OnlyFans · Paris · DM ouvert'></textarea>
+      <label>Thème de la page publique</label>
+      <select name='theme' id='bio-theme'>
+        <option value='dark'>Sombre (défaut)</option>
+        <option value='light'>Clair</option>
+        <option value='gradient'>Dégradé violet/rose</option>
+      </select>
+      <button type='submit' style='margin-top:14px;width:100%'>Sauvegarder le profil</button>
+    </form>
+    <h4 style='margin:24px 0 10px;font-size:14px'>Liens (drag pour réorganiser à venir)</h4>
+    <div id='bio-links-list' style='display:flex;flex-direction:column;gap:8px;margin-bottom:14px'></div>
+    <form method='POST' action='/biolinks/add_link' id='bio-add-form'>
+      <input type='hidden' name='identity' id='bio-add-identity'>
+      <h4 style='margin:0 0 8px;font-size:14px'>➕ Ajouter un lien</h4>
+      <div style='display:grid;grid-template-columns:60px 1fr;gap:8px'>
+        <div><label>Icône</label><input type='text' name='icon' id='bio-link-icon' maxlength='5' placeholder='🔗' value='🔗'></div>
+        <div><label>Titre</label><input type='text' name='title' id='bio-link-title' maxlength='100' placeholder='OnlyFans' required></div>
+      </div>
+      <label>URL</label>
+      <input type='url' name='url' id='bio-link-url' maxlength='500' placeholder='https://onlyfans.com/...' required>
+      <button type='submit' style='margin-top:10px;width:100%'>Ajouter le lien</button>
+    </form>
+  </div>
+</div>
+<script>
+window.__bioData = {};
+function openBioEditor(ident){
+  fetch('/biolinks/get?identity=' + encodeURIComponent(ident))
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      window.__bioData = data;
+      document.getElementById('bio-modal-title').textContent = 'Éditer la bio de @' + ident;
+      document.getElementById('bio-identity').value = ident;
+      document.getElementById('bio-add-identity').value = ident;
+      document.getElementById('bio-display-name').value = data.display_name || '';
+      document.getElementById('bio-text').value = data.bio || '';
+      document.getElementById('bio-theme').value = data.theme || 'dark';
+      renderBioLinks(data.links || []);
+      document.getElementById('bio-overlay').classList.add('show');
+    });
+}
+function renderBioLinks(links){
+  var ident = document.getElementById('bio-identity').value;
+  var container = document.getElementById('bio-links-list');
+  if(!links || links.length === 0){
+    container.innerHTML = '<p style="color:#888;text-align:center;font-size:13px;margin:0">Aucun lien ajouté pour l\\'instant</p>';
+    return;
+  }
+  var html = '';
+  links.forEach(function(l){
+    html += '<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px">'
+      + '<div style="font-size:18px">' + (l.icon || '🔗') + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + l.title + '</div>'
+      + '<div style="font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + l.url + '</div>'
+      + '</div>'
+      + '<button onclick="removeBioLink(\\''  + ident + '\\','+l.id+')" style="background:transparent;border:0;color:#aaa;cursor:pointer;padding:4px 8px;font-size:14px" onmouseover="this.style.color=\\'#ef4444\\'" onmouseout="this.style.color=\\'#aaa\\'">✕</button>'
+      + '</div>';
+  });
+  container.innerHTML = html;
+}
+function removeBioLink(ident, linkId){
+  showConfirm('Supprimer le lien ?', 'Cette action est irréversible.', function(){
+    var form = new FormData();
+    form.append('identity', ident);
+    form.append('link_id', linkId);
+    fetch('/biolinks/remove_link', {method: 'POST', body: form})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data.success){
+          showToast('✅ Lien supprimé', 'success');
+          window.__bioData.links = (window.__bioData.links || []).filter(function(l){ return l.id !== linkId; });
+          renderBioLinks(window.__bioData.links);
+        }
+      });
+  });
+}
+function closeBioEditor(){
+  document.getElementById('bio-overlay').classList.remove('show');
+}
+</script>
+""")
+    return "".join(rows)
+
+
+def _render_bio_public_page(identity: str) -> str:
+    """Page publique style Linktree pour une identité."""
+    try:
+        from bio_links import get_bio
+    except Exception:
+        return "<h1>Erreur module</h1>"
+    bio = get_bio(identity)
+    display_name = bio.get("display_name") or identity
+    bio_text = bio.get("bio") or ""
+    theme = bio.get("theme", "dark")
+    links = bio.get("links", [])
+    avatar_url = _identity_avatar_url(identity)
+
+    if theme == "light":
+        bg = "#f9fafb"
+        card_bg = "#fff"
+        text = "#111827"
+        text_secondary = "#6b7280"
+        link_bg = "#fff"
+        link_hover = "#f3f4f6"
+        link_border = "#e5e7eb"
+    elif theme == "gradient":
+        bg = "linear-gradient(135deg,#667eea,#764ba2)"
+        card_bg = "rgba(255,255,255,.1)"
+        text = "#fff"
+        text_secondary = "rgba(255,255,255,.7)"
+        link_bg = "rgba(255,255,255,.15)"
+        link_hover = "rgba(255,255,255,.25)"
+        link_border = "rgba(255,255,255,.2)"
+    else:  # dark
+        bg = "#0a0a0a"
+        card_bg = "#1a1a1a"
+        text = "#fff"
+        text_secondary = "#888"
+        link_bg = "#1a1a1a"
+        link_hover = "#2a2a2a"
+        link_border = "#2a2a2a"
+
+    if avatar_url:
+        avatar = f"<img src='{avatar_url}' style='width:96px;height:96px;border-radius:50%;object-fit:cover;border:3px solid {text};box-shadow:0 4px 20px rgba(0,0,0,.3)'>"
+    else:
+        init = (display_name[0] if display_name else "?").upper()
+        avatar = f"<div style='width:96px;height:96px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:42px'>{init}</div>"
+
+    links_html = ""
+    for l in links:
+        url = l.get("url", "#")
+        title = l.get("title", "")
+        icon = l.get("icon", "🔗")
+        links_html += (
+            f"<a href='{url}' target='_blank' rel='noopener' style='display:flex;align-items:center;gap:14px;padding:16px 20px;background:{link_bg};border:1px solid {link_border};border-radius:14px;color:{text};text-decoration:none;font-weight:600;transition:all .15s;font-size:15px' "
+            f"onmouseover='this.style.background=\"{link_hover}\";this.style.transform=\"translateY(-2px)\"' "
+            f"onmouseout='this.style.background=\"{link_bg}\";this.style.transform=\"\"'>"
+            f"<span style='font-size:22px'>{icon}</span>"
+            f"<span>{title}</span>"
+            f"</a>"
+        )
+    if not links_html:
+        links_html = f"<p style='color:{text_secondary};text-align:center;padding:30px 20px'>Aucun lien pour l'instant</p>"
+
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@{identity} — {display_name}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;color:{text};-webkit-font-smoothing:antialiased}}
+.container{{max-width:480px;width:100%}}
+.header{{text-align:center;margin-bottom:30px}}
+.name{{font-size:24px;font-weight:800;margin-top:18px;letter-spacing:-.02em}}
+.handle{{font-size:14px;color:{text_secondary};margin-top:4px}}
+.bio{{font-size:15px;color:{text_secondary};margin-top:14px;line-height:1.5;padding:0 12px}}
+.links{{display:flex;flex-direction:column;gap:12px}}
+.footer{{text-align:center;margin-top:40px;font-size:11px;color:{text_secondary};opacity:.5}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    {avatar}
+    <div class="name">{display_name}</div>
+    <div class="handle">@{identity}</div>
+    {f'<div class="bio">{bio_text}</div>' if bio_text else ''}
+  </div>
+  <div class="links">{links_html}</div>
+  <div class="footer">Powered by VA Bot</div>
+</div>
+</body>
+</html>"""
+
+
 def _render_bilan_html() -> str:
     try:
         from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
@@ -4050,6 +4300,7 @@ def _render_upload(msg=None, error=None):
         .replace("{revenus_html}", _render_revenus_html())
         .replace("{depenses_html}", _render_depenses_html())
         .replace("{paievas_html}", _render_paievas_html())
+        .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{profile_pic_html}", _render_profile_pic_html())
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
@@ -4662,6 +4913,81 @@ def create_app():
         if remove_va_payment(iid):
             return _success("✅ Paiement supprimé")
         return _error("❌ Paiement introuvable")
+
+    # ============ BIO LINKS ============
+
+    @app.route("/biolinks/get")
+    def biolinks_get():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"error": "unauth"}), 401
+        try:
+            from bio_links import get_bio
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        ident = (request.args.get("identity", "") or "").lower().strip()
+        if not ident:
+            return jsonify({"error": "no identity"}), 400
+        return jsonify(get_bio(ident))
+
+    @app.route("/biolinks/save_meta", methods=["POST"])
+    def biolinks_save_meta():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from bio_links import set_bio_meta
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        ident = (request.form.get("identity", "") or "").lower().strip()
+        if not ident:
+            return _error("❌ Identité manquante")
+        display_name = request.form.get("display_name", "") or ""
+        bio_text = request.form.get("bio", "") or ""
+        theme = request.form.get("theme", "dark") or "dark"
+        set_bio_meta(ident, display_name, bio_text, theme)
+        return _success(f"✅ Profil bio de @{ident} mis à jour")
+
+    @app.route("/biolinks/add_link", methods=["POST"])
+    def biolinks_add_link():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from bio_links import add_link
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        ident = (request.form.get("identity", "") or "").lower().strip()
+        title = (request.form.get("title", "") or "").strip()
+        url = (request.form.get("url", "") or "").strip()
+        icon = (request.form.get("icon", "🔗") or "🔗").strip() or "🔗"
+        if not ident or not title or not url:
+            return _error("❌ Identité, titre et URL requis")
+        add_link(ident, title, url, icon)
+        return _success(f"✅ Lien ajouté à @{ident}")
+
+    @app.route("/biolinks/remove_link", methods=["POST"])
+    def biolinks_remove_link():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"error": "unauth"}), 401
+        try:
+            from bio_links import remove_link
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        ident = (request.form.get("identity", "") or "").lower().strip()
+        try:
+            link_id = int(request.form.get("link_id", "0"))
+        except Exception:
+            return jsonify({"success": False, "error": "bad id"}), 400
+        ok = remove_link(ident, link_id)
+        return jsonify({"success": ok})
+
+    @app.route("/bio/<identity>")
+    def bio_public(identity):
+        """Page publique style Linktree (pas d'auth requise)."""
+        ident = (identity or "").lower().strip()
+        if not ident:
+            return "Not Found", 404
+        return _render_bio_public_page(ident)
 
     @app.route("/account/profile_pic")
     def account_profile_pic():
