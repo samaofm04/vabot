@@ -2742,10 +2742,16 @@ def _render_va_list_html_inner() -> str:
 .va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
 .va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
 .va-list{display:flex;flex-direction:column;gap:8px}
-.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
-.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;max-width:160px;white-space:nowrap}
+.va-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
 .va-links-btn:hover{background:rgba(168,85,247,.2)}
-.va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;max-width:130px;display:inline-block;line-height:1}
+.va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;flex:1;display:inline-block;line-height:1;text-align:left}
+.va-mini-stat{width:170px;height:48px;box-sizing:border-box}
+.va-change-form{width:130px}
+.va-change-form select{flex:1;min-width:0}
+.va-reset-btn{width:80px;text-align:center}
+@media(max-width:1200px){.va-card{grid-template-columns:auto minmax(0,1fr);gap:12px}.va-actions{grid-column:1/-1;justify-content:flex-start;flex-wrap:wrap;padding-top:8px;border-top:1px dashed #2a2a2a;margin-top:4px}}
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
@@ -3015,10 +3021,12 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-name'>{name_display} {auto_pill} {salon_html}</div>"
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
+                f"<div class='va-actions'>"
                 f"{links_btn_html}"
                 f"{mini_clicks_html}"
                 f"{change_form}"
                 f"{reset_form}"
+                f"</div>"
                 f"</div>"
             )
 
