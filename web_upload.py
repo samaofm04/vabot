@@ -2657,9 +2657,11 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
     # Récupérer les options de tri/filtre depuis l'URL
     sort_mode = ""
     filter_date = ""
+    type_filter = "all"
     try:
         sort_mode = (_req.args.get(f"cloud_{subdir}_sort", "recent") or "recent").lower().strip()
         filter_date = (_req.args.get(f"cloud_{subdir}_date", "") or "").strip()
+        type_filter = (_req.args.get(f"cloud_{subdir}_type", "all") or "all").lower().strip()
     except Exception:
         sort_mode = "recent"
 
@@ -2670,6 +2672,12 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             p for p in folder.iterdir()
             if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
         ]
+
+    # Filtre type (photo/vidéo) — appliqué après chargement, avant tri
+    if type_filter == "photo":
+        files = [p for p in files if p.suffix.lower() in IMAGE_EXTS]
+    elif type_filter == "video":
+        files = [p for p in files if p.suffix.lower() in VIDEO_EXTS]
 
     # Filtre "Aller à la date" : ne garder que les fichiers de cette date
     if filter_date:
@@ -2734,6 +2742,28 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "</div>"
     )
 
+    # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent photos+vidéos
+    # Reels = videos only donc inutile. Autres = on affiche le filtre.
+    type_filter_html = ""
+    if subdir != "videos":
+        def _type_url(value):
+            params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
+            if sort_mode and sort_mode != "recent":
+                params.append(f"cloud_{subdir}_sort={sort_mode}")
+            if filter_date:
+                params.append(f"cloud_{subdir}_date={filter_date}")
+            if value != "all":
+                params.append(f"cloud_{subdir}_type={value}")
+            return "?" + "&".join(params)
+
+        type_filter_html = (
+            "<div class='media-type-pills'>"
+            + f"<a href='{_type_url('all')}' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
+            + f"<a href='{_type_url('photo')}' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
+            + f"<a href='{_type_url('video')}' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
+            + "</div>"
+        )
+
     gallery_header = (
         f"<div class='vault-gallery-header'>"
         f"{sel_avatar_html}"
@@ -2741,6 +2771,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div></div>"
         f"{sort_btn_html}"
         f"</div>"
+        + type_filter_html
     )
 
     if not files:
@@ -2778,7 +2809,15 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
 .vault-item:hover{background:rgba(255,255,255,.04)}
 .vault-item-active{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(168,85,247,.08)) !important;border-color:rgba(59,130,246,.4) !important}
 .vault-gallery{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:20px}
-.vault-gallery-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a}
+.vault-gallery-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:16px;border-bottom:1px solid #2a2a2a}
+/* === Pills filtre Photo/Vidéo === */
+.media-type-pills{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.media-pill{padding:7px 18px;background:transparent;border:1px solid #2a2a2a;color:#aaa;border-radius:18px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;transition:all .15s;letter-spacing:-.01em}
+.media-pill:hover{background:rgba(255,255,255,.05);color:#fff;border-color:#3a3a3a}
+.media-pill-active{background:rgba(59,130,246,.15) !important;color:#3b82f6 !important;border-color:rgba(59,130,246,.4) !important}
+body.light .media-pill{color:#666;border-color:#e5e7eb}
+body.light .media-pill:hover{background:#f3f4f6;color:#111;border-color:#d1d5db}
+body.light .media-pill-active{background:#dbeafe !important;color:#3b82f6 !important;border-color:rgba(59,130,246,.3) !important}
 /* === Sort/filter dropdown === */
 .vault-sort{position:relative}
 .vault-sort-btn{background:#1a1a1a;border:1px solid #2a2a2a;color:#ddd;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-family:inherit;transition:all .15s}
