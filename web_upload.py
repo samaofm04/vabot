@@ -2834,7 +2834,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         )
     else:
         cards_html = []
-        # Pré-indexer les fichiers exemple par stem pour lookup rapide
+        # Pré-indexer les fichiers exemple par stem (pour swap clean -> example)
         example_by_stem = {}
         if folder.exists():
             for pe in folder.iterdir():
@@ -2843,15 +2843,20 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                     example_by_stem[base_stem] = pe.name
 
         for p in files:
-            url = f"/cloud/file/{selected}/{subdir}/{p.name}"
-            thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
+            # Le file_id pointe TOUJOURS sur le fichier clean (pour les actions :
+            # delete, caption, etc. — la caption est attachée au clean)
             file_id = f"{selected}|{subdir}|{p.name}"
-            # Chercher un fichier exemple correspondant
-            example_url = ""
+            # Mais l'AFFICHAGE prend la version EXEMPLE si elle existe
+            # (avec overlay/caption visible, plus représentatif visuellement)
             ex_name = example_by_stem.get(p.stem)
             if ex_name:
-                example_url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, example_url))
+                # Le clean est remplacé par l'exemple dans la galerie
+                url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
+            else:
+                url = f"/cloud/file/{selected}/{subdir}/{p.name}"
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, ""))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px'>"
