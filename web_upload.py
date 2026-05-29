@@ -767,27 +767,40 @@ document.addEventListener('submit', function(e){
   }
 }, true);
 // === PAGE LOADER GLOBAL ===
+var _pageLoaderTimeout = null;
 function showPageLoader(){
   var pl = document.getElementById('page-loader');
   if(pl) pl.classList.add('show');
+  // Safety : auto-hide après 20s si la navigation se bloque
+  if(_pageLoaderTimeout) clearTimeout(_pageLoaderTimeout);
+  _pageLoaderTimeout = setTimeout(hidePageLoader, 20000);
 }
 function hidePageLoader(){
   var pl = document.getElementById('page-loader');
   if(pl) pl.classList.remove('show');
+  if(_pageLoaderTimeout){ clearTimeout(_pageLoaderTimeout); _pageLoaderTimeout = null; }
 }
 // Cacher au load de la page (si visible depuis navigation précédente)
 window.addEventListener('pageshow', hidePageLoader);
 window.addEventListener('load', hidePageLoader);
+// Escape clavier = cacher le loader (filet de sécurité)
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){ hidePageLoader(); }
+});
+// Clic sur le loader lui-même = le cacher
+document.addEventListener('click', function(e){
+  var pl = document.getElementById('page-loader');
+  if(pl && pl.classList.contains('show') && (e.target === pl || pl.contains(e.target))){
+    hidePageLoader();
+  }
+}, true);
 // Afficher pendant la navigation (clic sur lien interne, submit form)
 document.addEventListener('click', function(e){
   var a = e.target.closest('a[href]');
   if(!a) return;
   var href = a.getAttribute('href') || '';
-  // Ignorer liens externes, anchors, javascript:, target=_blank
   if(!href || href.startsWith('#') || href.startsWith('javascript:') || a.target === '_blank') return;
-  // Ignorer si modificateur (ctrl/cmd-click = nouvel onglet)
   if(e.ctrlKey || e.metaKey || e.shiftKey) return;
-  // Ignorer hosts externes
   try{
     var url = new URL(href, window.location.origin);
     if(url.origin !== window.location.origin) return;
@@ -799,7 +812,10 @@ document.addEventListener('submit', function(e){
   if(!form || form.dataset.noLoader) return;
   // Ignorer les forms qui submit-en-ajax (ex: change handlers)
   if(form.action && form.action.indexOf('javascript:') === 0) return;
-  // Petite latence pour ne pas flicker sur les forms ultra rapides
+  // Skip si le form a un bouton avec data-confirm — ces forms passent par un modal
+  // de confirmation, le loader doit attendre que l'user confirme (sinon il s'affiche
+  // pendant le modal et reste bloqué si l'user annule).
+  if(form.querySelector && form.querySelector('[data-confirm]') && !form.dataset.confirmed) return;
   setTimeout(showPageLoader, 150);
 }, true);
 
