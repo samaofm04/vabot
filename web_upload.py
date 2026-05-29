@@ -2878,6 +2878,20 @@ def _render_va_list_html_inner() -> str:
 
     css = """
 <style>
+/* === Vault toolbar (search + filter) === */
+.va-vault-toolbar{display:flex;gap:10px;margin-bottom:18px;align-items:stretch}
+.va-vault-search{flex:1;background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:9px;transition:all .15s}
+.va-vault-search:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.va-vault-search input{flex:1;background:transparent;border:0;color:#fff;outline:none;font-size:13px;font-family:inherit;padding:0;margin:0}
+.va-vault-search input::placeholder{color:#666}
+.va-vault-filter{background:#0f1116;border:1px solid #2a2a2a;color:#aaa;border-radius:10px;padding:0 14px;font-size:13px;font-family:inherit;cursor:pointer;min-width:180px;outline:none}
+.va-vault-filter:focus{border-color:#3b82f6}
+body.light .va-vault-search,body.light .va-vault-filter{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .va-vault-search input{color:#111}
+/* Animation fade quand un VA est masqué/affiché */
+.va-card{opacity:1;transition:opacity .15s}
+.va-card.va-hidden{display:none}
+.va-section.va-empty{display:none}
 .va-section{margin-bottom:24px;background:#0f1116;border:1px solid #2a2a2a;border-radius:16px;padding:20px 22px}
 .va-section-head{display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #2a2a2a}
 .va-section-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.4);flex-shrink:0}
@@ -3007,6 +3021,25 @@ body.light .va-id{color:#9ca3af}
                     _va_clicks_cache[uid] = {"data": d, "source": kind}
     except Exception:
         pass
+
+    # Vault toolbar : search + filter identité
+    identities_for_filter = sorted(by_identity.keys())
+    ident_opts = "".join(
+        f"<option value='{i}'>{i.capitalize()}</option>" for i in identities_for_filter
+    )
+    vault_toolbar = (
+        "<div class='va-vault-toolbar'>"
+        "<div class='va-vault-search'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
+        "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        "<input type='text' id='va-search' placeholder='Rechercher un VA…' oninput='vaSearch(this.value)'>"
+        "</div>"
+        "<select id='va-filter-identity' onchange='vaSearch(null)' class='va-vault-filter'>"
+        "<option value=''>Toutes les identités</option>"
+        + ident_opts +
+        "</select>"
+        "</div>"
+    )
 
     sections = []
     for identity in sorted(by_identity.keys()):
@@ -3260,8 +3293,9 @@ body.light .va-id{color:#9ca3af}
                 + "</button>"
             )
 
+            search_blob = (username + " " + uid + " " + identity).lower()
             cards.append(
-                f"<div class='va-card'>"
+                f"<div class='va-card' data-va-search='{search_blob}' data-va-identity='{identity}'>"
                 f"{pp_html}"
                 f"<div class='va-info'>"
                 f"{name_display}"
@@ -3280,7 +3314,7 @@ body.light .va-id{color:#9ca3af}
             )
 
         sections.append(
-            f"<div class='va-section'>"
+            f"<div class='va-section' data-va-section-identity='{identity}'>"
             f"<div class='va-section-head'>"
             f"{avatar_html}"
             f"<div class='va-section-name'>@{identity}</div>"
@@ -3798,7 +3832,40 @@ function vaLinksSave(){
 </script>
 """
 
-    return css + css_modal + pay_css_js + insta_css_js + "".join(sections) + footer + modal_html + pay_modal_html + insta_modal_html
+    vault_search_js = """
+<script>
+function vaSearch(q){
+  if(q === null) q = document.getElementById('va-search').value;
+  q = (q || '').toLowerCase().trim();
+  var identFilter = (document.getElementById('va-filter-identity').value || '').toLowerCase().trim();
+  var sections = document.querySelectorAll('.va-section');
+  sections.forEach(function(sec){
+    var secIdent = (sec.getAttribute('data-va-section-identity') || '').toLowerCase();
+    // Si filtre identité actif et qu'on n'est pas dans la bonne section → cacher
+    if(identFilter && secIdent !== identFilter){
+      sec.classList.add('va-empty');
+      return;
+    }
+    var anyVisible = false;
+    sec.querySelectorAll('.va-card').forEach(function(card){
+      var blob = (card.getAttribute('data-va-search') || '').toLowerCase();
+      var match = !q || blob.indexOf(q) !== -1;
+      card.classList.toggle('va-hidden', !match);
+      if(match) anyVisible = true;
+    });
+    sec.classList.toggle('va-empty', !anyVisible);
+  });
+}
+</script>
+"""
+    return (
+        css + css_modal + pay_css_js + insta_css_js
+        + vault_toolbar
+        + "".join(sections)
+        + footer
+        + modal_html + pay_modal_html + insta_modal_html
+        + vault_search_js
+    )
 
 
 def _render_identity_stats_html() -> str:
