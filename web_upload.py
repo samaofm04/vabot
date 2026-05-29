@@ -2743,8 +2743,9 @@ def _render_va_list_html_inner() -> str:
 .va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
 .va-list{display:flex;flex-direction:column;gap:8px}
 .va-card{display:grid;grid-template-columns:auto 1fr auto auto auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
-.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px}
+.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;max-width:160px;white-space:nowrap}
 .va-links-btn:hover{background:rgba(168,85,247,.2)}
+.va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;max-width:130px;display:inline-block;line-height:1}
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
@@ -2776,6 +2777,24 @@ body.light .va-change-form select{background:#fff;border-color:#e5e7eb;color:#11
 body.light .va-id{color:#9ca3af}
 </style>
 """
+
+    # Pré-calculer une map link_id -> {shortcode, name} pour afficher dans les cartes
+    _links_info_map = {}
+    try:
+        import gms as _gms_pre
+        if _gms_pre.is_configured():
+            _grp = _gms_pre.get_links_grouped_by_model()
+            _res_pre = _gms_pre.list_all_links()
+            if _res_pre.get("ok"):
+                for _l in _res_pre.get("links", []):
+                    _lid = _l.get("id")
+                    if _lid:
+                        _links_info_map[_lid] = {
+                            "shortcode": _l.get("shortcode", ""),
+                            "name": _l.get("display_name") or _l.get("shortcode", ""),
+                        }
+    except Exception:
+        pass
 
     # ===== Pré-calcul parallèle des clicks pour TOUS les VAs (1 round-trip) =====
     # Sinon : chaque carte fait son appel série -> 4 VAs = 4×~200ms = 800ms+
@@ -2900,11 +2919,33 @@ body.light .va-id{color:#9ca3af}
 
             # Bouton "Liens" pour attribuer des liens GMS à ce VA
             assigned_links = _get_links_for_va(uid)
+            # Construire le label/tooltip basé sur les liens assignés
+            if assigned_links:
+                first_link = _links_info_map.get(assigned_links[0], {})
+                first_short = first_link.get("shortcode", "") or "?"
+                if len(assigned_links) == 1:
+                    btn_label = f"/{first_short}"
+                else:
+                    btn_label = f"/{first_short} +{len(assigned_links) - 1}"
+                # Tooltip : liste complète
+                tip_lines = []
+                for lid in assigned_links[:8]:  # max 8 pour pas overflow
+                    info = _links_info_map.get(lid, {})
+                    name = info.get("name", "?")
+                    sc = info.get("shortcode", "?")
+                    tip_lines.append(f"/{sc} — {name}")
+                if len(assigned_links) > 8:
+                    tip_lines.append(f"… +{len(assigned_links) - 8} autres")
+                tooltip = "\n".join(tip_lines).replace("\"", "&quot;")
+            else:
+                btn_label = "Aucun"
+                tooltip = "Aucun lien assigné. Clic pour attribuer."
+
             links_btn_html = (
                 f"<button type='button' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
-                f"class='va-links-btn' title='Liens GMS assignés ({len(assigned_links)})'>"
-                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
-                f"<span>{len(assigned_links)}</span>"
+                f"class='va-links-btn' title=\"{tooltip}\">"
+                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
+                f"<span class='va-links-btn-label'>{btn_label}</span>"
                 f"</button>"
             )
 
