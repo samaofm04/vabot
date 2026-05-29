@@ -3020,10 +3020,10 @@ def _render_depenses_html() -> str:
 
 
 def _render_mypuls_section_html() -> str:
-    """Section MyPuls en haut de la page Revenus :
-    - statut clé API + bouton tester
-    - mapping identité -> nom modèle MYM
-    - bouton sync qui récupère /userInfo pour chaque modèle et affiche les ventes
+    """Section MyPuls en haut de la page Revenus.
+
+    Scrape le dashboard MyPuls via cookies de session (PHPSESSID + REMEMBERME).
+    Affiche : stats globales, top chatteurs, transactions récentes, filtre période.
     """
     try:
         import mypuls
@@ -3031,137 +3031,230 @@ def _render_mypuls_section_html() -> str:
         return f"<div class='box' style='border:1px solid rgba(239,68,68,.3)'><p style='color:#ef4444;margin:0;font-size:13px'>❌ Module mypuls indispo : {e}</p></div>"
 
     from flask import request as flask_request
+    import datetime as _dt
 
-    identities = _list_identities()
     configured = mypuls.is_configured()
-    key = mypuls.get_api_key()
-    key_masked = (key[:10] + "…" + key[-6:]) if key and len(key) > 18 else (key or "")
-    mapping = mypuls.list_model_map()
 
-    if configured:
-        status_html = (
-            f"<div style='display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:8px;margin-bottom:14px'>"
-            f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='#22c55e' stroke-width='2.5'><path d='M20 6L9 17l-5-5'/></svg>"
-            f"<div style='flex:1;font-size:13px'>Clé API MyPuls configurée — <code style='color:#888'>{key_masked}</code></div>"
-            f"<form method='POST' action='/mypuls/test' style='margin:0'><button type='submit' style='background:#22c55e;color:#000;border:0;padding:5px 12px;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer'>▶ Tester</button></form>"
-            f"</div>"
-        )
-    else:
-        status_html = (
-            "<div style='display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;margin-bottom:14px;font-size:13px;color:#ef4444;font-weight:600'>"
-            "⚠ Configure ta clé API MyPuls pour synchroniser tes ventes automatiquement"
-            "</div>"
-        )
-
-    key_form = (
-        "<form method='POST' action='/mypuls/save_key' style='display:flex;gap:8px;margin-bottom:14px'>"
-        "<input type='password' name='api_key' placeholder='Clé API (Profil MyPuls → Extension)' required minlength='32' style='flex:1' "
-        + (f"value=''" if configured else "") + ">"
-        "<button type='submit'>" + ("Changer la clé" if configured else "Enregistrer") + "</button>"
-        "</form>"
-    )
-
-    # Mapping identité <-> modèle MYM
-    mapping_rows_html = ""
-    if identities and configured:
-        rows_inner = []
-        for ident in identities:
-            current = mapping.get(ident, "")
-            rows_inner.append(
-                f"<form method='POST' action='/mypuls/save_model' style='display:flex;align-items:center;gap:10px;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;margin:0'>"
-                f"<input type='hidden' name='identity' value='{ident}'>"
-                f"<div style='min-width:80px;font-weight:600;font-size:13px;color:#888'>{ident}</div>"
-                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#666' stroke-width='2'><line x1='5' y1='12' x2='19' y2='12'/><polyline points='12 5 19 12 12 19'/></svg>"
-                f"<input type='text' name='model_name' value='{current}' placeholder='nom MYM (ex. ameliawdifference)' style='flex:1;font-size:12px;padding:6px 10px;background:#0f1116;border:1px solid #2a2a2a;color:#fff;border-radius:6px'>"
-                f"<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer'>Save</button>"
-                f"</form>"
-            )
-        mapping_rows_html = (
-            "<div style='margin:10px 0 14px'>"
-            "<div style='font-size:12px;color:#888;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Modèle MYM par identité</div>"
-            "<div style='display:flex;flex-direction:column;gap:6px'>"
-            + "".join(rows_inner) + "</div></div>"
-        )
-
-    # Si on a un modelName en query (résultat de sync), afficher
-    sync_results_html = ""
-    if configured:
-        sync_for = flask_request.args.get("mypuls_for", "").strip() if hasattr(flask_request, "args") else ""
-        if sync_for:
-            res = mypuls.user_info(sync_for)
-            if not res.get("ok"):
-                sync_results_html = (
-                    f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px;margin-bottom:14px'>"
-                    f"❌ Sync échoué pour <code>{sync_for}</code> : {res.get('error', '?')}<br>"
-                    f"<span style='font-size:11px;color:#888'>Vérifie que ce modèle est bien claimed via l'extension MymUtils.</span>"
-                    f"</div>"
-                )
-            else:
-                data = res.get("data") or {}
-                if isinstance(data, str):
-                    sync_results_html = f"<div class='box' style='font-family:monospace;font-size:12px'>{data}</div>"
-                else:
-                    parts = [f"<div class='box'><h4 style='margin:0 0 10px'>📊 Données MyPuls pour <code>{sync_for}</code></h4>"]
-                    if data.get("revenues"):
-                        parts.append("<h5 style='margin:8px 0;color:#00d68f'>💰 Ventes par chatteur</h5>")
-                        parts.append(f"<div class='mypuls-html' style='overflow-x:auto'>{data['revenues']}</div>")
-                    if data.get("modeles"):
-                        parts.append("<h5 style='margin:16px 0 8px;color:#3b82f6'>👤 Modèles gérés</h5>")
-                        parts.append(f"<div class='mypuls-html' style='overflow-x:auto'>{data['modeles']}</div>")
-                    if not data.get("revenues") and not data.get("modeles"):
-                        parts.append(f"<p style='color:#888;font-size:13px;margin:0'>Aucune donnée renvoyée. Réponse brute : <code>{str(data)[:300]}</code></p>")
-                    parts.append("</div>")
-                    sync_results_html = "".join(parts)
-
-    # Boutons de sync par modèle (si on en a)
-    sync_buttons_html = ""
-    if configured and mapping:
-        buttons = []
-        for ident, model in mapping.items():
-            if not model:
-                continue
-            buttons.append(
-                f"<a href='?tab=revenus&mypuls_for={model}' "
-                f"style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px'>"
-                f"🔄 Sync {ident}</a>"
-            )
-        if buttons:
-            sync_buttons_html = (
-                "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center'>"
-                "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px'>Récupérer les ventes :</span>"
-                + "".join(buttons) + "</div>"
-            )
-
+    # CSS commun
     css = """
 <style>
 .mypuls-section{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
 .mypuls-section h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
-.mypuls-html table{width:100%;border-collapse:collapse;font-size:12px}
-.mypuls-html th{background:#1a1a1a;color:#888;padding:8px;text-align:left;border-bottom:1px solid #2a2a2a;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-.mypuls-html td{padding:8px;border-bottom:1px solid #1a1a1a;color:#fff}
-.mypuls-html tr:hover td{background:rgba(59,130,246,.05)}
+.mypuls-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.mypuls-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px}
+.mypuls-stat .v{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.mypuls-stat .l{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:4px;font-weight:600}
+.mypuls-tabs{display:flex;gap:6px;border-bottom:1px solid #2a2a2a;margin-bottom:14px}
+.mypuls-tab{background:transparent;border:0;color:#888;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.mypuls-tab:hover{color:#fff}
+.mypuls-tab-active{color:#3b82f6;border-bottom-color:#3b82f6}
+.mypuls-table{width:100%;border-collapse:collapse;font-size:12px}
+.mypuls-table th{background:#1a1a1a;color:#888;padding:8px 10px;text-align:left;border-bottom:1px solid #2a2a2a;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.mypuls-table td{padding:8px 10px;border-bottom:1px solid #1a1a1a;color:#fff;vertical-align:middle}
+.mypuls-table tr:hover td{background:rgba(59,130,246,.04)}
+.mypuls-bar{position:relative;background:#1a1a1a;height:6px;border-radius:3px;overflow:hidden;margin-top:4px}
+.mypuls-bar-fill{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:3px}
+.mypuls-pill{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.mypuls-period{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.mypuls-period-btn{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+.mypuls-period-btn:hover{background:rgba(255,255,255,.05);color:#fff}
+.mypuls-period-btn-active{background:#3b82f6;border-color:#3b82f6;color:#fff}
 body.light .mypuls-section{background:#fff;border-color:#e5e7eb}
-body.light .mypuls-html th{background:#f9fafb;color:#666;border-color:#e5e7eb}
-body.light .mypuls-html td{color:#111;border-color:#f3f4f6}
+body.light .mypuls-stat{background:#f9fafb;border-color:#e5e7eb}
+body.light .mypuls-stat .v{color:#111}
+body.light .mypuls-table th{background:#f9fafb;color:#666;border-color:#e5e7eb}
+body.light .mypuls-table td{color:#111;border-color:#f3f4f6}
+body.light .mypuls-period-btn{color:#666;border-color:#e5e7eb}
+body.light .mypuls-period-btn:hover{background:#f3f4f6;color:#111}
+body.light .mypuls-tabs{border-color:#e5e7eb}
+body.light .mypuls-tab{color:#888}
+body.light .mypuls-tab:hover{color:#111}
+body.light .mypuls-bar{background:#e5e7eb}
 </style>
 """
 
-    header = (
-        "<div class='mypuls-section'>"
-        "<h3>"
-        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
-        "Sync MyPuls"
-        "<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>récupère les ventes depuis mymutils.fr</span>"
-        "</h3>"
-        + status_html
-        + key_form
-        + mapping_rows_html
-        + sync_buttons_html
-        + sync_results_html
-        + "<p style='font-size:11px;color:#666;margin:8px 0 0'>⚠ Prérequis : ton modèle MYM doit être <strong>claimed</strong> via l'extension Chrome MymUtils (auto quand tu vas sur creators.mym.fans connecté).</p>"
+    if not configured:
+        # Pas de cookies : afficher uniquement le form de config
+        config_html = (
+            "<div class='mypuls-section'>"
+            "<h3>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg>"
+            "Sync MyPuls"
+            "<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct du dashboard mypuls.app via tes cookies</span>"
+            "</h3>"
+            "<div style='padding:14px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;margin-bottom:14px;font-size:13px;color:#fbbf24'>"
+            "⚠ Cookies non configurés. Loggue-toi sur <a href='https://mypuls.app/' target='_blank' style='color:#fbbf24;text-decoration:underline'>mypuls.app</a> et colle tes cookies ci-dessous."
+            "</div>"
+            "<form method='POST' action='/mypuls/save_cookies' style='display:flex;flex-direction:column;gap:8px;margin-bottom:14px'>"
+            "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Cookie PHPSESSID (obligatoire)</label>"
+            "<input type='password' name='phpsessid' placeholder='9c1f82750ae5104c5d326e57150fe0c9' required minlength='16' style='font-family:monospace;font-size:12px'>"
+            "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:6px'>Cookie REMEMBERME (optionnel, garde la session plus longtemps)</label>"
+            "<input type='password' name='rememberme' placeholder='App.Entity.User%3A...' style='font-family:monospace;font-size:11px'>"
+            "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer les cookies</button>"
+            "</form>"
+            "<details style='font-size:12px;color:#888'>"
+            "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Comment récupérer mes cookies ?</summary>"
+            "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+            "<li>Loggue-toi sur <code>mypuls.app</code></li>"
+            "<li>Appuie sur <b>F12</b> → onglet <b>Application</b> (Storage)</li>"
+            "<li>Côté gauche : <b>Cookies → https://mypuls.app</b></li>"
+            "<li>Copie la valeur de <code>PHPSESSID</code> (et <code>REMEMBERME</code> si dispo)</li>"
+            "</ol>"
+            "</details>"
+            "</div>"
+        )
+        return css + config_html
+
+    # ============ Cookies configurés : afficher les données ============
+    # Période : défaut 30j
+    today = _dt.date.today()
+    default_start = (today - _dt.timedelta(days=29)).isoformat()
+    default_end = today.isoformat()
+    start_str = flask_request.args.get("mp_start", default_start) if hasattr(flask_request, "args") else default_start
+    end_str = flask_request.args.get("mp_end", default_end) if hasattr(flask_request, "args") else default_end
+
+    res = mypuls.fetch_team_stats(start_str, end_str)
+    if not res.get("ok"):
+        err_html = (
+            "<div class='mypuls-section'>"
+            "<h3>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
+            "Sync MyPuls — Erreur"
+            "</h3>"
+            f"<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;margin-bottom:14px'>❌ {res.get('error', '?')}</div>"
+            "<form method='POST' action='/mypuls/clear_cookies' style='margin:0'>"
+            "<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer'>Reset cookies</button>"
+            "</form>"
+            "</div>"
+        )
+        return css + err_html
+
+    totals = res["totals"]
+    chatters = res["chatters"]
+    transactions = res["transactions"]
+    max_ca = chatters[0]["ca_total"] if chatters else 1
+
+    # Boutons période (presets + custom)
+    def _preset_url(days):
+        s = (today - _dt.timedelta(days=days - 1)).isoformat()
+        e = today.isoformat()
+        active = "mypuls-period-btn-active" if start_str == s and end_str == e else ""
+        return f"<a href='?tab=revenus&mp_start={s}&mp_end={e}' class='mypuls-period-btn {active}'>{days}j</a>"
+
+    period_html = (
+        "<div class='mypuls-period'>"
+        "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:6px'>Période :</span>"
+        + _preset_url(1) + _preset_url(7) + _preset_url(30) + _preset_url(90)
+        + "<form method='GET' style='display:inline-flex;gap:6px;align-items:center;margin-left:6px'>"
+        + "<input type='hidden' name='tab' value='revenus'>"
+        + f"<input type='date' name='mp_start' value='{start_str}' style='font-size:12px;padding:4px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto'>"
+        + "<span style='color:#666;font-size:12px'>→</span>"
+        + f"<input type='date' name='mp_end' value='{end_str}' style='font-size:12px;padding:4px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto'>"
+        + "<button type='submit' class='mypuls-period-btn'>Filtrer</button>"
+        + "</form>"
         + "</div>"
     )
-    return css + header
+
+    # Stats grid
+    stats_html = (
+        "<div class='mypuls-stats-grid'>"
+        f"<div class='mypuls-stat'><div class='v' style='color:#22c55e'>+{totals['ca_total']:.0f}€</div><div class='l'>CA Total</div></div>"
+        f"<div class='mypuls-stat'><div class='v' style='color:#3b82f6'>{totals['ca_ppv']:.0f}€</div><div class='l'>CA PPV</div></div>"
+        f"<div class='mypuls-stat'><div class='v' style='color:#a855f7'>{totals['ca_tips']:.0f}€</div><div class='l'>CA Tips</div></div>"
+        f"<div class='mypuls-stat'><div class='v'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
+        f"<div class='mypuls-stat'><div class='v'>{totals['active_chatters']}<span style='font-size:14px;color:#666'>/{totals['nb_chatters']}</span></div><div class='l'>Chatteurs actifs</div></div>"
+        "</div>"
+    )
+
+    # Table chatteurs (top 30)
+    chatters_rows = []
+    for c in chatters[:30]:
+        bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
+        name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
+        chatters_rows.append(
+            f"<tr>"
+            f"<td><div style='font-weight:600'>{name_esc}</div>"
+            f"<div class='mypuls-bar' style='width:140px'><div class='mypuls-bar-fill' style='width:{bar_pct:.1f}%'></div></div></td>"
+            f"<td style='font-weight:700;color:#22c55e'>{c['ca_total']:.2f}€</td>"
+            f"<td style='color:#3b82f6'>{c['ca_ppv']:.2f}€</td>"
+            f"<td style='color:#a855f7'>{c['ca_tips']:.2f}€</td>"
+            f"<td><span class='mypuls-pill' style='background:rgba(255,255,255,.05);color:#aaa'>{c['conv_rate']}</span></td>"
+            f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
+            f"</tr>"
+        )
+    chatters_empty = "<tr><td colspan='6' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
+    chatters_body = "".join(chatters_rows) or chatters_empty
+    chatters_table = (
+        "<div id='mp-tab-chatters' style='display:block'>"
+        "<table class='mypuls-table'>"
+        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>Présence</th></tr></thead>"
+        f"<tbody>{chatters_body}</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+    # Table transactions (recent 50)
+    tx_rows = []
+    for t in transactions[:50]:
+        type_color = {
+            "Média privé": "#3b82f6",
+            "Pourboires": "#a855f7",
+            "Abonnement": "#22c55e",
+        }.get(t["type"], "#888")
+        tx_rows.append(
+            f"<tr>"
+            f"<td style='color:#888;font-size:11px;white-space:nowrap'>{t['date']}</td>"
+            f"<td style='font-weight:600'>{t['creator']}</td>"
+            f"<td style='color:#3b82f6'>{t['chatter']}</td>"
+            f"<td style='color:#888'>{t['fan']}</td>"
+            f"<td style='font-weight:700;color:#22c55e'>+{t['amount']:.2f}€</td>"
+            f"<td><span class='mypuls-pill' style='background:rgba({251 if t['type']=='Pourboires' else 59},{191 if t['type']=='Pourboires' else 130},{36 if t['type']=='Pourboires' else 246},.15);color:{type_color}'>{t['type']}</span></td>"
+            f"</tr>"
+        )
+    tx_empty = "<tr><td colspan='6' style='text-align:center;padding:30px;color:#888'>Aucune transaction</td></tr>"
+    tx_body = "".join(tx_rows) or tx_empty
+    tx_table = (
+        "<div id='mp-tab-tx' style='display:none'>"
+        "<table class='mypuls-table'>"
+        "<thead><tr><th>Date</th><th>Créateur</th><th>Chatteur</th><th>Fan</th><th>Montant</th><th>Type</th></tr></thead>"
+        f"<tbody>{tx_body}</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+    tabs_html = (
+        "<div class='mypuls-tabs'>"
+        f"<button class='mypuls-tab mypuls-tab-active' onclick='mpTab(this,\"chatters\")'>Top chatteurs ({totals['active_chatters']})</button>"
+        f"<button class='mypuls-tab' onclick='mpTab(this,\"tx\")'>Transactions ({totals['nb_transactions']})</button>"
+        "<div style='flex:1'></div>"
+        "<form method='POST' action='/mypuls/clear_cookies' style='margin:0;align-self:center' onsubmit='return confirm(\"Supprimer les cookies MyPuls ?\")'>"
+        "<button type='submit' style='background:transparent;border:0;color:#888;font-size:11px;cursor:pointer;padding:4px 8px'>Reset cookies</button>"
+        "</form>"
+        "</div>"
+    )
+
+    js = """
+<script>
+function mpTab(btn, name){
+  document.querySelectorAll('.mypuls-tab').forEach(function(t){t.classList.remove('mypuls-tab-active');});
+  btn.classList.add('mypuls-tab-active');
+  document.getElementById('mp-tab-chatters').style.display = (name === 'chatters') ? 'block' : 'none';
+  document.getElementById('mp-tab-tx').style.display = (name === 'tx') ? 'block' : 'none';
+}
+</script>
+"""
+
+    section = (
+        "<div class='mypuls-section'>"
+        "<h3>"
+        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><path d='M3 3v18h18'/><path d='M7 14l4-4 4 4 5-5'/></svg>"
+        "MyPuls — Ventes chatteurs"
+        f"<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct mypuls.app · {start_str} → {end_str}</span>"
+        "</h3>"
+        + period_html + stats_html + tabs_html + chatters_table + tx_table
+        + "</div>"
+    )
+    return css + section + js
 
 
 def _render_revenus_html() -> str:
@@ -5439,19 +5532,38 @@ def create_app():
 
     # ============ MYPULS ============
 
-    @app.route("/mypuls/save_key", methods=["POST"])
-    def mypuls_save_key():
+    @app.route("/mypuls/save_cookies", methods=["POST"])
+    def mypuls_save_cookies():
         if not is_auth():
             return redirect("/")
         try:
             import mypuls
         except Exception as e:
             return _error(f"❌ Module mypuls indispo : {e}")
-        key = (request.form.get("api_key") or "").strip()
-        if not key or len(key) < 32:
-            return _error("❌ Clé invalide (doit faire au moins 32 caractères hex)")
-        mypuls.save_api_key(key)
-        return _success(f"✅ Clé MyPuls enregistrée : <code>{key[:10]}…{key[-6:]}</code>")
+        phpsessid = (request.form.get("phpsessid") or "").strip()
+        rememberme = (request.form.get("rememberme") or "").strip()
+        if not phpsessid or len(phpsessid) < 16:
+            return _error("❌ PHPSESSID invalide (au moins 16 caractères)")
+        mypuls.save_cookies(phpsessid, rememberme)
+        # Test immédiat
+        res = mypuls.ping()
+        if res.get("ok"):
+            return _success(f"✅ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
+        return _error(f"⚠ Cookies enregistrés mais ping échoué : {res.get('error', '?')}")
+
+    @app.route("/mypuls/clear_cookies", methods=["POST"])
+    def mypuls_clear_cookies():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        cfg = mypuls.load_config()
+        cfg.pop("PHPSESSID", None)
+        cfg.pop("REMEMBERME", None)
+        mypuls.save_config(cfg)
+        return _success("✅ Cookies MyPuls supprimés")
 
     @app.route("/mypuls/test", methods=["POST"])
     def mypuls_test():
@@ -5463,26 +5575,8 @@ def create_app():
             return _error(f"❌ Module mypuls indispo : {e}")
         res = mypuls.ping()
         if res.get("ok"):
-            info = res.get("info", "OK")
-            return _success(f"✅ Connexion MyPuls : {info}")
+            return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
-
-    @app.route("/mypuls/save_model", methods=["POST"])
-    def mypuls_save_model():
-        if not is_auth():
-            return redirect("/")
-        try:
-            import mypuls
-        except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
-        ident = (request.form.get("identity") or "").strip().lower()
-        model = (request.form.get("model_name") or "").strip()
-        if not ident:
-            return _error("❌ Identité requise")
-        mypuls.set_model_for_identity(ident, model)
-        if model:
-            return _success(f"✅ <code>{ident}</code> → modèle MYM <code>{model}</code>")
-        return _success(f"✅ Mapping retiré pour <code>{ident}</code>")
 
     @app.route("/gms/delete", methods=["POST"])
     def gms_delete():
