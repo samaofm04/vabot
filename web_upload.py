@@ -2457,6 +2457,58 @@ def _set_va_payment(user_id, payload: dict):
     _save_va_payments(data)
 
 
+# ============ VA -> Instagram (handle + last stats) ============
+VA_INSTA_FILE = DATA_DIR / "va_instagram.json"
+
+
+def _load_va_insta() -> dict:
+    if not VA_INSTA_FILE.exists():
+        return {}
+    try:
+        return json.loads(VA_INSTA_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_va_insta(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    VA_INSTA_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _get_va_insta(user_id) -> dict:
+    """Retourne {handle, followers, posts, last_post_at, last_scraped_at} ou {}."""
+    return _load_va_insta().get(str(user_id), {})
+
+
+def _set_va_insta(user_id, handle: str):
+    data = _load_va_insta()
+    key = str(user_id)
+    h = (handle or "").strip().lstrip("@")[:50]
+    if not h:
+        data.pop(key, None)
+    else:
+        existing = data.get(key, {})
+        existing["handle"] = h
+        data[key] = existing
+    _save_va_insta(data)
+
+
+def _update_va_insta_stats(user_id, handle: str, followers: int = 0,
+                            posts: int = 0, last_post_at: str = ""):
+    """Mise à jour des stats après scrape."""
+    data = _load_va_insta()
+    key = str(user_id)
+    import time as _t
+    data[key] = {
+        "handle": handle,
+        "followers": followers,
+        "posts": posts,
+        "last_post_at": last_post_at,
+        "last_scraped_at": int(_t.time()),
+    }
+    _save_va_insta(data)
+
+
 # ============ VA -> GMS links mapping ============
 VA_LINKS_FILE = DATA_DIR / "va_links.json"
 
@@ -2845,6 +2897,10 @@ def _render_va_list_html_inner() -> str:
 .va-pink-badge svg{flex-shrink:0}
 .va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 body.light .va-status-dot-on-avatar,body.light .va-status-dot-off-avatar{border-color:#f9fafb}
+.va-ig-btn{background:transparent;border:1px solid currentColor;padding:6px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:135px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box;transition:all .15s}
+.va-ig-btn:hover{background:currentColor;color:#fff !important}
+.va-ig-btn:hover .va-ig-label{color:#fff}
+.va-ig-label{overflow:hidden;text-overflow:ellipsis;font-size:11px;flex:1;text-align:left;font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace}
 .va-pay-btn{background:transparent;border:1px solid currentColor;padding:6px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:110px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box;transition:all .15s}
 .va-pay-btn:hover{background:currentColor;color:#fff !important}
 .va-pay-btn:hover .va-pay-label{color:#fff}
@@ -3161,6 +3217,49 @@ body.light .va-id{color:#9ca3af}
                 f"</button>"
             )
 
+            # Bouton Instagram + indicateur santé
+            insta = _get_va_insta(uid)
+            ig_handle = insta.get("handle", "")
+            if ig_handle:
+                # Calcul du status santé d'après dernier post / scrape
+                import time as _t_ig
+                last_scraped = int(insta.get("last_scraped_at", 0))
+                age_h = (_t_ig.time() - last_scraped) / 3600 if last_scraped else 999
+                last_post = insta.get("last_post_at", "")
+                post_age_days = 0
+                try:
+                    if last_post:
+                        import datetime as _dt_ig
+                        d_post = _dt_ig.date.fromisoformat(last_post[:10])
+                        post_age_days = (_dt_ig.date.today() - d_post).days
+                except Exception:
+                    post_age_days = 999
+
+                if not last_post or post_age_days > 14:
+                    ig_color = "#ef4444"  # rouge : inactif
+                    ig_dot = "🔴"
+                elif post_age_days > 7:
+                    ig_color = "#f59e0b"  # amber : ralenti
+                    ig_dot = "🟡"
+                else:
+                    ig_color = "#22c55e"  # vert : actif
+                    ig_dot = "🟢"
+                ig_label = f"@{ig_handle[:14]}{'…' if len(ig_handle) > 14 else ''}"
+            else:
+                ig_color = "#444"
+                ig_dot = ""
+                ig_label = "Instagram"
+
+            ig_btn = (
+                f"<button type='button' onclick=\"vaInstaOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"class='va-ig-btn' style='border-color:{ig_color}40;color:{ig_color}' "
+                f"title='Compte Instagram'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='2' y='2' width='20' height='20' rx='5'/><path d='M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z'/><line x1='17.5' y1='6.5' x2='17.51' y2='6.5'/></svg>"
+                f"<span class='va-ig-label'>{ig_label}</span>"
+                + (f"<span style='font-size:8px'>{ig_dot}</span>" if ig_dot else "")
+                + "</button>"
+            )
+
             cards.append(
                 f"<div class='va-card'>"
                 f"{pp_html}"
@@ -3170,6 +3269,7 @@ body.light .va-id{color:#9ca3af}
                 f"</div>"
                 f"{pink_badge}"
                 f"<div class='va-actions'>"
+                f"{ig_btn}"
                 f"{links_btn_html}"
                 f"{pay_btn}"
                 f"{mini_clicks_html}"
@@ -3195,6 +3295,179 @@ body.light .va-id{color:#9ca3af}
         f"💡 <b style='color:#3b82f6'>{len(users)}</b> VA{'s' if len(users) > 1 else ''} actif{'s' if len(users) > 1 else ''} réparti{'s' if len(users) > 1 else ''} sur <b style='color:#3b82f6'>{len(by_identity)}</b> identité{'s' if len(by_identity) > 1 else ''}"
         f"</div>"
     )
+
+    # ====== Modal Instagram (handle + stats + scraper) ======
+    all_va_insta = _load_va_insta()
+    import json as _json_ig
+    insta_data_json = _json_ig.dumps(all_va_insta, ensure_ascii=False)
+
+    insta_modal_html = (
+        "<div id='va-ig-modal' onclick='vaInstaClose(event)'>"
+        "<div class='vim-box' onclick='event.stopPropagation()'>"
+        "<div class='vim-head'>"
+        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ec4899' stroke-width='2'><rect x='2' y='2' width='20' height='20' rx='5'/><path d='M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z'/><line x1='17.5' y1='6.5' x2='17.51' y2='6.5'/></svg>"
+        "<div>Compte Instagram</div>"
+        "<div id='vim-subtitle'></div>"
+        "<button onclick='vaInstaClose()' class='vim-close'>×</button>"
+        "</div>"
+        "<div class='vim-body'>"
+        "<label>Handle Instagram (sans @)</label>"
+        "<div style='display:flex;gap:8px;align-items:stretch'>"
+        "<input type='text' id='vim-handle' placeholder='amelia.xoxoo' maxlength='50' style='flex:1'>"
+        "<a id='vim-open-link' href='#' target='_blank' class='vim-open-btn' title='Ouvrir sur Instagram'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><path d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/><polyline points='15 3 21 3 21 9'/><line x1='10' y1='14' x2='21' y2='3'/></svg>"
+        "</a>"
+        "</div>"
+        # Stats si disponibles
+        "<div id='vim-stats-block' style='display:none;margin-top:18px'>"
+        "<div class='vim-stats-grid'>"
+        "<div class='vim-stat'><div class='vim-stat-v' id='vim-followers'>—</div><div class='vim-stat-l'>Followers</div></div>"
+        "<div class='vim-stat'><div class='vim-stat-v' id='vim-posts'>—</div><div class='vim-stat-l'>Posts</div></div>"
+        "<div class='vim-stat'><div class='vim-stat-v' id='vim-last-post'>—</div><div class='vim-stat-l'>Dernier post</div></div>"
+        "</div>"
+        "<div id='vim-health' style='margin-top:12px;font-size:12px;padding:10px 14px;border-radius:8px;text-align:center'></div>"
+        "<div id='vim-scraped-at' style='margin-top:8px;font-size:10px;color:#666;text-align:center'></div>"
+        "</div>"
+        "</div>"
+        "<div class='vim-foot'>"
+        "<button onclick='vaInstaClear()' class='vim-clear'>Effacer</button>"
+        "<button onclick='vaInstaScrape()' class='vim-scrape' id='vim-scrape-btn'>"
+        "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.5' style='margin-right:4px'><polyline points='1 4 1 10 7 10'/><polyline points='23 20 23 14 17 14'/><path d='M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15'/></svg>"
+        "<span class='vim-scrape-label'>Scraper</span>"
+        "<span class='vim-scrape-spinner'></span>"
+        "</button>"
+        "<button onclick='vaInstaClose()' class='vim-cancel'>Annuler</button>"
+        "<button onclick='vaInstaSave()' class='vim-save'>Enregistrer</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        + f"<script>window.__vaInstaData={insta_data_json};</script>"
+    )
+
+    insta_css_js = """
+<style>
+#va-ig-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
+#va-ig-modal.show{display:flex}
+.vim-box{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:480px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.vim-head{padding:18px 22px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.vim-head > div:first-of-type{flex:1}
+#vim-subtitle{font-size:11px;color:#888;font-weight:400}
+.vim-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
+.vim-body{padding:18px 22px;display:flex;flex-direction:column;gap:4px}
+.vim-body label{font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.vim-body input{background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;border-radius:8px;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;width:100%;box-sizing:border-box}
+.vim-body input:focus{border-color:#ec4899;outline:none;box-shadow:0 0 0 3px rgba(236,72,153,.15)}
+.vim-open-btn{background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:0 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;transition:all .15s}
+.vim-open-btn:hover{background:#ec4899;color:#fff;border-color:#ec4899}
+.vim-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.vim-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;text-align:center}
+.vim-stat-v{font-size:18px;font-weight:800;letter-spacing:-.02em;color:#ec4899}
+.vim-stat-l{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-top:3px}
+.vim-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.vim-clear{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
+.vim-clear:hover{background:rgba(239,68,68,.1)}
+.vim-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.vim-scrape{background:transparent;border:1px solid #ec4899;color:#ec4899;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;min-width:100px}
+.vim-scrape:hover{background:#ec4899;color:#fff}
+.vim-scrape.loading{opacity:.85;cursor:wait}
+.vim-scrape.loading .vim-scrape-label{display:none}
+.vim-scrape.loading .vim-scrape-spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.vim-scrape-spinner{display:none}
+.vim-save{background:#ec4899;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.vim-save:hover{background:#db2777}
+body.light .vim-box{background:#fff;border-color:#e5e7eb}
+body.light .vim-head,body.light .vim-foot{border-color:#e5e7eb}
+body.light .vim-body input{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .vim-stat{background:#f9fafb;border-color:#e5e7eb}
+</style>
+<script>
+var _vimCurrentUid = null;
+function vaInstaOpen(uid, username){
+  _vimCurrentUid = uid;
+  document.getElementById('vim-subtitle').textContent = '@' + username;
+  var data = (window.__vaInstaData || {})[uid] || {};
+  var handle = data.handle || '';
+  document.getElementById('vim-handle').value = handle;
+  vaInstaUpdateOpenLink();
+  // Stats
+  var hasStats = data.followers !== undefined && data.last_scraped_at;
+  document.getElementById('vim-stats-block').style.display = hasStats ? 'block' : 'none';
+  if(hasStats){
+    document.getElementById('vim-followers').textContent = (data.followers || 0).toLocaleString();
+    document.getElementById('vim-posts').textContent = (data.posts || 0).toLocaleString();
+    var lp = data.last_post_at || '';
+    document.getElementById('vim-last-post').textContent = lp ? lp.substring(0, 10) : '—';
+    // Health
+    var hEl = document.getElementById('vim-health');
+    var ageDays = 999;
+    if(lp){ try { ageDays = Math.floor((Date.now() - new Date(lp).getTime()) / 86400000); } catch(e){} }
+    if(ageDays <= 7){ hEl.innerHTML = '🟢 Actif (post il y a ' + ageDays + 'j)'; hEl.style.cssText = 'background:rgba(34,197,94,.1);color:#22c55e;margin-top:12px;font-size:12px;padding:10px 14px;border-radius:8px;text-align:center;font-weight:600'; }
+    else if(ageDays <= 14){ hEl.innerHTML = '🟡 Ralenti (' + ageDays + 'j sans poster)'; hEl.style.cssText = 'background:rgba(245,158,11,.1);color:#f59e0b;margin-top:12px;font-size:12px;padding:10px 14px;border-radius:8px;text-align:center;font-weight:600'; }
+    else { hEl.innerHTML = '🔴 Inactif (' + ageDays + 'j sans poster)'; hEl.style.cssText = 'background:rgba(239,68,68,.1);color:#ef4444;margin-top:12px;font-size:12px;padding:10px 14px;border-radius:8px;text-align:center;font-weight:600'; }
+    // Scraped at
+    var scrapeAge = Math.floor((Date.now() / 1000 - (data.last_scraped_at || 0)) / 3600);
+    document.getElementById('vim-scraped-at').textContent = 'Dernière vérif il y a ' + (scrapeAge < 24 ? scrapeAge + 'h' : Math.floor(scrapeAge / 24) + 'j');
+  }
+  document.getElementById('va-ig-modal').classList.add('show');
+}
+function vaInstaUpdateOpenLink(){
+  var h = document.getElementById('vim-handle').value.trim().replace(/^@/, '');
+  document.getElementById('vim-open-link').href = h ? ('https://instagram.com/' + h) : '#';
+}
+document.addEventListener('input', function(e){
+  if(e.target && e.target.id === 'vim-handle') vaInstaUpdateOpenLink();
+});
+function vaInstaClose(e){
+  if(e && e.target && e.target.id !== 'va-ig-modal' && e.target !== this) return;
+  document.getElementById('va-ig-modal').classList.remove('show');
+}
+function vaInstaClear(){
+  var form = new FormData();
+  form.append('user_id', _vimCurrentUid);
+  form.append('handle', '');
+  fetch('/va/set_insta', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Compte Instagram effacé', 'success');
+        setTimeout(function(){ window.location.reload(); }, 300);
+      }
+    });
+}
+function vaInstaSave(){
+  var form = new FormData();
+  form.append('user_id', _vimCurrentUid);
+  form.append('handle', document.getElementById('vim-handle').value);
+  fetch('/va/set_insta', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Compte Instagram enregistré', 'success');
+        setTimeout(function(){ window.location.reload(); }, 300);
+      }
+    });
+}
+function vaInstaScrape(){
+  var btn = document.getElementById('vim-scrape-btn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  var form = new FormData();
+  form.append('user_id', _vimCurrentUid);
+  form.append('handle', document.getElementById('vim-handle').value);
+  fetch('/va/scrape_insta', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.classList.remove('loading'); btn.disabled = false;
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Profil scrapé : ' + d.followers.toLocaleString() + ' followers', 'success');
+        setTimeout(function(){ window.location.reload(); }, 500);
+      } else {
+        if(typeof showToast === 'function') showToast('Erreur scrape : ' + (d.error || '?'), 'error');
+      }
+    });
+}
+</script>
+"""
 
     # ====== Modal Paiement (crypto ou taptap) ======
     import json as _json_pay
@@ -3525,7 +3798,7 @@ function vaLinksSave(){
 </script>
 """
 
-    return css + css_modal + pay_css_js + "".join(sections) + footer + modal_html + pay_modal_html
+    return css + css_modal + pay_css_js + insta_css_js + "".join(sections) + footer + modal_html + pay_modal_html + insta_modal_html
 
 
 def _render_identity_stats_html() -> str:
@@ -9217,6 +9490,61 @@ def create_app():
         _save_users(users)
         return _success(f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
             "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer.")
+
+    @app.route("/va/set_insta", methods=["POST"])
+    def va_set_insta():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.form.get("user_id") or "").strip()
+        handle = (request.form.get("handle") or "").strip()
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        try:
+            _set_va_insta(uid, handle)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True})
+
+    @app.route("/va/scrape_insta", methods=["POST"])
+    def va_scrape_insta():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.form.get("user_id") or "").strip()
+        handle = (request.form.get("handle") or "").strip().lstrip("@")
+        if not uid or not handle:
+            return jsonify({"ok": False, "error": "user_id et handle requis"}), 400
+        try:
+            from insta_scraper import scrape_profile
+            data = scrape_profile(handle, limit=3)
+            if not data or "error" in data:
+                err = data.get("error", "scrape échoué") if data else "scrape échoué"
+                return jsonify({"ok": False, "error": err})
+            # Extraire les champs utiles
+            followers = int(data.get("followers", 0) or 0)
+            posts_count = int(data.get("posts_count", 0) or data.get("posts", 0) or 0)
+            # Dernier post timestamp
+            last_post_at = ""
+            posts_list = data.get("posts") if isinstance(data.get("posts"), list) else []
+            if posts_list:
+                # Trouver le timestamp le plus récent
+                import datetime as _dt_sc
+                latest_ts = 0
+                for p in posts_list:
+                    ts = p.get("taken_at", 0) if isinstance(p, dict) else 0
+                    if ts and ts > latest_ts:
+                        latest_ts = int(ts)
+                if latest_ts:
+                    last_post_at = _dt_sc.datetime.fromtimestamp(latest_ts).isoformat()
+            _update_va_insta_stats(uid, handle, followers, posts_count, last_post_at)
+            return jsonify({"ok": True, "followers": followers, "posts": posts_count,
+                            "last_post_at": last_post_at})
+        except ImportError:
+            _set_va_insta(uid, handle)
+            return jsonify({"ok": False, "error": "insta_scraper indispo, handle sauvegardé seulement"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
     @app.route("/va/set_payment", methods=["POST"])
     def va_set_payment():
