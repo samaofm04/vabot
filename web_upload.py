@@ -3330,7 +3330,7 @@ body.light .mypuls-bar{background:#e5e7eb}
 
     # Table chatteurs (top 30) — avec % commission, à payer en USD, screenshot crypto
     chatters_rows = []
-    for c in chatters[:30]:
+    for i, c in enumerate(chatters[:30]):
         bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
         meta = mypuls.get_chatter_meta(c["name"])
@@ -3338,11 +3338,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         to_pay_eur = round(c["ca_total"] * commission / 100, 2)
         to_pay = round(to_pay_eur * eur_to_usd, 2)
         has_crypto = bool(meta["crypto_file"]) or bool(meta["crypto_address"])
+        has_screenshot = bool(meta.get("crypto_file"))
         crypto_type = meta.get("crypto_type") or ""
         crypto_network = meta.get("crypto_network") or ""
         crypto_address = meta.get("crypto_address") or ""
         addr_short = (crypto_address[:6] + "…" + crypto_address[-4:]) if len(crypto_address) > 14 else crypto_address
-        screenshot_icon = "🖼️" if meta.get("crypto_file") else ""
 
         # Couleur du badge selon la crypto
         type_color = {
@@ -3352,34 +3352,101 @@ body.light .mypuls-bar{background:#e5e7eb}
             "TRX": "#ef4444",
         }.get(crypto_type, "#888")
 
-        if has_crypto and crypto_type:
-            crypto_cell = (
-                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
-                f"style='background:transparent;border:1px solid #2a2a2a;border-radius:8px;padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:120px;text-align:left'>"
-                f"<div style='display:flex;align-items:center;gap:6px'>"
-                f"<span style='background:{type_color};color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em'>{crypto_type}</span>"
-                + (f"<span style='font-size:10px;color:#888'>{crypto_network.split('(')[0].strip()}</span>" if crypto_network else "")
-                + f"{screenshot_icon}"
+        name_url_safe = c["name"].replace(" ", "%20")
+
+        # Thumbnail screenshot (preview direct dans la cellule + hover = enlarge)
+        if has_screenshot:
+            thumb_html = (
+                f"<div class='mp-crypto-thumb' style='position:relative;display:inline-block'>"
+                f"<img src='/mypuls/chatter/crypto/{name_url_safe}' "
+                f"style='width:38px;height:38px;border-radius:6px;object-fit:cover;border:1px solid #2a2a2a;cursor:zoom-in;display:block' "
+                f"onclick=\"event.stopPropagation();mpEnlargeImg(this.src)\">"
                 f"</div>"
-                + (f"<div style='font-family:monospace;font-size:10px;color:#aaa'>{addr_short}</div>" if addr_short else "")
-                + "</button>"
-            )
-        elif has_crypto and meta.get("crypto_file"):
-            # Seulement screenshot, pas d'adresse texte
-            crypto_cell = (
-                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
-                f"style='background:transparent;border:1px solid #2a2a2a;border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#888'>"
-                f"🖼️ Screenshot</button>"
             )
         else:
-            crypto_cell = (
-                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
-                f"style='background:transparent;border:1px dashed #2a2a2a;color:#888;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px'>"
-                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><line x1='12' y1='5' x2='12' y2='19'/><line x1='5' y1='12' x2='19' y2='12'/></svg>"
-                f"Configurer</button>"
+            thumb_html = (
+                "<div style='width:38px;height:38px;border-radius:6px;border:1px dashed #2a2a2a;display:flex;align-items:center;justify-content:center;color:#444'>"
+                "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.5'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><polyline points='21 15 16 10 5 21'/></svg>"
+                "</div>"
             )
+
+        # Info crypto (badge type + reseau + adresse) ou bouton configurer
+        if crypto_type:
+            info_html = (
+                f"<div style='display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0;flex:1'>"
+                f"<div style='display:flex;align-items:center;gap:6px;flex-wrap:wrap'>"
+                f"<span style='background:{type_color};color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em'>{crypto_type}</span>"
+                + (f"<span style='font-size:10px;color:#888'>{crypto_network.split('(')[0].strip()}</span>" if crypto_network else "")
+                + "</div>"
+                + (f"<div style='font-family:monospace;font-size:10px;color:#aaa;overflow:hidden;text-overflow:ellipsis;max-width:120px;white-space:nowrap'>{addr_short}</div>" if addr_short else "")
+                + "</div>"
+            )
+        else:
+            info_html = (
+                "<div style='flex:1;font-size:11px;color:#666'>Pas configuré</div>"
+            )
+
+        # Tout dans un row cliquable qui toggle l'edit inline
+        crypto_cell = (
+            f"<div style='display:flex;align-items:center;gap:8px'>"
+            f"{thumb_html}"
+            f"{info_html}"
+            f"<button onclick=\"mpToggleEdit({_json_escape(c['name'])})\" "
+            f"style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer'>"
+            f"✏️</button>"
+            f"</div>"
+        )
+        # Construire le bloc edit inline (caché par défaut)
+        chatter_name_safe = c["name"].replace("'", "&#39;")
+        edit_inline = (
+            f"<tr id='mp-edit-row-{i}' class='mp-edit-row' data-chatter='{chatter_name_safe}' style='display:none'>"
+            f"<td colspan='9' style='background:#0f1116;border-top:0;padding:18px 20px'>"
+            f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:760px'>"
+            # Colonne gauche : type + reseau + adresse
+            f"<form method='POST' action='/mypuls/chatter/set_crypto' style='display:flex;flex-direction:column;gap:10px'>"
+            f"<input type='hidden' name='name' value='{name_esc}'>"
+            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Crypto</label>"
+            f"<select name='crypto_type' class='mp-edit-type' data-row='{i}' onchange='mpUpdateInlineNetworks({i})' style='margin-top:4px;width:100%'>"
+            f"<option value=''>—</option>"
+            + "".join(
+                f"<option value='{t}'{' selected' if crypto_type==t else ''}>{t}</option>"
+                for t in ["USDC", "ETH", "SOL", "TRX"]
+            )
+            + f"</select></div>"
+            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Réseau</label>"
+            f"<select name='crypto_network' class='mp-edit-network' data-row='{i}' data-saved=\"{crypto_network.replace(chr(34), '&quot;')}\" style='margin-top:4px;width:100%'>"
+            f"<option value=''>Choisis d'abord une crypto</option>"
+            f"</select></div>"
+            f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Adresse</label>"
+            f"<input type='text' name='crypto_address' value='{crypto_address.replace(chr(39), '&#39;')}' placeholder='0x… / T… / …' style='margin-top:4px;width:100%;font-family:monospace;font-size:12px'></div>"
+            f"<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:8px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-top:4px'>Enregistrer</button>"
+            f"</form>"
+            # Colonne droite : screenshot + actions
+            f"<div style='display:flex;flex-direction:column;gap:10px'>"
+            + (
+                f"<div style='position:relative'><img src='/mypuls/chatter/crypto/{name_url_safe}?t=now' style='width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000'></div>"
+                if has_screenshot else
+                "<div style='border:2px dashed #2a2a2a;border-radius:8px;padding:40px 20px;text-align:center;color:#666;font-size:12px'>Pas de screenshot</div>"
+            )
+            + f"<form method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='margin:0'>"
+            f"<input type='hidden' name='name' value='{name_esc}'>"
+            f"<label style='display:block;background:transparent;border:1px dashed #2a2a2a;color:#888;padding:8px;border-radius:6px;cursor:pointer;text-align:center;font-size:12px'>📷 "
+            + ("Changer le screenshot" if has_screenshot else "Upload un screenshot")
+            + f"<input type='file' name='file' accept='image/*' onchange='this.form.submit()' style='display:none'></label>"
+            f"</form>"
+            + (
+                f"<form method='POST' action='/mypuls/chatter/delete_crypto' style='margin:0' onsubmit='return confirm(\"Supprimer le screenshot ?\")'>"
+                f"<input type='hidden' name='name' value='{name_esc}'>"
+                f"<button type='submit' style='width:100%;background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px;border-radius:6px;font-size:11px;cursor:pointer'>🗑 Supprimer le screenshot</button>"
+                f"</form>"
+                if has_screenshot else ""
+            )
+            + "</div>"
+            f"</div></td></tr>"
+        )
+
         chatters_rows.append(
-            f"<tr>"
+            f"<tr data-chatter-row='{i}'>"
             f"<td><div style='font-weight:600'>{name_esc}</div>"
             f"<div class='mypuls-bar' style='width:140px'><div class='mypuls-bar-fill' style='width:{bar_pct:.1f}%'></div></div></td>"
             f"<td style='font-weight:700;color:#22c55e'>{c['ca_total']:.2f}€</td>"
@@ -3394,12 +3461,11 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<span style='color:#888;font-size:11px'>%</span>"
             f"</form>"
             f"</td>"
-            # À payer (en USD)
             f"<td style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
-            # Screenshot crypto
             f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
             f"</tr>"
+            + edit_inline
         )
     chatters_empty = "<tr><td colspan='9' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
     chatters_body = "".join(chatters_rows) or chatters_empty
@@ -3461,59 +3527,6 @@ body.light .mypuls-bar{background:#e5e7eb}
         "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer ($)</th><th>Crypto</th><th>Présence</th></tr></thead>"
         f"<tbody>{chatters_body}</tbody>"
         "</table>"
-        # ========== MODAL CRYPTO ==========
-        "<div id='mp-crypto-modal' style='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px'>"
-        "<div style='background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:18px'>"
-        "<h3 id='mp-crypto-modal-title' style='margin:0;font-size:17px;font-weight:700'>Crypto chatteur</h3>"
-        "<button onclick='mpCloseCryptoModal()' style='background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1;padding:0'>×</button>"
-        "</div>"
-        "<form method='POST' action='/mypuls/chatter/set_crypto' style='display:flex;flex-direction:column;gap:14px'>"
-        "<input type='hidden' name='name' id='mp-crypto-modal-name'>"
-        "<div>"
-        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Crypto</label>"
-        "<select name='crypto_type' id='mp-crypto-modal-type' onchange='mpUpdateNetworks()' required style='margin-top:6px'>"
-        "<option value=''>Choisir…</option>"
-        "<option value='USDC'>💵 USDC</option>"
-        "<option value='ETH'>Ξ ETH</option>"
-        "<option value='SOL'>◎ SOL</option>"
-        "<option value='TRX'>⏶ TRX</option>"
-        "</select>"
-        "</div>"
-        "<div>"
-        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Réseau</label>"
-        "<select name='crypto_network' id='mp-crypto-modal-network' required style='margin-top:6px'>"
-        "<option value=''>Choisis d'abord une crypto</option>"
-        "</select>"
-        "</div>"
-        "<div>"
-        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Adresse wallet</label>"
-        "<input type='text' name='crypto_address' id='mp-crypto-modal-address' placeholder='0x… / T… / …' maxlength='150' style='margin-top:6px;font-family:monospace;font-size:13px'>"
-        "</div>"
-        "<button type='submit' style='width:100%;background:#3b82f6;color:#fff;border:0;padding:11px;border-radius:8px;font-weight:600;cursor:pointer'>Enregistrer adresse</button>"
-        "</form>"
-        # Section screenshot (formulaire séparé pour multipart)
-        "<div style='margin-top:18px;padding-top:18px;border-top:1px solid #2a2a2a'>"
-        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Screenshot de l'adresse (optionnel)</label>"
-        "<div id='mp-crypto-modal-screenshot-preview' style='margin-top:8px;display:none'>"
-        "<img id='mp-crypto-modal-screenshot-img' src='' style='max-width:100%;max-height:200px;border-radius:8px;border:1px solid #2a2a2a;display:block;margin-bottom:8px'>"
-        "</div>"
-        "<div style='display:flex;gap:8px;margin-top:6px'>"
-        "<form method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='flex:1;margin:0'>"
-        "<input type='hidden' name='name' id='mp-crypto-modal-upload-name'>"
-        "<label style='display:block;background:transparent;border:1px dashed #2a2a2a;color:#888;padding:9px;border-radius:8px;cursor:pointer;text-align:center;font-size:12px'>"
-        "📷 Choisir une image"
-        "<input type='file' name='file' accept='image/*' onchange='this.form.submit()' style='display:none'>"
-        "</label>"
-        "</form>"
-        "<form method='POST' action='/mypuls/chatter/delete_crypto' id='mp-crypto-modal-delete-form' style='margin:0;display:none'>"
-        "<input type='hidden' name='name' id='mp-crypto-modal-delete-name'>"
-        "<button type='submit' style='background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:9px 14px;border-radius:8px;font-size:12px;cursor:pointer'>🗑️ Supprimer</button>"
-        "</form>"
-        "</div>"
-        "</div>"
-        "</div>"
-        "</div>"
         f"<script>window.__mpCryptoData = {crypto_data_json};</script>"
         f"<script>window.__mpNetworks = {networks_js};</script>"
         "</div>"
@@ -3567,55 +3580,61 @@ function mpTab(btn, name){
   document.getElementById('mp-tab-chatters').style.display = (name === 'chatters') ? 'block' : 'none';
   document.getElementById('mp-tab-tx').style.display = (name === 'tx') ? 'block' : 'none';
 }
-function mpUpdateNetworks(){
-  var type = document.getElementById('mp-crypto-modal-type').value;
-  var sel = document.getElementById('mp-crypto-modal-network');
-  sel.innerHTML = '';
-  if(!type){
-    sel.innerHTML = '<option value="">Choisis d\\'abord une crypto</option>';
+function mpUpdateInlineNetworks(rowIdx){
+  var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
+  var netSel = document.querySelector('.mp-edit-network[data-row="'+rowIdx+'"]');
+  if(!typeSel || !netSel) return;
+  var t = typeSel.value;
+  var nets = (window.__mpNetworks || {})[t] || [];
+  var savedNet = netSel.getAttribute('data-saved') || netSel.value || '';
+  netSel.innerHTML = '';
+  if(!t){
+    netSel.innerHTML = '<option value="">Choisis d\\'abord une crypto</option>';
     return;
   }
-  var nets = (window.__mpNetworks || {})[type] || [];
   nets.forEach(function(n){
     var opt = document.createElement('option');
     opt.value = n;
     opt.textContent = n;
-    sel.appendChild(opt);
+    if(n === savedNet) opt.selected = true;
+    netSel.appendChild(opt);
   });
-  // Restaurer la valeur si elle est dans la liste
-  var saved = window.__mpModalSavedNetwork || '';
-  if(saved && nets.indexOf(saved) !== -1) sel.value = saved;
 }
-function mpOpenCryptoModal(chatterName){
-  var data = (window.__mpCryptoData || {})[chatterName] || {type:'', network:'', address:'', has_screenshot:false};
-  document.getElementById('mp-crypto-modal-title').textContent = 'Crypto · ' + chatterName;
-  document.getElementById('mp-crypto-modal-name').value = chatterName;
-  document.getElementById('mp-crypto-modal-upload-name').value = chatterName;
-  document.getElementById('mp-crypto-modal-delete-name').value = chatterName;
-  document.getElementById('mp-crypto-modal-type').value = data.type || '';
-  window.__mpModalSavedNetwork = data.network || '';
-  mpUpdateNetworks();
-  document.getElementById('mp-crypto-modal-address').value = data.address || '';
-  // Preview screenshot si existe
-  var prev = document.getElementById('mp-crypto-modal-screenshot-preview');
-  var img = document.getElementById('mp-crypto-modal-screenshot-img');
-  var delForm = document.getElementById('mp-crypto-modal-delete-form');
-  if(data.has_screenshot){
-    img.src = '/mypuls/chatter/crypto/' + encodeURIComponent(chatterName) + '?t=' + Date.now();
-    prev.style.display = 'block';
-    delForm.style.display = 'inline-block';
-  } else {
-    prev.style.display = 'none';
-    delForm.style.display = 'none';
-  }
-  var modal = document.getElementById('mp-crypto-modal');
-  modal.style.display = 'flex';
-  // Fermer si on clique sur le fond
-  modal.onclick = function(e){ if(e.target === modal) mpCloseCryptoModal(); };
+function mpToggleEdit(chatterName){
+  // Cherche la row d'edit qui matche ce chatter
+  var rows = document.querySelectorAll('.mp-edit-row');
+  rows.forEach(function(r){
+    if(r.getAttribute('data-chatter') === chatterName){
+      r.style.display = (r.style.display === 'none' || !r.style.display) ? 'table-row' : 'none';
+      if(r.style.display === 'table-row'){
+        // Init networks pour cette row
+        var typeSel = r.querySelector('.mp-edit-type');
+        if(typeSel) mpUpdateInlineNetworks(typeSel.getAttribute('data-row'));
+      }
+    } else {
+      r.style.display = 'none';
+    }
+  });
 }
-function mpCloseCryptoModal(){
-  document.getElementById('mp-crypto-modal').style.display = 'none';
+function mpEnlargeImg(src){
+  // Overlay plein écran avec l'image agrandie
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px;cursor:zoom-out';
+  ov.innerHTML = '<img src="' + src + '" style="max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 0 60px rgba(0,0,0,.8)">';
+  ov.onclick = function(){ document.body.removeChild(ov); };
+  document.body.appendChild(ov);
 }
+// Init des dropdowns réseaux pour chaque row au load
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.mp-edit-network').forEach(function(sel){
+    var rowIdx = sel.getAttribute('data-row');
+    var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
+    if(!typeSel || !typeSel.value) return;
+    // Stocker la valeur sauvegardée pour la restaurer
+    sel.setAttribute('data-saved', (window.__mpCryptoData_byRow || {})[rowIdx] || '');
+    mpUpdateInlineNetworks(rowIdx);
+  });
+});
 </script>
 """
 
