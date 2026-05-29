@@ -2394,6 +2394,69 @@ def _identity_stats(identity: str) -> dict:
     }
 
 
+# ============ VA -> Paiement (crypto ou taptap) ============
+VA_PAYMENTS_FILE = DATA_DIR / "va_payments.json"
+
+# Réseaux crypto par type (réutilise la convention MyPuls)
+VA_CRYPTO_NETWORKS = {
+    "USDC": ["Ethereum", "Tron", "Solana", "BSC", "Polygon", "Arbitrum", "Optimism", "Base"],
+    "ETH": ["Ethereum", "Arbitrum", "Optimism", "Base", "BSC", "Polygon", "Solana"],
+    "SOL": ["Solana", "Ethereum", "BSC"],
+    "TRX": ["Tron"],
+}
+VA_CRYPTO_TYPES = list(VA_CRYPTO_NETWORKS.keys())
+
+# Opérateurs TapTap (mobile money)
+TAPTAP_NETWORKS = ["Orange Money", "MTN Mobile Money", "Moov Money",
+                   "Wave", "Free Money", "Airtel Money", "Autre"]
+
+
+def _load_va_payments() -> dict:
+    if not VA_PAYMENTS_FILE.exists():
+        return {}
+    try:
+        return json.loads(VA_PAYMENTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_va_payments(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    VA_PAYMENTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _get_va_payment(user_id) -> dict:
+    """Retourne {kind, crypto_type, crypto_network, crypto_address,
+    taptap_number, taptap_network} ou dict vide."""
+    return _load_va_payments().get(str(user_id), {})
+
+
+def _set_va_payment(user_id, payload: dict):
+    data = _load_va_payments()
+    key = str(user_id)
+    # Nettoyer : ne garder que les champs reconnus
+    clean = {}
+    kind = (payload.get("kind") or "").strip().lower()
+    if kind not in ("crypto", "taptap"):
+        # Vide = effacer
+        if key in data:
+            data.pop(key)
+            _save_va_payments(data)
+        return
+    clean["kind"] = kind
+    if kind == "crypto":
+        ct = (payload.get("crypto_type") or "").strip().upper()
+        if ct in VA_CRYPTO_TYPES:
+            clean["crypto_type"] = ct
+        clean["crypto_network"] = (payload.get("crypto_network") or "").strip()
+        clean["crypto_address"] = (payload.get("crypto_address") or "").strip()[:200]
+    else:  # taptap
+        clean["taptap_number"] = (payload.get("taptap_number") or "").strip()[:30]
+        clean["taptap_network"] = (payload.get("taptap_network") or "").strip()
+    data[key] = clean
+    _save_va_payments(data)
+
+
 # ============ VA -> GMS links mapping ============
 VA_LINKS_FILE = DATA_DIR / "va_links.json"
 
@@ -2782,6 +2845,10 @@ def _render_va_list_html_inner() -> str:
 .va-pink-badge svg{flex-shrink:0}
 .va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 body.light .va-status-dot-on-avatar,body.light .va-status-dot-off-avatar{border-color:#f9fafb}
+.va-pay-btn{background:transparent;border:1px solid currentColor;padding:6px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:110px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box;transition:all .15s}
+.va-pay-btn:hover{background:currentColor;color:#fff !important}
+.va-pay-btn:hover .va-pay-label{color:#fff}
+.va-pay-label{overflow:hidden;text-overflow:ellipsis;font-size:11px;flex:1;text-align:left}
 .va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
 .va-links-btn:hover{background:rgba(168,85,247,.2)}
 .va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;flex:1;display:inline-block;line-height:1;text-align:left}
@@ -3063,6 +3130,37 @@ body.light .va-id{color:#9ca3af}
             except Exception:
                 pass
 
+            # Bouton paiement (crypto ou taptap)
+            payment = _get_va_payment(uid)
+            if payment.get("kind") == "crypto":
+                ct = payment.get("crypto_type", "?")
+                net = payment.get("crypto_network", "")
+                pay_label = f"{ct}" + (f" · {net.split(' ')[0]}" if net else "")
+                pay_color = {"USDC": "#2775ca", "ETH": "#627eea",
+                             "SOL": "#9945ff", "TRX": "#ef4444"}.get(ct, "#3b82f6")
+                pay_icon = "💵" if ct == "USDC" else "₿"
+            elif payment.get("kind") == "taptap":
+                num = payment.get("taptap_number", "")
+                net = payment.get("taptap_network", "")
+                # afficher les 4 derniers chiffres
+                short_num = ("…" + num[-4:]) if len(num) > 4 else num
+                pay_label = f"{short_num}" if num else "TapTap"
+                pay_color = "#f59e0b"
+                pay_icon = "📱"
+            else:
+                pay_label = "Paiement"
+                pay_color = "#444"
+                pay_icon = "💳"
+
+            pay_btn = (
+                f"<button type='button' onclick=\"vaPayOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"class='va-pay-btn' style='border-color:{pay_color}40;color:{pay_color}' "
+                f"title='Configurer le paiement'>"
+                f"<span>{pay_icon}</span>"
+                f"<span class='va-pay-label'>{pay_label}</span>"
+                f"</button>"
+            )
+
             cards.append(
                 f"<div class='va-card'>"
                 f"{pp_html}"
@@ -3073,6 +3171,7 @@ body.light .va-id{color:#9ca3af}
                 f"{pink_badge}"
                 f"<div class='va-actions'>"
                 f"{links_btn_html}"
+                f"{pay_btn}"
                 f"{mini_clicks_html}"
                 f"{change_form}"
                 f"{reset_form}"
@@ -3096,6 +3195,176 @@ body.light .va-id{color:#9ca3af}
         f"💡 <b style='color:#3b82f6'>{len(users)}</b> VA{'s' if len(users) > 1 else ''} actif{'s' if len(users) > 1 else ''} réparti{'s' if len(users) > 1 else ''} sur <b style='color:#3b82f6'>{len(by_identity)}</b> identité{'s' if len(by_identity) > 1 else ''}"
         f"</div>"
     )
+
+    # ====== Modal Paiement (crypto ou taptap) ======
+    import json as _json_pay
+    all_va_payments = _load_va_payments()
+    pay_data_json = _json_pay.dumps(all_va_payments, ensure_ascii=False)
+    pay_networks_json = _json_pay.dumps(VA_CRYPTO_NETWORKS, ensure_ascii=False)
+    pay_taptap_json = _json_pay.dumps(TAPTAP_NETWORKS, ensure_ascii=False)
+
+    pay_modal_html = (
+        "<div id='va-pay-modal' onclick='vaPayClose(event)'>"
+        "<div class='vpm-box' onclick='event.stopPropagation()'>"
+        "<div class='vpm-head'>"
+        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><rect x='2' y='5' width='20' height='14' rx='2'/><line x1='2' y1='10' x2='22' y2='10'/></svg>"
+        "<div>Configurer le paiement</div>"
+        "<div id='vpm-subtitle'></div>"
+        "<button onclick='vaPayClose()' class='vpm-close'>×</button>"
+        "</div>"
+        # Toggle Crypto / TapTap
+        "<div class='vpm-toggle'>"
+        "<button class='vpm-kind-btn' data-kind='crypto' onclick='vaPaySetKind(\"crypto\")'>💵 Crypto</button>"
+        "<button class='vpm-kind-btn' data-kind='taptap' onclick='vaPaySetKind(\"taptap\")'>📱 TapTap</button>"
+        "</div>"
+        # Form Crypto (caché par défaut)
+        "<div id='vpm-form-crypto' class='vpm-form'>"
+        "<label>Type</label>"
+        "<select id='vpm-crypto-type' onchange='vaPayUpdateCryptoNetworks()'>"
+        "<option value=''>—</option>"
+        "<option value='USDC'>USDC</option>"
+        "<option value='ETH'>ETH</option>"
+        "<option value='SOL'>SOL</option>"
+        "<option value='TRX'>TRX</option>"
+        "</select>"
+        "<label>Blockchain</label>"
+        "<select id='vpm-crypto-network'><option value=''>Choisis d\\'abord le type</option></select>"
+        "<label>Adresse</label>"
+        "<input type='text' id='vpm-crypto-address' placeholder='0x… / T… / …' maxlength='200'>"
+        "</div>"
+        # Form TapTap (caché par défaut)
+        "<div id='vpm-form-taptap' class='vpm-form' style='display:none'>"
+        "<label>Numéro</label>"
+        "<input type='tel' id='vpm-taptap-number' placeholder='+225 07 12 34 56 78' maxlength='30'>"
+        "<label>Opérateur / Réseau</label>"
+        "<select id='vpm-taptap-network'><option value=''>—</option></select>"
+        "</div>"
+        "<div class='vpm-foot'>"
+        "<button onclick='vaPayClear()' class='vpm-clear'>Effacer</button>"
+        "<button onclick='vaPayClose()' class='vpm-cancel'>Annuler</button>"
+        "<button onclick='vaPaySave()' class='vpm-save'>Enregistrer</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        + f"<script>window.__vaPayData={pay_data_json};window.__vaPayCryptoNetworks={pay_networks_json};window.__vaPayTaptap={pay_taptap_json};</script>"
+    )
+
+    pay_css_js = """
+<style>
+#va-pay-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
+#va-pay-modal.show{display:flex}
+.vpm-box{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:480px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.vpm-head{padding:18px 22px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.vpm-head > div:first-of-type{flex:1}
+#vpm-subtitle{font-size:11px;color:#888;font-weight:400}
+.vpm-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
+.vpm-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 18px 6px}
+.vpm-kind-btn{background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:10px 14px;border-radius:9px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px;transition:all .15s}
+.vpm-kind-btn:hover{background:#222;color:#fff}
+.vpm-kind-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.vpm-form{padding:14px 18px;display:flex;flex-direction:column;gap:4px}
+.vpm-form label{font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:10px}
+.vpm-form input,.vpm-form select{background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;border-radius:8px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box;margin-top:4px}
+.vpm-form input:focus,.vpm-form select:focus{border-color:#3b82f6;outline:none}
+.vpm-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.vpm-clear{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
+.vpm-clear:hover{background:rgba(239,68,68,.1)}
+.vpm-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.vpm-save{background:#3b82f6;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.vpm-save:hover{background:#2563eb}
+body.light .vpm-box{background:#fff;border-color:#e5e7eb}
+body.light .vpm-head,body.light .vpm-foot{border-color:#e5e7eb}
+body.light .vpm-kind-btn{background:#f9fafb;border-color:#e5e7eb;color:#666}
+body.light .vpm-form input,body.light .vpm-form select{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .vpm-cancel{color:#666;border-color:#e5e7eb}
+</style>
+<script>
+var _vpmCurrentUid = null;
+var _vpmCurrentKind = '';
+function vaPayOpen(uid, username){
+  _vpmCurrentUid = uid;
+  document.getElementById('vpm-subtitle').textContent = '@' + username;
+  // Populate taptap networks
+  var tt = document.getElementById('vpm-taptap-network');
+  tt.innerHTML = '<option value="">—</option>';
+  (window.__vaPayTaptap || []).forEach(function(n){
+    var o = document.createElement('option'); o.value = n; o.textContent = n; tt.appendChild(o);
+  });
+  // Charger les données existantes
+  var data = (window.__vaPayData || {})[uid] || {};
+  var kind = data.kind || 'crypto';
+  vaPaySetKind(kind);
+  if(kind === 'crypto'){
+    document.getElementById('vpm-crypto-type').value = data.crypto_type || '';
+    vaPayUpdateCryptoNetworks();
+    document.getElementById('vpm-crypto-network').value = data.crypto_network || '';
+    document.getElementById('vpm-crypto-address').value = data.crypto_address || '';
+  } else {
+    document.getElementById('vpm-taptap-number').value = data.taptap_number || '';
+    document.getElementById('vpm-taptap-network').value = data.taptap_network || '';
+  }
+  document.getElementById('va-pay-modal').classList.add('show');
+}
+function vaPaySetKind(kind){
+  _vpmCurrentKind = kind;
+  document.querySelectorAll('.vpm-kind-btn').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-kind') === kind);
+  });
+  document.getElementById('vpm-form-crypto').style.display = (kind === 'crypto' ? '' : 'none');
+  document.getElementById('vpm-form-taptap').style.display = (kind === 'taptap' ? '' : 'none');
+}
+function vaPayUpdateCryptoNetworks(){
+  var t = document.getElementById('vpm-crypto-type').value;
+  var sel = document.getElementById('vpm-crypto-network');
+  sel.innerHTML = '';
+  if(!t){
+    sel.innerHTML = '<option value="">Choisis d\\'abord le type</option>'; return;
+  }
+  var nets = (window.__vaPayCryptoNetworks || {})[t] || [];
+  nets.forEach(function(n){
+    var o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+  });
+}
+function vaPayClose(e){
+  if(e && e.target && e.target.id !== 'va-pay-modal' && e.target !== this) return;
+  document.getElementById('va-pay-modal').classList.remove('show');
+}
+function vaPayClear(){
+  var form = new FormData();
+  form.append('user_id', _vpmCurrentUid);
+  form.append('kind', '');
+  fetch('/va/set_payment', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Paiement effacé', 'success');
+        setTimeout(function(){ window.location.reload(); }, 300);
+      }
+    });
+}
+function vaPaySave(){
+  var form = new FormData();
+  form.append('user_id', _vpmCurrentUid);
+  form.append('kind', _vpmCurrentKind);
+  if(_vpmCurrentKind === 'crypto'){
+    form.append('crypto_type', document.getElementById('vpm-crypto-type').value);
+    form.append('crypto_network', document.getElementById('vpm-crypto-network').value);
+    form.append('crypto_address', document.getElementById('vpm-crypto-address').value);
+  } else {
+    form.append('taptap_number', document.getElementById('vpm-taptap-number').value);
+    form.append('taptap_network', document.getElementById('vpm-taptap-network').value);
+  }
+  fetch('/va/set_payment', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Paiement enregistré', 'success');
+        setTimeout(function(){ window.location.reload(); }, 300);
+      }
+    });
+}
+</script>
+"""
 
     # ====== Modal d'attribution de liens GMS (récupération de la liste à l'ouverture) ======
     all_va_links = _load_va_links()
@@ -3256,7 +3525,7 @@ function vaLinksSave(){
 </script>
 """
 
-    return css + css_modal + "".join(sections) + footer + modal_html
+    return css + css_modal + pay_css_js + "".join(sections) + footer + modal_html + pay_modal_html
 
 
 def _render_identity_stats_html() -> str:
@@ -8948,6 +9217,27 @@ def create_app():
         _save_users(users)
         return _success(f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
             "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer.")
+
+    @app.route("/va/set_payment", methods=["POST"])
+    def va_set_payment():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.form.get("user_id") or "").strip()
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        try:
+            _set_va_payment(uid, {
+                "kind": request.form.get("kind", ""),
+                "crypto_type": request.form.get("crypto_type", ""),
+                "crypto_network": request.form.get("crypto_network", ""),
+                "crypto_address": request.form.get("crypto_address", ""),
+                "taptap_number": request.form.get("taptap_number", ""),
+                "taptap_network": request.form.get("taptap_network", ""),
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True})
 
     @app.route("/va/set_links", methods=["POST"])
     def va_set_links():
