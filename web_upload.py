@@ -2755,8 +2755,10 @@ def _render_va_list_html_inner() -> str:
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
-.va-info{min-width:0}
-.va-name{font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.va-info{min-width:0;overflow:hidden}
+.va-name{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap;overflow:hidden}
+.va-name > .va-username{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;max-width:260px}
+.va-name > .va-auto-pill,.va-name > .va-salon{flex-shrink:0}
 .va-id{font-family:monospace;font-size:11px;color:#666;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .va-salon{font-size:11px;color:#888;display:inline-flex;align-items:center;gap:4px;text-decoration:none;background:rgba(255,255,255,.04);padding:3px 8px;border-radius:6px}
 .va-salon:hover{background:rgba(59,130,246,.15);color:#3b82f6}
@@ -2884,9 +2886,10 @@ body.light .va-id{color:#9ca3af}
             )
 
             if username == str(uid):
-                name_display = f"<span style='color:#888'>—</span>"
+                name_display = f"<span class='va-username' style='color:#888'>—</span>"
             else:
-                name_display = f"<span>@{username}</span>"
+                # Tooltip = nom complet pour si le truncate cache une partie
+                name_display = f"<span class='va-username' title='@{username}'>@{username}</span>"
 
             auto_pill = (
                 "<span class='va-auto-pill va-auto-on'>"
