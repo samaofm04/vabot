@@ -2367,9 +2367,69 @@ def _identity_stats(identity: str) -> dict:
     }
 
 
+# ============ VA -> GMS links mapping ============
+VA_LINKS_FILE = DATA_DIR / "va_links.json"
+
+
+def _load_va_links() -> dict:
+    """Retourne {user_id_str: [link_id_1, link_id_2, ...]}."""
+    if not VA_LINKS_FILE.exists():
+        return {}
+    try:
+        return json.loads(VA_LINKS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_va_links(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    VA_LINKS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _get_links_for_va(user_id) -> list:
+    return _load_va_links().get(str(user_id), [])
+
+
+def _set_links_for_va(user_id, link_ids: list):
+    data = _load_va_links()
+    key = str(user_id)
+    if link_ids:
+        data[key] = link_ids
+    else:
+        data.pop(key, None)
+    _save_va_links(data)
+
+
 # Cache simple pour les données quotidiennes GMS (TTL 5 min, module-level)
 _VA_DAILY_CACHE: dict = {}
 _VA_DAILY_TTL = 300  # 5 minutes
+
+
+def _get_links_clicks_period(link_ids: list, days: int = 30) -> int:
+    """Total clicks GMS sur des liens spécifiques, sur N derniers jours. Cache 5 min."""
+    import time as _t
+    now = _t.time()
+    key = "|".join(sorted(link_ids))
+    cached = _VA_DAILY_CACHE.get(key)
+    if cached and (now - cached[0]) < _VA_DAILY_TTL:
+        return cached[1]
+    try:
+        import gms
+        import datetime as _dt3
+        if not gms.is_configured() or not link_ids:
+            _VA_DAILY_CACHE[key] = (now, 0)
+            return 0
+        today = _dt3.date.today()
+        start = (today - _dt3.timedelta(days=days - 1)).isoformat()
+        end = today.isoformat()
+        res = gms.get_analytics_overview(start, end, link_ids)
+        clicks = 0
+        if res.get("ok"):
+            clicks = int((res.get("data") or {}).get("total_clicks", 0))
+        _VA_DAILY_CACHE[key] = (now, clicks)
+        return clicks
+    except Exception:
+        return 0
 
 
 def _get_model_clicks_period(model_name: str, days: int = 7) -> int:
@@ -2626,7 +2686,9 @@ def _render_va_list_html_inner() -> str:
 .va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
 .va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
 .va-list{display:flex;flex-direction:column;gap:8px}
-.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px}
+.va-links-btn:hover{background:rgba(168,85,247,.2)}
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
@@ -2740,18 +2802,35 @@ body.light .va-id{color:#9ca3af}
                 f"</form>"
             )
 
-            # Mini stat clicks 30j (modèle = identité avec 1ère lettre capitalisée)
+            # Bouton "Liens" pour attribuer des liens GMS à ce VA
+            assigned_links = _get_links_for_va(uid)
+            links_btn_html = (
+                f"<button type='button' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"class='va-links-btn' title='Liens GMS assignés ({len(assigned_links)})'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
+                f"<span>{len(assigned_links)}</span>"
+                f"</button>"
+            )
+
+            # Mini stat clicks 30j (priorité : liens assignés, sinon modèle)
             mini_clicks_html = ""
             try:
-                model_name = (identity or "").strip().capitalize()
-                clicks_30d = _get_model_clicks_period(model_name, days=30)
+                if assigned_links:
+                    clicks_30d = _get_links_clicks_period(assigned_links, days=30)
+                    label = "30 jours"
+                    title = f"Clicks des {len(assigned_links)} lien(s) assigné(s) sur 30 jours"
+                else:
+                    model_name = (identity or "").strip().capitalize()
+                    clicks_30d = _get_model_clicks_period(model_name, days=30)
+                    label = "30 jours · modèle"
+                    title = f"Clicks GMS de {model_name} sur 30 jours (aucun lien attribué à ce VA)"
                 if clicks_30d > 0:
                     mini_clicks_html = (
-                        f"<div class='va-mini-stat' title='Clicks GMS de {model_name} sur 30 jours'>"
+                        f"<div class='va-mini-stat' title='{title}'>"
                         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#3b82f6' stroke-width='2.5' style='flex-shrink:0'><polyline points='23 6 13.5 15.5 8.5 10.5 1 18'/><polyline points='17 6 23 6 23 12'/></svg>"
                         f"<div>"
                         f"<div class='va-mini-num'>{clicks_30d:,}</div>"
-                        f"<div class='va-mini-label'>30 jours</div>"
+                        f"<div class='va-mini-label'>{label}</div>"
                         f"</div>"
                         f"</div>"
                     )
@@ -2766,6 +2845,7 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
                 f"{change_form}"
+                f"{links_btn_html}"
                 f"{reset_form}"
                 f"{mini_clicks_html}"
                 f"</div>"
@@ -2788,7 +2868,166 @@ body.light .va-id{color:#9ca3af}
         f"</div>"
     )
 
-    return css + "".join(sections) + footer
+    # ====== Modal d'attribution de liens GMS (récupération de la liste à l'ouverture) ======
+    all_va_links = _load_va_links()
+    import json as _json_va
+    va_links_json = _json_va.dumps(all_va_links, ensure_ascii=False)
+
+    # Récupérer la liste de tous les liens GMS (par modèle)
+    grouped_for_modal = {}
+    try:
+        import gms
+        if gms.is_configured():
+            grouped_for_modal = gms.get_links_grouped_by_model() or {}
+    except Exception:
+        pass
+
+    # Construire un dict {link_id: {shortcode, display_name, model, url}}
+    all_links_info = []
+    try:
+        import gms
+        if gms.is_configured():
+            res_all = gms.list_all_links()
+            if res_all.get("ok"):
+                for link in res_all["links"]:
+                    model = gms.categorize_link(link)
+                    all_links_info.append({
+                        "id": link.get("id"),
+                        "shortcode": link.get("shortcode", ""),
+                        "name": link.get("display_name") or "—",
+                        "model": model,
+                        "url": link.get("url") or "(landing)",
+                        "status": link.get("status", "active"),
+                    })
+            all_links_info.sort(key=lambda l: (l["model"], l["name"]))
+    except Exception:
+        pass
+
+    links_json = _json_va.dumps(all_links_info, ensure_ascii=False)
+
+    modal_html = (
+        "<div id='va-links-modal' onclick='vaLinksClose(event)'>"
+        "<div class='vlm-box' onclick='event.stopPropagation()'>"
+        "<div class='vlm-head'>"
+        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#a855f7' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
+        "<div>Attribuer des liens GMS</div>"
+        "<div id='vlm-subtitle'></div>"
+        "<button onclick='vaLinksClose()' class='vlm-close'>×</button>"
+        "</div>"
+        "<input type='text' id='vlm-search' placeholder='Rechercher un lien…' oninput='vaLinksFilter(this.value)'>"
+        "<div id='vlm-list'></div>"
+        "<div class='vlm-foot'>"
+        "<button onclick='vaLinksClose()' class='vlm-cancel'>Annuler</button>"
+        "<button onclick='vaLinksSave()' class='vlm-save'>Enregistrer</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};</script>"
+    )
+
+    css_modal = """
+<style>
+#va-links-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
+#va-links-modal.show{display:flex}
+.vlm-box{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:560px;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.vlm-head{padding:18px 22px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.vlm-head > div:first-of-type{flex:1}
+#vlm-subtitle{font-size:11px;color:#888;font-weight:400}
+.vlm-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
+.vlm-close:hover{color:#fff}
+#vlm-search{margin:14px 18px;padding:9px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;width:calc(100% - 36px)}
+#vlm-search:focus{border-color:#a855f7;outline:none}
+#vlm-list{flex:1;overflow-y:auto;padding:6px 14px 14px}
+.vlm-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent}
+.vlm-item:hover{background:rgba(255,255,255,.04)}
+.vlm-item.checked{background:rgba(168,85,247,.1);border-color:rgba(168,85,247,.3)}
+.vlm-cb{width:16px;height:16px;border-radius:4px;border:1.5px solid #444;background:transparent;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.vlm-item.checked .vlm-cb{background:#a855f7;border-color:#a855f7}
+.vlm-item.checked .vlm-cb svg{display:block}
+.vlm-cb svg{display:none;width:12px;height:12px}
+.vlm-info{flex:1;min-width:0}
+.vlm-name{font-weight:600;font-size:13px;letter-spacing:-.01em}
+.vlm-meta{font-size:11px;color:#888;font-family:monospace;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vlm-badge{background:rgba(168,85,247,.15);color:#a855f7;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px}
+.vlm-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
+.vlm-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
+.vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
+.vlm-save:hover{background:#9333ea}
+body.light .vlm-box{background:#fff;border-color:#e5e7eb}
+body.light .vlm-head,body.light .vlm-foot{border-color:#e5e7eb}
+body.light #vlm-search{background:#f9fafb;border-color:#e5e7eb;color:#111}
+body.light .vlm-item:hover{background:#f3f4f6}
+body.light .vlm-cancel{color:#666;border-color:#e5e7eb}
+</style>
+<script>
+var _vlmCurrentUid = null;
+function vaLinksOpen(uid, username){
+  _vlmCurrentUid = uid;
+  document.getElementById('vlm-subtitle').textContent = '@' + username;
+  document.getElementById('vlm-search').value = '';
+  var current = (window.__vaLinksData || {})[uid] || [];
+  // Construire la liste
+  var listEl = document.getElementById('vlm-list');
+  var html = '';
+  var groupedByModel = {};
+  (window.__gmsAllLinks || []).forEach(function(l){
+    (groupedByModel[l.model] = groupedByModel[l.model] || []).push(l);
+  });
+  Object.keys(groupedByModel).sort().forEach(function(model){
+    html += '<div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:14px 8px 6px">' + model + '</div>';
+    groupedByModel[model].forEach(function(l){
+      var checked = current.indexOf(l.id) !== -1;
+      html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this)">'
+        + '<div class="vlm-cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
+        + '<div class="vlm-info">'
+        + '<div class="vlm-name">' + l.name + '</div>'
+        + '<div class="vlm-meta">/' + l.shortcode + '</div>'
+        + '</div>'
+        + '</div>';
+    });
+  });
+  listEl.innerHTML = html || '<p style="color:#888;text-align:center;padding:30px">Aucun lien GMS disponible.</p>';
+  document.getElementById('va-links-modal').classList.add('show');
+}
+function vaLinksToggle(el){
+  el.classList.toggle('checked');
+}
+function vaLinksFilter(q){
+  q = (q||'').toLowerCase().trim();
+  document.querySelectorAll('.vlm-item').forEach(function(el){
+    var s = el.getAttribute('data-search') || '';
+    el.style.display = (!q || s.indexOf(q) !== -1) ? '' : 'none';
+  });
+}
+function vaLinksClose(e){
+  if(e && e.target && e.target.id !== 'va-links-modal' && e.target !== this) return;
+  document.getElementById('va-links-modal').classList.remove('show');
+}
+function vaLinksSave(){
+  var selected = [];
+  document.querySelectorAll('.vlm-item.checked').forEach(function(el){
+    var id = el.getAttribute('data-link-id');
+    if(id) selected.push(id);
+  });
+  var form = new FormData();
+  form.append('user_id', _vlmCurrentUid);
+  selected.forEach(function(id){ form.append('link_ids', id); });
+  fetch('/va/set_links', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Liens mis à jour', 'success');
+        // Reload pour rafraîchir le mini-stat
+        setTimeout(function(){ window.location.reload(); }, 300);
+      } else {
+        if(typeof showToast === 'function') showToast('Erreur : ' + (d.error || '?'), 'error');
+      }
+    });
+}
+</script>
+"""
+
+    return css + css_modal + "".join(sections) + footer + modal_html
 
 
 def _render_identity_stats_html() -> str:
@@ -8472,6 +8711,25 @@ def create_app():
         _save_users(users)
         return _success(f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
             "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer.")
+
+    @app.route("/va/set_links", methods=["POST"])
+    def va_set_links():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.form.get("user_id") or "").strip()
+        link_ids = request.form.getlist("link_ids")
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        # Validation basique des link_ids (commence par lnk_)
+        clean = [l for l in link_ids if isinstance(l, str) and l.startswith("lnk_")]
+        try:
+            _set_links_for_va(uid, clean)
+            # Invalider le cache pour ce VA
+            _VA_DAILY_CACHE.pop("|".join(sorted(clean)), None)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True, "count": len(clean)})
 
     @app.route("/va/change_identity", methods=["POST"])
     def va_change_identity():
