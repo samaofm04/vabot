@@ -962,7 +962,10 @@ function lbRender(){
   if(!it) return;
   var content = document.getElementById('lightbox-content');
   if(it.isVideo){
-    content.innerHTML = '<video controls autoplay preload="metadata" src="'+it.url+'"></video>';
+    // Vidéo : auto-play + controls custom-styled. Le video tag se redimensionne tout seul
+    // selon le ratio du média (9:16 vertical pour MYM, ou 16:9, etc.)
+    content.innerHTML = '<video controls autoplay playsinline preload="metadata" src="'+it.url+'" '
+      + 'style="max-width:100%;max-height:calc(100vh - 120px);height:auto;width:auto"></video>';
   } else {
     content.innerHTML = '<img src="'+it.url+'" alt="'+(it.name||'').replace(/"/g,'')+'">';
   }
@@ -2064,12 +2067,16 @@ body.light .action-icon{color:#666}
 .lb-next{right:18px}
 .lb-nav:hover{background:rgba(255,255,255,.15);transform:translateY(-50%) scale(1.08)}
 .lb-nav:disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
-.lb-stage{display:flex;align-items:center;gap:16px;max-width:calc(100vw - 220px);width:100%}
+.lb-stage{display:flex;align-items:center;justify-content:center;gap:18px;max-width:calc(100vw - 220px);width:100%;height:100%}
 .lb-stage.with-panel .lb-content-wrap{max-width:calc(100% - 380px)}
-.lb-content-wrap{display:flex;align-items:center;justify-content:center;flex:1;max-height:calc(100vh - 120px);height:100%;transition:max-width .25s}
-#lightbox-content{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
-#lightbox-content img,#lightbox-content video{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;display:block;border-radius:10px;background:#000;box-shadow:0 24px 60px rgba(0,0,0,.6)}
-#lightbox-content video{outline:none;width:auto;min-width:480px}
+.lb-content-wrap{display:flex;align-items:center;justify-content:center;flex:1;max-height:calc(100vh - 120px);height:100%;transition:max-width .25s;min-width:0}
+#lightbox-content{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+#lightbox-content img{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;display:block;border-radius:12px;background:#000;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+/* Lecteur vidéo plus élégant : ratio 9:16 (vertical) par défaut, controls plus solides */
+#lightbox-content video{outline:none;display:block;background:#000;border-radius:14px;
+  box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
+  max-width:100%;max-height:calc(100vh - 120px);width:auto;height:auto}
+#lightbox-content video::-webkit-media-controls-panel{background:linear-gradient(to top,rgba(0,0,0,.85),transparent);border-radius:0 0 14px 14px}
 /* Bouton edit crayon dans header */
 .lb-edit-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
 .lb-edit-btn:hover,.lb-edit-btn.active{background:#3b82f6;transform:scale(1.08)}
@@ -2484,15 +2491,15 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             "</div>"
         )
 
-    # Badge date en haut à GAUCHE — plus solide pour rester lisible en light mode
+    # Badge date en haut à GAUCHE — fond blanc frosted, texte foncé (lisible partout)
     date_badge = ""
     if date_short:
         date_badge = (
             f"<div class='card-date-badge' style='position:absolute;top:8px;left:8px;"
-            f"background:rgba(0,0,0,.85);color:#fff;font-size:11px;font-weight:600;"
-            f"padding:4px 10px;border-radius:6px;backdrop-filter:blur(6px);"
+            f"background:rgba(255,255,255,.92);color:#1a1a1a;font-size:11px;font-weight:700;"
+            f"padding:4px 10px;border-radius:6px;backdrop-filter:blur(8px);"
             f"letter-spacing:.01em;pointer-events:none;z-index:4;"
-            f"box-shadow:0 2px 6px rgba(0,0,0,.3)'>{date_short}</div>"
+            f"box-shadow:0 2px 8px rgba(0,0,0,.2),0 0 0 1px rgba(255,255,255,.4) inset'>{date_short}</div>"
         )
 
     is_video_js = "true" if is_video else "false"
