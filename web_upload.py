@@ -3684,16 +3684,75 @@ def _save_role_users(users: list):
     f.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _load_role_definitions() -> dict:
+    """Charge les définitions des rôles personnalisés (nom, description, permissions)."""
+    f = DATA_DIR / "role_definitions.json"
+    if not f.exists():
+        return {}
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_role_definitions(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "role_definitions.json").write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+# Structure des menus avec permissions disponibles
+ROLE_MENU_STRUCTURE = [
+    {"section": "Contenu", "items": [
+        {"key": "upload", "name": "Upload (Reel/Post/Story/StoryCTA/PP)", "perms": ["view", "create"]},
+        {"key": "cloud", "name": "Cloud (vue & gestion stockage)", "perms": ["view", "delete"]},
+    ]},
+    {"section": "Management", "items": [
+        {"key": "vas_list", "name": "Liste VAs", "perms": ["view", "edit"]},
+        {"key": "vas_stats", "name": "Stats par identité", "perms": ["view"]},
+    ]},
+    {"section": "Outils", "items": [
+        {"key": "trends_ig", "name": "Trends Instagram", "perms": ["view", "scrape"]},
+        {"key": "trends_tt", "name": "Trends TikTok", "perms": ["view"]},
+        {"key": "business_sfs", "name": "Business — SFS Planning", "perms": ["view", "create", "edit"]},
+        {"key": "business_revenus", "name": "Business — Revenus", "perms": ["view", "create", "edit"]},
+        {"key": "business_depenses", "name": "Business — Dépenses", "perms": ["view", "create"]},
+        {"key": "business_paievas", "name": "Business — Paie VAs", "perms": ["view", "create"]},
+        {"key": "business_bilan", "name": "Business — Bilan", "perms": ["view"]},
+    ]},
+    {"section": "Settings", "items": [
+        {"key": "settings_account", "name": "Mon compte", "perms": ["view", "edit"]},
+        {"key": "settings_security", "name": "Sécurité (sessions)", "perms": ["view", "revoke"]},
+        {"key": "settings_roles", "name": "Rôles & permissions", "perms": ["view", "edit"]},
+    ]},
+]
+
+
 def _render_role_settings_html() -> str:
     """Tableau des rôles et permissions + utilisateurs."""
     users = _load_role_users()
-    roles_info = [
-        ("Owner", "Toutes permissions", "Toi (compte principal)", "#3b82f6"),
-        ("Admin", "Accès complet (toutes pages, gestion VAs)", "—", "#3b82f6"),
-        ("Creator", "Upload + Cloud + visualisation revenus de son identité", "—", "#10b981"),
-        ("Chatter", "Voir revenus + SFS + planning, pas d'upload", "—", "#fbbf24"),
-        ("VA", "Lecture seule + accès à son propre contenu", "—", "#a855f7"),
+    role_defs = _load_role_definitions()
+    # Rôles par défaut
+    default_roles = [
+        ("owner", "Owner", "Toutes permissions", "#3b82f6"),
+        ("admin", "Admin", "Accès complet (toutes pages, gestion VAs)", "#3b82f6"),
+        ("creator", "Creator", "Upload + Cloud + visualisation revenus de son identité", "#10b981"),
+        ("chatter", "Chatter", "Voir revenus + SFS + planning, pas d'upload", "#fbbf24"),
+        ("va", "VA", "Lecture seule + accès à son propre contenu", "#a855f7"),
     ]
+    # Construire la liste finale en mergeant avec les overrides custom
+    roles_info = []
+    for key, name, desc, color in default_roles:
+        custom = role_defs.get(key, {})
+        roles_info.append({
+            "key": key,
+            "name": custom.get("name", name),
+            "desc": custom.get("description", desc),
+            "color": color,
+            "enabled": custom.get("enabled", True),
+        })
+
     users_by_role = {}
     for u in users:
         r = u.get("role", "?")
@@ -3706,28 +3765,161 @@ def _render_role_settings_html() -> str:
         "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Description</th>"
         "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Utilisateurs</th>"
         "<th style='padding:10px 8px;text-align:center;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Statut</th>"
+        "<th style='padding:10px 8px;text-align:right;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Actions</th>"
         "</tr>"
     )
-    for role_name, desc, default_user, color in roles_info:
-        members_list = users_by_role.get(role_name.lower(), [])
-        if role_name == "Owner" and not members_list:
-            members_list = [default_user]
-        if members_list:
-            members_str = ", ".join(members_list)
-        else:
-            members_str = "<span style='color:#666'>—</span>"
+    for r in roles_info:
+        key = r["key"]
+        members_list = users_by_role.get(key, [])
+        if key == "owner" and not members_list:
+            members_list = ["Toi"]
+        members_str = ", ".join(members_list) if members_list else "<span style='color:#666'>—</span>"
+        toggle_color = "#3b82f6" if r["enabled"] else "#444"
+        toggle_pos = "right:2px" if r["enabled"] else "left:2px"
+        # Échapper les guillemets pour les onclick JS
+        r_name_safe = r["name"].replace('"', '\\"')
+        r_desc_safe = r["desc"].replace('"', '\\"')
+        r_color = r["color"]
         rows.append(
             f"<tr style='border-bottom:1px solid #2a2a2a'>"
-            f"<td style='padding:12px 8px'><b style='color:{color}'>{role_name}</b></td>"
-            f"<td style='padding:12px 8px;font-size:13px;color:#aaa'>{desc}</td>"
+            f"<td style='padding:12px 8px'><b style='color:{r_color}'>{r['name']}</b></td>"
+            f"<td style='padding:12px 8px;font-size:13px;color:#aaa'>{r['desc']}</td>"
             f"<td style='padding:12px 8px;font-size:13px'>{members_str}</td>"
             f"<td style='padding:12px 8px;text-align:center'>"
-            f"<div style='display:inline-block;width:36px;height:20px;background:#3b82f6;border-radius:10px;position:relative'>"
-            f"<div style='position:absolute;right:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div>"
-            f"</div>"
+            f"<div style='display:inline-block;width:36px;height:20px;background:{toggle_color};border-radius:10px;position:relative'>"
+            f"<div style='position:absolute;{toggle_pos};top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div>"
+            f"</div></td>"
+            f"<td style='padding:12px 8px;text-align:right;white-space:nowrap'>"
+            f"<button onclick='openEditRole(\"{key}\",\"{r_name_safe}\",\"{r_desc_safe}\")' "
+            f"style='padding:6px 12px;background:#2a2a2a;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px'>✏️ Edit</button>"
+            f"<button onclick='openPermissions(\"{key}\",\"{r_name_safe}\")' "
+            f"style='padding:6px 12px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>🔒 Permissions</button>"
             f"</td></tr>"
         )
     rows.append("</table>")
+
+    # Modal Edit role
+    rows.append("""
+<div id='edit-role-overlay' class='confirm-overlay' onclick='closeEditRole()'>
+  <div class='confirm-box' style='max-width:480px' onclick='event.stopPropagation()'>
+    <h3 style='margin-top:0'>Edit role</h3>
+    <form method='POST' action='/settings/role/edit_def'>
+      <input type='hidden' name='role_key' id='edit-role-key'>
+      <label>Nom du rôle</label>
+      <input type='text' name='name' id='edit-role-name' maxlength='50' required>
+      <div style='font-size:11px;color:#666;text-align:right;margin-top:-8px'><span id='edit-role-name-count'>0</span> / 50</div>
+      <label style='margin-top:12px'>Description</label>
+      <textarea name='description' id='edit-role-desc' maxlength='300' rows='3' required></textarea>
+      <div style='font-size:11px;color:#666;text-align:right;margin-top:-8px'><span id='edit-role-desc-count'>0</span> / 300</div>
+      <div style='display:flex;gap:8px;justify-content:flex-end;margin-top:14px'>
+        <button type='button' onclick='closeEditRole()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Cancel</button>
+        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id='perm-overlay' class='confirm-overlay' onclick='closePermissions()'>
+  <div class='confirm-box' style='max-width:900px;width:95%;max-height:85vh;overflow-y:auto' onclick='event.stopPropagation()'>
+    <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;position:sticky;top:0;background:#1a1a1a;padding-bottom:10px'>
+      <h3 style='margin:0' id='perm-title'>‹ Set permissions for [role]</h3>
+      <button onclick='savePermissions()' style='padding:8px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:700;cursor:pointer;margin:0'>Save</button>
+    </div>
+    <div id='perm-content'></div>
+  </div>
+</div>
+
+<script>
+window.__roleMenuStructure = """ + json.dumps(ROLE_MENU_STRUCTURE, ensure_ascii=False) + """;
+window.__currentEditRoleKey = null;
+function openEditRole(key, name, desc){
+  document.getElementById('edit-role-key').value = key;
+  document.getElementById('edit-role-name').value = name;
+  document.getElementById('edit-role-desc').value = desc;
+  document.getElementById('edit-role-name-count').textContent = name.length;
+  document.getElementById('edit-role-desc-count').textContent = desc.length;
+  document.getElementById('edit-role-overlay').classList.add('show');
+}
+function closeEditRole(){
+  document.getElementById('edit-role-overlay').classList.remove('show');
+}
+document.addEventListener('input', function(e){
+  if(e.target.id === 'edit-role-name') document.getElementById('edit-role-name-count').textContent = e.target.value.length;
+  if(e.target.id === 'edit-role-desc') document.getElementById('edit-role-desc-count').textContent = e.target.value.length;
+});
+function openPermissions(key, name){
+  window.__currentEditRoleKey = key;
+  document.getElementById('perm-title').innerHTML = '‹ Set permissions for <b>' + name + '</b>';
+  // Charger les permissions existantes via fetch
+  fetch('/settings/role/permissions?key=' + encodeURIComponent(key))
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var perms = data.permissions || {};
+      var content = document.getElementById('perm-content');
+      var html = '';
+      window.__roleMenuStructure.forEach(function(section){
+        html += '<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700">' + section.section + '</h4>';
+        html += '<table style="width:100%;border-collapse:collapse;background:#0f0f0f;border-radius:8px;overflow:hidden;margin-bottom:14px">';
+        html += '<tr style="background:#1a1a1a"><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Menus</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Permissions</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Data scope</th></tr>';
+        section.items.forEach(function(item){
+          var menuPerms = perms[item.key] || {};
+          var enabled = menuPerms.enabled !== false;
+          var scope = menuPerms.scope || 'self';
+          html += '<tr style="border-top:1px solid #1a1a1a">';
+          html += '<td style="padding:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="enabled" ' + (enabled ? 'checked' : '') + ' style="accent-color:#3b82f6;width:18px;height:18px"> ' + item.name + '</label></td>';
+          // Function perms
+          var fnHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
+          (item.perms || []).forEach(function(p){
+            var checked = (menuPerms.perms || []).indexOf(p) !== -1 || enabled;
+            fnHtml += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="perm" data-perm="' + p + '" ' + (checked ? 'checked' : '') + ' style="accent-color:#3b82f6"> ' + p + '</label>';
+          });
+          fnHtml += '</div>';
+          html += '<td style="padding:10px">' + fnHtml + '</td>';
+          // Data scope
+          var scopeHtml = '<div style="display:flex;gap:10px">'
+            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="all" ' + (scope === 'all' ? 'checked' : '') + '> All data</label>'
+            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="sub" ' + (scope === 'sub' ? 'checked' : '') + '> Self+subordinates</label>'
+            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="self" ' + (scope === 'self' ? 'checked' : '') + '> Self only</label>'
+            + '</div>';
+          html += '<td style="padding:10px">' + scopeHtml + '</td>';
+          html += '</tr>';
+        });
+        html += '</table>';
+      });
+      content.innerHTML = html;
+      document.getElementById('perm-overlay').classList.add('show');
+    });
+}
+function closePermissions(){
+  document.getElementById('perm-overlay').classList.remove('show');
+}
+function savePermissions(){
+  // Construire l'objet permissions à partir des checkboxes
+  var perms = {};
+  document.querySelectorAll('#perm-content [data-menu]').forEach(function(input){
+    var menu = input.dataset.menu;
+    var field = input.dataset.field;
+    if(!perms[menu]) perms[menu] = {enabled: true, perms: [], scope: 'self'};
+    if(field === 'enabled') perms[menu].enabled = input.checked;
+    else if(field === 'perm' && input.checked) perms[menu].perms.push(input.dataset.perm);
+    else if(field === 'scope' && input.checked) perms[menu].scope = input.value;
+  });
+  var form = new FormData();
+  form.append('role_key', window.__currentEditRoleKey);
+  form.append('permissions', JSON.stringify(perms));
+  fetch('/settings/role/permissions', {method: 'POST', body: form})
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data.success){
+        showToast('✅ Permissions sauvées', 'success');
+        closePermissions();
+      } else {
+        showToast('❌ ' + (data.error || 'Erreur'), 'error');
+      }
+    });
+}
+</script>
+""")
     # Tableau des utilisateurs ajoutés (avec suppression)
     if users:
         rows.append("<h4 style='margin:20px 0 10px'>Utilisateurs ajoutés</h4>")
@@ -4542,6 +4734,50 @@ def create_app():
         users = [u for u in users if u.get("username") != username]
         _save_role_users(users)
         return _success(f"✅ {username} supprimé")
+
+    @app.route("/settings/role/edit_def", methods=["POST"])
+    def settings_role_edit_def():
+        if not is_auth():
+            return redirect("/")
+        key = (request.form.get("role_key") or "").strip()
+        name = (request.form.get("name") or "").strip()[:50]
+        desc = (request.form.get("description") or "").strip()[:300]
+        if not key or not name:
+            return _error("❌ Champs requis manquants")
+        defs = _load_role_definitions()
+        if key not in defs:
+            defs[key] = {}
+        defs[key]["name"] = name
+        defs[key]["description"] = desc
+        _save_role_definitions(defs)
+        return _success(f"✅ Rôle <b>{name}</b> mis à jour")
+
+    @app.route("/settings/role/permissions", methods=["GET", "POST"])
+    def settings_role_permissions():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"error": "auth required"}), 401
+        from flask import jsonify
+        if request.method == "GET":
+            key = (request.args.get("key") or "").strip()
+            if not key:
+                return jsonify({"error": "key required"}), 400
+            defs = _load_role_definitions()
+            perms = defs.get(key, {}).get("permissions", {})
+            return jsonify({"key": key, "permissions": perms})
+        # POST
+        key = (request.form.get("role_key") or "").strip()
+        perms_json = request.form.get("permissions") or "{}"
+        try:
+            perms = json.loads(perms_json)
+        except Exception:
+            return jsonify({"error": "invalid permissions JSON"}), 400
+        defs = _load_role_definitions()
+        if key not in defs:
+            defs[key] = {}
+        defs[key]["permissions"] = perms
+        _save_role_definitions(defs)
+        return jsonify({"success": True})
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
     def settings_insta_rapidapi():
