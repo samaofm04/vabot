@@ -2507,7 +2507,7 @@ def _get_model_clicks_period(model_name: str, days: int = 7) -> dict:
 
 
 def _render_gms_clicks_widget() -> str:
-    """Widget clicks GMS par modèle, période bi-mensuelle (1-15 et 16-fin)."""
+    """Widget clicks GMS par modèle — style Infloww : cartes compactes par identité."""
     try:
         import gms
         if not gms.is_configured():
@@ -2520,7 +2520,7 @@ def _render_gms_clicks_widget() -> str:
 
     today = _dt.date.today()
 
-    # Période : "current_h1" (1-15), "current_h2" (16-end), "prev_h1", "prev_h2"
+    # Période : current_h1 (1-15) ou current_h2 (16-end), avec switches prev_*
     period = "current_h2" if today.day > 15 else "current_h1"
     try:
         period = _req.args.get("va_clicks_period", period) or period
@@ -2531,101 +2531,105 @@ def _render_gms_clicks_widget() -> str:
         first_of_month = today.replace(day=1)
         if p == "current_h1":
             s = first_of_month
-            e = first_of_month + _dt.timedelta(days=14)  # 15
-            label = f"1 → 15 {first_of_month.strftime('%B')}"
+            e = min(first_of_month + _dt.timedelta(days=14), today)
         elif p == "current_h2":
-            s = first_of_month + _dt.timedelta(days=15)  # 16
-            # Last day of month
+            s = first_of_month + _dt.timedelta(days=15)
             if first_of_month.month == 12:
-                next_month = first_of_month.replace(year=first_of_month.year + 1, month=1)
+                nm = first_of_month.replace(year=first_of_month.year + 1, month=1)
             else:
-                next_month = first_of_month.replace(month=first_of_month.month + 1)
-            e = next_month - _dt.timedelta(days=1)
-            label = f"16 → {e.day} {first_of_month.strftime('%B')}"
+                nm = first_of_month.replace(month=first_of_month.month + 1)
+            e = min(nm - _dt.timedelta(days=1), today)
         elif p == "prev_h2":
-            # 16-end of previous month
             if first_of_month.month == 1:
-                prev_first = first_of_month.replace(year=first_of_month.year - 1, month=12)
+                pf = first_of_month.replace(year=first_of_month.year - 1, month=12)
             else:
-                prev_first = first_of_month.replace(month=first_of_month.month - 1)
-            s = prev_first + _dt.timedelta(days=15)
+                pf = first_of_month.replace(month=first_of_month.month - 1)
+            s = pf + _dt.timedelta(days=15)
             e = first_of_month - _dt.timedelta(days=1)
-            label = f"16 → {e.day} {prev_first.strftime('%B')}"
-        else:  # prev_h1
+        else:
             if first_of_month.month == 1:
-                prev_first = first_of_month.replace(year=first_of_month.year - 1, month=12)
+                pf = first_of_month.replace(year=first_of_month.year - 1, month=12)
             else:
-                prev_first = first_of_month.replace(month=first_of_month.month - 1)
-            s = prev_first
-            e = prev_first + _dt.timedelta(days=14)
-            label = f"1 → 15 {prev_first.strftime('%B')}"
-        return s, e, label
+                pf = first_of_month.replace(month=first_of_month.month - 1)
+            s = pf
+            e = pf + _dt.timedelta(days=14)
+        return s, e
 
-    start_dt, end_dt, period_label = _range_for(period)
-    start_iso = start_dt.isoformat()
-    end_iso = end_dt.isoformat()
+    start_dt, end_dt = _range_for(period)
+    days_count = (end_dt - start_dt).days + 1
 
-    # Récupérer mapping modèle -> link_ids
-    try:
-        grouped = gms.get_links_grouped_by_model()
-    except Exception:
-        grouped = {}
+    # Limiter aux modèles principaux (qui correspondent aux identités du bot)
+    identities = _list_identities()
+    ident_to_model = {ident: ident.capitalize() for ident in identities}
+    sorted_models = [ident_to_model[i] for i in sorted(identities)]
 
-    # Modèles "officiels" prioritaires (matchent les identités)
-    PRIORITY = ["Amelia", "Lola", "Julia", "Sarah", "Emma"]
-    all_models = list(set(PRIORITY) | set(grouped.keys()))
-    sorted_models = [m for m in PRIORITY if m in grouped] + sorted(
-        [m for m in grouped.keys() if m not in PRIORITY]
-    )
-
-    # Fetch analytics par modèle (en parallèle conceptuel - on fait séquentiel ici, c'est OK avec le cache)
-    stats_by_model = {}
+    # Fetch + daily breakdown par modèle (réutilise notre infra)
+    cards_html = []
     total_clicks = 0
     total_visitors = 0
-    for model in sorted_models:
-        link_ids = grouped.get(model, [])
-        if not link_ids:
-            continue
+    for ident in sorted(identities):
+        model = ident_to_model[ident]
         try:
-            res = gms.get_analytics_overview(start_iso, end_iso, link_ids)
-            if res.get("ok"):
-                d = res.get("data", {}) or {}
-                clicks = int(d.get("total_clicks", 0))
-                visitors = int(d.get("unique_visitors", 0))
-                stats_by_model[model] = {"clicks": clicks, "visitors": visitors, "nb_links": len(link_ids)}
-                total_clicks += clicks
-                total_visitors += visitors
+            data = _get_model_clicks_period(model, days=days_count)
+            clicks = int(data.get("total", 0))
+            daily = data.get("daily", []) or [0] * days_count
         except Exception:
-            pass
+            clicks = 0
+            daily = [0] * days_count
+        total_clicks += clicks
 
-    # Trier par clicks décroissants
-    sorted_stats = sorted(stats_by_model.items(), key=lambda x: -x[1]["clicks"])
-    max_clicks = max((v["clicks"] for v in stats_by_model.values()), default=1) or 1
+        # Avatar identité
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy'>"
+            if avatar_url else
+            f"<div class='vac-card-avatar vac-card-avatar-fallback'>{ident[:1].upper()}</div>"
+        )
+
+        # Trend
+        if clicks > 0 and len(daily) >= 2:
+            trend_up = daily[-1] >= daily[-2]
+            trend_color = "#22c55e" if trend_up else "#ef4444"
+            trend_arrow = "↑" if trend_up else "↓"
+        else:
+            trend_color = "#6b7280"
+            trend_arrow = "—"
+
+        # Sparkline
+        spark_color = "#3b82f6" if clicks > 0 else "#6b7280"
+        spark = _sparkline_svg(daily, width=140, height=32, color=spark_color)
+
+        cards_html.append(
+            f"<div class='vac-card'>"
+            f"<div class='vac-card-head'>"
+            f"{avatar_html}"
+            f"<div class='vac-card-info'>"
+            f"<div class='vac-card-name'>@{ident}</div>"
+            f"<div class='vac-card-sub'>{len(gms.get_links_grouped_by_model().get(model, []))} lien{'s' if len(gms.get_links_grouped_by_model().get(model, [])) > 1 else ''}</div>"
+            f"</div>"
+            f"<div class='vac-card-trend' style='color:{trend_color}'>{trend_arrow}</div>"
+            f"</div>"
+            f"<div class='vac-card-value'>{clicks:,}</div>"
+            f"<div class='vac-card-label'>clicks</div>"
+            f"<div class='vac-card-spark'>{spark}</div>"
+            f"</div>"
+        )
+
+    if not cards_html:
+        return ""
 
     def _btn(p, txt):
         active = "vac-btn-active" if p == period else ""
         return f"<a href='?tab=valist&va_clicks_period={p}' class='vac-btn {active}'>{txt}</a>"
 
-    # Cartes par modèle
-    cards_html = []
-    for model, st in sorted_stats:
-        bar_pct = (st["clicks"] / max_clicks * 100) if max_clicks else 0
-        cards_html.append(
-            f"<div class='vac-row'>"
-            f"<div class='vac-name'>{model}</div>"
-            f"<div class='vac-bar'><div class='vac-bar-fill' style='width:{bar_pct:.1f}%'></div></div>"
-            f"<div class='vac-clicks'>{st['clicks']}</div>"
-            f"<div class='vac-visitors'>{st['visitors']} 👀</div>"
-            f"</div>"
-        )
-
-    if not cards_html:
-        cards_html = ["<div style='padding:30px;text-align:center;color:#888'>Aucun click sur cette période.</div>"]
+    mois_fr = ["janv", "févr", "mars", "avr", "mai", "juin",
+               "juil", "août", "sept", "oct", "nov", "déc"]
+    period_label_short = f"{start_dt.day} → {end_dt.day} {mois_fr[start_dt.month - 1]}"
 
     css = """
 <style>
 .vac-widget{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
-.vac-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.vac-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap}
 .vac-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;letter-spacing:-.01em}
 .vac-title svg{color:#3b82f6}
 .vac-subtitle{font-size:11px;color:#888;font-weight:400;margin-left:6px}
@@ -2633,24 +2637,25 @@ def _render_gms_clicks_widget() -> str:
 .vac-btn{padding:6px 12px;background:transparent;border:1px solid #2a2a2a;color:#aaa;border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;transition:all .15s}
 .vac-btn:hover{background:rgba(255,255,255,.05);color:#fff}
 .vac-btn-active{background:#3b82f6 !important;border-color:#3b82f6 !important;color:#fff !important}
-.vac-stats{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
-.vac-stat{flex:1;min-width:130px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:12px 14px}
-.vac-stat .v{font-size:22px;font-weight:800;letter-spacing:-.02em;color:#3b82f6}
-.vac-stat .l{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-top:3px}
-.vac-list{display:flex;flex-direction:column;gap:6px}
-.vac-row{display:grid;grid-template-columns:140px 1fr 60px 80px;gap:14px;align-items:center;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;font-size:13px}
-.vac-name{font-weight:700;color:#fff;letter-spacing:-.01em}
-.vac-bar{position:relative;height:8px;background:#0f1116;border-radius:4px;overflow:hidden}
-.vac-bar-fill{position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:4px;transition:width .25s}
-.vac-clicks{font-weight:800;font-size:16px;color:#22c55e;text-align:right;letter-spacing:-.02em}
-.vac-visitors{font-size:11px;color:#888;text-align:right}
+/* Grid de cartes par modèle */
+.vac-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.vac-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px;transition:all .15s;position:relative;overflow:hidden}
+.vac-card:hover{border-color:rgba(59,130,246,.4);transform:translateY(-2px)}
+.vac-card-head{display:flex;align-items:center;gap:10px}
+.vac-card-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;flex-shrink:0}
+.vac-card-avatar-fallback{background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;border:0}
+.vac-card-info{flex:1;min-width:0}
+.vac-card-name{font-weight:700;font-size:13px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vac-card-sub{font-size:10px;color:#888;margin-top:2px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.vac-card-trend{font-size:16px;font-weight:800;line-height:1}
+.vac-card-value{font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1;margin-top:4px}
+.vac-card-label{font-size:11px;color:#888;font-weight:600;letter-spacing:.02em}
+.vac-card-spark{margin-top:auto;display:flex;align-items:center;justify-content:center;opacity:.9}
 body.light .vac-widget{background:#fff;border-color:#e5e7eb}
 body.light .vac-btn{color:#666;border-color:#e5e7eb}
 body.light .vac-btn:hover{background:#f3f4f6;color:#111}
-body.light .vac-row{background:#f9fafb;border-color:#e5e7eb}
-body.light .vac-name{color:#111}
-body.light .vac-bar{background:#e5e7eb}
-@media(max-width:700px){.vac-row{grid-template-columns:1fr;gap:6px;text-align:left}.vac-clicks,.vac-visitors{text-align:left}}
+body.light .vac-card{background:#f9fafb;border-color:#e5e7eb}
+body.light .vac-card-name{color:#111}
 </style>
 """
 
@@ -2660,7 +2665,7 @@ body.light .vac-bar{background:#e5e7eb}
         + "<div class='vac-head'>"
         + "<div class='vac-title'>"
         + "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>"
-        + f"Clicks GMS par modèle<span class='vac-subtitle'>{period_label} · {start_iso} → {end_iso}</span>"
+        + f"Performance des modèles<span class='vac-subtitle'>{period_label_short} · {total_clicks} clicks</span>"
         + "</div>"
         + "<div class='vac-period-row'>"
         + _btn("prev_h1", "M-1 · 1-15")
@@ -2669,13 +2674,7 @@ body.light .vac-bar{background:#e5e7eb}
         + _btn("current_h2", "Ce mois · 16-fin")
         + "</div>"
         + "</div>"
-        # Stats globales
-        + "<div class='vac-stats'>"
-        + f"<div class='vac-stat'><div class='v'>{total_clicks:,}</div><div class='l'>Total clicks</div></div>"
-        + f"<div class='vac-stat'><div class='v'>{total_visitors:,}</div><div class='l'>Visiteurs uniques</div></div>"
-        + f"<div class='vac-stat'><div class='v'>{len(stats_by_model)}</div><div class='l'>Modèles actifs</div></div>"
-        + "</div>"
-        + "<div class='vac-list'>"
+        + "<div class='vac-grid'>"
         + "".join(cards_html)
         + "</div>"
         + "</div>"
