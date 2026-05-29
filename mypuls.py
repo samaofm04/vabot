@@ -428,8 +428,8 @@ def get_chatter_meta(name: str) -> dict:
 # Mapping réseau (asset) -> liste de blockchains supportées
 CRYPTO_NETWORKS = {
     "USDC": ["Ethereum", "Tron", "Solana", "BSC", "Polygon", "Arbitrum", "Optimism", "Base"],
-    "ETH": ["Ethereum", "Arbitrum", "Optimism", "Base"],
-    "SOL": ["Solana"],
+    "ETH": ["Ethereum", "Arbitrum", "Optimism", "Base", "BSC", "Polygon", "Solana"],
+    "SOL": ["Solana", "Ethereum", "BSC"],
     "TRX": ["Tron"],
 }
 CRYPTO_TYPES = list(CRYPTO_NETWORKS.keys())

@@ -3371,15 +3371,29 @@ body.light .mypuls-bar{background:#e5e7eb}
                 "</div>"
             )
 
-        # Info crypto (badge type + reseau + adresse) ou bouton configurer
+        # Info crypto (badge type + reseau + adresse + copier) ou bouton configurer
         if crypto_type:
+            addr_full_safe = crypto_address.replace("'", "\\'").replace('"', '\\"')
+            copy_btn = (
+                f"<button type='button' onclick=\"mpCopyAddr('{addr_full_safe}', this);event.stopPropagation()\" "
+                f"title='Copier l\\'adresse complète' "
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;padding:2px 4px;font-size:10px;display:inline-flex;align-items:center;gap:3px'>"
+                f"<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' stroke-width='2'><rect x='9' y='9' width='13' height='13' rx='2'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/></svg>"
+                f"</button>"
+            ) if crypto_address else ""
             info_html = (
                 f"<div style='display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0;flex:1'>"
                 f"<div style='display:flex;align-items:center;gap:6px;flex-wrap:wrap'>"
                 f"<span style='background:{type_color};color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em'>{crypto_type}</span>"
                 + (f"<span style='font-size:10px;color:#888'>{crypto_network.split('(')[0].strip()}</span>" if crypto_network else "")
                 + "</div>"
-                + (f"<div style='font-family:monospace;font-size:10px;color:#aaa;overflow:hidden;text-overflow:ellipsis;max-width:120px;white-space:nowrap'>{addr_short}</div>" if addr_short else "")
+                + (
+                    f"<div style='display:flex;align-items:center;gap:2px;max-width:140px'>"
+                    f"<span style='font-family:monospace;font-size:10px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{addr_short}</span>"
+                    f"{copy_btn}"
+                    f"</div>"
+                    if addr_short else ""
+                )
                 + "</div>"
             )
         else:
@@ -3419,8 +3433,17 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<option value=''>Choisis d'abord un réseau</option>"
             f"</select></div>"
             f"<div><label style='font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Adresse</label>"
-            f"<input type='text' name='crypto_address' value='{crypto_address.replace(chr(39), '&#39;')}' placeholder='0x… / T… / …' style='margin-top:4px;width:100%;font-family:monospace;font-size:12px'></div>"
-            f"<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:8px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-top:4px'>Enregistrer</button>"
+            f"<div style='display:flex;gap:6px;margin-top:4px;align-items:stretch'>"
+            f"<input type='text' name='crypto_address' value='{crypto_address.replace(chr(39), '&#39;')}' placeholder='0x… / T… / …' style='flex:1;font-family:monospace;font-size:12px'>"
+            + (
+                f"<button type='button' onclick=\"mpCopyAddr('{crypto_address.replace(chr(39), chr(92)+chr(39))}', this)\" "
+                f"style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:0 10px;border-radius:6px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:4px' title='Copier'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='9' y='9' width='13' height='13' rx='2'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/></svg>"
+                f"</button>"
+                if crypto_address else ""
+            )
+            + "</div></div>"
+            f"<button type='submit' onclick='this.innerText=\"Sauvegarde…\";this.disabled=true;this.form.submit()' style='background:#3b82f6;color:#fff;border:0;padding:8px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-top:4px'>Enregistrer</button>"
             f"</form>"
             # Colonne droite : screenshot + actions
             f"<div style='display:flex;flex-direction:column;gap:10px'>"
@@ -3616,6 +3639,28 @@ function mpToggleEdit(chatterName){
       r.style.display = 'none';
     }
   });
+}
+function mpCopyAddr(addr, btn){
+  if(!navigator.clipboard){
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = addr;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta);
+  } else {
+    navigator.clipboard.writeText(addr);
+  }
+  // Feedback visuel
+  var orig = btn.innerHTML;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#22c55e" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+  btn.style.color = '#22c55e';
+  setTimeout(function(){
+    btn.innerHTML = orig;
+    btn.style.color = '';
+  }, 1200);
+  if(typeof showToast === 'function') showToast('Adresse copiée', 'success');
 }
 function mpEnlargeImg(src){
   // Overlay plein écran avec l'image agrandie
