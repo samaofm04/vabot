@@ -338,6 +338,43 @@ def invalidate_grouping_cache():
     _GROUPED_CACHE["data"] = None
 
 
+_TEMPLATES_FILE = DATA_DIR / "gms_templates.json"
+
+
+def load_templates() -> Dict[str, str]:
+    """Mapping {model_lowercase: link_id} - template link par modèle."""
+    if not _TEMPLATES_FILE.exists():
+        return {}
+    try:
+        return json.loads(_TEMPLATES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_templates(data: Dict[str, str]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _TEMPLATES_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def set_template_for_model(model: str, link_id: str):
+    tpls = load_templates()
+    key = (model or "").strip().lower()
+    if not key:
+        return
+    if link_id and link_id.startswith("lnk_"):
+        tpls[key] = link_id
+    else:
+        tpls.pop(key, None)
+    save_templates(tpls)
+
+
+def generate_random_prefix(length: int = 4) -> str:
+    """Génère N lettres minuscules aléatoires."""
+    import random
+    import string
+    return "".join(random.choices(string.ascii_lowercase, k=length))
+
+
 def duplicate_link(source_link_id: str, new_shortcode: str,
                     new_display_name: str = "", new_url: str = "") -> Dict[str, Any]:
     """Duplique un lien existant — copie TOUTE la config (boutons, pixels, design,

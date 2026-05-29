@@ -7377,6 +7377,78 @@ def _render_gms_html() -> str:
             "</div>"
         )
 
+        # Section : templates par modèle + boutons Génération rapide
+        templates = gms.load_templates()
+        identities = _list_identities()
+        # Réutiliser le même `source_options` plus bas via fonction helper
+        def _build_source_select(selected=""):
+            html = []
+            for model in sorted(links_by_model.keys()):
+                html.append(f"<optgroup label='{model}'>")
+                for l in sorted(links_by_model[model], key=lambda x: (x.get("display_name") or "").lower()):
+                    lid = l.get("id", "")
+                    sc = l.get("shortcode", "")
+                    nm = l.get("display_name") or "—"
+                    lbl = f"/{sc} — {nm}"[:80]
+                    sel = " selected" if lid == selected else ""
+                    html.append(f"<option value='{lid}'{sel}>{lbl}</option>")
+                html.append("</optgroup>")
+            return "".join(html) if html else "<option value=''>Aucun lien</option>"
+
+        from collections import defaultdict as _dd_t
+        links_by_model_t = _dd_t(list)
+        for l in res.get("links", []):
+            model = gms.categorize_link(l)
+            links_by_model_t[model].append(l)
+        links_by_model = links_by_model_t  # réutilisé plus bas pour duplicate_form
+
+        template_rows = []
+        for ident in sorted(identities):
+            cur_tpl = templates.get(ident.lower(), "")
+            tpl_select = _build_source_select(cur_tpl)
+            avatar = _identity_avatar_url(ident)
+            avatar_html = (
+                f"<img src='{avatar}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0'>"
+                if avatar else
+                f"<div style='width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0'>{ident[:1].upper()}</div>"
+            )
+            # Bouton Generate quick si template défini
+            if cur_tpl:
+                quick_btn = (
+                    f"<form method='POST' action='/gms/quick_generate' style='margin:0'>"
+                    f"<input type='hidden' name='identity' value='{ident}'>"
+                    f"<button type='submit' style='background:#22c55e;color:#000;border:0;padding:8px 14px;border-radius:7px;font-weight:700;cursor:pointer;font-size:12px;white-space:nowrap'>"
+                    f"🎲 Générer</button></form>"
+                )
+            else:
+                quick_btn = "<span style='color:#666;font-size:11px'>Définis un template d'abord</span>"
+
+            template_rows.append(
+                f"<div style='display:grid;grid-template-columns:30px 90px 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
+                f"{avatar_html}"
+                f"<div style='font-weight:700;font-size:13px'>@{ident}</div>"
+                f"<form method='POST' action='/gms/set_template' style='margin:0;display:flex;gap:6px;align-items:center'>"
+                f"<input type='hidden' name='identity' value='{ident}'>"
+                f"<select name='link_id' style='flex:1;font-size:12px;padding:6px 8px'>"
+                f"<option value=''>—</option>{tpl_select}</select>"
+                f"<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer'>Save</button>"
+                f"</form>"
+                f"<div>{quick_btn}</div>"
+                f"</div>"
+            )
+
+        templates_section = (
+            "<div class='box' style='margin-bottom:18px;border:2px solid #22c55e'>"
+            "<h3 style='margin:0 0 4px;font-size:15px;color:#22c55e'>🎲 Templates par modèle</h3>"
+            "<p style='color:#888;font-size:12px;margin:0 0 14px'>"
+            "Définis un lien template par modèle. Click sur <b>🎲 Générer</b> → crée auto un nouveau lien "
+            "avec préfixe aléatoire (ex: <code>jfsiamelia</code>) en clonant tout du template.</p>"
+            "<div style='display:flex;flex-direction:column;gap:6px'>"
+            + "".join(template_rows)
+            + "</div>"
+            "</div>"
+        )
+
         # Formulaire de duplication depuis un template
         # On groupe les liens dispos par modèle pour le select
         from collections import defaultdict as _dd
@@ -7421,7 +7493,8 @@ def _render_gms_html() -> str:
 
         total_count = len(res.get("links", []))
         links_section = (
-            create_form
+            templates_section
+            + create_form
             + duplicate_form
             + f"<h3 style='margin:24px 0 0;font-size:15px;display:flex;align-items:center;gap:10px'>Tes liens"
             + f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px'>{total_count}</span>"
@@ -9172,6 +9245,54 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ Connexion OK (user <code>{res.get('user_id', '?')[:18]}…</code>)")
         return _error(f"❌ Test échoué : {res.get('error', '?')}")
+
+    @app.route("/gms/set_template", methods=["POST"])
+    def gms_set_template():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        ident = (request.form.get("identity") or "").strip().lower()
+        link_id = (request.form.get("link_id") or "").strip()
+        if not ident:
+            return _error("❌ Identité manquante")
+        gms.set_template_for_model(ident, link_id)
+        if link_id:
+            return _success(f"✅ Template défini pour <code>@{ident}</code>")
+        return _success(f"✅ Template retiré pour <code>@{ident}</code>")
+
+    @app.route("/gms/quick_generate", methods=["POST"])
+    def gms_quick_generate():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        ident = (request.form.get("identity") or "").strip().lower()
+        if not ident:
+            return _error("❌ Identité manquante")
+        templates = gms.load_templates()
+        tpl_id = templates.get(ident)
+        if not tpl_id:
+            return _error(f"❌ Aucun template défini pour <code>@{ident}</code>. Configure-le d'abord ↑")
+
+        # Génère shortcode = <random 4 lettres> + identity
+        new_shortcode = gms.generate_random_prefix(4) + ident
+        # Display name lisible
+        new_name = f"@{ident} — {new_shortcode}"
+        # Pas de nouvelle URL : on garde celle du template
+        res = gms.duplicate_link(tpl_id, new_shortcode, new_name, new_url="")
+        if not res.get("ok"):
+            return _error(f"❌ {res.get('error', 'Génération échouée')}")
+        link = res.get("link") or {}
+        url_dest = link.get("url") or "(landing page)"
+        return _success(
+            f"✅ Nouveau lien généré : <code>/{new_shortcode}</code> "
+            f"(clone de <code>{tpl_id[:18]}…</code>) → {url_dest}"
+        )
 
     @app.route("/gms/duplicate", methods=["POST"])
     def gms_duplicate():
