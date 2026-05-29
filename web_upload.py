@@ -507,8 +507,30 @@ label{display:block;font-weight:600;margin-bottom:8px;margin-top:16px}
 label:first-child{margin-top:0}
 input,select,textarea{width:100%;padding:12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:15px;font-family:inherit}
 textarea{min-height:80px;resize:vertical}
-button[type=submit],.btn{padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer;font-weight:600;margin-top:16px}
-button[type=submit]:hover,.btn:hover{background:#2563eb}
+/* ============ Styled file inputs (no more ugly "Choose File") ============ */
+input[type="file"]{padding:0;background:transparent;border:0;color:#aaa;font-size:13px;cursor:pointer;line-height:1.4}
+input[type="file"]::file-selector-button,
+input[type="file"]::-webkit-file-upload-button{
+  background:linear-gradient(135deg,#3b82f6,#2563eb);
+  color:#fff;border:0;padding:11px 18px;border-radius:8px;font-size:13px;
+  font-weight:600;cursor:pointer;font-family:inherit;margin-right:14px;
+  transition:all .15s;letter-spacing:.01em;
+  box-shadow:0 1px 3px rgba(59,130,246,.25)
+}
+input[type="file"]::file-selector-button:hover,
+input[type="file"]::-webkit-file-upload-button:hover{
+  background:linear-gradient(135deg,#2563eb,#1d4ed8);
+  box-shadow:0 4px 12px rgba(59,130,246,.35);transform:translateY(-1px)
+}
+/* Light mode override */
+body.light input[type="file"]{color:#666}
+body.light input[type="file"]::file-selector-button,
+body.light input[type="file"]::-webkit-file-upload-button{
+  background:linear-gradient(135deg,#3b82f6,#2563eb)!important;color:#fff!important
+}
+button[type=submit],.btn{padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer;font-weight:600;margin-top:16px;transition:all .15s}
+button[type=submit]:hover,.btn:hover{background:#2563eb;box-shadow:0 4px 14px rgba(59,130,246,.3);transform:translateY(-1px)}
+button[type=submit]:active,.btn:active{transform:translateY(0)}
 .msg{padding:12px 16px;border-radius:6px;margin-bottom:16px;background:#1a3a1a;color:#9fe89f;border:1px solid #2a5a2a}
 .err{background:#3a1a1a;color:#f99;border-color:#5a2a2a}
 a{color:#7289da}
@@ -1175,7 +1197,7 @@ function showTab(group,name,title,subtitle){
 <textarea name="caption" placeholder="Pov : j'ai fait la maline..."></textarea>
 <label>Description (texte du post)</label>
 <textarea name="description" placeholder="Ouais bon on va espérer hein 💀"></textarea>
-<button type="submit">📤 Uploader le reel</button>
+<button type="submit">Uploader le reel</button>
 </form>
 </div>
 
@@ -1191,7 +1213,7 @@ function showTab(group,name,title,subtitle){
 <textarea name="caption"></textarea>
 <label>Description</label>
 <textarea name="description"></textarea>
-<button type="submit">📤 Uploader le post</button>
+<button type="submit">Uploader le post</button>
 </form>
 </div>
 
@@ -1207,7 +1229,7 @@ function showTab(group,name,title,subtitle){
 <textarea name="caption"></textarea>
 <label>Description</label>
 <textarea name="description"></textarea>
-<button type="submit">📤 Uploader la story</button>
+<button type="submit">Uploader la story</button>
 </form>
 </div>
 
@@ -1218,7 +1240,7 @@ function showTab(group,name,title,subtitle){
 <label>Photo</label>
 <input type="file" name="photo" accept="image/*" required>
 <small>Les captions storycta sont partagées (utilise /addstoryctacaptions sur Discord)</small>
-<button type="submit">📤 Uploader story CTA</button>
+<button type="submit">Uploader story CTA</button>
 </form>
 </div>
 
@@ -1227,7 +1249,7 @@ function showTab(group,name,title,subtitle){
 <small>Pool partagé entre toutes les identités</small>
 <label>Photo de profil</label>
 <input type="file" name="photo" accept="image/*" required>
-<button type="submit">📤 Uploader la PP</button>
+<button type="submit">Uploader la PP</button>
 </form>
 </div>
 
@@ -1499,7 +1521,7 @@ function showFeed(btn,name){
 <label>Token Discord du bot admin</label>
 <input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
-<button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
+<button type="submit" style="background:#d9534f">Sauver et redémarrer</button>
 </form>
 </div>
 
@@ -1559,7 +1581,7 @@ function showFeed(btn,name){
 <input type="password" name="rapidapi_key" placeholder="abcdefghijklmnopqrstuvwxyz1234567890..." required>
 <label>x-rapidapi-host (défaut OK)</label>
 <input type="text" name="rapidapi_host" value="instagram-scraper-stable-api.p.rapidapi.com">
-<button type="submit">💾 Sauver la clé RapidAPI</button>
+<button type="submit">Sauver la clé RapidAPI</button>
 </form>
 <form method="POST" action="/insta/test_rapidapi" class="box">
 <h4 style="margin-top:0">🧪 Tester ma config RapidAPI</h4>
@@ -1611,7 +1633,7 @@ function showFeed(btn,name){
 <label>Ton username Instagram (optionnel)</label>
 <input type="text" name="username" placeholder="ton_compte_secondaire">
 <small>⚠️ Utilise un <b>compte secondaire</b>. Risque de ban si Instagram détecte le scraping.</small>
-<button type="submit">💾 Sauver les cookies</button>
+<button type="submit">Sauver les cookies</button>
 </form>
 </div>
 
@@ -1629,7 +1651,7 @@ function showFeed(btn,name){
 <input type="text" name="display_name" value="{account_display_name}" placeholder="Ton nom">
 <label>Email</label>
 <input type="email" name="email" value="{account_email}" placeholder="email@exemple.com">
-<button type="submit">💾 Sauvegarder le profil</button>
+<button type="submit">Sauvegarder le profil</button>
 </form>
 
 <form method="POST" action="/settings/account_password" class="box">
@@ -1639,7 +1661,7 @@ function showFeed(btn,name){
 <input type="password" name="new_password" placeholder="Min 6 caractères" required minlength="6">
 <label>Confirmer le mot de passe</label>
 <input type="password" name="confirm_password" placeholder="Re-tape pour confirmer" required minlength="6">
-<button type="submit">💾 Changer le mot de passe</button>
+<button type="submit">Changer le mot de passe</button>
 </form>
 </div>
 
@@ -1720,7 +1742,7 @@ function showFeed(btn,name){
 <label>Nouveau mot de passe</label>
 <input type="password" name="password" placeholder="Choisis un mot de passe fort" required minlength="6">
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
-<button type="submit" style="background:#d9534f">💾 Sauver et redémarrer</button>
+<button type="submit" style="background:#d9534f">Sauver et redémarrer</button>
 </form>
 </div>
 
