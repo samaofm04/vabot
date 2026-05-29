@@ -134,6 +134,27 @@ async def main_async():
     except Exception as e:
         log.warning(f"Impossible de demarrer le mini site web : {e}")
 
+    # Cron quotidien : auto-refresh des cookies MyPuls pour qu'ils ne meurent jamais
+    async def _mypuls_keepalive():
+        # Attendre 60s au démarrage pour laisser tout se stabiliser
+        await asyncio.sleep(60)
+        while True:
+            try:
+                import mypuls
+                if mypuls.is_configured():
+                    res = mypuls.auto_refresh()
+                    if res.get("ok"):
+                        if res.get("rotated"):
+                            log.info("[mypuls] Cookies refreshed (REMEMBERME prolonge)")
+                    else:
+                        log.warning(f"[mypuls] Auto-refresh echoue : {res.get('error')}")
+            except Exception as e:
+                log.warning(f"[mypuls] Erreur keepalive : {e}")
+            # Toutes les 12 heures (le REMEMBERME dure ~7 jours, donc 12h c'est large)
+            await asyncio.sleep(12 * 3600)
+
+    asyncio.create_task(_mypuls_keepalive(), name="mypuls_keepalive")
+
     async def _run_safe(bot, token, label):
         """Wrap bot.start dans un try/except pour qu'un bot qui crashe ne tue pas l'autre.
 

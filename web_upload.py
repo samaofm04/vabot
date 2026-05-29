@@ -3244,6 +3244,25 @@ function mpTab(btn, name){
 </script>
 """
 
+    # Indicateur cookies auto-refresh
+    age_h = mypuls.last_refresh_age_hours()
+    if age_h is None:
+        refresh_status = "<span style='color:#888'>Cookies frais (pas encore rafraîchis)</span>"
+    elif age_h < 1:
+        refresh_status = f"<span style='color:#22c55e'>● Cookies auto-renouvelés il y a {int(age_h*60)} min</span>"
+    elif age_h < 24:
+        refresh_status = f"<span style='color:#22c55e'>● Cookies auto-renouvelés il y a {age_h:.1f}h</span>"
+    elif age_h < 24 * 7:
+        refresh_status = f"<span style='color:#fbbf24'>● Cookies pas renouvelés depuis {age_h/24:.1f}j</span>"
+    else:
+        refresh_status = f"<span style='color:#ef4444'>● Cookies pas renouvelés depuis {age_h/24:.0f}j</span>"
+
+    keepalive_info = (
+        f"<div style='font-size:11px;color:#666;margin-top:10px;padding:8px 12px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.15);border-radius:6px'>"
+        f"🔄 <strong>Auto-refresh actif</strong> : le bot ping MyPuls toutes les 12h pour prolonger ton cookie REMEMBERME automatiquement — tant que tu changes pas ton mot de passe MyPuls, ça reste connecté pour toujours. {refresh_status}"
+        f"</div>"
+    )
+
     section = (
         "<div class='mypuls-section'>"
         "<h3>"
@@ -3251,7 +3270,7 @@ function mpTab(btn, name){
         "MyPuls — Ventes chatteurs"
         f"<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct mypuls.app · {start_str} → {end_str}</span>"
         "</h3>"
-        + period_html + stats_html + tabs_html + chatters_table + tx_table
+        + period_html + stats_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
     )
     return css + section + js

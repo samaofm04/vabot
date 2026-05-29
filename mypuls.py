@@ -99,7 +99,9 @@ def _make_session() -> Optional[requests.Session]:
     if not cookies:
         return None
     s = requests.Session()
-    s.cookies.update(cookies)
+    # Set cookies with the domain so they get sent + Set-Cookie peut les remplacer
+    for name, value in cookies.items():
+        s.cookies.set(name, value, domain="mypuls.app", path="/")
     s.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -107,6 +109,77 @@ def _make_session() -> Optional[requests.Session]:
         "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
     })
     return s
+
+
+def _save_rotated_cookies(session: requests.Session) -> bool:
+    """Après une requête, vérifie si MyPuls a rotaté nos cookies (Set-Cookie)
+    et persiste les nouvelles valeurs. Retourne True si changement.
+
+    REMEMBERME est rotaté à chaque request réussie (~+1 jour de validité).
+    PHPSESSID peut aussi changer si l'ancien expire.
+    """
+    cfg = load_config()
+    changed = False
+    for c in session.cookies:
+        if c.domain not in ("mypuls.app", ".mypuls.app", ""):
+            continue
+        if c.name in ("PHPSESSID", "REMEMBERME"):
+            old = cfg.get(c.name, "")
+            if c.value and c.value != old:
+                cfg[c.name] = c.value
+                changed = True
+    if changed:
+        import time as _t
+        cfg["last_refreshed"] = int(_t.time())
+        save_config(cfg)
+    return changed
+
+
+def auto_refresh() -> Dict[str, Any]:
+    """Ping silencieux de MyPuls pour rafraîchir le REMEMBERME.
+
+    Appelé périodiquement (cron) pour maintenir la session en vie sans que
+    l'user ait à se reconnecter manuellement.
+
+    Astuce : on envoie SEULEMENT le REMEMBERME (pas le PHPSESSID). Comme
+    ça MyPuls considère qu'il n'y a pas de session active et invoque le
+    "remember me" guard de Symfony, qui crée une nouvelle session ET émet
+    un nouveau REMEMBERME avec expiry prolongé. Si on envoyait les 2
+    cookies ensemble, Symfony utilise juste la session existante sans
+    toucher au REMEMBERME.
+
+    Tant que ce cron tourne (toutes les 12h), le cookie ne meurt jamais
+    — sauf si l'user change son mot de passe MyPuls.
+    """
+    cfg = load_config()
+    rememberme = cfg.get("REMEMBERME", "")
+    if not rememberme:
+        return {"ok": False, "error": "REMEMBERME non configuré — refresh impossible"}
+    s = requests.Session()
+    s.cookies.set("REMEMBERME", rememberme, domain="mypuls.app", path="/")
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    })
+    try:
+        r = s.get(f"{BASE_URL}/profil", timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code != 200 or _detect_login_redirect(r.text):
+        return {"ok": False, "error": "Cookies expirés ou révoqués"}
+    rotated = _save_rotated_cookies(s)
+    return {"ok": True, "rotated": rotated}
+
+
+def last_refresh_age_hours() -> Optional[float]:
+    """Heures depuis le dernier refresh. None si jamais."""
+    ts = load_config().get("last_refreshed")
+    if not ts:
+        return None
+    import time as _t
+    return (_t.time() - ts) / 3600.0
 
 
 def _detect_login_redirect(html: str) -> bool:
@@ -190,6 +263,8 @@ def fetch_team_stats(start_date: str = "", end_date: str = "") -> Dict[str, Any]
         return {"ok": False, "error": f"HTTP {r.status_code}"}
     if _detect_login_redirect(r.text):
         return {"ok": False, "error": "Cookies expirés — reconnecte-toi sur MyPuls et recopie tes cookies"}
+    # Sauvegarder les cookies rotatés (REMEMBERME prolongé)
+    _save_rotated_cookies(s)
 
     tables = _extract_tables(r.text)
     if len(tables) < 2:
@@ -267,6 +342,8 @@ def ping() -> Dict[str, Any]:
         return {"ok": False, "error": f"HTTP {r.status_code}"}
     if _detect_login_redirect(r.text):
         return {"ok": False, "error": "Cookies expirés"}
+    # Sauvegarder les cookies rotatés
+    _save_rotated_cookies(s)
     # Extraire l'email pour confirmer l'identité
     email_match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", r.text)
     return {"ok": True, "email": email_match.group(0) if email_match else "?"}
