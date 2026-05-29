@@ -134,10 +134,16 @@ def _call_tool(tool_name: str, args: Optional[dict] = None) -> Dict[str, Any]:
     # Le résultat des outils MCP est sous result.content[0].text (JSON sérialisé)
     content = result.get("content") or []
     if content and isinstance(content[0], dict) and "text" in content[0]:
+        raw_text = content[0]["text"]
         try:
-            payload = json.loads(content[0]["text"])
+            payload = json.loads(raw_text)
         except Exception:
-            payload = content[0]["text"]
+            # Sometimes MCP returns Python-repr instead of JSON (single quotes etc.)
+            try:
+                import ast as _ast
+                payload = _ast.literal_eval(raw_text)
+            except Exception:
+                payload = raw_text
         # Détecter les erreurs renvoyées par l'outil GMS
         if isinstance(payload, dict) and payload.get("error"):
             return {"ok": False, "error": str(payload.get("error"))[:500]}
@@ -187,7 +193,17 @@ def list_all_links(max_pages: int = 50) -> Dict[str, Any]:
         if not res["ok"]:
             return res
         data = res["data"] or {}
-        page = (data.get("data") if isinstance(data, dict) else []) or []
+        # Si MCP retourne du texte brut (réponse trop large pour le parse JSON),
+        # on essaie de la re-parser ici. Sinon on stoppe la pagination proprement.
+        if isinstance(data, str):
+            try:
+                import json as _json_p
+                data = _json_p.loads(data)
+            except Exception:
+                break
+        if not isinstance(data, dict):
+            break
+        page = data.get("data") or []
         all_links.extend(page)
         if not data.get("has_more"):
             break
