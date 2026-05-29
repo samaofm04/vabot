@@ -3319,10 +3319,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         chart_html = ""
         chart_init_js = ""
 
-    # Helper pour insérer un nom comme arg JS (échappe les guillemets)
+    # Helper pour insérer un nom comme arg JS dans un onclick="..." HTML.
+    # On utilise &quot; pour les guillemets pour pas casser le parsing HTML.
     def _json_escape(s: str) -> str:
         import json as _js
-        return _js.dumps(s)
+        return _js.dumps(s).replace('"', "&quot;")
 
     # Récupérer le taux EUR -> USD (cache 24h)
     rate_info = mypuls.get_eur_usd_rate()
