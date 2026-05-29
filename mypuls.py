@@ -26,6 +26,8 @@ import requests
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "mypuls_cookies.json"
+CHATTERS_FILE = DATA_DIR / "mypuls_chatters.json"
+CRYPTO_DIR = DATA_DIR / "mypuls_crypto"
 BASE_URL = "https://mypuls.app"
 TIMEOUT = 30
 
@@ -391,6 +393,99 @@ def fetch_team_stats(start_date: str = "", end_date: str = "") -> Dict[str, Any]
             "all_creators_total": round(sum(creator_totals.values()), 2),
         },
     }
+
+
+# ============ Métadonnées par chatteur (commission % + screenshot crypto) ============
+
+def _load_chatters() -> dict:
+    if not CHATTERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(CHATTERS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_chatters(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CHATTERS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def get_chatter_meta(name: str) -> dict:
+    """Retourne {commission_pct: float, crypto_file: str|None}."""
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    meta = data.get(key, {})
+    return {
+        "commission_pct": float(meta.get("commission_pct", 0)),
+        "crypto_file": meta.get("crypto_file"),
+    }
+
+
+def set_commission_pct(name: str, pct: float):
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if key not in data:
+        data[key] = {}
+    # Clamp 0..100
+    p = max(0.0, min(100.0, float(pct)))
+    data[key]["commission_pct"] = p
+    data[key]["original_name"] = name
+    _save_chatters(data)
+
+
+def set_crypto_file(name: str, filename: str):
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if key not in data:
+        data[key] = {}
+    data[key]["crypto_file"] = filename
+    data[key]["original_name"] = name
+    _save_chatters(data)
+
+
+def crypto_path_for(name: str) -> Optional[Path]:
+    """Retourne le path local du screenshot crypto, ou None."""
+    meta = get_chatter_meta(name)
+    fn = meta.get("crypto_file")
+    if not fn:
+        return None
+    p = CRYPTO_DIR / fn
+    return p if p.exists() else None
+
+
+def save_crypto_screenshot(name: str, file_bytes: bytes, original_filename: str) -> str:
+    """Sauvegarde un fichier crypto pour un chatteur. Retourne le nom de fichier final."""
+    CRYPTO_DIR.mkdir(parents=True, exist_ok=True)
+    # Slugify name + détecter extension
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9_-]", "_", name.lower().strip())[:40]
+    ext = ""
+    if "." in original_filename:
+        ext = "." + original_filename.rsplit(".", 1)[-1].lower()[:5]
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        ext = ".png"
+    filename = f"{slug}{ext}"
+    target = CRYPTO_DIR / filename
+    target.write_bytes(file_bytes)
+    set_crypto_file(name, filename)
+    return filename
+
+
+def delete_crypto_file(name: str) -> bool:
+    p = crypto_path_for(name)
+    if p:
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if key in data and "crypto_file" in data[key]:
+        del data[key]["crypto_file"]
+        _save_chatters(data)
+        return True
+    return False
 
 
 def list_creators(force_refresh: bool = False) -> Dict[str, Any]:

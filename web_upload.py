@@ -3319,11 +3319,28 @@ body.light .mypuls-bar{background:#e5e7eb}
         chart_html = ""
         chart_init_js = ""
 
-    # Table chatteurs (top 30)
+    # Table chatteurs (top 30) — avec % commission, à payer, screenshot crypto
     chatters_rows = []
     for c in chatters[:30]:
         bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
+        meta = mypuls.get_chatter_meta(c["name"])
+        commission = meta["commission_pct"]
+        to_pay = round(c["ca_total"] * commission / 100, 2)
+        has_crypto = bool(meta["crypto_file"])
+        name_url_safe = c["name"].replace(" ", "%20")
+        crypto_cell = (
+            f"<div style='display:flex;align-items:center;gap:6px'>"
+            f"<a href='/mypuls/chatter/crypto/{name_url_safe}' target='_blank' style='display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.4);border-radius:6px;color:#22c55e;text-decoration:none;font-size:11px;font-weight:600'>"
+            f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><polyline points='21 15 16 10 5 21'/></svg>"
+            f"Voir</a>"
+            f"<button onclick=\"mpUploadCrypto('{c['name']}')\" style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer'>Changer</button>"
+            f"</div>"
+        ) if has_crypto else (
+            f"<button onclick=\"mpUploadCrypto('{c['name']}')\" style='background:transparent;border:1px dashed #2a2a2a;color:#888;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px'>"
+            f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' y1='3' x2='12' y2='15'/></svg>"
+            f"Upload</button>"
+        )
         chatters_rows.append(
             f"<tr>"
             f"<td><div style='font-weight:600'>{name_esc}</div>"
@@ -3332,17 +3349,48 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<td style='color:#3b82f6'>{c['ca_ppv']:.2f}€</td>"
             f"<td style='color:#a855f7'>{c['ca_tips']:.2f}€</td>"
             f"<td><span class='mypuls-pill' style='background:rgba(255,255,255,.05);color:#aaa'>{c['conv_rate']}</span></td>"
+            # Commission % éditable inline
+            f"<td>"
+            f"<form method='POST' action='/mypuls/chatter/set_pct' style='display:inline-flex;align-items:center;gap:4px;margin:0' onchange='this.submit()'>"
+            f"<input type='hidden' name='name' value='{name_esc}'>"
+            f"<input type='number' name='pct' value='{commission:g}' min='0' max='100' step='1' style='width:60px;padding:4px 6px;background:#0f1116;border:1px solid #2a2a2a;color:#fff;border-radius:5px;font-size:12px;text-align:right'>"
+            f"<span style='color:#888;font-size:11px'>%</span>"
+            f"</form>"
+            f"</td>"
+            # À payer
+            f"<td style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px'>{to_pay:.2f}€</td>"
+            # Screenshot crypto
+            f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
             f"</tr>"
         )
-    chatters_empty = "<tr><td colspan='6' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
+    chatters_empty = "<tr><td colspan='9' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
     chatters_body = "".join(chatters_rows) or chatters_empty
+
+    # Total à payer (somme des "à payer" sur les 30 affichés)
+    total_to_pay = sum(
+        round(c["ca_total"] * mypuls.get_chatter_meta(c["name"])["commission_pct"] / 100, 2)
+        for c in chatters[:30]
+    )
+    payout_summary = (
+        f"<div style='padding:10px 14px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>"
+        f"<div style='font-size:13px;color:#888'>💰 Total à payer aux chatteurs sur cette période :</div>"
+        f"<div style='font-weight:800;font-size:20px;color:#22c55e'>{total_to_pay:.2f}€</div>"
+        f"</div>"
+    )
+
     chatters_table = (
         "<div id='mp-tab-chatters' style='display:block'>"
+        + payout_summary +
         "<table class='mypuls-table'>"
-        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>Présence</th></tr></thead>"
+        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer</th><th>Crypto</th><th>Présence</th></tr></thead>"
         f"<tbody>{chatters_body}</tbody>"
         "</table>"
+        # Form upload caché (réutilisé par tous les boutons)
+        "<form id='mp-crypto-form' method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='display:none'>"
+        "<input type='hidden' name='name' id='mp-crypto-name'>"
+        "<input type='file' name='file' id='mp-crypto-file' accept='image/*' onchange='document.getElementById(\"mp-crypto-form\").submit()'>"
+        "</form>"
         "</div>"
     )
 
@@ -3393,6 +3441,11 @@ function mpTab(btn, name){
   btn.classList.add('mypuls-tab-active');
   document.getElementById('mp-tab-chatters').style.display = (name === 'chatters') ? 'block' : 'none';
   document.getElementById('mp-tab-tx').style.display = (name === 'tx') ? 'block' : 'none';
+}
+function mpUploadCrypto(chatterName){
+  document.getElementById('mp-crypto-name').value = chatterName;
+  document.getElementById('mp-crypto-file').value = '';
+  document.getElementById('mp-crypto-file').click();
 }
 </script>
 """
@@ -5736,6 +5789,81 @@ def create_app():
         cfg.pop("REMEMBERME", None)
         mypuls.save_config(cfg)
         return _success("✅ Cookies MyPuls supprimés")
+
+    @app.route("/mypuls/chatter/set_pct", methods=["POST"])
+    def mypuls_chatter_set_pct():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        name = (request.form.get("name") or "").strip()
+        try:
+            pct = float(request.form.get("pct") or "0")
+        except Exception:
+            return _error("❌ % invalide")
+        if not name:
+            return _error("❌ Nom manquant")
+        mypuls.set_commission_pct(name, pct)
+        return _success(f"✅ {name} → {pct:g}%")
+
+    @app.route("/mypuls/chatter/upload_crypto", methods=["POST"])
+    def mypuls_chatter_upload_crypto():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return _error("❌ Nom du chatteur manquant")
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return _error("❌ Fichier manquant")
+        # Limiter à 5MB
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(0)
+        if size > 5 * 1024 * 1024:
+            return _error("❌ Fichier trop gros (max 5MB)")
+        try:
+            data = f.read()
+            mypuls.save_crypto_screenshot(name, data, f.filename)
+        except Exception as e:
+            return _error(f"❌ Erreur upload : {e}")
+        return _success(f"✅ Screenshot crypto enregistré pour <code>{name}</code>")
+
+    @app.route("/mypuls/chatter/crypto/<path:name>")
+    def mypuls_chatter_crypto(name):
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception:
+            return "", 404
+        from urllib.parse import unquote
+        name_dec = unquote(name)
+        p = mypuls.crypto_path_for(name_dec)
+        if not p or not p.exists():
+            return "", 404
+        from flask import send_file
+        return send_file(str(p))
+
+    @app.route("/mypuls/chatter/delete_crypto", methods=["POST"])
+    def mypuls_chatter_delete_crypto():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return _error("❌ Nom manquant")
+        ok = mypuls.delete_crypto_file(name)
+        return _success(f"✅ Screenshot supprimé pour <code>{name}</code>") if ok else _error("❌ Pas de screenshot à supprimer")
 
     @app.route("/mypuls/avatar/<int:creator_id>")
     def mypuls_avatar(creator_id):
