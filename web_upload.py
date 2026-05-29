@@ -2546,15 +2546,22 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"</div>"
     )
 
-    # Icône crayon (Edit) + cercle de sélection en haut à DROITE — frosted white style
+    # Crayon (Edit) UNIQUEMENT pour les Reels (file_id contient |videos|).
+    # Posts / Stories / Story CTA / PPs n'ont pas de caption/description à éditer.
+    show_edit = "|videos|" in (file_id or "")
     actions_html = ""
     if file_id:
+        edit_btn = ""
+        if show_edit:
+            edit_btn = (
+                f"<button class='card-edit-btn' onclick='event.stopPropagation();openCaptionEditor(\"{fid_safe}\")' "
+                f"title='Modifier caption / description'>"
+                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
+                f"</button>"
+            )
         actions_html = (
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
-            f"<button class='card-edit-btn' onclick='event.stopPropagation();openCaptionEditor(\"{fid_safe}\")' "
-            f"title='Modifier caption / description'>"
-            f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
-            f"</button>"
+            f"{edit_btn}"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
