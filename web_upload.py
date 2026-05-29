@@ -1020,6 +1020,10 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       Bio Links
     </button>
+    <button class="item" id="tab-gms" onclick="showTab('business','gms','GetMySocial','Gere tes liens GMS depuis le site')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      GetMySocial
+    </button>
   </div>
 </div>
 
@@ -1439,6 +1443,11 @@ function showFeed(btn,name){
 <!-- BUSINESS - BIO LINKS -->
 <div class="form-section" id="form-biolinks" style="display:none">
 {biolinks_html}
+</div>
+
+<!-- BUSINESS - GETMYSOCIAL -->
+<div class="form-section" id="form-gms" style="display:none">
+{gms_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -3444,6 +3453,155 @@ body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:10
 </html>"""
 
 
+def _render_gms_html() -> str:
+    """Page GetMySocial : gestion clé API + liste/création/suppression liens."""
+    try:
+        import gms
+    except Exception as e:
+        return f"<p style='color:#f99'>Module gms indispo : {e}</p>"
+
+    configured = gms.is_configured()
+    key = gms.get_api_key()
+    key_masked = (key[:9] + "…" + key[-6:]) if key and len(key) > 18 else (key or "")
+
+    # Header / config key
+    if configured:
+        key_status_html = (
+            f"<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:10px;margin-bottom:18px'>"
+            f"<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#22c55e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6L9 17l-5-5'/></svg>"
+            f"<div style='flex:1'><div style='font-weight:600;color:#22c55e;font-size:13px'>Clé API GetMySocial configurée</div>"
+            f"<div style='font-size:12px;color:#888;font-family:monospace'>{key_masked}</div></div>"
+            f"<form method='POST' action='/gms/test' style='margin:0'><button type='submit' style='background:#22c55e;border:0;color:#000;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer'>▶ Tester</button></form>"
+            f"</div>"
+        )
+    else:
+        key_status_html = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
+            "<div style='flex:1;font-weight:600;color:#ef4444;font-size:13px'>Aucune clé API configurée — entre ta clé ci-dessous pour activer l'intégration</div>"
+            "</div>"
+        )
+
+    key_form = (
+        "<div class='box' style='margin-bottom:24px'>"
+        "<h3 style='margin:0 0 4px;font-size:15px'>Clé API GetMySocial</h3>"
+        "<p style='color:#888;font-size:12px;margin:0 0 12px'>Récupère-la sur ton dashboard GetMySocial → Settings → API Keys (commence par <code>gms_live_</code>).</p>"
+        "<form method='POST' action='/gms/save_key' style='display:flex;gap:8px'>"
+        "<input type='password' name='api_key' placeholder='gms_live_…' required minlength='20' style='flex:1'>"
+        "<button type='submit'>Enregistrer</button>"
+        "</form>"
+        "</div>"
+    )
+
+    # Liste des liens (uniquement si configuré)
+    links_section = ""
+    if configured:
+        res = gms.list_links(limit=100)
+        if not res.get("ok"):
+            links_html = (
+                f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px'>"
+                f"❌ Erreur API : {res.get('error', '?')}</div>"
+            )
+        else:
+            links = res["links"]
+            if not links:
+                links_html = (
+                    "<div style='padding:40px;text-align:center;color:#888;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px'>"
+                    "Aucun lien pour l'instant. Crée ton premier ci-dessus.</div>"
+                )
+            else:
+                rows = []
+                for l in links:
+                    lid = l.get("id", "")
+                    short = l.get("shortcode", "")
+                    name = l.get("display_name", "") or "—"
+                    url = l.get("url") or "(landing page)"
+                    status = l.get("status", "active")
+                    ltype = l.get("type", "directlink")
+                    is_active = status == "active"
+                    status_color = "#22c55e" if is_active else "#6b7280"
+                    status_bg = "rgba(34,197,94,.12)" if is_active else "rgba(107,114,128,.15)"
+                    status_label = "Actif" if is_active else "Inactif"
+                    toggle_label = "Désactiver" if is_active else "Activer"
+                    toggle_action = "disable" if is_active else "enable"
+                    type_badge = "Landing" if ltype == "landing" else "Redirect"
+                    type_color = "#a855f7" if ltype == "landing" else "#3b82f6"
+                    rows.append(
+                        f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center'>"
+                        f"<div style='min-width:0'>"
+                        f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap'>"
+                        f"<strong style='font-size:14px'>{name}</strong>"
+                        f"<span style='background:rgba(255,255,255,.05);border:1px solid #2a2a2a;color:{type_color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em'>{type_badge}</span>"
+                        f"<span style='background:{status_bg};color:{status_color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em'>{status_label}</span>"
+                        f"</div>"
+                        f"<div style='font-size:12px;color:#888;font-family:monospace;margin-bottom:3px'>/{short}</div>"
+                        f"<div style='font-size:11px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>→ {url}</div>"
+                        f"</div>"
+                        f"<div style='display:flex;gap:6px;align-items:center'>"
+                        f"<button onclick=\"copyToClipboard('/{short}', this)\" style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer' title='Copier le shortcode'>📋</button>"
+                        f"<form method='POST' action='/gms/toggle' style='margin:0;display:inline'>"
+                        f"<input type='hidden' name='link_id' value='{lid}'>"
+                        f"<input type='hidden' name='action' value='{toggle_action}'>"
+                        f"<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer'>{toggle_label}</button>"
+                        f"</form>"
+                        f"<form method='POST' action='/gms/delete' style='margin:0;display:inline' onsubmit='return confirmGmsDelete(this)'>"
+                        f"<input type='hidden' name='link_id' value='{lid}'>"
+                        f"<input type='hidden' name='shortcode' value='{short}'>"
+                        f"<button type='submit' style='background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer'>Supprimer</button>"
+                        f"</form>"
+                        f"</div>"
+                        f"</div>"
+                    )
+                links_html = "<div style='display:flex;flex-direction:column;gap:10px'>" + "".join(rows) + "</div>"
+
+        # Formulaire de création
+        create_form = (
+            "<div class='box' style='margin-bottom:18px;border:2px solid #3b82f6'>"
+            "<h3 style='margin:0 0 4px;font-size:15px;color:#3b82f6'>➕ Créer un nouveau lien</h3>"
+            "<p style='color:#888;font-size:12px;margin:0 0 14px'>Redirect simple (directlink) : shortcode → URL de destination.</p>"
+            "<form method='POST' action='/gms/create' style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>"
+            "<div><label>Shortcode (3-24 car.)</label><input type='text' name='shortcode' pattern='[a-zA-Z0-9_-]{3,24}' minlength='3' maxlength='24' placeholder='amelia-of' required></div>"
+            "<div><label>Nom affiché (optionnel)</label><input type='text' name='display_name' maxlength='60' placeholder='Amelia OnlyFans'></div>"
+            "<div style='grid-column:1 / -1'><label>URL de destination</label><input type='url' name='url' placeholder='https://onlyfans.com/...' required></div>"
+            "<div style='grid-column:1 / -1'><button type='submit' style='width:100%'>Créer le lien</button></div>"
+            "</form>"
+            "</div>"
+        )
+
+        links_section = (
+            create_form
+            + "<h3 style='margin:24px 0 12px;font-size:15px;display:flex;align-items:center;gap:10px'>Tes liens"
+            + f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px'>{len(res.get('links', []))}</span>"
+            + "</h3>"
+            + links_html
+        )
+
+    js = """
+<script>
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(function(){
+    var orig = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(function(){ btn.textContent = orig; }, 1200);
+  });
+}
+function confirmGmsDelete(form) {
+  var sc = form.querySelector('input[name=shortcode]').value;
+  return confirm('Supprimer définitivement le lien /' + sc + ' ?\\n\\nCette action est irréversible — l\\'historique de redirections est perdu et le shortcode peut être réservé un moment contre le squatting.');
+}
+</script>
+"""
+
+    return (
+        "<h2 style='margin:0 0 6px;font-size:20px'>GetMySocial</h2>"
+        "<p style='margin:0 0 18px;color:#888;font-size:13px'>Gère tes liens GetMySocial (redirects) directement depuis le site — synchronisé avec ton compte GMS via l'API officielle.</p>"
+        + key_status_html
+        + (key_form if not configured else "")
+        + links_section
+        + js
+    )
+
+
 def _render_bilan_html() -> str:
     try:
         from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
@@ -4301,6 +4459,7 @@ def _render_upload(msg=None, error=None):
         .replace("{depenses_html}", _render_depenses_html())
         .replace("{paievas_html}", _render_paievas_html())
         .replace("{biolinks_html}", _render_biolinks_html())
+        .replace("{gms_html}", _render_gms_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{profile_pic_html}", _render_profile_pic_html())
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
@@ -4988,6 +5147,96 @@ def create_app():
         if not ident:
             return "Not Found", 404
         return _render_bio_public_page(ident)
+
+    # ============ GETMYSOCIAL ============
+
+    @app.route("/gms/save_key", methods=["POST"])
+    def gms_save_key():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        key = (request.form.get("api_key") or "").strip()
+        if not key or len(key) < 20 or not key.startswith("gms_"):
+            return _error("❌ Clé invalide (doit commencer par <code>gms_</code> et faire 20+ caractères)")
+        gms.save_api_key(key)
+        # Test immédiat
+        res = gms.ping()
+        if res.get("ok"):
+            return _success(f"✅ Clé enregistrée et validée (user <code>{res.get('user_id', '?')[:18]}…</code>)")
+        return _error(f"⚠ Clé enregistrée mais le test a échoué : {res.get('error', '?')}")
+
+    @app.route("/gms/test", methods=["POST"])
+    def gms_test():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        res = gms.ping()
+        if res.get("ok"):
+            return _success(f"✅ Connexion OK (user <code>{res.get('user_id', '?')[:18]}…</code>)")
+        return _error(f"❌ Test échoué : {res.get('error', '?')}")
+
+    @app.route("/gms/create", methods=["POST"])
+    def gms_create():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        short = (request.form.get("shortcode") or "").strip()
+        url = (request.form.get("url") or "").strip()
+        name = (request.form.get("display_name") or "").strip()
+        if not short or not url:
+            return _error("❌ Shortcode et URL requis")
+        if len(short) < 3 or len(short) > 24:
+            return _error("❌ Shortcode doit faire 3-24 caractères")
+        res = gms.create_directlink(short, url, name)
+        if res.get("ok"):
+            link = res.get("link") or {}
+            lid = link.get("id", "?")
+            return _success(f"✅ Lien <code>/{short}</code> créé ({lid[:18]}…)")
+        return _error(f"❌ {res.get('error', 'Création échouée')}")
+
+    @app.route("/gms/toggle", methods=["POST"])
+    def gms_toggle():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        lid = (request.form.get("link_id") or "").strip()
+        action = (request.form.get("action") or "").strip()
+        if not lid or action not in ("enable", "disable"):
+            return _error("❌ Paramètres invalides")
+        res = gms.enable_link(lid) if action == "enable" else gms.disable_link(lid)
+        if res.get("ok"):
+            verb = "activé" if action == "enable" else "désactivé"
+            return _success(f"✅ Lien {verb}")
+        return _error(f"❌ {res.get('error', 'Action échouée')}")
+
+    @app.route("/gms/delete", methods=["POST"])
+    def gms_delete():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        lid = (request.form.get("link_id") or "").strip()
+        short = (request.form.get("shortcode") or "").strip() or lid[:12]
+        if not lid:
+            return _error("❌ ID manquant")
+        res = gms.delete_link(lid)
+        if res.get("ok"):
+            return _success(f"✅ Lien <code>/{short}</code> supprimé")
+        return _error(f"❌ {res.get('error', 'Suppression échouée')}")
 
     @app.route("/account/profile_pic")
     def account_profile_pic():
