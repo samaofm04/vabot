@@ -3319,6 +3319,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         chart_html = ""
         chart_init_js = ""
 
+    # Helper pour insérer un nom comme arg JS (échappe les guillemets)
+    def _json_escape(s: str) -> str:
+        import json as _js
+        return _js.dumps(s)
+
     # Récupérer le taux EUR -> USD (cache 24h)
     rate_info = mypuls.get_eur_usd_rate()
     eur_to_usd = rate_info["rate"]
@@ -3332,20 +3337,47 @@ body.light .mypuls-bar{background:#e5e7eb}
         commission = meta["commission_pct"]
         to_pay_eur = round(c["ca_total"] * commission / 100, 2)
         to_pay = round(to_pay_eur * eur_to_usd, 2)
-        has_crypto = bool(meta["crypto_file"])
-        name_url_safe = c["name"].replace(" ", "%20")
-        crypto_cell = (
-            f"<div style='display:flex;align-items:center;gap:6px'>"
-            f"<a href='/mypuls/chatter/crypto/{name_url_safe}' target='_blank' style='display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.4);border-radius:6px;color:#22c55e;text-decoration:none;font-size:11px;font-weight:600'>"
-            f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><polyline points='21 15 16 10 5 21'/></svg>"
-            f"Voir</a>"
-            f"<button onclick=\"mpUploadCrypto('{c['name']}')\" style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer'>Changer</button>"
-            f"</div>"
-        ) if has_crypto else (
-            f"<button onclick=\"mpUploadCrypto('{c['name']}')\" style='background:transparent;border:1px dashed #2a2a2a;color:#888;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px'>"
-            f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' y1='3' x2='12' y2='15'/></svg>"
-            f"Upload</button>"
-        )
+        has_crypto = bool(meta["crypto_file"]) or bool(meta["crypto_address"])
+        crypto_type = meta.get("crypto_type") or ""
+        crypto_network = meta.get("crypto_network") or ""
+        crypto_address = meta.get("crypto_address") or ""
+        addr_short = (crypto_address[:6] + "…" + crypto_address[-4:]) if len(crypto_address) > 14 else crypto_address
+        screenshot_icon = "🖼️" if meta.get("crypto_file") else ""
+
+        # Couleur du badge selon la crypto
+        type_color = {
+            "USDC": "#2775ca",
+            "ETH": "#627eea",
+            "SOL": "#9945ff",
+            "TRX": "#ef4444",
+        }.get(crypto_type, "#888")
+
+        if has_crypto and crypto_type:
+            crypto_cell = (
+                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
+                f"style='background:transparent;border:1px solid #2a2a2a;border-radius:8px;padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:120px;text-align:left'>"
+                f"<div style='display:flex;align-items:center;gap:6px'>"
+                f"<span style='background:{type_color};color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em'>{crypto_type}</span>"
+                + (f"<span style='font-size:10px;color:#888'>{crypto_network.split('(')[0].strip()}</span>" if crypto_network else "")
+                + f"{screenshot_icon}"
+                f"</div>"
+                + (f"<div style='font-family:monospace;font-size:10px;color:#aaa'>{addr_short}</div>" if addr_short else "")
+                + "</button>"
+            )
+        elif has_crypto and meta.get("crypto_file"):
+            # Seulement screenshot, pas d'adresse texte
+            crypto_cell = (
+                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
+                f"style='background:transparent;border:1px solid #2a2a2a;border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#888'>"
+                f"🖼️ Screenshot</button>"
+            )
+        else:
+            crypto_cell = (
+                f"<button onclick=\"mpOpenCryptoModal({_json_escape(c['name'])})\" "
+                f"style='background:transparent;border:1px dashed #2a2a2a;color:#888;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><line x1='12' y1='5' x2='12' y2='19'/><line x1='5' y1='12' x2='19' y2='12'/></svg>"
+                f"Configurer</button>"
+            )
         chatters_rows.append(
             f"<tr>"
             f"<td><div style='font-weight:600'>{name_esc}</div>"
@@ -3408,6 +3440,20 @@ body.light .mypuls-bar{background:#e5e7eb}
         "</div>"
     )
 
+    # Construire la map JSON {chatter: {type, network, address, has_screenshot}}
+    import json as _json_mod
+    crypto_data_js = {}
+    for c in chatters[:30]:
+        m = mypuls.get_chatter_meta(c["name"])
+        crypto_data_js[c["name"]] = {
+            "type": m.get("crypto_type", "") or "",
+            "network": m.get("crypto_network", "") or "",
+            "address": m.get("crypto_address", "") or "",
+            "has_screenshot": bool(m.get("crypto_file")),
+        }
+    networks_js = _json_mod.dumps(mypuls.CRYPTO_NETWORKS, ensure_ascii=False)
+    crypto_data_json = _json_mod.dumps(crypto_data_js, ensure_ascii=False)
+
     chatters_table = (
         "<div id='mp-tab-chatters' style='display:block'>"
         + payout_summary +
@@ -3415,11 +3461,61 @@ body.light .mypuls-bar{background:#e5e7eb}
         "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer ($)</th><th>Crypto</th><th>Présence</th></tr></thead>"
         f"<tbody>{chatters_body}</tbody>"
         "</table>"
-        # Form upload caché (réutilisé par tous les boutons)
-        "<form id='mp-crypto-form' method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='display:none'>"
-        "<input type='hidden' name='name' id='mp-crypto-name'>"
-        "<input type='file' name='file' id='mp-crypto-file' accept='image/*' onchange='document.getElementById(\"mp-crypto-form\").submit()'>"
+        # ========== MODAL CRYPTO ==========
+        "<div id='mp-crypto-modal' style='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px'>"
+        "<div style='background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:18px'>"
+        "<h3 id='mp-crypto-modal-title' style='margin:0;font-size:17px;font-weight:700'>Crypto chatteur</h3>"
+        "<button onclick='mpCloseCryptoModal()' style='background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1;padding:0'>×</button>"
+        "</div>"
+        "<form method='POST' action='/mypuls/chatter/set_crypto' style='display:flex;flex-direction:column;gap:14px'>"
+        "<input type='hidden' name='name' id='mp-crypto-modal-name'>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Crypto</label>"
+        "<select name='crypto_type' id='mp-crypto-modal-type' onchange='mpUpdateNetworks()' required style='margin-top:6px'>"
+        "<option value=''>Choisir…</option>"
+        "<option value='USDC'>💵 USDC</option>"
+        "<option value='ETH'>Ξ ETH</option>"
+        "<option value='SOL'>◎ SOL</option>"
+        "<option value='TRX'>⏶ TRX</option>"
+        "</select>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Réseau</label>"
+        "<select name='crypto_network' id='mp-crypto-modal-network' required style='margin-top:6px'>"
+        "<option value=''>Choisis d'abord une crypto</option>"
+        "</select>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Adresse wallet</label>"
+        "<input type='text' name='crypto_address' id='mp-crypto-modal-address' placeholder='0x… / T… / …' maxlength='150' style='margin-top:6px;font-family:monospace;font-size:13px'>"
+        "</div>"
+        "<button type='submit' style='width:100%;background:#3b82f6;color:#fff;border:0;padding:11px;border-radius:8px;font-weight:600;cursor:pointer'>Enregistrer adresse</button>"
         "</form>"
+        # Section screenshot (formulaire séparé pour multipart)
+        "<div style='margin-top:18px;padding-top:18px;border-top:1px solid #2a2a2a'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Screenshot de l'adresse (optionnel)</label>"
+        "<div id='mp-crypto-modal-screenshot-preview' style='margin-top:8px;display:none'>"
+        "<img id='mp-crypto-modal-screenshot-img' src='' style='max-width:100%;max-height:200px;border-radius:8px;border:1px solid #2a2a2a;display:block;margin-bottom:8px'>"
+        "</div>"
+        "<div style='display:flex;gap:8px;margin-top:6px'>"
+        "<form method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='flex:1;margin:0'>"
+        "<input type='hidden' name='name' id='mp-crypto-modal-upload-name'>"
+        "<label style='display:block;background:transparent;border:1px dashed #2a2a2a;color:#888;padding:9px;border-radius:8px;cursor:pointer;text-align:center;font-size:12px'>"
+        "📷 Choisir une image"
+        "<input type='file' name='file' accept='image/*' onchange='this.form.submit()' style='display:none'>"
+        "</label>"
+        "</form>"
+        "<form method='POST' action='/mypuls/chatter/delete_crypto' id='mp-crypto-modal-delete-form' style='margin:0;display:none'>"
+        "<input type='hidden' name='name' id='mp-crypto-modal-delete-name'>"
+        "<button type='submit' style='background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:9px 14px;border-radius:8px;font-size:12px;cursor:pointer'>🗑️ Supprimer</button>"
+        "</form>"
+        "</div>"
+        "</div>"
+        "</div>"
+        "</div>"
+        f"<script>window.__mpCryptoData = {crypto_data_json};</script>"
+        f"<script>window.__mpNetworks = {networks_js};</script>"
         "</div>"
     )
 
@@ -3471,10 +3567,54 @@ function mpTab(btn, name){
   document.getElementById('mp-tab-chatters').style.display = (name === 'chatters') ? 'block' : 'none';
   document.getElementById('mp-tab-tx').style.display = (name === 'tx') ? 'block' : 'none';
 }
-function mpUploadCrypto(chatterName){
-  document.getElementById('mp-crypto-name').value = chatterName;
-  document.getElementById('mp-crypto-file').value = '';
-  document.getElementById('mp-crypto-file').click();
+function mpUpdateNetworks(){
+  var type = document.getElementById('mp-crypto-modal-type').value;
+  var sel = document.getElementById('mp-crypto-modal-network');
+  sel.innerHTML = '';
+  if(!type){
+    sel.innerHTML = '<option value="">Choisis d\\'abord une crypto</option>';
+    return;
+  }
+  var nets = (window.__mpNetworks || {})[type] || [];
+  nets.forEach(function(n){
+    var opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    sel.appendChild(opt);
+  });
+  // Restaurer la valeur si elle est dans la liste
+  var saved = window.__mpModalSavedNetwork || '';
+  if(saved && nets.indexOf(saved) !== -1) sel.value = saved;
+}
+function mpOpenCryptoModal(chatterName){
+  var data = (window.__mpCryptoData || {})[chatterName] || {type:'', network:'', address:'', has_screenshot:false};
+  document.getElementById('mp-crypto-modal-title').textContent = 'Crypto · ' + chatterName;
+  document.getElementById('mp-crypto-modal-name').value = chatterName;
+  document.getElementById('mp-crypto-modal-upload-name').value = chatterName;
+  document.getElementById('mp-crypto-modal-delete-name').value = chatterName;
+  document.getElementById('mp-crypto-modal-type').value = data.type || '';
+  window.__mpModalSavedNetwork = data.network || '';
+  mpUpdateNetworks();
+  document.getElementById('mp-crypto-modal-address').value = data.address || '';
+  // Preview screenshot si existe
+  var prev = document.getElementById('mp-crypto-modal-screenshot-preview');
+  var img = document.getElementById('mp-crypto-modal-screenshot-img');
+  var delForm = document.getElementById('mp-crypto-modal-delete-form');
+  if(data.has_screenshot){
+    img.src = '/mypuls/chatter/crypto/' + encodeURIComponent(chatterName) + '?t=' + Date.now();
+    prev.style.display = 'block';
+    delForm.style.display = 'inline-block';
+  } else {
+    prev.style.display = 'none';
+    delForm.style.display = 'none';
+  }
+  var modal = document.getElementById('mp-crypto-modal');
+  modal.style.display = 'flex';
+  // Fermer si on clique sur le fond
+  modal.onclick = function(e){ if(e.target === modal) mpCloseCryptoModal(); };
+}
+function mpCloseCryptoModal(){
+  document.getElementById('mp-crypto-modal').style.display = 'none';
 }
 </script>
 """
@@ -5847,6 +5987,27 @@ def create_app():
             return _error("❌ Nom manquant")
         mypuls.set_commission_pct(name, pct)
         return _success(f"✅ {name} → {pct:g}%")
+
+    @app.route("/mypuls/chatter/set_crypto", methods=["POST"])
+    def mypuls_chatter_set_crypto():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        name = (request.form.get("name") or "").strip()
+        crypto_type = (request.form.get("crypto_type") or "").strip().upper()
+        network = (request.form.get("crypto_network") or "").strip()
+        address = (request.form.get("crypto_address") or "").strip()
+        if not name:
+            return _error("❌ Nom du chatteur manquant")
+        if crypto_type and crypto_type not in mypuls.CRYPTO_TYPES:
+            return _error(f"❌ Crypto inconnue ({crypto_type})")
+        mypuls.set_crypto_address(name, crypto_type, network, address)
+        if crypto_type:
+            return _success(f"✅ {name} → {crypto_type} ({network or 'pas de réseau'})")
+        return _success(f"✅ Infos crypto effacées pour {name}")
 
     @app.route("/mypuls/chatter/upload_crypto", methods=["POST"])
     def mypuls_chatter_upload_crypto():

@@ -412,14 +412,41 @@ def _save_chatters(data: dict):
 
 
 def get_chatter_meta(name: str) -> dict:
-    """Retourne {commission_pct: float, crypto_file: str|None}."""
+    """Retourne {commission_pct, crypto_file, crypto_type, crypto_network, crypto_address}."""
     data = _load_chatters()
     key = (name or "").strip().lower()
     meta = data.get(key, {})
     return {
         "commission_pct": float(meta.get("commission_pct", 0)),
         "crypto_file": meta.get("crypto_file"),
+        "crypto_type": meta.get("crypto_type", ""),  # USDC | ETH | SOL | TRX
+        "crypto_network": meta.get("crypto_network", ""),  # ERC20 | TRC20 | SPL | etc.
+        "crypto_address": meta.get("crypto_address", ""),
     }
+
+
+# Mapping crypto -> liste de réseaux supportés
+CRYPTO_NETWORKS = {
+    "USDC": ["ERC20 (Ethereum)", "TRC20 (Tron)", "SPL (Solana)", "BEP20 (BSC)",
+             "Polygon", "Arbitrum", "Optimism", "Base"],
+    "ETH": ["Ethereum", "Arbitrum", "Optimism", "Base"],
+    "SOL": ["Solana"],
+    "TRX": ["Tron"],
+}
+CRYPTO_TYPES = list(CRYPTO_NETWORKS.keys())
+
+
+def set_crypto_address(name: str, crypto_type: str, network: str, address: str):
+    """Met à jour les infos crypto (type, réseau, adresse) d'un chatteur."""
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if key not in data:
+        data[key] = {}
+    data[key]["crypto_type"] = (crypto_type or "").strip().upper()
+    data[key]["crypto_network"] = (network or "").strip()
+    data[key]["crypto_address"] = (address or "").strip()
+    data[key]["original_name"] = name
+    _save_chatters(data)
 
 
 def set_commission_pct(name: str, pct: float):
