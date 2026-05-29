@@ -2769,7 +2769,9 @@ def _render_va_list_html_inner() -> str:
 .va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
 .va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
 .va-list{display:flex;flex-direction:column;gap:8px}
-.va-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+/* Card grid : avatar | (username + id) | auto-post | salon | spacer | actions */
+.va-card{display:grid;grid-template-columns:46px minmax(160px,200px) 110px 130px 1fr auto;gap:12px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-col-auto,.va-col-salon{display:flex;align-items:center;min-width:0}
 .va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 .va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
 .va-links-btn:hover{background:rgba(168,85,247,.2)}
@@ -2778,15 +2780,17 @@ def _render_va_list_html_inner() -> str:
 .va-change-form{width:130px}
 .va-change-form select{flex:1;min-width:0}
 .va-reset-btn{width:80px;text-align:center}
-@media(max-width:1200px){.va-card{grid-template-columns:auto minmax(0,1fr);gap:12px}.va-actions{grid-column:1/-1;justify-content:flex-start;flex-wrap:wrap;padding-top:8px;border-top:1px dashed #2a2a2a;margin-top:4px}}
+@media(max-width:1100px){
+  .va-card{grid-template-columns:46px minmax(0,1fr) auto;gap:10px}
+  .va-col-auto,.va-col-salon{grid-column:2/-2;justify-self:start}
+  .va-actions{grid-column:1/-1;justify-content:flex-start;flex-wrap:wrap;padding-top:8px;border-top:1px dashed #2a2a2a;margin-top:4px}
+}
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
-.va-info{min-width:0;overflow:hidden}
-.va-name{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap;overflow:hidden}
-.va-name > .va-username{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;max-width:260px}
-.va-name > .va-auto-pill,.va-name > .va-salon{flex-shrink:0}
-.va-id{font-family:monospace;font-size:11px;color:#666;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.va-info{min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:2px}
+.va-username{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;color:#fff}
+.va-id{font-family:monospace;font-size:11px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .va-salon{font-size:11px;color:#888;display:inline-flex;align-items:center;gap:4px;text-decoration:none;background:rgba(255,255,255,.04);padding:3px 8px;border-radius:6px}
 .va-salon:hover{background:rgba(59,130,246,.15);color:#3b82f6}
 .va-auto-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
@@ -3048,9 +3052,13 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-card'>"
                 f"{pp_html}"
                 f"<div class='va-info'>"
-                f"<div class='va-name'>{name_display} {auto_pill} {salon_html}</div>"
+                f"{name_display}"
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
+                f"<div class='va-col-auto'>{auto_pill}</div>"
+                + ("<div class='va-col-salon'>" + (salon_html or "<span style='color:#444;font-size:11px'>—</span>") + "</div>")
+                + f""
+                f"<div></div>"
                 f"<div class='va-actions'>"
                 f"{links_btn_html}"
                 f"{mini_clicks_html}"
