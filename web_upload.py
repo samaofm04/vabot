@@ -1050,8 +1050,19 @@ function lbRender(){
   var next = document.querySelector('.lb-next');
   if(prev) prev.disabled = (lbIndex === 0);
   if(next) next.disabled = (lbIndex >= lbGallery.length - 1);
-  // Si panneau ouvert, recharger les meta du nouvel item
-  if(lbEditMode) lbLoadMeta();
+  // Le bouton edit (crayon dans le header) n'apparaît que pour les Reels
+  // (file_id contient |videos|). Pour Posts / Stories / Story CTA / PPs : caché.
+  var editBtn = document.querySelector('.lb-edit-btn');
+  var canEdit = (it.fileId || '').indexOf('|videos|') !== -1;
+  if(editBtn){
+    editBtn.style.display = canEdit ? '' : 'none';
+  }
+  // Si on est sur un media non-éditable et que le panel est ouvert -> fermer
+  if(!canEdit && lbEditMode){
+    lbToggleEdit();
+  }
+  // Si panneau ouvert et item editable, recharger les meta
+  if(lbEditMode && canEdit) lbLoadMeta();
 }
 function lbPrev(){ if(lbIndex > 0){ lbIndex--; lbRender(); } }
 function lbNext(){ if(lbIndex < lbGallery.length - 1){ lbIndex++; lbRender(); } }
