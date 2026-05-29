@@ -1028,17 +1028,25 @@ function showTab(group,name,title,subtitle){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
+    <button class="item" id="tab-saccount" onclick="showTab('settings','saccount','Mon compte','Profil et identifiants')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Mon compte
+    </button>
+    <button class="item" id="tab-sprefs" onclick="showTab('settings','sprefs','Préférences','Thème, langue, affichage')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      Préférences
+    </button>
+    <button class="item" id="tab-ssecurity" onclick="showTab('settings','ssecurity','Sécurité','Sessions actives et accès')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Sécurité
+    </button>
+    <button class="item" id="tab-srole" onclick="showTab('settings','srole','Rôles & permissions','Gérer les utilisateurs et leurs accès')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Rôles & permissions
+    </button>
     <button class="item" id="tab-stoken" onclick="showTab('settings','stoken','Token bot admin','Token du 2e bot Discord')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
       Token bot admin
-    </button>
-    <button class="item" id="tab-spwd" onclick="showTab('settings','spwd','Mot de passe site','Mot de passe d accès à ce site')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      Mot de passe site
-    </button>
-    <button class="item" id="tab-stheme" onclick="showTab('settings','stheme','Thème','Clair ou sombre')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-      Thème
     </button>
     <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
@@ -1501,24 +1509,101 @@ function showFeed(btn,name){
 </form>
 </div>
 
-<!-- SETTINGS - THÈME -->
-<div class="form-section" id="form-stheme" style="display:none">
+<!-- SETTINGS - MON COMPTE -->
+<div class="form-section" id="form-saccount" style="display:none">
+<form method="POST" action="/settings/account" enctype="multipart/form-data" class="box">
+<h3 style="margin-top:0">👤 Informations personnelles</h3>
+<small>Profil et identifiants de connexion</small>
+<label style="margin-top:16px">Photo de profil</label>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+  {profile_pic_html}
+  <input type="file" name="profile_pic" accept="image/*" style="flex:1">
+</div>
+<label>Nom affiché</label>
+<input type="text" name="display_name" value="{account_display_name}" placeholder="Ton nom">
+<label>Email</label>
+<input type="email" name="email" value="{account_email}" placeholder="email@exemple.com">
+<button type="submit">💾 Sauvegarder le profil</button>
+</form>
+
+<form method="POST" action="/settings/account_password" class="box">
+<h3 style="margin-top:0">🔐 Changer le mot de passe</h3>
+<small>Mot de passe d'accès au site</small>
+<label style="margin-top:14px">Nouveau mot de passe</label>
+<input type="password" name="new_password" placeholder="Min 6 caractères" required minlength="6">
+<label>Confirmer le mot de passe</label>
+<input type="password" name="confirm_password" placeholder="Re-tape pour confirmer" required minlength="6">
+<button type="submit">💾 Changer le mot de passe</button>
+</form>
+</div>
+
+<!-- SETTINGS - PRÉFÉRENCES -->
+<div class="form-section" id="form-sprefs" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">🎨 Choisir le thème</h3>
-<small style="margin-bottom:20px;display:block">Choisis entre le mode clair et sombre. Ta préférence est sauvée dans ton navigateur.</small>
+<h3 style="margin-top:0">🎨 Affichage</h3>
+<small>Choisis entre le mode clair et sombre</small>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
-  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:20px;cursor:pointer;transition:all .15s;text-align:center">
-    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-    <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:4px">Clair</div>
-    <div style="font-size:12px;color:#6b7280">Fond blanc, texte sombre</div>
+  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:20px;cursor:pointer;text-align:center;color:#111827">
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;width:100%"><div style="width:14px;height:14px;border-radius:50%;background:#e5e7eb"></div><div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px"></div></div>
+      <div style="display:flex;align-items:center;gap:8px;width:60%"><div style="width:14px;height:14px;border-radius:50%;background:#e5e7eb"></div><div style="flex:1;height:8px;background:#3b82f6;border-radius:4px"></div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px"><input type="radio" name="theme-radio" style="margin:0" id="theme-radio-light"><label for="theme-radio-light" style="font-size:14px;font-weight:600;cursor:pointer;color:#111827;margin:0">Light mode</label></div>
   </div>
-  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0a0a0a;border:2px solid #2a2a2a;border-radius:12px;padding:20px;cursor:pointer;transition:all .15s;text-align:center">
-    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#a5b4fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px">Sombre</div>
-    <div style="font-size:12px;color:#9ca3af">Fond noir, texte clair</div>
+  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0a0a0a;border:2px solid #2a2a2a;border-radius:12px;padding:20px;cursor:pointer;text-align:center;color:#fff">
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;width:100%"><div style="width:14px;height:14px;border-radius:50%;background:#2a2a2a"></div><div style="flex:1;height:8px;background:#2a2a2a;border-radius:4px"></div></div>
+      <div style="display:flex;align-items:center;gap:8px;width:60%"><div style="width:14px;height:14px;border-radius:50%;background:#2a2a2a"></div><div style="flex:1;height:8px;background:#3b82f6;border-radius:4px"></div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px"><input type="radio" name="theme-radio" style="margin:0" id="theme-radio-dark" checked><label for="theme-radio-dark" style="font-size:14px;font-weight:600;cursor:pointer;color:#fff;margin:0">Dark mode</label></div>
   </div>
 </div>
 </div>
+<div class="box">
+<h3 style="margin-top:0">🌐 Langue</h3>
+<small>Langue de l'interface</small>
+<label style="margin-top:14px">Langue</label>
+<select disabled>
+  <option>Français (par défaut)</option>
+  <option>English (coming soon)</option>
+</select>
+<small style="margin-top:8px">L'anglais sera disponible bientôt.</small>
+</div>
+</div>
+
+<!-- SETTINGS - SÉCURITÉ -->
+<div class="form-section" id="form-ssecurity" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🛡️ Sessions actives</h3>
+<small>Personnes actuellement connectées à ton site</small>
+{security_sessions_html}
+</div>
+</div>
+
+<!-- SETTINGS - RÔLES -->
+<div class="form-section" id="form-srole" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">👥 Rôles & permissions</h3>
+<small>Gère qui peut accéder à quelles fonctions du site</small>
+{role_settings_html}
+</div>
+<form method="POST" action="/settings/role/add" class="box">
+<h3 style="margin-top:0">➕ Ajouter un utilisateur</h3>
+<small>Crée un compte d'accès avec un rôle spécifique</small>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+<div><label>Nom</label><input type="text" name="username" placeholder="Nom de l'utilisateur" required></div>
+<div><label>Rôle</label><select name="role" required>
+<option value="admin">Admin (tout)</option>
+<option value="creator">Creator (upload + cloud)</option>
+<option value="chatter">Chatter (revenus + sfs)</option>
+<option value="va">VA (lecture seule)</option>
+<option value="custom">Custom (à définir)</option>
+</select></div>
+</div>
+<label>Mot de passe initial</label>
+<input type="password" name="password" placeholder="Min 6 caractères" required minlength="6">
+<button type="submit">Ajouter l'utilisateur</button>
+</form>
 </div>
 
 <!-- SETTINGS - MOT DE PASSE -->
@@ -3495,6 +3580,181 @@ def _render_bilan_html_OLD() -> str:
     return "".join(rows)
 
 
+def _load_account_settings() -> dict:
+    """Charge les settings du compte propriétaire."""
+    f = DATA_DIR / "account_settings.json"
+    if not f.exists():
+        return {}
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_account_settings(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    f = DATA_DIR / "account_settings.json"
+    f.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _render_profile_pic_html() -> str:
+    """Render the profile pic preview (with fallback initial)."""
+    settings = _load_account_settings()
+    name = settings.get("display_name", "Admin")
+    pic_path = DATA_DIR / "profile_pic.png"
+    pic_jpg = DATA_DIR / "profile_pic.jpg"
+    if pic_path.exists():
+        return f"<img src='/account/profile_pic?v={int(time.time())}' style='width:80px;height:80px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+    if pic_jpg.exists():
+        return f"<img src='/account/profile_pic?v={int(time.time())}' style='width:80px;height:80px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+    init = (name[0] if name else "?").upper()
+    return (
+        f"<div style='width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);"
+        f"display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:28px'>{init}</div>"
+    )
+
+
+def _load_active_sessions() -> list:
+    """Charge la liste des sessions actives."""
+    f = DATA_DIR / "active_sessions.json"
+    if not f.exists():
+        return []
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _render_security_sessions_html() -> str:
+    """Liste des sessions actives."""
+    sessions = _load_active_sessions()
+    try:
+        from flask import session as flask_session
+        current_sid = flask_session.get("session_id")
+        for s in sessions:
+            if s.get("id") == current_sid:
+                s["current"] = True
+    except Exception:
+        pass
+    if not sessions:
+        return (
+            "<p style='color:#888'>Aucune session active trackée pour l'instant.</p>"
+            "<small>Les sessions seront enregistrées au prochain login.</small>"
+        )
+    rows = ["<div style='display:flex;flex-direction:column;gap:10px;margin-top:14px'>"]
+    import datetime
+    for s in sessions[:20]:
+        ts = s.get("last_seen", 0)
+        try:
+            last_seen = datetime.datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            last_seen = "?"
+        is_current = s.get("current", False)
+        badge = "<span style='background:#10b981;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700'>ACTUELLE</span>" if is_current else ""
+        rows.append(
+            f"<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center'>"
+            f"<div>"
+            f"<div style='font-weight:600;font-size:14px;margin-bottom:4px'>{s.get('user_agent_short', 'Unknown browser')} {badge}</div>"
+            f"<div style='font-size:12px;color:#888'>IP : {s.get('ip', '?')} · Dernière activité : {last_seen}</div>"
+            f"</div>"
+            f"<form method='POST' action='/security/revoke_session' style='margin:0'>"
+            f"<input type='hidden' name='session_id' value='{s.get('id', '')}'>"
+            f"<button type='submit' class='danger-btn' data-confirm='Déconnecter cette session ?'>Déconnecter</button>"
+            f"</form>"
+            f"</div>"
+        )
+    rows.append("</div>")
+    return "".join(rows)
+
+
+def _load_role_users() -> list:
+    """Liste des utilisateurs additionnels avec rôles."""
+    f = DATA_DIR / "role_users.json"
+    if not f.exists():
+        return []
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_role_users(users: list):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    f = DATA_DIR / "role_users.json"
+    f.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _render_role_settings_html() -> str:
+    """Tableau des rôles et permissions + utilisateurs."""
+    users = _load_role_users()
+    roles_info = [
+        ("Owner", "Toutes permissions", "Toi (compte principal)", "#3b82f6"),
+        ("Admin", "Accès complet (toutes pages, gestion VAs)", "—", "#3b82f6"),
+        ("Creator", "Upload + Cloud + visualisation revenus de son identité", "—", "#10b981"),
+        ("Chatter", "Voir revenus + SFS + planning, pas d'upload", "—", "#fbbf24"),
+        ("VA", "Lecture seule + accès à son propre contenu", "—", "#a855f7"),
+    ]
+    users_by_role = {}
+    for u in users:
+        r = u.get("role", "?")
+        users_by_role.setdefault(r, []).append(u.get("username", "?"))
+
+    rows = ["<table style='width:100%;border-collapse:collapse;margin-top:14px'>"]
+    rows.append(
+        "<tr style='background:#1a1a1a'>"
+        "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Rôle</th>"
+        "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Description</th>"
+        "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Utilisateurs</th>"
+        "<th style='padding:10px 8px;text-align:center;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Statut</th>"
+        "</tr>"
+    )
+    for role_name, desc, default_user, color in roles_info:
+        members_list = users_by_role.get(role_name.lower(), [])
+        if role_name == "Owner" and not members_list:
+            members_list = [default_user]
+        if members_list:
+            members_str = ", ".join(members_list)
+        else:
+            members_str = "<span style='color:#666'>—</span>"
+        rows.append(
+            f"<tr style='border-bottom:1px solid #2a2a2a'>"
+            f"<td style='padding:12px 8px'><b style='color:{color}'>{role_name}</b></td>"
+            f"<td style='padding:12px 8px;font-size:13px;color:#aaa'>{desc}</td>"
+            f"<td style='padding:12px 8px;font-size:13px'>{members_str}</td>"
+            f"<td style='padding:12px 8px;text-align:center'>"
+            f"<div style='display:inline-block;width:36px;height:20px;background:#3b82f6;border-radius:10px;position:relative'>"
+            f"<div style='position:absolute;right:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div>"
+            f"</div>"
+            f"</td></tr>"
+        )
+    rows.append("</table>")
+    # Tableau des utilisateurs ajoutés (avec suppression)
+    if users:
+        rows.append("<h4 style='margin:20px 0 10px'>Utilisateurs ajoutés</h4>")
+        rows.append("<table style='width:100%;border-collapse:collapse'>")
+        rows.append("<tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Username</th><th style='padding:8px;text-align:left'>Rôle</th><th style='padding:8px;text-align:left'>Créé</th><th style='padding:8px;text-align:right'></th></tr>")
+        import datetime
+        for u in users:
+            ts = u.get("created_at", 0)
+            try:
+                created = datetime.datetime.fromtimestamp(ts).strftime("%d/%m/%Y")
+            except Exception:
+                created = "?"
+            rows.append(
+                f"<tr style='border-bottom:1px solid #2a2a2a'>"
+                f"<td style='padding:8px'><b>{u.get('username','?')}</b></td>"
+                f"<td style='padding:8px;color:#aaa'>{u.get('role','?')}</td>"
+                f"<td style='padding:8px;color:#888;font-size:12px'>{created}</td>"
+                f"<td style='padding:8px;text-align:right'>"
+                f"<form method='POST' action='/settings/role/remove' style='display:inline;margin:0'>"
+                f"<input type='hidden' name='username' value='{u.get('username','')}'>"
+                f"<button type='submit' class='danger-btn' data-confirm=\"Supprimer {u.get('username','')} ?\">×</button>"
+                f"</form></td></tr>"
+            )
+        rows.append("</table>")
+    return "".join(rows)
+
+
 def _web_password_status() -> str:
     if WEB_PASSWORD == "changeme":
         return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
@@ -3571,6 +3831,11 @@ def _render_upload(msg=None, error=None):
         .replace("{depenses_html}", _render_depenses_html())
         .replace("{paievas_html}", _render_paievas_html())
         .replace("{bilan_html}", _render_bilan_html())
+        .replace("{profile_pic_html}", _render_profile_pic_html())
+        .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
+        .replace("{account_email}", _load_account_settings().get("email", ""))
+        .replace("{security_sessions_html}", _render_security_sessions_html())
+        .replace("{role_settings_html}", _render_role_settings_html())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
         .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
@@ -3625,11 +3890,65 @@ def create_app():
         session["flash_error"] = True
         return redirect(_redirect_back(tab))
 
+    def _track_session():
+        """Met à jour la session courante dans active_sessions.json."""
+        try:
+            sid = session.get("session_id")
+            if not sid:
+                import uuid
+                sid = uuid.uuid4().hex[:16]
+                session["session_id"] = sid
+            ua = request.headers.get("User-Agent", "")
+            # User-agent simplifié
+            ua_short = "Unknown"
+            for tag, label in [
+                ("Chrome", "Chrome"), ("Firefox", "Firefox"), ("Safari", "Safari"),
+                ("Edge", "Edge"), ("Opera", "Opera"),
+            ]:
+                if tag in ua:
+                    ua_short = label
+                    break
+            os_name = "Unknown"
+            for tag, label in [
+                ("Windows", "Windows"), ("Mac", "macOS"), ("Linux", "Linux"),
+                ("Android", "Android"), ("iPhone", "iOS"),
+            ]:
+                if tag in ua:
+                    os_name = label
+                    break
+            ua_label = f"{ua_short} sur {os_name}"
+            sessions = _load_active_sessions()
+            now = int(time.time())
+            updated = False
+            for s in sessions:
+                if s.get("id") == sid:
+                    s["last_seen"] = now
+                    s["ip"] = request.remote_addr or "?"
+                    s["user_agent_short"] = ua_label
+                    updated = True
+                    break
+            if not updated:
+                sessions.append({
+                    "id": sid,
+                    "ip": request.remote_addr or "?",
+                    "user_agent_short": ua_label,
+                    "first_seen": now,
+                    "last_seen": now,
+                })
+            # Garder seulement les 50 plus récentes
+            sessions = sorted(sessions, key=lambda s: s.get("last_seen", 0), reverse=True)[:50]
+            (DATA_DIR / "active_sessions.json").write_text(
+                json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
     @app.route("/", methods=["GET", "POST"])
     def index():
         if request.method == "POST" and not is_auth():
             if request.form.get("password") == WEB_PASSWORD:
                 session["auth"] = True
+                _track_session()
                 return redirect("/")
             return _render_login("Mauvais mot de passe")
         if not is_auth():
@@ -4123,6 +4442,106 @@ def create_app():
         if remove_va_payment(iid):
             return _success("✅ Paiement supprimé")
         return _error("❌ Paiement introuvable")
+
+    @app.route("/account/profile_pic")
+    def account_profile_pic():
+        if not is_auth():
+            return redirect("/")
+        for ext in ("png", "jpg", "jpeg", "webp"):
+            p = DATA_DIR / f"profile_pic.{ext}"
+            if p.exists():
+                from flask import send_file
+                return send_file(str(p))
+        return "Not found", 404
+
+    @app.route("/settings/account", methods=["POST"])
+    def settings_account():
+        if not is_auth():
+            return redirect("/")
+        settings = _load_account_settings()
+        display_name = (request.form.get("display_name") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        if display_name:
+            settings["display_name"] = display_name[:60]
+        if email:
+            settings["email"] = email[:120]
+        f = request.files.get("profile_pic")
+        if f and f.filename:
+            ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
+            if ext in ("png", "jpg", "jpeg", "webp"):
+                # Supprimer les anciennes
+                for old_ext in ("png", "jpg", "jpeg", "webp"):
+                    old = DATA_DIR / f"profile_pic.{old_ext}"
+                    if old.exists():
+                        try:
+                            old.unlink()
+                        except Exception:
+                            pass
+                f.save(str(DATA_DIR / f"profile_pic.{ext}"))
+        _save_account_settings(settings)
+        return _success("✅ Profil sauvegardé")
+
+    @app.route("/settings/account_password", methods=["POST"])
+    def settings_account_password():
+        if not is_auth():
+            return redirect("/")
+        new_pwd = (request.form.get("new_password") or "").strip()
+        confirm = (request.form.get("confirm_password") or "").strip()
+        if not new_pwd or len(new_pwd) < 6:
+            return _error("❌ Mot de passe trop court (min 6 caractères)")
+        if new_pwd != confirm:
+            return _error("❌ Les mots de passe ne correspondent pas")
+        ok = _write_env_var("WEB_UPLOAD_PASSWORD", new_pwd)
+        if not ok:
+            return _error("❌ Erreur écriture .env")
+        _schedule_restart(2.0)
+        return _success("✅ Mot de passe changé. Redémarrage dans 2 sec — reconnecte-toi.")
+
+    @app.route("/security/revoke_session", methods=["POST"])
+    def security_revoke():
+        if not is_auth():
+            return redirect("/")
+        sid = (request.form.get("session_id") or "").strip()
+        sessions = _load_active_sessions()
+        sessions = [s for s in sessions if s.get("id") != sid]
+        try:
+            (DATA_DIR / "active_sessions.json").write_text(
+                json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception as e:
+            return _error(f"❌ Erreur : {e}")
+        return _success("✅ Session révoquée")
+
+    @app.route("/settings/role/add", methods=["POST"])
+    def settings_role_add():
+        if not is_auth():
+            return redirect("/")
+        username = (request.form.get("username") or "").strip()
+        role = (request.form.get("role") or "").strip().lower()
+        password = (request.form.get("password") or "").strip()
+        if not username or not role or len(password) < 6:
+            return _error("❌ Champs requis manquants ou password trop court")
+        users = _load_role_users()
+        if any(u.get("username") == username for u in users):
+            return _error(f"❌ {username} existe déjà")
+        users.append({
+            "username": username,
+            "role": role,
+            "password_hash": password,  # TODO: bcrypt hash in real prod
+            "created_at": int(time.time()),
+        })
+        _save_role_users(users)
+        return _success(f"✅ Utilisateur <b>{username}</b> ajouté (rôle : {role})")
+
+    @app.route("/settings/role/remove", methods=["POST"])
+    def settings_role_remove():
+        if not is_auth():
+            return redirect("/")
+        username = (request.form.get("username") or "").strip()
+        users = _load_role_users()
+        users = [u for u in users if u.get("username") != username]
+        _save_role_users(users)
+        return _success(f"✅ {username} supprimé")
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
     def settings_insta_rapidapi():
