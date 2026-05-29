@@ -319,7 +319,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hel
 #page-loader.show{display:flex}
 #page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
 @keyframes plSpin{to{transform:rotate(360deg)}}
-body.light #page-loader{background:rgba(249,250,251,.92)}
+body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,.92)}
 .layout{display:flex;min-height:100vh}
 
 /* ============ ANIMATIONS ============ */
@@ -960,8 +960,12 @@ function lbCollectGallery(){
     var wrap = card.querySelector('[onclick*="openLightbox"]');
     if(!wrap) return;
     var oc = wrap.getAttribute('onclick') || '';
-    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)"(?:,"([^"]*)")?\)/);
-    if(m) lbGallery.push({url:m[1], isVideo:m[2]==='true', name:m[3], fileId:m[4]||''});
+    // openLightbox("url",isVideo,"name","fileId","exampleUrl")
+    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)",?"?([^"]*)"?,?"?([^"]*)"?\)/);
+    if(m) lbGallery.push({
+      url: m[1], isVideo: m[2]==='true', name: m[3],
+      fileId: m[4] || '', exampleUrl: m[5] || ''
+    });
   });
 }
 function lbRender(){
@@ -971,10 +975,25 @@ function lbRender(){
   if(!it) return;
   var content = document.getElementById('lightbox-content');
   if(it.isVideo){
-    // Vidéo : auto-play + controls custom-styled. Le video tag se redimensionne tout seul
-    // selon le ratio du média (9:16 vertical pour MYM, ou 16:9, etc.)
-    content.innerHTML = '<video controls autoplay playsinline preload="metadata" src="'+it.url+'" '
+    var mainVideo = '<video controls autoplay playsinline preload="metadata" src="'+it.url+'" '
       + 'style="max-width:100%;max-height:calc(100vh - 120px);height:auto;width:auto"></video>';
+    if(it.exampleUrl){
+      // Affichage côte-à-côte : vidéo principale + exemple (muet, autoplay loop pour preview)
+      content.innerHTML =
+        '<div class="lb-dual-video">' +
+          '<div class="lb-dual-item">' +
+            '<div class="lb-dual-label">Original</div>' +
+            mainVideo +
+          '</div>' +
+          '<div class="lb-dual-item">' +
+            '<div class="lb-dual-label">Exemple</div>' +
+            '<video controls muted loop playsinline preload="metadata" src="'+it.exampleUrl+'" '
+              + 'style="max-width:100%;max-height:calc(100vh - 120px);height:auto;width:auto"></video>' +
+          '</div>' +
+        '</div>';
+    } else {
+      content.innerHTML = mainVideo;
+    }
   } else {
     content.innerHTML = '<img src="'+it.url+'" alt="'+(it.name||'').replace(/"/g,'')+'">';
   }
@@ -991,14 +1010,14 @@ function lbRender(){
 }
 function lbPrev(){ if(lbIndex > 0){ lbIndex--; lbRender(); } }
 function lbNext(){ if(lbIndex < lbGallery.length - 1){ lbIndex++; lbRender(); } }
-function openLightbox(url, isVideo, filename, fileId){
+function openLightbox(url, isVideo, filename, fileId, exampleUrl){
   lbCollectGallery();
   lbIndex = 0;
   for(var i = 0; i < lbGallery.length; i++){
     if(lbGallery[i].url === url){ lbIndex = i; break; }
   }
   if(lbGallery.length === 0){
-    lbGallery = [{url:url, isVideo:isVideo, name:filename, fileId:fileId||''}];
+    lbGallery = [{url:url, isVideo:isVideo, name:filename, fileId:fileId||'', exampleUrl:exampleUrl||''}];
     lbIndex = 0;
   }
   var modal = document.getElementById('lightbox');
@@ -1143,9 +1162,20 @@ function showTab(group,name,title,subtitle){
 }
 </script>
 <script>
+// === Theme sync (AVANT le premier paint pour éviter le flash sombre) ===
+(function(){
+  try{
+    var theme = localStorage.getItem('vabot_theme') || 'light';
+    if(theme === 'light'){
+      // Ajouter la classe sur <html> tout de suite + CSS critique
+      document.documentElement.classList.add('light-pre');
+      var s = document.createElement('style');
+      s.textContent = 'html.light-pre,html.light-pre body{background:#f9fafb !important;color:#111827 !important}';
+      document.head.appendChild(s);
+    }
+  }catch(e){}
+})();
 // Run AVANT le premier rendu : cache form-home et affiche le bon form-<tab>
-// directement via une <style> injectée. Evite le flicker (form-home brièvement
-// visible avant que showTab() bascule sur le bon).
 (function(){
   try{
     var params = new URLSearchParams(window.location.search);
@@ -2086,6 +2116,12 @@ body.light .action-icon{color:#666}
   box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
   max-width:100%;max-height:calc(100vh - 120px);width:auto;height:auto}
 #lightbox-content video::-webkit-media-controls-panel{background:linear-gradient(to top,rgba(0,0,0,.85),transparent);border-radius:0 0 14px 14px}
+/* Dual video : Original + Exemple côte à côte */
+.lb-dual-video{display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap;max-width:100%;max-height:100%}
+.lb-dual-item{display:flex;flex-direction:column;align-items:center;gap:8px;max-width:48%;flex:1;min-width:0}
+.lb-dual-label{font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.08em;background:rgba(0,0,0,.5);padding:5px 12px;border-radius:6px;backdrop-filter:blur(4px)}
+.lb-dual-item video{max-width:100% !important;max-height:calc(100vh - 160px) !important}
+@media(max-width:900px){.lb-dual-video{flex-direction:column}.lb-dual-item{max-width:100%}}
 /* Bouton edit crayon dans header */
 .lb-edit-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
 .lb-edit-btn:hover,.lb-edit-btn.active{background:#3b82f6;transform:scale(1.08)}
@@ -2474,7 +2510,7 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "") -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "") -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title)."""
     name = file_path.name
@@ -2512,10 +2548,10 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
 
     is_video_js = "true" if is_video else "false"
-    # file_id contient identity|subdir|name → utile pour fetch/save meta
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
+    example_safe = example_url.replace("'", "\\'") if example_url else ""
     media_html = (
-        f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\")' "
+        f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\",\"{example_safe}\")' "
         f"title='{name}' "
         f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;background:#000;border-radius:10px;overflow:hidden'>"
         f"<img src='{thumb_url}' loading='lazy' "
@@ -2798,11 +2834,24 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         )
     else:
         cards_html = []
+        # Pré-indexer les fichiers exemple par stem pour lookup rapide
+        example_by_stem = {}
+        if folder.exists():
+            for pe in folder.iterdir():
+                if pe.is_file() and ".example" in pe.name:
+                    base_stem = pe.stem.replace(".example", "")
+                    example_by_stem[base_stem] = pe.name
+
         for p in files:
             url = f"/cloud/file/{selected}/{subdir}/{p.name}"
             thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
             file_id = f"{selected}|{subdir}|{p.name}"
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id))
+            # Chercher un fichier exemple correspondant
+            example_url = ""
+            ex_name = example_by_stem.get(p.stem)
+            if ex_name:
+                example_url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, example_url))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px'>"
