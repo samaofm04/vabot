@@ -3187,6 +3187,12 @@ def _render_mypuls_section_html() -> str:
     # CSS commun
     css = """
 <style>
+/* Spinner Insta-style */
+.mp-spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:mpSpin .7s linear infinite;flex-shrink:0}
+@keyframes mpSpin{to{transform:rotate(360deg)}}
+.mp-save-btn.loading{cursor:wait;opacity:.85}
+.mp-save-btn.loading .mp-save-label{display:none}
+.mp-save-btn.loading .mp-spinner{display:inline-block !important}
 .mypuls-section{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
 .mypuls-section h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
 .mypuls-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
@@ -3592,7 +3598,10 @@ body.light .mypuls-bar{background:#e5e7eb}
                 if crypto_address else ""
             )
             + "</div></div>"
-            f"<button type='submit' onclick='this.innerText=\"Sauvegarde…\";this.disabled=true;this.form.submit()' style='background:#3b82f6;color:#fff;border:0;padding:8px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-top:4px'>Enregistrer</button>"
+            f"<button type='submit' class='mp-save-btn' style='background:#3b82f6;color:#fff;border:0;padding:10px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:38px'>"
+            f"<span class='mp-save-label'>Enregistrer</span>"
+            f"<span class='mp-spinner' style='display:none'></span>"
+            f"</button>"
             f"</form>"
             # Colonne droite : screenshot + actions
             f"<div style='display:flex;flex-direction:column;gap:10px'>"
@@ -3608,9 +3617,9 @@ body.light .mypuls-bar{background:#e5e7eb}
             + f"<input type='file' name='file' accept='image/*' onchange='this.form.submit()' style='display:none'></label>"
             f"</form>"
             + (
-                f"<form method='POST' action='/mypuls/chatter/delete_crypto' style='margin:0' onsubmit='return confirm(\"Supprimer le screenshot ?\")'>"
+                f"<form method='POST' action='/mypuls/chatter/delete_crypto' style='margin:0'>"
                 f"<input type='hidden' name='name' value='{name_esc}'>"
-                f"<button type='submit' style='width:100%;background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px;border-radius:6px;font-size:11px;cursor:pointer'>🗑 Supprimer le screenshot</button>"
+                f"<button type='submit' data-confirm='Cette action est irréversible.' data-confirm-title='Supprimer le screenshot ?' style='width:100%;background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px;border-radius:6px;font-size:11px;cursor:pointer'>🗑 Supprimer le screenshot</button>"
                 f"</form>"
                 if has_screenshot else ""
             )
@@ -3825,9 +3834,18 @@ document.addEventListener('DOMContentLoaded', function(){
     var rowIdx = sel.getAttribute('data-row');
     var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
     if(!typeSel || !typeSel.value) return;
-    // Stocker la valeur sauvegardée pour la restaurer
     sel.setAttribute('data-saved', (window.__mpCryptoData_byRow || {})[rowIdx] || '');
     mpUpdateInlineNetworks(rowIdx);
+  });
+  // Spinner sur tous les boutons Save MyPuls quand le form est submit
+  document.querySelectorAll('.mp-save-btn').forEach(function(btn){
+    var form = btn.closest('form');
+    if(form){
+      form.addEventListener('submit', function(){
+        btn.classList.add('loading');
+        btn.disabled = true;
+      });
+    }
   });
 });
 </script>
