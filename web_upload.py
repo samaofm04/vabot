@@ -3019,6 +3019,151 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
+def _render_mypuls_section_html() -> str:
+    """Section MyPuls en haut de la page Revenus :
+    - statut clé API + bouton tester
+    - mapping identité -> nom modèle MYM
+    - bouton sync qui récupère /userInfo pour chaque modèle et affiche les ventes
+    """
+    try:
+        import mypuls
+    except Exception as e:
+        return f"<div class='box' style='border:1px solid rgba(239,68,68,.3)'><p style='color:#ef4444;margin:0;font-size:13px'>❌ Module mypuls indispo : {e}</p></div>"
+
+    from flask import request as flask_request
+
+    identities = _list_identities()
+    configured = mypuls.is_configured()
+    key = mypuls.get_api_key()
+    key_masked = (key[:10] + "…" + key[-6:]) if key and len(key) > 18 else (key or "")
+    mapping = mypuls.list_model_map()
+
+    if configured:
+        status_html = (
+            f"<div style='display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:8px;margin-bottom:14px'>"
+            f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='#22c55e' stroke-width='2.5'><path d='M20 6L9 17l-5-5'/></svg>"
+            f"<div style='flex:1;font-size:13px'>Clé API MyPuls configurée — <code style='color:#888'>{key_masked}</code></div>"
+            f"<form method='POST' action='/mypuls/test' style='margin:0'><button type='submit' style='background:#22c55e;color:#000;border:0;padding:5px 12px;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer'>▶ Tester</button></form>"
+            f"</div>"
+        )
+    else:
+        status_html = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;margin-bottom:14px;font-size:13px;color:#ef4444;font-weight:600'>"
+            "⚠ Configure ta clé API MyPuls pour synchroniser tes ventes automatiquement"
+            "</div>"
+        )
+
+    key_form = (
+        "<form method='POST' action='/mypuls/save_key' style='display:flex;gap:8px;margin-bottom:14px'>"
+        "<input type='password' name='api_key' placeholder='Clé API (Profil MyPuls → Extension)' required minlength='32' style='flex:1' "
+        + (f"value=''" if configured else "") + ">"
+        "<button type='submit'>" + ("Changer la clé" if configured else "Enregistrer") + "</button>"
+        "</form>"
+    )
+
+    # Mapping identité <-> modèle MYM
+    mapping_rows_html = ""
+    if identities and configured:
+        rows_inner = []
+        for ident in identities:
+            current = mapping.get(ident, "")
+            rows_inner.append(
+                f"<form method='POST' action='/mypuls/save_model' style='display:flex;align-items:center;gap:10px;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;margin:0'>"
+                f"<input type='hidden' name='identity' value='{ident}'>"
+                f"<div style='min-width:80px;font-weight:600;font-size:13px;color:#888'>{ident}</div>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#666' stroke-width='2'><line x1='5' y1='12' x2='19' y2='12'/><polyline points='12 5 19 12 12 19'/></svg>"
+                f"<input type='text' name='model_name' value='{current}' placeholder='nom MYM (ex. ameliawdifference)' style='flex:1;font-size:12px;padding:6px 10px;background:#0f1116;border:1px solid #2a2a2a;color:#fff;border-radius:6px'>"
+                f"<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer'>Save</button>"
+                f"</form>"
+            )
+        mapping_rows_html = (
+            "<div style='margin:10px 0 14px'>"
+            "<div style='font-size:12px;color:#888;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Modèle MYM par identité</div>"
+            "<div style='display:flex;flex-direction:column;gap:6px'>"
+            + "".join(rows_inner) + "</div></div>"
+        )
+
+    # Si on a un modelName en query (résultat de sync), afficher
+    sync_results_html = ""
+    if configured:
+        sync_for = flask_request.args.get("mypuls_for", "").strip() if hasattr(flask_request, "args") else ""
+        if sync_for:
+            res = mypuls.user_info(sync_for)
+            if not res.get("ok"):
+                sync_results_html = (
+                    f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px;margin-bottom:14px'>"
+                    f"❌ Sync échoué pour <code>{sync_for}</code> : {res.get('error', '?')}<br>"
+                    f"<span style='font-size:11px;color:#888'>Vérifie que ce modèle est bien claimed via l'extension MymUtils.</span>"
+                    f"</div>"
+                )
+            else:
+                data = res.get("data") or {}
+                if isinstance(data, str):
+                    sync_results_html = f"<div class='box' style='font-family:monospace;font-size:12px'>{data}</div>"
+                else:
+                    parts = [f"<div class='box'><h4 style='margin:0 0 10px'>📊 Données MyPuls pour <code>{sync_for}</code></h4>"]
+                    if data.get("revenues"):
+                        parts.append("<h5 style='margin:8px 0;color:#00d68f'>💰 Ventes par chatteur</h5>")
+                        parts.append(f"<div class='mypuls-html' style='overflow-x:auto'>{data['revenues']}</div>")
+                    if data.get("modeles"):
+                        parts.append("<h5 style='margin:16px 0 8px;color:#3b82f6'>👤 Modèles gérés</h5>")
+                        parts.append(f"<div class='mypuls-html' style='overflow-x:auto'>{data['modeles']}</div>")
+                    if not data.get("revenues") and not data.get("modeles"):
+                        parts.append(f"<p style='color:#888;font-size:13px;margin:0'>Aucune donnée renvoyée. Réponse brute : <code>{str(data)[:300]}</code></p>")
+                    parts.append("</div>")
+                    sync_results_html = "".join(parts)
+
+    # Boutons de sync par modèle (si on en a)
+    sync_buttons_html = ""
+    if configured and mapping:
+        buttons = []
+        for ident, model in mapping.items():
+            if not model:
+                continue
+            buttons.append(
+                f"<a href='?tab=revenus&mypuls_for={model}' "
+                f"style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px'>"
+                f"🔄 Sync {ident}</a>"
+            )
+        if buttons:
+            sync_buttons_html = (
+                "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center'>"
+                "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px'>Récupérer les ventes :</span>"
+                + "".join(buttons) + "</div>"
+            )
+
+    css = """
+<style>
+.mypuls-section{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
+.mypuls-section h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
+.mypuls-html table{width:100%;border-collapse:collapse;font-size:12px}
+.mypuls-html th{background:#1a1a1a;color:#888;padding:8px;text-align:left;border-bottom:1px solid #2a2a2a;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.mypuls-html td{padding:8px;border-bottom:1px solid #1a1a1a;color:#fff}
+.mypuls-html tr:hover td{background:rgba(59,130,246,.05)}
+body.light .mypuls-section{background:#fff;border-color:#e5e7eb}
+body.light .mypuls-html th{background:#f9fafb;color:#666;border-color:#e5e7eb}
+body.light .mypuls-html td{color:#111;border-color:#f3f4f6}
+</style>
+"""
+
+    header = (
+        "<div class='mypuls-section'>"
+        "<h3>"
+        "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
+        "Sync MyPuls"
+        "<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>récupère les ventes depuis mymutils.fr</span>"
+        "</h3>"
+        + status_html
+        + key_form
+        + mapping_rows_html
+        + sync_buttons_html
+        + sync_results_html
+        + "<p style='font-size:11px;color:#666;margin:8px 0 0'>⚠ Prérequis : ton modèle MYM doit être <strong>claimed</strong> via l'extension Chrome MymUtils (auto quand tu vas sur creators.mym.fans connecté).</p>"
+        + "</div>"
+    )
+    return css + header
+
+
 def _render_revenus_html() -> str:
     try:
         from business import list_revenues, revenue_stats
@@ -3033,6 +3178,8 @@ def _render_revenus_html() -> str:
     items = list_revenues()
     stats = revenue_stats()
     rows = []
+    # ============ MyPuls sync en haut ============
+    rows.append(_render_mypuls_section_html())
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
         f"<div class='stat'><div class='v' style='color:#00d68f'>+{stats['total_this_month']:.0f}€</div><div class='l'>Revenus ce mois</div></div>"
@@ -5289,6 +5436,53 @@ def create_app():
             verb = "activé" if action == "enable" else "désactivé"
             return _success(f"✅ Lien {verb}")
         return _error(f"❌ {res.get('error', 'Action échouée')}")
+
+    # ============ MYPULS ============
+
+    @app.route("/mypuls/save_key", methods=["POST"])
+    def mypuls_save_key():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        key = (request.form.get("api_key") or "").strip()
+        if not key or len(key) < 32:
+            return _error("❌ Clé invalide (doit faire au moins 32 caractères hex)")
+        mypuls.save_api_key(key)
+        return _success(f"✅ Clé MyPuls enregistrée : <code>{key[:10]}…{key[-6:]}</code>")
+
+    @app.route("/mypuls/test", methods=["POST"])
+    def mypuls_test():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        res = mypuls.ping()
+        if res.get("ok"):
+            info = res.get("info", "OK")
+            return _success(f"✅ Connexion MyPuls : {info}")
+        return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/mypuls/save_model", methods=["POST"])
+    def mypuls_save_model():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        ident = (request.form.get("identity") or "").strip().lower()
+        model = (request.form.get("model_name") or "").strip()
+        if not ident:
+            return _error("❌ Identité requise")
+        mypuls.set_model_for_identity(ident, model)
+        if model:
+            return _success(f"✅ <code>{ident}</code> → modèle MYM <code>{model}</code>")
+        return _success(f"✅ Mapping retiré pour <code>{ident}</code>")
 
     @app.route("/gms/delete", methods=["POST"])
     def gms_delete():
