@@ -2405,65 +2405,105 @@ _VA_DAILY_CACHE: dict = {}
 _VA_DAILY_TTL = 300  # 5 minutes
 
 
-def _get_links_clicks_period(link_ids: list, days: int = 30) -> int:
-    """Total clicks GMS sur des liens spécifiques, sur N derniers jours. Cache 5 min."""
+def _get_links_clicks_period(link_ids: list, days: int = 7) -> dict:
+    """Retourne {total, daily: [...]} pour des liens GMS sur N jours.
+
+    Daily est calculé à partir de list_recent_visitors (timestamps par visite).
+    Cache 5 min.
+    """
     import time as _t
     now = _t.time()
-    key = "|".join(sorted(link_ids))
+    key = "|".join(sorted(link_ids)) + f"|days={days}"
     cached = _VA_DAILY_CACHE.get(key)
     if cached and (now - cached[0]) < _VA_DAILY_TTL:
         return cached[1]
+    result = {"total": 0, "daily": [0] * days}
     try:
         import gms
         import datetime as _dt3
         if not gms.is_configured() or not link_ids:
-            _VA_DAILY_CACHE[key] = (now, 0)
-            return 0
+            _VA_DAILY_CACHE[key] = (now, result)
+            return result
+        # list_recent_visitors avec limit 100 (les param dates ne marchent pas
+        # fiablement sur cette API, on filtre côté client).
         today = _dt3.date.today()
-        start = (today - _dt3.timedelta(days=days - 1)).isoformat()
-        end = today.isoformat()
-        res = gms.get_analytics_overview(start, end, link_ids)
-        clicks = 0
+        start_date = today - _dt3.timedelta(days=days - 1)
+        res = gms._call_tool("list_recent_visitors", {
+            "link_ids": link_ids,
+            "limit": 100,
+        })
         if res.get("ok"):
-            clicks = int((res.get("data") or {}).get("total_clicks", 0))
-        _VA_DAILY_CACHE[key] = (now, clicks)
-        return clicks
+            data = res.get("data") or {}
+            visitors = data.get("data", []) if isinstance(data, dict) else []
+            # Bucketer par jour
+            buckets = {}  # iso_date -> count
+            for v in visitors:
+                ts = v.get("timestamp", "") if isinstance(v, dict) else ""
+                if not ts:
+                    continue
+                try:
+                    # Format "2026-05-29T09:00:47.000Z"
+                    day = ts[:10]  # "2026-05-29"
+                    if start_date.isoformat() <= day <= today.isoformat():
+                        buckets[day] = buckets.get(day, 0) + 1
+                except Exception:
+                    pass
+            # Construire le tableau dans l'ordre chronologique
+            daily = []
+            for i in range(days - 1, -1, -1):
+                d = (today - _dt3.timedelta(days=i)).isoformat()
+                daily.append(buckets.get(d, 0))
+            result = {"total": sum(daily), "daily": daily}
+        _VA_DAILY_CACHE[key] = (now, result)
+        return result
     except Exception:
-        return 0
+        return result
 
 
-def _get_model_clicks_period(model_name: str, days: int = 7) -> int:
-    """Retourne le total des clicks GMS d'un modèle sur les N derniers jours.
+def _sparkline_svg(values: list, width: int = 90, height: int = 28, color: str = "#a855f7") -> str:
+    """Mini sparkline avec area fill."""
+    if not values:
+        return ""
+    n = len(values)
+    if n < 2:
+        return ""
+    max_v = max(values) or 1
+    pts = []
+    for i, v in enumerate(values):
+        x = (i / (n - 1)) * (width - 4) + 2
+        y = height - 4 - (v / max_v) * (height - 8)
+        pts.append(f"{x:.1f},{y:.1f}")
+    pts_str = " ".join(pts)
+    area_pts = f"2,{height} {pts_str} {width-2},{height}"
+    grad_id = f"spk-{id(values) % 100000}"
+    return (
+        f"<svg width='{width}' height='{height}' viewBox='0 0 {width} {height}' style='overflow:visible;display:block'>"
+        f"<defs><linearGradient id='{grad_id}' x1='0' x2='0' y1='0' y2='1'>"
+        f"<stop offset='0%' stop-color='{color}' stop-opacity='.35'/>"
+        f"<stop offset='100%' stop-color='{color}' stop-opacity='0'/>"
+        f"</linearGradient></defs>"
+        f"<polygon points='{area_pts}' fill='url(#{grad_id})'/>"
+        f"<polyline points='{pts_str}' fill='none' stroke='{color}' stroke-width='1.8' stroke-linejoin='round' stroke-linecap='round'/>"
+        f"</svg>"
+    )
 
-    Une seule call API, cachée 5 min.
+
+def _get_model_clicks_period(model_name: str, days: int = 7) -> dict:
+    """Retourne {total, daily: [...]} pour un modèle sur N derniers jours.
+
+    Réutilise _get_links_clicks_period en récupérant d'abord les links du modèle.
     """
-    import time as _t
-    now = _t.time()
-    cached = _VA_DAILY_CACHE.get(model_name)
-    if cached and (now - cached[0]) < _VA_DAILY_TTL:
-        return cached[1]
     try:
         import gms
-        import datetime as _dt2
         if not gms.is_configured():
-            _VA_DAILY_CACHE[model_name] = (now, 0)
-            return 0
+            return {"total": 0, "daily": [0] * days}
         grouped = gms.get_links_grouped_by_model()
         link_ids = grouped.get(model_name, [])
         if not link_ids:
-            _VA_DAILY_CACHE[model_name] = (now, 0)
-            return 0
-        today = _dt2.date.today()
-        start = (today - _dt2.timedelta(days=days - 1)).isoformat()
-        end = today.isoformat()
-        res = gms.get_analytics_overview(start, end, link_ids)
-        clicks = 0
-        if res.get("ok"):
-            clicks = int((res.get("data") or {}).get("total_clicks", 0))
-        _VA_DAILY_CACHE[model_name] = (now, clicks)
-        return clicks
+            return {"total": 0, "daily": [0] * days}
+        return _get_links_clicks_period(link_ids, days=days)
     except Exception:
-        return 0
+        return {"total": 0, "daily": [0] * days}
 
 
 def _render_gms_clicks_widget() -> str:
@@ -2706,12 +2746,11 @@ def _render_va_list_html_inner() -> str:
 .va-change-form button:hover{background:#2563eb}
 .va-reset-btn{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;margin:0;font-family:inherit}
 .va-reset-btn:hover{background:rgba(239,68,68,.1)}
-/* Mini stat clicks 7 jours */
-.va-mini-stat{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.18);border-radius:10px;margin-left:4px}
-.va-mini-spark{display:flex;align-items:center}
+/* Mini stat clicks avec sparkline (à côté du username) */
+.va-mini-stat{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.18);border-radius:10px;min-width:140px}
 .va-mini-num{font-size:15px;font-weight:800;letter-spacing:-.02em;line-height:1}
-.va-mini-label{font-size:10px;color:#888;margin-top:2px;font-weight:500;letter-spacing:.02em}
-body.light .va-mini-stat{background:rgba(59,130,246,.05);border-color:rgba(59,130,246,.2)}
+.va-mini-label{font-size:10px;color:#888;margin-top:3px;font-weight:600;letter-spacing:.03em;text-align:right}
+body.light .va-mini-stat{background:rgba(168,85,247,.06);border-color:rgba(168,85,247,.2)}
 @media(max-width:900px){.va-card{grid-template-columns:auto 1fr;grid-auto-rows:auto}.va-card > *{grid-column:span 2}.va-pp,.va-pp-fallback{grid-column:1;grid-row:1}.va-info{grid-column:2;grid-row:1}}
 body.light .va-section{background:#fff;border-color:#e5e7eb}
 body.light .va-section-head{border-color:#e5e7eb}
@@ -2812,26 +2851,37 @@ body.light .va-id{color:#9ca3af}
                 f"</button>"
             )
 
-            # Mini stat clicks 30j (priorité : liens assignés, sinon modèle)
+            # Mini stat clicks 7j AVEC sparkline (à côté du username)
             mini_clicks_html = ""
             try:
                 if assigned_links:
-                    clicks_30d = _get_links_clicks_period(assigned_links, days=30)
-                    label = "30 jours"
-                    title = f"Clicks des {len(assigned_links)} lien(s) assigné(s) sur 30 jours"
+                    clicks_data = _get_links_clicks_period(assigned_links, days=7)
+                    label = "7 jours"
+                    is_fallback = False
                 else:
                     model_name = (identity or "").strip().capitalize()
-                    clicks_30d = _get_model_clicks_period(model_name, days=30)
-                    label = "30 jours · modèle"
-                    title = f"Clicks GMS de {model_name} sur 30 jours (aucun lien attribué à ce VA)"
-                if clicks_30d > 0:
+                    clicks_data = _get_model_clicks_period(model_name, days=7)
+                    label = "7 jours · modèle"
+                    is_fallback = True
+
+                total = clicks_data.get("total", 0)
+                daily = clicks_data.get("daily", [])
+                if total > 0 and daily:
+                    color = "#a855f7" if not is_fallback else "#3b82f6"
+                    trend_up = daily[-1] >= daily[-2] if len(daily) >= 2 else True
+                    arrow = "↑" if trend_up else "↓"
+                    arrow_color = "#22c55e" if trend_up else "#ef4444"
+                    spark = _sparkline_svg(daily, width=70, height=22, color=color)
                     mini_clicks_html = (
-                        f"<div class='va-mini-stat' title='{title}'>"
-                        f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#3b82f6' stroke-width='2.5' style='flex-shrink:0'><polyline points='23 6 13.5 15.5 8.5 10.5 1 18'/><polyline points='17 6 23 6 23 12'/></svg>"
-                        f"<div>"
-                        f"<div class='va-mini-num'>{clicks_30d:,}</div>"
+                        f"<div class='va-mini-stat'>"
+                        f"<div style='display:flex;flex-direction:column;align-items:flex-end;gap:0'>"
+                        f"<div style='display:flex;align-items:center;gap:5px;line-height:1'>"
+                        f"<span style='color:{arrow_color};font-weight:800;font-size:11px'>{arrow}</span>"
+                        f"<span class='va-mini-num' style='color:{color}'>{total:,}</span>"
+                        f"</div>"
                         f"<div class='va-mini-label'>{label}</div>"
                         f"</div>"
+                        f"<div style='display:flex;align-items:center'>{spark}</div>"
                         f"</div>"
                     )
             except Exception:
@@ -2844,10 +2894,10 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-name'>{name_display} {auto_pill} {salon_html}</div>"
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
+                f"{mini_clicks_html}"
                 f"{change_form}"
                 f"{links_btn_html}"
                 f"{reset_form}"
-                f"{mini_clicks_html}"
                 f"</div>"
             )
 
