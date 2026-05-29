@@ -241,20 +241,32 @@ def fetch_team_stats(start_date: str = "", end_date: str = "") -> Dict[str, Any]
     """Récupère les stats de l'équipe (transactions + chatteurs) sur une période.
 
     Si pas de dates : 30 derniers jours.
-    Retourne : {ok, transactions: [...], chatters: [...], totals: {...}, error}
+    L'API publique est INCLUSIVE pour end_date (end=29/05 → inclut le 29/05
+    en entier). MyPuls traite end comme exclusif, donc on ajoute +1 jour
+    en interne pour l'appel HTTP.
+
+    Retourne : {ok, transactions, chatters, daily, totals, error}
+    où daily = [{date: 'YYYY-MM-DD', creator: 'Julia_dv', amount: 18.32}, ...]
     """
     s = _make_session()
     if s is None:
         return {"ok": False, "error": "Cookies MyPuls non configurés"}
 
-    # Période par défaut : 30 derniers jours
+    # Période par défaut : 30 derniers jours (inclusif)
     today = date.today()
     if not end_date:
         end_date = today.isoformat()
     if not start_date:
         start_date = (today - timedelta(days=29)).isoformat()
 
-    url = f"{BASE_URL}/creator/messaging-money-team?start={start_date}&end={end_date}"
+    # Convertir end inclusif (UI) → end exclusif (MyPuls)
+    try:
+        end_dt = date.fromisoformat(end_date)
+        end_exclusive = (end_dt + timedelta(days=1)).isoformat()
+    except Exception:
+        end_exclusive = end_date
+
+    url = f"{BASE_URL}/creator/messaging-money-team?start={start_date}&end={end_exclusive}"
     try:
         r = s.get(url, timeout=TIMEOUT)
     except Exception as e:
@@ -319,11 +331,125 @@ def fetch_team_stats(start_date: str = "", end_date: str = "") -> Dict[str, Any]
         "period_end": end_date,
     }
 
+    # Aggrégation pour graphique : revenus par jour ET par créateur
+    # Convertit la date "29/05/2026 05:36" -> "2026-05-29"
+    def _to_iso(date_str: str) -> str:
+        try:
+            d, _, _ = date_str.partition(" ")  # "29/05/2026"
+            parts = d.split("/")
+            if len(parts) == 3:
+                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        except Exception:
+            pass
+        return ""
+
+    # Liste de tous les jours dans la période
+    try:
+        start_dt = date.fromisoformat(start_date)
+        end_dt_inc = date.fromisoformat(end_date)
+        days_list: List[str] = []
+        cur = start_dt
+        while cur <= end_dt_inc:
+            days_list.append(cur.isoformat())
+            cur += timedelta(days=1)
+    except Exception:
+        days_list = []
+
+    # Total par créateur (pour ranking) + par (jour, créateur)
+    creator_totals: Dict[str, float] = {}
+    by_day_creator: Dict[Tuple[str, str], float] = {}
+    for tx in transactions:
+        iso = _to_iso(tx["date"])
+        creator = tx["creator"] or "?"
+        amt = tx["amount"]
+        creator_totals[creator] = creator_totals.get(creator, 0) + amt
+        if iso:
+            by_day_creator[(iso, creator)] = by_day_creator.get((iso, creator), 0) + amt
+
+    # Top créateurs par CA (limite à 10 pour le graphique lisible)
+    top_creators = sorted(creator_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_creator_names = [c[0] for c in top_creators]
+
+    # Datasets : un par créateur, valeurs par jour
+    datasets = []
+    for name in top_creator_names:
+        data_points = [round(by_day_creator.get((d, name), 0), 2) for d in days_list]
+        datasets.append({
+            "label": name,
+            "data": data_points,
+            "total": round(creator_totals[name], 2),
+        })
+
     return {
         "ok": True,
         "transactions": transactions,
         "chatters": chatters,
         "totals": totals,
+        "chart": {
+            "days": days_list,
+            "datasets": datasets,
+            "all_creators_total": round(sum(creator_totals.values()), 2),
+        },
+    }
+
+
+def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
+    """Liste les créateurs gérés avec leur ID MyPuls.
+
+    Scrape /creators et extrait les paires (name -> id). Cache 1h.
+    Retourne : {ok, creators: {name: id_int}, error}
+    """
+    cfg = load_config()
+    import time as _t
+    cache = cfg.get("creators_cache", {})
+    cache_ts = cfg.get("creators_cache_ts", 0)
+    if not force_refresh and cache and (_t.time() - cache_ts) < 3600:
+        return {"ok": True, "creators": cache}
+
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies non configurés"}
+    try:
+        r = s.get(f"{BASE_URL}/creators", timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code != 200 or _detect_login_redirect(r.text):
+        return {"ok": False, "error": "Cookies expirés"}
+
+    # HTML: <img src="/creator/<id>/avatar" ... alt="<name>" ...>
+    creators: Dict[str, int] = {}
+    for cid, name in re.findall(
+        r"src=[\"']/creator/(\d+)/avatar[\"'][^>]*?alt=[\"']([^\"']+)[\"']",
+        r.text,
+        re.DOTALL,
+    ):
+        if name and name not in ("Image utilisateur", "Avatar d'en-tête", "Avatar d’en-tête"):
+            creators[name] = int(cid)
+    # Sauvegarder en cache
+    cfg["creators_cache"] = creators
+    cfg["creators_cache_ts"] = int(_t.time())
+    save_config(cfg)
+    return {"ok": True, "creators": creators}
+
+
+def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
+    """Proxy : récupère l'image avatar d'un créateur MyPuls.
+
+    Retourne {ok, content: bytes, content_type: str, error}.
+    """
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies non configurés"}
+    try:
+        r = s.get(f"{BASE_URL}/creator/{int(creator_id)}/avatar", timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code}"}
+    return {
+        "ok": True,
+        "content": r.content,
+        "content_type": r.headers.get("Content-Type", "image/jpeg"),
     }
 
 

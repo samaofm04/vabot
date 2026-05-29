@@ -3166,6 +3166,159 @@ body.light .mypuls-bar{background:#e5e7eb}
         "</div>"
     )
 
+    # ============ Graphique évolution revenus par créateur ============
+    chart_data = res.get("chart", {"days": [], "datasets": []})
+    chart_days = chart_data["days"]
+    chart_datasets = chart_data["datasets"]
+
+    # Palette de couleurs distinctes pour les créateurs
+    palette = ["#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ec4899",
+               "#06b6d4", "#ef4444", "#84cc16", "#f97316", "#8b5cf6"]
+
+    # Format date pour l'axe X : "30 avr"
+    import datetime as _dt2
+    def _fmt_day(iso):
+        try:
+            d = _dt2.date.fromisoformat(iso)
+            fr_months = ["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"]
+            return f"{d.day} {fr_months[d.month-1]}"
+        except Exception:
+            return iso
+    chart_labels = [_fmt_day(d) for d in chart_days]
+
+    # Récupérer le mapping name -> id pour les avatars
+    creators_map: dict = {}
+    try:
+        cr_res = mypuls.list_creators()
+        if cr_res.get("ok"):
+            creators_map = cr_res.get("creators") or {}
+    except Exception:
+        pass
+
+    # Construire les datasets pour Chart.js
+    import json as _json
+    chartjs_datasets = []
+    legend_items = []
+    avatars_header = []
+    for i, ds in enumerate(chart_datasets):
+        color = palette[i % len(palette)]
+        chartjs_datasets.append({
+            "label": ds["label"],
+            "data": ds["data"],
+            "borderColor": color,
+            "backgroundColor": color + "20",
+            "fill": True,
+            "tension": 0.4,
+            "borderWidth": 2,
+            "pointRadius": 0,
+            "pointHoverRadius": 4,
+        })
+        creator_id = creators_map.get(ds["label"])
+        ds_label = ds["label"]
+        ds_total = ds["total"]
+        if creator_id:
+            avatar_img = (
+                f"<img src='/mypuls/avatar/{creator_id}' alt='{ds_label}' "
+                f"title='{ds_label} — {ds_total:.0f}€' "
+                f"style='width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid {color};margin-left:-8px' loading='lazy'>"
+            )
+            avatars_header.append(avatar_img)
+            avatar_legend = (
+                f"<img src='/mypuls/avatar/{creator_id}' style='width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid {color}'>"
+            )
+        else:
+            avatar_legend = f"<span style='width:8px;height:8px;background:{color};border-radius:50%;display:inline-block'></span>"
+        legend_items.append(
+            f"<div style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600'>"
+            f"{avatar_legend}"
+            f"{ds['label']} <span style='color:#888;font-weight:400'>{ds['total']:.0f}€</span>"
+            f"</div>"
+        )
+
+    avatars_header_html = (
+        f"<div style='display:flex;align-items:center;margin-left:14px'>{''.join(avatars_header)}</div>"
+        if avatars_header else ""
+    )
+
+    chart_json = _json.dumps({"labels": chart_labels, "datasets": chartjs_datasets}, ensure_ascii=False)
+
+    if chart_datasets:
+        plural_s = "s" if len(chart_datasets) > 1 else ""
+        chart_html = (
+            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px;margin-bottom:14px'>"
+            "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px'>"
+            "<div style='display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px'>"
+            "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='#22c55e' stroke-width='2.5'><polyline points='22 12 18 12 15 21 9 3 6 12 2 12'/></svg>"
+            "Évolution des revenus par modèle"
+            + avatars_header_html +
+            "</div>"
+            f"<div style='font-size:11px;color:#888'>{len(chart_datasets)} modèle{plural_s} actif{plural_s}</div>"
+            "</div>"
+            "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px'>"
+            + "".join(legend_items) +
+            "</div>"
+            "<div style='position:relative;height:340px'>"
+            "<canvas id='mypuls-chart'></canvas>"
+            "</div>"
+            "</div>"
+        )
+        # JS d'initialisation du chart (déclenché après le DOM)
+        chart_init_js = f"""
+<script>
+(function(){{
+  var data = {chart_json};
+  function initChart(){{
+    var canvas = document.getElementById('mypuls-chart');
+    if(!canvas || typeof Chart === 'undefined'){{ setTimeout(initChart, 100); return; }}
+    if(window.__mypulsChart){{ try{{ window.__mypulsChart.destroy(); }}catch(e){{}} }}
+    var isDark = !document.body.classList.contains('light');
+    var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+    var textColor = isDark ? '#888' : '#666';
+    window.__mypulsChart = new Chart(canvas, {{
+      type: 'line',
+      data: data,
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {{ mode: 'index', intersect: false }},
+        plugins: {{
+          legend: {{ display: false }},
+          tooltip: {{
+            backgroundColor: isDark ? '#0f1116' : '#fff',
+            titleColor: isDark ? '#fff' : '#111',
+            bodyColor: isDark ? '#aaa' : '#555',
+            borderColor: '#2a2a2a',
+            borderWidth: 1,
+            padding: 12,
+            callbacks: {{
+              label: function(ctx){{
+                return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + '€';
+              }}
+            }}
+          }}
+        }},
+        scales: {{
+          y: {{
+            beginAtZero: true,
+            grid: {{ color: gridColor }},
+            ticks: {{ color: textColor, callback: function(v){{ return v.toFixed(0)+'€'; }} }}
+          }},
+          x: {{
+            grid: {{ display: false }},
+            ticks: {{ color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }}
+          }}
+        }}
+      }}
+    }});
+  }}
+  initChart();
+}})();
+</script>
+"""
+    else:
+        chart_html = ""
+        chart_init_js = ""
+
     # Table chatteurs (top 30)
     chatters_rows = []
     for c in chatters[:30]:
@@ -3270,10 +3423,10 @@ function mpTab(btn, name){
         "MyPuls — Ventes chatteurs"
         f"<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct mypuls.app · {start_str} → {end_str}</span>"
         "</h3>"
-        + period_html + stats_html + tabs_html + chatters_table + tx_table + keepalive_info
+        + period_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
     )
-    return css + section + js
+    return css + section + js + chart_init_js
 
 
 def _render_revenus_html() -> str:
@@ -5583,6 +5736,22 @@ def create_app():
         cfg.pop("REMEMBERME", None)
         mypuls.save_config(cfg)
         return _success("✅ Cookies MyPuls supprimés")
+
+    @app.route("/mypuls/avatar/<int:creator_id>")
+    def mypuls_avatar(creator_id):
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception:
+            return "", 404
+        res = mypuls.get_avatar_bytes(creator_id)
+        if not res.get("ok"):
+            return "", 404
+        from flask import Response
+        resp = Response(res["content"], mimetype=res.get("content_type", "image/jpeg"))
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     @app.route("/mypuls/test", methods=["POST"])
     def mypuls_test():
