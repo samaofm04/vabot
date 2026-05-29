@@ -3527,53 +3527,109 @@ def _render_home_dashboard_html() -> str:
     else:
         warning = ""
 
+    # Breakdown par type de revenu (matching Infloww layout)
+    type_totals = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
+                   "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
+    for tx in mp_data.get("transactions", []) or []:
+        ty = (tx.get("type", "") or "").lower()
+        amt = tx.get("amount", 0)
+        if "média privé" in ty or "media prive" in ty or "ppv" in ty or "message" in ty:
+            type_totals["Messages"] += amt
+        elif "pourboire" in ty or "tip" in ty:
+            type_totals["Tips"] += amt
+        elif "abonnement" in ty or "subscription" in ty:
+            type_totals["Subscriptions"] += amt
+        elif "post" in ty:
+            type_totals["Posts"] += amt
+        elif "stream" in ty:
+            type_totals["Streams"] += amt
+        elif "referral" in ty or "parrain" in ty:
+            type_totals["Referrals"] += amt
+
     css = """
 <style>
-.home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:16px}
-.home-card-header{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em}
-.home-period-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
-.home-period-btn{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s}
-.home-period-btn:hover{background:rgba(255,255,255,.05);color:#fff}
-.home-period-active{background:#3b82f6 !important;border-color:#3b82f6 !important;color:#fff !important}
-.home-hero{background:linear-gradient(135deg,#0f1116 0%,#1a1a2e 100%);border:1px solid #2a2a2a;border-radius:18px;padding:32px;margin-bottom:18px;position:relative;overflow:hidden}
-.home-hero::before{content:'';position:absolute;inset:-50%;background:radial-gradient(circle at 70% 30%,rgba(59,130,246,.1),transparent 50%);pointer-events:none}
-.home-hero-content{position:relative}
-.home-hero-label{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px}
-.home-hero-value{font-size:48px;font-weight:800;letter-spacing:-.04em;line-height:1;background:linear-gradient(135deg,#22c55e,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.home-hero-sub{font-size:13px;color:#888;margin-top:8px}
-.home-mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:20px}
-.home-mini{background:rgba(255,255,255,.02);border:1px solid #2a2a2a;border-radius:10px;padding:14px}
-.home-mini-l{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:6px}
-.home-mini-v{font-size:22px;font-weight:800;letter-spacing:-.02em}
-.home-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.home-period-row{display:flex;gap:0;background:rgba(255,255,255,.04);border:1px solid #2a2a2a;border-radius:10px;padding:4px;font-size:13px}
+.home-period-btn{background:transparent;border:0;color:#888;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;flex:1;text-align:center}
+.home-period-btn:hover{color:#fff}
+.home-period-active{background:#3b82f6 !important;color:#fff !important;box-shadow:0 2px 8px rgba(59,130,246,.25)}
+.home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
+.home-overview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
+.home-overview-title{font-size:16px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.home-overview-title small{font-size:11px;font-weight:400;color:#888;background:rgba(59,130,246,.1);padding:3px 8px;border-radius:5px}
+.home-grid{display:grid;grid-template-columns:280px 1fr 1fr 1fr;gap:14px}
+@media(max-width:1100px){.home-grid{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:760px){.home-grid{grid-template-columns:1fr 1fr}}
+.home-hero-card{background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.25);border-radius:14px;padding:22px;grid-row:span 2;display:flex;flex-direction:column;justify-content:space-between;min-height:180px;position:relative;overflow:hidden}
+.home-hero-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 20%,rgba(59,130,246,.15),transparent 60%);pointer-events:none}
+.home-hero-icon{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 20px rgba(59,130,246,.4);position:relative}
+.home-hero-label{font-size:13px;color:#3b82f6;font-weight:600;margin-top:32px;position:relative}
+.home-hero-value{font-size:36px;font-weight:800;letter-spacing:-.03em;margin-top:6px;position:relative}
+.home-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:88px}
+.home-stat-icon{position:absolute;top:18px;right:18px;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.home-stat-value{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.home-stat-label{font-size:12px;color:#888;margin-top:5px;font-weight:500}
+.home-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
 @media(max-width:768px){.home-row{grid-template-columns:1fr}}
+.home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
+.home-card-header{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em}
+body.light .home-period-row{background:#f3f4f6;border-color:#e5e7eb}
+body.light .home-period-btn{color:#666}
+body.light .home-overview{background:#fff;border-color:#e5e7eb}
+body.light .home-stat{background:#f9fafb;border-color:#e5e7eb}
 body.light .home-card{background:#fff;border-color:#e5e7eb}
-body.light .home-hero{background:linear-gradient(135deg,#fff,#f9fafb);border-color:#e5e7eb}
-body.light .home-period-btn{color:#666;border-color:#e5e7eb}
-body.light .home-mini{background:#fafafa;border-color:#e5e7eb}
 </style>
 """
 
+    def _stat(label, value, color, bg_color, icon_svg):
+        return (
+            f"<div class='home-stat'>"
+            f"<div class='home-stat-icon' style='background:{bg_color};color:{color}'>{icon_svg}</div>"
+            f"<div>"
+            f"<div class='home-stat-value' style='color:{color}'>{value:,.2f}€</div>"
+            f"<div class='home-stat-label'>{label}</div>"
+            f"</div>"
+            f"</div>"
+        )
+
+    # 6 stat cards comme Infloww
+    overview_html = (
+        "<div class='home-overview'>"
+        "<div class='home-overview-head'>"
+        f"<div class='home-overview-title'>Aperçu des revenus créateur "
+        f"<small>UTC{_dt.datetime.now().astimezone().strftime('%z')[:3]}:{_dt.datetime.now().astimezone().strftime('%z')[3:]}</small>"
+        "</div>"
+        + period_switcher
+        + "</div>"
+        "<div class='home-grid'>"
+        # Big hero card (Total earnings)
+        "<div class='home-hero-card'>"
+        "<div class='home-hero-icon'>"
+        "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
+        "</div>"
+        f"<div><div class='home-hero-label'>Total revenus</div>"
+        f"<div class='home-hero-value'>{ca_total + manual_total:,.2f}€</div></div>"
+        "</div>"
+        # 6 small stat cards
+        + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'/></svg>")
+        + _stat("Posts", type_totals["Posts"], "#10b981", "rgba(16,185,129,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>")
+        + _stat("Messages (PPV)", type_totals["Messages"], "#a855f7", "rgba(168,85,247,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>")
+        + _stat("Pourboires", type_totals["Tips"], "#f59e0b", "rgba(245,158,11,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M9 18h6M10 22h4M15 14c0-3 4-3 4-7a7 7 0 0 0-14 0c0 4 4 4 4 7'/></svg>")
+        + _stat("Parrainage", type_totals["Referrals"], "#ec4899", "rgba(236,72,153,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg>")
+        + _stat("Streams", type_totals["Streams"], "#3b82f6", "rgba(59,130,246,.15)",
+                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><line x1='8' y1='6' x2='21' y2='6'/><line x1='8' y1='12' x2='21' y2='12'/><line x1='8' y1='18' x2='21' y2='18'/><line x1='3' y1='6' x2='3.01' y2='6'/><line x1='3' y1='12' x2='3.01' y2='12'/><line x1='3' y1='18' x2='3.01' y2='18'/></svg>")
+        + "</div>"
+        + "</div>"
+    )
+
     return (
         css
-        + period_switcher
         + warning
-        + (
-            f"<div class='home-hero'><div class='home-hero-content'>"
-            f"<div class='home-hero-label'>Revenus · {period_label}</div>"
-            f"<div class='home-hero-value'>{grand_total:,.2f}€</div>"
-            f"<div class='home-hero-sub'>{ca_total:.0f}€ MyPuls"
-            + (f" + {manual_total:.0f}€ manuel" if manual_total > 0 else "")
-            + f" · {nb_tx} transaction{'s' if nb_tx > 1 else ''} · {active_chatters} chatteur{'s' if active_chatters > 1 else ''} actif{'s' if active_chatters > 1 else ''}"
-            f"</div>"
-            f"<div class='home-mini-grid'>"
-            f"<div class='home-mini'><div class='home-mini-l'>📦 Média privé</div><div class='home-mini-v' style='color:#3b82f6'>{ca_ppv:.0f}€</div></div>"
-            f"<div class='home-mini'><div class='home-mini-l'>💝 Pourboires</div><div class='home-mini-v' style='color:#a855f7'>{ca_tips:.0f}€</div></div>"
-            + (f"<div class='home-mini'><div class='home-mini-l'>📝 Manuel</div><div class='home-mini-v' style='color:#22c55e'>{manual_total:.0f}€</div></div>" if manual_total > 0 else "")
-            + f"<div class='home-mini'><div class='home-mini-l'>👥 Chatteurs actifs</div><div class='home-mini-v'>{active_chatters}</div></div>"
-            f"</div>"
-            f"</div></div>"
-        )
+        + overview_html
         + (
             f"<div class='home-row'>{top_creators_html}{top_chatters_html}</div>"
             if top_creators_html or top_chatters_html else ""
