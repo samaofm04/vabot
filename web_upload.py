@@ -2894,7 +2894,11 @@ def _render_va_list_html_inner() -> str:
 /* Liste sidebar scrollable */
 .va-vault-list{display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;margin:0 -6px;padding:0 6px}
 .va-vlist-section{display:flex;flex-direction:column;gap:3px;margin-bottom:6px}
-.va-vlist-section-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;padding:8px 8px 4px}
+.va-vlist-section-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;padding:8px 8px 4px;border-radius:8px;transition:background .12s}
+.va-vlist-section-head:hover{background:rgba(255,255,255,.04)}
+.va-vlist-section-active .va-vlist-section-head{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(168,85,247,.08));color:#60a5fa}
+body.light .va-vlist-section-head:hover{background:#f3f4f6}
+body.light .va-vlist-section-active .va-vlist-section-head{background:linear-gradient(90deg,#dbeafe,#ede9fe);color:#3b82f6}
 .va-vlist-ident-av{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .va-vlist-section-head > span:nth-child(2){flex:1;color:#aaa;font-size:12px;letter-spacing:-.01em;text-transform:none;font-weight:600}
 .va-vlist-count{background:rgba(59,130,246,.15);color:#60a5fa;padding:2px 7px;border-radius:9px;font-size:10px;font-weight:700}
@@ -3073,7 +3077,8 @@ body.light .va-id{color:#9ca3af}
         )
         sidebar_rows.append(
             f"<div class='va-vlist-section' data-vlist-identity='{identity}'>"
-            f"<div class='va-vlist-section-head'>{ident_av_html}<span>@{identity}</span>"
+            f"<div class='va-vlist-section-head' onclick=\"vaShowIdentity('{identity}')\" style='cursor:pointer'>"
+            f"{ident_av_html}<span>@{identity}</span>"
             f"<span class='va-vlist-count'>{len(members)}</span></div>"
         )
         for uid, data in members:
@@ -3967,8 +3972,15 @@ function vaSearch(q){
     });
     sec.style.display = anyVisible ? '' : 'none';
   });
+  // Si le dropdown a une identité sélectionnée → afficher tous ses VAs en détail
+  if(identFilter) vaShowIdentity(identFilter);
+  else if(!q) vaShowAll();
 }
 function vaSelectVa(uid){
+  // Désélectionner les sections highlight
+  document.querySelectorAll('.va-vlist-section').forEach(function(sec){
+    sec.classList.remove('va-vlist-section-active');
+  });
   // Highlight sidebar item
   document.querySelectorAll('.va-vlist-item').forEach(function(it){
     it.classList.toggle('va-vlist-selected', it.getAttribute('data-vlist-uid') === uid);
@@ -3977,14 +3989,46 @@ function vaSelectVa(uid){
   document.querySelectorAll('.va-card').forEach(function(card){
     card.style.display = card.getAttribute('data-va-uid') === uid ? '' : 'none';
   });
-  // Hide section heads if not the selected VA's section
   document.querySelectorAll('.va-section').forEach(function(sec){
     var hasVisible = sec.querySelector('.va-card:not([style*="display: none"])');
     sec.style.display = hasVisible ? '' : 'none';
   });
-  // Scroll détail panel en haut
   var detail = document.querySelector('.va-vault-detail');
   if(detail) detail.scrollTop = 0;
+}
+function vaShowIdentity(identity){
+  identity = (identity || '').toLowerCase();
+  // Désélectionner les items individuels
+  document.querySelectorAll('.va-vlist-item').forEach(function(it){
+    it.classList.remove('va-vlist-selected');
+  });
+  // Highlight la section entière dans la sidebar
+  document.querySelectorAll('.va-vlist-section').forEach(function(sec){
+    var secId = (sec.getAttribute('data-vlist-identity') || '').toLowerCase();
+    sec.classList.toggle('va-vlist-section-active', secId === identity);
+  });
+  // Afficher TOUS les VAs de cette identité dans le panel détail
+  document.querySelectorAll('.va-card').forEach(function(card){
+    var cardId = (card.getAttribute('data-va-identity') || '').toLowerCase();
+    card.style.display = cardId === identity ? '' : 'none';
+  });
+  // Afficher uniquement la section qui correspond
+  document.querySelectorAll('.va-section').forEach(function(sec){
+    var secId = (sec.getAttribute('data-va-section-identity') || '').toLowerCase();
+    sec.style.display = secId === identity ? '' : 'none';
+  });
+  var detail = document.querySelector('.va-vault-detail');
+  if(detail) detail.scrollTop = 0;
+}
+function vaShowAll(){
+  document.querySelectorAll('.va-vlist-item').forEach(function(it){
+    it.classList.remove('va-vlist-selected');
+  });
+  document.querySelectorAll('.va-vlist-section').forEach(function(sec){
+    sec.classList.remove('va-vlist-section-active');
+  });
+  document.querySelectorAll('.va-card').forEach(function(card){ card.style.display = ''; });
+  document.querySelectorAll('.va-section').forEach(function(sec){ sec.style.display = ''; });
 }
 // Auto-select le premier VA au chargement
 document.addEventListener('DOMContentLoaded', function(){
