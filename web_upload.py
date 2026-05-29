@@ -167,24 +167,114 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 LOGIN_HTML = """
 <!DOCTYPE html>
-<html><head><title>VA Bot</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="fr"><head><title>VA Bot — Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
 <style>
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a1a;color:#eee;margin:0;padding:0;display:flex;align-items:center;justify-content:center;min-height:100vh;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
-.box{background:#2a2a2a;padding:32px;border-radius:12px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.3)}
-h1{margin:0 0 24px;text-align:center}
-input{width:100%;padding:12px;margin-bottom:16px;background:#1a1a1a;border:1px solid #444;color:#fff;border-radius:6px;font-size:16px;box-sizing:border-box}
-button{width:100%;padding:14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:16px;cursor:pointer;font-weight:600}
-button:hover{background:#2563eb}
-.err{color:#f55;margin-bottom:16px;text-align:center}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#fafafa;color:#0a0a0a;min-height:100vh;display:flex;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
+.layout{display:flex;width:100%;min-height:100vh}
+/* Panneau gauche : formulaire */
+.left{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 32px;background:#fff;
+  min-width:0}
+.card{width:100%;max-width:380px}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:48px;font-weight:800;font-size:22px;letter-spacing:-.03em}
+.logo-mark{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#a855f7);
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:18px;
+  box-shadow:0 4px 14px rgba(59,130,246,.3)}
+h1{font-size:30px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px;color:#0a0a0a}
+.subtitle{color:#6b7280;font-size:14px;margin-bottom:32px}
+.field{margin-bottom:18px}
+label{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}
+label .req{color:#ef4444;font-weight:700;margin-left:2px}
+input{width:100%;padding:11px 14px;background:#f9fafb;border:1px solid #e5e7eb;
+  color:#0a0a0a;border-radius:9px;font-size:14px;font-family:inherit;
+  transition:all .15s;outline:none}
+input:focus{border-color:#3b82f6;background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+input::placeholder{color:#9ca3af}
+.row-links{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;font-size:13px}
+.row-links a{color:#3b82f6;text-decoration:none;font-weight:500}
+.row-links a:hover{text-decoration:underline}
+.row-links .muted{color:#6b7280;font-weight:500}
+.btn{display:block;width:100%;padding:13px;background:#3b82f6;color:#fff;border:0;border-radius:9px;
+  font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;
+  box-shadow:0 1px 2px rgba(59,130,246,.15)}
+.btn:hover{background:#2563eb;box-shadow:0 4px 14px rgba(59,130,246,.35);transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.footer-note{margin-top:28px;text-align:center;color:#6b7280;font-size:13px}
+.footer-note a{color:#3b82f6;text-decoration:none;font-weight:500}
+.footer-note a:hover{text-decoration:underline}
+.err{background:#fee2e2;border:1px solid #fecaca;color:#dc2626;padding:11px 14px;
+  border-radius:9px;font-size:13px;margin-bottom:20px;font-weight:500;
+  display:flex;align-items:center;gap:8px}
+/* Panneau droit : visuel */
+.right{flex:1;background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#3b0764 100%);
+  display:flex;align-items:center;justify-content:center;padding:48px;
+  position:relative;overflow:hidden}
+.right::before{content:'';position:absolute;inset:-50%;
+  background:radial-gradient(circle at 30% 50%,rgba(59,130,246,.15),transparent 60%),
+             radial-gradient(circle at 70% 20%,rgba(168,85,247,.12),transparent 50%);
+  animation:drift 20s ease-in-out infinite}
+@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-20px)}}
+.brand{position:relative;text-align:center;color:#fff;max-width:420px}
+.brand-emoji{font-size:64px;margin-bottom:20px;filter:drop-shadow(0 8px 24px rgba(0,0,0,.4))}
+.brand h2{font-size:32px;font-weight:800;letter-spacing:-.03em;margin-bottom:14px;line-height:1.2}
+.brand p{font-size:15px;color:rgba(255,255,255,.7);line-height:1.6}
+.stats{display:flex;gap:28px;justify-content:center;margin-top:36px;padding-top:28px;
+  border-top:1px solid rgba(255,255,255,.1)}
+.stat-item{text-align:center}
+.stat-v{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.stat-l{font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;margin-top:4px}
+@media (max-width:900px){
+  .right{display:none}
+  .layout{justify-content:center}
+}
 </style></head><body>
-<div class="box">
-<h1>🤖 VA Bot Upload</h1>
-{err}
-<form method="POST"><input type="password" name="password" placeholder="Mot de passe" autofocus required><button type="submit">Connexion</button></form>
-</div></body></html>
+<div class="layout">
+  <div class="left">
+    <div class="card">
+      <div class="logo">
+        <div class="logo-mark">VA</div>
+        <span>VA Bot</span>
+      </div>
+      <h1>Connexion</h1>
+      <p class="subtitle">Content de te revoir 👋</p>
+      {err}
+      <form method="POST" autocomplete="on">
+        <div class="field">
+          <label>Username<span class="req">*</span></label>
+          <input type="text" name="username" placeholder="samaali" value="samaali" autocomplete="username" autofocus>
+        </div>
+        <div class="field">
+          <label>Mot de passe<span class="req">*</span></label>
+          <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+        </div>
+        <div class="row-links">
+          <span class="muted">Garde-moi connecté</span>
+        </div>
+        <button type="submit" class="btn">Se connecter →</button>
+      </form>
+      <div class="footer-note">Privé · accès réservé</div>
+    </div>
+  </div>
+  <div class="right">
+    <div class="brand">
+      <div class="brand-emoji">🤖</div>
+      <h2>Pilote ton agence depuis une seule interface</h2>
+      <p>Upload contenu, planification SFS, suivi des ventes MyPuls en temps réel, paiements chatteurs, et bien plus.</p>
+      <div class="stats">
+        <div class="stat-item"><div class="stat-v">5</div><div class="stat-l">Modèles</div></div>
+        <div class="stat-item"><div class="stat-v">160+</div><div class="stat-l">Chatteurs</div></div>
+        <div class="stat-item"><div class="stat-v">24/7</div><div class="stat-l">Sync auto</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>
 """
 
 UPLOAD_HTML = """
@@ -1679,8 +1769,67 @@ def _list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+# ============ Utilisateurs web (login user/password) ============
+
+WEB_USERS_FILE = DATA_DIR / "web_admin_users.json"
+
+
+def _hash_password(password: str) -> str:
+    import hashlib
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _load_web_users() -> dict:
+    if not WEB_USERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(WEB_USERS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_web_users(users: dict):
+    WEB_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WEB_USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _bootstrap_web_users():
+    """Crée le user 'samaali' avec le WEB_PASSWORD courant si pas déjà présent."""
+    users = _load_web_users()
+    if "samaali" not in users:
+        users["samaali"] = {
+            "password_hash": _hash_password(WEB_PASSWORD),
+            "created_at": int(time.time()),
+            "role": "admin",
+        }
+        _save_web_users(users)
+
+
+def _check_web_login(username: str, password: str) -> bool:
+    """Accepte 2 façons :
+    1. username + password matchant un user enregistré dans web_admin_users.json
+    2. password seul matchant WEB_PASSWORD (legacy, pour compat)
+    """
+    if not password:
+        return False
+    # Bootstrap au premier login
+    _bootstrap_web_users()
+    if username:
+        users = _load_web_users()
+        u = users.get(username.lower().strip())
+        if u and u.get("password_hash") == _hash_password(password):
+            return True
+    # Fallback : password seul matchant WEB_PASSWORD
+    if password == WEB_PASSWORD:
+        return True
+    return False
+
+
 def _render_login(err=""):
-    err_html = f'<div class="err">{err}</div>' if err else ""
+    err_html = (
+        f'<div class="err"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>{err}</div>'
+        if err else ""
+    )
     return LOGIN_HTML.replace("{err}", err_html)
 
 
@@ -5344,11 +5493,14 @@ def create_app():
     @app.route("/", methods=["GET", "POST"])
     def index():
         if request.method == "POST" and not is_auth():
-            if request.form.get("password") == WEB_PASSWORD:
+            username = (request.form.get("username") or "").strip().lower()
+            password = request.form.get("password") or ""
+            if _check_web_login(username, password):
                 session["auth"] = True
+                session["username"] = username or "admin"
                 _track_session()
                 return redirect("/")
-            return _render_login("Mauvais mot de passe")
+            return _render_login("Nom d'utilisateur ou mot de passe incorrect")
         if not is_auth():
             return _render_login()
         return _render_upload()
