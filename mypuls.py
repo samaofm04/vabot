@@ -472,6 +472,63 @@ def save_crypto_screenshot(name: str, file_bytes: bytes, original_filename: str)
     return filename
 
 
+# ============ Taux de change EUR -> USD ============
+
+def get_eur_usd_rate(force_refresh: bool = False) -> Dict[str, Any]:
+    """Retourne le taux EUR -> USD avec cache 24h.
+
+    Source : api.frankfurter.dev (taux officiels BCE, gratuit, sans clé).
+    Retourne : {rate: float, date: str, cached_age_h: float, source: str}
+    """
+    cfg = load_config()
+    import time as _t
+    cache_rate = cfg.get("eur_usd_rate")
+    cache_ts = cfg.get("eur_usd_ts", 0)
+    cache_date = cfg.get("eur_usd_date", "?")
+    age_h = (_t.time() - cache_ts) / 3600 if cache_ts else 999
+
+    if not force_refresh and cache_rate and age_h < 24:
+        return {
+            "rate": float(cache_rate),
+            "date": cache_date,
+            "cached_age_h": age_h,
+            "source": "cache",
+        }
+
+    # Refresh depuis API
+    try:
+        r = requests.get(
+            "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD",
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            rate = float(data["rates"]["USD"])
+            cfg["eur_usd_rate"] = rate
+            cfg["eur_usd_ts"] = int(_t.time())
+            cfg["eur_usd_date"] = data.get("date", "?")
+            save_config(cfg)
+            return {
+                "rate": rate,
+                "date": data.get("date", "?"),
+                "cached_age_h": 0,
+                "source": "api",
+            }
+    except Exception:
+        pass
+
+    # Fallback : utiliser le cache même si vieux
+    if cache_rate:
+        return {
+            "rate": float(cache_rate),
+            "date": cache_date,
+            "cached_age_h": age_h,
+            "source": "stale_cache",
+        }
+    # Pas de cache, pas d'API → fallback 1.1
+    return {"rate": 1.10, "date": "?", "cached_age_h": 999, "source": "fallback"}
+
+
 def delete_crypto_file(name: str) -> bool:
     p = crypto_path_for(name)
     if p:

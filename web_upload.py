@@ -3319,14 +3319,19 @@ body.light .mypuls-bar{background:#e5e7eb}
         chart_html = ""
         chart_init_js = ""
 
-    # Table chatteurs (top 30) — avec % commission, à payer, screenshot crypto
+    # Récupérer le taux EUR -> USD (cache 24h)
+    rate_info = mypuls.get_eur_usd_rate()
+    eur_to_usd = rate_info["rate"]
+
+    # Table chatteurs (top 30) — avec % commission, à payer en USD, screenshot crypto
     chatters_rows = []
     for c in chatters[:30]:
         bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
         meta = mypuls.get_chatter_meta(c["name"])
         commission = meta["commission_pct"]
-        to_pay = round(c["ca_total"] * commission / 100, 2)
+        to_pay_eur = round(c["ca_total"] * commission / 100, 2)
+        to_pay = round(to_pay_eur * eur_to_usd, 2)
         has_crypto = bool(meta["crypto_file"])
         name_url_safe = c["name"].replace(" ", "%20")
         crypto_cell = (
@@ -3357,8 +3362,8 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<span style='color:#888;font-size:11px'>%</span>"
             f"</form>"
             f"</td>"
-            # À payer
-            f"<td style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px'>{to_pay:.2f}€</td>"
+            # À payer (en USD)
+            f"<td style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
             # Screenshot crypto
             f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
@@ -3368,22 +3373,46 @@ body.light .mypuls-bar{background:#e5e7eb}
     chatters_body = "".join(chatters_rows) or chatters_empty
 
     # Total à payer (somme des "à payer" sur les 30 affichés)
-    total_to_pay = sum(
+    total_to_pay_eur = sum(
         round(c["ca_total"] * mypuls.get_chatter_meta(c["name"])["commission_pct"] / 100, 2)
         for c in chatters[:30]
     )
+    total_to_pay_usd = round(total_to_pay_eur * eur_to_usd, 2)
+
+    # Indicateur de fraîcheur du taux
+    rate_age = rate_info.get("cached_age_h", 0)
+    if rate_info.get("source") == "fallback":
+        rate_color = "#ef4444"
+        rate_label = "fallback (API down)"
+    elif rate_info.get("source") == "stale_cache":
+        rate_color = "#fbbf24"
+        rate_label = f"cache vieux de {rate_age:.0f}h"
+    else:
+        rate_color = "#888"
+        rate_label = f"BCE {rate_info.get('date', '?')}"
+
     payout_summary = (
-        f"<div style='padding:10px 14px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>"
-        f"<div style='font-size:13px;color:#888'>💰 Total à payer aux chatteurs sur cette période :</div>"
-        f"<div style='font-weight:800;font-size:20px;color:#22c55e'>{total_to_pay:.2f}€</div>"
-        f"</div>"
+        "<div style='padding:12px 14px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>"
+        "<div style='display:flex;flex-direction:column;gap:2px'>"
+        "<div style='font-size:13px;color:#888'>💰 Total à payer aux chatteurs sur cette période</div>"
+        f"<div style='font-size:10px;color:{rate_color};font-weight:600'>Taux EUR→USD : 1€ = {eur_to_usd:.4f}$ <span style='color:#666'>({rate_label})</span> "
+        "<form method='POST' action='/mypuls/refresh_rate' style='display:inline;margin-left:6px'>"
+        "<button type='submit' style='background:transparent;border:0;color:#3b82f6;font-size:10px;cursor:pointer;padding:0;text-decoration:underline'>↻ MAJ taux</button>"
+        "</form>"
+        "</div>"
+        "</div>"
+        "<div style='text-align:right'>"
+        f"<div style='font-weight:800;font-size:22px;color:#22c55e'>${total_to_pay_usd:.2f}</div>"
+        f"<div style='font-size:11px;color:#666'>≈ {total_to_pay_eur:.2f}€</div>"
+        "</div>"
+        "</div>"
     )
 
     chatters_table = (
         "<div id='mp-tab-chatters' style='display:block'>"
         + payout_summary +
         "<table class='mypuls-table'>"
-        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer</th><th>Crypto</th><th>Présence</th></tr></thead>"
+        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer ($)</th><th>Crypto</th><th>Présence</th></tr></thead>"
         f"<tbody>{chatters_body}</tbody>"
         "</table>"
         # Form upload caché (réutilisé par tous les boutons)
@@ -5789,6 +5818,17 @@ def create_app():
         cfg.pop("REMEMBERME", None)
         mypuls.save_config(cfg)
         return _success("✅ Cookies MyPuls supprimés")
+
+    @app.route("/mypuls/refresh_rate", methods=["POST"])
+    def mypuls_refresh_rate():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module mypuls indispo : {e}")
+        res = mypuls.get_eur_usd_rate(force_refresh=True)
+        return _success(f"✅ Taux EUR→USD mis à jour : 1€ = {res['rate']:.4f}$ ({res.get('date', '?')})")
 
     @app.route("/mypuls/chatter/set_pct", methods=["POST"])
     def mypuls_chatter_set_pct():
