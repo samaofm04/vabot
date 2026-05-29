@@ -237,6 +237,14 @@ input::placeholder{color:#9ca3af}
 .row-links a{color:#3b82f6;text-decoration:none;font-weight:500}
 .row-links a:hover{text-decoration:underline}
 .row-links .muted{color:#6b7280;font-weight:500}
+.remember-row{display:flex;align-items:center;gap:10px;margin-bottom:22px;cursor:pointer;font-size:13px;color:#374151;user-select:none}
+.remember-row input[type=checkbox]{position:absolute;opacity:0;pointer-events:none}
+.remember-check{width:18px;height:18px;border:1.5px solid #d1d5db;border-radius:5px;display:flex;align-items:center;justify-content:center;background:#fff;transition:all .15s;flex-shrink:0}
+.remember-check svg{width:12px;height:12px;display:none}
+.remember-row input[type=checkbox]:checked + .remember-check{background:#3b82f6;border-color:#3b82f6}
+.remember-row input[type=checkbox]:checked + .remember-check svg{display:block}
+.remember-row:hover .remember-check{border-color:#3b82f6}
+.remember-hint{color:#9ca3af;font-size:11px;margin-left:auto;font-weight:400}
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;background:#3b82f6;color:#fff;border:0;border-radius:9px;
   font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;
   box-shadow:0 1px 2px rgba(59,130,246,.15);min-height:46px}
@@ -298,26 +306,45 @@ input::placeholder{color:#9ca3af}
       <form method="POST" autocomplete="on">
         <div class="field">
           <label>Username<span class="req">*</span></label>
-          <input type="text" name="username" placeholder="samaali" value="samaali" autocomplete="username" autofocus>
+          <input type="text" name="username" id="login-username" placeholder="samaali" value="samaali" autocomplete="username" autofocus>
         </div>
         <div class="field">
           <label>Mot de passe<span class="req">*</span></label>
           <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
         </div>
-        <div class="row-links">
-          <span class="muted">Garde-moi connecté</span>
-        </div>
+        <label class="remember-row">
+          <input type="checkbox" name="remember" id="login-remember" value="1">
+          <span class="remember-check"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span>Se souvenir de moi</span>
+          <span class="remember-hint">(30 jours)</span>
+        </label>
         <button type="submit" class="btn" id="login-btn"><span class="label">Se connecter →</span><span class="spinner"></span></button>
       </form>
       <script>
+        // Pré-remplir username depuis localStorage si l'user s'était souvenu
+        try{
+          var savedUser = localStorage.getItem('vabot_remembered_user');
+          if(savedUser){
+            document.getElementById('login-username').value = savedUser;
+            document.getElementById('login-remember').checked = true;
+          }
+        }catch(e){}
         document.querySelector('form').addEventListener('submit', function(){
+          // Sauver / oublier le username selon la checkbox
+          try{
+            var remember = document.getElementById('login-remember').checked;
+            var u = document.getElementById('login-username').value.trim();
+            if(remember && u){
+              localStorage.setItem('vabot_remembered_user', u);
+            } else {
+              localStorage.removeItem('vabot_remembered_user');
+            }
+          }catch(e){}
           var b = document.getElementById('login-btn');
           if(b){ b.classList.add('loading'); b.disabled = true; }
-          // Afficher aussi le page loader (couvre tout l'écran pendant le chargement du dashboard)
           var pl = document.getElementById('page-loader');
           if(pl) setTimeout(function(){ pl.classList.add('show'); }, 300);
         });
-        // Cacher au load (au cas où on revient en arrière)
         window.addEventListener('pageshow', function(){
           var pl = document.getElementById('page-loader');
           if(pl) pl.classList.remove('show');
@@ -7570,9 +7597,17 @@ def create_app():
         if request.method == "POST" and not is_auth():
             username = (request.form.get("username") or "").strip().lower()
             password = request.form.get("password") or ""
+            remember = (request.form.get("remember") or "") == "1"
             if _check_web_login(username, password):
                 session["auth"] = True
                 session["username"] = username or "admin"
+                # "Se souvenir de moi" : session de 30 jours au lieu de session navigateur
+                if remember:
+                    session.permanent = True
+                    import datetime as _dt_login
+                    app.permanent_session_lifetime = _dt_login.timedelta(days=30)
+                else:
+                    session.permanent = False
                 _track_session()
                 return redirect("/")
             return _render_login("Nom d'utilisateur ou mot de passe incorrect")
