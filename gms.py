@@ -147,6 +147,11 @@ def _call_tool(tool_name: str, args: Optional[dict] = None) -> Dict[str, Any]:
         # Détecter les erreurs renvoyées par l'outil GMS
         if isinstance(payload, dict) and payload.get("error"):
             return {"ok": False, "error": str(payload.get("error"))[:500]}
+        # Certaines erreurs arrivent en plain text "Error 400 (...)" — les attraper
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if stripped.lower().startswith("error ") or stripped.lower().startswith("error("):
+                return {"ok": False, "error": stripped[:500]}
         return {"ok": True, "data": payload}
     return {"ok": True, "data": result}
 
@@ -331,6 +336,61 @@ def invalidate_grouping_cache():
     """À appeler après create/delete/update de lien pour forcer un refresh."""
     _GROUPED_CACHE["ts"] = 0
     _GROUPED_CACHE["data"] = None
+
+
+def duplicate_link(source_link_id: str, new_shortcode: str,
+                    new_display_name: str = "", new_url: str = "") -> Dict[str, Any]:
+    """Duplique un lien existant — copie TOUTE la config (boutons, pixels, design,
+    bot protection, etc.) avec un nouveau shortcode + display_name.
+
+    Optionnel : new_url pour changer l'URL de destination (directlink uniquement).
+    Pour ça on appelle update_link après le duplicate.
+
+    Retourne {ok, link, error}.
+    """
+    sc = new_shortcode.strip()
+    if not source_link_id or not sc:
+        return {"ok": False, "error": "source_link_id et new_shortcode requis"}
+    args = {
+        "link_id": source_link_id,
+        "shortcode": sc,
+        "display_name": (new_display_name or sc).strip()[:60],
+    }
+    res = _call_tool("duplicate_link", args)
+    if not res.get("ok"):
+        return res
+    new_link = res.get("data") or {}
+    # MCP renvoie parfois du repr string -> on tente un re-parse safe
+    if isinstance(new_link, str):
+        try:
+            import ast as _ast
+            new_link = _ast.literal_eval(new_link)
+        except Exception:
+            try:
+                import json as _json
+                new_link = _json.loads(new_link)
+            except Exception:
+                new_link = {}
+    new_id = new_link.get("id") if isinstance(new_link, dict) else None
+
+    # Si une nouvelle URL est fournie ET qu'on a bien l'id, on patch le lien
+    new_url_clean = (new_url or "").strip()
+    if new_url_clean and new_id:
+        try:
+            upd_res = _call_tool("update_link", {
+                "link_id": new_id,
+                "url": new_url_clean,
+            })
+            if upd_res.get("ok"):
+                new_link = upd_res.get("data") or new_link
+        except Exception:
+            pass
+    # Invalider le cache pour rafraîchir la liste à la prochaine lecture
+    try:
+        invalidate_grouping_cache()
+    except Exception:
+        pass
+    return {"ok": True, "link": new_link}
 
 
 def delete_link(link_id: str) -> Dict[str, Any]:

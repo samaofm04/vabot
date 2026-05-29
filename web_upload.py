@@ -7377,9 +7377,52 @@ def _render_gms_html() -> str:
             "</div>"
         )
 
+        # Formulaire de duplication depuis un template
+        # On groupe les liens dispos par modèle pour le select
+        from collections import defaultdict as _dd
+        links_by_model = _dd(list)
+        for l in res.get("links", []):
+            model = gms.categorize_link(l)
+            links_by_model[model].append(l)
+        source_options = []
+        for model in sorted(links_by_model.keys()):
+            source_options.append(f"<optgroup label='{model}'>")
+            for l in sorted(links_by_model[model], key=lambda x: (x.get("display_name") or "").lower()):
+                lid = l.get("id", "")
+                sc = l.get("shortcode", "")
+                nm = l.get("display_name") or "—"
+                lbl = f"/{sc} — {nm}"[:80]
+                source_options.append(f"<option value='{lid}'>{lbl}</option>")
+            source_options.append("</optgroup>")
+        source_select = "".join(source_options) if source_options else "<option value=''>Aucun lien existant à dupliquer</option>"
+
+        duplicate_form = (
+            "<div class='box' style='margin-bottom:18px;border:2px solid #a855f7'>"
+            "<h3 style='margin:0 0 4px;font-size:15px;color:#a855f7'>🪄 Dupliquer depuis un template</h3>"
+            "<p style='color:#888;font-size:12px;margin:0 0 14px'>"
+            "Reprend TOUTE la config d'un lien existant (boutons, profile pic, pixels, anti-bot, design, "
+            "smart redirect, A/B testing, etc.) — tu changes juste le shortcode et l'URL.</p>"
+            "<form method='POST' action='/gms/duplicate' style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>"
+            "<div style='grid-column:1 / -1'>"
+            "<label>Lien source (template)</label>"
+            f"<select name='source_link_id' required>{source_select}</select>"
+            "</div>"
+            "<div><label>Nouveau shortcode</label>"
+            "<input type='text' name='shortcode' pattern='[a-zA-Z0-9_-]{3,24}' minlength='3' maxlength='24' placeholder='amelia-newva' required></div>"
+            "<div><label>Nom affiché</label>"
+            "<input type='text' name='display_name' maxlength='60' placeholder='Amelia New VA' required></div>"
+            "<div style='grid-column:1 / -1'><label>Nouvelle URL (optionnel — sinon garde celle du template)</label>"
+            "<input type='url' name='url' placeholder='https://onlyfans.com/<nouveau-username>'></div>"
+            "<div style='grid-column:1 / -1'>"
+            "<button type='submit' style='width:100%;background:#a855f7'>🪄 Dupliquer + créer</button></div>"
+            "</form>"
+            "</div>"
+        )
+
         total_count = len(res.get("links", []))
         links_section = (
             create_form
+            + duplicate_form
             + f"<h3 style='margin:24px 0 0;font-size:15px;display:flex;align-items:center;gap:10px'>Tes liens"
             + f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px'>{total_count}</span>"
             + "</h3>"
@@ -9129,6 +9172,32 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ Connexion OK (user <code>{res.get('user_id', '?')[:18]}…</code>)")
         return _error(f"❌ Test échoué : {res.get('error', '?')}")
+
+    @app.route("/gms/duplicate", methods=["POST"])
+    def gms_duplicate():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import gms
+        except Exception as e:
+            return _error(f"❌ Module gms indispo : {e}")
+        source = (request.form.get("source_link_id") or "").strip()
+        short = (request.form.get("shortcode") or "").strip()
+        name = (request.form.get("display_name") or "").strip()
+        url = (request.form.get("url") or "").strip()
+        if not source or not source.startswith("lnk_"):
+            return _error("❌ Lien source invalide")
+        if not short or len(short) < 3 or len(short) > 24:
+            return _error("❌ Shortcode doit faire 3-24 caractères")
+        if not name:
+            return _error("❌ Nom affiché requis")
+        res = gms.duplicate_link(source, short, name, url)
+        if res.get("ok"):
+            link = res.get("link") or {}
+            lid = link.get("id", "?")
+            url_part = f" → {url}" if url else " (URL conservée du template)"
+            return _success(f"✅ Lien <code>/{short}</code> dupliqué depuis le template{url_part}")
+        return _error(f"❌ {res.get('error', 'Duplication échouée')}")
 
     @app.route("/gms/create", methods=["POST"])
     def gms_create():
