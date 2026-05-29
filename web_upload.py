@@ -2763,16 +2763,22 @@ def _render_va_list_html_inner() -> str:
 
     css = """
 <style>
-.va-section{margin-bottom:24px;background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
-.va-section-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #2a2a2a}
-.va-section-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.35);flex-shrink:0}
-.va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
-.va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
+.va-section{margin-bottom:24px;background:#0f1116;border:1px solid #2a2a2a;border-radius:16px;padding:20px 22px}
+.va-section-head{display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #2a2a2a}
+.va-section-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.4);flex-shrink:0}
+.va-section-name{font-weight:800;font-size:18px;letter-spacing:-.02em}
+.va-section-count{background:rgba(59,130,246,.12);color:#60a5fa;font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;letter-spacing:.02em;text-transform:uppercase}
 .va-list{display:flex;flex-direction:column;gap:8px}
-/* Card grid : avatar | (username + id) | auto-post | salon | spacer | actions */
-.va-card{display:grid;grid-template-columns:46px minmax(160px,200px) 110px 130px 1fr auto;gap:12px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
-.va-col-auto,.va-col-salon{display:flex;align-items:center;min-width:0}
+/* Card style Infloww : généreux espacement, infos hiérarchisées */
+.va-card{display:grid;grid-template-columns:52px minmax(180px,1fr) 120px 1fr auto;gap:16px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:14px 18px;transition:all .15s}
+.va-card:hover{background:#1f1f1f;border-color:#3a3a3a}
+.va-pp,.va-pp-fallback{width:44px;height:44px}
+.va-col-auto,.va-col-salon{display:flex;align-items:center;min-width:0;gap:8px}
 .va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+/* Petite pastille statut */
+.va-status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block}
+.va-status-on{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+.va-status-off{background:#6b7280}
 .va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
 .va-links-btn:hover{background:rgba(168,85,247,.2)}
 .va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;flex:1;display:inline-block;line-height:1;text-align:left}
@@ -2791,7 +2797,7 @@ def _render_va_list_html_inner() -> str:
 .va-info{min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:2px}
 .va-username{font-weight:700;font-size:14px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;color:#fff}
 .va-id{font-family:monospace;font-size:11px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.va-salon{font-size:11px;color:#888;display:inline-flex;align-items:center;gap:4px;text-decoration:none;background:rgba(255,255,255,.04);padding:3px 8px;border-radius:6px}
+.va-salon{font-size:11px;color:#888;display:inline-flex;align-items:center;gap:5px;text-decoration:none;background:rgba(255,255,255,.04);padding:5px 10px;border-radius:7px;font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;letter-spacing:-.01em;white-space:nowrap;transition:all .15s}
 .va-salon:hover{background:rgba(59,130,246,.15);color:#3b82f6}
 .va-auto-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .va-auto-on{background:rgba(34,197,94,.15);color:#22c55e}
@@ -2922,19 +2928,19 @@ body.light .va-id{color:#9ca3af}
                 # Tooltip = nom complet pour si le truncate cache une partie
                 name_display = f"<span class='va-username' title='@{username}'>@{username}</span>"
 
+            # Statut sous forme de petite pastille verte ou grise (sans texte)
             auto_pill = (
-                "<span class='va-auto-pill va-auto-on'>"
-                "<svg viewBox='0 0 24 24' width='10' height='10' fill='none' stroke='currentColor' stroke-width='3'><polyline points='20 6 9 17 4 12'/></svg>"
-                "Auto-post</span>"
+                "<span class='va-status-dot va-status-on' title='Auto-post actif'></span>"
                 if is_auto else
-                "<span class='va-auto-pill va-auto-off'>Manuel</span>"
+                "<span class='va-status-dot va-status-off' title='Manuel'></span>"
             )
 
+            # Salon : juste icône + short ID, lien direct
             salon_html = (
-                f"<a class='va-salon' href='https://discord.com/channels/@me/{channel_id}' target='_blank'>"
-                f"<svg viewBox='0 0 24 24' width='10' height='10' fill='none' stroke='currentColor' stroke-width='2'><path d='M4 4h16v16H4z'/></svg>"
-                f"#{channel_id[:8]}…</a>"
-                if channel_id else ""
+                f"<a class='va-salon' href='https://discord.com/channels/@me/{channel_id}' target='_blank' title='Ouvrir le salon Discord (#{channel_id})'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='3' y='4' width='18' height='14' rx='2'/></svg>"
+                f"<span>#{channel_id[:6]}…</span></a>"
+                if channel_id else "<span style='color:#444'>—</span>"
             )
 
             opts = "".join(
@@ -3052,12 +3058,13 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-card'>"
                 f"{pp_html}"
                 f"<div class='va-info'>"
+                f"<div style='display:flex;align-items:center;gap:8px;min-width:0'>"
+                f"{auto_pill}"
                 f"{name_display}"
+                f"</div>"
                 f"<div class='va-id'>{uid}</div>"
                 f"</div>"
-                f"<div class='va-col-auto'>{auto_pill}</div>"
-                + ("<div class='va-col-salon'>" + (salon_html or "<span style='color:#444;font-size:11px'>—</span>") + "</div>")
-                + f""
+                f"<div class='va-col-salon'>{salon_html}</div>"
                 f"<div></div>"
                 f"<div class='va-actions'>"
                 f"{links_btn_html}"
