@@ -1027,11 +1027,11 @@ function lbRender(){
       content.innerHTML =
         '<div class="lb-dual-video">' +
           '<div class="lb-dual-item">' +
-            '<div class="lb-dual-label">Original</div>' +
+            '<div class="lb-dual-label">Avec captions</div>' +
             mainVideo +
           '</div>' +
           '<div class="lb-dual-item">' +
-            '<div class="lb-dual-label">Exemple</div>' +
+            '<div class="lb-dual-label">Original (clean)</div>' +
             '<video controls muted loop playsinline preload="metadata" src="'+it.exampleUrl+'" '
               + 'style="max-width:100%;max-height:calc(100vh - 120px);height:auto;width:auto"></video>' +
           '</div>' +
@@ -2966,20 +2966,21 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                     example_by_stem[base_stem] = pe.name
 
         for p in files:
-            # Le file_id pointe TOUJOURS sur le fichier clean (pour les actions :
-            # delete, caption, etc. — la caption est attachée au clean)
+            # file_id pointe TOUJOURS sur le clean (actions : caption / delete)
             file_id = f"{selected}|{subdir}|{p.name}"
-            # Mais l'AFFICHAGE prend la version EXEMPLE si elle existe
-            # (avec overlay/caption visible, plus représentatif visuellement)
+            clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
             ex_name = example_by_stem.get(p.stem)
             if ex_name:
-                # Le clean est remplacé par l'exemple dans la galerie
+                # Thumbnail + lecture principale = version EXEMPLE (avec overlay)
+                # Le CLEAN s'affiche en deuxième dans la lightbox via le 5e param
                 url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
                 thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
+                second_url = clean_url
             else:
-                url = f"/cloud/file/{selected}/{subdir}/{p.name}"
+                url = clean_url
                 thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, ""))
+                second_url = ""
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px'>"
