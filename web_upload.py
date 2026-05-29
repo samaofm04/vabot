@@ -37,6 +37,44 @@ def set_bot_ref(bot):
     _BOT_REF = bot
 
 
+def _resolve_user_obj(user_id):
+    """Retourne l'objet User Discord depuis l'ID, ou None si pas trouvé."""
+    if _BOT_REF is None:
+        return None
+    try:
+        uid_int = int(user_id)
+    except Exception:
+        return None
+    try:
+        u = _BOT_REF.get_user(uid_int)
+        if u:
+            return u
+    except Exception:
+        pass
+    try:
+        for g in _BOT_REF.guilds:
+            m = g.get_member(uid_int)
+            if m:
+                return m
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_avatar_url(user_id) -> str:
+    """Retourne l'URL de la PP Discord d'un user, ou empty string si introuvable."""
+    u = _resolve_user_obj(user_id)
+    if not u:
+        return ""
+    try:
+        return str(u.display_avatar.url)
+    except Exception:
+        try:
+            return str(u.avatar.url) if u.avatar else ""
+        except Exception:
+            return ""
+
+
 def _resolve_username(user_id) -> str:
     """Retourne le username Discord depuis l'ID, ou l'ID si pas trouvé.
 
@@ -2298,7 +2336,13 @@ def _identity_stats(identity: str) -> dict:
 def _render_va_list_html() -> str:
     users = _load_users()
     if not users:
-        return "<p style='color:#888'>Aucun VA assigné pour l'instant.</p>"
+        return (
+            "<div style='padding:60px 20px;text-align:center;color:#888;background:#0f1116;border:1px solid #2a2a2a;border-radius:14px'>"
+            "<svg viewBox='0 0 24 24' width='44' height='44' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:12px;opacity:.5'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg>"
+            "<p style='margin:0;font-size:14px;font-weight:600'>Aucun VA assigné pour l'instant.</p>"
+            "<p style='margin:6px 0 0;font-size:12px;color:#666'>Les VAs apparaitront ici dès qu'ils utiliseront /assignme sur Discord.</p>"
+            "</div>"
+        )
 
     # Regrouper par identité
     by_identity = {}
@@ -2309,77 +2353,143 @@ def _render_va_list_html() -> str:
             identity = str(data)
         by_identity.setdefault(identity, []).append((uid, data))
 
-    rows = []
+    all_identities = _list_identities()
+
+    css = """
+<style>
+.va-section{margin-bottom:24px;background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
+.va-section-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #2a2a2a}
+.va-section-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.35);flex-shrink:0}
+.va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
+.va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
+.va-list{display:flex;flex-direction:column;gap:8px}
+.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
+.va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
+.va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
+.va-info{min-width:0}
+.va-name{font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.va-id{font-family:monospace;font-size:11px;color:#666;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.va-salon{font-size:11px;color:#888;display:inline-flex;align-items:center;gap:4px;text-decoration:none;background:rgba(255,255,255,.04);padding:3px 8px;border-radius:6px}
+.va-salon:hover{background:rgba(59,130,246,.15);color:#3b82f6}
+.va-auto-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.va-auto-on{background:rgba(34,197,94,.15);color:#22c55e}
+.va-auto-off{background:rgba(107,114,128,.15);color:#9ca3af}
+.va-change-form{display:flex;gap:6px;align-items:center;margin:0}
+.va-change-form select{padding:7px 10px;background:#0f1116;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px;width:auto;font-family:inherit;cursor:pointer}
+.va-change-form button{padding:7px 12px;background:#3b82f6;color:#fff;border:0;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;margin:0;font-family:inherit}
+.va-change-form button:hover{background:#2563eb}
+.va-reset-btn{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;margin:0;font-family:inherit}
+.va-reset-btn:hover{background:rgba(239,68,68,.1)}
+@media(max-width:900px){.va-card{grid-template-columns:auto 1fr;grid-auto-rows:auto}.va-card > *{grid-column:span 2}.va-pp,.va-pp-fallback{grid-column:1;grid-row:1}.va-info{grid-column:2;grid-row:1}}
+body.light .va-section{background:#fff;border-color:#e5e7eb}
+body.light .va-section-head{border-color:#e5e7eb}
+body.light .va-card{background:#f9fafb;border-color:#e5e7eb}
+body.light .va-card:hover{background:#fff}
+body.light .va-change-form select{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .va-id{color:#9ca3af}
+</style>
+"""
+
+    sections = []
     for identity in sorted(by_identity.keys()):
         members = by_identity[identity]
-        rows.append(
-            f"<div style='margin-top:18px;display:flex;align-items:center;gap:10px'>"
-            f"<h4 style='margin:0;color:#3b82f6;font-size:15px'>👤 {identity}</h4>"
-            f"<small style='color:#666'>{len(members)} VA(s)</small>"
-            f"</div>"
+        ident_avatar = _identity_avatar_url(identity)
+        avatar_html = (
+            f"<img src='{ident_avatar}' class='va-section-avatar' alt='{identity}'>"
+            if ident_avatar else
+            f"<div class='va-section-avatar' style='display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;font-weight:800;border:0'>{identity[:1].upper()}</div>"
         )
-        rows.append(
-            "<table style='width:100%;border-collapse:collapse;margin-top:8px'>"
-            "<tr style='background:#1a1a1a'>"
-            "<th style='padding:8px;text-align:left'>Username Discord</th>"
-            "<th style='padding:8px;text-align:left'>Discord ID</th>"
-            "<th style='padding:8px;text-align:left'>Salon</th>"
-            "<th style='padding:8px;text-align:center'>Auto-post</th>"
-            "<th style='padding:8px;text-align:left'>Changer d'identité</th>"
-            "<th style='padding:8px;text-align:right'>Actions</th>"
-            "</tr>"
-        )
-        all_identities = _list_identities()
+
+        cards = []
         for uid, data in members:
             if isinstance(data, dict):
                 channel_id = data.get("channel_id", "")
-                auto = "✅" if data.get("auto_post", True) else "❌"
+                is_auto = data.get("auto_post", True)
                 cur_identity = data.get("identity", identity)
             else:
                 channel_id = ""
-                auto = "?"
+                is_auto = True
                 cur_identity = identity
+
             username = _resolve_username(uid)
-            if username == str(uid):
-                username_html = "<span style='color:#888'>—</span>"
-            else:
-                username_html = f"<b>@{username}</b>"
-            channel_link = (
-                f"<a href='https://discord.com/channels/@me/{channel_id}'>{channel_id}</a>"
-                if channel_id else "<span style='color:#888'>—</span>"
+            avatar_url = _resolve_avatar_url(uid)
+            pp_html = (
+                f"<img src='{avatar_url}' class='va-pp' loading='lazy' alt='@{username}'>"
+                if avatar_url else
+                f"<div class='va-pp-fallback'>{(username[:1] if username else '?').upper()}</div>"
             )
-            # Select pour changer l'identité
+
+            if username == str(uid):
+                name_display = f"<span style='color:#888'>—</span>"
+            else:
+                name_display = f"<span>@{username}</span>"
+
+            auto_pill = (
+                "<span class='va-auto-pill va-auto-on'>"
+                "<svg viewBox='0 0 24 24' width='10' height='10' fill='none' stroke='currentColor' stroke-width='3'><polyline points='20 6 9 17 4 12'/></svg>"
+                "Auto-post</span>"
+                if is_auto else
+                "<span class='va-auto-pill va-auto-off'>Manuel</span>"
+            )
+
+            salon_html = (
+                f"<a class='va-salon' href='https://discord.com/channels/@me/{channel_id}' target='_blank'>"
+                f"<svg viewBox='0 0 24 24' width='10' height='10' fill='none' stroke='currentColor' stroke-width='2'><path d='M4 4h16v16H4z'/></svg>"
+                f"#{channel_id[:8]}…</a>"
+                if channel_id else ""
+            )
+
             opts = "".join(
                 f"<option value='{i}'{' selected' if i == cur_identity else ''}>{i}</option>"
                 for i in all_identities
             )
             change_form = (
-                f"<form method='POST' action='/va/change_identity' style='display:flex;gap:6px;margin:0'>"
+                f"<form method='POST' action='/va/change_identity' class='va-change-form'>"
                 f"<input type='hidden' name='user_id' value='{uid}'>"
-                f"<select name='identity' style='padding:6px 8px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:4px;font-size:13px;width:auto;flex:1'>"
-                f"{opts}"
-                f"</select>"
-                f"<button type='submit' style='padding:6px 10px;background:#3b82f6;color:#fff;border:0;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;margin:0'>OK</button>"
+                f"<select name='identity'>{opts}</select>"
+                f"<button type='submit'>OK</button>"
                 f"</form>"
             )
-            rows.append(
-                f"<tr style='border-bottom:1px solid #333'>"
-                f"<td style='padding:8px'>{username_html}</td>"
-                f"<td style='padding:8px'><code style='font-size:12px'>{uid}</code></td>"
-                f"<td style='padding:8px'>{channel_link}</td>"
-                f"<td style='padding:8px;text-align:center'>{auto}</td>"
-                f"<td style='padding:8px;min-width:180px'>{change_form}</td>"
-                f"<td style='padding:8px;text-align:right'>"
-                f"<form method='POST' action='/va/reset' style='display:inline'>"
+
+            reset_form = (
+                f"<form method='POST' action='/va/reset' style='margin:0'>"
                 f"<input type='hidden' name='user_id' value='{uid}'>"
-                f"<button type='submit' class='danger-btn' "
+                f"<button type='submit' class='va-reset-btn' "
                 f"data-confirm=\"Reset @{username} ? Le VA gardera son salon Discord mais perdra son identité assignée.\">Reset</button>"
                 f"</form>"
-                f"</td></tr>"
             )
-        rows.append("</table>")
-    rows.append(f"<div style='margin-top:18px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{len(users)}</b> VA(s) sur <b>{len(by_identity)}</b> identité(s)</small></div>")
-    return "".join(rows)
+
+            cards.append(
+                f"<div class='va-card'>"
+                f"{pp_html}"
+                f"<div class='va-info'>"
+                f"<div class='va-name'>{name_display} {auto_pill} {salon_html}</div>"
+                f"<div class='va-id'>{uid}</div>"
+                f"</div>"
+                f"{change_form}"
+                f"{reset_form}"
+                f"</div>"
+            )
+
+        sections.append(
+            f"<div class='va-section'>"
+            f"<div class='va-section-head'>"
+            f"{avatar_html}"
+            f"<div class='va-section-name'>@{identity}</div>"
+            f"<div class='va-section-count'>{len(members)} VA{'s' if len(members) > 1 else ''}</div>"
+            f"</div>"
+            f"<div class='va-list'>{''.join(cards)}</div>"
+            f"</div>"
+        )
+
+    footer = (
+        f"<div style='margin-top:18px;padding:12px 16px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.2);border-radius:10px;color:#888;font-size:13px'>"
+        f"💡 <b style='color:#3b82f6'>{len(users)}</b> VA{'s' if len(users) > 1 else ''} actif{'s' if len(users) > 1 else ''} réparti{'s' if len(users) > 1 else ''} sur <b style='color:#3b82f6'>{len(by_identity)}</b> identité{'s' if len(by_identity) > 1 else ''}"
+        f"</div>"
+    )
+
+    return css + "".join(sections) + footer
 
 
 def _render_identity_stats_html() -> str:
