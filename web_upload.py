@@ -2231,41 +2231,151 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
 
 
 def _render_cloud_content_html(subdir: str, exts) -> str:
-    """Liste les fichiers de <subdir> par identité avec previews en grille."""
+    """Vue "Dossier Sécurisé" : d'abord la liste des identités comme dossiers,
+    puis si ?cloud_ident=<name> sélectionne une identité, on montre ses fichiers.
+    """
+    from flask import request as _req
     identities = _list_identities()
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
     is_video = subdir == "videos"
-    rows = []
-    total = 0
-    for ident in identities:
-        folder = IDENTITIES_DIR / ident / subdir
+
+    # Vérifier si une identité est sélectionnée
+    selected = ""
+    try:
+        selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
+    except Exception:
+        pass
+
+    # ==== Vue : liste des fichiers pour une identité ====
+    if selected and selected in identities:
+        folder = IDENTITIES_DIR / selected / subdir
         files = []
         if folder.exists():
             files = sorted([
                 p for p in folder.iterdir()
                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
             ])
-        if not files:
-            continue
-        total += len(files)
-        rows.append(
-            f"<div style='margin-top:22px;display:flex;align-items:center;gap:10px'>"
-            f"<h4 style='margin:0;color:#3b82f6;font-size:15px'>👤 {ident}</h4>"
-            f"<small style='color:#666'>{len(files)} fichier(s)</small>"
+        avatar_url = _identity_avatar_url(selected)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+            if avatar_url else
+            f"<div style='width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px'>{selected[:1].upper()}</div>"
+        )
+        # Reconstruire l'URL "retour" sans le param cloud_<subdir>_ident
+        # On reste sur le bon tab
+        back_url = f"?tab=cloud{subdir.rstrip('s') if subdir != 'storyctas' else 'storyctas'}"
+        # Build URLs proprement : tab name est cloudreels/cloudposts/cloudstories/cloudstoryctas
+        tab_name = {"videos": "cloudreels", "posts": "cloudposts", "stories": "cloudstories", "storyctas": "cloudstoryctas"}.get(subdir, "cloudoverview")
+        back_url = f"?tab={tab_name}"
+
+        header = (
+            f"<div style='display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #2a2a2a'>"
+            f"<a href='{back_url}' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 12px;border-radius:8px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px'>"
+            f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M19 12H5M12 19l-7-7 7-7'/></svg>Retour</a>"
+            f"{avatar_html}"
+            f"<div><div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+            f"<div style='font-size:12px;color:#888;margin-top:2px'>{len(files)} fichier{'s' if len(files) > 1 else ''} · {sum(p.stat().st_size for p in files) / (1024*1024):.1f} MB</div></div>"
             f"</div>"
         )
-        rows.append("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:10px'>")
+        if not files:
+            return header + "<p style='color:#888;text-align:center;padding:40px'>Aucun fichier pour cette identité.</p>"
+        out = [header, "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px'>"]
         for p in files:
-            url = f"/cloud/file/{ident}/{subdir}/{p.name}"
-            thumb_url = f"/cloud/thumb/{ident}/{subdir}/{p.name}"
-            file_id = f"{ident}|{subdir}|{p.name}"
-            rows.append(_preview_card(url, thumb_url, p, is_video, file_id))
-        rows.append("</div>")
-    if not rows:
-        return "<p style='color:#888'>Aucun fichier stocké.</p>"
-    rows.append(f"<div style='margin-top:22px;padding-top:14px;border-top:1px solid #2a2a2a'><small>Total : <b>{total}</b> fichier(s)</small></div>")
-    return "".join(rows)
+            url = f"/cloud/file/{selected}/{subdir}/{p.name}"
+            thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
+            file_id = f"{selected}|{subdir}|{p.name}"
+            out.append(_preview_card(url, thumb_url, p, is_video, file_id))
+        out.append("</div>")
+        return "".join(out)
+
+    # ==== Vue : liste des dossiers (1 par identité) ====
+    tab_name = {"videos": "cloudreels", "posts": "cloudposts", "stories": "cloudstories", "storyctas": "cloudstoryctas"}.get(subdir, "cloudoverview")
+    subdir_key = f"cloud_{subdir}_ident"
+    cards = []
+    grand_total = 0
+    for ident in identities:
+        folder = IDENTITIES_DIR / ident / subdir
+        n_files = 0
+        n_videos = 0
+        n_images = 0
+        size_mb = 0.0
+        if folder.exists():
+            for p in folder.iterdir():
+                if not p.is_file():
+                    continue
+                if p.suffix.lower() not in exts or ".example" in p.name:
+                    continue
+                n_files += 1
+                if p.suffix.lower() in VIDEO_EXTS:
+                    n_videos += 1
+                else:
+                    n_images += 1
+                try:
+                    size_mb += p.stat().st_size / (1024 * 1024)
+                except Exception:
+                    pass
+        grand_total += n_files
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(59,130,246,.3);flex-shrink:0'>"
+            if avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+        )
+        # Petit count badge image / video
+        counts_html = []
+        if n_images:
+            counts_html.append(
+                f"<span style='display:inline-flex;align-items:center;gap:3px;color:#888;font-size:11px'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='9' cy='9' r='2'/><polyline points='21 15 16 10 5 21'/></svg>"
+                f"{n_images}</span>"
+            )
+        if n_videos:
+            counts_html.append(
+                f"<span style='display:inline-flex;align-items:center;gap:3px;color:#888;font-size:11px'>"
+                f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2'/></svg>"
+                f"{n_videos}</span>"
+            )
+        counts_str = " · ".join(counts_html) if counts_html else "<span style='color:#555;font-size:11px'>vide</span>"
+
+        size_str = (
+            f" · <span style='color:#555;font-size:11px'>{size_mb:.1f} MB</span>"
+            if size_mb > 0.05 else ""
+        )
+        cards.append(
+            f"<a href='?tab={tab_name}&{subdir_key}={ident}' class='cloud-folder-card' "
+            f"style='display:flex;align-items:center;gap:14px;padding:14px 16px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;text-decoration:none;color:inherit;transition:all .15s'>"
+            f"{avatar_html}"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>@{ident}</div>"
+            f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>{counts_str}{size_str}</div>"
+            f"</div>"
+            f"<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#444' stroke-width='2'><polyline points='9 18 15 12 9 6'/></svg>"
+            f"</a>"
+        )
+
+    if grand_total == 0:
+        return (
+            "<div style='padding:40px;text-align:center;color:#888;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px'>"
+            "<svg viewBox='0 0 24 24' width='40' height='40' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:10px;color:#444'><path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/></svg>"
+            "<p style='margin:0;font-size:13px'>Aucun fichier stocké pour le moment.</p>"
+            "</div>"
+        )
+
+    css = (
+        "<style>"
+        ".cloud-folder-card:hover{background:#202020 !important;border-color:rgba(59,130,246,.4) !important;transform:translateY(-1px)}"
+        "body.light .cloud-folder-card{background:#fff !important;border-color:#e5e7eb !important}"
+        "body.light .cloud-folder-card:hover{background:#f9fafb !important;border-color:rgba(59,130,246,.4) !important}"
+        "</style>"
+    )
+    return (
+        css
+        + "<div style='display:flex;flex-direction:column;gap:8px'>"
+        + "".join(cards)
+        + "</div>"
+        + f"<div style='margin-top:18px;padding-top:14px;border-top:1px solid #2a2a2a;color:#666;font-size:12px'>Total : <b style='color:#aaa'>{grand_total}</b> fichier{'s' if grand_total > 1 else ''} dans {len(cards)} dossier{'s' if len(cards) > 1 else ''}</div>"
+    )
 
 
 def _render_cloud_pps_html() -> str:
