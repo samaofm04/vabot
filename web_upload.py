@@ -347,11 +347,20 @@ body.light #page-loader{background:rgba(249,250,251,.92)}
 
 /* Pop quand checkbox sélectionnée */
 .sel-cb:checked{animation:pop .25s ease}
-/* Cercle de sélection rond style Infloww */
-.sel-circle{display:block;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.8);backdrop-filter:blur(4px);transition:all .15s;position:relative}
-.sel-circle-wrap:hover .sel-circle{background:rgba(255,255,255,.3);border-color:#fff;transform:scale(1.08)}
-.sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+/* Cercle de sélection rond — frosted white pour rester lisible sur n'importe quelle image */
+.sel-circle{display:block;width:24px;height:24px;border-radius:50%;
+  background:rgba(255,255,255,.85);border:2px solid #fff;
+  backdrop-filter:blur(8px);transition:all .15s;position:relative;
+  box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.sel-circle-wrap:hover .sel-circle{background:#fff;transform:scale(1.08);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25),0 4px 12px rgba(59,130,246,.3)}
 .sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
+/* Bouton edit crayon sur les cards — frosted white aussi */
+.card-edit-btn{background:rgba(255,255,255,.85);border:0;color:#1a1a1a;width:28px;height:28px;
+  border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  padding:0;backdrop-filter:blur(8px);transition:all .15s;
+  box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.card-edit-btn:hover{background:#3b82f6;color:#fff;transform:scale(1.08);box-shadow:0 4px 12px rgba(59,130,246,.4)}
 
 /* Items de la sidebar - smooth hover */
 .sidebar .item,.sidebar .group-head,.sidebar .subgroup-head,.sidebar .logout-btn{transition:background .15s,color .15s,padding-left .15s}
@@ -2516,17 +2525,14 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"</div>"
     )
 
-    # Icône crayon (Edit) + cercle de sélection en haut à DROITE
+    # Icône crayon (Edit) + cercle de sélection en haut à DROITE — frosted white style
     actions_html = ""
     if file_id:
         actions_html = (
-            f"<div class='card-actions' style='position:absolute;top:6px;right:6px;display:flex;gap:6px;align-items:center;z-index:5'>"
-            f"<button onclick='event.stopPropagation();openCaptionEditor(\"{fid_safe}\")' "
-            f"title='Modifier caption / description' "
-            f"style='background:rgba(0,0,0,.7);border:0;color:#fff;width:28px;height:28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s' "
-            f"onmouseover='this.style.background=\"rgba(59,130,246,.85)\"' "
-            f"onmouseout='this.style.background=\"rgba(0,0,0,.7)\"'>"
-            f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
+            f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
+            f"<button class='card-edit-btn' onclick='event.stopPropagation();openCaptionEditor(\"{fid_safe}\")' "
+            f"title='Modifier caption / description'>"
+            f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
             f"</button>"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
@@ -2749,10 +2755,11 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "</div>"
     )
 
-    # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent photos+vidéos
-    # Reels = videos only donc inutile. Autres = on affiche le filtre.
+    # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
+    # Reels = vidéos only, Posts = photos only → pas de filtre.
+    # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
     type_filter_html = ""
-    if subdir != "videos":
+    if subdir in ("stories", "storyctas"):
         def _type_url(value):
             params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
             if sort_mode and sort_mode != "recent":
