@@ -2351,11 +2351,191 @@ def _identity_stats(identity: str) -> dict:
     }
 
 
+def _render_gms_clicks_widget() -> str:
+    """Widget clicks GMS par modèle, période bi-mensuelle (1-15 et 16-fin)."""
+    try:
+        import gms
+        if not gms.is_configured():
+            return ""
+    except Exception:
+        return ""
+
+    from flask import request as _req
+    import datetime as _dt
+
+    today = _dt.date.today()
+
+    # Période : "current_h1" (1-15), "current_h2" (16-end), "prev_h1", "prev_h2"
+    period = "current_h2" if today.day > 15 else "current_h1"
+    try:
+        period = _req.args.get("va_clicks_period", period) or period
+    except Exception:
+        pass
+
+    def _range_for(p):
+        first_of_month = today.replace(day=1)
+        if p == "current_h1":
+            s = first_of_month
+            e = first_of_month + _dt.timedelta(days=14)  # 15
+            label = f"1 → 15 {first_of_month.strftime('%B')}"
+        elif p == "current_h2":
+            s = first_of_month + _dt.timedelta(days=15)  # 16
+            # Last day of month
+            if first_of_month.month == 12:
+                next_month = first_of_month.replace(year=first_of_month.year + 1, month=1)
+            else:
+                next_month = first_of_month.replace(month=first_of_month.month + 1)
+            e = next_month - _dt.timedelta(days=1)
+            label = f"16 → {e.day} {first_of_month.strftime('%B')}"
+        elif p == "prev_h2":
+            # 16-end of previous month
+            if first_of_month.month == 1:
+                prev_first = first_of_month.replace(year=first_of_month.year - 1, month=12)
+            else:
+                prev_first = first_of_month.replace(month=first_of_month.month - 1)
+            s = prev_first + _dt.timedelta(days=15)
+            e = first_of_month - _dt.timedelta(days=1)
+            label = f"16 → {e.day} {prev_first.strftime('%B')}"
+        else:  # prev_h1
+            if first_of_month.month == 1:
+                prev_first = first_of_month.replace(year=first_of_month.year - 1, month=12)
+            else:
+                prev_first = first_of_month.replace(month=first_of_month.month - 1)
+            s = prev_first
+            e = prev_first + _dt.timedelta(days=14)
+            label = f"1 → 15 {prev_first.strftime('%B')}"
+        return s, e, label
+
+    start_dt, end_dt, period_label = _range_for(period)
+    start_iso = start_dt.isoformat()
+    end_iso = end_dt.isoformat()
+
+    # Récupérer mapping modèle -> link_ids
+    try:
+        grouped = gms.get_links_grouped_by_model()
+    except Exception:
+        grouped = {}
+
+    # Modèles "officiels" prioritaires (matchent les identités)
+    PRIORITY = ["Amelia", "Lola", "Julia", "Sarah", "Emma"]
+    all_models = list(set(PRIORITY) | set(grouped.keys()))
+    sorted_models = [m for m in PRIORITY if m in grouped] + sorted(
+        [m for m in grouped.keys() if m not in PRIORITY]
+    )
+
+    # Fetch analytics par modèle (en parallèle conceptuel - on fait séquentiel ici, c'est OK avec le cache)
+    stats_by_model = {}
+    total_clicks = 0
+    total_visitors = 0
+    for model in sorted_models:
+        link_ids = grouped.get(model, [])
+        if not link_ids:
+            continue
+        try:
+            res = gms.get_analytics_overview(start_iso, end_iso, link_ids)
+            if res.get("ok"):
+                d = res.get("data", {}) or {}
+                clicks = int(d.get("total_clicks", 0))
+                visitors = int(d.get("unique_visitors", 0))
+                stats_by_model[model] = {"clicks": clicks, "visitors": visitors, "nb_links": len(link_ids)}
+                total_clicks += clicks
+                total_visitors += visitors
+        except Exception:
+            pass
+
+    # Trier par clicks décroissants
+    sorted_stats = sorted(stats_by_model.items(), key=lambda x: -x[1]["clicks"])
+    max_clicks = max((v["clicks"] for v in stats_by_model.values()), default=1) or 1
+
+    def _btn(p, txt):
+        active = "vac-btn-active" if p == period else ""
+        return f"<a href='?tab=valist&va_clicks_period={p}' class='vac-btn {active}'>{txt}</a>"
+
+    # Cartes par modèle
+    cards_html = []
+    for model, st in sorted_stats:
+        bar_pct = (st["clicks"] / max_clicks * 100) if max_clicks else 0
+        cards_html.append(
+            f"<div class='vac-row'>"
+            f"<div class='vac-name'>{model}</div>"
+            f"<div class='vac-bar'><div class='vac-bar-fill' style='width:{bar_pct:.1f}%'></div></div>"
+            f"<div class='vac-clicks'>{st['clicks']}</div>"
+            f"<div class='vac-visitors'>{st['visitors']} 👀</div>"
+            f"</div>"
+        )
+
+    if not cards_html:
+        cards_html = ["<div style='padding:30px;text-align:center;color:#888'>Aucun click sur cette période.</div>"]
+
+    css = """
+<style>
+.vac-widget{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
+.vac-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.vac-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;letter-spacing:-.01em}
+.vac-title svg{color:#3b82f6}
+.vac-subtitle{font-size:11px;color:#888;font-weight:400;margin-left:6px}
+.vac-period-row{display:flex;gap:5px;flex-wrap:wrap}
+.vac-btn{padding:6px 12px;background:transparent;border:1px solid #2a2a2a;color:#aaa;border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;transition:all .15s}
+.vac-btn:hover{background:rgba(255,255,255,.05);color:#fff}
+.vac-btn-active{background:#3b82f6 !important;border-color:#3b82f6 !important;color:#fff !important}
+.vac-stats{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.vac-stat{flex:1;min-width:130px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:12px 14px}
+.vac-stat .v{font-size:22px;font-weight:800;letter-spacing:-.02em;color:#3b82f6}
+.vac-stat .l{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-top:3px}
+.vac-list{display:flex;flex-direction:column;gap:6px}
+.vac-row{display:grid;grid-template-columns:140px 1fr 60px 80px;gap:14px;align-items:center;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;font-size:13px}
+.vac-name{font-weight:700;color:#fff;letter-spacing:-.01em}
+.vac-bar{position:relative;height:8px;background:#0f1116;border-radius:4px;overflow:hidden}
+.vac-bar-fill{position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:4px;transition:width .25s}
+.vac-clicks{font-weight:800;font-size:16px;color:#22c55e;text-align:right;letter-spacing:-.02em}
+.vac-visitors{font-size:11px;color:#888;text-align:right}
+body.light .vac-widget{background:#fff;border-color:#e5e7eb}
+body.light .vac-btn{color:#666;border-color:#e5e7eb}
+body.light .vac-btn:hover{background:#f3f4f6;color:#111}
+body.light .vac-row{background:#f9fafb;border-color:#e5e7eb}
+body.light .vac-name{color:#111}
+body.light .vac-bar{background:#e5e7eb}
+@media(max-width:700px){.vac-row{grid-template-columns:1fr;gap:6px;text-align:left}.vac-clicks,.vac-visitors{text-align:left}}
+</style>
+"""
+
+    return (
+        css
+        + "<div class='vac-widget'>"
+        + "<div class='vac-head'>"
+        + "<div class='vac-title'>"
+        + "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>"
+        + f"Clicks GMS par modèle<span class='vac-subtitle'>{period_label} · {start_iso} → {end_iso}</span>"
+        + "</div>"
+        + "<div class='vac-period-row'>"
+        + _btn("prev_h1", "M-1 · 1-15")
+        + _btn("prev_h2", "M-1 · 16-fin")
+        + _btn("current_h1", "Ce mois · 1-15")
+        + _btn("current_h2", "Ce mois · 16-fin")
+        + "</div>"
+        + "</div>"
+        # Stats globales
+        + "<div class='vac-stats'>"
+        + f"<div class='vac-stat'><div class='v'>{total_clicks:,}</div><div class='l'>Total clicks</div></div>"
+        + f"<div class='vac-stat'><div class='v'>{total_visitors:,}</div><div class='l'>Visiteurs uniques</div></div>"
+        + f"<div class='vac-stat'><div class='v'>{len(stats_by_model)}</div><div class='l'>Modèles actifs</div></div>"
+        + "</div>"
+        + "<div class='vac-list'>"
+        + "".join(cards_html)
+        + "</div>"
+        + "</div>"
+    )
+
+
 def _render_va_list_html() -> str:
     try:
-        return _render_va_list_html_inner()
+        clicks_widget = _render_gms_clicks_widget()
+    except Exception:
+        clicks_widget = ""
+    try:
+        return clicks_widget + _render_va_list_html_inner()
     except Exception as e:
-        return (
+        return clicks_widget + (
             f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
             f"border-radius:10px;color:#ef4444;font-size:13px'>❌ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
         )

@@ -266,6 +266,40 @@ def create_directlink(shortcode: str, url: str, display_name: str = "") -> Dict[
     return {"ok": True, "link": res["data"]}
 
 
+def get_analytics_overview(start_date: str = "", end_date: str = "",
+                            link_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Récupère les analytics (clics + visiteurs) sur une période.
+
+    start_date / end_date : format YYYY-MM-DD (inclusif).
+    link_ids : optionnel, restreindre à un sous-ensemble de liens.
+    Retourne : {ok, data: {totals, daily}, error}
+    """
+    args: Dict[str, Any] = {}
+    if start_date:
+        args["start_date"] = start_date
+    if end_date:
+        args["end_date"] = end_date
+    if link_ids:
+        args["link_ids"] = link_ids[:200]
+    res = _call_tool("get_analytics_overview", args)
+    return res
+
+
+def get_links_grouped_by_model() -> Dict[str, List[str]]:
+    """Récupère tous les liens et les groupe par modèle détecté.
+
+    Retourne : {model_name: [link_id_1, link_id_2, ...]}
+    """
+    res = list_all_links()
+    if not res.get("ok"):
+        return {}
+    grouped: Dict[str, List[str]] = {}
+    for link in res["links"]:
+        model = categorize_link(link)
+        grouped.setdefault(model, []).append(link.get("id", ""))
+    return grouped
+
+
 def delete_link(link_id: str) -> Dict[str, Any]:
     res = _call_tool("delete_link", {"link_id": link_id})
     return res
