@@ -199,11 +199,19 @@ input::placeholder{color:#9ca3af}
 .row-links a{color:#3b82f6;text-decoration:none;font-weight:500}
 .row-links a:hover{text-decoration:underline}
 .row-links .muted{color:#6b7280;font-weight:500}
-.btn{display:block;width:100%;padding:13px;background:#3b82f6;color:#fff;border:0;border-radius:9px;
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;background:#3b82f6;color:#fff;border:0;border-radius:9px;
   font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;
-  box-shadow:0 1px 2px rgba(59,130,246,.15)}
+  box-shadow:0 1px 2px rgba(59,130,246,.15);min-height:46px}
 .btn:hover{background:#2563eb;box-shadow:0 4px 14px rgba(59,130,246,.35);transform:translateY(-1px)}
 .btn:active{transform:translateY(0)}
+.btn:disabled{cursor:wait;opacity:.85;transform:none}
+.btn:disabled:hover{transform:none;box-shadow:0 1px 2px rgba(59,130,246,.15)}
+/* Spinner Insta-style pour le bouton de login */
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .7s linear infinite;flex-shrink:0}
+.btn .spinner{display:none}
+.btn.loading .spinner{display:inline-block}
+.btn.loading .label{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
 .footer-note{margin-top:28px;text-align:center;color:#6b7280;font-size:13px}
 .footer-note a{color:#3b82f6;text-decoration:none;font-weight:500}
 .footer-note a:hover{text-decoration:underline}
@@ -255,8 +263,14 @@ input::placeholder{color:#9ca3af}
         <div class="row-links">
           <span class="muted">Garde-moi connecté</span>
         </div>
-        <button type="submit" class="btn">Se connecter →</button>
+        <button type="submit" class="btn" id="login-btn"><span class="label">Se connecter →</span><span class="spinner"></span></button>
       </form>
+      <script>
+        document.querySelector('form').addEventListener('submit', function(){
+          var b = document.getElementById('login-btn');
+          if(b){ b.classList.add('loading'); b.disabled = true; }
+        });
+      </script>
       <div class="footer-note">Privé · accès réservé</div>
     </div>
   </div>
@@ -3213,7 +3227,15 @@ def _render_mypuls_section_html() -> str:
 .mp-save-btn.loading{cursor:wait;opacity:.85}
 .mp-save-btn.loading .mp-save-label{display:none}
 .mp-save-btn.loading .mp-spinner{display:inline-block !important}
-.mypuls-section{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
+/* Etat excluded sur avatars + pills */
+img.mp-creator-excluded{filter:grayscale(1);opacity:.35}
+button.mp-creator-excluded{filter:grayscale(1);opacity:.4;text-decoration:line-through;text-decoration-color:#888}
+/* Loading overlay quand on change de période */
+.mp-loading-overlay{position:absolute;inset:0;background:rgba(15,17,22,.85);display:none;align-items:center;justify-content:center;border-radius:14px;z-index:10;backdrop-filter:blur(2px)}
+.mp-loading-overlay.show{display:flex}
+.mp-loading-overlay .mp-big-spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.15);border-top-color:#3b82f6;border-radius:50%;animation:mpSpin .7s linear infinite}
+body.light .mp-loading-overlay{background:rgba(249,250,251,.9)}
+.mypuls-section{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px;position:relative}
 .mypuls-section h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
 .mypuls-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
 .mypuls-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px}
@@ -3309,18 +3331,18 @@ body.light .mypuls-bar{background:#e5e7eb}
     transactions = res["transactions"]
     max_ca = chatters[0]["ca_total"] if chatters else 1
 
-    # Boutons période (presets + custom)
+    # Boutons période (presets + custom) avec loader au clic
     def _preset_url(days):
         s = (today - _dt.timedelta(days=days - 1)).isoformat()
         e = today.isoformat()
         active = "mypuls-period-btn-active" if start_str == s and end_str == e else ""
-        return f"<a href='?tab=revenus&mp_start={s}&mp_end={e}' class='mypuls-period-btn {active}'>{days}j</a>"
+        return f"<a href='?tab=revenus&mp_start={s}&mp_end={e}' onclick='mpShowPeriodLoader()' class='mypuls-period-btn {active}'>{days}j</a>"
 
     period_html = (
         "<div class='mypuls-period'>"
         "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:6px'>Période :</span>"
         + _preset_url(1) + _preset_url(7) + _preset_url(30) + _preset_url(90)
-        + "<form method='GET' style='display:inline-flex;gap:6px;align-items:center;margin-left:6px'>"
+        + "<form method='GET' style='display:inline-flex;gap:6px;align-items:center;margin-left:6px' onsubmit='mpShowPeriodLoader()'>"
         + "<input type='hidden' name='tab' value='revenus'>"
         + f"<input type='date' name='mp_start' value='{start_str}' style='font-size:12px;padding:4px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto'>"
         + "<span style='color:#666;font-size:12px'>→</span>"
@@ -3330,14 +3352,14 @@ body.light .mypuls-bar{background:#e5e7eb}
         + "</div>"
     )
 
-    # Stats grid
+    # Stats grid (avec data-attributes pour update JS)
     stats_html = (
         "<div class='mypuls-stats-grid'>"
-        f"<div class='mypuls-stat'><div class='v' style='color:#22c55e'>+{totals['ca_total']:.0f}€</div><div class='l'>CA Total</div></div>"
-        f"<div class='mypuls-stat'><div class='v' style='color:#3b82f6'>{totals['ca_ppv']:.0f}€</div><div class='l'>CA PPV</div></div>"
-        f"<div class='mypuls-stat'><div class='v' style='color:#a855f7'>{totals['ca_tips']:.0f}€</div><div class='l'>CA Tips</div></div>"
-        f"<div class='mypuls-stat'><div class='v'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
-        f"<div class='mypuls-stat'><div class='v'>{totals['active_chatters']}<span style='font-size:14px;color:#666'>/{totals['nb_chatters']}</span></div><div class='l'>Chatteurs actifs</div></div>"
+        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_total' style='color:#22c55e'>+{totals['ca_total']:.0f}€</div><div class='l'>CA Total</div></div>"
+        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_ppv' style='color:#3b82f6'>{totals['ca_ppv']:.0f}€</div><div class='l'>CA PPV</div></div>"
+        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_tips' style='color:#a855f7'>{totals['ca_tips']:.0f}€</div><div class='l'>CA Tips</div></div>"
+        f"<div class='mypuls-stat'><div class='v' data-mp-stat='nb_tx'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
+        f"<div class='mypuls-stat'><div class='v' data-mp-stat='active_chatters'>{totals['active_chatters']}<span style='font-size:14px;color:#666'>/{totals['nb_chatters']}</span></div><div class='l'>Chatteurs actifs</div></div>"
         "</div>"
     )
 
@@ -3394,8 +3416,10 @@ body.light .mypuls-bar{background:#e5e7eb}
         if creator_id:
             avatar_img = (
                 f"<img src='/mypuls/avatar/{creator_id}' alt='{ds_label}' "
-                f"title='{ds_label} — {ds_total:.0f}€' "
-                f"style='width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid {color};margin-left:-8px' loading='lazy'>"
+                f"title='Clic pour activer / désactiver {ds_label}' "
+                f"onclick=\"mpToggleCreator('{ds_label.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"data-mp-avatar='{ds_label}' "
+                f"style='width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid {color};margin-left:-8px;cursor:pointer;transition:filter .2s,opacity .2s' loading='lazy'>"
             )
             avatars_header.append(avatar_img)
             avatar_legend = (
@@ -3403,11 +3427,14 @@ body.light .mypuls-bar{background:#e5e7eb}
             )
         else:
             avatar_legend = f"<span style='width:8px;height:8px;background:{color};border-radius:50%;display:inline-block'></span>"
+        ds_label_safe = ds_label.replace("'", "\\'")
         legend_items.append(
-            f"<div style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600'>"
+            f"<button type='button' onclick=\"mpToggleCreator('{ds_label_safe}')\" "
+            f"data-mp-legend='{ds_label}' "
+            f"style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600;color:inherit;cursor:pointer;font-family:inherit;transition:all .2s'>"
             f"{avatar_legend}"
             f"{ds['label']} <span style='color:#888;font-weight:400'>{ds['total']:.0f}€</span>"
-            f"</div>"
+            f"</button>"
         )
 
     avatars_header_html = (
@@ -3648,14 +3675,13 @@ body.light .mypuls-bar{background:#e5e7eb}
         )
 
         chatters_rows.append(
-            f"<tr data-chatter-row='{i}'>"
+            f"<tr data-chatter-row='{i}' data-chatter='{name_esc}' class='mp-chatter-row'>"
             f"<td><div style='font-weight:600'>{name_esc}</div>"
-            f"<div class='mypuls-bar' style='width:140px'><div class='mypuls-bar-fill' style='width:{bar_pct:.1f}%'></div></div></td>"
-            f"<td style='font-weight:700;color:#22c55e'>{c['ca_total']:.2f}€</td>"
-            f"<td style='color:#3b82f6'>{c['ca_ppv']:.2f}€</td>"
-            f"<td style='color:#a855f7'>{c['ca_tips']:.2f}€</td>"
+            f"<div class='mypuls-bar' style='width:140px'><div class='mp-bar-fill mypuls-bar-fill' data-max='{max_ca}' style='width:{bar_pct:.1f}%'></div></div></td>"
+            f"<td class='mp-cell-ca-total' style='font-weight:700;color:#22c55e'>{c['ca_total']:.2f}€</td>"
+            f"<td class='mp-cell-ca-ppv' style='color:#3b82f6'>{c['ca_ppv']:.2f}€</td>"
+            f"<td class='mp-cell-ca-tips' style='color:#a855f7'>{c['ca_tips']:.2f}€</td>"
             f"<td><span class='mypuls-pill' style='background:rgba(255,255,255,.05);color:#aaa'>{c['conv_rate']}</span></td>"
-            # Commission % éditable inline
             f"<td>"
             f"<form method='POST' action='/mypuls/chatter/set_pct' style='display:inline-flex;align-items:center;gap:4px;margin:0' onchange='this.submit()'>"
             f"<input type='hidden' name='name' value='{name_esc}'>"
@@ -3663,7 +3689,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<span style='color:#888;font-size:11px'>%</span>"
             f"</form>"
             f"</td>"
-            f"<td style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
+            f"<td class='mp-cell-pay' style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
             f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
             f"</tr>"
@@ -3702,13 +3728,13 @@ body.light .mypuls-bar{background:#e5e7eb}
         "</div>"
         "</div>"
         "<div style='text-align:right'>"
-        f"<div style='font-weight:800;font-size:22px;color:#22c55e'>${total_to_pay_usd:.2f}</div>"
-        f"<div style='font-size:11px;color:#666'>≈ {total_to_pay_eur:.2f}€</div>"
+        f"<div data-mp-stat='total_pay_usd' style='font-weight:800;font-size:22px;color:#22c55e'>${total_to_pay_usd:.2f}</div>"
+        f"<div data-mp-stat='total_pay_eur' style='font-size:11px;color:#666'>≈ {total_to_pay_eur:.2f}€</div>"
         "</div>"
         "</div>"
     )
 
-    # Construire la map JSON {chatter: {type, network, address, has_screenshot}}
+    # Construire la map JSON {chatter: {type, network, address, has_screenshot, commission}}
     import json as _json_mod
     crypto_data_js = {}
     for c in chatters[:30]:
@@ -3718,9 +3744,21 @@ body.light .mypuls-bar{background:#e5e7eb}
             "network": m.get("crypto_network", "") or "",
             "address": m.get("crypto_address", "") or "",
             "has_screenshot": bool(m.get("crypto_file")),
+            "commission_pct": float(m.get("commission_pct", 0)),
         }
     networks_js = _json_mod.dumps(mypuls.CRYPTO_NETWORKS, ensure_ascii=False)
     crypto_data_json = _json_mod.dumps(crypto_data_js, ensure_ascii=False)
+
+    # Exposer les transactions à JS pour le filtre client-side par modèle
+    transactions_js = _json_mod.dumps(
+        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"]} for t in transactions],
+        ensure_ascii=False,
+    )
+    # Liste des chatteurs avec leur présence/réactivité (stats non-recalculables côté client)
+    chatters_base_js = _json_mod.dumps(
+        [{"name": c["name"], "presence": c["presence"], "conv_rate": c["conv_rate"]} for c in chatters[:50]],
+        ensure_ascii=False,
+    )
 
     chatters_table = (
         "<div id='mp-tab-chatters' style='display:block'>"
@@ -3731,6 +3769,9 @@ body.light .mypuls-bar{background:#e5e7eb}
         "</table>"
         f"<script>window.__mpCryptoData = {crypto_data_json};</script>"
         f"<script>window.__mpNetworks = {networks_js};</script>"
+        f"<script>window.__mpTransactions = {transactions_js};</script>"
+        f"<script>window.__mpChattersBase = {chatters_base_js};</script>"
+        f"<script>window.__mpEurToUsd = {eur_to_usd};</script>"
         "</div>"
     )
 
@@ -3818,6 +3859,130 @@ function mpToggleEdit(chatterName){
     }
   });
 }
+window.__mpExcluded = window.__mpExcluded || new Set();
+
+function mpToggleCreator(name){
+  if(window.__mpExcluded.has(name)) window.__mpExcluded.delete(name);
+  else window.__mpExcluded.add(name);
+  mpUpdateVisualState();
+  mpRecompute();
+}
+function mpUpdateVisualState(){
+  // Avatars dans le header
+  document.querySelectorAll('[data-mp-avatar]').forEach(function(el){
+    var n = el.getAttribute('data-mp-avatar');
+    if(window.__mpExcluded.has(n)) el.classList.add('mp-creator-excluded');
+    else el.classList.remove('mp-creator-excluded');
+  });
+  // Pills légende
+  document.querySelectorAll('[data-mp-legend]').forEach(function(el){
+    var n = el.getAttribute('data-mp-legend');
+    if(window.__mpExcluded.has(n)) el.classList.add('mp-creator-excluded');
+    else el.classList.remove('mp-creator-excluded');
+  });
+}
+function mpRecompute(){
+  var excluded = window.__mpExcluded;
+  var txs = window.__mpTransactions || [];
+  var rate = window.__mpEurToUsd || 1;
+  // Filtrer les transactions
+  var filtered = txs.filter(function(t){ return !excluded.has(t.c); });
+  // Agréger par chatteur
+  var byChat = {};
+  var totals = {ca_total: 0, ca_ppv: 0, ca_tips: 0, nb_tx: filtered.length};
+  filtered.forEach(function(t){
+    totals.ca_total += t.a;
+    if(t.y === 'Média privé' || (t.y && t.y.indexOf('PPV') >= 0)) totals.ca_ppv += t.a;
+    else if(t.y === 'Pourboires' || (t.y && t.y.indexOf('Tip') >= 0)) totals.ca_tips += t.a;
+    var n = t.h || '?';
+    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0};
+    byChat[n].ca_total += t.a;
+    if(t.y === 'Média privé') byChat[n].ca_ppv += t.a;
+    else if(t.y === 'Pourboires') byChat[n].ca_tips += t.a;
+  });
+  // Update stat cards
+  var setStat = function(key, val){
+    var el = document.querySelector('[data-mp-stat="'+key+'"]');
+    if(el) el.firstChild ? el.firstChild.nodeValue = val : el.textContent = val;
+  };
+  var statCa = document.querySelector('[data-mp-stat="ca_total"]');
+  if(statCa) statCa.textContent = '+' + Math.round(totals.ca_total) + '€';
+  var statPpv = document.querySelector('[data-mp-stat="ca_ppv"]');
+  if(statPpv) statPpv.textContent = Math.round(totals.ca_ppv) + '€';
+  var statTips = document.querySelector('[data-mp-stat="ca_tips"]');
+  if(statTips) statTips.textContent = Math.round(totals.ca_tips) + '€';
+  var statTx = document.querySelector('[data-mp-stat="nb_tx"]');
+  if(statTx) statTx.textContent = totals.nb_tx;
+
+  // Update chart - cacher les datasets exclus
+  if(window.__mypulsChart){
+    window.__mypulsChart.data.datasets.forEach(function(ds){
+      var meta = window.__mypulsChart.getDatasetMeta(window.__mypulsChart.data.datasets.indexOf(ds));
+      meta.hidden = excluded.has(ds.label);
+    });
+    window.__mypulsChart.update('none');
+  }
+
+  // Update table chatteurs
+  var rows = document.querySelectorAll('.mp-chatter-row');
+  var activeCount = 0;
+  // Calculer le nouveau max pour les barres
+  var newMax = 0;
+  Object.keys(byChat).forEach(function(n){ if(byChat[n].ca_total > newMax) newMax = byChat[n].ca_total; });
+  if(newMax === 0) newMax = 1;
+  // Trier les chatteurs par ca_total desc - on doit re-ordonner les rows
+  var sortedChatters = Object.keys(byChat).filter(function(n){ return byChat[n].ca_total > 0; })
+    .sort(function(a,b){ return byChat[b].ca_total - byChat[a].ca_total; });
+  var sortedSet = {};
+  sortedChatters.forEach(function(n, idx){ sortedSet[n] = idx; });
+
+  var totalPayUsd = 0;
+  rows.forEach(function(row){
+    var name = row.getAttribute('data-chatter');
+    var data = byChat[name];
+    if(!data || data.ca_total <= 0){
+      row.style.display = 'none';
+      var nextRow = row.nextElementSibling;
+      if(nextRow && nextRow.classList.contains('mp-edit-row')) nextRow.style.display = 'none';
+      return;
+    }
+    activeCount++;
+    row.style.display = '';
+    var cellTotal = row.querySelector('.mp-cell-ca-total');
+    if(cellTotal) cellTotal.textContent = data.ca_total.toFixed(2) + '€';
+    var cellPpv = row.querySelector('.mp-cell-ca-ppv');
+    if(cellPpv) cellPpv.textContent = data.ca_ppv.toFixed(2) + '€';
+    var cellTips = row.querySelector('.mp-cell-ca-tips');
+    if(cellTips) cellTips.textContent = data.ca_tips.toFixed(2) + '€';
+    // Bar
+    var bar = row.querySelector('.mp-bar-fill');
+    if(bar) bar.style.width = (data.ca_total / newMax * 100).toFixed(1) + '%';
+    // Commission + à payer
+    var pct = (window.__mpCryptoData[name] && window.__mpCryptoData[name].commission_pct) || 0;
+    var payEur = data.ca_total * pct / 100;
+    var payUsd = payEur * rate;
+    totalPayUsd += payUsd;
+    var cellPay = row.querySelector('.mp-cell-pay');
+    if(cellPay){
+      cellPay.textContent = '$' + payUsd.toFixed(2);
+      cellPay.style.color = payUsd > 0 ? '#22c55e' : '#444';
+    }
+  });
+  // Update active chatters stat
+  var statActive = document.querySelector('[data-mp-stat="active_chatters"]');
+  if(statActive){
+    statActive.innerHTML = activeCount + '<span style="font-size:14px;color:#666">/' + (window.__mpChattersBase || []).length + '</span>';
+  }
+  // Update total à payer
+  var totalUsdEl = document.querySelector('[data-mp-stat="total_pay_usd"]');
+  if(totalUsdEl) totalUsdEl.textContent = '$' + totalPayUsd.toFixed(2);
+  var totalEurEl = document.querySelector('[data-mp-stat="total_pay_eur"]');
+  if(totalEurEl) totalEurEl.textContent = '≈ ' + (totalPayUsd / rate).toFixed(2) + '€';
+}
+function mpShowPeriodLoader(){
+  var ov = document.getElementById('mp-loading');
+  if(ov) ov.classList.add('show');
+}
 function mpCopyAddr(addr, btn){
   if(!navigator.clipboard){
     // Fallback
@@ -3892,6 +4057,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     section = (
         "<div class='mypuls-section'>"
+        "<div class='mp-loading-overlay' id='mp-loading'><div class='mp-big-spinner'></div></div>"
         "<h3>"
         "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><path d='M3 3v18h18'/><path d='M7 14l4-4 4 4 5-5'/></svg>"
         "MyPuls — Ventes chatteurs"
