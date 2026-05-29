@@ -220,7 +220,6 @@ input::placeholder{color:#9ca3af}
   animation:drift 20s ease-in-out infinite}
 @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-20px)}}
 .brand{position:relative;text-align:center;color:#fff;max-width:420px}
-.brand-emoji{font-size:64px;margin-bottom:20px;filter:drop-shadow(0 8px 24px rgba(0,0,0,.4))}
 .brand h2{font-size:32px;font-weight:800;letter-spacing:-.03em;margin-bottom:14px;line-height:1.2}
 .brand p{font-size:15px;color:rgba(255,255,255,.7);line-height:1.6}
 .stats{display:flex;gap:28px;justify-content:center;margin-top:36px;padding-top:28px;
@@ -242,7 +241,7 @@ input::placeholder{color:#9ca3af}
         <span>VA Bot</span>
       </div>
       <h1>Connexion</h1>
-      <p class="subtitle">Content de te revoir 👋</p>
+      <p class="subtitle">Content de te revoir</p>
       {err}
       <form method="POST" autocomplete="on">
         <div class="field">
@@ -263,7 +262,6 @@ input::placeholder{color:#9ca3af}
   </div>
   <div class="right">
     <div class="brand">
-      <div class="brand-emoji">🤖</div>
       <h2>Pilote ton agence depuis une seule interface</h2>
       <p>Upload contenu, planification SFS, suivi des ventes MyPuls en temps réel, paiements chatteurs, et bien plus.</p>
       <div class="stats">
