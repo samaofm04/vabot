@@ -941,28 +941,77 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
-// Lightbox pour voir le fichier complet
-function openLightbox(url, isVideo, filename){
-  var modal = document.getElementById('lightbox');
+// Lightbox style Infloww : navigation prev/next + compteur
+var lbGallery = [];   // {url, isVideo, name} pour les fichiers visibles
+var lbIndex = 0;
+function lbCollectGallery(){
+  // Récupère toutes les cartes du gallery courant dans l'ordre du DOM
+  lbGallery = [];
+  document.querySelectorAll('.cloud-card').forEach(function(card){
+    var img = card.querySelector('img[loading="lazy"]');
+    var wrap = card.querySelector('[onclick^="openLightbox"]');
+    if(!wrap) return;
+    var oc = wrap.getAttribute('onclick') || '';
+    // Match openLightbox("url",bool,"name")
+    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)"\)/);
+    if(m) lbGallery.push({url:m[1], isVideo:m[2]==='true', name:m[3]});
+  });
+}
+function lbRender(){
+  if(lbIndex < 0) lbIndex = 0;
+  if(lbIndex >= lbGallery.length) lbIndex = lbGallery.length - 1;
+  var it = lbGallery[lbIndex];
+  if(!it) return;
   var content = document.getElementById('lightbox-content');
-  if(isVideo){
-    content.innerHTML = '<video controls autoplay style="max-width:100%;max-height:80vh;background:#000;border-radius:8px"><source src="'+url+'"></video>';
+  if(it.isVideo){
+    content.innerHTML = '<video controls autoplay src="'+it.url+'"></video>';
   } else {
-    content.innerHTML = '<img src="'+url+'" style="max-width:100%;max-height:80vh;object-fit:contain;display:block;border-radius:8px;background:#000">';
+    content.innerHTML = '<img src="'+it.url+'" alt="'+(it.name||'').replace(/"/g,'')+'">';
   }
-  document.getElementById('lightbox-name').textContent = filename;
-  modal.style.display = 'flex';
+  var pos = document.getElementById('lb-pos');
+  var tot = document.getElementById('lb-total');
+  if(pos) pos.textContent = (lbIndex + 1);
+  if(tot) tot.textContent = lbGallery.length;
+  // Disable arrows aux extrêmes
+  var prev = document.querySelector('.lb-prev');
+  var next = document.querySelector('.lb-next');
+  if(prev) prev.disabled = (lbIndex === 0);
+  if(next) next.disabled = (lbIndex >= lbGallery.length - 1);
+}
+function lbPrev(){ if(lbIndex > 0){ lbIndex--; lbRender(); } }
+function lbNext(){ if(lbIndex < lbGallery.length - 1){ lbIndex++; lbRender(); } }
+function openLightbox(url, isVideo, filename){
+  // Rebuild la liste au moment du clic pour avoir l'ordre/contenu courant
+  lbCollectGallery();
+  // Trouver l'index de l'item cliqué
+  lbIndex = 0;
+  for(var i = 0; i < lbGallery.length; i++){
+    if(lbGallery[i].url === url){ lbIndex = i; break; }
+  }
+  // Fallback si jamais on a pas pu collecter (ex. mode test)
+  if(lbGallery.length === 0){
+    lbGallery = [{url:url, isVideo:isVideo, name:filename}];
+    lbIndex = 0;
+  }
+  var modal = document.getElementById('lightbox');
+  modal.classList.add('show');
+  lbRender();
+  // Listener clavier
+  document.addEventListener('keydown', lbKeyboard);
+  return;
 }
 function closeLightbox(){
   var modal = document.getElementById('lightbox');
   var content = document.getElementById('lightbox-content');
-  modal.style.display = 'none';
-  content.innerHTML = ''; // stoppe la vidéo et libère la mémoire
+  if(modal) modal.classList.remove('show');
+  if(content) content.innerHTML = ''; // stoppe la vidéo et libère la mémoire
+  document.removeEventListener('keydown', lbKeyboard);
 }
-// Fermer avec Escape
-document.addEventListener('keydown', function(e){
-  if(e.key === 'Escape') closeLightbox();
-});
+function lbKeyboard(e){
+  if(e.key === 'Escape'){ closeLightbox(); return; }
+  if(e.key === 'ArrowLeft'){ lbPrev(); e.preventDefault(); return; }
+  if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
+}
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
   showConfirm(
@@ -1886,13 +1935,47 @@ body.light .action-icon{color:#666}
 </style>
 
 <!-- Lightbox plein écran -->
-<div id="lightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;align-items:center;justify-content:center;padding:30px;animation:fadeIn .2s">
-  <div style="position:relative;max-width:90vw;max-height:90vh" onclick="event.stopPropagation()">
-    <button onclick="closeLightbox()" style="position:absolute;top:-46px;right:0;background:rgba(255,255,255,.1);border:0;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:22px;line-height:1;padding:0">×</button>
-    <div id="lightbox-content"></div>
-    <div id="lightbox-name" style="text-align:center;margin-top:14px;color:#aaa;font-family:monospace;font-size:13px"></div>
+<!-- Lightbox style Infloww : backdrop semi-transparent + nav prev/next + compteur -->
+<div id="lightbox" onclick="closeLightbox()">
+  <div class="lb-header" onclick="event.stopPropagation()">
+    <div class="lb-counter"><span id="lb-pos">1</span> / <span id="lb-total">1</span></div>
+    <button class="lb-close-btn" onclick="closeLightbox()" title="Fermer (Esc)">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
   </div>
+  <button class="lb-nav lb-prev" onclick="event.stopPropagation();lbPrev()" title="Précédent (←)">
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div class="lb-content-wrap" onclick="event.stopPropagation()">
+    <div id="lightbox-content"></div>
+  </div>
+  <button class="lb-nav lb-next" onclick="event.stopPropagation();lbNext()" title="Suivant (→)">
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
 </div>
+<style>
+#lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);z-index:300;align-items:center;justify-content:center;padding:60px 80px;animation:lbFade .2s}
+#lightbox.show{display:flex}
+@keyframes lbFade{from{opacity:0}to{opacity:1}}
+.lb-header{position:absolute;top:18px;right:20px;display:flex;align-items:center;gap:14px;z-index:5}
+.lb-counter{background:rgba(0,0,0,.5);color:#fff;font-size:14px;font-weight:600;padding:7px 14px;border-radius:8px;letter-spacing:.01em;backdrop-filter:blur(6px)}
+.lb-close-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
+.lb-close-btn:hover{background:rgba(255,255,255,.15);transform:scale(1.08)}
+.lb-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.5);border:0;color:#fff;width:48px;height:48px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s;z-index:5}
+.lb-prev{left:18px}
+.lb-next{right:18px}
+.lb-nav:hover{background:rgba(255,255,255,.15);transform:translateY(-50%) scale(1.08)}
+.lb-nav:disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
+.lb-content-wrap{display:flex;align-items:center;justify-content:center;max-width:calc(100vw - 220px);max-height:calc(100vh - 120px);width:100%;height:100%}
+#lightbox-content{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
+#lightbox-content img,#lightbox-content video{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;display:block;border-radius:10px;background:#000;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+#lightbox-content video{outline:none}
+@media(max-width:768px){
+  #lightbox{padding:50px 60px}
+  .lb-content-wrap{max-width:calc(100vw - 130px)}
+  .lb-nav{width:38px;height:38px}
+}
+</style>
 
 <!-- Container pour les toasts -->
 <div id="toast-container" class="toast-container"></div>
