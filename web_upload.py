@@ -1012,7 +1012,7 @@ function showTab(group,name,title,subtitle){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item active" id="tab-reel" onclick="showTab('upload','reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
+    <button class="item" id="tab-reel" onclick="showTab('upload','reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reel
     </button>
@@ -1078,7 +1078,7 @@ function showTab(group,name,title,subtitle){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-home" onclick="showTab('va','home','Dashboard','Vue d ensemble globale')">
+    <button class="item active" id="tab-home" onclick="showTab('va','home','Dashboard','Tous tes revenus en un coup d oeil')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
       Dashboard
     </button>
@@ -1260,11 +1260,11 @@ function showTab(group,name,title,subtitle){
 
 </div>
 <div class="main">
-<h1 id="page-title">Upload Reel</h1>
-<div class="subtitle" id="page-subtitle">Vidéo clean + caption + description (+ exemple optionnel)</div>
+<h1 id="page-title">Dashboard</h1>
+<div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
 {msg_html}
 
-<div class="form-section" id="form-reel">
+<div class="form-section" id="form-reel" style="display:none">
 <form method="POST" action="/upload/reel" enctype="multipart/form-data" class="box">
 <label>Identité</label>
 <select name="identity" required>{ident_opts}</select>
@@ -1563,24 +1563,8 @@ function showFeed(btn,name){
 </div><!-- /form-igtrends -->
 
 <!-- HOME (clic sur "VA Bot") -->
-<div class="form-section" id="form-home" style="display:none">
-<div class="stat-grid">
-  <div class="stat"><div class="v">{stat_va_count}</div><div class="l">VAs assignés</div></div>
-  <div class="stat"><div class="v">{stat_identities}</div><div class="l">Identités</div></div>
-  <div class="stat"><div class="v">{stat_reels}</div><div class="l">Reels totaux</div></div>
-  <div class="stat"><div class="v">{stat_posts}</div><div class="l">Posts totaux</div></div>
-  <div class="stat"><div class="v">{stat_stories}</div><div class="l">Stories totales</div></div>
-  <div class="stat"><div class="v">{stat_storyctas}</div><div class="l">Story CTAs</div></div>
-</div>
-<div class="box">
-<h3 style="margin-top:0">🎯 Raccourcis</h3>
-<p>Utilise le menu à gauche pour :</p>
-<ul>
-<li><b>📤 Upload</b> — ajouter du contenu à une identité (reels, posts, stories, etc.)</li>
-<li><b>👥 VAs</b> — voir qui est assigné à quoi + statistiques par identité</li>
-<li><b>⚙️ Settings</b> — config du bot (token admin, mot de passe site)</li>
-</ul>
-</div>
+<div class="form-section" id="form-home">
+{home_dashboard_html}
 </div>
 
 <!-- VA LIST -->
@@ -3273,6 +3257,218 @@ def _render_depenses_html() -> str:
             )
         rows.append("</table></div>")
     return "".join(rows)
+
+
+def _render_home_dashboard_html() -> str:
+    """Dashboard global affiché à la racine — synthèse de TOUS les revenus.
+
+    Combine :
+    - MyPuls (ventes chatteurs live) — cache 5min
+    - Revenus manuels (module Business → Revenus)
+    Avec sélecteur de période (Aujourd'hui / Hier / Cette semaine / Ce mois).
+    """
+    import datetime as _dt
+    from flask import request as flask_request
+
+    period = flask_request.args.get("home_period", "week") if hasattr(flask_request, "args") else "week"
+    today = _dt.date.today()
+
+    # Calculer la période
+    if period == "today":
+        start = today
+        end = today
+        period_label = "Aujourd'hui"
+    elif period == "yesterday":
+        start = end = today - _dt.timedelta(days=1)
+        period_label = "Hier"
+    elif period == "month":
+        start = today.replace(day=1)
+        end = today
+        period_label = "Ce mois"
+    else:  # week
+        start = today - _dt.timedelta(days=today.weekday())
+        end = today
+        period_label = "Cette semaine"
+
+    # Fetch MyPuls (cached)
+    mp_configured = False
+    mp_data = {"totals": {}, "chatters": [], "transactions": [], "chart": {}}
+    try:
+        import mypuls
+        mp_configured = mypuls.is_configured()
+        if mp_configured:
+            res = mypuls.fetch_team_stats(start.isoformat(), end.isoformat(), use_cache=True)
+            if res.get("ok"):
+                mp_data = res
+    except Exception:
+        pass
+
+    # Fetch revenus manuels (module Business)
+    manual_total = 0.0
+    try:
+        from business import list_revenues
+        revs = list_revenues()
+        for r in revs:
+            try:
+                d = _dt.date.fromisoformat(r.get("date", ""))
+                if start <= d <= end:
+                    manual_total += float(r.get("amount", 0))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    totals = mp_data.get("totals", {}) or {}
+    chatters = mp_data.get("chatters", []) or []
+    chart_data = mp_data.get("chart", {}) or {}
+
+    ca_total = float(totals.get("ca_total", 0))
+    ca_ppv = float(totals.get("ca_ppv", 0))
+    ca_tips = float(totals.get("ca_tips", 0))
+    nb_tx = int(totals.get("nb_transactions", 0))
+    active_chatters = int(totals.get("active_chatters", 0))
+    grand_total = ca_total + manual_total
+
+    def _btn(p, label):
+        active = "home-period-active" if p == period else ""
+        return f"<a href='?tab=home&home_period={p}' class='home-period-btn {active}'>{label}</a>"
+
+    period_switcher = (
+        "<div class='home-period-row'>"
+        + _btn("today", "Aujourd'hui")
+        + _btn("yesterday", "Hier")
+        + _btn("week", "Cette semaine")
+        + _btn("month", "Ce mois")
+        + "</div>"
+    )
+
+    # Top créateurs (depuis le chart datasets)
+    top_creators_html = ""
+    if chart_data.get("datasets"):
+        creators_map = {}
+        try:
+            cr_res = mypuls.list_creators()
+            if cr_res.get("ok"):
+                creators_map = cr_res.get("creators") or {}
+        except Exception:
+            pass
+        items = []
+        for i, ds in enumerate(chart_data["datasets"][:5]):
+            cid = creators_map.get(ds["label"])
+            avatar = (
+                f"<img src='/mypuls/avatar/{cid}' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+                if cid else
+                f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{ds['label'][:1].upper()}</div>"
+            )
+            pct = (ds["total"] / chart_data.get("all_creators_total", 1) * 100) if chart_data.get("all_creators_total") else 0
+            items.append(
+                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
+                f"{avatar}"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='font-weight:600;font-size:14px'>{ds['label']}</div>"
+                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
+                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#3b82f6)'></div></div>"
+                f"<div style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>{ds['total']:.0f}€</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+            )
+        top_creators_html = (
+            "<div class='home-card'>"
+            "<div class='home-card-header'>Top modèles</div>"
+            "<div style='display:flex;flex-direction:column;gap:8px'>"
+            + "".join(items)
+            + "</div></div>"
+        )
+
+    # Top chatteurs (top 5)
+    top_chatters_html = ""
+    if chatters:
+        items = []
+        max_ca = chatters[0].get("ca_total", 1) or 1
+        for c in chatters[:5]:
+            pct = (c.get("ca_total", 0) / max_ca * 100) if max_ca else 0
+            items.append(
+                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
+                f"<div style='width:32px;height:32px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px'>{c['name'][:2].upper()}</div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='font-weight:600;font-size:14px'>{c['name']}</div>"
+                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
+                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#a855f7,#ec4899)'></div></div>"
+                f"<div style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>{c['ca_total']:.0f}€</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+            )
+        top_chatters_html = (
+            "<div class='home-card'>"
+            "<div class='home-card-header'>Top chatteurs</div>"
+            "<div style='display:flex;flex-direction:column;gap:8px'>"
+            + "".join(items)
+            + "</div></div>"
+        )
+
+    if not mp_configured:
+        warning = (
+            "<div style='padding:14px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#fbbf24'>"
+            "💡 Configure MyPuls (Business → Revenus) pour voir tes ventes en temps réel."
+            "</div>"
+        )
+    else:
+        warning = ""
+
+    css = """
+<style>
+.home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:16px}
+.home-card-header{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em}
+.home-period-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.home-period-btn{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s}
+.home-period-btn:hover{background:rgba(255,255,255,.05);color:#fff}
+.home-period-active{background:#3b82f6 !important;border-color:#3b82f6 !important;color:#fff !important}
+.home-hero{background:linear-gradient(135deg,#0f1116 0%,#1a1a2e 100%);border:1px solid #2a2a2a;border-radius:18px;padding:32px;margin-bottom:18px;position:relative;overflow:hidden}
+.home-hero::before{content:'';position:absolute;inset:-50%;background:radial-gradient(circle at 70% 30%,rgba(59,130,246,.1),transparent 50%);pointer-events:none}
+.home-hero-content{position:relative}
+.home-hero-label{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px}
+.home-hero-value{font-size:48px;font-weight:800;letter-spacing:-.04em;line-height:1;background:linear-gradient(135deg,#22c55e,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.home-hero-sub{font-size:13px;color:#888;margin-top:8px}
+.home-mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:20px}
+.home-mini{background:rgba(255,255,255,.02);border:1px solid #2a2a2a;border-radius:10px;padding:14px}
+.home-mini-l{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:6px}
+.home-mini-v{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.home-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:768px){.home-row{grid-template-columns:1fr}}
+body.light .home-card{background:#fff;border-color:#e5e7eb}
+body.light .home-hero{background:linear-gradient(135deg,#fff,#f9fafb);border-color:#e5e7eb}
+body.light .home-period-btn{color:#666;border-color:#e5e7eb}
+body.light .home-mini{background:#fafafa;border-color:#e5e7eb}
+</style>
+"""
+
+    return (
+        css
+        + period_switcher
+        + warning
+        + (
+            f"<div class='home-hero'><div class='home-hero-content'>"
+            f"<div class='home-hero-label'>Revenus · {period_label}</div>"
+            f"<div class='home-hero-value'>{grand_total:,.2f}€</div>"
+            f"<div class='home-hero-sub'>{ca_total:.0f}€ MyPuls"
+            + (f" + {manual_total:.0f}€ manuel" if manual_total > 0 else "")
+            + f" · {nb_tx} transaction{'s' if nb_tx > 1 else ''} · {active_chatters} chatteur{'s' if active_chatters > 1 else ''} actif{'s' if active_chatters > 1 else ''}"
+            f"</div>"
+            f"<div class='home-mini-grid'>"
+            f"<div class='home-mini'><div class='home-mini-l'>📦 Média privé</div><div class='home-mini-v' style='color:#3b82f6'>{ca_ppv:.0f}€</div></div>"
+            f"<div class='home-mini'><div class='home-mini-l'>💝 Pourboires</div><div class='home-mini-v' style='color:#a855f7'>{ca_tips:.0f}€</div></div>"
+            + (f"<div class='home-mini'><div class='home-mini-l'>📝 Manuel</div><div class='home-mini-v' style='color:#22c55e'>{manual_total:.0f}€</div></div>" if manual_total > 0 else "")
+            + f"<div class='home-mini'><div class='home-mini-l'>👥 Chatteurs actifs</div><div class='home-mini-v'>{active_chatters}</div></div>"
+            f"</div>"
+            f"</div></div>"
+        )
+        + (
+            f"<div class='home-row'>{top_creators_html}{top_chatters_html}</div>"
+            if top_creators_html or top_chatters_html else ""
+        )
+    )
 
 
 def _render_mypuls_section_html() -> str:
@@ -5637,6 +5833,7 @@ def _render_upload(msg=None, error=None):
         .replace("{web_password_status}", _web_password_status())
         .replace("{va_list_html}", _render_va_list_html())
         .replace("{identity_stats_html}", _render_identity_stats_html())
+        .replace("{home_dashboard_html}", _render_home_dashboard_html())
         .replace("{stat_va_count}", str(va_count))
         .replace("{stat_identities}", str(len(identities_list)))
         .replace("{stat_reels}", str(stat_reels))
