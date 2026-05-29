@@ -2563,19 +2563,35 @@ def _render_gms_clicks_widget() -> str:
     ident_to_model = {ident: ident.capitalize() for ident in identities}
     sorted_models = [ident_to_model[i] for i in sorted(identities)]
 
-    # Fetch + daily breakdown par modèle (réutilise notre infra)
+    # Fetch en parallèle pour les 5 modèles (3-5x plus rapide que séquentiel)
+    from concurrent.futures import ThreadPoolExecutor
+    sorted_idents = sorted(identities)
+
+    def _fetch_one(ident):
+        try:
+            return ident, _get_model_clicks_period(ident_to_model[ident], days=days_count)
+        except Exception:
+            return ident, {"total": 0, "daily": [0] * days_count}
+
+    results = {}
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, len(sorted_idents) or 1)) as pool:
+            for ident, data in pool.map(_fetch_one, sorted_idents):
+                results[ident] = data
+    except Exception:
+        for ident in sorted_idents:
+            results[ident] = {"total": 0, "daily": [0] * days_count}
+
     cards_html = []
     total_clicks = 0
     total_visitors = 0
-    for ident in sorted(identities):
+    # Pré-calculer le grouping une fois (cache déjà au niveau gms)
+    grouped_links = gms.get_links_grouped_by_model()
+    for ident in sorted_idents:
         model = ident_to_model[ident]
-        try:
-            data = _get_model_clicks_period(model, days=days_count)
-            clicks = int(data.get("total", 0))
-            daily = data.get("daily", []) or [0] * days_count
-        except Exception:
-            clicks = 0
-            daily = [0] * days_count
+        data = results.get(ident) or {"total": 0, "daily": [0] * days_count}
+        clicks = int(data.get("total", 0))
+        daily = data.get("daily", []) or [0] * days_count
         total_clicks += clicks
 
         # Avatar identité
@@ -2599,13 +2615,14 @@ def _render_gms_clicks_widget() -> str:
         spark_color = "#3b82f6" if clicks > 0 else "#6b7280"
         spark = _sparkline_svg(daily, width=140, height=32, color=spark_color)
 
+        n_links = len(grouped_links.get(model, []))
         cards_html.append(
             f"<div class='vac-card'>"
             f"<div class='vac-card-head'>"
             f"{avatar_html}"
             f"<div class='vac-card-info'>"
             f"<div class='vac-card-name'>@{ident}</div>"
-            f"<div class='vac-card-sub'>{len(gms.get_links_grouped_by_model().get(model, []))} lien{'s' if len(gms.get_links_grouped_by_model().get(model, [])) > 1 else ''}</div>"
+            f"<div class='vac-card-sub'>{n_links} lien{'s' if n_links > 1 else ''}</div>"
             f"</div>"
             f"<div class='vac-card-trend' style='color:{trend_color}'>{trend_arrow}</div>"
             f"</div>"
@@ -2760,6 +2777,47 @@ body.light .va-id{color:#9ca3af}
 </style>
 """
 
+    # ===== Pré-calcul parallèle des clicks pour TOUS les VAs (1 round-trip) =====
+    # Sinon : chaque carte fait son appel série -> 4 VAs = 4×~200ms = 800ms+
+    import datetime as _dt_pre
+    _today_pre = _dt_pre.date.today()
+    if _today_pre.day <= 15:
+        _pre_days = _today_pre.day
+    else:
+        _pre_days = _today_pre.day - 15
+
+    _va_clicks_cache = {}  # uid -> {total, daily, source: 'links'|'model'}
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        # Collecter tous les fetch à faire (déduplication)
+        fetch_tasks = []  # [(uid, kind, key)] où key = "lnk_..." tuple ou model name
+        for uid, data in users.items():
+            assigned = _get_links_for_va(uid)
+            if assigned:
+                fetch_tasks.append((uid, "links", tuple(sorted(assigned))))
+            else:
+                ident = data.get("identity", "?") if isinstance(data, dict) else str(data)
+                model = (ident or "").strip().capitalize()
+                fetch_tasks.append((uid, "model", model))
+
+        def _fetch_va(task):
+            uid, kind, key = task
+            try:
+                if kind == "links":
+                    d = _get_links_clicks_period(list(key), days=_pre_days)
+                else:
+                    d = _get_model_clicks_period(key, days=_pre_days)
+                return uid, kind, d
+            except Exception:
+                return uid, kind, {"total": 0, "daily": [0] * _pre_days}
+
+        if fetch_tasks:
+            with _TPE(max_workers=min(8, len(fetch_tasks))) as pool:
+                for uid, kind, d in pool.map(_fetch_va, fetch_tasks):
+                    _va_clicks_cache[uid] = {"data": d, "source": kind}
+    except Exception:
+        pass
+
     sections = []
     for identity in sorted(by_identity.keys()):
         members = by_identity[identity]
@@ -2864,15 +2922,21 @@ body.light .va-id{color:#9ca3af}
                 _period_label = f"16-fin {_today_va.strftime('%b').lower()}"
             mini_clicks_html = ""
             try:
-                if assigned_links:
-                    clicks_data = _get_links_clicks_period(assigned_links, days=_period_days)
-                    label = _period_label
-                    is_fallback = False
+                # Utiliser le cache pré-calculé (parallèle) au lieu de refaire l'appel
+                pre = _va_clicks_cache.get(uid)
+                if pre:
+                    clicks_data = pre["data"]
+                    is_fallback = (pre["source"] == "model")
                 else:
-                    model_name = (identity or "").strip().capitalize()
-                    clicks_data = _get_model_clicks_period(model_name, days=_period_days)
-                    label = f"{_period_label} · modèle"
-                    is_fallback = True
+                    # Fallback : pas dans le pre-cache, fetch direct
+                    if assigned_links:
+                        clicks_data = _get_links_clicks_period(assigned_links, days=_period_days)
+                        is_fallback = False
+                    else:
+                        model_name = (identity or "").strip().capitalize()
+                        clicks_data = _get_model_clicks_period(model_name, days=_period_days)
+                        is_fallback = True
+                label = f"{_period_label}" + (" · modèle" if is_fallback else "")
 
                 total = clicks_data.get("total", 0)
                 daily = clicks_data.get("daily", []) or [0] * 7

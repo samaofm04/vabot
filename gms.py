@@ -285,19 +285,36 @@ def get_analytics_overview(start_date: str = "", end_date: str = "",
     return res
 
 
-def get_links_grouped_by_model() -> Dict[str, List[str]]:
+_GROUPED_CACHE: Dict[str, Any] = {"ts": 0, "data": None}
+_GROUPED_TTL = 300  # 5 min
+
+
+def get_links_grouped_by_model(force_refresh: bool = False) -> Dict[str, List[str]]:
     """Récupère tous les liens et les groupe par modèle détecté.
 
+    Cache 5 min pour éviter de paginer tous les liens à chaque render.
     Retourne : {model_name: [link_id_1, link_id_2, ...]}
     """
+    import time as _t
+    now = _t.time()
+    if not force_refresh and _GROUPED_CACHE.get("data") and (now - _GROUPED_CACHE.get("ts", 0)) < _GROUPED_TTL:
+        return _GROUPED_CACHE["data"]
     res = list_all_links()
     if not res.get("ok"):
-        return {}
+        return _GROUPED_CACHE.get("data") or {}
     grouped: Dict[str, List[str]] = {}
     for link in res["links"]:
         model = categorize_link(link)
         grouped.setdefault(model, []).append(link.get("id", ""))
+    _GROUPED_CACHE["ts"] = now
+    _GROUPED_CACHE["data"] = grouped
     return grouped
+
+
+def invalidate_grouping_cache():
+    """À appeler après create/delete/update de lien pour forcer un refresh."""
+    _GROUPED_CACHE["ts"] = 0
+    _GROUPED_CACHE["data"] = None
 
 
 def delete_link(link_id: str) -> Dict[str, Any]:
