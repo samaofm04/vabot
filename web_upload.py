@@ -2341,6 +2341,16 @@ def _identity_stats(identity: str) -> dict:
 
 
 def _render_va_list_html() -> str:
+    try:
+        return _render_va_list_html_inner()
+    except Exception as e:
+        return (
+            f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
+            f"border-radius:10px;color:#ef4444;font-size:13px'>❌ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
+        )
+
+
+def _render_va_list_html_inner() -> str:
     users = _load_users()
     if not users:
         return (
@@ -2410,17 +2420,21 @@ body.light .va-id{color:#9ca3af}
 
         cards = []
         for uid, data in members:
-            if isinstance(data, dict):
-                channel_id = data.get("channel_id", "")
-                is_auto = data.get("auto_post", True)
-                cur_identity = data.get("identity", identity)
-            else:
-                channel_id = ""
-                is_auto = True
-                cur_identity = identity
+            try:
+                if isinstance(data, dict):
+                    channel_id = data.get("channel_id", "")
+                    is_auto = data.get("auto_post", True)
+                    cur_identity = data.get("identity", identity)
+                else:
+                    channel_id = ""
+                    is_auto = True
+                    cur_identity = identity
 
-            username = _resolve_username(uid)
-            avatar_url = _resolve_avatar_url(uid)
+                username = _resolve_username(uid)
+                avatar_url = _resolve_avatar_url(uid)
+            except Exception:
+                # Si une entrée VA est corrompue, on skip plutôt que de crasher
+                continue
             pp_html = (
                 f"<img src='{avatar_url}' class='va-pp' loading='lazy' alt='@{username}'>"
                 if avatar_url else
