@@ -764,9 +764,7 @@ window.addEventListener('DOMContentLoaded', function(){
   var tabName = params.get('tab');
   if(tabName){
     var btn = document.getElementById('tab-' + tabName);
-    if(btn){
-      setTimeout(function(){ btn.click(); }, 50);
-    }
+    if(btn) btn.click();  // Synchrone (pas de setTimeout pour éviter flicker)
   }
 });
 function igPeriod(btn, period){
@@ -982,6 +980,9 @@ function deleteSelected(){
   );
 }
 function showTab(group,name,title,subtitle){
+  // Retirer le style initial injecté en HEAD (pour le pre-paint)
+  var initStyle = document.getElementById('__initial-tab-css');
+  if(initStyle) initStyle.remove();
   // Ouvrir le groupe parent
   var grp=document.getElementById('grp-'+group);
   if(grp && !grp.classList.contains('open'))grp.classList.add('open');
@@ -1005,6 +1006,23 @@ function showTab(group,name,title,subtitle){
     }
   }catch(e){}
 }
+</script>
+<script>
+// Run AVANT le premier rendu : cache form-home et affiche le bon form-<tab>
+// directement via une <style> injectée. Evite le flicker (form-home brièvement
+// visible avant que showTab() bascule sur le bon).
+(function(){
+  try{
+    var params = new URLSearchParams(window.location.search);
+    var t = params.get('tab');
+    if(t && t !== 'home' && /^[a-zA-Z0-9_]{1,30}$/.test(t)){
+      var s = document.createElement('style');
+      s.id = '__initial-tab-css';
+      s.textContent = '#form-home{display:none !important}#form-' + t + '{display:block !important}';
+      document.head.appendChild(s);
+    }
+  }catch(e){}
+})();
 </script>
 </head><body>
 <!-- Page loader global (affiché pendant la navigation) -->
