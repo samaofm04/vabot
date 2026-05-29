@@ -2865,25 +2865,31 @@ body.light .va-id{color:#9ca3af}
                     is_fallback = True
 
                 total = clicks_data.get("total", 0)
-                daily = clicks_data.get("daily", [])
-                if total > 0 and daily:
+                daily = clicks_data.get("daily", []) or [0] * 7
+                # Toujours afficher le chip — même avec 0 — pour confirmer la connexion GMS
+                if total > 0:
                     color = "#a855f7" if not is_fallback else "#3b82f6"
                     trend_up = daily[-1] >= daily[-2] if len(daily) >= 2 else True
                     arrow = "↑" if trend_up else "↓"
                     arrow_color = "#22c55e" if trend_up else "#ef4444"
-                    spark = _sparkline_svg(daily, width=70, height=22, color=color)
-                    mini_clicks_html = (
-                        f"<div class='va-mini-stat'>"
-                        f"<div style='display:flex;flex-direction:column;align-items:flex-end;gap:0'>"
-                        f"<div style='display:flex;align-items:center;gap:5px;line-height:1'>"
-                        f"<span style='color:{arrow_color};font-weight:800;font-size:11px'>{arrow}</span>"
-                        f"<span class='va-mini-num' style='color:{color}'>{total:,}</span>"
-                        f"</div>"
-                        f"<div class='va-mini-label'>{label}</div>"
-                        f"</div>"
-                        f"<div style='display:flex;align-items:center'>{spark}</div>"
-                        f"</div>"
-                    )
+                else:
+                    # Etat muted pour 0 clicks
+                    color = "#6b7280"
+                    arrow = ""
+                    arrow_color = "#444"
+                spark = _sparkline_svg(daily, width=70, height=22, color=color)
+                mini_clicks_html = (
+                    f"<div class='va-mini-stat' style='border-color:{color}30;background:{color}10'>"
+                    f"<div style='display:flex;flex-direction:column;align-items:flex-end;gap:0'>"
+                    f"<div style='display:flex;align-items:center;gap:5px;line-height:1'>"
+                    + (f"<span style='color:{arrow_color};font-weight:800;font-size:11px'>{arrow}</span>" if arrow else "")
+                    + f"<span class='va-mini-num' style='color:{color}'>{total:,}</span>"
+                    f"</div>"
+                    f"<div class='va-mini-label'>{label}</div>"
+                    f"</div>"
+                    f"<div style='display:flex;align-items:center'>{spark}</div>"
+                    f"</div>"
+                )
             except Exception:
                 pass
 
