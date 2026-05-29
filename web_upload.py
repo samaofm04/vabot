@@ -2378,19 +2378,92 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
 
+    # Récupérer les options de tri/filtre depuis l'URL
+    sort_mode = ""
+    filter_date = ""
+    try:
+        sort_mode = (_req.args.get(f"cloud_{subdir}_sort", "recent") or "recent").lower().strip()
+        filter_date = (_req.args.get(f"cloud_{subdir}_date", "") or "").strip()
+    except Exception:
+        sort_mode = "recent"
+
     folder = IDENTITIES_DIR / selected / subdir
     files = []
     if folder.exists():
-        files = sorted([
+        files = [
             p for p in folder.iterdir()
             if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
-        ])
+        ]
+
+    # Filtre "Aller à la date" : ne garder que les fichiers de cette date
+    if filter_date:
+        try:
+            import datetime as _dt_fc
+            target = _dt_fc.date.fromisoformat(filter_date)
+            files = [
+                p for p in files
+                if _dt_fc.date.fromtimestamp(p.stat().st_mtime) == target
+            ]
+        except Exception:
+            pass
+
+    # Tri
+    if sort_mode == "asc":
+        files.sort(key=lambda p: p.stat().st_mtime)  # plus ancien d'abord
+    elif sort_mode == "desc" or sort_mode == "recent":
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)  # plus récent d'abord
+    else:  # "all" ou inconnu : tri alphabétique
+        files.sort(key=lambda p: p.name.lower())
+
+    # Construire les URLs de tri (préservant la sélection d'identité courante)
+    def _sort_url(value):
+        params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
+        if value != "recent":
+            params.append(f"cloud_{subdir}_sort={value}")
+        return "?" + "&".join(params)
+
+    # Compteur fichiers affichés (après filtre)
+    n_shown = len(files)
+    filter_label = ""
+    if filter_date:
+        filter_label = f" · filtré au {filter_date}"
+
+    sort_btn_html = (
+        "<div class='vault-sort'>"
+        "<button type='button' class='vault-sort-btn' onclick='vaultSortToggle(event,this)'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><line x1='4' y1='6' x2='20' y2='6'/><line x1='8' y1='12' x2='16' y2='12'/><line x1='10' y1='18' x2='14' y2='18'/></svg>"
+        f"<span>{('Tout' if sort_mode == 'all' else 'Récemment' if sort_mode == 'recent' else 'Croissant' if sort_mode == 'asc' else 'Décroissant' if sort_mode == 'desc' else 'Trier')}</span>"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</button>"
+        "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
+        f"<a href='{_sort_url('all')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
+        "<span class='vault-radio'></span>Tout</a>"
+        f"<form method='GET' class='vault-sort-form'>"
+        f"<input type='hidden' name='tab' value='{tab_name}'>"
+        f"<input type='hidden' name='{subdir_key}' value='{selected}'>"
+        "<label class='vault-sort-item' style='cursor:default'>"
+        "<span class='vault-radio'></span>Aller à la date :</label>"
+        f"<input type='date' name='cloud_{subdir}_date' value='{filter_date}' onchange='this.form.submit()' "
+        "style='margin:6px 36px 8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:12px;width:calc(100% - 72px)'>"
+        "</form>"
+        "<div class='vault-sort-sep'></div>"
+        f"<a href='{_sort_url('recent')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'recent' else '')}'>"
+        "<span class='vault-radio'></span>Récemment</a>"
+        "<div class='vault-sort-sep'></div>"
+        f"<a href='{_sort_url('asc')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'asc' else '')}'>"
+        "<span class='vault-radio'></span>Croissant</a>"
+        f"<a href='{_sort_url('desc')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
+        "<span class='vault-radio'></span>Décroissant</a>"
+        "</div>"
+        "</div>"
+    )
 
     gallery_header = (
         f"<div class='vault-gallery-header'>"
         f"{sel_avatar_html}"
-        f"<div><div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
-        f"<div style='font-size:12px;color:#888;margin-top:2px'>{sel_stats['n_files']} fichier{'s' if sel_stats['n_files'] != 1 else ''} · {sel_stats['size_mb']:.1f} MB</div></div>"
+        f"<div style='flex:1'><div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div></div>"
+        f"{sort_btn_html}"
         f"</div>"
     )
 
@@ -2430,12 +2503,33 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
 .vault-item-active{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(168,85,247,.08)) !important;border-color:rgba(59,130,246,.4) !important}
 .vault-gallery{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:20px}
 .vault-gallery-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a}
+/* === Sort/filter dropdown === */
+.vault-sort{position:relative}
+.vault-sort-btn{background:#1a1a1a;border:1px solid #2a2a2a;color:#ddd;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-family:inherit;transition:all .15s}
+.vault-sort-btn:hover{background:#252525;border-color:#3a3a3a}
+.vault-sort-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:240px;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:12px;padding:6px;display:none;z-index:1000;box-shadow:0 12px 32px rgba(0,0,0,.5);max-height:80vh;overflow-y:auto}
+.vault-sort.open .vault-sort-menu{display:block;animation:vaultMenuFade .14s ease}
+@keyframes vaultMenuFade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.vault-sort-item{display:flex;align-items:center;gap:10px;padding:10px 14px;color:#ddd;font-size:13px;font-weight:500;text-decoration:none;border-radius:8px;cursor:pointer;transition:background .12s}
+.vault-sort-item:hover{background:rgba(255,255,255,.06)}
+.vault-sort-active{color:#3b82f6}
+.vault-sort-sep{height:1px;background:#222;margin:4px 8px}
+.vault-radio{width:16px;height:16px;border-radius:50%;border:2px solid #444;flex-shrink:0;position:relative}
+.vault-sort-active .vault-radio{border-color:#3b82f6}
+.vault-sort-active .vault-radio::after{content:'';position:absolute;inset:2px;background:#3b82f6;border-radius:50%}
+.vault-sort-form{margin:0;padding:0}
 body.light .vault-sidebar{background:#fff;border-color:#e5e7eb}
 body.light .vault-search{background:#f9fafb;border-color:#e5e7eb}
 body.light .vault-search input{color:#111}
 body.light .vault-item:hover{background:#f3f4f6}
 body.light .vault-item-active{background:linear-gradient(90deg,#dbeafe,#ede9fe) !important;border-color:rgba(59,130,246,.3) !important}
 body.light .vault-gallery{background:#fff;border-color:#e5e7eb}
+body.light .vault-sort-btn{background:#fff;border-color:#e5e7eb;color:#111}
+body.light .vault-sort-btn:hover{background:#f9fafb}
+body.light .vault-sort-menu{background:#fff;border-color:#e5e7eb}
+body.light .vault-sort-item{color:#111}
+body.light .vault-sort-item:hover{background:#f3f4f6}
+body.light .vault-sort-sep{background:#e5e7eb}
 </style>
 <script>
 function vaultFilter(q){
@@ -2446,6 +2540,19 @@ function vaultFilter(q){
     el.style.display = (!q || ident.indexOf(q) !== -1) ? '' : 'none';
   });
 }
+function vaultSortToggle(e, btn){
+  e.stopPropagation();
+  var wrap = btn.closest('.vault-sort');
+  if(!wrap) return;
+  // Fermer les autres
+  document.querySelectorAll('.vault-sort.open').forEach(function(w){ if(w !== wrap) w.classList.remove('open'); });
+  wrap.classList.toggle('open');
+}
+document.addEventListener('click', function(e){
+  document.querySelectorAll('.vault-sort.open').forEach(function(w){
+    if(!w.contains(e.target)) w.classList.remove('open');
+  });
+});
 </script>
 """
 
