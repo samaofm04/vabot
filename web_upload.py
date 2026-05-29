@@ -1239,31 +1239,31 @@ function showTab(group,name,title,subtitle){
 <div class="group" id="grp-cloud">
   <button class="group-head" onclick="toggleGroup('cloud')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-    <span class="label">Cloud</span>
+    <span class="label">Dossier sécurisé</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" onclick="showTab('cloud','cloudoverview','Cloud — Vue d ensemble','Tout ton stockage par type de contenu')">
+    <button class="item" onclick="showTab('cloud','cloudoverview','Vue d ensemble','Tout ton stockage par type de contenu')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
       Vue d'ensemble
     </button>
-    <button class="item" onclick="showTab('cloud','cloudreels','Cloud — Reels','Tous les reels stockés par identité')">
+    <button class="item" onclick="showTab('cloud','cloudreels','Reels','Tous les reels stockés par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
     </button>
-    <button class="item" onclick="showTab('cloud','cloudposts','Cloud — Posts','Tous les posts stockés')">
+    <button class="item" onclick="showTab('cloud','cloudposts','Posts','Tous les posts stockés')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
       Posts
     </button>
-    <button class="item" onclick="showTab('cloud','cloudstories','Cloud — Stories','Toutes les stories stockées')">
+    <button class="item" onclick="showTab('cloud','cloudstories','Stories','Toutes les stories stockées')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
       Stories
     </button>
-    <button class="item" onclick="showTab('cloud','cloudstoryctas','Cloud — Story CTA','Toutes les stories CTA stockées')">
+    <button class="item" onclick="showTab('cloud','cloudstoryctas','Story CTA','Toutes les stories CTA stockées')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
-    <button class="item" onclick="showTab('cloud','cloudpps','Cloud — Photos de profil','Pool partagé des PPs')">
+    <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','Pool partagé des PPs')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       Photos profil
     </button>
@@ -1551,42 +1551,27 @@ function showTab(group,name,title,subtitle){
 
 <!-- CLOUD : reels -->
 <div class="form-section" id="form-cloudreels" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">🎬 Reels stockés</h3>
 {cloud_reels_html}
-</div>
 </div>
 
 <!-- CLOUD : posts -->
 <div class="form-section" id="form-cloudposts" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">📸 Posts stockés</h3>
 {cloud_posts_html}
-</div>
 </div>
 
 <!-- CLOUD : stories -->
 <div class="form-section" id="form-cloudstories" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">📱 Stories stockées</h3>
 {cloud_stories_html}
-</div>
 </div>
 
 <!-- CLOUD : Story CTAs -->
 <div class="form-section" id="form-cloudstoryctas" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">Story CTA stockées</h3>
 {cloud_storyctas_html}
-</div>
 </div>
 
 <!-- CLOUD : PPs -->
 <div class="form-section" id="form-cloudpps" style="display:none">
-<div class="box">
-<h3 style="margin-top:0">Photos de profil (pool partagé)</h3>
-{cloud_pps_html}
-</div>
+<div class="box">{cloud_pps_html}</div>
 </div>
 
 <!-- INSTAGRAM ACCOUNTS (watchlist) -->
