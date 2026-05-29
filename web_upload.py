@@ -417,6 +417,16 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 /* Sidebar large avec groupes pliables + flèches + section labels */
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
 .sidebar .section-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.5px;padding:14px 22px 6px;font-weight:700}
+/* Item standalone (Dashboard tout en haut) */
+.sidebar .solo-group{padding:0 12px 8px;margin-bottom:4px;border-bottom:1px solid #1a1a1a}
+.sidebar .solo-item{display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;background:transparent;border:0;color:#aaa;font-size:14px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;letter-spacing:-.01em;margin-bottom:4px}
+.sidebar .solo-item svg{width:18px;height:18px;flex-shrink:0}
+.sidebar .solo-item:hover{background:rgba(255,255,255,.05);color:#fff}
+.sidebar .solo-item.active{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(168,85,247,.1));color:#3b82f6;box-shadow:0 0 0 1px rgba(59,130,246,.2) inset}
+body.light .sidebar .solo-item{color:#4b5563}
+body.light .sidebar .solo-item:hover{background:#f3f4f6;color:#111827}
+body.light .sidebar .solo-item.active{background:linear-gradient(135deg,#dbeafe,#ede9fe);color:#3b82f6;box-shadow:0 0 0 1px rgba(59,130,246,.25) inset}
+body.light .sidebar .solo-group{border-bottom-color:#e5e7eb}
 /* SFS responsive : stack sur petits écrans */
 @media(max-width:1300px){.sfs-layout{grid-template-columns:200px 1fr!important}.sfs-layout > div:last-child{grid-column:1/-1}}
 @media(max-width:900px){.sfs-layout{grid-template-columns:1fr!important}}
@@ -1003,10 +1013,18 @@ function showTab(group,name,title,subtitle){
 <!-- SIDEBAR : groupes pliables avec flèches -->
 <div class="sidebar">
 
+<!-- DASHBOARD STANDALONE (top) -->
+<div class="solo-group">
+  <button class="item solo-item active" id="tab-home" onclick="showTab('solo','home','Dashboard','Tous tes revenus en un coup d oeil')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+    Dashboard
+  </button>
+</div>
+
 <div class="section-label">Contenu</div>
 
-<div class="group open" id="grp-upload">
-  <button class="group-head active" onclick="toggleGroup('upload')">
+<div class="group" id="grp-upload">
+  <button class="group-head" onclick="toggleGroup('upload')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
     <span class="label">Upload</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -1078,10 +1096,6 @@ function showTab(group,name,title,subtitle){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item active" id="tab-home" onclick="showTab('va','home','Dashboard','Tous tes revenus en un coup d oeil')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-      Dashboard
-    </button>
     <button class="item" id="tab-valist" onclick="showTab('va','valist','Délégations VA','VAs assignés à chaque identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
       Liste VAs
