@@ -193,6 +193,7 @@ UPLOAD_HTML = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
@@ -3110,24 +3111,205 @@ def _render_paievas_html() -> str:
 
 def _render_bilan_html() -> str:
     try:
-        from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats
-        from insta_scraper import load_watchlist
+        from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
+    import datetime
+    import json as _json
     exp = expense_stats()
     rev = revenue_stats()
-    sfs = sfs_stats()
     pay = va_payment_stats()
-    try:
-        nb_va = len(_load_users())
-    except Exception:
-        nb_va = 0
     nb_ident = len(_list_identities())
-    # Profit net = revenus - dépenses - paie VAs payés
+    revenues = list_revenues()
+
+    # Revenus par source
+    by_source = {}
+    for r in revenues:
+        src = r.get("source", "Autre")
+        by_source[src] = by_source.get(src, 0) + r.get("amount", 0)
+    # Revenus quotidiens (7 derniers jours)
+    today = datetime.date.today()
+    last_7_days = [(today - datetime.timedelta(days=i)) for i in range(6, -1, -1)]
+    daily_revenue = {d.isoformat(): 0 for d in last_7_days}
+    for r in revenues:
+        d = r.get("date", "")
+        if d in daily_revenue:
+            daily_revenue[d] += r.get("amount", 0)
+
     profit_month = rev["total_this_month"] - exp["total_this_month"]
-    profit_all = rev["total_all_time"] - exp["total_all_time"] - pay["total_paid"]
-    profit_color = "#00d68f" if profit_month >= 0 else "#f99"
+    profit_color = "#10b981" if profit_month >= 0 else "#ef4444"
     profit_sign = "+" if profit_month >= 0 else ""
+    daily_data_json = _json.dumps([{"date": k, "amount": v} for k, v in daily_revenue.items()])
+    by_ident_json = _json.dumps(rev.get("by_identity", {}))
+    by_cat_json = _json.dumps(exp.get("by_category", {}))
+    start_label = last_7_days[0].strftime("%d %b")
+    end_label = last_7_days[-1].strftime("%d %b, %Y")
+    sub_amt = by_source.get("OnlyFans", 0)
+    fansly_amt = by_source.get("Fansly", 0)
+    snap_amt = by_source.get("Snap", 0)
+
+    rows = []
+    # Top : date range + filtres
+    rows.append(f"""
+<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:20px'>
+  <div style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px'>
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#888" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+    <span style='font-size:13px;color:#fff;font-weight:500'>{start_label} → {end_label}</span>
+  </div>
+  <div style='display:flex;gap:8px'>
+    <div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:13px'>Vue: par jour</div>
+    <div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:13px'>Filtres</div>
+  </div>
+</div>
+<h3 style='margin:0 0 14px;font-size:20px;font-weight:700'>Récap des revenus</h3>
+<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:20px'>
+  <div class='box' style='display:flex;flex-direction:column;justify-content:space-between'>
+    <div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>
+      <div style='width:48px;height:48px;background:#3b82f6;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>$</div>
+      <div style='font-size:13px;color:#888;font-weight:500'>Revenus totaux</div>
+    </div>
+    <div style='font-size:32px;font-weight:700;color:#3b82f6;letter-spacing:-.02em'>{rev['total_all_time']:.2f}€</div>
+  </div>
+  <div class='box'>
+    <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+      <div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px'>{sub_amt:.2f}€</div>
+        <div style='font-size:12px;color:#888'>OnlyFans</div>
+      </div>
+      <div style='width:40px;height:40px;background:rgba(59,130,246,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#3b82f6;font-weight:700'>OF</div>
+    </div>
+  </div>
+  <div class='box'>
+    <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+      <div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px'>{fansly_amt:.2f}€</div>
+        <div style='font-size:12px;color:#888'>Fansly</div>
+      </div>
+      <div style='width:40px;height:40px;background:rgba(16,185,129,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#10b981;font-weight:700;font-size:11px'>FS</div>
+    </div>
+  </div>
+  <div class='box'>
+    <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+      <div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px'>{snap_amt:.2f}€</div>
+        <div style='font-size:12px;color:#888'>Snap</div>
+      </div>
+      <div style='width:40px;height:40px;background:rgba(251,191,36,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fbbf24;font-weight:700'>SC</div>
+    </div>
+  </div>
+  <div class='box'>
+    <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+      <div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px;color:#fbbf24'>{pay['total_unpaid']:.2f}€</div>
+        <div style='font-size:12px;color:#888'>À payer VAs</div>
+      </div>
+      <div style='width:40px;height:40px;background:rgba(251,191,36,.15);border-radius:10px;color:#fbbf24;display:flex;align-items:center;justify-content:center;font-weight:700'>€</div>
+    </div>
+  </div>
+  <div class='box'>
+    <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+      <div>
+        <div style='font-size:22px;font-weight:700;margin-bottom:4px;color:#ef4444'>-{exp['total_all_time']:.2f}€</div>
+        <div style='font-size:12px;color:#888'>Dépenses totales</div>
+      </div>
+      <div style='width:40px;height:40px;background:rgba(239,68,68,.15);border-radius:10px;color:#ef4444;display:flex;align-items:center;justify-content:center;font-weight:700'>−</div>
+    </div>
+  </div>
+</div>
+
+<div class='box' style='display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,rgba(59,130,246,.1),rgba(6,182,212,.05));border-color:#3b82f6;margin-bottom:24px'>
+  <div>
+    <div style='font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px'>Profit net ce mois</div>
+    <div style='font-size:36px;font-weight:800;color:{profit_color};letter-spacing:-.02em'>{profit_sign}{profit_month:.2f}€</div>
+  </div>
+  <div style='display:flex;gap:30px;text-align:right'>
+    <div>
+      <div style='font-size:11px;color:#888;text-transform:uppercase'>Revenus</div>
+      <div style='font-size:18px;font-weight:700;color:#10b981;margin-top:2px'>+{rev['total_this_month']:.0f}€</div>
+    </div>
+    <div>
+      <div style='font-size:11px;color:#888;text-transform:uppercase'>Dépenses</div>
+      <div style='font-size:18px;font-weight:700;color:#ef4444;margin-top:2px'>-{exp['total_this_month']:.0f}€</div>
+    </div>
+  </div>
+</div>
+
+<div class='box'>
+  <h4 style='margin:0 0 14px;font-size:16px;font-weight:700'>Tendance des revenus (7 derniers jours)</h4>
+  <div style='height:280px;position:relative'><canvas id='bilan-bar-chart'></canvas></div>
+</div>
+
+<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px' class='bilan-charts'>
+  <div class='box'>
+    <h4 style='margin:0 0 14px;font-size:16px;font-weight:700'>Revenus par identité</h4>
+    <div style='height:240px;position:relative'><canvas id='bilan-identity-chart'></canvas></div>
+  </div>
+  <div class='box'>
+    <h4 style='margin:0 0 14px;font-size:16px;font-weight:700'>Dépenses par catégorie</h4>
+    <div style='height:240px;position:relative'><canvas id='bilan-expense-chart'></canvas></div>
+  </div>
+</div>
+
+<script>
+(function(){{
+  if(typeof Chart === 'undefined'){{
+    setTimeout(arguments.callee, 200);
+    return;
+  }}
+  var isLight = document.body.classList.contains('light');
+  var textColor = isLight ? '#374151' : '#aaa';
+  var gridColor = isLight ? '#e5e7eb' : '#2a2a2a';
+  Chart.defaults.color = textColor;
+  Chart.defaults.borderColor = gridColor;
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+  var daily = {daily_data_json};
+  var byIdent = {by_ident_json};
+  var byCat = {by_cat_json};
+  var bc = document.getElementById('bilan-bar-chart');
+  if(bc){{
+    new Chart(bc, {{
+      type: 'bar',
+      data: {{
+        labels: daily.map(function(d){{ var dt = new Date(d.date); return dt.toLocaleDateString('fr-FR', {{day:'numeric',month:'short'}}); }}),
+        datasets: [{{ label: 'Revenus', data: daily.map(function(d){{ return d.amount; }}), backgroundColor: '#3b82f6', borderRadius: 6, maxBarThickness: 60 }}]
+      }},
+      options: {{ responsive: true, maintainAspectRatio: false, plugins:{{legend:{{display:false}}}}, scales: {{ y: {{ beginAtZero: true }}, x: {{ grid: {{display: false}} }} }} }}
+    }});
+  }}
+  var ic = document.getElementById('bilan-identity-chart');
+  if(ic){{
+    var idents = Object.keys(byIdent);
+    if(idents.length){{
+      new Chart(ic, {{
+        type: 'doughnut',
+        data: {{ labels: idents, datasets: [{{ data: idents.map(function(k){{ return byIdent[k]; }}), backgroundColor: ['#3b82f6','#06b6d4','#10b981','#f59e0b','#a855f7','#ec4899'], borderWidth: 0 }}] }},
+        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'right', labels: {{padding: 12, boxWidth: 12}} }} }} }}
+      }});
+    }} else {{
+      ic.parentElement.innerHTML = '<p style="color:#888;text-align:center;padding:80px 0">Aucune donnée</p>';
+    }}
+  }}
+  var ec = document.getElementById('bilan-expense-chart');
+  if(ec){{
+    var cats = Object.keys(byCat);
+    if(cats.length){{
+      new Chart(ec, {{
+        type: 'bar',
+        data: {{ labels: cats, datasets: [{{ label: 'Dépenses', data: cats.map(function(k){{ return byCat[k]; }}), backgroundColor: '#ef4444', borderRadius: 6, maxBarThickness: 28 }}] }},
+        options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins:{{legend:{{display:false}}}}, scales: {{ x: {{beginAtZero: true}}, y: {{grid:{{display:false}}}} }} }}
+      }});
+    }} else {{
+      ec.parentElement.innerHTML = '<p style="color:#888;text-align:center;padding:80px 0">Aucune dépense</p>';
+    }}
+  }}
+}})();
+</script>
+""")
+    return "".join(rows)
+
+
+def _render_bilan_html_OLD() -> str:
+    """Ancienne version (gardée temporairement, à supprimer)."""
     rows = []
     # Stats GROSSES en haut : profit net
     rows.append(
