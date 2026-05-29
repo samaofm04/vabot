@@ -2351,6 +2351,45 @@ def _identity_stats(identity: str) -> dict:
     }
 
 
+# Cache simple pour les données quotidiennes GMS (TTL 5 min, module-level)
+_VA_DAILY_CACHE: dict = {}
+_VA_DAILY_TTL = 300  # 5 minutes
+
+
+def _get_model_clicks_period(model_name: str, days: int = 7) -> int:
+    """Retourne le total des clicks GMS d'un modèle sur les N derniers jours.
+
+    Une seule call API, cachée 5 min.
+    """
+    import time as _t
+    now = _t.time()
+    cached = _VA_DAILY_CACHE.get(model_name)
+    if cached and (now - cached[0]) < _VA_DAILY_TTL:
+        return cached[1]
+    try:
+        import gms
+        import datetime as _dt2
+        if not gms.is_configured():
+            _VA_DAILY_CACHE[model_name] = (now, 0)
+            return 0
+        grouped = gms.get_links_grouped_by_model()
+        link_ids = grouped.get(model_name, [])
+        if not link_ids:
+            _VA_DAILY_CACHE[model_name] = (now, 0)
+            return 0
+        today = _dt2.date.today()
+        start = (today - _dt2.timedelta(days=days - 1)).isoformat()
+        end = today.isoformat()
+        res = gms.get_analytics_overview(start, end, link_ids)
+        clicks = 0
+        if res.get("ok"):
+            clicks = int((res.get("data") or {}).get("total_clicks", 0))
+        _VA_DAILY_CACHE[model_name] = (now, clicks)
+        return clicks
+    except Exception:
+        return 0
+
+
 def _render_gms_clicks_widget() -> str:
     """Widget clicks GMS par modèle, période bi-mensuelle (1-15 et 16-fin)."""
     try:
@@ -2571,7 +2610,7 @@ def _render_va_list_html_inner() -> str:
 .va-section-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
 .va-section-count{background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em}
 .va-list{display:flex;flex-direction:column;gap:8px}
-.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
+.va-card{display:grid;grid-template-columns:auto 1fr auto auto auto auto;gap:14px;align-items:center;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;transition:all .15s}
 .va-card:hover{border-color:rgba(59,130,246,.3);background:#202020}
 .va-pp{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;background:#222;flex-shrink:0}
 .va-pp-fallback{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
@@ -2589,6 +2628,12 @@ def _render_va_list_html_inner() -> str:
 .va-change-form button:hover{background:#2563eb}
 .va-reset-btn{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;margin:0;font-family:inherit}
 .va-reset-btn:hover{background:rgba(239,68,68,.1)}
+/* Mini stat clicks 7 jours */
+.va-mini-stat{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.18);border-radius:10px;margin-left:4px}
+.va-mini-spark{display:flex;align-items:center}
+.va-mini-num{font-size:15px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.va-mini-label{font-size:10px;color:#888;margin-top:2px;font-weight:500;letter-spacing:.02em}
+body.light .va-mini-stat{background:rgba(59,130,246,.05);border-color:rgba(59,130,246,.2)}
 @media(max-width:900px){.va-card{grid-template-columns:auto 1fr;grid-auto-rows:auto}.va-card > *{grid-column:span 2}.va-pp,.va-pp-fallback{grid-column:1;grid-row:1}.va-info{grid-column:2;grid-row:1}}
 body.light .va-section{background:#fff;border-color:#e5e7eb}
 body.light .va-section-head{border-color:#e5e7eb}
@@ -2679,6 +2724,24 @@ body.light .va-id{color:#9ca3af}
                 f"</form>"
             )
 
+            # Mini stat clicks 30j (modèle = identité avec 1ère lettre capitalisée)
+            mini_clicks_html = ""
+            try:
+                model_name = (identity or "").strip().capitalize()
+                clicks_30d = _get_model_clicks_period(model_name, days=30)
+                if clicks_30d > 0:
+                    mini_clicks_html = (
+                        f"<div class='va-mini-stat' title='Clicks GMS de {model_name} sur 30 jours'>"
+                        f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#3b82f6' stroke-width='2.5' style='flex-shrink:0'><polyline points='23 6 13.5 15.5 8.5 10.5 1 18'/><polyline points='17 6 23 6 23 12'/></svg>"
+                        f"<div>"
+                        f"<div class='va-mini-num'>{clicks_30d:,}</div>"
+                        f"<div class='va-mini-label'>30 jours</div>"
+                        f"</div>"
+                        f"</div>"
+                    )
+            except Exception:
+                pass
+
             cards.append(
                 f"<div class='va-card'>"
                 f"{pp_html}"
@@ -2688,6 +2751,7 @@ body.light .va-id{color:#9ca3af}
                 f"</div>"
                 f"{change_form}"
                 f"{reset_form}"
+                f"{mini_clicks_html}"
                 f"</div>"
             )
 
