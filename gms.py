@@ -159,13 +159,96 @@ def ping() -> Dict[str, Any]:
 
 
 def list_links(limit: int = 100) -> Dict[str, Any]:
-    """Retourne {ok, links: [..], error}."""
+    """Une page de liens (max 100). Retourne {ok, links, has_more, next_cursor, error}."""
     res = _call_tool("list_links", {"limit": min(max(limit, 1), 100)})
     if not res["ok"]:
         return res
     data = res["data"] or {}
-    links = data.get("data") if isinstance(data, dict) else []
-    return {"ok": True, "links": links or []}
+    return {
+        "ok": True,
+        "links": (data.get("data") if isinstance(data, dict) else []) or [],
+        "has_more": bool(data.get("has_more")) if isinstance(data, dict) else False,
+        "next_cursor": data.get("next_cursor") if isinstance(data, dict) else None,
+    }
+
+
+def list_all_links(max_pages: int = 50) -> Dict[str, Any]:
+    """Paginate pour récupérer TOUS les liens du compte.
+
+    Limite de sécurité : max_pages * 100 liens (par défaut 5000).
+    """
+    all_links: List[dict] = []
+    cursor: Optional[str] = None
+    for _ in range(max_pages):
+        args: Dict[str, Any] = {"limit": 100}
+        if cursor:
+            args["cursor"] = cursor
+        res = _call_tool("list_links", args)
+        if not res["ok"]:
+            return res
+        data = res["data"] or {}
+        page = (data.get("data") if isinstance(data, dict) else []) or []
+        all_links.extend(page)
+        if not data.get("has_more"):
+            break
+        cursor = data.get("next_cursor")
+        if not cursor:
+            break
+    return {"ok": True, "links": all_links}
+
+
+def categorize_link(link: dict) -> str:
+    """Détecte la catégorie (= modèle) d'un lien à partir du display_name et de l'URL.
+
+    Stratégie :
+    1. Nettoyer le display_name (retirer "(Copy)", "VA " préfixe, espaces)
+    2. Si ça matche un nom de modèle connu, c'est gagné
+    3. Sinon on prend le premier mot du nom nettoyé
+    4. Fallback : extraire le username du path OnlyFans/MYM (ex. ameliawdifference → Amelia)
+    """
+    import re as _re
+    name = (link.get("display_name") or "").strip()
+    url = link.get("url") or ""
+
+    # Nettoyer le name : enlever (Copy) répétés, VA en préfixe, normaliser
+    clean = _re.sub(r"\s*\(Copy\)\s*", " ", name, flags=_re.IGNORECASE).strip()
+    # Si commence par "VA " et qu'il y a quelque chose après, garder ce qui suit
+    m = _re.match(r"^VA\s+(.+)$", clean, _re.IGNORECASE)
+    if m:
+        rest = m.group(1).strip()
+        # Si c'est juste un nombre (ex. "VA 10"), c'est la catégorie "Jessy" (cas spécifique de ton compte)
+        # On le laisse tel quel sinon
+        if rest.isdigit() or _re.match(r"^\d+$", rest):
+            # Regarder l'URL pour déduire le modèle
+            if "jessyewdiference" in url.lower():
+                return "Jessy"
+            return f"VA {rest}"
+        clean = rest
+
+    # Modèles connus en priorité (substring case-insensitive)
+    KNOWN = ["Amelia", "Lola", "Julia", "Sarah", "Emma", "Khloe", "Jessy",
+             "Boo7", "Mirabelle", "Enzo", "Dem boss"]
+    lower = clean.lower()
+    for k in KNOWN:
+        if k.lower() in lower:
+            return k
+
+    # Sinon : fallback URL (extraire username du path)
+    if url:
+        m2 = _re.search(r"onlyfans\.com/([a-z0-9_]+)", url, _re.IGNORECASE)
+        if m2:
+            user = m2.group(1).lower()
+            for k in KNOWN:
+                if k.lower() in user:
+                    return k
+
+    # Sinon : premier mot du clean
+    if clean:
+        first = clean.split()[0]
+        if len(first) >= 2:
+            return first.title()
+
+    return "Autre"
 
 
 def create_directlink(shortcode: str, url: str, display_name: str = "") -> Dict[str, Any]:

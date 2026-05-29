@@ -3496,14 +3496,56 @@ def _render_gms_html() -> str:
     # Liste des liens (uniquement si configuré)
     links_section = ""
     if configured:
-        res = gms.list_links(limit=100)
+        res = gms.list_all_links()
         if not res.get("ok"):
             links_html = (
                 f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px'>"
                 f"❌ Erreur API : {res.get('error', '?')}</div>"
             )
+            tabs_html = ""
         else:
             links = res["links"]
+            # Catégoriser chaque lien
+            from collections import Counter
+            cat_counter: Counter = Counter()
+            link_cats = []  # parallel array
+            for l in links:
+                c = gms.categorize_link(l)
+                cat_counter[c] += 1
+                link_cats.append(c)
+
+            # Préparer la liste des catégories triées : modèles principaux d'abord, puis par count
+            PRIORITY = ["Amelia", "Lola", "Julia", "Sarah", "Emma"]
+            sorted_cats = []
+            # 1) Ajouter prioritaires s'ils existent
+            for p in PRIORITY:
+                if p in cat_counter:
+                    sorted_cats.append((p, cat_counter[p]))
+            # 2) Ajouter le reste par count décroissant
+            for c, n in cat_counter.most_common():
+                if c not in PRIORITY:
+                    sorted_cats.append((c, n))
+
+            # Tabs HTML
+            if sorted_cats:
+                tab_buttons = (
+                    f"<button class='gms-tab gms-tab-active' data-cat='__all__' onclick='gmsFilter(this,\"__all__\")'>"
+                    f"Tous <span class='gms-tab-count'>{len(links)}</span></button>"
+                )
+                for cat, n in sorted_cats:
+                    cat_safe = cat.replace("'", "&#39;").replace('"', "&quot;")
+                    tab_buttons += (
+                        f"<button class='gms-tab' data-cat='{cat_safe}' onclick='gmsFilter(this,\"{cat_safe}\")'>"
+                        f"{cat} <span class='gms-tab-count'>{n}</span></button>"
+                    )
+                tabs_html = (
+                    "<div class='gms-tabs' style='display:flex;gap:6px;flex-wrap:wrap;margin:20px 0 14px;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;overflow-x:auto'>"
+                    + tab_buttons
+                    + "</div>"
+                )
+            else:
+                tabs_html = ""
+
             if not links:
                 links_html = (
                     "<div style='padding:40px;text-align:center;color:#888;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px'>"
@@ -3511,7 +3553,7 @@ def _render_gms_html() -> str:
                 )
             else:
                 rows = []
-                for l in links:
+                for l, cat in zip(links, link_cats):
                     lid = l.get("id", "")
                     short = l.get("shortcode", "")
                     name = l.get("display_name", "") or "—"
@@ -3526,11 +3568,13 @@ def _render_gms_html() -> str:
                     toggle_action = "disable" if is_active else "enable"
                     type_badge = "Landing" if ltype == "landing" else "Redirect"
                     type_color = "#a855f7" if ltype == "landing" else "#3b82f6"
+                    cat_safe = cat.replace("'", "&#39;").replace('"', "&quot;")
                     rows.append(
-                        f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center'>"
+                        f"<div class='gms-link-card' data-cat='{cat_safe}' style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center'>"
                         f"<div style='min-width:0'>"
                         f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap'>"
                         f"<strong style='font-size:14px'>{name}</strong>"
+                        f"<span style='background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);color:#3b82f6;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px'>{cat}</span>"
                         f"<span style='background:rgba(255,255,255,.05);border:1px solid #2a2a2a;color:{type_color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em'>{type_badge}</span>"
                         f"<span style='background:{status_bg};color:{status_color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em'>{status_label}</span>"
                         f"</div>"
@@ -3552,7 +3596,7 @@ def _render_gms_html() -> str:
                         f"</div>"
                         f"</div>"
                     )
-                links_html = "<div style='display:flex;flex-direction:column;gap:10px'>" + "".join(rows) + "</div>"
+                links_html = "<div id='gms-links-list' style='display:flex;flex-direction:column;gap:10px'>" + "".join(rows) + "</div>"
 
         # Formulaire de création
         create_form = (
@@ -3568,15 +3612,27 @@ def _render_gms_html() -> str:
             "</div>"
         )
 
+        total_count = len(res.get("links", []))
         links_section = (
             create_form
-            + "<h3 style='margin:24px 0 12px;font-size:15px;display:flex;align-items:center;gap:10px'>Tes liens"
-            + f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px'>{len(res.get('links', []))}</span>"
+            + f"<h3 style='margin:24px 0 0;font-size:15px;display:flex;align-items:center;gap:10px'>Tes liens"
+            + f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#888;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px'>{total_count}</span>"
             + "</h3>"
+            + tabs_html
             + links_html
         )
 
     js = """
+<style>
+.gms-tab{background:transparent;border:1px solid transparent;color:#aaa;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:all .12s}
+.gms-tab:hover{background:rgba(255,255,255,.05);color:#fff}
+.gms-tab-active{background:#3b82f6 !important;color:#fff !important;border-color:#3b82f6 !important}
+.gms-tab-active .gms-tab-count{background:rgba(255,255,255,.2);color:#fff}
+.gms-tab-count{background:#2a2a2a;color:#888;font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;line-height:1.5}
+body.light .gms-tab{color:#666}
+body.light .gms-tab:hover{background:rgba(0,0,0,.05);color:#111}
+body.light .gms-tab-count{background:#e5e7eb;color:#666}
+</style>
 <script>
 function copyToClipboard(text, btn) {
   navigator.clipboard.writeText(text).then(function(){
@@ -3588,6 +3644,19 @@ function copyToClipboard(text, btn) {
 function confirmGmsDelete(form) {
   var sc = form.querySelector('input[name=shortcode]').value;
   return confirm('Supprimer définitivement le lien /' + sc + ' ?\\n\\nCette action est irréversible — l\\'historique de redirections est perdu et le shortcode peut être réservé un moment contre le squatting.');
+}
+function gmsFilter(btn, cat){
+  // update active tab
+  document.querySelectorAll('.gms-tab').forEach(function(t){ t.classList.remove('gms-tab-active'); });
+  btn.classList.add('gms-tab-active');
+  // filter cards
+  document.querySelectorAll('.gms-link-card').forEach(function(c){
+    if(cat === '__all__' || c.getAttribute('data-cat') === cat){
+      c.style.display = '';
+    } else {
+      c.style.display = 'none';
+    }
+  });
 }
 </script>
 """
