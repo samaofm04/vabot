@@ -2894,11 +2894,23 @@ def _render_va_list_html_inner() -> str:
 /* Liste sidebar scrollable */
 .va-vault-list{display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;margin:0 -6px;padding:0 6px}
 .va-vlist-section{display:flex;flex-direction:column;gap:3px;margin-bottom:6px}
-.va-vlist-section-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;padding:8px 8px 4px;border-radius:8px;transition:background .12s}
+.va-vlist-section-head{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;padding:6px 4px 4px 8px;border-radius:8px;transition:background .12s}
 .va-vlist-section-head:hover{background:rgba(255,255,255,.04)}
+.va-vlist-section-head-main{display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;min-width:0;padding:2px 0}
+.va-vlist-section-head-main > span:nth-child(2){flex:1;color:#aaa;font-size:12px;letter-spacing:-.01em;text-transform:none;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .va-vlist-section-active .va-vlist-section-head{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(168,85,247,.08));color:#60a5fa}
+/* Toggle chevron pour collapse/expand */
+.va-vlist-toggle{background:rgba(255,255,255,.04);border:0;color:#888;width:26px;height:26px;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;transition:all .15s}
+.va-vlist-toggle:hover{background:rgba(255,255,255,.1);color:#fff}
+.va-vlist-toggle svg{transition:transform .2s}
+.va-vlist-section.collapsed .va-vlist-toggle svg{transform:rotate(-90deg)}
+/* Body collapsible */
+.va-vlist-section-body{display:flex;flex-direction:column;gap:3px;overflow:hidden;transition:max-height .25s ease,opacity .15s,margin-top .15s;max-height:1000px;opacity:1;margin-top:2px}
+.va-vlist-section.collapsed .va-vlist-section-body{max-height:0;opacity:0;margin-top:0;pointer-events:none}
 body.light .va-vlist-section-head:hover{background:#f3f4f6}
 body.light .va-vlist-section-active .va-vlist-section-head{background:linear-gradient(90deg,#dbeafe,#ede9fe);color:#3b82f6}
+body.light .va-vlist-toggle{background:#f3f4f6}
+body.light .va-vlist-toggle:hover{background:#e5e7eb;color:#111}
 .va-vlist-ident-av{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .va-vlist-section-head > span:nth-child(2){flex:1;color:#aaa;font-size:12px;letter-spacing:-.01em;text-transform:none;font-weight:600}
 .va-vlist-count{background:rgba(59,130,246,.15);color:#60a5fa;padding:2px 7px;border-radius:9px;font-size:10px;font-weight:700}
@@ -3077,9 +3089,16 @@ body.light .va-id{color:#9ca3af}
         )
         sidebar_rows.append(
             f"<div class='va-vlist-section' data-vlist-identity='{identity}'>"
-            f"<div class='va-vlist-section-head' onclick=\"vaShowIdentity('{identity}')\" style='cursor:pointer'>"
+            f"<div class='va-vlist-section-head'>"
+            f"<div class='va-vlist-section-head-main' onclick=\"vaShowIdentity('{identity}')\">"
             f"{ident_av_html}<span>@{identity}</span>"
-            f"<span class='va-vlist-count'>{len(members)}</span></div>"
+            f"<span class='va-vlist-count'>{len(members)}</span>"
+            f"</div>"
+            f"<button class='va-vlist-toggle' onclick=\"vaToggleSection(this)\" title='Réduire / déplier'>"
+            f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+            f"</button>"
+            f"</div>"
+            f"<div class='va-vlist-section-body'>"
         )
         for uid, data in members:
             try:
@@ -3136,7 +3155,7 @@ body.light .va-id{color:#9ca3af}
                 )
             except Exception:
                 continue
-        sidebar_rows.append("</div>")  # close section
+        sidebar_rows.append("</div></div>")  # close section-body + section
 
     vault_sidebar = (
         "<div class='va-vault-sidebar'>"
@@ -4030,9 +4049,38 @@ function vaShowAll(){
   document.querySelectorAll('.va-card').forEach(function(card){ card.style.display = ''; });
   document.querySelectorAll('.va-section').forEach(function(sec){ sec.style.display = ''; });
 }
-// Auto-select le premier VA au chargement
+// Toggle collapse d'une section (chevron)
+function vaToggleSection(btn){
+  event.stopPropagation();
+  var sec = btn.closest('.va-vlist-section');
+  if(!sec) return;
+  sec.classList.toggle('collapsed');
+  // Persist dans localStorage
+  try{
+    var ident = sec.getAttribute('data-vlist-identity') || '';
+    var collapsed = JSON.parse(localStorage.getItem('vabot_va_collapsed') || '[]');
+    if(sec.classList.contains('collapsed')){
+      if(collapsed.indexOf(ident) === -1) collapsed.push(ident);
+    } else {
+      collapsed = collapsed.filter(function(i){ return i !== ident; });
+    }
+    localStorage.setItem('vabot_va_collapsed', JSON.stringify(collapsed));
+  }catch(e){}
+}
+// Auto-select le premier VA au chargement + restaurer collapsed
 document.addEventListener('DOMContentLoaded', function(){
   if(_firstVaUid) vaSelectVa(_firstVaUid);
+  // Restaurer l'état collapsed depuis localStorage
+  try{
+    var collapsed = JSON.parse(localStorage.getItem('vabot_va_collapsed') || '[]');
+    collapsed.forEach(function(ident){
+      document.querySelectorAll('.va-vlist-section').forEach(function(sec){
+        if(sec.getAttribute('data-vlist-identity') === ident){
+          sec.classList.add('collapsed');
+        }
+      });
+    });
+  }catch(e){}
 });
 </script>
 """
