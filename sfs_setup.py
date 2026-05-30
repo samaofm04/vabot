@@ -41,7 +41,13 @@ DEFAULT_EMOJIS = [
     "\U0001F469\U0001F3FC‍\U0001F9B3",
 ]
 
-FIELDS = ["niche", "age", "abonnement", "abonnes", "anciens", "interesses"]
+# Champs par plateforme - chaque plateforme a sa propre structure
+PLATFORM_FIELDS: Dict[str, List[str]] = {
+    "mym": ["niche", "age", "abonnement", "abonnes", "anciens", "interesses"],
+    "of":  ["abonnement", "last_30d"],
+}
+# Liste union pour la persistance / compat
+FIELDS = ["niche", "age", "abonnement", "abonnes", "anciens", "interesses", "last_30d"]
 FIELD_LABELS = {
     "niche": "Niche",
     "age": "Âge",
@@ -49,11 +55,27 @@ FIELD_LABELS = {
     "abonnes": "Abonnes",
     "anciens": "Anciens abonnes",
     "interesses": "Interesses",
+    "last_30d": "Last 30 days",
 }
 PLATFORMS = ("mym", "of")
 DEFAULT_ABONNEMENT = "free"
-# Champs eligibles au bulk-apply (Appliquer a TOUS)
-BULK_FIELDS = ("niche", "age", "abonnement")
+# Champs eligibles au bulk-apply (Appliquer a TOUS) par plateforme
+PLATFORM_BULK_FIELDS: Dict[str, tuple] = {
+    "mym": ("niche", "age", "abonnement"),
+    "of":  ("abonnement", "last_30d"),
+}
+# Compat (pointe sur mym par defaut)
+BULK_FIELDS = PLATFORM_BULK_FIELDS["mym"]
+
+
+def fields_for(platform: str) -> List[str]:
+    """Liste des champs visibles/utilises pour une plateforme."""
+    return PLATFORM_FIELDS.get(platform, PLATFORM_FIELDS["mym"])
+
+
+def bulk_fields_for(platform: str) -> tuple:
+    """Liste des champs eligibles au bulk-apply pour une plateforme."""
+    return PLATFORM_BULK_FIELDS.get(platform, PLATFORM_BULK_FIELDS["mym"])
 
 
 def _load() -> Dict[str, Any]:
@@ -85,17 +107,20 @@ def _save(data: Dict[str, Any]):
 
 
 def get_identity(platform: str, identity: str) -> Dict[str, Any]:
-    """Retourne les infos pour une identite sur une plateforme."""
+    """Retourne les infos pour une identite sur une plateforme.
+
+    Ne renvoie QUE les champs valides pour la plateforme (ex: pas de niche pour OF).
+    """
     if platform not in PLATFORMS:
         platform = "mym"
     data = _load()
     key = (identity or "").lower().strip()
     info = data.get("platforms", {}).get(platform, {}).get("identities", {}).get(key, {})
     out: Dict[str, Any] = {}
-    for f in FIELDS:
+    for f in fields_for(platform):
         out[f] = info.get(f, "")
-    # Defaut abonnement = "free"
-    if not out["abonnement"] and not info:
+    # Defaut abonnement = "free" si l identite n existe pas encore
+    if "abonnement" in out and not out["abonnement"] and not info:
         out["abonnement"] = DEFAULT_ABONNEMENT
     out["emoji"] = info.get("emoji", "")
     out["enabled"] = info.get("enabled", True)
@@ -104,18 +129,30 @@ def get_identity(platform: str, identity: str) -> Dict[str, Any]:
 
 def save_identity(platform: str, identity: str, fields: Dict[str, str],
                   emoji: str = "", enabled: bool = True):
-    """Sauvegarde les infos pour une identite sur une plateforme."""
+    """Sauvegarde les infos pour une identite sur une plateforme.
+
+    Ne sauvegarde QUE les champs valides pour la plateforme.
+    Preserve emoji/enabled existants si non fournis.
+    """
     if platform not in PLATFORMS:
         platform = "mym"
     key = (identity or "").lower().strip()
     if not key:
         return
     data = _load()
+    existing = data["platforms"][platform]["identities"].get(key, {})
     info: Dict[str, Any] = {}
-    for f in FIELDS:
-        info[f] = (fields.get(f) or "").strip()
+    # On garde uniquement les champs pertinents pour cette plateforme
+    for f in fields_for(platform):
+        if f in fields:
+            info[f] = (fields.get(f) or "").strip()
+        else:
+            # Conserve la valeur deja stockee si non fournie
+            info[f] = existing.get(f, "")
     if emoji:
         info["emoji"] = emoji.strip()
+    elif existing.get("emoji"):
+        info["emoji"] = existing["emoji"]
     info["enabled"] = bool(enabled)
     data["platforms"][platform]["identities"][key] = info
     _save(data)
@@ -128,10 +165,15 @@ def all_info(platform: str) -> Dict[str, Dict[str, Any]]:
 
 
 def generate_message(platform: str, identities_ordered: List[str]) -> str:
-    """Genere le message a copier-coller pour les identites donnees."""
+    """Genere le message a copier-coller pour les identites donnees.
+
+    Ne sort QUE les champs de la plateforme (ex: pas de niche pour OF).
+    Skip les champs vides (mais "abonnement" tombe sur 'free' par defaut).
+    """
     data = all_info(platform)
     lines: List[str] = []
     idx_actif = 0
+    plat_fields = fields_for(platform)
     for ident in identities_ordered:
         key = ident.lower().strip()
         info = data.get(key, {})
@@ -140,11 +182,15 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
         idx_actif += 1
         emoji = info.get("emoji") or DEFAULT_EMOJIS[(idx_actif - 1) % len(DEFAULT_EMOJIS)]
         lines.append(f"{emoji} MODELE {idx_actif} :")
-        for f in FIELDS:
-            label = FIELD_LABELS[f]
+        for f in plat_fields:
+            label = FIELD_LABELS.get(f, f)
             val = (info.get(f) or "").strip()
             if not val:
-                val = DEFAULT_ABONNEMENT if f == "abonnement" else "-"
+                if f == "abonnement":
+                    val = DEFAULT_ABONNEMENT
+                else:
+                    # Champ vide : on skip carrement la ligne
+                    continue
             lines.append(f"-> {label} : {val}")
         lines.append("")
     return "\n".join(lines).rstrip()

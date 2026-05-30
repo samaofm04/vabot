@@ -8866,19 +8866,21 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
             if avatar_url else
             f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{ident[:1].upper()}</div>"
         )
-        # Inputs
+        # Inputs - QUE les champs valides pour cette plateforme
         fields_html = ""
-        for f in sfs_setup.FIELDS:
+        for f in sfs_setup.fields_for(platform):
             val = (info.get(f) or "")
             # Defaut "free" pour abonnement
             if f == "abonnement" and not val:
                 val = sfs_setup.DEFAULT_ABONNEMENT
             val_safe = val.replace('"', '&quot;')
-            label = sfs_setup.FIELD_LABELS[f]
+            label = sfs_setup.FIELD_LABELS.get(f, f)
             if f == "abonnement":
                 placeholder = "ex: free"
             elif f == "age":
                 placeholder = "ex: 50 ans"
+            elif f == "last_30d":
+                placeholder = "ex: 200"
             else:
                 placeholder = "ex: BCP"
             fields_html += (
@@ -8916,12 +8918,31 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
 
     cards_html = "".join(cards)
 
-    # Bulk apply : niche / age / abonnement communs + (pour MyM) bouton scrape abonnes
+    # Bulk apply : 1 input par champ bulk-eligible de la plateforme
+    # MyM = niche / age / abonnement | OF = abonnement / last_30d
     mypuls_btn = (
         f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
         f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
         f"🔄 Auto-fill abonnes depuis MyPuls</button>"
     ) if platform == "mym" else ""
+
+    bulk_meta = {
+        "niche":      {"icon": "🎯", "label": "Niche",       "placeholder": "ex: CAISSE"},
+        "age":        {"icon": "🎂", "label": "Âge",         "placeholder": "ex: 50 ans"},
+        "abonnement": {"icon": "💳", "label": "Abonnement",  "placeholder": "ex: free"},
+        "last_30d":   {"icon": "📅", "label": "Last 30 days","placeholder": "ex: 200"},
+    }
+    bulk_inputs_html = ""
+    for f in sfs_setup.bulk_fields_for(platform):
+        meta = bulk_meta.get(f, {"icon": "•", "label": f, "placeholder": ""})
+        bulk_inputs_html += (
+            f"<div>"
+            f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>"
+            f"{meta['icon']} {meta['label']}</label>"
+            f"<input type='text' id='setup-bulk-{f}-{platform}' placeholder='{meta['placeholder']}' "
+            f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
+            f"</div>"
+        )
 
     bulk_html = (
         "<div style='background:linear-gradient(135deg,rgba(59,130,246,.06),rgba(168,85,247,.04));"
@@ -8931,28 +8952,11 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"<span style='font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800'>⚡ Appliquer à TOUS les modèles</span>"
         f"<small style='color:#666;font-size:11px'>(les champs vides sont ignorés)</small>"
         f"</div>"
-        # Grid 3 inputs + 2 boutons
+        # Grid inputs dynamique
         f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end'>"
-        # Niche
-        f"<div>"
-        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>🎯 Niche</label>"
-        f"<input type='text' id='setup-bulk-niche-{platform}' placeholder='ex: CAISSE' "
-        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
-        f"</div>"
-        # Age
-        f"<div>"
-        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>🎂 Âge</label>"
-        f"<input type='text' id='setup-bulk-age-{platform}' placeholder='ex: 50 ans' "
-        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
-        f"</div>"
-        # Abonnement
-        f"<div>"
-        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>💳 Abonnement</label>"
-        f"<input type='text' id='setup-bulk-abonnement-{platform}' placeholder='ex: free' "
-        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
-        f"</div>"
-        # Boutons (full width sur petite ligne, inline sur grande)
-        f"</div>"
+        + bulk_inputs_html
+        + f"</div>"
+        # Boutons
         f"<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
         f"<button type='button' onclick='applyBulk_{platform}()' "
         f"style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
@@ -9022,11 +9026,11 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
         f"}}"
-        # Bulk apply : niche + age + abonnement, ignore champs vides
+        # Bulk apply - champs eligibles dependent de la plateforme
         f"async function applyBulk_{platform}(){{"
         f"  const sec=document.getElementById('form-sfssetup{platform}');"
         f"  if(!sec) return;"
-        f"  const fields=['niche','age','abonnement'];"
+        f"  const fields={json.dumps(list(sfs_setup.bulk_fields_for(platform)))};"
         f"  const values={{}};"
         f"  for(const f of fields){{"
         f"    const inp=document.getElementById('setup-bulk-'+f+'-{platform}');"
@@ -9034,7 +9038,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"    if(v) values[f]=v;"
         f"  }}"
         f"  const keys=Object.keys(values);"
-        f"  if(keys.length===0){{ alert('Remplis au moins un champ (niche, âge ou abonnement)'); return; }}"
+        f"  if(keys.length===0){{ alert('Remplis au moins un champ'); return; }}"
         f"  const cards=sec.querySelectorAll('.sfssetup-card');"
         f"  let count=0;"
         f"  for(const card of cards){{"
