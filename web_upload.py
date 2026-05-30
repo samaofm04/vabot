@@ -8062,6 +8062,30 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
+      <!-- Quick clean depuis date X -->
+      <div style='background:linear-gradient(135deg,rgba(239,68,68,.06),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.25);border-radius:12px;padding:14px;margin-bottom:14px'>
+        <div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>
+          <svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/></svg>
+          <span style='color:#ef4444;font-weight:700;font-size:13px;letter-spacing:.3px'>🧹 Clean rapide</span>
+        </div>
+        <p style='color:#aaa;font-size:12.5px;margin:0 0 10px;line-height:1.5'>
+          Supprime <b>TOUS</b> les events planifies a partir d une date — utile pour repartir de zero sur ce createur.
+        </p>
+        <div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>
+          <input type='date' id='mpl-clean-from' value='{d_start}' style='flex:0 0 auto;max-width:180px'>
+          <button type='button' onclick='quickClean()' style='background:#ef4444;border:0;color:#fff;padding:9px 16px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer'>
+            🧹 Tout supprimer a partir de cette date
+          </button>
+          <small id='mpl-clean-status' style='color:#888'></small>
+        </div>
+      </div>
+
+      <div style='display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase'>
+        <span style='flex:1;height:1px;background:#222'></span>
+        <span>OU selection manuelle</span>
+        <span style='flex:1;height:1px;background:#222'></span>
+      </div>
+
       <div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px'>
         <button type='button' class='mpl-fetch-btn' style='border-color:#ef4444;color:#ef4444' onclick='fetchEvents()'>↓ Charger events</button>
         <button type='button' class='mpl-fetch-btn' onclick='toggleSelectAll()'>☑ Tout selectionner</button>
@@ -8442,6 +8466,54 @@ function toggleSelectAll(){{
 function unselectAll(){{
   document.querySelectorAll('.mpl-event-cb').forEach(cb=>cb.checked=false);
   updateDeleteSel();
+}}
+async function quickClean(){{
+  const cid = document.getElementById('mpl-creator-id').value;
+  if(!cid){{ alert('Pas de createur'); return; }}
+  const from = document.getElementById('mpl-clean-from').value;
+  if(!from){{ alert('Choisis une date'); return; }}
+  const status = document.getElementById('mpl-clean-status');
+  status.textContent = 'Comptage...';
+  status.style.color = '#3b82f6';
+  // Range : from -> +1 an
+  const fromD = new Date(from);
+  const toD = new Date(fromD); toD.setFullYear(toD.getFullYear()+1);
+  const toStr = toD.toISOString().slice(0,10);
+  try {{
+    const r = await fetch('/mypulslive/list_events?creator='+cid+'&start='+from+'&end='+toStr);
+    const j = await r.json();
+    if(!j.ok){{
+      status.textContent = 'Erreur: '+(j.error||'?');
+      status.style.color = '#f99';
+      return;
+    }}
+    const ids = (j.events||[]).map(e=>e.id);
+    if(!ids.length){{
+      status.textContent = 'Aucun event a supprimer';
+      status.style.color = '#888';
+      return;
+    }}
+    if(!confirm('Supprimer '+ids.length+' event(s) planifie(s) a partir du '+from+' ?\\n\\nCette action est IRREVERSIBLE.')){{
+      status.textContent = 'Annule';
+      status.style.color = '#888';
+      return;
+    }}
+    status.textContent = 'Suppression en cours...';
+    status.style.color = '#3b82f6';
+    // POST direct au endpoint de bulk delete
+    const fd = new FormData();
+    fd.set('delete_ids', ids.join(','));
+    const dr = await fetch('/mypulslive/delete_events', {{method:'POST', body:fd}});
+    // Le endpoint redirige avec flash, on suit le redirect
+    if(dr.redirected){{
+      window.location.href = dr.url;
+    }} else {{
+      window.location.reload();
+    }}
+  }} catch(e){{
+    status.textContent = 'Erreur reseau: '+e;
+    status.style.color = '#f99';
+  }}
 }}
 
 function toggleOpt(elId, hiddenId){{
