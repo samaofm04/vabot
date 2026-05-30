@@ -5825,25 +5825,24 @@ def _render_insta_trends_grid_html() -> str:
       <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</div>
       <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
     </div>
-    <!-- Trending indicator + username at bottom -->
-    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.9),transparent);padding:8px 10px;z-index:2">
+    <!-- Bottom stack DANS la card : expand au-dessus, trending + username en bas (toujours visibles) -->
+    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:2">
+      <!-- Expand panel : slide UP depuis le bas, caption + sound (cachee par defaut) -->
+      <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
+        <div class="reel-expand-inner" style="padding-bottom:8px">
+          {f'<div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:100px;overflow-y:auto;margin-bottom:8px;font-weight:500">{caption_short}</div>' if caption_short else ''}
+          <div style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:11.5px">
+            <span style="color:#3b82f6">🎵</span><span style="color:#aaa">Sound:</span>
+            <span style="color:#fff;font-weight:600">Original audio</span>
+            <span style="margin-left:auto;color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
+          </div>
+        </div>
+      </div>
       {trending_html}
       <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Voir caption, son, durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
         {avatar}<span style="flex:1">@{owner}</span>
-        <!-- Chevron pointe en BAS par defaut (= click pour ouvrir), HAUT quand ouvert -->
         <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .25s ease"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-    </div>
-  </div>
-  <!-- Expand panel : caption + sound (slide smooth) -->
-  <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;background:#0f0f0f;border-top:0 solid #232323;font-size:12.5px;color:#ddd;line-height:1.5">
-    <div class="reel-expand-inner" style="padding:12px">
-      {f'<div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:10px">{caption_short}</div>' if caption_short else ''}
-      <div style="display:flex;align-items:center;gap:6px;color:#aaa;font-size:11.5px">
-        <span style="color:#3b82f6">🎵</span><span style="color:#888">Sound:</span>
-        <span style="color:#ccc;font-weight:600">Original audio</span>
-        <span style="margin-left:auto;color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
-      </div>
     </div>
   </div>
 </div>""")
