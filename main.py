@@ -155,6 +155,25 @@ async def main_async():
 
     asyncio.create_task(_mypuls_keepalive(), name="mypuls_keepalive")
 
+    # Cron : traite les auto-deletes en attente toutes les 10 min
+    # (stories planifiees via MyPuls Live avec option "auto-delete after X jours")
+    async def _mypuls_pending_deletes():
+        await asyncio.sleep(120)
+        while True:
+            try:
+                import mypuls_scheduler as _ms
+                res = _ms.process_pending_deletes()
+                if res.get("deleted"):
+                    log.info(
+                        f"[mypuls] Auto-delete cron: {res['deleted']} suppr, "
+                        f"{res['failed']} fail, {res['remaining']} restantes"
+                    )
+            except Exception as e:
+                log.warning(f"[mypuls] Erreur auto-delete cron : {e}")
+            await asyncio.sleep(600)  # toutes les 10 min
+
+    asyncio.create_task(_mypuls_pending_deletes(), name="mypuls_pending_deletes")
+
     async def _run_safe(bot, token, label):
         """Wrap bot.start dans un try/except pour qu'un bot qui crashe ne tue pas l'autre.
 

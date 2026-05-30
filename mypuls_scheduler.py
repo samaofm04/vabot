@@ -390,6 +390,7 @@ def schedule_story(
     media_id: int,
     date_iso: str,
     audience: str = "everyone",
+    auto_delete_after_sec: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Planifie une story (POST /stories, multipart/form-data).
 
@@ -397,6 +398,11 @@ def schedule_story(
       _token (csrf-story-create), mediaId, dateSchedule (ISO+TZ Paris),
       storyAudience, creatorId
     -> 201 {id, status:"schedule", dateSchedule}
+
+    Si auto_delete_after_sec est fourni, on track la story dans
+    data/mypuls_pending_deletes.json pour qu'un cron la supprime au moment voulu.
+    (MyPuls n'expose pas l'auto-delete pour stories dans leur API, donc on
+    le fait cote nous.)
     """
     cfg = _get_planif_config()
     csrf = cfg.get("csrf_story_create", "")
@@ -410,7 +416,14 @@ def schedule_story(
     res = _post_multipart(url, fields, csrf)
     if res.get("ok"):
         j = res.get("json") or {}
-        return {"ok": True, "story_id": j.get("id"), "status": j.get("status"),
+        story_id = j.get("id")
+        # Track local auto-delete if requested
+        if story_id and auto_delete_after_sec and auto_delete_after_sec > 0:
+            try:
+                _add_pending_delete(int(story_id), date_iso, int(auto_delete_after_sec), "story")
+            except Exception:
+                pass
+        return {"ok": True, "story_id": story_id, "status": j.get("status"),
                 "date_schedule": j.get("dateSchedule")}
     return res
 
@@ -468,10 +481,13 @@ def bulk_schedule_stories(
     date_end: str,
     hour_slots: List[int],
     audience: str = "everyone",
+    auto_delete_after_sec: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Planifie en masse des stories. Une story par (jour, heure_slot).
 
     Minutes randomisees entre 3 et 25. Media IDs recycles en ordre.
+    Si auto_delete_after_sec : la story sera supprimee X secondes apres
+    sa publication (gere cote nous, pas MyPuls).
     """
     import random
     from datetime import datetime, timedelta
@@ -505,6 +521,7 @@ def bulk_schedule_stories(
                 media_id=mid,
                 date_iso=dt.strftime("%Y-%m-%d %H:%M:%S"),
                 audience=audience,
+                auto_delete_after_sec=auto_delete_after_sec,
             )
             if res.get("ok"):
                 planned += 1
@@ -612,6 +629,103 @@ def delete_post(post_id: int) -> Dict[str, Any]:
 def delete_event(event_id: int) -> Dict[str, Any]:
     """Alias generique : supprime un event planifie (story OU post)."""
     return delete_story(event_id)
+
+
+# ============ Local pending-delete tracker (story auto-delete) ============
+
+import json as _json
+from pathlib import Path as _Path
+
+_PENDING_FILE = _Path("data") / "mypuls_pending_deletes.json"
+
+
+def _load_pending() -> List[Dict[str, Any]]:
+    if not _PENDING_FILE.exists():
+        return []
+    try:
+        return _json.loads(_PENDING_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_pending(items: List[Dict[str, Any]]):
+    _PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PENDING_FILE.write_text(_json.dumps(items, indent=2), encoding="utf-8")
+
+
+def _add_pending_delete(item_id: int, scheduled_date_iso: str,
+                        delay_sec: int, kind: str = "story"):
+    """Enregistre une suppression future. delete_at = scheduled_date + delay."""
+    from datetime import datetime, timedelta
+    # parse scheduled date (sans tz)
+    s = scheduled_date_iso.strip().replace("T", " ")[:19]
+    try:
+        sched = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        try:
+            sched = datetime.strptime(s, "%Y-%m-%d %H:%M")
+        except Exception:
+            return
+    delete_at = sched + timedelta(seconds=int(delay_sec))
+    items = _load_pending()
+    items.append({
+        "id": int(item_id),
+        "kind": kind,
+        "scheduled_at": sched.isoformat(),
+        "delete_at": delete_at.isoformat(),
+        "added_at": datetime.utcnow().isoformat(),
+    })
+    _save_pending(items)
+
+
+def process_pending_deletes(now=None) -> Dict[str, Any]:
+    """A appeler par un cron. Supprime les items dont delete_at est passe.
+
+    Retourne {processed, deleted, failed, errors}.
+    """
+    from datetime import datetime
+    if now is None:
+        now = datetime.now()
+    items = _load_pending()
+    if not items:
+        return {"processed": 0, "deleted": 0, "failed": 0, "errors": []}
+    remaining: List[Dict[str, Any]] = []
+    deleted, failed = 0, 0
+    errors: List[str] = []
+    for it in items:
+        try:
+            dt = datetime.fromisoformat(it["delete_at"])
+        except Exception:
+            # Item corrompu : on le drop
+            continue
+        if dt > now:
+            remaining.append(it)
+            continue
+        # On supprime
+        res = delete_story(int(it["id"]))
+        if res.get("ok"):
+            deleted += 1
+        else:
+            failed += 1
+            err = str(res.get("error", "?"))[:80]
+            errors.append(f"id={it['id']}: {err}")
+            # En cas d'erreur on garde dans la file et on retentera plus tard,
+            # SAUF si c'est 404 (deja supprime ou inexistant -> drop)
+            if "404" not in err and "introuvable" not in err.lower():
+                remaining.append(it)
+    _save_pending(remaining)
+    return {
+        "processed": len(items),
+        "deleted": deleted,
+        "failed": failed,
+        "remaining": len(remaining),
+        "errors": errors[:10],
+    }
+
+
+def list_pending_deletes() -> List[Dict[str, Any]]:
+    """Retourne la liste actuelle des suppressions en attente."""
+    return _load_pending()
 
 
 # ============ Image proxy (refresh JWT-signed URLs in pages) ============
