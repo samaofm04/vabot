@@ -5769,7 +5769,7 @@ def _render_insta_trends_grid_html() -> str:
         views = r.get("views") or 0
         likes = r.get("likes", 0)
         comments = r.get("comments", 0)
-        caption = (r.get("caption") or "").replace('"', '&quot;')
+        caption = (r.get("caption") or "").strip().replace('"', '&quot;')
         caption_short = caption[:100]
         is_video = r.get("is_video")
         taken_at = r.get("taken_at", 0) or 0
@@ -5846,7 +5846,7 @@ def _render_insta_trends_grid_html() -> str:
       <!-- Expand panel : slide UP depuis le bas, caption COMPLETE + sound -->
       <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:8px">
-          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{_format_caption_html(caption) if caption else '<span style=color:#888;font-style:italic>Pas de description</span>'}</div>
+          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{_format_caption_html(caption) if caption else '<span style="color:#888;font-style:italic">Pas de description</span>'}</div>
           <div style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:11.5px">
             <span style="color:#3b82f6">🎵</span><span style="color:#aaa">Sound:</span>
             <span style="color:#fff;font-weight:600">Original audio</span>
