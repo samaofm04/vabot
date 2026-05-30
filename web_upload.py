@@ -1262,32 +1262,38 @@ function showTab(group,name,title,subtitle){
   }catch(e){}
 }
 
-// === Send to Veille Telegram ===
-window.sendToVeille = async function(btn, url){
-  if(!url || !btn) return;
+// === Add to Veille (bookmark) ===
+window.addToVeille = async function(btn, payload){
+  if(!payload || !payload.url) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="20" style="animation:plSpin 1s linear infinite;transform-origin:center"/></svg>';
+  btn.innerHTML = '⏳';
   try {
-    const fd = new FormData();
-    fd.set('url', url);
-    const r = await fetch('/trends/send_to_veille', {method:'POST', body:fd, credentials:'same-origin'});
+    const r = await fetch('/veille/add', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+      credentials:'same-origin'
+    });
     const j = await r.json();
     if(j.ok){
-      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e"><path d="M20 6L9 17l-5-5"/></svg>';
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e" stroke="#22c55e" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
       btn.style.background = 'rgba(34,197,94,.3)';
-      if(typeof showToast === 'function') showToast('✅ Envoyé à Veille Telegram', 'success');
-      setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.6)'; btn.disabled = false; }, 2000);
+      if(typeof showToast === 'function') showToast('🔖 Ajouté à la Veille', 'success');
+      // Reste filled
+      btn.disabled = false;
+    } else if(j.error === 'already_exists'){
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#3b82f6" stroke="#3b82f6" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+      btn.style.background = 'rgba(59,130,246,.3)';
+      if(typeof showToast === 'function') showToast('🔖 Déjà dans la Veille', 'success');
+      btn.disabled = false;
     } else {
-      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#ef4444" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-      btn.style.background = 'rgba(239,68,68,.3)';
+      btn.innerHTML = orig;
+      btn.disabled = false;
       if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur'), 'error');
-      else alert('Erreur Telegram : ' + (j.error || '?'));
-      setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.6)'; btn.disabled = false; }, 3000);
     }
   } catch(e){
     btn.innerHTML = orig;
-    btn.style.background = 'rgba(0,0,0,.6)';
     btn.disabled = false;
     if(typeof showToast === 'function') showToast('❌ Erreur réseau', 'error');
   }
@@ -1919,10 +1925,11 @@ window.upClearPrefill = function(utab){
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
 
-<!-- Sub-tabs style Insta : Mes suivies / Explorer -->
+<!-- Sub-tabs style Insta : Mes suivies / Explorer / Veille -->
 <div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
   <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #3b82f6;margin:0">👥 Mes suivies</button>
   <button class="ig-feed-tab" onclick="showFeed(this,'explore')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔍 Explorer</button>
+  <button class="ig-feed-tab" onclick="showFeed(this,'veille')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔖 Veille <span id="veille-count-badge" style="background:#3b82f6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;margin-left:4px;display:none"></span></button>
 </div>
 <script>
 function showFeed(btn,name){
@@ -2036,6 +2043,10 @@ function showFeed(btn,name){
   <h3 style="margin:0 0 8px;color:#888">Explorer — Coming soon</h3>
   <p style="margin:0;font-size:14px">Découverte de comptes Instagram populaires que tu ne suis pas encore.<br>Nécessite l'endpoint <code>Explore Feed</code> de RapidAPI (à brancher).</p>
 </div>
+</div>
+
+<div id="feed-veille" class="ig-feed-content" style="display:none">
+{veille_feed_html}
 </div>
 
 </div><!-- /form-igtrends -->
@@ -5663,8 +5674,8 @@ def _render_insta_trends_grid_html() -> str:
       <a href="{video_url or url}" target="_blank" download title="Télécharger" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </a>
-      <button onclick='sendToVeille(this, "{url}")' title="Envoyer à Veille Telegram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#0088cc;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+      <button onclick='addToVeille(this, {{"url":"{url}","video_url":"{video_url}","thumb":"{thumb}","owner":"{owner}","owner_pp":"{owner_pic}","caption":"{caption}","views":{d_views},"likes":{d_likes},"comments":{d_comments}}})' title="Ajouter à la Veille" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
       </button>
       <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
@@ -8311,6 +8322,174 @@ function gmsFilter(btn, cat){
         + links_section
         + js
     )
+
+
+def _render_veille_feed_html() -> str:
+    """Liste des reels veille, groupes par jour. Bouton 'Send to Telegram' par reel."""
+    try:
+        import veille
+        import veille_telegram
+    except Exception as e:
+        return f"<p style='color:#f99'>Module veille indispo : {e}</p>"
+
+    by_day = veille.reels_by_day()
+    s = veille.stats()
+    tg_configured = veille_telegram.is_configured()
+
+    if not by_day:
+        return (
+            "<div style='background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
+            "<div style='font-size:48px;margin-bottom:12px'>🔖</div>"
+            "<h3 style='margin:0 0 8px;color:#fff'>Pas de reels en veille</h3>"
+            "<p style='margin:0;font-size:14px'>Va dans <b>Mes suivies</b> et clique sur le bouton 🔖 d'un reel pour l'ajouter ici.</p>"
+            "</div>"
+        )
+
+    # Header stats + actions globales
+    tg_warn = ""
+    if not tg_configured:
+        tg_warn = (
+            "<div style='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:12px 16px;margin-bottom:18px;color:#f59e0b;font-size:13px'>"
+            "⚠️ Bot Telegram pas configuré — va dans <a href='?tab=vtg' style='color:#f59e0b;text-decoration:underline'>Settings → Veille Telegram</a> pour l envoyer aux reels."
+            "</div>"
+        )
+
+    stats_html = (
+        "<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px'>"
+        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
+        f"<div style='font-size:22px;font-weight:800;color:#fff'>{s['total']}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Reels</div></div>"
+        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
+        f"<div style='font-size:22px;font-weight:800;color:#22c55e'>{s['sent_count']}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Envoyés</div></div>"
+        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
+        f"<div style='font-size:22px;font-weight:800;color:#3b82f6'>{s['unsent_count']}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>A envoyer</div></div>"
+        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
+        f"<div style='font-size:22px;font-weight:800;color:#a855f7'>{s['days_count']}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Jours</div></div>"
+        "</div>"
+    )
+
+    # Render par jour
+    import datetime as _dt_v
+    fr_months = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
+                 "juill.", "août", "sept.", "oct.", "nov.", "déc."]
+
+    sections = []
+    for day in sorted(by_day.keys(), reverse=True):
+        reels = by_day[day]
+        # Format date
+        try:
+            d = _dt_v.date.fromisoformat(day)
+            today = _dt_v.date.today()
+            if d == today:
+                day_label = "Aujourd'hui"
+            elif d == today - _dt_v.timedelta(days=1):
+                day_label = "Hier"
+            else:
+                day_label = f"{d.day} {fr_months[d.month - 1]} {d.year}"
+        except Exception:
+            day_label = day
+
+        unsent_count = sum(1 for r in reels if not r.get('sent_to_telegram'))
+
+        # Header du jour
+        section_html = (
+            "<div style='margin-bottom:30px'>"
+            "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #2a2a2a'>"
+            f"<div><h3 style='margin:0;font-size:17px;color:#fff;letter-spacing:-.01em'>📅 {day_label}</h3>"
+            f"<div style='font-size:12px;color:#666;margin-top:2px'>{len(reels)} reels · {unsent_count} non envoyés</div></div>"
+        )
+        if unsent_count > 0 and tg_configured:
+            section_html += (
+                f"<button onclick=\"sendAllVeilleDay('{day}')\" "
+                f"style='background:#0088cc;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px'>"
+                f"📤 Envoyer tout ({unsent_count})</button>"
+            )
+        section_html += "</div>"
+
+        # Grille des reels
+        section_html += "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px'>"
+        for r in reels:
+            sent = r.get("sent_to_telegram", False)
+            ribbon = ""
+            if sent:
+                ribbon = ("<div style='position:absolute;top:8px;left:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
+                          "padding:3px 8px;border-radius:6px;z-index:3;letter-spacing:.3px'>✓ ENVOYÉ</div>")
+            send_btn = ""
+            if not sent and tg_configured:
+                send_btn = (
+                    f"<button onclick=\"sendVeilleReel('{r['id']}', this)\" "
+                    f"style='flex:1;background:#0088cc;color:#fff;border:0;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700'>"
+                    f"📤 Telegram</button>"
+                )
+            else:
+                send_btn = (
+                    f"<button disabled style='flex:1;background:#1a1a1a;color:#22c55e;border:1px solid #22c55e;padding:7px;border-radius:6px;font-size:12px;font-weight:700;cursor:default'>"
+                    f"✓ Envoyé</button>"
+                )
+            section_html += (
+                f"<div style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
+                f"<div style='position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer' onclick=\"window.open('{r['url']}','_blank')\">"
+                f"{ribbon}"
+                f"<img src='{r.get('thumb', '')}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
+                f"<div style='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:10px;color:#fff;font-size:11px'>"
+                f"<div style='font-weight:700'>@{r.get('owner', '?')}</div>"
+                f"<div style='display:flex;gap:8px;color:#ddd;margin-top:3px;font-size:11px'>▶ {_format_count(r.get('views', 0))} · ♥ {_format_count(r.get('likes', 0))}</div>"
+                f"</div></div>"
+                f"<div style='padding:10px;display:flex;gap:6px'>"
+                + send_btn +
+                f"<button onclick=\"removeVeilleReel('{r['id']}', this)\" "
+                f"style='background:transparent;border:1px solid #5a2020;color:#ef4444;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px' title='Retirer de la veille'>🗑</button>"
+                f"</div>"
+                f"</div>"
+            )
+        section_html += "</div></div>"
+        sections.append(section_html)
+
+    js = """
+<script>
+async function sendVeilleReel(rid, btn){
+  if(!confirm('Envoyer ce reel sur Telegram ?')) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '⏳ Envoi...';
+  const fd = new FormData(); fd.set('reel_id', rid);
+  const r = await fetch('/veille/send', {method:'POST', body:fd});
+  const j = await r.json();
+  if(j.ok){
+    btn.innerHTML = '✓ Envoyé'; btn.style.background = '#22c55e';
+    setTimeout(()=>location.reload(), 800);
+  } else {
+    btn.innerHTML = '✗ ' + (j.error||'Erreur');
+    btn.style.background = '#ef4444';
+    setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = '#0088cc'; btn.disabled = false; }, 3000);
+  }
+}
+async function sendAllVeilleDay(day){
+  if(!confirm('Envoyer TOUS les reels non envoyés du ' + day + ' sur Telegram ?')) return;
+  const fd = new FormData(); fd.set('day', day);
+  const r = await fetch('/veille/send_day', {method:'POST', body:fd});
+  const j = await r.json();
+  if(j.ok){
+    showToast('✅ ' + j.sent + ' reels envoyés' + (j.failed?' · ' + j.failed + ' fail':''), j.failed?'error':'success');
+    setTimeout(()=>location.reload(), 800);
+  } else {
+    alert('Erreur: ' + (j.error || '?'));
+  }
+}
+async function removeVeilleReel(rid, btn){
+  if(!confirm('Retirer ce reel de la veille ?')) return;
+  const fd = new FormData(); fd.set('reel_id', rid);
+  const r = await fetch('/veille/remove', {method:'POST', body:fd});
+  const card = btn.closest('div[style*="aspect-ratio"]')?.parentNode;
+  if(card) card.style.opacity = '0.3';
+  setTimeout(()=>location.reload(), 400);
+}
+</script>
+"""
+
+    return tg_warn + stats_html + "".join(sections) + js
 
 
 def _render_vtg_html() -> str:
@@ -11635,6 +11814,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{vtg_html}", _render_vtg_html())
+        .replace("{veille_feed_html}", _render_veille_feed_html())
         .replace("{mypulslive_html}", _render_mypulslive_html())
         .replace("{chatplanning_html}", _render_chatplanning_html())
         .replace("{bilan_html}", _render_bilan_html())
@@ -12715,23 +12895,92 @@ def create_app():
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
 
-    @app.route("/trends/send_to_veille", methods=["POST"])
-    def trends_send_to_veille():
+    @app.route("/veille/add", methods=["POST"])
+    def veille_add():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify, request as _r
+        try:
+            import veille
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        try:
+            payload = _r.get_json(force=True, silent=True) or {}
+        except Exception:
+            payload = {}
+        res = veille.add_reel(payload)
+        return jsonify(res)
+
+    @app.route("/veille/remove", methods=["POST"])
+    def veille_remove():
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
         try:
+            import veille
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        if not rid:
+            return jsonify({"ok": False, "error": "reel_id manquant"})
+        ok = veille.remove_reel(rid)
+        return jsonify({"ok": ok})
+
+    @app.route("/veille/send", methods=["POST"])
+    def veille_send():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import veille
             import veille_telegram
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
-        url = (request.form.get("url") or "").strip()
-        if not url:
-            return jsonify({"ok": False, "error": "URL manquant"})
+        rid = (request.form.get("reel_id") or "").strip()
+        if not rid:
+            return jsonify({"ok": False, "error": "reel_id manquant"})
+        reel = veille.get_reel(rid)
+        if not reel:
+            return jsonify({"ok": False, "error": "Reel introuvable"})
         if not veille_telegram.is_configured():
-            return jsonify({"ok": False, "error": "Bot Telegram non configuré (Settings → Veille Telegram)"})
-        res = veille_telegram.send_url(url)
+            return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
+        res = veille_telegram.send_url(reel.get("url", ""), caption=f"📌 @{reel.get('owner', '?')}")
+        if res.get("ok"):
+            veille.mark_sent(rid)
         return jsonify(res)
+
+    @app.route("/veille/send_day", methods=["POST"])
+    def veille_send_day():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import veille
+            import veille_telegram
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        day = (request.form.get("day") or "").strip()
+        if not day:
+            return jsonify({"ok": False, "error": "day manquant"})
+        if not veille_telegram.is_configured():
+            return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
+        by_day = veille.reels_by_day()
+        reels = by_day.get(day, [])
+        sent, failed = 0, 0
+        for r in reels:
+            if r.get("sent_to_telegram"):
+                continue
+            res = veille_telegram.send_url(r.get("url", ""), caption=f"📌 @{r.get('owner', '?')}")
+            if res.get("ok"):
+                veille.mark_sent(r["id"])
+                sent += 1
+            else:
+                failed += 1
+        return jsonify({"ok": True, "sent": sent, "failed": failed})
 
     @app.route("/settings/veille_telegram", methods=["POST"])
     def settings_veille_telegram():
