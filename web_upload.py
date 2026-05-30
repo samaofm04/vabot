@@ -8875,7 +8875,12 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
                 val = sfs_setup.DEFAULT_ABONNEMENT
             val_safe = val.replace('"', '&quot;')
             label = sfs_setup.FIELD_LABELS[f]
-            placeholder = "ex: free" if f == "abonnement" else "ex: BCP"
+            if f == "abonnement":
+                placeholder = "ex: free"
+            elif f == "age":
+                placeholder = "ex: 50 ans"
+            else:
+                placeholder = "ex: BCP"
             fields_html += (
                 f"<div>"
                 f"<label style='font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;display:block;margin-bottom:4px'>{label}</label>"
@@ -8911,26 +8916,49 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
 
     cards_html = "".join(cards)
 
-    # Bulk apply : niche commune + (pour MyM) bouton scrape abonnes
+    # Bulk apply : niche / age / abonnement communs + (pour MyM) bouton scrape abonnes
+    mypuls_btn = (
+        f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
+        f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
+        f"🔄 Auto-fill abonnes depuis MyPuls</button>"
+    ) if platform == "mym" else ""
+
     bulk_html = (
         "<div style='background:linear-gradient(135deg,rgba(59,130,246,.06),rgba(168,85,247,.04));"
-        "border:1px solid rgba(59,130,246,.25);border-radius:12px;padding:14px;margin-bottom:18px;"
-        "display:flex;gap:12px;flex-wrap:wrap;align-items:end'>"
-        # Niche commune
-        f"<div style='flex:1;min-width:200px'>"
-        f"<label style='display:block;font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800;margin-bottom:6px'>🎯 Appliquer une niche a TOUS</label>"
+        "border:1px solid rgba(59,130,246,.25);border-radius:12px;padding:14px;margin-bottom:18px'>"
+        # Header
+        f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
+        f"<span style='font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800'>⚡ Appliquer à TOUS les modèles</span>"
+        f"<small style='color:#666;font-size:11px'>(les champs vides sont ignorés)</small>"
+        f"</div>"
+        # Grid 3 inputs + 2 boutons
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end'>"
+        # Niche
+        f"<div>"
+        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>🎯 Niche</label>"
         f"<input type='text' id='setup-bulk-niche-{platform}' placeholder='ex: CAISSE' "
         f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
         f"</div>"
-        f"<button type='button' onclick='applyBulkNiche_{platform}()' "
+        # Age
+        f"<div>"
+        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>🎂 Âge</label>"
+        f"<input type='text' id='setup-bulk-age-{platform}' placeholder='ex: 50 ans' "
+        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
+        f"</div>"
+        # Abonnement
+        f"<div>"
+        f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>💳 Abonnement</label>"
+        f"<input type='text' id='setup-bulk-abonnement-{platform}' placeholder='ex: free' "
+        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
+        f"</div>"
+        # Boutons (full width sur petite ligne, inline sur grande)
+        f"</div>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
+        f"<button type='button' onclick='applyBulk_{platform}()' "
         f"style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
-        f"⚡ Appliquer a tous</button>"
-        + (
-            f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
-            f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
-            f"🔄 Auto-fill abonnes depuis MyPuls</button>"
-            if platform == "mym" else ""
-        )
+        f"⚡ Appliquer à tous</button>"
+        + mypuls_btn
+        + f"</div>"
         + f"</div>"
     )
 
@@ -8994,21 +9022,34 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
         f"}}"
-        # Bulk niche
-        f"async function applyBulkNiche_{platform}(){{"
-        f"  const input=document.getElementById('setup-bulk-niche-{platform}');"
-        f"  const niche=(input?input.value:'').trim();"
-        f"  if(!niche){{ alert('Tape une niche d abord'); return; }}"
+        # Bulk apply : niche + age + abonnement, ignore champs vides
+        f"async function applyBulk_{platform}(){{"
         f"  const sec=document.getElementById('form-sfssetup{platform}');"
         f"  if(!sec) return;"
-        f"  const inputs=sec.querySelectorAll('input[data-field=niche]');"
-        f"  let count=0;"
-        f"  for(const el of inputs){{"
-        f"    el.value=niche;"
-        f"    const fd=new FormData(); fd.set('platform','{platform}'); fd.set('identity',el.dataset.ident); fd.set('field','niche'); fd.set('value',niche);"
-        f"    try{{ await fetch('/sfssetup/save',{{method:'POST',body:fd}}); count++; }}catch(e){{}}"
+        f"  const fields=['niche','age','abonnement'];"
+        f"  const values={{}};"
+        f"  for(const f of fields){{"
+        f"    const inp=document.getElementById('setup-bulk-'+f+'-{platform}');"
+        f"    const v=(inp?inp.value:'').trim();"
+        f"    if(v) values[f]=v;"
         f"  }}"
-        f"  alert('Niche \"'+niche+'\" appliquee sur '+count+' modeles');"
+        f"  const keys=Object.keys(values);"
+        f"  if(keys.length===0){{ alert('Remplis au moins un champ (niche, âge ou abonnement)'); return; }}"
+        f"  const cards=sec.querySelectorAll('.sfssetup-card');"
+        f"  let count=0;"
+        f"  for(const card of cards){{"
+        f"    const ident=card.dataset.ident;"
+        f"    if(!ident) continue;"
+        f"    for(const f of keys){{"
+        f"      const el=card.querySelector('input[data-field='+f+']');"
+        f"      if(el) el.value=values[f];"
+        f"      const fd=new FormData(); fd.set('platform','{platform}'); fd.set('identity',ident); fd.set('field',f); fd.set('value',values[f]);"
+        f"      try{{ await fetch('/sfssetup/save',{{method:'POST',body:fd}}); }}catch(e){{}}"
+        f"    }}"
+        f"    count++;"
+        f"  }}"
+        f"  const summary=keys.map(k=>k+'=\"'+values[k]+'\"').join(', ');"
+        f"  alert('Appliqué sur '+count+' modèles : '+summary);"
         f"}}"
         # MyPuls fetch subs (stub pour le moment, attend impl serveur)
         f"async function fetchMyPulsSubs_{platform}(){{"

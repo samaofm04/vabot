@@ -41,9 +41,10 @@ DEFAULT_EMOJIS = [
     "\U0001F469\U0001F3FC‍\U0001F9B3",
 ]
 
-FIELDS = ["niche", "abonnement", "abonnes", "anciens", "interesses"]
+FIELDS = ["niche", "age", "abonnement", "abonnes", "anciens", "interesses"]
 FIELD_LABELS = {
     "niche": "Niche",
+    "age": "Âge",
     "abonnement": "Abonnement",
     "abonnes": "Abonnes",
     "anciens": "Anciens abonnes",
@@ -51,6 +52,8 @@ FIELD_LABELS = {
 }
 PLATFORMS = ("mym", "of")
 DEFAULT_ABONNEMENT = "free"
+# Champs eligibles au bulk-apply (Appliquer a TOUS)
+BULK_FIELDS = ("niche", "age", "abonnement")
 
 
 def _load() -> Dict[str, Any]:
