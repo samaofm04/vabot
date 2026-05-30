@@ -1702,13 +1702,6 @@ window.upClearPrefill = function(utab){
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
 </div>
 </div>
-<div class="up-card">
-<div class="up-step"><span class="up-dot"></span><h3>Textes</h3></div>
-<label class="up-mini-label">Caption (overlay)</label>
-<textarea name="caption" class="up-input"></textarea>
-<label class="up-mini-label" style="margin-top:14px">Description</label>
-<textarea name="description" class="up-input"></textarea>
-</div>
 <button type="submit" class="up-submit">⬆ Uploader le post</button>
 </form>
 </div>
@@ -4705,7 +4698,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
     # Mapping subdir -> upload tab name (pour le bouton + Add media)
     upload_tab_map = {
         "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description"),
-        "posts": ("post", "Upload Post", "Photo + caption + description"),
+        "posts": ("post", "Upload Post", "Photo simple pour le feed"),
         "stories": ("story", "Upload Story", "Photo simple pour story"),
         "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien"),
     }
