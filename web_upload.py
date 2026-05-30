@@ -4634,9 +4634,10 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
     add_media_btn = ""
     if subdir in upload_tab_map:
         utab, utitle, usub = upload_tab_map[subdir]
+        # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
         add_media_btn = (
             f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
-            f"setTimeout(function(){{var s=document.querySelector('#form-{utab} select[name=identity]');if(s){{s.value='{selected}';s.dispatchEvent(new Event('change'));}}}}, 50);\" "
+            f"upPrefillIdentity('{utab}', '{selected}');\" "
             f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
             f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
             f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
@@ -4831,6 +4832,46 @@ body.sfw-on #sfw-floating span:last-child{color:#fb923c!important}
 @media(max-width:768px){#sfw-floating{top:12px;right:12px;padding:5px 10px 5px 6px}}
 </style>
 <script>
+// === Upload : pre-fill l identite + cache la card identite + badge "Pour @xxx" ===
+function upPrefillIdentity(utab, ident){
+  setTimeout(function(){
+    const form = document.getElementById('form-' + utab);
+    if(!form) return;
+    const sel = form.querySelector('select[name=identity]');
+    if(sel){
+      sel.value = ident;
+      sel.dispatchEvent(new Event('change'));
+    }
+    // Cache la card identite (la 1ere up-card du form)
+    const firstCard = form.querySelector('.up-card');
+    if(firstCard && firstCard.querySelector('select[name=identity]')){
+      firstCard.style.display = 'none';
+    }
+    // Ajoute (ou met a jour) un badge "Pour @ident" au-dessus
+    let badge = form.querySelector('.up-identity-badge');
+    if(!badge){
+      badge = document.createElement('div');
+      badge.className = 'up-identity-badge';
+      badge.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:linear-gradient(135deg,rgba(59,130,246,.12),rgba(168,85,247,.08));border:1px solid rgba(59,130,246,.3);border-radius:12px;color:#3b82f6;font-size:13px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em';
+      badge.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Pour @<span class="up-badge-name"></span></span><button type="button" onclick="upClearPrefill(\'' + utab + '\')" style="background:transparent;border:0;color:#888;font-size:14px;cursor:pointer;padding:2px 6px;border-radius:4px;margin-left:4px" title="Changer">×</button>';
+      form.insertBefore(badge, form.firstChild);
+    }
+    badge.querySelector('.up-badge-name').textContent = ident;
+  }, 60);
+}
+function upClearPrefill(utab){
+  const form = document.getElementById('form-' + utab);
+  if(!form) return;
+  // Re-affiche la card identite
+  const cards = form.querySelectorAll('.up-card');
+  cards.forEach(c=>{
+    if(c.querySelector('select[name=identity]')) c.style.display = '';
+  });
+  // Retire le badge
+  const badge = form.querySelector('.up-identity-badge');
+  if(badge) badge.remove();
+}
+
 // === Upload drag&drop + preview ===
 function _upHumanSize(b){
   if(b<1024) return b+' B';
