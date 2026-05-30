@@ -7797,6 +7797,30 @@ def _render_mypulslive_html() -> str:
 .mpl-card-posts{border-left:3px solid rgba(34,197,94,.5)}
 .mpl-card-stories{border-left:3px solid rgba(59,130,246,.5)}
 
+/* === PILL NAV (Auto-Post / Auto-Story / Auto-Delete) === */
+.mpl-pillnav{display:flex;gap:6px;padding:6px;background:#0f0f0f;border:1px solid #232323;border-radius:14px;margin-bottom:20px}
+.mpl-pillnav button{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;background:transparent;border:0;color:#888;padding:11px 14px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+.mpl-pillnav button svg{width:18px;height:18px;flex-shrink:0}
+.mpl-pillnav button:hover{background:#1a1a1a;color:#fff}
+.mpl-pillnav button.active{background:#1f1f1f;color:#fff;box-shadow:0 0 0 1px #333 inset}
+.mpl-pillnav button.active[data-tab=post]{background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.08));color:#22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.4) inset}
+.mpl-pillnav button.active[data-tab=story]{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(59,130,246,.08));color:#3b82f6;box-shadow:0 0 0 1px rgba(59,130,246,.4) inset}
+.mpl-pillnav button.active[data-tab=delete]{background:linear-gradient(135deg,rgba(239,68,68,.15),rgba(239,68,68,.08));color:#ef4444;box-shadow:0 0 0 1px rgba(239,68,68,.4) inset}
+body.light .mpl-pillnav{background:#f3f4f6;border-color:#e5e7eb}
+body.light .mpl-pillnav button{color:#6b7280}
+body.light .mpl-pillnav button:hover{background:#fff;color:#111}
+
+/* === Delete panel === */
+.mpl-events{display:flex;flex-direction:column;gap:6px;margin-top:14px;max-height:480px;overflow-y:auto;padding-right:4px}
+.mpl-event{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#0f0f0f;border:1px solid #222;border-radius:10px;font-size:13px;color:#ccc}
+.mpl-event.selected{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.4)}
+.mpl-event-cb{flex-shrink:0;width:18px;height:18px;accent-color:#ef4444}
+.mpl-event-type{flex-shrink:0;padding:3px 8px;font-size:10px;border-radius:5px;font-weight:700;letter-spacing:.5px}
+.mpl-event-type.feed{background:rgba(34,197,94,.15);color:#22c55e}
+.mpl-event-type.story{background:rgba(59,130,246,.15);color:#3b82f6}
+.mpl-event-date{flex-shrink:0;color:#888;font-family:monospace;font-size:12px}
+.mpl-event-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 body.light .mpl-card{background:#fff;border-color:#e5e7eb}
 body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
 body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
@@ -7812,24 +7836,36 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
   <input type='hidden' name='infinite_recycle' id='mpl-recycle' value='1'>
   <input type='hidden' name='randomize_minutes' id='mpl-random-min' value='1'>
 
-  <!-- Periode & type -->
-  <div class='mpl-row open'>
+  <!-- PILL NAV : Auto-Post / Auto-Story / Auto-Delete -->
+  <div class='mpl-pillnav'>
+    <button type='button' data-tab='post' class='active' onclick='switchTab("post")'>
+      <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2'/><path d='M3 9h18'/><path d='M3 15h18'/><path d='M9 3v18'/><path d='M15 3v18'/></svg>
+      Auto-Post
+    </button>
+    <button type='button' data-tab='story' onclick='switchTab("story")'>
+      <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><circle cx='12' cy='10' r='3'/><path d='M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662'/></svg>
+      Auto-Story
+    </button>
+    <button type='button' data-tab='delete' onclick='switchTab("delete")'>
+      <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/><line x1='10' x2='10' y1='11' y2='17'/><line x1='14' x2='14' y1='11' y2='17'/></svg>
+      Auto-Delete
+    </button>
+  </div>
+
+  <input type='hidden' name='content_type' id='mpl-content-type' value='post'>
+
+  <!-- Bloc dates (commun a post / story, masque pour delete) -->
+  <div class='mpl-row open' id='mpl-dates-block'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Periode et type</div>
-        <div class='mpl-row-sub'>Quoi pousser et sur quelle plage de dates</div>
+        <div class='mpl-row-title'>Periode</div>
+        <div class='mpl-row-sub'>Plage de dates a planifier</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
-      <label>Type</label>
-      <select name='content_type' id='mpl-content-type' onchange='updateContentType()'>
-        <option value='post'>Posts uniquement</option>
-        <option value='story'>Stories uniquement</option>
-        <option value='both' selected>Les 2 en parallele</option>
-      </select>
-      <div class='mpl-2col' style='margin-top:10px'>
+      <div class='mpl-2col'>
         <div>
           <label>Date debut</label>
           <input type='date' name='date_start' value='{d_start}' required>
@@ -7842,7 +7878,7 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
   </div>
 
-  <div class='mpl-section-label'>Planification</div>
+  <div class='mpl-section-label' id='mpl-planif-label'>Planification</div>
 
   <!-- POSTS card -->
   <div class='mpl-row open mpl-card-posts' id='mpl-posts-block'>
@@ -7925,8 +7961,30 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
   </div>
 
+  <!-- Auto-Delete panel (events planifies) -->
+  <div class='mpl-row open' id='mpl-delete-block' style='display:none;border-left:3px solid rgba(239,68,68,.5)'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon' style='background:rgba(239,68,68,.12);color:#ef4444'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/><line x1='10' x2='10' y1='11' y2='17'/><line x1='14' x2='14' y1='11' y2='17'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>Events planifies <span class='mpl-mini-badge' style='background:rgba(239,68,68,.15);color:#ef4444' id='mpl-del-count'>0</span></div>
+        <div class='mpl-row-sub'>Liste des posts et stories deja planifies sur MyPuls (selectionne ceux a supprimer)</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px'>
+        <button type='button' class='mpl-fetch-btn' style='border-color:#ef4444;color:#ef4444' onclick='fetchEvents()'>↓ Charger events</button>
+        <button type='button' class='mpl-fetch-btn' onclick='toggleSelectAll()'>☑ Tout selectionner</button>
+        <button type='button' class='mpl-fetch-btn' onclick='unselectAll()'>☐ Tout deselectionner</button>
+        <small id='mpl-events-status' style='color:#888;margin-left:8px'>Choisis une periode + clique "Charger events"</small>
+      </div>
+      <div class='mpl-events' id='mpl-events-list'></div>
+      <input type='hidden' name='delete_ids' id='mpl-delete-ids' value=''>
+    </div>
+  </div>
+
   <!-- Options -->
-  <div class='mpl-section-label'>Options</div>
+  <div class='mpl-section-label' id='mpl-options-label'>Options</div>
 
   <div class='mpl-opt active' id='opt-recycle' onclick='toggleOpt("opt-recycle","mpl-recycle")'>
     <div class='mpl-opt-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a9 9 0 1 1-6.219-8.56'/></svg></div>
@@ -7958,7 +8016,7 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
   <div class='mpl-section-label'>Contenu</div>
 
   <!-- Bibliotheque Medias -->
-  <div class='mpl-row'>
+  <div class='mpl-row' id='mpl-media-block'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
       <div class='mpl-row-text'>
@@ -8130,31 +8188,139 @@ function syncSlots(){{
   if(st) st.textContent = storySlots.length + ' / jour';
 }}
 
-function updateContentType(){{
-  const t = document.getElementById('mpl-content-type').value;
-  const showPosts = (t==='post'||t==='both');
-  const showStories = (t==='story'||t==='both');
-  // Cards Posts / Stories
-  document.getElementById('mpl-posts-block').style.display = showPosts?'':'none';
-  document.getElementById('mpl-stories-block').style.display = showStories?'':'none';
-  // Auto-delete posts : visible UNIQUEMENT si on a des posts
+function switchTab(tab){{
+  // Mise a jour du bouton actif
+  document.querySelectorAll('.mpl-pillnav button').forEach(b=>{{
+    b.classList.toggle('active', b.dataset.tab===tab);
+  }});
+  // Set hidden content_type
+  document.getElementById('mpl-content-type').value = tab;
+  // Show/hide blocs selon le tab
+  const showPosts = (tab==='post');
+  const showStories = (tab==='story');
+  const showDelete = (tab==='delete');
+  // Posts card
+  const pb = document.getElementById('mpl-posts-block');
+  if(pb) pb.style.display = showPosts?'':'none';
+  // Stories card
+  const sb = document.getElementById('mpl-stories-block');
+  if(sb) sb.style.display = showStories?'':'none';
+  // Auto-delete posts settings (lie aux posts)
   const ad = document.getElementById('mpl-autodelete-block');
   if(ad) ad.style.display = showPosts?'':'none';
-  // Captions : visibles UNIQUEMENT si on a des posts (les stories n'ont pas de captions)
+  // Captions (lie aux posts)
   const cap = document.getElementById('mpl-captions-block');
   if(cap) cap.style.display = showPosts?'':'none';
-  // Stat POSTS/JOUR : on adapte le label selon le mode
+  // Delete panel
+  const del = document.getElementById('mpl-delete-block');
+  if(del) del.style.display = showDelete?'':'none';
+  // Options + section labels : cachees en mode delete
+  const opts = document.querySelectorAll('.mpl-opt');
+  opts.forEach(o=>{{ o.style.display = showDelete?'none':''; }});
+  const oLbl = document.getElementById('mpl-options-label');
+  if(oLbl) oLbl.style.display = showDelete?'none':'';
+  const pLbl = document.getElementById('mpl-planif-label');
+  if(pLbl) pLbl.style.display = showDelete?'none':'';
+  // Bibliotheque medias : cachee en delete
+  const med = document.getElementById('mpl-media-block');
+  if(med) med.style.display = showDelete?'none':'';
+  // Stats : adapter le label /jour
   const lbl = document.querySelector('.mpl-stat-lbl-perday');
-  if(lbl) lbl.textContent = (t==='story')?'STORIES / JOUR':'POSTS / JOUR';
-  // Stat valeur : posts si posts visible, sinon stories
+  if(lbl){{
+    if(showStories) lbl.textContent = 'STORIES / JOUR';
+    else if(showDelete) lbl.textContent = 'A SUPPRIMER';
+    else lbl.textContent = 'POSTS / JOUR';
+  }}
   const v = document.getElementById('mpl-stat-perday');
-  if(v) v.textContent = showPosts?postSlots.length:storySlots.length;
+  if(v){{
+    if(showStories) v.textContent = storySlots.length;
+    else if(showDelete) v.textContent = parseSelectedIds().length;
+    else v.textContent = postSlots.length;
+  }}
+  // Bouton push : adapter le texte
+  const btn = document.querySelector('.mpl-push-btn');
+  if(btn){{
+    if(showDelete) btn.innerHTML = '🗑️ Supprimer la selection';
+    else if(showStories) btn.innerHTML = '⚡ Pousser les stories';
+    else btn.innerHTML = '⚡ Pousser les posts';
+  }}
 }}
 function updatePostAction(){{
-  // Cache l'input "Apres combien de jours" si "Non, garder"
   const a = document.getElementById('mpl-post-action');
   const w = document.getElementById('mpl-post-delay-wrap');
   if(a && w) w.style.display = (a.value==='delete')?'':'none';
+}}
+
+// === Auto-Delete : fetch events + select + delete ===
+async function fetchEvents(){{
+  const cid = document.getElementById('mpl-creator-id').value;
+  if(!cid){{ alert('Pas de createur'); return; }}
+  const ds = document.querySelector('input[name=date_start]').value;
+  const de = document.querySelector('input[name=date_end]').value;
+  const status = document.getElementById('mpl-events-status');
+  status.textContent = 'Chargement...';
+  status.style.color = '#3b82f6';
+  try {{
+    const r = await fetch('/mypulslive/list_events?creator='+cid+'&start='+ds+'&end='+de);
+    const j = await r.json();
+    if(!j.ok){{
+      status.textContent = 'Erreur: ' + (j.error || '?');
+      status.style.color = '#f99';
+      return;
+    }}
+    const list = document.getElementById('mpl-events-list');
+    if(!j.events || !j.events.length){{
+      list.innerHTML = '<div style=\"color:#666;padding:20px;text-align:center;font-size:13px\">Aucun event planifie sur cette periode</div>';
+      status.textContent = '0 event';
+      status.style.color = '#888';
+      document.getElementById('mpl-del-count').textContent = '0';
+      return;
+    }}
+    list.innerHTML = j.events.map(e=>{{
+      const ep = e.extendedProps || {{}};
+      const typ = ep.type || 'feed';
+      const d = (e.start || '').substring(0, 16).replace('T', ' ');
+      const title = (e.title || '').substring(0, 70);
+      const vis = ep.visibility ? ' • '+ep.visibility : '';
+      return '<label class=\"mpl-event\" data-id=\"'+e.id+'\"><input type=\"checkbox\" class=\"mpl-event-cb\" onchange=\"updateDeleteSel()\"><span class=\"mpl-event-type '+typ+'\">'+typ.toUpperCase()+'</span><span class=\"mpl-event-date\">'+d+'</span><span class=\"mpl-event-title\">'+title+vis+'</span></label>';
+    }}).join('');
+    status.textContent = j.events.length + ' events trouves';
+    status.style.color = '#22c55e';
+    document.getElementById('mpl-del-count').textContent = j.events.length;
+    updateDeleteSel();
+  }} catch(e){{
+    status.textContent = 'Erreur reseau: '+e;
+    status.style.color = '#f99';
+  }}
+}}
+function parseSelectedIds(){{
+  const ids = [];
+  document.querySelectorAll('.mpl-event').forEach(el=>{{
+    const cb = el.querySelector('.mpl-event-cb');
+    if(cb && cb.checked){{
+      ids.push(el.dataset.id);
+      el.classList.add('selected');
+    }} else {{
+      el.classList.remove('selected');
+    }}
+  }});
+  return ids;
+}}
+function updateDeleteSel(){{
+  const ids = parseSelectedIds();
+  document.getElementById('mpl-delete-ids').value = ids.join(',');
+  const v = document.getElementById('mpl-stat-perday');
+  if(v && document.getElementById('mpl-content-type').value==='delete'){{
+    v.textContent = ids.length;
+  }}
+}}
+function toggleSelectAll(){{
+  document.querySelectorAll('.mpl-event-cb').forEach(cb=>cb.checked=true);
+  updateDeleteSel();
+}}
+function unselectAll(){{
+  document.querySelectorAll('.mpl-event-cb').forEach(cb=>cb.checked=false);
+  updateDeleteSel();
 }}
 
 function toggleOpt(elId, hiddenId){{
@@ -8207,10 +8373,22 @@ async function fetchMyPulsMedia(){{
 function submitMyPulsForm(ev){{
   ev.preventDefault();
   syncSlots();
+  const ct = document.getElementById('mpl-content-type').value;
   const ds = document.querySelector('input[name=date_start]').value;
   const de = document.querySelector('input[name=date_end]').value;
-  const ct = document.getElementById('mpl-content-type').value;
-  if(confirm('Pousser le batch dans MyPuls du '+ds+' au '+de+' ('+ct+') ?\\n\\nCette action est IRREVERSIBLE.')){{
+  if(ct==='delete'){{
+    const ids = parseSelectedIds();
+    if(!ids.length){{ alert('Aucun event selectionne.'); return false; }}
+    if(confirm('Supprimer '+ids.length+' event(s) planifie(s) sur MyPuls ? Action IRREVERSIBLE.')){{
+      // Set form action to delete endpoint
+      ev.target.action = '/mypulslive/delete_events';
+      ev.target.submit();
+    }}
+    return false;
+  }}
+  const label = (ct==='story')?'stories':'posts';
+  if(confirm('Pousser les '+label+' dans MyPuls du '+ds+' au '+de+' ?\\n\\nCette action est IRREVERSIBLE.')){{
+    ev.target.action = '/mypulslive/push';
     ev.target.submit();
   }}
   return false;
@@ -8221,7 +8399,7 @@ document.getElementById('mpl-posts-count').value = postSlots.length;
 document.getElementById('mpl-stories-count').value = storySlots.length;
 renderPostSlots();
 renderStorySlots();
-updateContentType();
+switchTab('post');
 updatePostAction();
 updateMediaCount();
 updateCapCount();
@@ -10606,6 +10784,69 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/mypulslive/list_events", methods=["GET"])
+    def mypulslive_list_events():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls_scheduler
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        try:
+            cid = int(request.args.get("creator") or 0)
+        except Exception:
+            return jsonify({"ok": False, "error": "creator invalide"})
+        start = (request.args.get("start") or "").strip()
+        end = (request.args.get("end") or "").strip()
+        if not cid or not start or not end:
+            return jsonify({"ok": False, "error": "creator/start/end requis"})
+        # Format ISO sans tz
+        start_iso = start + "T00:00:00"
+        end_iso = end + "T23:59:59"
+        res = mypuls_scheduler.list_calendar_events([cid], start_iso, end_iso)
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error", "fetch echoue")})
+        events = res.get("events", [])
+        # Garde uniquement les events futurs (status=schedule)
+        filtered = []
+        for e in events:
+            ep = e.get("extendedProps", {}) or {}
+            if ep.get("status") == "schedule":
+                filtered.append(e)
+        return jsonify({"ok": True, "events": filtered})
+
+    @app.route("/mypulslive/delete_events", methods=["POST"])
+    def mypulslive_delete_events():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls_scheduler
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="mypulslive")
+        ids_raw = (request.form.get("delete_ids") or "").strip()
+        if not ids_raw:
+            return _error("❌ Aucun event selectionne", tab="mypulslive")
+        try:
+            ids = [int(x.strip()) for x in ids_raw.split(",") if x.strip()]
+        except Exception:
+            return _error("❌ IDs invalides", tab="mypulslive")
+        deleted, failed = 0, 0
+        first_errors = []
+        for i in ids:
+            res = mypuls_scheduler.delete_story(i)
+            if res.get("ok"):
+                deleted += 1
+            else:
+                failed += 1
+                if len(first_errors) < 3:
+                    first_errors.append(f"{i}: {res.get('error','?')[:60]}")
+        msg = f"✅ Suppression : {deleted} OK / {failed} fail"
+        if first_errors:
+            msg += " | " + " ; ".join(first_errors)
+        return _success(msg, tab="mypulslive")
 
     @app.route("/mypulslive/fetch_media", methods=["GET"])
     def mypulslive_fetch_media():
