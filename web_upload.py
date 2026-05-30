@@ -1648,7 +1648,7 @@ window.upClearPrefill = function(utab){
 {msg_html}
 
 <div class="form-section" id="form-reel" style="display:none">
-<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*">
+<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*" data-multi="1">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -1656,14 +1656,13 @@ window.upClearPrefill = function(utab){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Vidéo CLEAN <span class="up-req">(obligatoire)</span></h3></div>
 <label class="up-drop">
-<input type="file" name="video" accept="video/*" required class="up-file-main">
+<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop video file here or click to select</div>
+<div class="up-drop-hint">Drag and drop video file(s) — tu peux selectionner plusieurs vidéos d un coup</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
 </div>
 </div>
 <div class="up-card">
@@ -1693,9 +1692,9 @@ window.upClearPrefill = function(utab){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
 <label class="up-drop">
-<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop media file(s) here or select them from your computer</div>
+<div class="up-drop-hint">Drag and drop media file(s) — tu peux selectionner plusieurs photos d un coup</div>
 <div class="up-drop-limits"><span>Image size limit: 100MB</span><span>·</span><span>Dimensions: 16px to 10000px</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
@@ -1716,9 +1715,9 @@ window.upClearPrefill = function(utab){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
 <label class="up-drop">
-<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop media file(s) here or select them from your computer</div>
+<div class="up-drop-hint">Drag and drop media file(s) — tu peux selectionner plusieurs photos d un coup</div>
 <div class="up-drop-limits"><span>Image size limit: 100MB</span><span>·</span><span>Dimensions: 16px to 10000px</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
@@ -1739,9 +1738,9 @@ window.upClearPrefill = function(utab){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
 <label class="up-drop">
-<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop 1080x1920 image here</div>
+<div class="up-drop-hint">Drag and drop 1080x1920 image(s) — multi OK</div>
 <div class="up-drop-limits"><span>Story CTA · captions partagées via /addstoryctacaptions</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
@@ -1759,9 +1758,9 @@ window.upClearPrefill = function(utab){
 <div class="up-step"><span class="up-dot"></span><h3>Photo de profil</h3></div>
 <small style="color:#888;margin-bottom:10px;display:block">Pool partagé entre toutes les identités</small>
 <label class="up-drop">
-<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop your profile picture here</div>
+<div class="up-drop-hint">Drag and drop your profile picture(s) — multi OK</div>
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
@@ -4916,47 +4915,60 @@ body.sfw-on #sfw-floating span:last-child{color:#fb923c!important}
 @media(max-width:768px){#sfw-floating{top:12px;right:12px;padding:5px 10px 5px 6px}}
 </style>
 <script>
-// === Upload drag&drop + preview ===
+// === Upload drag&drop + preview MULTI-FILE ===
 function _upHumanSize(b){
   if(b<1024) return b+' B';
   if(b<1024*1024) return (b/1024).toFixed(1)+' KB';
   if(b<1024*1024*1024) return (b/(1024*1024)).toFixed(1)+' MB';
   return (b/(1024*1024*1024)).toFixed(2)+' GB';
 }
+function _upRowThumb(file){
+  if(file.type && file.type.startsWith('image/')){
+    const url = URL.createObjectURL(file);
+    return '<img class=up-edit-thumb src="'+url+'">';
+  } else if(file.type && file.type.startsWith('video/')){
+    return '<span class=up-edit-thumb style="display:inline-flex;align-items:center;justify-content:center;color:#aaa;font-size:18px">🎬</span>';
+  }
+  return '<span class=up-edit-thumb></span>';
+}
 function _upRefreshTable(input){
   const dropZone = input.closest('.up-drop');
   const card = dropZone.closest('.up-card');
   const table = card.querySelector('.up-edit-table');
   if(!table) return;
-  const file = input.files && input.files[0];
-  if(!file){
+  const files = input.files && input.files.length ? Array.from(input.files) : [];
+  // Vide la table sauf le head
+  Array.from(table.querySelectorAll('.up-edit-row')).forEach(r=>r.remove());
+  if(!files.length){
     table.style.display = 'none';
     dropZone.classList.remove('has-file');
-    dropZone.querySelector('.up-drop-inner, .up-drop-inner-small').style.display = '';
-    dropZone.querySelector('.up-drop-hint')?.removeAttribute('hidden');
+    const inner = dropZone.querySelector('.up-drop-inner, .up-drop-inner-small');
+    if(inner) inner.style.display = '';
+    const hint = dropZone.querySelector('.up-drop-hint');
+    if(hint && hint.dataset.origText){ hint.textContent = hint.dataset.origText; }
+    const limits = dropZone.querySelector('.up-drop-limits');
+    if(limits) limits.style.display = '';
     return;
   }
-  // Cache l'inner zone, montre la table
   dropZone.classList.add('has-file');
   const inner = dropZone.querySelector('.up-drop-inner, .up-drop-inner-small');
   if(inner) inner.style.display = 'none';
   const hint = dropZone.querySelector('.up-drop-hint');
-  if(hint) hint.textContent = '✓ Fichier prêt — clique pour changer';
+  if(hint){
+    if(!hint.dataset.origText) hint.dataset.origText = hint.textContent;
+    hint.textContent = '✓ ' + files.length + ' fichier' + (files.length>1?'s':'') + ' prêt' + (files.length>1?'s':'') + ' — clique pour changer';
+  }
   const limits = dropZone.querySelector('.up-drop-limits');
   if(limits) limits.style.display = 'none';
   table.style.display = '';
-  const row = table.querySelector('.up-edit-row[data-file=main] .up-edit-name');
-  if(row){
-    // Mini thumbnail si image
-    let thumbHtml = '';
-    if(file.type && file.type.startsWith('image/')){
-      const url = URL.createObjectURL(file);
-      thumbHtml = '<img class=up-edit-thumb src="'+url+'">';
-    } else if(file.type && file.type.startsWith('video/')){
-      thumbHtml = '<span class=up-edit-thumb style="display:inline-flex;align-items:center;justify-content:center;color:#aaa;font-size:18px">🎬</span>';
-    }
-    row.innerHTML = thumbHtml + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span>';
-  }
+  // 1 row par file
+  files.forEach((file, idx)=>{
+    const row = document.createElement('div');
+    row.className = 'up-edit-row';
+    row.dataset.file = 'main-' + idx;
+    row.innerHTML = '<div class=up-edit-name>' + _upRowThumb(file) + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span></div><div><span class="up-progress" data-idx="' + idx + '" style="color:#666;font-size:12px;margin-right:8px"></span></div>';
+    table.appendChild(row);
+  });
 }
 function upClearMain(btn){
   const card = btn.closest('.up-card');
@@ -4970,6 +4982,73 @@ document.addEventListener('change', function(e){
     _upRefreshTable(input);
   }
 });
+
+// === BULK UPLOAD : intercepte submit, envoie chaque file separement ===
+document.addEventListener('submit', function(e){
+  const form = e.target;
+  if(!form.classList || !form.classList.contains('up-form')) return;
+  const mainInput = form.querySelector('.up-file-main');
+  if(!mainInput || !mainInput.files || mainInput.files.length <= 1) return; // <=1 file : laisse le submit natif
+  e.preventDefault();
+  const files = Array.from(mainInput.files);
+  const exampleInput = form.querySelector('.up-file-example');
+  const exampleFile = exampleInput && exampleInput.files.length ? exampleInput.files[0] : null;
+  const submitBtn = form.querySelector('.up-submit');
+  const baseData = new FormData(form);
+  // Conserve les champs non-fichier
+  const nonFileFields = {};
+  baseData.forEach((v, k)=>{
+    if(!(v instanceof File)) nonFileFields[k] = v;
+  });
+  let done = 0, errs = 0;
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = '⬆ Upload 0 / ' + files.length + '...'; }
+  const fileFieldName = mainInput.getAttribute('name');
+  async function pushOne(file, idx){
+    const fd = new FormData();
+    Object.entries(nonFileFields).forEach(([k,v])=>fd.append(k, v));
+    fd.append(fileFieldName, file, file.name);
+    // Pour reel : ajoute la video example sur le PREMIER push uniquement
+    if(idx === 0 && exampleFile){
+      fd.append('example', exampleFile, exampleFile.name);
+    }
+    const pgEl = form.querySelector('.up-progress[data-idx="' + idx + '"]');
+    if(pgEl){ pgEl.textContent = '⏳'; pgEl.style.color = '#3b82f6'; }
+    try {
+      const r = await fetch(form.action, {method:'POST', body:fd, credentials:'same-origin'});
+      if(r.ok){
+        done++;
+        if(pgEl){ pgEl.textContent = '✓'; pgEl.style.color = '#22c55e'; }
+      } else {
+        errs++;
+        if(pgEl){ pgEl.textContent = '✗ ' + r.status; pgEl.style.color = '#ef4444'; }
+      }
+    } catch(e){
+      errs++;
+      if(pgEl){ pgEl.textContent = '✗'; pgEl.style.color = '#ef4444'; }
+    }
+    if(submitBtn) submitBtn.textContent = '⬆ Upload ' + (done+errs) + ' / ' + files.length + '...';
+  }
+  // Push 3 en parallele max
+  (async function(){
+    const CONCURRENCY = 3;
+    for(let i = 0; i < files.length; i += CONCURRENCY){
+      await Promise.all(files.slice(i, i + CONCURRENCY).map((f, j)=>pushOne(f, i+j)));
+    }
+    if(submitBtn){
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✅ ' + done + ' upload(s) OK' + (errs?' · '+errs+' erreur(s)':'');
+      submitBtn.style.background = errs ? 'linear-gradient(135deg,#22c55e,#ef4444)' : 'linear-gradient(135deg,#22c55e,#16a34a)';
+    }
+    setTimeout(function(){
+      if(submitBtn){
+        submitBtn.textContent = '⬆ Uploader';
+        submitBtn.style.background = '';
+      }
+      mainInput.value = '';
+      _upRefreshTable(mainInput);
+    }, 2500);
+  })();
+}, true);
 document.addEventListener('dragover', function(e){
   const drop = e.target.closest('.up-drop');
   if(drop){ e.preventDefault(); drop.classList.add('dragover'); }
