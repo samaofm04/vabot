@@ -5714,10 +5714,13 @@ def _render_insta_trends_grid_html() -> str:
             trending_x = ""
         trending_html = ""
         if trending_x:
+            # Badge plus clean : pill avec icone trending + valeur
             trending_html = (
-                '<div style="display:flex;align-items:center;gap:4px;color:#5cf266;font-weight:700;font-size:13px;margin-bottom:4px">'
-                '<svg viewBox="0 0 24 24" width="12" height="12" fill="#5cf266">'
-                '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/></svg>'
+                '<div style="display:inline-flex;align-items:center;gap:5px;color:#22c55e;font-weight:800;font-size:12px;margin-bottom:6px;'
+                'background:rgba(34,197,94,.15);padding:3px 9px;border-radius:8px;letter-spacing:.2px;'
+                'border:1px solid rgba(34,197,94,.35);text-shadow:0 0 4px rgba(0,0,0,.6)">'
+                '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+                '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
                 f'{trending_x}</div>'
             )
         # Avatar
@@ -5728,13 +5731,13 @@ def _render_insta_trends_grid_html() -> str:
         video_html = ""
         if is_video and video_url:
             video_html = (
-                f"<video class='reel-video' src='{video_url}' muted loop preload='none' "
+                f"<video class='reel-video' src='{video_url}' muted loop playsinline preload='metadata' "
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
         cards.append(f"""
 <div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
-       onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.play();v.style.opacity=1}}'
+       onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.currentTime=0;v.muted=true;v.style.opacity=1;v.play().catch(function(){{}});}}'
        onmouseleave='var v=this.querySelector(".reel-video");if(v){{v.pause();v.style.opacity=0}}'
        onclick='window.open("{url}","_blank")'>
     <img src="{thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">
@@ -5766,11 +5769,13 @@ def _render_insta_trends_grid_html() -> str:
       <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
     </div>
     <!-- Trending indicator + username at bottom -->
-    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:8px 10px;z-index:2">
+    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.9),transparent);padding:8px 10px;z-index:2">
       {trending_html}
-      <button onclick='event.stopPropagation();openReelDetails(this.parentNode.parentNode)' style="display:flex;align-items:center;gap:6px;color:#fff;background:transparent;border:0;cursor:pointer;font-size:12px;font-weight:600;width:100%;padding:0;text-align:left;font-family:inherit">
-        {avatar}<span>@{owner}</span>
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
+      <button onclick='event.stopPropagation();openReelDetails(this.closest(".reel-card"))' title="Voir caption, son, durée" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
+        {avatar}<span style="flex:1">@{owner}</span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:#3b82f6;border-radius:50%">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </span>
       </button>
     </div>
   </div>
