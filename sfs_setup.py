@@ -148,28 +148,65 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
 
 
 def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
-    """Tente de fetch les counts d'abonnes depuis MyPuls pour chaque createur.
+    """Fetch les counts d'abonnes / anciens / interesses depuis MyPuls.
 
-    Retourne {identity: {"abonnes": "N", "anciens": "M", "interesses": "K"}}
-    ou un dict vide si MyPuls n'est pas configure ou si pas de mapping.
+    Pour chaque createur, switche le contexte puis appelle les endpoints
+    DataTables qui renvoient {recordsTotal: N}.
+
+    Endpoints utilises (reverse-engineered) :
+    - GET /switch-creator/<id>?from=app_fans  (bascule le contexte)
+    - GET /fans/data?old=0  -> abonnes actuels
+    - GET /fans/data?old=1  -> anciens abonnes
+    - GET /fans/new/data    -> interesses
+
+    Retourne {identity_lowercase: {"abonnes": "N", "anciens": "M", "interesses": "K"}}
     """
     out: Dict[str, Dict[str, str]] = {}
     try:
         import mypuls
-        if not mypuls.is_configured():
-            return out
-        # mypuls.list_creators() retourne {nom_creator: id}
-        res = mypuls.list_creators()
-        if not res.get("ok"):
-            return out
-        # Pour chaque createur, on essaie de parser sa page profil
-        # NB: MyPuls n'expose pas directement les counts d'abonnes via API
-        # Cette fonction est un placeholder pour une future implementation
-        # via parsing de la page /creator/<id>
-        # Pour l'instant on retourne juste les noms detectes
-        creators_map = res.get("creators", {})
-        for name in creators_map:
-            out[name.lower().strip()] = {}
     except Exception:
-        pass
+        return out
+    if not mypuls.is_configured():
+        return out
+    res = mypuls.list_creators()
+    if not res.get("ok"):
+        return out
+    creators_map = res.get("creators", {})
+    s = mypuls._make_session()
+    if s is None:
+        return out
+    headers = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+
+    def _count(path: str) -> str:
+        try:
+            r = s.get(f"{mypuls.BASE_URL}{path}", timeout=20, headers=headers)
+            if r.status_code != 200:
+                return ""
+            j = r.json()
+            tot = j.get("recordsTotal")
+            if isinstance(tot, int):
+                return str(tot)
+        except Exception:
+            return ""
+        return ""
+
+    for name, cid in creators_map.items():
+        try:
+            # Switch context vers ce createur
+            s.get(
+                f"{mypuls.BASE_URL}/switch-creator/{int(cid)}?from=app_fans",
+                timeout=15,
+                allow_redirects=True,
+            )
+            # Get les 3 counts
+            abonnes = _count("/fans/data?old=0")
+            anciens = _count("/fans/data?old=1")
+            interesses = _count("/fans/new/data")
+            out[name.lower().strip()] = {
+                "abonnes": abonnes,
+                "anciens": anciens,
+                "interesses": interesses,
+            }
+        except Exception:
+            continue
     return out
