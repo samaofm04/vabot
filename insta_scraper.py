@@ -297,6 +297,17 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             if not items:
                 break
             oldest_taken_at_this_page = None
+            # DEBUG : dump le premier item pour debugging
+            if pages_fetched == 1 and items:
+                first = items[0]
+                log.info(f"[DEBUG_CAPTION] First reel structure for @{username}: keys={list(first.keys()) if isinstance(first, dict) else type(first).__name__}")
+                if isinstance(first, dict):
+                    media_dbg = first.get("media") or first.get("node", {}).get("media") if isinstance(first.get("node"), dict) else first
+                    if isinstance(media_dbg, dict):
+                        log.info(f"[DEBUG_CAPTION] media keys: {list(media_dbg.keys())[:30]}")
+                        # Specifiquement, regarde la structure caption
+                        cap_check = media_dbg.get("caption")
+                        log.info(f"[DEBUG_CAPTION] caption field: type={type(cap_check).__name__} value={repr(cap_check)[:200]}")
             for it in items:
                 try:
                     node = it.get("node") if isinstance(it, dict) else None
@@ -309,6 +320,9 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     shortcode = media.get("code") or media.get("shortcode") or ""
                     is_video = media.get("media_type") == 2 or media.get("is_video", True)
                     caption = _extract_caption_robust(media)
+                    # DEBUG : log les premieres captions trouvees ou pas
+                    if not caption and shortcode:
+                        log.info(f"[DEBUG_CAPTION] @{username} {shortcode}: NO caption found. Top-level keys: {list(media.keys())[:20]}")
                     thumb = ""
                     iv2 = media.get("image_versions2", {})
                     candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
