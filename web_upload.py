@@ -1353,10 +1353,11 @@ window.upClearPrefill = function(utab){
       document.head.appendChild(s);
     }
     // SFW pre-apply : floute les images avant qu'elles s'affichent si actif
+    // (exclus la lightbox, sera unblurred au clic)
     if(localStorage.getItem('vault_sfw') === '1'){
       var ss = document.createElement('style');
       ss.id = '__sfw-pre';
-      ss.textContent = '.vault-gallery img,.vault-thumb img,.file-thumb img,.preview-card img{filter:blur(22px) saturate(.5)!important}';
+      ss.textContent = '.vault-gallery img,.vault-thumb img,.file-thumb img,.preview-card img{filter:blur(22px) saturate(.5)}#lightbox img,#lightbox video,.lightbox-content img,.lightbox-content video{filter:none!important}';
       document.head.appendChild(ss);
     }
   }catch(e){}
@@ -4888,8 +4889,10 @@ body.light .up-edit-name{color:#111}
 .up-submit:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.4)}
 
 /* === SFW blur mode === */
-body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5)!important;transition:filter .25s}
-body.sfw-on .vault-gallery img:hover,body.sfw-on .vault-thumb img:hover{filter:blur(0)!important}
+/* Tout flou par defaut quand SFW est ON */
+body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5);transition:filter .25s}
+/* Pas d unblur au hover. Seul la lightbox (clic) affiche net. */
+body.sfw-on #lightbox img,body.sfw-on #lightbox video,body.sfw-on .lightbox-content img,body.sfw-on .lightbox-content video{filter:none!important}
 
 /* SFW floating toggle (style iOS, dark theme adapte) */
 #sfw-floating{}
