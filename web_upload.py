@@ -1269,33 +1269,59 @@ window.upPrefillIdentity = function(utab, ident){
     if(!form) return;
     var sel = form.querySelector('select[name=identity]');
     if(sel){ sel.value = ident; }
-    // Cache la 1ere up-card si elle contient le select identity
+    // Cache la card identite (.up-card) OU le label/select classique
     var cards = form.querySelectorAll('.up-card');
     cards.forEach(function(c){
       if(c.querySelector('select[name=identity]')){ c.style.display = 'none'; }
     });
-    // Cache aussi les anciens forms (sans up-card) : si le label "Identité" est present, le cache
     if(cards.length === 0){
-      var labels = form.querySelectorAll('label');
-      labels.forEach(function(l){
+      form.querySelectorAll('label').forEach(function(l){
         if(l.textContent.trim() === 'Identité' && l.nextElementSibling){
           l.style.display = 'none';
           l.nextElementSibling.style.display = 'none';
         }
       });
     }
-    // Badge "Pour @ident"
+    // Badge "Pour @ident" - construit avec DOM API (pas d innerHTML pour eviter escape hell)
     var badge = form.querySelector('.up-identity-badge');
     if(!badge){
       badge = document.createElement('div');
       badge.className = 'up-identity-badge';
       badge.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 16px;background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(168,85,247,.1));border:1px solid rgba(59,130,246,.35);border-radius:12px;color:#3b82f6;font-size:13px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em;width:fit-content';
-      var userIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/></svg>';
-      badge.innerHTML = userIcon + '<span>Pour @<span class="up-badge-name"></span></span><button type="button" onclick="upClearPrefill(\'' + utab + '\')" style="background:transparent;border:0;color:#888;font-size:14px;cursor:pointer;padding:2px 8px;margin-left:4px;border-radius:4px" title="Changer d identite">×</button>';
+      // Icone user
+      var icon = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      icon.setAttribute('viewBox','0 0 24 24');
+      icon.setAttribute('width','14');
+      icon.setAttribute('height','14');
+      icon.setAttribute('fill','none');
+      icon.setAttribute('stroke','currentColor');
+      icon.setAttribute('stroke-width','2.5');
+      var p1 = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      p1.setAttribute('cx','12'); p1.setAttribute('cy','7'); p1.setAttribute('r','4');
+      var p2 = document.createElementNS('http://www.w3.org/2000/svg','path');
+      p2.setAttribute('d','M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2');
+      icon.appendChild(p1); icon.appendChild(p2);
+      badge.appendChild(icon);
+      // Texte
+      var txt = document.createElement('span');
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'up-badge-name';
+      nameSpan.textContent = ident;
+      txt.append('Pour @', nameSpan);
+      badge.appendChild(txt);
+      // Bouton X
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.title = 'Changer d identite';
+      x.style.cssText = 'background:transparent;border:0;color:#888;font-size:14px;cursor:pointer;padding:2px 8px;margin-left:4px;border-radius:4px';
+      x.onclick = function(){ window.upClearPrefill(utab); };
+      badge.appendChild(x);
       form.insertBefore(badge, form.firstChild);
+    } else {
+      var nm = badge.querySelector('.up-badge-name');
+      if(nm) nm.textContent = ident;
     }
-    var nameSpan = badge.querySelector('.up-badge-name');
-    if(nameSpan) nameSpan.textContent = ident;
   }, 50);
 };
 window.upClearPrefill = function(utab){
