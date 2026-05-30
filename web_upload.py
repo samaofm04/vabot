@@ -4412,7 +4412,8 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             )
         active_class = "vault-item-active" if ident == selected else ""
         vault_items.append(
-            f"<a href='?tab={tab_name}&{subdir_key}={ident}' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"<a href='?tab={tab_name}&{subdir_key}={ident}' onclick='return vaultSwitchTo(this.href)' "
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
@@ -4514,7 +4515,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
         "</button>"
         "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
-        f"<a href='{_sort_url('all')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
+        f"<a href='{_sort_url('all')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
         "<span class='vault-radio'></span>Tout</a>"
         f"<form method='GET' class='vault-sort-form'>"
         f"<input type='hidden' name='tab' value='{tab_name}'>"
@@ -4525,12 +4526,12 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "style='margin:6px 36px 8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:12px;width:calc(100% - 72px)'>"
         "</form>"
         "<div class='vault-sort-sep'></div>"
-        f"<a href='{_sort_url('recent')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'recent' else '')}'>"
+        f"<a href='{_sort_url('recent')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'recent' else '')}'>"
         "<span class='vault-radio'></span>Récemment</a>"
         "<div class='vault-sort-sep'></div>"
-        f"<a href='{_sort_url('asc')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'asc' else '')}'>"
+        f"<a href='{_sort_url('asc')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'asc' else '')}'>"
         "<span class='vault-radio'></span>Croissant</a>"
-        f"<a href='{_sort_url('desc')}' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
+        f"<a href='{_sort_url('desc')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
         "<span class='vault-radio'></span>Décroissant</a>"
         "</div>"
         "</div>"
@@ -4553,9 +4554,9 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
 
         type_filter_html = (
             "<div class='media-type-pills'>"
-            + f"<a href='{_type_url('all')}' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
-            + f"<a href='{_type_url('photo')}' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
-            + f"<a href='{_type_url('video')}' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
+            + f"<a href='{_type_url('all')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
+            + f"<a href='{_type_url('photo')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
+            + f"<a href='{_type_url('video')}' onclick='return vaultSwitchTo(this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
             + "</div>"
         )
 
@@ -4751,6 +4752,44 @@ document.addEventListener('click', function(e){
     if(!w.contains(e.target)) w.classList.remove('open');
   });
 });
+
+// === AJAX switch d'identite dans la Vault (no page reload) ===
+window.vaultSwitchTo = async function(url){
+  // Trouver la section visible (form-cloud<...>)
+  const visibleSec = document.querySelector('.form-section[style*="block"], .form-section:not([style*="none"])');
+  // On filtre : seules les form-cloud* sont concernees
+  let sec = visibleSec;
+  if(!sec || !sec.id || !sec.id.startsWith('form-cloud')){
+    // Fallback : trouve la premiere form-cloud* affichee
+    sec = document.querySelector('[id^="form-cloud"]');
+    if(!sec) return true; // laisse la navigation normale
+  }
+  sec.style.opacity = '0.5';
+  sec.style.pointerEvents = 'none';
+  try {
+    const r = await fetch(url);
+    const html = await r.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const newSec = doc.getElementById(sec.id);
+    if(newSec){
+      sec.innerHTML = newSec.innerHTML;
+      history.pushState({}, '', url);
+      // Re-execute les <script> inline (sinon les fonctions vaultSwitchTo, IO etc. disparaissent)
+      sec.querySelectorAll('script').forEach(oldS=>{
+        const newS = document.createElement('script');
+        newS.textContent = oldS.textContent;
+        oldS.parentNode.replaceChild(newS, oldS);
+      });
+    }
+  } catch(e){
+    console.error('vaultSwitchTo:', e);
+    window.location.href = url;
+    return false;
+  }
+  sec.style.opacity = '';
+  sec.style.pointerEvents = '';
+  return false;
+};
 
 // === Lazy loading des thumbnails differees (IntersectionObserver) ===
 (function(){
