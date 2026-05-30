@@ -7723,6 +7723,53 @@ def _render_mypulslive_html() -> str:
         first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
         first_creator_id = creators_map[first_creator_name]
 
+    # Campagnes actives
+    try:
+        import mypuls_campaigns
+        active_campaigns = mypuls_campaigns.list_campaigns(active_only=False)
+    except Exception:
+        active_campaigns = []
+
+    def _campaign_row(c):
+        cid = c.get("id", "")
+        cname = c.get("creator_name", "?")
+        ctype = c.get("type", "?")
+        active = c.get("active", False)
+        sched_until = c.get("scheduled_until", "?")
+        planned = c.get("total_planned", 0)
+        slots_count = len(c.get("slots", []))
+        active_color = "#22c55e" if active else "#666"
+        active_label = "ACTIF" if active else "PAUSE"
+        type_color = "#22c55e" if ctype == "post" else "#3b82f6"
+        # Action buttons
+        toggle_action = "pause" if active else "resume"
+        toggle_label = "⏸" if active else "▶"
+        return (
+            f"<div style='display:flex;align-items:center;gap:10px;padding:11px 14px;"
+            f"background:#0f0f0f;border:1px solid #232323;border-radius:10px;margin-bottom:6px'>"
+            f"<img src='/mypuls/avatar/{c.get('creator_id')}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='color:#fff;font-weight:600;font-size:13px'>{cname} <span style='color:{type_color};font-size:10px;letter-spacing:.5px;padding:2px 6px;background:rgba({34 if ctype=='post' else 59},{197 if ctype=='post' else 130},{94 if ctype=='post' else 246},.15);border-radius:5px;margin-left:6px'>{ctype.upper()}</span></div>"
+            f"<div style='color:#888;font-size:11px;font-family:monospace;margin-top:2px'>{slots_count}/jour · planifie jusqu au {sched_until} · {planned} total</div>"
+            f"</div>"
+            f"<span style='color:{active_color};font-size:10px;font-weight:700;letter-spacing:.5px;padding:3px 8px;background:rgba({34 if active else 100},{197 if active else 100},{94 if active else 100},.12);border-radius:5px;flex-shrink:0'>{active_label}</span>"
+            f"<form method='POST' action='/mypulslive/campaign/{toggle_action}' style='margin:0;display:inline'><input type='hidden' name='campaign_id' value='{cid}'><button type='submit' style='background:transparent;border:1px solid #444;color:#aaa;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px'>{toggle_label}</button></form>"
+            f"<form method='POST' action='/mypulslive/campaign/delete' style='margin:0;display:inline' onsubmit=\"return confirm('Supprimer cette campagne ? Les posts deja planifies restent sur MyPuls.')\"><input type='hidden' name='campaign_id' value='{cid}'><button type='submit' style='background:transparent;border:1px solid #5a2020;color:#ef4444;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px'>×</button></form>"
+            f"</div>"
+        )
+
+    campaigns_html = ""
+    if active_campaigns:
+        campaigns_html = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
+            "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px'>"
+            "<span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>♾️ Campagnes</span>"
+            f"<span style='color:#666;font-size:11px'>{sum(1 for c in active_campaigns if c.get('active'))} actives / {len(active_campaigns)} total</span>"
+            "</div>"
+            + "".join(_campaign_row(c) for c in active_campaigns) +
+            "</div>"
+        )
+
     # Cards de createurs avec avatars
     def _creator_card(name, cid, active=False):
         active_cls = " active" if active else ""
@@ -7897,14 +7944,25 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
+      <!-- Toggle Mode infini -->
+      <label class='mpl-opt' style='margin:0 0 14px 0' id='mpl-infinite-toggle' onclick='toggleInfinite()'>
+        <div class='mpl-opt-icon' style='background:rgba(168,85,247,.15);color:#a855f7'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.739-8z'/></svg></div>
+        <div class='mpl-opt-text'>
+          <p class='mpl-opt-title'>♾️ Mode infini (campagne continue)</p>
+          <p class='mpl-opt-sub'>Schedule 2 jours a la fois. Le cron etend automatiquement tant que c est actif. Evite les rate-limits MyPuls.</p>
+        </div>
+        <div class='mpl-opt-toggle'></div>
+      </label>
+      <input type='hidden' name='infinite_mode' id='mpl-infinite' value='0'>
+
       <div class='mpl-2col'>
         <div>
-          <label>Date debut</label>
+          <label id='mpl-lbl-start'>Date debut</label>
           <input type='date' name='date_start' value='{d_start}' required>
         </div>
-        <div>
+        <div id='mpl-end-wrap'>
           <label>Date fin</label>
-          <input type='date' name='date_end' value='{d_end}' required>
+          <input type='date' name='date_end' value='{d_end}'>
         </div>
       </div>
     </div>
@@ -8120,6 +8178,8 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       </div>
     </div>
 
+    {campaigns_html}
+
     <div class='mpl-stats'>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div><div class='mpl-stat-lbl'>CAPTIONS</div></div>
@@ -8286,6 +8346,31 @@ function updatePostAction(){{
   const a = document.getElementById('mpl-post-action');
   const w = document.getElementById('mpl-post-delay-wrap');
   if(a && w) w.style.display = (a.value==='delete')?'':'none';
+}}
+
+function toggleInfinite(){{
+  const t = document.getElementById('mpl-infinite-toggle');
+  if(!t) return;
+  t.classList.toggle('active');
+  const on = t.classList.contains('active');
+  document.getElementById('mpl-infinite').value = on?'1':'0';
+  // Cache la date de fin si infini
+  const ew = document.getElementById('mpl-end-wrap');
+  if(ew) ew.style.display = on?'none':'';
+  // Change le label de "Date debut" en "Demarrer le"
+  const lbl = document.getElementById('mpl-lbl-start');
+  if(lbl) lbl.textContent = on?'Demarrer le':'Date debut';
+  // Adapter le bouton push
+  const btn = document.querySelector('.mpl-push-btn');
+  if(btn){{
+    const ct = document.getElementById('mpl-content-type').value;
+    if(ct==='delete') return;
+    if(on){{
+      btn.innerHTML = '♾️ Lancer la campagne infinie';
+    }} else {{
+      btn.innerHTML = (ct==='story')?'⚡ Pousser les stories':'⚡ Pousser les posts';
+    }}
+  }}
 }}
 
 // === Auto-Delete : fetch events + select + delete ===
@@ -10434,6 +10519,51 @@ def create_app():
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
 
+    @app.route("/mypulslive/campaign/pause", methods=["POST"])
+    def mypulslive_campaign_pause():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls_campaigns
+        except Exception as e:
+            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+        cid = (request.form.get("campaign_id") or "").strip()
+        if not cid:
+            return _error("❌ Campaign ID manquant", tab="mypulslive")
+        if mypuls_campaigns.set_campaign_active(cid, False):
+            return _success(f"⏸ Campagne {cid[:14]} mise en pause", tab="mypulslive")
+        return _error("❌ Campagne introuvable", tab="mypulslive")
+
+    @app.route("/mypulslive/campaign/resume", methods=["POST"])
+    def mypulslive_campaign_resume():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls_campaigns
+        except Exception as e:
+            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+        cid = (request.form.get("campaign_id") or "").strip()
+        if not cid:
+            return _error("❌ Campaign ID manquant", tab="mypulslive")
+        if mypuls_campaigns.set_campaign_active(cid, True):
+            return _success(f"▶ Campagne {cid[:14]} reactivee", tab="mypulslive")
+        return _error("❌ Campagne introuvable", tab="mypulslive")
+
+    @app.route("/mypulslive/campaign/delete", methods=["POST"])
+    def mypulslive_campaign_delete():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls_campaigns
+        except Exception as e:
+            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+        cid = (request.form.get("campaign_id") or "").strip()
+        if not cid:
+            return _error("❌ Campaign ID manquant", tab="mypulslive")
+        if mypuls_campaigns.delete_campaign(cid):
+            return _success(f"🗑 Campagne {cid[:14]} supprimee", tab="mypulslive")
+        return _error("❌ Campagne introuvable", tab="mypulslive")
+
     @app.route("/mypulslive/list_events", methods=["GET"])
     def mypulslive_list_events():
         if not is_auth():
@@ -10538,6 +10668,7 @@ def create_app():
         content_type = (request.form.get("content_type") or "both").strip()
         date_start = (request.form.get("date_start") or "").strip()
         date_end = (request.form.get("date_end") or "").strip()
+        infinite_mode = (request.form.get("infinite_mode") or "0") == "1"
         post_slots_raw = request.form.get("post_slots_json") or "[]"
         story_slots_raw = request.form.get("story_slots_json") or "[]"
         media_ids_raw = request.form.get("media_ids") or ""
@@ -10567,8 +10698,10 @@ def create_app():
         except Exception:
             story_slots = []
 
-        if not date_start or not date_end:
-            return _error("❌ Dates manquantes", tab="mypulslive")
+        if not date_start:
+            return _error("❌ Date de debut manquante", tab="mypulslive")
+        if not infinite_mode and not date_end:
+            return _error("❌ Date de fin manquante (sinon active Mode infini)", tab="mypulslive")
 
         def _parse_lines(raw):
             return [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
@@ -10582,6 +10715,43 @@ def create_app():
             return _error("❌ Aucun media_id", tab="mypulslive")
 
         captions = _parse_lines(captions_raw) or [""]
+
+        # === Mode INFINI : creer une campagne au lieu d'un push one-shot ===
+        if infinite_mode and content_type in ("story", "post"):
+            try:
+                import mypuls_campaigns
+                import mypuls
+            except Exception as e:
+                return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+            # Recup nom du createur
+            creators = mypuls.list_creators().get("creators", {})
+            cname = ""
+            for n, cid in creators.items():
+                if int(cid) == creator_id:
+                    cname = n
+                    break
+            slots = story_slots if content_type == "story" else post_slots
+            if not slots:
+                return _error("❌ Aucun slot configure pour ce type", tab="mypulslive")
+            res = mypuls_campaigns.create_campaign(
+                creator_id=creator_id,
+                creator_name=cname,
+                campaign_type=content_type,
+                slots=slots,
+                media_ids=media_ids,
+                captions=captions,
+                options={"shuffle_media": shuffle_media, "randomize_minutes": randomize_minutes},
+                post_action=post_action,
+                delay_sec=delay_sec,
+                start_date=date_start,
+            )
+            if not res.get("ok"):
+                return _error(f"❌ Creation campagne : {res.get('error', '?')}", tab="mypulslive")
+            return _success(
+                f"♾️ Campagne {content_type} lancee — premiers 2 jours planifies : "
+                f"{res.get('planned', 0)} {content_type}(s). Le cron etend de 2 jours toutes les heures.",
+                tab="mypulslive",
+            )
 
         summary_parts = []
         all_errors = []

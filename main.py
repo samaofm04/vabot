@@ -174,6 +174,26 @@ async def main_async():
 
     asyncio.create_task(_mypuls_pending_deletes(), name="mypuls_pending_deletes")
 
+    # Cron : etend les campagnes MyPuls infinies (toutes les heures)
+    # Chaque campagne active est etendue de 2 jours quand il reste < 1 jour
+    # de planning. Evite de pousser des milliers d events d un coup.
+    async def _mypuls_extend_campaigns():
+        await asyncio.sleep(180)
+        while True:
+            try:
+                import mypuls_campaigns as _mc
+                res = _mc.extend_due_campaigns()
+                if res.get("extended"):
+                    log.info(
+                        f"[mypuls] Campaigns cron: {res['extended']} etendues, "
+                        f"{res['planned']} planifies, {res['failed']} fails"
+                    )
+            except Exception as e:
+                log.warning(f"[mypuls] Erreur extend campaigns : {e}")
+            await asyncio.sleep(3600)  # toutes les heures
+
+    asyncio.create_task(_mypuls_extend_campaigns(), name="mypuls_extend_campaigns")
+
     async def _run_safe(bot, token, label):
         """Wrap bot.start dans un try/except pour qu'un bot qui crashe ne tue pas l'autre.
 
