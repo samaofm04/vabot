@@ -10024,7 +10024,8 @@ def _render_mypulslive_html() -> str:
             "</div></div>"
         )
 
-    # Createurs
+    # Createurs - cache 5min, mais force refresh si on a moins de createurs
+    # qu'attendu (workaround pour les changements de parser cote serveur)
     res = mypuls.list_creators()
     creators_map = res.get("creators", {}) if res.get("ok") else {}
 
@@ -10619,7 +10620,11 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
 
     <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
       <span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>Createur <span style='color:#444;font-size:10px;margin-left:6px'>(drag pour reorganiser)</span></span>
-      <span style='color:#666;font-size:11px'><span id='mpl-cr-count'>{len(creators_map)} createurs</span><span class='mpl-cr-saved-hint' id='mpl-cr-saved'></span></span>
+      <span style='color:#666;font-size:11px;display:flex;align-items:center;gap:8px'>
+        <span id='mpl-cr-count'>{len(creators_map)} createurs</span>
+        <span class='mpl-cr-saved-hint' id='mpl-cr-saved'></span>
+        <a href='/mypulslive/refresh_creators' title='Re-scrape la liste des createurs depuis MyPuls' style='color:#3b82f6;text-decoration:none;font-size:14px;cursor:pointer'>↻</a>
+      </span>
     </div>
     <div class='mpl-cr-bar'>
       {creators_cards}
@@ -13776,6 +13781,18 @@ def create_app():
             week_start=(request.form.get("week_start") or "").strip(),
         )
         return jsonify({"ok": ok})
+
+    @app.route("/mypulslive/refresh_creators", methods=["GET"])
+    def mypulslive_refresh_creators():
+        """Force re-scrape de /creators et redirige vers la page MyPuls Live."""
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+            mypuls.list_creators(force_refresh=True)
+        except Exception:
+            pass
+        return redirect("/?tab=mypulslive")
 
     @app.route("/mypulslive/reorder_creators", methods=["POST"])
     def mypulslive_reorder_creators():

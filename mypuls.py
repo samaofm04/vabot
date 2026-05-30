@@ -634,7 +634,10 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     import time as _t
     cache = cfg.get("creators_cache", {})
     cache_ts = cfg.get("creators_cache_ts", 0)
-    if not force_refresh and cache and (_t.time() - cache_ts) < 3600:
+    # TTL court (5min) - les ajouts/changements de createurs sont rares mais
+    # un cache trop long masque les fixes de parser (ex: Kiara qui n etait
+    # pas detectee avant)
+    if not force_refresh and cache and (_t.time() - cache_ts) < 300:
         return {"ok": True, "creators": cache}
 
     s = _make_session()
