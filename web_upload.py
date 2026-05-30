@@ -7789,9 +7789,10 @@ def _render_chatplanning_html() -> str:
         "20h-02h": "#7e22ce",
     }
 
-    # Tabs des EDTs (data-no-loader pour switch instant sans loader flash)
+    # Tabs des EDTs : JS-only switch (no page reload)
     tabs_html = "".join(
-        f"<a href='?tab=chatplanning&edt_id={e['id']}' data-no-loader='1' "
+        f"<a href='?tab=chatplanning&edt_id={e['id']}' "
+        f"onclick='return chatSwitchTo(this.href)' data-no-loader='1' "
         f"class='chat-tab {'active' if e['id'] == active_edt['id'] else ''}' "
         f"style='padding:9px 18px;background:{'#1a1a1a' if e['id'] == active_edt['id'] else 'transparent'};"
         f"border:1px solid {'#3b82f6' if e['id'] == active_edt['id'] else '#262626'};"
@@ -7994,6 +7995,42 @@ def _render_chatplanning_html() -> str:
 
     js = """
 <script>
+// AJAX switch entre EDTs et semaines : remplace juste le contenu de #form-chatplanning
+window.chatSwitchTo = async function(url){
+  const sec = document.getElementById('form-chatplanning');
+  if(!sec) return true;
+  // Visual feedback : leger fade
+  sec.style.opacity = '0.5';
+  sec.style.pointerEvents = 'none';
+  try {
+    const r = await fetch(url, {headers:{'X-Chat-Ajax':'1'}});
+    const html = await r.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const newSec = doc.getElementById('form-chatplanning');
+    if(newSec){
+      sec.innerHTML = newSec.innerHTML;
+      // Update URL sans reload
+      history.pushState({}, '', url);
+      // Re-execute les scripts inline (sinon les fonctions saveCell/addChatRow etc disparaissent)
+      sec.querySelectorAll('script').forEach(oldScript=>{
+        const newScript = document.createElement('script');
+        newScript.textContent = oldScript.textContent;
+        oldScript.parentNode.replaceChild(newScript, oldScript);
+      });
+    }
+  } catch(e){
+    console.error('chatSwitchTo:', e);
+    window.location.href = url;
+    return false;
+  }
+  sec.style.opacity = '';
+  sec.style.pointerEvents = '';
+  return false;
+};
+
+// Restaure le scroll vers le tableau apres un switch
+window.addEventListener('popstate', ()=>{ window.chatSwitchTo(window.location.href); });
+
 async function saveCell(el){
   const fd = new FormData();
   fd.set('edt_id', '""" + active_edt['id'] + """');
@@ -8139,7 +8176,7 @@ async function addChatRow(creneau){
         f"padding:14px 18px;background:linear-gradient(135deg,#161616,#0f0f0f);"
         f"border:1px solid #2a2a2a;border-radius:14px;margin-bottom:14px;flex-wrap:wrap;gap:10px'>"
         # Prev arrow
-        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={prev_week}' data-no-loader='1' "
+        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={prev_week}' onclick='return chatSwitchTo(this.href)' data-no-loader='1' "
         f"style='display:flex;align-items:center;gap:8px;color:#fff;text-decoration:none;"
         f"padding:8px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;"
         f"font-size:13px;font-weight:600;transition:.12s' "
@@ -8151,12 +8188,12 @@ async function addChatRow(creneau){
         f"<div style='display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;flex:1;min-width:200px'>"
         f"<div style='display:flex;align-items:center;gap:10px'>"
         f"<span style='font-size:11px;color:#888;letter-spacing:1.5px;text-transform:uppercase'>Semaine {iso_w}</span>"
-        + (f"<span style='background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;letter-spacing:.5px'>EN COURS</span>" if is_current else f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={today_week}' data-no-loader='1' style='background:#3b82f6;color:#fff;font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer'>Revenir a aujourd hui</a>")
+        + (f"<span style='background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;letter-spacing:.5px'>EN COURS</span>" if is_current else f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={today_week}' onclick='return chatSwitchTo(this.href)' data-no-loader='1' style='background:#3b82f6;color:#fff;font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer'>Revenir a aujourd hui</a>")
         + f"</div>"
         f"<div style='color:#fff;font-size:17px;font-weight:700;letter-spacing:-.01em'>{week_lbl}</div>"
         f"</div>"
         # Next arrow
-        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={next_week}' data-no-loader='1' "
+        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={next_week}' onclick='return chatSwitchTo(this.href)' data-no-loader='1' "
         f"style='display:flex;align-items:center;gap:8px;color:#fff;text-decoration:none;"
         f"padding:8px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;"
         f"font-size:13px;font-weight:600;transition:.12s' "
