@@ -4249,9 +4249,13 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "") -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
-    en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title)."""
+    en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
+
+    Si deferred=True, l img a data-src (pas src) et l IntersectionObserver
+    se charge de la swap au moment ou la card devient visible.
+    """
     name = file_path.name
     # Date upload courte format français (ex. "27 mai")
     try:
@@ -4289,12 +4293,23 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
+    # Defer : data-src au lieu de src + un placeholder transparent (pas de requete HTTP)
+    if deferred:
+        img_tag = (
+            f"<img data-src='{thumb_url}' class='vault-defer-img' loading='lazy' "
+            f"src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg==' "
+            f"style='width:100%;height:100%;object-fit:cover;display:block;background:#1a1a1a'>"
+        )
+    else:
+        img_tag = (
+            f"<img src='{thumb_url}' loading='lazy' "
+            f"style='width:100%;height:100%;object-fit:cover;display:block'>"
+        )
     media_html = (
         f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\",\"{example_safe}\")' "
         f"title='{name}' "
         f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;background:#000;border-radius:10px;overflow:hidden'>"
-        f"<img src='{thumb_url}' loading='lazy' "
-        f"style='width:100%;height:100%;object-fit:cover;display:block'>"
+        f"{img_tag}"
         f"{play_badge}"
         f"{date_badge}"
         f"</div>"
@@ -4579,6 +4594,8 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             "</div>"
         )
     else:
+        # === PAGINATION : ne render que les N premiers, le reste = lazy via Intersection Observer ===
+        INITIAL_BATCH = 24  # cards visibles direct (rapide a charger)
         cards_html = []
         # Pré-indexer les fichiers exemple par stem (pour swap clean -> example)
         example_by_stem = {}
@@ -4588,14 +4605,12 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                     base_stem = pe.stem.replace(".example", "")
                     example_by_stem[base_stem] = pe.name
 
-        for p in files:
-            # file_id pointe TOUJOURS sur le clean (actions : caption / delete)
+        total_files = len(files)
+        for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
             clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
             ex_name = example_by_stem.get(p.stem)
             if ex_name:
-                # Thumbnail + lecture principale = version EXEMPLE (avec overlay)
-                # Le CLEAN s'affiche en deuxième dans la lightbox via le 5e param
                 url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
                 thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
                 second_url = clean_url
@@ -4603,13 +4618,22 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                 url = clean_url
                 thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
                 second_url = ""
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url))
+            # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
+            deferred = idx >= INITIAL_BATCH
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred))
         gallery = (
             gallery_header
-            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px'>"
+            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px' id='vault-grid'>"
             + "".join(cards_html)
             + "</div>"
         )
+        # Compteur en bas + auto-scroll trigger
+        if total_files > INITIAL_BATCH:
+            gallery += (
+                f"<div id='vault-load-status' style='text-align:center;padding:14px;color:#666;font-size:12px;margin-top:10px'>"
+                f"{INITIAL_BATCH} / {total_files} affiches — scroll pour charger plus"
+                f"</div>"
+            )
 
     css = """
 <style>
@@ -4683,6 +4707,35 @@ document.addEventListener('click', function(e){
     if(!w.contains(e.target)) w.classList.remove('open');
   });
 });
+
+// === Lazy loading des thumbnails differees (IntersectionObserver) ===
+(function(){
+  const imgs = document.querySelectorAll('img.vault-defer-img');
+  if(!imgs.length || !('IntersectionObserver' in window)) {
+    // Fallback : charge tout direct
+    imgs.forEach(i=>{ if(i.dataset.src){ i.src = i.dataset.src; }});
+    return;
+  }
+  const status = document.getElementById('vault-load-status');
+  let loaded = 24; // INITIAL_BATCH
+  const total = 24 + imgs.length;
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(entry=>{
+      if(entry.isIntersecting){
+        const img = entry.target;
+        if(img.dataset.src){
+          img.src = img.dataset.src;
+          delete img.dataset.src;
+          io.unobserve(img);
+          loaded++;
+          if(status) status.textContent = loaded + ' / ' + total + ' charges';
+          if(loaded >= total && status) status.style.display = 'none';
+        }
+      }
+    });
+  }, {rootMargin: '300px'});  // pre-charge avant que l img n entre dans le viewport
+  imgs.forEach(img=>io.observe(img));
+})();
 </script>
 """
 
