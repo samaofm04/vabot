@@ -8826,10 +8826,24 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     platform_label = "MyM" if platform == "mym" else "OnlyFans"
     platform_color = "#a855f7" if platform == "mym" else "#0099ff"
 
-    try:
-        identities = sorted(_list_identities())
-    except Exception:
-        identities = []
+    # Pour MyM, on charge la liste des createurs MyPuls (peut depasser les identites locales)
+    identities: list = []
+    if platform == "mym":
+        try:
+            import mypuls
+            if mypuls.is_configured():
+                res = mypuls.list_creators()
+                if res.get("ok"):
+                    # Noms des createurs MyPuls
+                    identities = sorted(res.get("creators", {}).keys(), key=str.lower)
+        except Exception:
+            identities = []
+    # Fallback : identites locales si pas de MyPuls ou si OF
+    if not identities:
+        try:
+            identities = sorted(_list_identities())
+        except Exception:
+            identities = []
 
     if not identities:
         return (
@@ -8897,6 +8911,29 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
 
     cards_html = "".join(cards)
 
+    # Bulk apply : niche commune + (pour MyM) bouton scrape abonnes
+    bulk_html = (
+        "<div style='background:linear-gradient(135deg,rgba(59,130,246,.06),rgba(168,85,247,.04));"
+        "border:1px solid rgba(59,130,246,.25);border-radius:12px;padding:14px;margin-bottom:18px;"
+        "display:flex;gap:12px;flex-wrap:wrap;align-items:end'>"
+        # Niche commune
+        f"<div style='flex:1;min-width:200px'>"
+        f"<label style='display:block;font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800;margin-bottom:6px'>🎯 Appliquer une niche a TOUS</label>"
+        f"<input type='text' id='setup-bulk-niche-{platform}' placeholder='ex: CAISSE' "
+        f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
+        f"</div>"
+        f"<button type='button' onclick='applyBulkNiche_{platform}()' "
+        f"style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
+        f"⚡ Appliquer a tous</button>"
+        + (
+            f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
+            f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
+            f"🔄 Auto-fill abonnes depuis MyPuls</button>"
+            if platform == "mym" else ""
+        )
+        + f"</div>"
+    )
+
     return (
         "<div style='max-width:1100px'>"
         f"<h2 style='margin:0 0 6px;font-size:20px;display:flex;align-items:center;gap:10px'>📋 Setup SFS "
@@ -8904,6 +8941,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"<p style='margin:0 0 18px;color:#888;font-size:13px'>"
         f"Remplis les infos pour chaque modele {platform_label}. Au final clique <b>Générer le message</b> "
         f"→ tu obtiens un texte prêt à copier-coller (format Discord/Telegram).</p>"
+        + bulk_html
         # Cards
         + cards_html
         # Bouton generate + output (avec id specifique a la plateforme)
@@ -8955,6 +8993,34 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  const btn=document.getElementById('setup-copy-btn-{platform}');"
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
+        f"}}"
+        # Bulk niche
+        f"async function applyBulkNiche_{platform}(){{"
+        f"  const input=document.getElementById('setup-bulk-niche-{platform}');"
+        f"  const niche=(input?input.value:'').trim();"
+        f"  if(!niche){{ alert('Tape une niche d abord'); return; }}"
+        f"  const sec=document.getElementById('form-sfssetup{platform}');"
+        f"  if(!sec) return;"
+        f"  const inputs=sec.querySelectorAll('input[data-field=niche]');"
+        f"  let count=0;"
+        f"  for(const el of inputs){{"
+        f"    el.value=niche;"
+        f"    const fd=new FormData(); fd.set('platform','{platform}'); fd.set('identity',el.dataset.ident); fd.set('field','niche'); fd.set('value',niche);"
+        f"    try{{ await fetch('/sfssetup/save',{{method:'POST',body:fd}}); count++; }}catch(e){{}}"
+        f"  }}"
+        f"  alert('Niche \"'+niche+'\" appliquee sur '+count+' modeles');"
+        f"}}"
+        # MyPuls fetch subs (stub pour le moment, attend impl serveur)
+        f"async function fetchMyPulsSubs_{platform}(){{"
+        f"  const r=await fetch('/sfssetup/fetch_mypuls_subs');"
+        f"  const j=await r.json();"
+        f"  if(!j.ok){{ alert('Erreur: '+(j.error||'?')); return; }}"
+        f"  if(!j.applied){{"
+        f"    alert('MyPuls expose pas les counts d abonnes via l API connue. Faut un HAR pour reverse-engineer l endpoint. En attendant, remplis les counts a la main (BCP / MOYEN / PEU ou un nombre).');"
+        f"    return;"
+        f"  }}"
+        f"  alert(j.applied+' modeles mis a jour depuis MyPuls');"
+        f"  location.reload();"
         f"}}"
         "</script>"
         "</div>"
@@ -13344,6 +13410,41 @@ def create_app():
         else:
             return jsonify({"ok": False, "error": f"unknown field: {field}"})
         return jsonify({"ok": True})
+
+    @app.route("/sfssetup/fetch_mypuls_subs", methods=["GET"])
+    def sfssetup_fetch_mypuls_subs():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import sfs_setup
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        # Charge les counts depuis MyPuls (stub pour l instant)
+        subs_data = sfs_setup.fetch_mypuls_subscribers()
+        if not subs_data:
+            return jsonify({"ok": True, "applied": 0, "note": "MyPuls non configure ou pas de donnees"})
+        # Pour chaque createur, si on a des donnees on les sauve
+        applied = 0
+        for ident, data in subs_data.items():
+            if not data:
+                continue
+            current = sfs_setup.get_identity("mym", ident)
+            updated = {f: current.get(f, "") for f in sfs_setup.FIELDS}
+            if data.get("abonnes"):
+                updated["abonnes"] = data["abonnes"]
+            if data.get("anciens"):
+                updated["anciens"] = data["anciens"]
+            if data.get("interesses"):
+                updated["interesses"] = data["interesses"]
+            sfs_setup.save_identity(
+                "mym", ident, updated,
+                emoji=current.get("emoji", ""),
+                enabled=current.get("enabled", True),
+            )
+            applied += 1
+        return jsonify({"ok": True, "applied": applied})
 
     @app.route("/sfssetup/generate", methods=["GET"])
     def sfssetup_generate():
