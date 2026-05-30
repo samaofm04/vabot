@@ -1474,6 +1474,20 @@ function showTab(group,name,title,subtitle){
 
 <div class="section-label">Outils</div>
 
+<div class="group" id="grp-chatting">
+  <button class="group-head" onclick="toggleGroup('chatting')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span class="label">Chatting</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-chatplanning" onclick="showTab('chatting','chatplanning','Emploi du temps chatteurs','Planning hebdomadaire des shifts de chatting')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+      Emploi du temps
+    </button>
+  </div>
+</div>
+
 <div class="group" id="grp-business">
   <button class="group-head" onclick="toggleGroup('business')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
@@ -1928,6 +1942,11 @@ function showFeed(btn,name){
 <!-- BUSINESS - MYPULS LIVE PUSH -->
 <div class="form-section" id="form-mypulslive" style="display:none">
 {mypulslive_html}
+</div>
+
+<!-- CHATTING - EMPLOI DU TEMPS -->
+<div class="form-section" id="form-chatplanning" style="display:none">
+{chatplanning_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -7678,6 +7697,216 @@ def _render_schedule_html() -> str:
     )
 
 
+def _render_chatplanning_html() -> str:
+    """Emploi du temps des chatteurs - grille hebdomadaire avec shifts."""
+    import hashlib as _hash
+    try:
+        import chatting
+    except Exception as e:
+        return f"<p style='color:#f99'>Module chatting indispo : {e}</p>"
+
+    shifts_by_day = chatting.shifts_by_day()
+    chatters = chatting.get_chatter_list()
+    stats = chatting.coverage_stats()
+
+    # Identites pour le dropdown "Model"
+    try:
+        identities = sorted(_list_identities())
+    except Exception:
+        identities = []
+
+    # Couleur deterministe par chatteur
+    def _color_for(name: str) -> str:
+        h = int(_hash.md5((name or "?").lower().encode()).hexdigest()[:8], 16)
+        return f"hsl({h % 360},70%,55%)"
+
+    DAYS = chatting.DAYS
+    DAYS_FULL = chatting.DAYS_FULL
+
+    # Heures affichees (5h-3h+1 = 22 heures pour couvrir une journee de chat)
+    hours_range = list(range(5, 24)) + list(range(0, 4))  # 5h matin -> 3h nuit
+    hour_height_px = 32
+
+    # Helpers pour position des shifts
+    def _hour_to_offset(h: int, m: int) -> int:
+        """Position en px depuis le haut de la grille."""
+        if h in hours_range:
+            idx = hours_range.index(h)
+        elif h < 5:
+            idx = len(hours_range) - 1 + (h - 3)  # rare : avant 5h matin
+        else:
+            idx = 0
+        return idx * hour_height_px + (m * hour_height_px // 60)
+
+    def _shift_block(s):
+        sh, sm = map(int, s["start"].split(":"))
+        eh, em = map(int, s["end"].split(":"))
+        top = _hour_to_offset(sh, sm)
+        bot = _hour_to_offset(eh, em)
+        height = max(20, bot - top)
+        color = _color_for(s["chatter"])
+        model = s.get("model", "")
+        model_tag = f"<div style='font-size:9.5px;color:rgba(255,255,255,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>🎯 {model}</div>" if model else ""
+        return (
+            f"<div onclick='editShift(\"{s['id']}\")' "
+            f"style='position:absolute;top:{top}px;left:4px;right:4px;height:{height}px;"
+            f"background:linear-gradient(135deg,{color},hsla(0,0%,0%,.2));"
+            f"border-left:3px solid {color};border-radius:8px;padding:4px 6px;"
+            f"overflow:hidden;cursor:pointer;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);"
+            f"transition:transform .12s' onmouseover='this.style.transform=\"translateX(2px)\"' "
+            f"onmouseout='this.style.transform=\"none\"'>"
+            f"<div style='font-size:11px;font-weight:700;letter-spacing:.2px'>{s['chatter']}</div>"
+            f"<div style='font-size:10px;color:rgba(255,255,255,.8);font-family:monospace'>{s['start']} → {s['end']}</div>"
+            f"{model_tag}"
+            f"</div>"
+        )
+
+    # === Header: stats + form add ===
+    stats_html = (
+        "<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px'>"
+        f"<div class='box' style='text-align:center;padding:14px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#fff'>{stats['shifts_count']}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-top:4px'>Shifts</div></div>"
+        f"<div class='box' style='text-align:center;padding:14px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#22c55e'>{len(chatters)}</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-top:4px'>Chatteurs</div></div>"
+        f"<div class='box' style='text-align:center;padding:14px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#3b82f6'>{stats['total_hours']}h</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-top:4px'>Heures/semaine</div></div>"
+        f"<div class='box' style='text-align:center;padding:14px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#a855f7'>{round(stats['total_hours']/7, 1)}h</div>"
+        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-top:4px'>Moyenne/jour</div></div>"
+        "</div>"
+    )
+
+    # === Add shift form ===
+    day_opts = "".join(f"<option value='{d}'>{DAYS_FULL[d]}</option>" for d in DAYS)
+    chatter_opts = "".join(f"<option value='{c}'>{c}</option>" for c in chatters)
+    ident_opts = "<option value=''>(aucun modele)</option>" + "".join(f"<option value='{i}'>{i}</option>" for i in identities)
+
+    add_form = (
+        "<form method='POST' action='/chatting/add_shift' class='box' style='margin-bottom:18px;border:1px solid #2a2a2a'>"
+        "<h3 style='margin:0 0 14px;font-size:15px'>➕ Ajouter un shift</h3>"
+        "<div style='display:grid;grid-template-columns:repeat(5,1fr);gap:10px;align-items:end'>"
+        "<div>"
+        "<label style='font-size:11px'>Chatteur</label>"
+        f"<input type='text' name='chatter' list='chat-existing' placeholder='ex: Lola' required>"
+        f"<datalist id='chat-existing'>{chatter_opts}</datalist>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px'>Jour</label>"
+        f"<select name='day' required>{day_opts}</select>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px'>Debut</label>"
+        "<input type='time' name='start' value='09:00' required>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px'>Fin</label>"
+        "<input type='time' name='end' value='17:00' required>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px'>Modele (optionnel)</label>"
+        f"<select name='model'>{ident_opts}</select>"
+        "</div>"
+        "</div>"
+        "<button type='submit' style='margin-top:14px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer'>+ Ajouter au planning</button>"
+        "</form>"
+    )
+
+    # === Grille hebdo ===
+    # Header colonnes (jours)
+    day_headers = "".join(
+        f"<div style='text-align:center;padding:10px 8px;color:#fff;font-weight:700;font-size:13px;letter-spacing:.5px;border-right:1px solid #1a1a1a;background:#161616'>"
+        f"{DAYS_FULL[d]}"
+        f"<div style='font-size:10px;color:#666;font-weight:500;margin-top:2px'>{stats['by_day'].get(d, 0):.1f}h</div>"
+        f"</div>"
+        for d in DAYS
+    )
+
+    # Colonne heures (gauche)
+    hour_labels = "".join(
+        f"<div style='height:{hour_height_px}px;font-size:10px;color:#666;padding:0 8px;text-align:right;line-height:{hour_height_px}px;font-family:monospace'>{h:02d}:00</div>"
+        for h in hours_range
+    )
+
+    # Colonnes jours avec shifts
+    day_cols = []
+    total_height = len(hours_range) * hour_height_px
+    for d in DAYS:
+        shifts_today = shifts_by_day.get(d, [])
+        blocks = "".join(_shift_block(s) for s in shifts_today)
+        # Hour-grid lines
+        lines = "".join(
+            f"<div style='position:absolute;top:{i*hour_height_px}px;left:0;right:0;height:1px;background:#1a1a1a'></div>"
+            for i in range(len(hours_range)+1)
+        )
+        day_cols.append(
+            f"<div style='position:relative;border-right:1px solid #1a1a1a;height:{total_height}px;background:#0f0f0f'>"
+            f"{lines}{blocks}"
+            f"</div>"
+        )
+    day_cols_html = "".join(day_cols)
+
+    grid = (
+        f"<div style='background:#0a0a0a;border:1px solid #1a1a1a;border-radius:14px;overflow:hidden'>"
+        # Header
+        f"<div style='display:grid;grid-template-columns:60px repeat(7,1fr);border-bottom:1px solid #232323'>"
+        f"<div style='background:#161616;border-right:1px solid #1a1a1a'></div>"
+        f"{day_headers}"
+        f"</div>"
+        # Body
+        f"<div style='display:grid;grid-template-columns:60px repeat(7,1fr)'>"
+        f"<div style='background:#0d0d0d;border-right:1px solid #1a1a1a'>{hour_labels}</div>"
+        f"{day_cols_html}"
+        f"</div>"
+        f"</div>"
+    )
+
+    # Legend chatteurs
+    legend_items = "".join(
+        f"<div style='display:flex;align-items:center;gap:6px;font-size:12px;color:#ccc'>"
+        f"<span style='width:12px;height:12px;background:{_color_for(c)};border-radius:3px'></span>"
+        f"{c}"
+        f"</div>"
+        for c in chatters
+    )
+    legend = (
+        f"<div style='display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;padding:12px 16px;background:#161616;border:1px solid #232323;border-radius:10px'>"
+        f"<span style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:600'>Equipe :</span>"
+        f"{legend_items or '<span style=color:#666>Aucun chatteur encore</span>'}"
+        f"</div>"
+    )
+
+    # Edit modal (cache par defaut, ouvert par JS)
+    js = """
+<script>
+function editShift(sid){
+  if(confirm('Supprimer ce shift ? Pour modifier, supprime + recree pour l instant.')){
+    const fd = new FormData();
+    fd.set('shift_id', sid);
+    fetch('/chatting/delete_shift', {method:'POST', body:fd}).then(()=>location.reload());
+  }
+}
+</script>
+"""
+
+    return (
+        "<div style='max-width:1280px'>"
+        "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
+        "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+        "Planning hebdomadaire des shifts. Clique sur un shift pour le supprimer. "
+        "<b>Recurrence hebdo</b> — c est ton modele de base, repete chaque semaine."
+        "</p>"
+        + stats_html
+        + add_form
+        + grid
+        + legend
+        + js
+        + "</div>"
+    )
+
+
 def _render_mypulslive_html() -> str:
     """MyPuls Live - UI 'campagne' avec slots dynamiques (style MyPuls)."""
     import datetime as _dt
@@ -10056,6 +10285,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{mypulslive_html}", _render_mypulslive_html())
+        .replace("{chatplanning_html}", _render_chatplanning_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{profile_pic_html}", _render_profile_pic_html())
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
@@ -11133,6 +11363,42 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/chatting/add_shift", methods=["POST"])
+    def chatting_add_shift():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import chatting
+        except Exception as e:
+            return _error(f"❌ Module chatting indispo : {e}", tab="chatplanning")
+        res = chatting.add_shift(
+            chatter=request.form.get("chatter") or "",
+            day=(request.form.get("day") or "").strip(),
+            start=(request.form.get("start") or "").strip(),
+            end=(request.form.get("end") or "").strip(),
+            model=(request.form.get("model") or "").strip(),
+        )
+        if not res.get("ok"):
+            return _error(f"❌ {res.get('error', '?')}", tab="chatplanning")
+        return _success(f"✅ Shift ajoute pour {request.form.get('chatter')}", tab="chatplanning")
+
+    @app.route("/chatting/delete_shift", methods=["POST"])
+    def chatting_delete_shift():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import chatting
+        except Exception as e:
+            from flask import jsonify
+            return jsonify({"ok": False, "error": str(e)})
+        sid = (request.form.get("shift_id") or "").strip()
+        if not sid:
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "shift_id manquant"})
+        ok = chatting.delete_shift(sid)
+        from flask import jsonify
+        return jsonify({"ok": ok})
 
     @app.route("/mypulslive/reorder_creators", methods=["POST"])
     def mypulslive_reorder_creators():
