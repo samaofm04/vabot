@@ -7793,6 +7793,10 @@ def _render_mypulslive_html() -> str:
 .mpl-fetch-btn{background:#1a1a1a;border:1px solid #3b82f6;color:#3b82f6;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
 .mpl-fetch-btn:hover{background:rgba(59,130,246,.1)}
 
+/* Distinct visual identity per type */
+.mpl-card-posts{border-left:3px solid rgba(34,197,94,.5)}
+.mpl-card-stories{border-left:3px solid rgba(59,130,246,.5)}
+
 body.light .mpl-card{background:#fff;border-color:#e5e7eb}
 body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
 body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
@@ -7808,13 +7812,13 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
   <input type='hidden' name='infinite_recycle' id='mpl-recycle' value='1'>
   <input type='hidden' name='randomize_minutes' id='mpl-random-min' value='1'>
 
-  <!-- Planification -->
+  <!-- Periode & type -->
   <div class='mpl-row open'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/></svg></div>
+      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Planification</div>
-        <div class='mpl-row-sub'>Type, periode, posts/jour, stories/jour et horaires</div>
+        <div class='mpl-row-title'>Periode et type</div>
+        <div class='mpl-row-sub'>Quoi pousser et sur quelle plage de dates</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
@@ -7825,7 +7829,6 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
         <option value='story'>Stories uniquement</option>
         <option value='both' selected>Les 2 en parallele</option>
       </select>
-
       <div class='mpl-2col' style='margin-top:10px'>
         <div>
           <label>Date debut</label>
@@ -7836,24 +7839,61 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
           <input type='date' name='date_end' value='{d_end}' required>
         </div>
       </div>
+    </div>
+  </div>
 
-      <!-- POSTS slots -->
-      <div id='mpl-posts-block' style='margin-top:18px'>
-        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Posts par jour</div>
-        <input type='number' class='mpl-count-input' id='mpl-posts-count' value='9' min='0' max='24' oninput='renderPostSlots()'>
-        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:14px 0 4px'>Horaires de publication</div>
-        <div class='mpl-slots' id='mpl-post-slots'></div>
-        <button type='button' onclick='addPostSlot()' style='margin-top:8px;background:transparent;border:1px dashed #444;color:#888;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px'>+ Ajouter un creneau</button>
-      </div>
+  <div class='mpl-section-label'>Planification</div>
 
-      <!-- STORIES slots -->
-      <div id='mpl-stories-block' style='margin-top:18px'>
-        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Stories par jour</div>
-        <input type='number' class='mpl-count-input' id='mpl-stories-count' value='4' min='0' max='24' oninput='renderStorySlots()'>
-        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:14px 0 4px'>Horaires des stories</div>
-        <div class='mpl-slots' id='mpl-story-slots'></div>
-        <button type='button' onclick='addStorySlot()' style='margin-top:8px;background:transparent;border:1px dashed #444;color:#888;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px'>+ Ajouter une story</button>
+  <!-- POSTS card -->
+  <div class='mpl-row open mpl-card-posts' id='mpl-posts-block'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon' style='background:rgba(34,197,94,.12);color:#22c55e'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>📰 Posts (feed)<span class='mpl-mini-badge green' id='mpl-posts-tag'>9 / jour</span></div>
+        <div class='mpl-row-sub'>Publications dans le feed (public ou prive) avec captions</div>
       </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap'>
+        <div>
+          <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px'>Posts par jour</div>
+          <input type='number' class='mpl-count-input' id='mpl-posts-count' value='9' min='0' max='24' oninput='renderPostSlots()'>
+        </div>
+        <div style='flex:1;min-width:200px;color:#888;font-size:13px'>
+          Pour chaque post : 1 creneau = 1 publication par jour de la periode.<br>
+          Clique sur le bouton bleu/gris pour basculer <b>Public ↔ Prive</b>.
+        </div>
+      </div>
+      <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:18px 0 6px'>Horaires de publication</div>
+      <div class='mpl-slots' id='mpl-post-slots'></div>
+      <button type='button' onclick='addPostSlot()' style='margin-top:10px;background:transparent;border:1px dashed #2e6f4e;color:#22c55e;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter un creneau post</button>
+    </div>
+  </div>
+
+  <!-- STORIES card -->
+  <div class='mpl-row open mpl-card-stories' id='mpl-stories-block'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon' style='background:rgba(59,130,246,.12);color:#3b82f6'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='14' height='20' x='5' y='2' rx='2' ry='2'/><line x1='12' x2='12' y1='18' y2='18'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>📱 Stories <span class='mpl-mini-badge' style='background:rgba(59,130,246,.15);color:#3b82f6' id='mpl-stories-tag'>4 / jour</span></div>
+        <div class='mpl-row-sub'>Stories ephemères MyM (auto-supprimees au bout de 24h)</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap'>
+        <div>
+          <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px'>Stories par jour</div>
+          <input type='number' class='mpl-count-input' id='mpl-stories-count' value='4' min='0' max='24' oninput='renderStorySlots()'>
+        </div>
+        <div style='flex:1;min-width:200px;color:#888;font-size:13px'>
+          Audience par defaut : <code>everyone</code>. Pas de caption sur les stories.
+        </div>
+      </div>
+      <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:18px 0 6px'>Horaires des stories</div>
+      <div class='mpl-slots' id='mpl-story-slots'></div>
+      <button type='button' onclick='addStorySlot()' style='margin-top:10px;background:transparent;border:1px dashed #2e4f80;color:#3b82f6;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter une story</button>
     </div>
   </div>
 
@@ -8082,6 +8122,10 @@ function syncSlots(){{
   document.getElementById('mpl-post-slots-json').value = JSON.stringify(postSlots);
   document.getElementById('mpl-story-slots-json').value = JSON.stringify(storySlots);
   document.getElementById('mpl-stat-perday').textContent = postSlots.length;
+  var pt = document.getElementById('mpl-posts-tag');
+  if(pt) pt.textContent = postSlots.length + ' / jour';
+  var st = document.getElementById('mpl-stories-tag');
+  if(st) st.textContent = storySlots.length + ' / jour';
 }}
 
 function updateContentType(){{
