@@ -4555,11 +4555,10 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
     add_media_btn = ""
     if subdir in upload_tab_map:
         utab, utitle, usub = upload_tab_map[subdir]
-        # Pre-fill l identite selectionnee dans le form upload via JS
         add_media_btn = (
             f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
             f"setTimeout(function(){{var s=document.querySelector('#form-{utab} select[name=identity]');if(s){{s.value='{selected}';s.dispatchEvent(new Event('change'));}}}}, 50);\" "
-            f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+            f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
             f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
             f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
             f"box-shadow:0 4px 12px rgba(59,130,246,.25);letter-spacing:.01em'>"
@@ -4567,15 +4566,38 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             f"Add media</button>"
         )
 
+    # Bouton SFW toggle
+    sfw_btn = (
+        "<button type='button' onclick='toggleSFW()' id='sfw-toggle' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
+        "background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:10px;"
+        "font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.5px' "
+        "title='Floute les images (Safe For Work)'>"
+        "<span class='sfw-led' style='width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;transition:.15s'></span>"
+        "SFW</button>"
+    )
+
     gallery_header = (
-        f"<div class='vault-gallery-header'>"
+        # === Row 1 : identite a gauche + boutons SFW & Add media a droite ===
+        f"<div class='vault-gallery-header' style='justify-content:space-between'>"
+        f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"{sel_avatar_html}"
-        f"<div style='flex:1'><div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
-        f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div></div>"
+        f"<div style='flex:1;min-width:0'>"
+        f"<div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
+        f"</div></div>"
+        f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        f"{sfw_btn}"
         f"{add_media_btn}"
-        f"{sort_btn_html}"
         f"</div>"
-        + type_filter_html
+        f"</div>"
+        # === Row 2 : tri + filtres ===
+        f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0;border-top:1px solid #232323'>"
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
+        + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
+        + f"</div>"
+        f"<div>{sort_btn_html}</div>"
+        f"</div>"
     )
 
     if not files:
@@ -4677,8 +4699,30 @@ body.light .vault-sort-menu{background:#fff;border-color:#e5e7eb}
 body.light .vault-sort-item{color:#111}
 body.light .vault-sort-item:hover{background:#f3f4f6}
 body.light .vault-sort-sep{background:#e5e7eb}
+
+/* === SFW blur mode === */
+body.sfw-on .vault-gallery img{filter:blur(22px) saturate(.5)!important;transition:filter .25s}
+body.sfw-on .vault-gallery img:hover{filter:blur(0)!important}
+#sfw-toggle.active{background:linear-gradient(135deg,#ff6b6b,#fa5252)!important;color:#fff!important;border-color:#fa5252!important;box-shadow:0 4px 12px rgba(250,82,82,.3)!important}
+#sfw-toggle.active .sfw-led{background:#fff!important;box-shadow:0 0 8px #fff!important}
 </style>
 <script>
+// === SFW toggle (blur all images) ===
+function toggleSFW(){
+  document.body.classList.toggle('sfw-on');
+  const on = document.body.classList.contains('sfw-on');
+  localStorage.setItem('vault_sfw', on ? '1' : '0');
+  // Re-apply state on all toggles
+  document.querySelectorAll('#sfw-toggle').forEach(b=>b.classList.toggle('active', on));
+}
+// Init au load
+(function(){
+  if(localStorage.getItem('vault_sfw') === '1'){
+    document.body.classList.add('sfw-on');
+    setTimeout(()=>{ document.querySelectorAll('#sfw-toggle').forEach(b=>b.classList.add('active')); }, 50);
+  }
+})();
+
 function vaultFilter(q){
   q = (q || '').toLowerCase().trim();
   var list = document.querySelectorAll('.vault-item');
