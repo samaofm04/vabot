@@ -1,168 +1,204 @@
-"""chatting.py - Planning des chatteurs (emploi du temps hebdo).
+"""chatting.py - Planning des chatteurs (style Excel, multi-EDT).
 
-Stockage : data/chatting_shifts.json
+Stockage : data/chatting_planning.json
 Structure :
 {
-    "shifts": [
+    "edts": [
         {
-            "id": "shift_xxx",
-            "chatter": "Lola",
-            "day": "lun",          # lun mar mer jeu ven sam dim
-            "start": "08:00",
-            "end": "12:00",
-            "model": "Amelia_xoxo",
-            "created_at": "..."
-        }, ...
+            "id": "edt_xxx",
+            "name": "EDT 1 OF",
+            "rows": [
+                {
+                    "id": "row_xxx",
+                    "creneau": "02h-08h",     # 02h-08h | 08h-14h | 14h-20h | 20h-02h
+                    "pseudo": "Mariamos",
+                    "statut": "Ancien",       # Ancien | Nouveau | Support
+                    "modele": "Les 3 (Julia+Amelia+Lola)",
+                    "off": "FULLTIME",        # Lundi..Dimanche | FULLTIME | PAS DE REPONSE
+                    "presence": {
+                        "lun": "Present", "mar": "Present", "mer": "Present",
+                        "jeu": "Present", "ven": "Present", "sam": "Present",
+                        "dim": "Present"
+                    }
+                }
+            ]
+        }
     ]
 }
+
+Valeurs de presence : "Present" | "Absent" | "Retard" | "Coupure" | "OFF"
 """
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 DATA_DIR = Path("data")
-SHIFTS_FILE = DATA_DIR / "chatting_shifts.json"
+PLANNING_FILE = DATA_DIR / "chatting_planning.json"
 
+CRENEAUX = ["02h-08h", "08h-14h", "14h-20h", "20h-02h"]
 DAYS = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
-DAYS_FULL = {
-    "lun": "Lundi", "mar": "Mardi", "mer": "Mercredi",
-    "jeu": "Jeudi", "ven": "Vendredi", "sam": "Samedi", "dim": "Dimanche",
-}
+DAYS_FULL = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+STATUTS = ["Ancien", "Nouveau", "Support"]
+OFF_OPTIONS = ["FULLTIME", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche", "PAS DE REPONSE"]
+PRESENCE_VALUES = ["Present", "Absent", "Retard", "Coupure", "OFF"]
+
+# Defauts modeles (liste evolutive cote UI)
+DEFAULT_MODELES = ["", "Julia", "Amelia", "Lola", "Sarah", "Emma",
+                   "Amelia+Lola", "Lola+Emma", "Julia+Sarah",
+                   "Les 3 (Julia+Amelia+Lola)", "Toutes (Julia+Amelia+Lola+Sarah+Emma)"]
 
 
 def _load() -> Dict[str, Any]:
-    if not SHIFTS_FILE.exists():
-        return {"shifts": []}
+    if not PLANNING_FILE.exists():
+        return {"edts": []}
     try:
-        data = json.loads(SHIFTS_FILE.read_text(encoding="utf-8"))
-        if "shifts" not in data:
-            data["shifts"] = []
+        data = json.loads(PLANNING_FILE.read_text(encoding="utf-8"))
+        if "edts" not in data:
+            data["edts"] = []
         return data
     except Exception:
-        return {"shifts": []}
+        return {"edts": []}
 
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SHIFTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    PLANNING_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def list_shifts() -> List[Dict[str, Any]]:
-    return _load().get("shifts", [])
+def list_edts() -> List[Dict[str, Any]]:
+    return _load().get("edts", [])
 
 
-def shifts_by_chatter() -> Dict[str, List[Dict[str, Any]]]:
-    """Retourne {chatter_name: [shifts...]} trie par jour/heure."""
-    out: Dict[str, List[Dict[str, Any]]] = {}
-    day_order = {d: i for i, d in enumerate(DAYS)}
-    for s in list_shifts():
-        chat = s.get("chatter", "?")
-        out.setdefault(chat, []).append(s)
-    for chat in out:
-        out[chat].sort(key=lambda s: (day_order.get(s.get("day", "lun"), 99), s.get("start", "00:00")))
-    return out
+def get_edt(edt_id: str) -> Optional[Dict[str, Any]]:
+    for e in list_edts():
+        if e.get("id") == edt_id:
+            return e
+    return None
 
 
-def shifts_by_day() -> Dict[str, List[Dict[str, Any]]]:
-    """Retourne {day_key: [shifts...]} trie par heure."""
-    out: Dict[str, List[Dict[str, Any]]] = {d: [] for d in DAYS}
-    for s in list_shifts():
-        d = s.get("day", "lun")
-        if d in out:
-            out[d].append(s)
-    for d in out:
-        out[d].sort(key=lambda s: s.get("start", "00:00"))
-    return out
-
-
-def add_shift(chatter: str, day: str, start: str, end: str,
-              model: str = "") -> Dict[str, Any]:
-    """Ajoute un shift. Retourne {ok, shift|error}."""
-    chatter = (chatter or "").strip()
-    if not chatter:
-        return {"ok": False, "error": "Nom du chatteur manquant"}
-    if day not in DAYS:
-        return {"ok": False, "error": f"Jour invalide : {day}"}
-    # Validate HH:MM
-    def _valid_time(t: str) -> bool:
-        try:
-            h, m = t.split(":")
-            return 0 <= int(h) <= 23 and 0 <= int(m) <= 59
-        except Exception:
-            return False
-    if not _valid_time(start) or not _valid_time(end):
-        return {"ok": False, "error": "Format heure invalide (HH:MM attendu)"}
-    if start >= end:
-        return {"ok": False, "error": "L heure de fin doit etre apres celle de debut"}
-
-    shift = {
-        "id": f"shift_{uuid.uuid4().hex[:10]}",
-        "chatter": chatter,
-        "day": day,
-        "start": start,
-        "end": end,
-        "model": (model or "").strip(),
-        "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+def create_edt(name: str) -> Dict[str, Any]:
+    name = (name or "").strip() or "EDT sans nom"
+    data = _load()
+    edt = {
+        "id": f"edt_{uuid.uuid4().hex[:10]}",
+        "name": name,
+        "rows": [],
     }
-    data = _load()
-    data["shifts"].append(shift)
+    data["edts"].append(edt)
     _save(data)
-    return {"ok": True, "shift": shift}
+    return edt
 
 
-def delete_shift(shift_id: str) -> bool:
+def rename_edt(edt_id: str, new_name: str) -> bool:
     data = _load()
-    before = len(data["shifts"])
-    data["shifts"] = [s for s in data["shifts"] if s.get("id") != shift_id]
-    if len(data["shifts"]) != before:
-        _save(data)
-        return True
-    return False
-
-
-def update_shift(shift_id: str, **fields) -> bool:
-    data = _load()
-    for s in data["shifts"]:
-        if s.get("id") == shift_id:
-            for k, v in fields.items():
-                if k in ("chatter", "day", "start", "end", "model"):
-                    s[k] = v
+    for e in data["edts"]:
+        if e["id"] == edt_id:
+            e["name"] = (new_name or "").strip() or e["name"]
             _save(data)
             return True
     return False
 
 
-def get_chatter_list() -> List[str]:
-    """Liste unique des chatteurs ayant au moins un shift."""
-    return sorted({s.get("chatter", "") for s in list_shifts() if s.get("chatter")})
+def delete_edt(edt_id: str) -> bool:
+    data = _load()
+    before = len(data["edts"])
+    data["edts"] = [e for e in data["edts"] if e["id"] != edt_id]
+    if len(data["edts"]) != before:
+        _save(data)
+        return True
+    return False
 
 
-def coverage_stats() -> Dict[str, Any]:
-    """Stats globales : heures totales / jour / chatteur."""
-    by_day = {d: 0.0 for d in DAYS}
-    by_chatter: Dict[str, float] = {}
-    total = 0.0
-    for s in list_shifts():
-        try:
-            sh, sm = map(int, s.get("start", "00:00").split(":"))
-            eh, em = map(int, s.get("end", "00:00").split(":"))
-            hrs = (eh * 60 + em - sh * 60 - sm) / 60.0
-            if hrs < 0:
-                hrs = 0
-        except Exception:
-            hrs = 0
-        d = s.get("day", "lun")
-        if d in by_day:
-            by_day[d] += hrs
-        by_chatter[s.get("chatter", "?")] = by_chatter.get(s.get("chatter", "?"), 0) + hrs
-        total += hrs
-    return {
-        "by_day": by_day,
-        "by_chatter": by_chatter,
-        "total_hours": round(total, 1),
-        "shifts_count": len(list_shifts()),
-    }
+def _empty_presence() -> Dict[str, str]:
+    return {d: "Present" for d in DAYS}
+
+
+def add_row(edt_id: str, creneau: str = "02h-08h") -> Optional[Dict[str, Any]]:
+    if creneau not in CRENEAUX:
+        creneau = "02h-08h"
+    data = _load()
+    for e in data["edts"]:
+        if e["id"] == edt_id:
+            row = {
+                "id": f"row_{uuid.uuid4().hex[:10]}",
+                "creneau": creneau,
+                "pseudo": "",
+                "statut": "Nouveau",
+                "modele": "",
+                "off": "",
+                "presence": _empty_presence(),
+            }
+            e["rows"].append(row)
+            _save(data)
+            return row
+    return None
+
+
+def delete_row(edt_id: str, row_id: str) -> bool:
+    data = _load()
+    for e in data["edts"]:
+        if e["id"] == edt_id:
+            before = len(e["rows"])
+            e["rows"] = [r for r in e["rows"] if r["id"] != row_id]
+            if len(e["rows"]) != before:
+                _save(data)
+                return True
+    return False
+
+
+def update_cell(edt_id: str, row_id: str, field: str, value: str) -> bool:
+    """Update une cellule. field = pseudo/statut/modele/off/lun/mar/mer/jeu/ven/sam/dim."""
+    data = _load()
+    for e in data["edts"]:
+        if e["id"] != edt_id:
+            continue
+        for r in e["rows"]:
+            if r["id"] != row_id:
+                continue
+            if field in ("pseudo", "statut", "modele", "off", "creneau"):
+                r[field] = value
+            elif field in DAYS:
+                if "presence" not in r:
+                    r["presence"] = _empty_presence()
+                # Valider la valeur
+                if value not in PRESENCE_VALUES:
+                    value = "Present"
+                r["presence"][field] = value
+            else:
+                return False
+            _save(data)
+            return True
+    return False
+
+
+def row_counts(row: Dict[str, Any]) -> Dict[str, int]:
+    """Retourne {retards, absences} pour une row."""
+    pres = row.get("presence", {})
+    retards = sum(1 for d in DAYS if pres.get(d) == "Retard")
+    absences = sum(1 for d in DAYS if pres.get(d) == "Absent")
+    return {"retards": retards, "absences": absences}
+
+
+def import_from_xlsx_data(name: str, rows_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Cree un EDT a partir de donnees structurees (utilise pour seed depuis xlsx)."""
+    edt = create_edt(name)
+    data = _load()
+    for e in data["edts"]:
+        if e["id"] == edt["id"]:
+            for r in rows_data:
+                row = {
+                    "id": f"row_{uuid.uuid4().hex[:10]}",
+                    "creneau": r.get("creneau", "02h-08h"),
+                    "pseudo": r.get("pseudo", ""),
+                    "statut": r.get("statut", "Nouveau"),
+                    "modele": r.get("modele", ""),
+                    "off": r.get("off", ""),
+                    "presence": r.get("presence") or _empty_presence(),
+                }
+                e["rows"].append(row)
+            _save(data)
+            return e
+    return edt

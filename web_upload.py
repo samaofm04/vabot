@@ -7698,16 +7698,293 @@ def _render_schedule_html() -> str:
 
 
 def _render_chatplanning_html() -> str:
-    """Emploi du temps des chatteurs - grille hebdomadaire avec shifts."""
-    import hashlib as _hash
+    """Emploi du temps des chatteurs - style tableau Excel multi-EDT."""
     try:
         import chatting
     except Exception as e:
         return f"<p style='color:#f99'>Module chatting indispo : {e}</p>"
 
-    shifts_by_day = chatting.shifts_by_day()
-    chatters = chatting.get_chatter_list()
-    stats = chatting.coverage_stats()
+    from flask import request as _req
+    edts = chatting.list_edts()
+
+    # Si pas d EDT, prompt creation
+    if not edts:
+        return (
+            "<div style='max-width:680px'>"
+            "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
+            "<p style='margin:0 0 18px;color:#888;font-size:13px'>Aucun planning pour l instant.</p>"
+            "<form method='POST' action='/chatting/create_edt' class='box' style='max-width:480px'>"
+            "<label>Nom du nouveau planning</label>"
+            "<input type='text' name='name' placeholder='ex: EDT 1 OF' required>"
+            "<button type='submit' style='margin-top:12px;background:#3b82f6;color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer'>+ Creer un EDT</button>"
+            "</form></div>"
+        )
+
+    # Determiner l EDT actif
+    active_id = (_req.args.get("edt_id") or "").strip()
+    active_edt = None
+    for e in edts:
+        if e["id"] == active_id:
+            active_edt = e
+            break
+    if not active_edt:
+        active_edt = edts[0]
+
+    # Couleurs statuts (matche le xlsx)
+    statut_colors = {
+        "Ancien":  {"bg": "#84e8c1", "fg": "#0a3d2c"},   # vert clair
+        "Nouveau": {"bg": "#a3e0f0", "fg": "#062f47"},   # bleu clair
+        "Support": {"bg": "#1f3a5f", "fg": "#cfe5ff"},   # bleu marine
+    }
+    pres_colors = {
+        "Present": {"bg": "#86efac", "fg": "#14532d"},
+        "Absent":  {"bg": "#fca5a5", "fg": "#7f1d1d"},
+        "Retard":  {"bg": "#fed7aa", "fg": "#7c2d12"},
+        "Coupure": {"bg": "#fef08a", "fg": "#713f12"},
+        "OFF":     {"bg": "#525252", "fg": "#e5e5e5"},
+    }
+    creneau_colors = {
+        "02h-08h": "#1d4ed8",
+        "08h-14h": "#0e7490",
+        "14h-20h": "#c2410c",
+        "20h-02h": "#7e22ce",
+    }
+
+    # Tabs des EDTs
+    tabs_html = "".join(
+        f"<a href='?tab=chatplanning&edt_id={e['id']}' "
+        f"class='chat-tab {'active' if e['id'] == active_edt['id'] else ''}' "
+        f"style='padding:9px 18px;background:{'#1a1a1a' if e['id'] == active_edt['id'] else 'transparent'};"
+        f"border:1px solid {'#3b82f6' if e['id'] == active_edt['id'] else '#262626'};"
+        f"color:{'#fff' if e['id'] == active_edt['id'] else '#888'};"
+        f"text-decoration:none;border-radius:10px;font-size:13px;font-weight:600'>{e['name']}</a>"
+        for e in edts
+    )
+    add_tab = (
+        "<button type='button' onclick=\"const n=prompt('Nom du nouveau planning ?'); if(n){const f=document.createElement('form');f.method='POST';f.action='/chatting/create_edt';f.innerHTML='<input name=name value=\\''+n+'\\'>';document.body.appendChild(f);f.submit();}\" "
+        "style='padding:9px 14px;background:transparent;border:1px dashed #3b82f6;color:#3b82f6;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer'>+ Nouveau planning</button>"
+    )
+    # Renommer/Supprimer EDT actif
+    edt_actions = (
+        f"<form method='POST' action='/chatting/rename_edt' style='display:inline;margin:0' "
+        f"onsubmit=\"const n=prompt('Nouveau nom ?', '{active_edt['name']}'); if(!n) return false; this.querySelector('[name=new_name]').value=n;\">"
+        f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
+        f"<input type='hidden' name='new_name' value=''>"
+        f"<button type='submit' style='background:transparent;border:0;color:#888;font-size:13px;cursor:pointer;padding:4px 8px'>✏ renommer</button>"
+        f"</form>"
+        f"<form method='POST' action='/chatting/delete_edt' style='display:inline;margin:0' "
+        f"onsubmit=\"return confirm('Supprimer ce planning et toutes ses lignes ?')\">"
+        f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
+        f"<button type='submit' style='background:transparent;border:0;color:#ef4444;font-size:13px;cursor:pointer;padding:4px 8px'>🗑 supprimer</button>"
+        f"</form>"
+    )
+
+    # === Construction du tableau ===
+    # Group rows by creneau (et conserve l ordre des creneaux)
+    rows_by_cre = {c: [] for c in chatting.CRENEAUX}
+    for r in active_edt.get("rows", []):
+        c = r.get("creneau", "02h-08h")
+        if c not in rows_by_cre:
+            c = "02h-08h"
+        rows_by_cre[c].append(r)
+
+    # Genere les options pour les selects
+    statut_opts = lambda v: "".join(
+        f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.STATUTS
+    )
+    off_opts = lambda v: "<option value=''></option>" + "".join(
+        f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.OFF_OPTIONS
+    )
+    modele_opts = lambda v: "".join(
+        f"<option value=\"{s}\" {'selected' if s == v else ''}>{s or '(vide)'}</option>"
+        for s in chatting.DEFAULT_MODELES
+    ) + (
+        f"<option value=\"{v}\" selected>{v}</option>"
+        if v and v not in chatting.DEFAULT_MODELES else ""
+    )
+    pres_opts = lambda v: "".join(
+        f"<option value='{p}' {'selected' if p == v else ''}>{p}</option>"
+        for p in chatting.PRESENCE_VALUES
+    )
+
+    def _select_cell(row_id, field, value, opts_html, bg, fg, width=None):
+        wstyle = f"width:{width}px;" if width else ""
+        return (
+            f"<select class='chat-cell' data-row='{row_id}' data-field='{field}' "
+            f"onchange='saveCell(this)' "
+            f"style='{wstyle}background:{bg};color:{fg};border:0;padding:6px 4px;"
+            f"border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center'>"
+            f"{opts_html}</select>"
+        )
+
+    def _input_cell(row_id, field, value, placeholder=""):
+        return (
+            f"<input type='text' class='chat-cell' data-row='{row_id}' data-field='{field}' "
+            f"value='{(value or '').replace(chr(39), chr(39)+chr(39))}' placeholder='{placeholder}' "
+            f"onchange='saveCell(this)' "
+            f"style='background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;"
+            f"border-radius:6px;font-size:12px;width:120px'>"
+        )
+
+    body_rows = []
+    for creneau in chatting.CRENEAUX:
+        rows_in = rows_by_cre.get(creneau, [])
+        cre_color = creneau_colors[creneau]
+        first = True
+        for r in rows_in:
+            counts = chatting.row_counts(r)
+            cre_cell = ""
+            if first:
+                cre_cell = (
+                    f"<td rowspan='{len(rows_in)}' "
+                    f"style='background:{cre_color};color:#fff;font-weight:700;text-align:center;"
+                    f"font-size:13px;padding:8px;writing-mode:initial;border-right:2px solid #0a0a0a'>"
+                    f"{creneau.replace('h-', 'h - ').replace('-', ' - ')}h"
+                    f"</td>"
+                )
+                first = False
+            # Pseudo
+            pseudo_cell = f"<td style='padding:4px 6px'>{_input_cell(r['id'], 'pseudo', r.get('pseudo', ''), 'Pseudo')}</td>"
+            # Statut
+            sc = statut_colors.get(r.get("statut", "Nouveau"), statut_colors["Nouveau"])
+            statut_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'statut', r.get('statut', 'Nouveau'), statut_opts(r.get('statut', 'Nouveau')), sc['bg'], sc['fg'], 90)}</td>"
+            # Modele
+            modele_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'modele', r.get('modele', ''), modele_opts(r.get('modele', '')), '#1a1a1a', '#fff', 150)}</td>"
+            # OFF
+            off_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'off', r.get('off', ''), off_opts(r.get('off', '')), '#1a1a1a', '#aaa', 110)}</td>"
+            # Days
+            day_cells = ""
+            for dk in chatting.DAYS:
+                pv = r.get("presence", {}).get(dk, "Present")
+                pc = pres_colors.get(pv, pres_colors["Present"])
+                day_cells += f"<td style='padding:4px 4px'>{_select_cell(r['id'], dk, pv, pres_opts(pv), pc['bg'], pc['fg'], 85)}</td>"
+            # Retards/absences
+            retards_cell = f"<td id='retards-{r['id']}' style='text-align:center;color:{'#fb923c' if counts['retards'] else '#666'};font-weight:700;padding:6px'>{counts['retards']}</td>"
+            absences_cell = f"<td id='absences-{r['id']}' style='text-align:center;color:{'#ef4444' if counts['absences'] else '#666'};font-weight:700;padding:6px'>{counts['absences']}</td>"
+            # Delete
+            del_btn = f"<td style='text-align:center'><button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px'>×</button></td>"
+            body_rows.append(
+                f"<tr>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
+            )
+        # Bouton "+ ajouter ligne" sous chaque creneau
+        body_rows.append(
+            f"<tr><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
+            f"<form method='POST' action='/chatting/add_row' style='margin:0'>"
+            f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
+            f"<input type='hidden' name='creneau' value='{creneau}'>"
+            f"<button type='submit' style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%'>"
+            f"+ ajouter une ligne sur {creneau}</button>"
+            f"</form>"
+            f"</td></tr>"
+        )
+
+    # Header tableau
+    day_headers = "".join(
+        f"<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 8px;font-size:12px'>{d}</th>"
+        for d in chatting.DAYS_FULL
+    )
+    header = (
+        "<thead><tr>"
+        "<th style='background:#0a0a0a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px;border-right:2px solid #0a0a0a;width:80px'>Creneau</th>"
+        "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Pseudo</th>"
+        "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Statut</th>"
+        "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Modele</th>"
+        "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>OFF</th>"
+        + day_headers +
+        "<th style='background:#1a1a1a;color:#fb923c;font-weight:700;padding:10px 6px;font-size:12px'>Retards</th>"
+        "<th style='background:#1a1a1a;color:#ef4444;font-weight:700;padding:10px 6px;font-size:12px'>Absences</th>"
+        "<th style='background:#1a1a1a'></th>"
+        "</tr></thead>"
+    )
+    table = (
+        f"<div style='overflow-x:auto;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px'>"
+        f"<table style='width:100%;border-collapse:separate;border-spacing:0;font-size:12px'>"
+        f"{header}<tbody>{''.join(body_rows)}</tbody></table></div>"
+    )
+
+    # Footer legend
+    legend = (
+        "<div style='margin-top:14px;padding:12px 16px;background:#161616;border:1px solid #232323;border-radius:10px;display:flex;flex-wrap:wrap;gap:18px;font-size:12px'>"
+        "<span style='color:#666;letter-spacing:.5px;font-weight:600'>PRESENCE :</span>"
+        + "".join(
+            f"<span style='display:flex;align-items:center;gap:5px'><span style='width:14px;height:14px;background:{pres_colors[p]['bg']};border-radius:3px'></span>{p}</span>"
+            for p in chatting.PRESENCE_VALUES
+        )
+        + "<span style='color:#666;letter-spacing:.5px;font-weight:600;margin-left:16px'>STATUT :</span>"
+        + "".join(
+            f"<span style='display:flex;align-items:center;gap:5px'><span style='width:14px;height:14px;background:{statut_colors[s]['bg']};border-radius:3px'></span>{s}</span>"
+            for s in chatting.STATUTS
+        )
+        + "</div>"
+    )
+
+    js = """
+<script>
+async function saveCell(el){
+  const fd = new FormData();
+  fd.set('edt_id', '""" + active_edt['id'] + """');
+  fd.set('row_id', el.dataset.row);
+  fd.set('field', el.dataset.field);
+  fd.set('value', el.value);
+  // Si c'est un select de presence, mettre a jour la couleur immediatement
+  const PRES_COL = {Present:['#86efac','#14532d'], Absent:['#fca5a5','#7f1d1d'], Retard:['#fed7aa','#7c2d12'], Coupure:['#fef08a','#713f12'], OFF:['#525252','#e5e5e5']};
+  const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
+  if(PRES_COL[el.value] && ['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
+    el.style.background = PRES_COL[el.value][0];
+    el.style.color = PRES_COL[el.value][1];
+  }
+  if(STA_COL[el.value] && el.dataset.field === 'statut'){
+    el.style.background = STA_COL[el.value][0];
+    el.style.color = STA_COL[el.value][1];
+  }
+  await fetch('/chatting/update_cell', {method:'POST', body:fd});
+  // Update counts si on a touche un jour
+  if(['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
+    const row = el.dataset.row;
+    const cells = document.querySelectorAll('select[data-row=\"'+row+'\"]');
+    let ret=0, abs=0;
+    cells.forEach(c=>{
+      if(['lun','mar','mer','jeu','ven','sam','dim'].includes(c.dataset.field)){
+        if(c.value==='Retard') ret++;
+        else if(c.value==='Absent') abs++;
+      }
+    });
+    document.getElementById('retards-'+row).textContent = ret;
+    document.getElementById('absences-'+row).textContent = abs;
+    document.getElementById('retards-'+row).style.color = ret ? '#fb923c' : '#666';
+    document.getElementById('absences-'+row).style.color = abs ? '#ef4444' : '#666';
+  }
+}
+async function deleteRow(rid){
+  if(!confirm('Supprimer cette ligne ?')) return;
+  const fd = new FormData();
+  fd.set('edt_id', '""" + active_edt['id'] + """');
+  fd.set('row_id', rid);
+  await fetch('/chatting/delete_row', {method:'POST', body:fd});
+  location.reload();
+}
+</script>
+"""
+
+    return (
+        "<div style='max-width:1500px'>"
+        "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
+        "<p style='margin:0 0 16px;color:#888;font-size:13px'>"
+        f"Planning <b>{active_edt['name']}</b> — clique sur n importe quelle cellule pour la modifier."
+        "</p>"
+        # Tabs EDTs
+        "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;align-items:center'>"
+        + tabs_html + add_tab +
+        "</div>"
+        f"<div style='margin:0 0 14px;color:#666;font-size:11px'>{edt_actions}</div>"
+        + table
+        + legend
+        + js
+        + "</div>"
+    )
+
+
+def _render_mypulslive_html() -> str:
 
     # Identites pour le dropdown "Model"
     try:
@@ -11364,40 +11641,72 @@ def create_app():
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
 
-    @app.route("/chatting/add_shift", methods=["POST"])
-    def chatting_add_shift():
+    @app.route("/chatting/create_edt", methods=["POST"])
+    def chatting_create_edt():
         if not is_auth():
             return redirect("/")
-        try:
-            import chatting
-        except Exception as e:
-            return _error(f"❌ Module chatting indispo : {e}", tab="chatplanning")
-        res = chatting.add_shift(
-            chatter=request.form.get("chatter") or "",
-            day=(request.form.get("day") or "").strip(),
-            start=(request.form.get("start") or "").strip(),
-            end=(request.form.get("end") or "").strip(),
-            model=(request.form.get("model") or "").strip(),
-        )
-        if not res.get("ok"):
-            return _error(f"❌ {res.get('error', '?')}", tab="chatplanning")
-        return _success(f"✅ Shift ajoute pour {request.form.get('chatter')}", tab="chatplanning")
+        import chatting
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return _error("❌ Nom manquant", tab="chatplanning")
+        edt = chatting.create_edt(name)
+        return redirect(f"/?tab=chatplanning&edt_id={edt['id']}")
 
-    @app.route("/chatting/delete_shift", methods=["POST"])
-    def chatting_delete_shift():
+    @app.route("/chatting/rename_edt", methods=["POST"])
+    def chatting_rename_edt():
         if not is_auth():
             return redirect("/")
-        try:
-            import chatting
-        except Exception as e:
+        import chatting
+        chatting.rename_edt(
+            (request.form.get("edt_id") or "").strip(),
+            (request.form.get("new_name") or "").strip(),
+        )
+        return redirect(f"/?tab=chatplanning&edt_id={request.form.get('edt_id') or ''}")
+
+    @app.route("/chatting/delete_edt", methods=["POST"])
+    def chatting_delete_edt():
+        if not is_auth():
+            return redirect("/")
+        import chatting
+        chatting.delete_edt((request.form.get("edt_id") or "").strip())
+        return redirect("/?tab=chatplanning")
+
+    @app.route("/chatting/add_row", methods=["POST"])
+    def chatting_add_row():
+        if not is_auth():
+            return redirect("/")
+        import chatting
+        edt_id = (request.form.get("edt_id") or "").strip()
+        cre = (request.form.get("creneau") or "02h-08h").strip()
+        chatting.add_row(edt_id, cre)
+        return redirect(f"/?tab=chatplanning&edt_id={edt_id}")
+
+    @app.route("/chatting/delete_row", methods=["POST"])
+    def chatting_delete_row():
+        if not is_auth():
             from flask import jsonify
-            return jsonify({"ok": False, "error": str(e)})
-        sid = (request.form.get("shift_id") or "").strip()
-        if not sid:
-            from flask import jsonify
-            return jsonify({"ok": False, "error": "shift_id manquant"})
-        ok = chatting.delete_shift(sid)
+            return jsonify({"ok": False}), 401
+        import chatting
         from flask import jsonify
+        ok = chatting.delete_row(
+            (request.form.get("edt_id") or "").strip(),
+            (request.form.get("row_id") or "").strip(),
+        )
+        return jsonify({"ok": ok})
+
+    @app.route("/chatting/update_cell", methods=["POST"])
+    def chatting_update_cell():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False}), 401
+        import chatting
+        from flask import jsonify
+        ok = chatting.update_cell(
+            (request.form.get("edt_id") or "").strip(),
+            (request.form.get("row_id") or "").strip(),
+            (request.form.get("field") or "").strip(),
+            (request.form.get("value") or "").strip(),
+        )
         return jsonify({"ok": ok})
 
     @app.route("/mypulslive/reorder_creators", methods=["POST"])
