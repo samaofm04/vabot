@@ -864,6 +864,58 @@ window.addEventListener('DOMContentLoaded', function(){
     if(btn) btn.click();  // Synchrone (pas de setTimeout pour éviter flicker)
   }
 });
+// === Reel hover play + expand panel ===
+window.igHoverPlay = function(media){
+  if(!media) return;
+  var v = media.querySelector('.reel-video');
+  if(!v) return;
+  try{ v.muted = true; v.currentTime = 0; }catch(e){}
+  v.style.opacity = '1';
+  var p = v.play();
+  if(p && p.catch) p.catch(function(){});
+};
+window.igHoverStop = function(media){
+  if(!media) return;
+  var v = media.querySelector('.reel-video');
+  if(!v) return;
+  try{ v.pause(); }catch(e){}
+  v.style.opacity = '0';
+};
+window.toggleReelExpand = function(card){
+  if(!card) return;
+  var panel = card.querySelector('.reel-expand');
+  var chev = card.querySelector('.reel-chevron');
+  if(!panel) return;
+  var isOpen = panel.style.display !== 'none' && panel.style.display !== '';
+  if(isOpen){
+    panel.style.display = 'none';
+    if(chev) chev.style.transform = 'rotate(0deg)';
+  } else {
+    panel.style.display = '';
+    if(chev) chev.style.transform = 'rotate(180deg)';
+    // Charge la duree depuis le video element
+    var v = card.querySelector('.reel-video');
+    var label = panel.querySelector('.reel-dur-label');
+    if(v && label){
+      if(v.duration && !isNaN(v.duration)){
+        var d = Math.round(v.duration);
+        label.textContent = Math.floor(d/60) + ':' + ('0' + (d%60)).slice(-2);
+      } else {
+        // Pas encore chargee : ecoute l'event loadedmetadata
+        v.addEventListener('loadedmetadata', function(){
+          if(v.duration && !isNaN(v.duration)){
+            var d = Math.round(v.duration);
+            label.textContent = Math.floor(d/60) + ':' + ('0' + (d%60)).slice(-2);
+          }
+        }, {once:true});
+        // Force le chargement si preload='none'
+        if(v.preload === 'none') v.preload = 'metadata';
+        try{ v.load(); }catch(e){}
+      }
+    }
+  }
+};
+
 function igPeriod(btn, period){
   document.querySelectorAll('.ig-period').forEach(function(b){
     b.style.background='none';
@@ -5737,8 +5789,8 @@ def _render_insta_trends_grid_html() -> str:
         cards.append(f"""
 <div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
-       onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.currentTime=0;v.muted=true;v.style.opacity=1;v.play().catch(function(){{}});}}'
-       onmouseleave='var v=this.querySelector(".reel-video");if(v){{v.pause();v.style.opacity=0}}'
+       onmouseenter='igHoverPlay(this)'
+       onmouseleave='igHoverStop(this)'
        onclick='window.open("{url}","_blank")'>
     <img src="{thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">
     {video_html}
@@ -5771,12 +5823,19 @@ def _render_insta_trends_grid_html() -> str:
     <!-- Trending indicator + username at bottom -->
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.9),transparent);padding:8px 10px;z-index:2">
       {trending_html}
-      <button onclick='event.stopPropagation();openReelDetails(this.closest(".reel-card"))' title="Voir caption, son, durée" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
+      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Voir caption, son, durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
         {avatar}<span style="flex:1">@{owner}</span>
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:#3b82f6;border-radius:50%">
-          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </span>
+        <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .2s"><polyline points="6 15 12 9 18 15"/></svg>
       </button>
+    </div>
+  </div>
+  <!-- Expand panel : caption + sound (cachee par defaut) -->
+  <div class="reel-expand" style="display:none;padding:12px;background:#0f0f0f;border-top:1px solid #232323;font-size:12.5px;color:#ddd;line-height:1.5">
+    <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto">{caption_short if caption_short else '<span style=color:#666>Aucune caption</span>'}</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #1a1a1a;color:#888;font-size:11.5px">
+      <span style="color:#3b82f6">🎵</span> <span>Sound:</span>
+      <span style="color:#ccc">Original audio</span>
+      <span style="margin-left:auto;color:#3b82f6;font-weight:700" class="reel-dur-label">--:--</span>
     </div>
   </div>
 </div>""")
