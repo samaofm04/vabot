@@ -1970,9 +1970,9 @@ function showFeed(btn,name){
   </div>
 
   <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:4px;display:flex;gap:2px">
-    <button onclick="igPeriod(this,'day')" class="ig-period" style="padding:8px 22px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0">Day</button>
-    <button onclick="igPeriod(this,'week')" class="ig-period active" style="padding:8px 22px;background:#2a2a2a;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0">Week</button>
-    <button onclick="igPeriod(this,'month')" class="ig-period" style="padding:8px 22px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0">Month</button>
+    <button onclick="igPeriod(this,'day')" class="ig-period" style="padding:8px 18px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0" title="Reels des dernieres 24h">24h</button>
+    <button onclick="igPeriod(this,'week')" class="ig-period active" style="padding:8px 18px;background:#2a2a2a;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0" title="Reels des 7 derniers jours">7j</button>
+    <button onclick="igPeriod(this,'month')" class="ig-period" style="padding:8px 18px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0" title="Reels des 30 derniers jours">30j</button>
   </div>
 
   <div style="position:relative;margin-left:auto">
@@ -2048,6 +2048,80 @@ function showFeed(btn,name){
 <div id="feed-veille" class="ig-feed-content" style="display:none">
 {veille_feed_html}
 </div>
+
+<!-- Modal details reel (sound, caption, duration) -->
+<div id="reel-details-modal" onclick="if(event.target===this)closeReelDetails()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:9999;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#161616;border:1px solid #2a2a2a;border-radius:16px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;color:#fff">
+    <div style="position:relative">
+      <video id="reel-details-video" controls muted loop style="width:100%;max-height:60vh;background:#000;display:block;border-radius:16px 16px 0 0"></video>
+      <button onclick="closeReelDetails()" style="position:absolute;top:12px;right:12px;width:32px;height:32px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;color:#fff;border-radius:50%;cursor:pointer;font-size:18px;line-height:1">×</button>
+    </div>
+    <div style="padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <img id="reel-details-pp" style="width:36px;height:36px;border-radius:50%;object-fit:cover">
+        <div style="flex:1">
+          <div id="reel-details-owner" style="font-weight:700;font-size:15px">@?</div>
+          <div id="reel-details-time" style="color:#888;font-size:11px"></div>
+        </div>
+        <a id="reel-details-igbtn" href="#" target="_blank" style="background:#3b82f6;color:#fff;text-decoration:none;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700">Voir sur Instagram</a>
+      </div>
+      <div style="display:flex;gap:14px;color:#aaa;font-size:13px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #232323">
+        <span id="reel-details-views" style="display:flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg> <span></span></span>
+        <span id="reel-details-likes" style="display:flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> <span></span></span>
+        <span id="reel-details-comments" style="display:flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> <span></span></span>
+        <span id="reel-details-duration" style="margin-left:auto;display:flex;align-items:center;gap:5px;color:#3b82f6;font-weight:700"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> <span>...</span></span>
+      </div>
+      <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Caption</div>
+      <div id="reel-details-caption" style="color:#ddd;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word;max-height:160px;overflow-y:auto;margin-bottom:14px"></div>
+      <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;font-weight:700;margin-bottom:6px">🎵 Sound</div>
+      <div id="reel-details-sound" style="color:#aaa;font-size:13px;font-style:italic">Info son pas disponible via le scraper</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openReelDetails(card){
+  if(!card) return;
+  const modal = document.getElementById('reel-details-modal');
+  if(!modal) return;
+  // Charge la video
+  const videoEl = document.getElementById('reel-details-video');
+  const videoUrl = card.dataset.videoUrl;
+  const thumb = card.dataset.thumb;
+  if(videoUrl){
+    videoEl.src = videoUrl;
+    videoEl.poster = thumb || '';
+    videoEl.play().catch(()=>{});
+    // Recupere la duree quand la video est chargee
+    videoEl.onloadedmetadata = function(){
+      const d = Math.round(videoEl.duration || 0);
+      const min = Math.floor(d/60), sec = (d%60).toString().padStart(2,'0');
+      const durEl = document.querySelector('#reel-details-duration span');
+      if(durEl) durEl.textContent = min + ':' + sec;
+    };
+  }
+  document.getElementById('reel-details-owner').textContent = '@' + (card.dataset.owner||'?');
+  document.getElementById('reel-details-time').textContent = card.dataset.timeAgo || '';
+  const pp = document.getElementById('reel-details-pp');
+  if(card.dataset.ownerPp){ pp.src = card.dataset.ownerPp; pp.style.display=''; } else { pp.style.display = 'none'; }
+  document.getElementById('reel-details-caption').textContent = card.dataset.caption || '(aucune caption)';
+  document.querySelector('#reel-details-views span').textContent = card.dataset.views || '0';
+  document.querySelector('#reel-details-likes span').textContent = card.dataset.likes || '0';
+  document.querySelector('#reel-details-comments span').textContent = card.dataset.comments || '0';
+  const igBtn = document.getElementById('reel-details-igbtn');
+  if(igBtn && card.dataset.url) igBtn.href = card.dataset.url;
+  modal.style.display = 'flex';
+}
+function closeReelDetails(){
+  const modal = document.getElementById('reel-details-modal');
+  const videoEl = document.getElementById('reel-details-video');
+  if(videoEl){ videoEl.pause(); videoEl.src = ''; }
+  if(modal) modal.style.display = 'none';
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeReelDetails();
+});
+</script>
 
 </div><!-- /form-igtrends -->
 
@@ -5658,7 +5732,7 @@ def _render_insta_trends_grid_html() -> str:
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
         cards.append(f"""
-<div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+<div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='var v=this.querySelector(".reel-video");if(v){{v.play();v.style.opacity=1}}'
        onmouseleave='var v=this.querySelector(".reel-video");if(v){{v.pause();v.style.opacity=0}}'
@@ -5694,10 +5768,10 @@ def _render_insta_trends_grid_html() -> str:
     <!-- Trending indicator + username at bottom -->
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:8px 10px;z-index:2">
       {trending_html}
-      <a href="https://www.instagram.com/{owner}/" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:6px;color:#fff;text-decoration:none;font-size:12px;font-weight:600">
-        {avatar}@{owner}
+      <button onclick='event.stopPropagation();openReelDetails(this.parentNode.parentNode)' style="display:flex;align-items:center;gap:6px;color:#fff;background:transparent;border:0;cursor:pointer;font-size:12px;font-weight:600;width:100%;padding:0;text-align:left;font-family:inherit">
+        {avatar}<span>@{owner}</span>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
-      </a>
+      </button>
     </div>
   </div>
 </div>""")
