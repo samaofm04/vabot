@@ -8203,6 +8203,52 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
 
     {campaigns_html}
 
+    <!-- Planning mensuel par createur -->
+    <div class='mpl-row' id='mpl-calendar-block' style='margin-bottom:18px'>
+      <div class='mpl-row-head' onclick='mplToggle(this.parentElement); if(this.parentElement.classList.contains("open")) loadCalendar();'>
+        <div class='mpl-row-icon' style='background:rgba(168,85,247,.12);color:#a855f7'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
+        <div class='mpl-row-text'>
+          <div class='mpl-row-title'>📅 Planning <span class='mpl-mini-badge' id='mpl-cal-month-badge' style='background:rgba(168,85,247,.15);color:#a855f7'></span></div>
+          <div class='mpl-row-sub'>Calendrier des events planifies pour le createur selectionne</div>
+        </div>
+        <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+      </div>
+      <div class='mpl-row-body'>
+        <!-- Header navigation mois -->
+        <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px'>
+          <div style='display:flex;align-items:center;gap:4px'>
+            <button type='button' onclick='calNav(-1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>‹</button>
+            <button type='button' onclick='calNav(1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>›</button>
+            <h4 id='mpl-cal-month-name' style='margin:0 0 0 10px;font-size:15px;font-weight:600;color:#fff;text-transform:capitalize'>mois</h4>
+          </div>
+          <div style='display:flex;align-items:center;gap:12px;font-size:11px;color:#888'>
+            <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#22c55e;border-radius:3px'></span>Posts</span>
+            <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#3b82f6;border-radius:3px'></span>Stories</span>
+            <button type='button' onclick='calToday()' style='padding:5px 11px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>Aujourd hui</button>
+          </div>
+        </div>
+
+        <!-- Header jours de la semaine -->
+        <div style='display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px'>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Lun</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mar</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mer</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Jeu</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Ven</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Sam</div>
+          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Dim</div>
+        </div>
+
+        <!-- Grille du mois (rempli en JS) -->
+        <div id='mpl-cal-grid' style='display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid #1a1a1a;border-left:1px solid #1a1a1a;border-radius:8px;overflow:hidden;min-height:240px'>
+          <div style='grid-column:1/-1;padding:60px;text-align:center;color:#666;font-size:13px'>Clique pour charger le planning</div>
+        </div>
+
+        <!-- Detail jour selectionne -->
+        <div id='mpl-cal-day-detail' style='display:none;margin-top:14px;padding:14px;background:#0f0f0f;border:1px solid #232323;border-radius:10px'></div>
+      </div>
+    </div>
+
     <div class='mpl-stats'>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div><div class='mpl-stat-lbl'>CAPTIONS</div></div>
@@ -8467,6 +8513,135 @@ function unselectAll(){{
   document.querySelectorAll('.mpl-event-cb').forEach(cb=>cb.checked=false);
   updateDeleteSel();
 }}
+// === CALENDRIER MENSUEL ===
+let __calYear, __calMonth;
+const FR_MONTHS = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+
+function calToday(){{
+  const d = new Date();
+  __calYear = d.getFullYear();
+  __calMonth = d.getMonth();
+  loadCalendar();
+}}
+function calNav(delta){{
+  if(__calYear===undefined){{ calToday(); return; }}
+  __calMonth += delta;
+  if(__calMonth < 0){{ __calMonth = 11; __calYear--; }}
+  if(__calMonth > 11){{ __calMonth = 0; __calYear++; }}
+  loadCalendar();
+}}
+async function loadCalendar(){{
+  if(__calYear===undefined){{
+    const d = new Date();
+    __calYear = d.getFullYear();
+    __calMonth = d.getMonth();
+  }}
+  const cid = document.getElementById('mpl-creator-id').value;
+  if(!cid){{ return; }}
+  // Update header
+  document.getElementById('mpl-cal-month-name').textContent = FR_MONTHS[__calMonth] + ' ' + __calYear;
+  document.getElementById('mpl-cal-month-badge').textContent = '...';
+
+  // Range : 1er du mois -> dernier du mois
+  const d1 = new Date(__calYear, __calMonth, 1);
+  const dLast = new Date(__calYear, __calMonth+1, 0);
+  const pad = n=>String(n).padStart(2,'0');
+  const startStr = __calYear+'-'+pad(__calMonth+1)+'-01';
+  const endStr = __calYear+'-'+pad(__calMonth+1)+'-'+pad(dLast.getDate());
+
+  try {{
+    const r = await fetch('/mypulslive/list_events?creator='+cid+'&start='+startStr+'&end='+endStr);
+    const j = await r.json();
+    if(!j.ok){{
+      document.getElementById('mpl-cal-grid').innerHTML = '<div style=\"grid-column:1/-1;padding:30px;text-align:center;color:#f99;font-size:13px\">Erreur: '+(j.error||'?')+'</div>';
+      document.getElementById('mpl-cal-month-badge').textContent = '0';
+      return;
+    }}
+    renderCalendar(j.events || []);
+  }} catch(e){{
+    document.getElementById('mpl-cal-grid').innerHTML = '<div style=\"grid-column:1/-1;padding:30px;text-align:center;color:#f99;font-size:13px\">Erreur reseau: '+e+'</div>';
+  }}
+}}
+function renderCalendar(events){{
+  // Index events par date YYYY-MM-DD
+  const byDate = {{}};
+  events.forEach(e=>{{
+    const d = (e.start || '').substring(0, 10);
+    if(!byDate[d]) byDate[d] = {{post:[], story:[]}};
+    const t = (e.extendedProps||{{}}).type || 'feed';
+    if(t === 'story') byDate[d].story.push(e);
+    else byDate[d].post.push(e);
+  }});
+  document.getElementById('mpl-cal-month-badge').textContent = events.length + ' events';
+
+  // Build grid
+  const d1 = new Date(__calYear, __calMonth, 1);
+  const dLast = new Date(__calYear, __calMonth+1, 0);
+  // Monday=0 .. Sunday=6
+  let firstWd = d1.getDay() - 1;
+  if(firstWd < 0) firstWd = 6;
+  const daysInMonth = dLast.getDate();
+  const todayStr = new Date().toISOString().substring(0,10);
+
+  let html = '';
+  // Previous month padding
+  const prevLast = new Date(__calYear, __calMonth, 0).getDate();
+  for(let i = firstWd; i > 0; i--){{
+    const d = prevLast - i + 1;
+    html += '<div style=\"min-height:74px;background:transparent;border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:8px 10px;color:#444;font-size:13px\">'+d+'</div>';
+  }}
+  // Current month
+  const pad = n=>String(n).padStart(2,'0');
+  for(let d = 1; d <= daysInMonth; d++){{
+    const iso = __calYear+'-'+pad(__calMonth+1)+'-'+pad(d);
+    const data = byDate[iso] || {{post:[], story:[]}};
+    const nbPost = data.post.length;
+    const nbStory = data.story.length;
+    const isToday = (iso === todayStr);
+    const bg = isToday ? '#0f1a2e' : 'transparent';
+    const weight = isToday ? 700 : 500;
+    const totalEvents = nbPost + nbStory;
+    html += '<div onclick=\"calDayDetail(\\''+iso+'\\')\" style=\"min-height:74px;background:'+bg+';border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:background .12s\" onmouseover=\"this.style.background=\\'#15100d\\'\" onmouseout=\"this.style.background=\\''+bg+'\\'\">'
+      + '<div style=\"font-size:13px;font-weight:'+weight+';color:#fff\">'+d+'</div>'
+      + '<div style=\"display:flex;flex-direction:column;gap:2px;margin-top:auto\">';
+    if(nbPost > 0) html += '<div style=\"background:rgba(34,197,94,.18);color:#22c55e;font-size:10px;padding:2px 5px;border-radius:4px;font-weight:600\">'+nbPost+' post'+(nbPost>1?'s':'')+'</div>';
+    if(nbStory > 0) html += '<div style=\"background:rgba(59,130,246,.18);color:#3b82f6;font-size:10px;padding:2px 5px;border-radius:4px;font-weight:600\">'+nbStory+' story'+(nbStory>1?'s':'')+'</div>';
+    html += '</div></div>';
+  }}
+  // Next month padding
+  const totalCells = firstWd + daysInMonth;
+  const padding = (Math.ceil(totalCells / 7) * 7) - totalCells;
+  for(let i = 1; i <= padding; i++){{
+    html += '<div style=\"min-height:74px;background:transparent;border-right:1px solid #1a1a1a;border-bottom:1px solid #1a1a1a;padding:8px 10px;color:#444;font-size:13px\">'+i+'</div>';
+  }}
+  document.getElementById('mpl-cal-grid').innerHTML = html;
+  window.__calEvents = byDate;
+  document.getElementById('mpl-cal-day-detail').style.display = 'none';
+}}
+function calDayDetail(iso){{
+  const byDate = window.__calEvents || {{}};
+  const data = byDate[iso] || {{post:[], story:[]}};
+  const det = document.getElementById('mpl-cal-day-detail');
+  const all = [...data.post, ...data.story].sort((a,b)=>a.start.localeCompare(b.start));
+  if(!all.length){{
+    det.innerHTML = '<div style=\"color:#666;text-align:center;padding:14px;font-size:13px\">Aucun event sur le <b>'+iso+'</b></div>';
+    det.style.display = '';
+    return;
+  }}
+  let html = '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:10px\"><strong style=\"color:#fff;font-size:14px\">'+iso+'</strong><span style=\"color:#888;font-size:12px\">'+all.length+' event(s)</span></div>';
+  html += all.map(e=>{{
+    const ep = e.extendedProps||{{}};
+    const typ = ep.type || 'feed';
+    const time = (e.start||'').substring(11,16);
+    const title = (e.title||'').substring(0,60);
+    const color = typ==='story'?'#3b82f6':'#22c55e';
+    const bg = 'rgba('+(typ==='story'?'59,130,246':'34,197,94')+',.10)';
+    return '<div style=\"display:flex;align-items:center;gap:10px;padding:7px 10px;background:'+bg+';border-radius:6px;margin-bottom:4px;font-size:12.5px\"><span style=\"color:'+color+';font-weight:700;font-family:monospace\">'+time+'</span><span style=\"color:'+color+';font-size:10px;padding:1px 6px;background:'+color+';color:#fff;border-radius:3px\">'+typ.toUpperCase()+'</span><span style=\"flex:1;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">'+title+'</span></div>';
+  }}).join('');
+  det.innerHTML = html;
+  det.style.display = '';
+}}
+
 async function quickClean(){{
   const cid = document.getElementById('mpl-creator-id').value;
   if(!cid){{ alert('Pas de createur'); return; }}
@@ -8543,6 +8718,9 @@ function selectCreator(cid, name){{
   if(el) el.innerHTML = '';
   var es = document.getElementById('mpl-events-status');
   if(es){{ es.textContent = 'Choisis une periode + clique "Charger events"'; es.style.color='#888'; }}
+  // Reload calendrier si visible
+  var cal = document.getElementById('mpl-calendar-block');
+  if(cal && cal.classList.contains('open')) loadCalendar();
 }}
 function updateMediaCount(){{
   const ta = document.getElementById('mpl-media-ids');
@@ -8606,6 +8784,11 @@ switchTab('post');
 updatePostAction();
 updateMediaCount();
 updateCapCount();
+// Init calendrier au mois courant (sans charger : c'est collapsible)
+const __initD = new Date();
+__calYear = __initD.getFullYear();
+__calMonth = __initD.getMonth();
+document.getElementById('mpl-cal-month-name').textContent = FR_MONTHS[__calMonth] + ' ' + __calYear;
 </script>
 """)
 
