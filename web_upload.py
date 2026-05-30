@@ -7884,7 +7884,7 @@ body.light .mpl-cr-card.active{background:linear-gradient(135deg,#dbeafe,#ede9fe
 .mpl-pillnav button.active{background:#1f1f1f;color:#fff;box-shadow:0 0 0 1px #333 inset}
 .mpl-pillnav button.active[data-tab=post]{background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.08));color:#22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.4) inset}
 .mpl-pillnav button.active[data-tab=story]{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(59,130,246,.08));color:#3b82f6;box-shadow:0 0 0 1px rgba(59,130,246,.4) inset}
-.mpl-pillnav button.active[data-tab=delete]{background:linear-gradient(135deg,rgba(239,68,68,.15),rgba(239,68,68,.08));color:#ef4444;box-shadow:0 0 0 1px rgba(239,68,68,.4) inset}
+.mpl-pillnav button.active[data-tab=delete]{background:linear-gradient(135deg,rgba(168,85,247,.15),rgba(168,85,247,.08));color:#a855f7;box-shadow:0 0 0 1px rgba(168,85,247,.4) inset}
 body.light .mpl-pillnav{background:#f3f4f6;border-color:#e5e7eb}
 body.light .mpl-pillnav button{color:#6b7280}
 body.light .mpl-pillnav button:hover{background:#fff;color:#111}
@@ -7926,8 +7926,8 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       Auto-Story
     </button>
     <button type='button' data-tab='delete' onclick='switchTab("delete")'>
-      <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/><line x1='10' x2='10' y1='11' y2='17'/><line x1='14' x2='14' y1='11' y2='17'/></svg>
-      Auto-Delete
+      <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/><path d='M8 14h.01'/><path d='M12 14h.01'/><path d='M16 14h.01'/><path d='M8 18h.01'/><path d='M12 18h.01'/><path d='M16 18h.01'/></svg>
+      Emploi du temps
     </button>
   </div>
 
@@ -8369,13 +8369,13 @@ function switchTab(tab){{
   const lbl = document.querySelector('.mpl-stat-lbl-perday');
   if(lbl){{
     if(showStories) lbl.textContent = 'STORIES / JOUR';
-    else if(showDelete) lbl.textContent = 'A SUPPRIMER';
+    else if(showDelete) lbl.textContent = 'EVENTS PLANIFIES';
     else lbl.textContent = 'POSTS / JOUR';
   }}
   const v = document.getElementById('mpl-stat-perday');
   if(v){{
     if(showStories) v.textContent = storySlots.length;
-    else if(showDelete) v.textContent = parseSelectedIds().length;
+    else if(showDelete) v.textContent = document.getElementById('mpl-cal-month-badge') ? document.getElementById('mpl-cal-month-badge').textContent.replace(' events','') : '0';
     else v.textContent = postSlots.length;
   }}
   // Bouton push : adapter le texte
