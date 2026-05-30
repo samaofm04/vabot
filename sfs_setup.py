@@ -209,14 +209,17 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     Pour chaque createur, switche le contexte puis appelle les endpoints
     DataTables qui renvoient {recordsTotal: N}.
 
-    Endpoints utilises (reverse-engineered) :
-    - GET /switch-creator/<id>?from=app_fans  (bascule le contexte)
-    - GET /fans/data?old=0  -> abonnes actuels
-    - GET /fans/data?old=1  -> anciens abonnes
-    - GET /fans/new/data    -> interesses
+    Endpoints utilises (reverse-engineered, verifies en live) :
+    - GET  /switch-creator/<id>?from=app_fans  -> bascule le contexte
+    - GET  /fans/data?old=0    -> abonnes actuels (DataTables)
+    - GET  /fans/data?old=1    -> anciens abonnes
+    - POST /interested/data    -> vrais "Interesses" (NON /fans/new qui
+      est en fait "Nouveaux abonnes 48h" - tres different)
+      Requiert _token CSRF + corps DataTables minimum
 
     Retourne {identity_lowercase: {"abonnes": "N", "anciens": "M", "interesses": "K"}}
     """
+    import re as _re
     out: Dict[str, Dict[str, str]] = {}
     try:
         import mypuls
@@ -233,18 +236,40 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
         return out
     headers = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 
-    def _count(path: str) -> str:
+    def _grab_csrf(html: str) -> str:
+        for pat in (
+            r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)',
+            r'name=["\']_token["\']\s+value=["\']([^"\']+)',
+        ):
+            m = _re.search(pat, html)
+            if m:
+                return m.group(1)
+        return ""
+
+    def _count_get(path: str) -> str:
         try:
             r = s.get(f"{mypuls.BASE_URL}{path}", timeout=20, headers=headers)
             if r.status_code != 200:
                 return ""
-            j = r.json()
-            tot = j.get("recordsTotal")
-            if isinstance(tot, int):
-                return str(tot)
+            tot = r.json().get("recordsTotal")
+            return str(tot) if isinstance(tot, int) else ""
         except Exception:
             return ""
-        return ""
+
+    def _count_post(path: str, csrf: str) -> str:
+        try:
+            r = s.post(
+                f"{mypuls.BASE_URL}{path}",
+                data={"draw": "1", "start": "0", "length": "10", "_token": csrf},
+                timeout=20,
+                headers=headers,
+            )
+            if r.status_code != 200:
+                return ""
+            tot = r.json().get("recordsTotal")
+            return str(tot) if isinstance(tot, int) else ""
+        except Exception:
+            return ""
 
     for name, cid in creators_map.items():
         try:
@@ -254,10 +279,19 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
                 timeout=15,
                 allow_redirects=True,
             )
-            # Get les 3 counts
-            abonnes = _count("/fans/data?old=0")
-            anciens = _count("/fans/data?old=1")
-            interesses = _count("/fans/new/data")
+            abonnes = _count_get("/fans/data?old=0")
+            anciens = _count_get("/fans/data?old=1")
+            # Pour les "vrais" interesses, on doit POST /interested/data avec un CSRF
+            # token frais (lie au scope du createur courant)
+            interesses = ""
+            try:
+                rp = s.get(f"{mypuls.BASE_URL}/interested", timeout=15)
+                if rp.status_code == 200:
+                    csrf = _grab_csrf(rp.text)
+                    if csrf:
+                        interesses = _count_post("/interested/data", csrf)
+            except Exception:
+                pass
             out[name.lower().strip()] = {
                 "abonnes": abonnes,
                 "anciens": anciens,
