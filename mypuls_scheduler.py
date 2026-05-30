@@ -474,20 +474,45 @@ def schedule_post(
 
 # ============ High-level bulk scheduling ============
 
+def _parse_time_slot(s: str) -> Optional[tuple]:
+    """Parse "HH:MM" en (hour, minute). Retourne None si invalide."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        # Accepter "9", "09:30", "9:0", "13:00"
+        if ":" in s:
+            hh, mm = s.split(":", 1)
+            h = int(hh)
+            m = int(mm)
+        else:
+            h = int(s)
+            m = 0
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return (h, m)
+    except Exception:
+        pass
+    return None
+
+
 def bulk_schedule_stories(
     creator_id: int,
     media_ids: List[int],
     date_start: str,
     date_end: str,
-    hour_slots: List[int],
+    story_slots: List[str],  # ["HH:MM", ...]
     audience: str = "everyone",
     auto_delete_after_sec: Optional[int] = None,
+    shuffle_media: bool = False,
+    randomize_minutes: bool = True,
+    # Backward compat : hour_slots (int) accepte aussi
+    hour_slots: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Planifie en masse des stories. Une story par (jour, heure_slot).
+    """Planifie en masse des stories.
 
-    Minutes randomisees entre 3 et 25. Media IDs recycles en ordre.
-    Si auto_delete_after_sec : la story sera supprimee X secondes apres
-    sa publication (gere cote nous, pas MyPuls).
+    story_slots = liste de "HH:MM". Si randomize_minutes=True, on randomise
+    les minutes entre 3 et 25 (override le MM specifie).
+    shuffle_media : si True, shuffle l ordre des media_ids avant utilisation.
     """
     import random
     from datetime import datetime, timedelta
@@ -503,8 +528,21 @@ def bulk_schedule_stories(
         return {"ok": False, "error": f"Date invalide : {e}"}
     if d_end < d_start:
         return {"ok": False, "error": "date_end < date_start"}
-    if not hour_slots:
-        return {"ok": False, "error": "Aucun creneau horaire"}
+
+    # Parse slots
+    parsed_slots: List[tuple] = []
+    if hour_slots:  # backward compat
+        parsed_slots = [(int(h), 0) for h in hour_slots]
+    for sl in (story_slots or []):
+        p = _parse_time_slot(sl)
+        if p:
+            parsed_slots.append(p)
+    if not parsed_slots:
+        return {"ok": False, "error": "Aucun creneau horaire valide"}
+
+    if shuffle_media:
+        media_ids = list(media_ids)
+        random.shuffle(media_ids)
 
     planned, failed = 0, 0
     errors: List[str] = []
@@ -512,8 +550,8 @@ def bulk_schedule_stories(
     media_idx = 0
     day = d_start
     while day <= d_end:
-        for h in hour_slots:
-            m = random.randint(3, 25)
+        for (h, base_m) in parsed_slots:
+            m = random.randint(3, 25) if randomize_minutes else base_m
             dt = datetime(day.year, day.month, day.day, h, m, 0)
             mid = media_ids[media_idx % len(media_ids)]
             res = schedule_story(
@@ -548,15 +586,20 @@ def bulk_schedule_posts(
     captions: List[str],
     date_start: str,
     date_end: str,
-    public_hours: List[int],
-    private_hours: List[int],
+    post_slots: List[Dict[str, str]],  # [{"time":"HH:MM", "visibility":"public"|"private"}, ...]
     action: str = "delete",
     delay_sec: int = 172800,
+    shuffle_media: bool = False,
+    randomize_minutes: bool = True,
+    # Backward compat
+    public_hours: Optional[List[int]] = None,
+    private_hours: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Planifie en masse des posts. Pour chaque jour :
-    - 1 post public par heure de public_hours
-    - 1 post prive par heure de private_hours
-    Minutes randomisees 3-25. Media IDs recycles. Captions tirees au hasard.
+    """Planifie en masse des posts.
+
+    post_slots = liste de {time:"HH:MM", visibility:"public"|"private"}.
+    Une publication par (jour, slot). Minutes randomisees 3-25 si
+    randomize_minutes=True.
     """
     import random
     from datetime import datetime, timedelta
@@ -574,8 +617,37 @@ def bulk_schedule_posts(
         return {"ok": False, "error": f"Date invalide : {e}"}
     if d_end < d_start:
         return {"ok": False, "error": "date_end < date_start"}
-    if not public_hours and not private_hours:
-        return {"ok": False, "error": "Aucun creneau horaire (public ou prive)"}
+
+    # Parse slots
+    parsed_slots: List[tuple] = []  # (hour, minute, visibility)
+    # backward compat
+    for h in (public_hours or []):
+        try:
+            parsed_slots.append((int(h), 0, "public"))
+        except Exception:
+            pass
+    for h in (private_hours or []):
+        try:
+            parsed_slots.append((int(h), 0, "private"))
+        except Exception:
+            pass
+    for sl in (post_slots or []):
+        p = _parse_time_slot(sl.get("time", ""))
+        if not p:
+            continue
+        vis = (sl.get("visibility") or "public").strip().lower()
+        if vis not in ("public", "private"):
+            vis = "public"
+        parsed_slots.append((p[0], p[1], vis))
+    if not parsed_slots:
+        return {"ok": False, "error": "Aucun slot post valide"}
+
+    if shuffle_media:
+        media_ids = list(media_ids)
+        random.shuffle(media_ids)
+
+    # Trier les slots par heure pour avoir un timeline propre
+    parsed_slots.sort(key=lambda x: (x[0], x[1]))
 
     planned, failed = 0, 0
     errors: List[str] = []
@@ -583,10 +655,8 @@ def bulk_schedule_posts(
     media_idx = 0
     day = d_start
     while day <= d_end:
-        slots = [(h, "public") for h in public_hours] + [(h, "private") for h in private_hours]
-        slots.sort()
-        for h, vis in slots:
-            m = random.randint(3, 25)
+        for (h, base_m, vis) in parsed_slots:
+            m = random.randint(3, 25) if randomize_minutes else base_m
             dt = datetime(day.year, day.month, day.day, h, m, 0)
             mid = media_ids[media_idx % len(media_ids)]
             cap = random.choice(captions)

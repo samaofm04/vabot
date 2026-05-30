@@ -7679,11 +7679,486 @@ def _render_schedule_html() -> str:
 
 
 def _render_mypulslive_html() -> str:
-    """Page MyPuls Live - look 'campagne' inspire de MyPuls.
+    """MyPuls Live - UI 'campagne' avec slots dynamiques (style MyPuls)."""
+    import datetime as _dt
+    try:
+        import mypuls
+        import mypuls_scheduler
+    except Exception as e:
+        return f"<p style='color:#f99'>Module mypuls indispo : {e}</p>"
 
-    Affiche une card par createur avec stats, sections collapsibles
-    (Planification, Boosts, Partage, Contenu).
-    """
+    if not mypuls.is_configured():
+        return (
+            "<div style='max-width:680px'>"
+            "<h2 style='margin:0 0 6px;font-size:20px'>MyPuls Live</h2>"
+            "<div style='background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
+            "border-radius:10px;padding:18px;color:#f99;margin-top:14px'>"
+            "<b>Cookies MyPuls non configures.</b><br>"
+            "Va dans <a href='?tab=mypuls' style='color:#3b82f6'>Settings → MyPuls</a> "
+            "et colle tes cookies avant d utiliser le scheduler live."
+            "</div></div>"
+        )
+
+    # Createurs
+    res = mypuls.list_creators()
+    creators_map = res.get("creators", {}) if res.get("ok") else {}
+
+    # Captions defaut
+    try:
+        from schedule_xlsx import DEFAULT_CAPTIONS
+        captions_default = "\n".join(DEFAULT_CAPTIONS)
+        captions_count = len(DEFAULT_CAPTIONS)
+    except Exception:
+        captions_default = ""
+        captions_count = 0
+
+    today = _dt.date.today()
+    week_later = today + _dt.timedelta(days=6)
+    d_start = today.isoformat()
+    d_end = week_later.isoformat()
+
+    creators_opts = "".join(
+        f"<option value='{cid}' data-name='{name}'>{name}</option>"
+        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
+    ) or "<option value=''>(aucun createur)</option>"
+
+    first_creator_name = ""
+    first_creator_id = 0
+    if creators_map:
+        first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
+        first_creator_id = creators_map[first_creator_name]
+
+    style = """
+<style>
+.mpl-shell{max-width:920px;margin:0 auto}
+.mpl-card{background:#161616;border:1px solid #232323;border-radius:18px;padding:28px;margin-bottom:22px}
+.mpl-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.mpl-name{font-size:24px;font-weight:700;color:#fff;display:flex;align-items:center;gap:10px;margin:6px 0}
+.mpl-badge{background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;padding:3px 12px;border-radius:14px;font-size:11px;font-weight:700;letter-spacing:.5px}
+.mpl-handle{color:#888;font-size:14px;margin-bottom:18px}
+.mpl-banner{display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.25);border-radius:14px;margin-bottom:18px}
+.mpl-banner-dot{width:10px;height:10px;border-radius:50%;background:#f59e0b}
+.mpl-banner-title{color:#fff;font-weight:600;font-size:14px;margin:0}
+.mpl-banner-sub{color:#888;font-size:12.5px;margin:2px 0 0}
+.mpl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.mpl-stat{background:#1a1a1a;border:1px solid #262626;border-radius:14px;padding:18px;text-align:center}
+.mpl-stat-num{font-size:30px;font-weight:800;color:#fff;line-height:1}
+.mpl-stat-lbl{font-size:11px;color:#888;letter-spacing:1px;margin-top:6px;text-transform:uppercase}
+.mpl-section-label{font-size:11px;color:#666;letter-spacing:1.5px;text-transform:uppercase;margin:14px 0 8px;padding-left:4px}
+.mpl-row{background:#1a1a1a;border:1px solid #262626;border-radius:14px;margin-bottom:8px;transition:background .15s}
+.mpl-row:hover{background:#1e1e1e}
+.mpl-row-head{display:flex;align-items:center;gap:14px;padding:16px 18px;cursor:pointer;user-select:none}
+.mpl-row-icon{width:38px;height:38px;border-radius:10px;background:#222;display:flex;align-items:center;justify-content:center;color:#aaa;flex-shrink:0}
+.mpl-row-icon svg{width:20px;height:20px}
+.mpl-row-text{flex:1;min-width:0}
+.mpl-row-title{color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.mpl-row-sub{color:#888;font-size:12.5px;margin-top:2px}
+.mpl-row-arrow{color:#888;transition:transform .15s}
+.mpl-row.open .mpl-row-arrow{transform:rotate(180deg)}
+.mpl-row-body{display:none;padding:0 18px 18px;border-top:1px solid #232323;margin-top:0}
+.mpl-row.open .mpl-row-body{display:block;padding-top:14px}
+.mpl-mini-badge{padding:2px 8px;font-size:10px;background:#262626;color:#888;border-radius:6px;letter-spacing:.5px;font-weight:700}
+.mpl-mini-badge.green{background:rgba(34,197,94,.15);color:#22c55e}
+.mpl-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* SLOTS */
+.mpl-count-input{width:90px;text-align:center;font-size:18px;font-weight:700;padding:8px 10px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;color:#fff}
+.mpl-slots{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.mpl-slot{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#0f0f0f;border:1px solid #232323;border-radius:12px}
+.mpl-slot-badge{flex-shrink:0;width:42px;height:28px;border-radius:14px;background:rgba(59,130,246,.12);color:#3b82f6;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:.5px}
+.mpl-slot-time{flex:1;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;color:#fff;font-size:14px;font-family:inherit}
+.mpl-slot-vis{flex-shrink:0;padding:7px 16px;border-radius:18px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #333;background:#1a1a1a;color:#aaa;display:flex;align-items:center;gap:6px;transition:.15s}
+.mpl-slot-vis.public{background:#3b82f6;color:#fff;border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6 inset}
+.mpl-slot-vis.private{background:#1a1a1a;color:#aaa}
+.mpl-slot-vis svg{width:13px;height:13px}
+.mpl-slot-rm{flex-shrink:0;width:28px;height:28px;border-radius:8px;background:transparent;border:0;color:#666;cursor:pointer;font-size:20px;line-height:1}
+.mpl-slot-rm:hover{color:#ef4444;background:rgba(239,68,68,.1)}
+
+/* TOGGLES (options) */
+.mpl-opt{display:flex;align-items:center;gap:14px;padding:14px 16px;background:#0f0f0f;border:1px solid #232323;border-radius:12px;margin-bottom:8px;cursor:pointer;transition:.15s}
+.mpl-opt:hover{background:#141414}
+.mpl-opt.active{background:linear-gradient(135deg,rgba(59,130,246,.12),rgba(168,85,247,.08));border-color:rgba(59,130,246,.35)}
+.mpl-opt-icon{width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mpl-opt-icon svg{width:18px;height:18px}
+.mpl-opt-text{flex:1}
+.mpl-opt-title{color:#fff;font-weight:600;font-size:14px;margin:0}
+.mpl-opt-sub{color:#888;font-size:12.5px;margin:2px 0 0}
+.mpl-opt-toggle{flex-shrink:0;width:44px;height:24px;background:#2a2a2a;border-radius:14px;position:relative;transition:.2s}
+.mpl-opt-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;background:#888;border-radius:50%;transition:.2s}
+.mpl-opt.active .mpl-opt-toggle{background:#3b82f6}
+.mpl-opt.active .mpl-opt-toggle::after{transform:translateX(20px);background:#fff}
+
+.mpl-push-btn{background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:14px 28px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.35);display:inline-flex;align-items:center;gap:8px;letter-spacing:.3px}
+.mpl-push-btn:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.45)}
+.mpl-fetch-btn{background:#1a1a1a;border:1px solid #3b82f6;color:#3b82f6;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
+.mpl-fetch-btn:hover{background:rgba(59,130,246,.1)}
+
+body.light .mpl-card{background:#fff;border-color:#e5e7eb}
+body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
+body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
+</style>
+"""
+
+    form = f"""
+<form method='POST' action='/mypulslive/push' id='mpl-form' onsubmit='return submitMyPulsForm(event)'>
+  <input type='hidden' name='creator_id' id='mpl-creator-id' value='{first_creator_id}'>
+  <input type='hidden' name='post_slots_json' id='mpl-post-slots-json' value='[]'>
+  <input type='hidden' name='story_slots_json' id='mpl-story-slots-json' value='[]'>
+  <input type='hidden' name='shuffle_media' id='mpl-shuffle-media' value='0'>
+  <input type='hidden' name='infinite_recycle' id='mpl-recycle' value='1'>
+  <input type='hidden' name='randomize_minutes' id='mpl-random-min' value='1'>
+
+  <!-- Planification -->
+  <div class='mpl-row open'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>Planification</div>
+        <div class='mpl-row-sub'>Type, periode, posts/jour, stories/jour et horaires</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <label>Type</label>
+      <select name='content_type' id='mpl-content-type' onchange='updateContentType()'>
+        <option value='post'>Posts uniquement</option>
+        <option value='story'>Stories uniquement</option>
+        <option value='both' selected>Les 2 en parallele</option>
+      </select>
+
+      <div class='mpl-2col' style='margin-top:10px'>
+        <div>
+          <label>Date debut</label>
+          <input type='date' name='date_start' value='{d_start}' required>
+        </div>
+        <div>
+          <label>Date fin</label>
+          <input type='date' name='date_end' value='{d_end}' required>
+        </div>
+      </div>
+
+      <!-- POSTS slots -->
+      <div id='mpl-posts-block' style='margin-top:18px'>
+        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Posts par jour</div>
+        <input type='number' class='mpl-count-input' id='mpl-posts-count' value='9' min='0' max='24' oninput='renderPostSlots()'>
+        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:14px 0 4px'>Horaires de publication</div>
+        <div class='mpl-slots' id='mpl-post-slots'></div>
+        <button type='button' onclick='addPostSlot()' style='margin-top:8px;background:transparent;border:1px dashed #444;color:#888;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px'>+ Ajouter un creneau</button>
+      </div>
+
+      <!-- STORIES slots -->
+      <div id='mpl-stories-block' style='margin-top:18px'>
+        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px'>Stories par jour</div>
+        <input type='number' class='mpl-count-input' id='mpl-stories-count' value='4' min='0' max='24' oninput='renderStorySlots()'>
+        <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:14px 0 4px'>Horaires des stories</div>
+        <div class='mpl-slots' id='mpl-story-slots'></div>
+        <button type='button' onclick='addStorySlot()' style='margin-top:8px;background:transparent;border:1px dashed #444;color:#888;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px'>+ Ajouter une story</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-delete posts -->
+  <div class='mpl-row'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>Auto-delete posts publics <span class='mpl-mini-badge green'>NATIF MYPULS</span></div>
+        <div class='mpl-row-sub'>Supprime les posts publics apres delai. Les stories se suppriment seules au bout de 24h.</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <div class='mpl-2col'>
+        <div>
+          <label>Activer auto-delete</label>
+          <select name='post_action'>
+            <option value='delete' selected>Oui, supprimer apres delai</option>
+            <option value='none'>Non, garder</option>
+          </select>
+        </div>
+        <div>
+          <label>Apres combien de jours</label>
+          <input type='number' name='post_delete_days' value='2' min='1' max='30' step='1'>
+          <small>Defaut 2 jours = 48h. MyPuls le gere nativement.</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class='mpl-section-label'>Options</div>
+
+  <div class='mpl-opt active' id='opt-recycle' onclick='toggleOpt("opt-recycle","mpl-recycle")'>
+    <div class='mpl-opt-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a9 9 0 1 1-6.219-8.56'/></svg></div>
+    <div class='mpl-opt-text'>
+      <p class='mpl-opt-title'>♾️ Recyclage infini</p>
+      <p class='mpl-opt-sub'>Tes medias sont recycles dans l'ordre quand on arrive au bout de la liste</p>
+    </div>
+    <div class='mpl-opt-toggle'></div>
+  </div>
+
+  <div class='mpl-opt' id='opt-shuffle' onclick='toggleOpt("opt-shuffle","mpl-shuffle-media")'>
+    <div class='mpl-opt-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='16 3 21 3 21 8'/><line x1='4' y1='20' x2='21' y2='3'/><polyline points='21 16 21 21 16 21'/><line x1='15' y1='15' x2='21' y2='21'/><line x1='4' y1='4' x2='9' y2='9'/></svg></div>
+    <div class='mpl-opt-text'>
+      <p class='mpl-opt-title'>🔀 Ordre aleatoire des medias</p>
+      <p class='mpl-opt-sub'>Shuffle la liste avant de planifier (au lieu de l'ordre fourni)</p>
+    </div>
+    <div class='mpl-opt-toggle'></div>
+  </div>
+
+  <div class='mpl-opt active' id='opt-randmin' onclick='toggleOpt("opt-randmin","mpl-random-min")'>
+    <div class='mpl-opt-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='1 4 1 10 7 10'/><polyline points='23 20 23 14 17 14'/><path d='M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15'/></svg></div>
+    <div class='mpl-opt-text'>
+      <p class='mpl-opt-title'>🎲 Randomiser les minutes</p>
+      <p class='mpl-opt-sub'>Les minutes varient (3 a 25) chaque jour pour eviter les patterns detectables</p>
+    </div>
+    <div class='mpl-opt-toggle'></div>
+  </div>
+
+  <div class='mpl-section-label'>Contenu</div>
+
+  <!-- Bibliotheque Medias -->
+  <div class='mpl-row'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>Bibliotheque Medias <span class='mpl-mini-badge' id='mpl-media-count'>0</span></div>
+        <div class='mpl-row-sub'>Tes media_id MyPuls qui seront planifies</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
+        <small style='color:#888' id='mpl-media-status'>Aucun media. Clique pour fetch.</small>
+        <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
+      </div>
+      <textarea name='media_ids' id='mpl-media-ids' rows='8' required
+                placeholder='75784227&#10;75784226&#10;...'
+                style='font-family:monospace;font-size:13px' oninput='updateMediaCount()'></textarea>
+    </div>
+  </div>
+
+  <!-- Captions -->
+  <div class='mpl-row'>
+    <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
+      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg></div>
+      <div class='mpl-row-text'>
+        <div class='mpl-row-title'>Captions <span class='mpl-mini-badge' id='mpl-cap-count'>{captions_count}</span></div>
+        <div class='mpl-row-sub'>Textes des posts (tirees au hasard)</div>
+      </div>
+      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
+    </div>
+    <div class='mpl-row-body'>
+      <textarea name='captions' id='mpl-captions' rows='8' style='font-family:inherit;font-size:13px' oninput='updateCapCount()'>{captions_default}</textarea>
+    </div>
+  </div>
+
+  <div style='text-align:center;margin-top:24px'>
+    <button type='submit' class='mpl-push-btn'>⚡ Pousser dans MyPuls (LIVE)</button>
+  </div>
+</form>
+"""
+
+    return (style + f"""
+<div class='mpl-shell'>
+  <div class='mpl-card'>
+    <div class='mpl-card-header'>
+      <span style='color:#888;font-size:12px;letter-spacing:1px;text-transform:uppercase'>MyPuls Live ⚡</span>
+      <a href='?tab=mypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
+    </div>
+
+    <div style='display:flex;align-items:center;gap:14px;margin-bottom:12px'>
+      <label style='margin:0;flex-shrink:0;color:#888;font-size:13px'>Createur :</label>
+      <select id='mpl-creator-sel' onchange='changeCreator(this)' style='flex:1;max-width:340px'>
+        {creators_opts}
+      </select>
+    </div>
+
+    <div class='mpl-name' id='mpl-name'>{first_creator_name or '—'} <span class='mpl-badge'>∞ INFINI</span></div>
+    <div class='mpl-handle' id='mpl-handle'>id #{first_creator_id}</div>
+
+    <div class='mpl-banner'>
+      <div class='mpl-banner-dot'></div>
+      <div>
+        <p class='mpl-banner-title'>Push manuel (one-shot)</p>
+        <p class='mpl-banner-sub'>Tu definis tes slots → ⚡ Pousser → MyPuls execute aux dates/heures prevues.</p>
+      </div>
+    </div>
+
+    <div class='mpl-stats'>
+      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
+      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div><div class='mpl-stat-lbl'>CAPTIONS</div></div>
+      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-perday'>9</div><div class='mpl-stat-lbl'>POSTS/JOUR</div></div>
+    </div>
+
+    {form}
+  </div>
+</div>
+
+<script>
+// ============= Slot management =============
+// Default seed slots inspired du screenshot du user (9 posts mix pub/priv)
+const DEFAULT_POST_SLOTS = [
+  {{time:'01:00', visibility:'public'}}, {{time:'02:00', visibility:'private'}},
+  {{time:'04:00', visibility:'public'}}, {{time:'08:00', visibility:'private'}},
+  {{time:'13:00', visibility:'public'}}, {{time:'15:00', visibility:'private'}},
+  {{time:'18:00', visibility:'public'}}, {{time:'19:00', visibility:'private'}},
+  {{time:'20:00', visibility:'public'}},
+];
+const DEFAULT_STORY_SLOTS = ['08:00','12:00','16:00','20:00'];
+
+let postSlots = DEFAULT_POST_SLOTS.slice();
+let storySlots = DEFAULT_STORY_SLOTS.slice();
+
+function renderPostSlots(){{
+  const cnt = parseInt(document.getElementById('mpl-posts-count').value)||0;
+  // resize
+  while(postSlots.length < cnt){{
+    // Auto-add: alternate vis, time = next free hour
+    const lastH = postSlots.length?parseInt(postSlots[postSlots.length-1].time.split(':')[0]):0;
+    const nextH = Math.min(23,(lastH+2));
+    const v = (postSlots.length%2===0)?'public':'private';
+    postSlots.push({{time:String(nextH).padStart(2,'0')+':00', visibility:v}});
+  }}
+  while(postSlots.length > cnt) postSlots.pop();
+  const c = document.getElementById('mpl-post-slots');
+  c.innerHTML = postSlots.map((s,i)=>`
+    <div class='mpl-slot' data-idx='${{i}}'>
+      <div class='mpl-slot-badge'>#${{i+1}}</div>
+      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='postSlots[${{i}}].time=this.value;syncSlots()'>
+      <button type='button' class='mpl-slot-vis ${{s.visibility}}' onclick='togglePostVis(${{i}})'>
+        ${{s.visibility==='public'?'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20\"/><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/></svg> Public':'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> Prive'}}
+      </button>
+      <button type='button' class='mpl-slot-rm' onclick='removePostSlot(${{i}})' title='Retirer'>×</button>
+    </div>
+  `).join('');
+  syncSlots();
+}}
+function togglePostVis(i){{
+  postSlots[i].visibility = postSlots[i].visibility==='public'?'private':'public';
+  renderPostSlots();
+}}
+function removePostSlot(i){{
+  postSlots.splice(i,1);
+  document.getElementById('mpl-posts-count').value = postSlots.length;
+  renderPostSlots();
+}}
+function addPostSlot(){{
+  postSlots.push({{time:'12:00', visibility:'public'}});
+  document.getElementById('mpl-posts-count').value = postSlots.length;
+  renderPostSlots();
+}}
+
+function renderStorySlots(){{
+  const cnt = parseInt(document.getElementById('mpl-stories-count').value)||0;
+  while(storySlots.length < cnt){{
+    const lastH = storySlots.length?parseInt(storySlots[storySlots.length-1].split(':')[0]):0;
+    const nextH = Math.min(23,(lastH+4));
+    storySlots.push(String(nextH).padStart(2,'0')+':00');
+  }}
+  while(storySlots.length > cnt) storySlots.pop();
+  const c = document.getElementById('mpl-story-slots');
+  c.innerHTML = storySlots.map((t,i)=>`
+    <div class='mpl-slot' data-idx='${{i}}'>
+      <div class='mpl-slot-badge' style='background:rgba(59,130,246,.15);color:#3b82f6'>#${{i+1}}</div>
+      <input type='time' class='mpl-slot-time' value='${{t}}' onchange='storySlots[${{i}}]=this.value;syncSlots()'>
+      <button type='button' class='mpl-slot-rm' onclick='removeStorySlot(${{i}})' title='Retirer'>×</button>
+    </div>
+  `).join('');
+  syncSlots();
+}}
+function removeStorySlot(i){{
+  storySlots.splice(i,1);
+  document.getElementById('mpl-stories-count').value = storySlots.length;
+  renderStorySlots();
+}}
+function addStorySlot(){{
+  storySlots.push('12:00');
+  document.getElementById('mpl-stories-count').value = storySlots.length;
+  renderStorySlots();
+}}
+
+function syncSlots(){{
+  document.getElementById('mpl-post-slots-json').value = JSON.stringify(postSlots);
+  document.getElementById('mpl-story-slots-json').value = JSON.stringify(storySlots);
+  document.getElementById('mpl-stat-perday').textContent = postSlots.length;
+}}
+
+function updateContentType(){{
+  const t = document.getElementById('mpl-content-type').value;
+  document.getElementById('mpl-posts-block').style.display = (t==='post'||t==='both')?'':'none';
+  document.getElementById('mpl-stories-block').style.display = (t==='story'||t==='both')?'':'none';
+}}
+
+function toggleOpt(elId, hiddenId){{
+  const el = document.getElementById(elId);
+  el.classList.toggle('active');
+  document.getElementById(hiddenId).value = el.classList.contains('active')?'1':'0';
+}}
+
+function mplToggle(el){{ el.classList.toggle('open'); }}
+
+function changeCreator(sel){{
+  const opt = sel.options[sel.selectedIndex];
+  document.getElementById('mpl-creator-id').value = sel.value;
+  document.getElementById('mpl-name').firstChild.nodeValue = opt.dataset.name + ' ';
+  document.getElementById('mpl-handle').textContent = 'id #' + sel.value;
+  const ta = document.getElementById('mpl-media-ids');
+  if(ta){{ ta.value = ''; updateMediaCount(); }}
+  const s = document.getElementById('mpl-media-status');
+  if(s){{ s.textContent = 'Aucun media charge. Clique pour fetch.'; s.style.color = '#888'; }}
+}}
+function updateMediaCount(){{
+  const ta = document.getElementById('mpl-media-ids');
+  const n = ta.value.split('\\n').filter(x=>x.trim()).length;
+  document.getElementById('mpl-stat-media').textContent = n;
+  document.getElementById('mpl-media-count').textContent = n;
+}}
+function updateCapCount(){{
+  const ta = document.getElementById('mpl-captions');
+  const n = ta.value.split('\\n').filter(x=>x.trim()).length;
+  document.getElementById('mpl-stat-cap').textContent = n;
+  document.getElementById('mpl-cap-count').textContent = n;
+}}
+async function fetchMyPulsMedia(){{
+  const cid = document.getElementById('mpl-creator-id').value;
+  if(!cid){{ alert('Pas de createur'); return; }}
+  const status = document.getElementById('mpl-media-status');
+  status.textContent = 'Fetching media library...';
+  status.style.color = '#3b82f6';
+  try{{
+    const r = await fetch('/mypulslive/fetch_media?creator='+cid);
+    const j = await r.json();
+    if(j.ok){{
+      document.getElementById('mpl-media-ids').value = j.ids.join('\\n');
+      status.textContent = '✓ '+j.ids.length+' medias recuperes';
+      status.style.color = '#22c55e';
+      updateMediaCount();
+    }} else {{ status.textContent='Erreur: '+(j.error||'?'); status.style.color='#f99'; }}
+  }} catch(e) {{ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }}
+}}
+function submitMyPulsForm(ev){{
+  ev.preventDefault();
+  syncSlots();
+  const ds = document.querySelector('input[name=date_start]').value;
+  const de = document.querySelector('input[name=date_end]').value;
+  const ct = document.getElementById('mpl-content-type').value;
+  if(confirm('Pousser le batch dans MyPuls du '+ds+' au '+de+' ('+ct+') ?\\n\\nCette action est IRREVERSIBLE.')){{
+    ev.target.submit();
+  }}
+  return false;
+}}
+
+// Init
+document.getElementById('mpl-posts-count').value = postSlots.length;
+document.getElementById('mpl-stories-count').value = storySlots.length;
+renderPostSlots();
+renderStorySlots();
+updateContentType();
+updateMediaCount();
+updateCapCount();
+</script>
+""")
     import datetime as _dt
     try:
         import mypuls
@@ -10102,46 +10577,40 @@ def create_app():
         if not creator_id:
             return _error("❌ Createur manquant", tab="mypulslive")
 
-        content_type = (request.form.get("content_type") or "story").strip()
+        content_type = (request.form.get("content_type") or "both").strip()
         date_start = (request.form.get("date_start") or "").strip()
         date_end = (request.form.get("date_end") or "").strip()
-        public_hours_raw = (request.form.get("public_hours") or "").strip()
-        private_hours_raw = (request.form.get("private_hours") or "").strip()
-        story_hours_raw = (request.form.get("story_hours") or "").strip()
+        post_slots_raw = request.form.get("post_slots_json") or "[]"
+        story_slots_raw = request.form.get("story_slots_json") or "[]"
         media_ids_raw = request.form.get("media_ids") or ""
         captions_raw = request.form.get("captions") or ""
         post_action = (request.form.get("post_action") or "delete").strip()
-        # Post delete in days (UI), converti en secondes
         try:
             post_delete_days = int(request.form.get("post_delete_days") or 2)
         except Exception:
             post_delete_days = 2
         delay_sec = max(1, post_delete_days) * 86400
-        # Story auto-delete
-        story_action = (request.form.get("story_action") or "none").strip()
+        # Options toggles
+        shuffle_media = (request.form.get("shuffle_media") or "0") == "1"
+        randomize_minutes = (request.form.get("randomize_minutes") or "1") == "1"
+        # infinite_recycle est l'algorithme par defaut (cycle via modulo) - le flag
+        # est pour info, le code recycle de toute facon
+        import json as _json
         try:
-            story_delete_days = int(request.form.get("story_delete_days") or 1)
+            post_slots = _json.loads(post_slots_raw)
+            if not isinstance(post_slots, list):
+                post_slots = []
         except Exception:
-            story_delete_days = 1
-        story_delete_sec = (max(1, story_delete_days) * 86400) if story_action == "delete" else None
+            post_slots = []
+        try:
+            story_slots = _json.loads(story_slots_raw)
+            if not isinstance(story_slots, list):
+                story_slots = []
+        except Exception:
+            story_slots = []
 
         if not date_start or not date_end:
             return _error("❌ Dates manquantes", tab="mypulslive")
-
-        # Parse helpers
-        def _parse_ints(raw):
-            out = []
-            for part in (raw or "").replace("\n", ",").replace(";", ",").split(","):
-                p = part.strip()
-                if not p:
-                    continue
-                try:
-                    v = int(p)
-                    if 0 <= v <= 23:
-                        out.append(v)
-                except Exception:
-                    pass
-            return out
 
         def _parse_lines(raw):
             return [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
@@ -10160,50 +10629,46 @@ def create_app():
         all_errors = []
 
         # Story push
-        if content_type in ("story", "both"):
-            sh = _parse_ints(story_hours_raw)
-            if sh:
-                res = mypuls_scheduler.bulk_schedule_stories(
-                    creator_id=creator_id,
-                    media_ids=media_ids,
-                    date_start=date_start,
-                    date_end=date_end,
-                    hour_slots=sh,
-                    auto_delete_after_sec=story_delete_sec,
-                )
-                tag = ""
-                if story_delete_sec:
-                    tag = f" (auto-delete {story_delete_days}j)"
-                summary_parts.append(
-                    f"📱 Stories : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail{tag}"
-                )
-                if res.get("errors"):
-                    all_errors.extend(res["errors"][:3])
+        if content_type in ("story", "both") and story_slots:
+            # story_slots est une liste de "HH:MM" strings
+            res = mypuls_scheduler.bulk_schedule_stories(
+                creator_id=creator_id,
+                media_ids=media_ids,
+                date_start=date_start,
+                date_end=date_end,
+                story_slots=story_slots,
+                shuffle_media=shuffle_media,
+                randomize_minutes=randomize_minutes,
+            )
+            summary_parts.append(
+                f"📱 Stories : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
+            )
+            if res.get("errors"):
+                all_errors.extend(res["errors"][:3])
 
         # Post push
-        if content_type in ("post", "both"):
-            pub = _parse_ints(public_hours_raw)
-            priv = _parse_ints(private_hours_raw)
-            if pub or priv:
-                res = mypuls_scheduler.bulk_schedule_posts(
-                    creator_id=creator_id,
-                    media_ids=media_ids,
-                    captions=captions,
-                    date_start=date_start,
-                    date_end=date_end,
-                    public_hours=pub,
-                    private_hours=priv,
-                    action=post_action,
-                    delay_sec=delay_sec,
-                )
-                summary_parts.append(
-                    f"📰 Posts : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
-                )
-                if res.get("errors"):
-                    all_errors.extend(res["errors"][:3])
+        if content_type in ("post", "both") and post_slots:
+            # post_slots est [{time:"HH:MM", visibility:"public"|"private"}, ...]
+            res = mypuls_scheduler.bulk_schedule_posts(
+                creator_id=creator_id,
+                media_ids=media_ids,
+                captions=captions,
+                date_start=date_start,
+                date_end=date_end,
+                post_slots=post_slots,
+                action=post_action,
+                delay_sec=delay_sec,
+                shuffle_media=shuffle_media,
+                randomize_minutes=randomize_minutes,
+            )
+            summary_parts.append(
+                f"📰 Posts : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
+            )
+            if res.get("errors"):
+                all_errors.extend(res["errors"][:3])
 
         if not summary_parts:
-            return _error("❌ Aucune heure indiquee pour le type choisi", tab="mypulslive")
+            return _error("❌ Aucun slot configure pour le type choisi", tab="mypulslive")
 
         msg = "✅ Push live termine — " + " | ".join(summary_parts)
         if all_errors:
