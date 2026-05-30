@@ -618,7 +618,16 @@ def save_creator_order(creator_ids: List[int]):
 def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     """Liste les créateurs gérés avec leur ID MyPuls.
 
-    Scrape /creators et extrait les paires (name -> id). Cache 1h.
+    Scrape /creators et extrait les paires (name -> id) en splittant le HTML
+    par carte <div class="creator-card"...>. Pour chaque carte :
+    - name = contenu du <h5 class="...fw-bold">NAME</h5>
+    - id   = premier ID trouvé via /creator/<id>/, /switch-creator/<id>,
+             ou data-creator-id="<id>" dans la même carte.
+
+    Robuste pour les createurs sans image avatar (rendu en initiale dans un
+    <div class="c-avatar">) - l ancienne version regex sur img alt= les ratait.
+
+    Cache 1h dans data/mypuls_cookies.json.
     Retourne : {ok, creators: {name: id_int}, error}
     """
     cfg = load_config()
@@ -638,15 +647,29 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     if r.status_code != 200 or _detect_login_redirect(r.text):
         return {"ok": False, "error": "Cookies expirés"}
 
-    # HTML: <img src="/creator/<id>/avatar" ... alt="<name>" ...>
     creators: Dict[str, int] = {}
-    for cid, name in re.findall(
-        r"src=[\"']/creator/(\d+)/avatar[\"'][^>]*?alt=[\"']([^\"']+)[\"']",
-        r.text,
-        re.DOTALL,
-    ):
-        if name and name not in ("Image utilisateur", "Avatar d'en-tête", "Avatar d’en-tête"):
-            creators[name] = int(cid)
+    chunks = re.split(r'<div\s+class="creator-card', r.text)
+    for chunk in chunks[1:]:  # skip preamble avant la 1ere card
+        nm = re.search(r'<h5\s+class="[^"]*fw-bold[^"]*">([^<]+)</h5>', chunk)
+        if not nm:
+            continue
+        name = nm.group(1).strip()
+        if not name:
+            continue
+        # Trouve l ID via plusieurs patterns possibles dans la card
+        cid = None
+        for pat in (
+            r'/creator/(\d+)/',
+            r'/switch-creator/(\d+)',
+            r'data-creator-id="(\d+)"',
+        ):
+            ids = re.findall(pat, chunk)
+            if ids:
+                cid = int(ids[0])
+                break
+        if cid:
+            creators[name] = cid
+
     # Sauvegarder en cache
     cfg["creators_cache"] = creators
     cfg["creators_cache_ts"] = int(_t.time())

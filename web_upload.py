@@ -8816,26 +8816,29 @@ def _render_vtg_html() -> str:
 def _sfssetup_identities(platform: str) -> list:
     """Retourne la liste d identites a afficher / utiliser pour Setup SFS.
 
-    MyM : creators MyPuls (Amelia_xoxo, Lolatacrush, ...) si configures.
-    OF  : identites locales.
-    Fallback : identites locales + cles deja sauvegardees pour cette plateforme.
+    MyM : SEULEMENT les creators MyPuls (Amelia_xoxo, Lolatacrush, ...).
+          Les noms courts stored (amelia, lola, ...) sont des legacy d'anciens
+          tests et sont filtres pour eviter les doublons.
+    OF  : identites locales + cles stored.
     """
-    identities: list = []
     if platform == "mym":
         try:
             import mypuls
             if mypuls.is_configured():
                 res = mypuls.list_creators()
                 if res.get("ok"):
-                    identities = sorted(res.get("creators", {}).keys(), key=str.lower)
+                    creators = res.get("creators", {})
+                    if creators:
+                        return sorted(creators.keys(), key=str.lower)
         except Exception:
-            identities = []
-    if not identities:
-        try:
-            identities = sorted(_list_identities())
-        except Exception:
-            identities = []
-    # Toujours inclure les identites deja stockees pour cette plateforme
+            pass
+
+    # OF (ou MyM si MyPuls indispo) : identites locales + cles stored
+    identities: list = []
+    try:
+        identities = sorted(_list_identities())
+    except Exception:
+        identities = []
     try:
         import sfs_setup
         stored = list(sfs_setup.all_info(platform).keys())
@@ -8846,6 +8849,20 @@ def _sfssetup_identities(platform: str) -> list:
     except Exception:
         pass
     return identities
+
+
+def _mypuls_creators_map() -> dict:
+    """Retourne {name_lowercase: creator_id} depuis MyPuls (vide si indispo)."""
+    try:
+        import mypuls
+        if not mypuls.is_configured():
+            return {}
+        res = mypuls.list_creators()
+        if not res.get("ok"):
+            return {}
+        return {n.lower().strip(): cid for n, cid in res.get("creators", {}).items()}
+    except Exception:
+        return {}
 
 
 def _render_sfssetup_html(platform: str = "mym") -> str:
@@ -8878,14 +8895,23 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
             "</div>"
         )
 
+    # Pre-charge la map MyPuls pour les avatars MyM
+    mypuls_map = _mypuls_creators_map() if platform == "mym" else {}
+
     # Cards par identite
     cards = []
     for i, ident in enumerate(identities):
         info = sfs_setup.get_identity(platform, ident)
         emoji = info.get("emoji") or sfs_setup.DEFAULT_EMOJIS[i % len(sfs_setup.DEFAULT_EMOJIS)]
         enabled = info.get("enabled", True)
-        # Avatar
-        avatar_url = _identity_avatar_url(ident)
+        # Avatar : MyPuls en priorite si MyM, fallback local sinon
+        avatar_url = ""
+        if platform == "mym":
+            cid = mypuls_map.get(ident.lower().strip())
+            if cid:
+                avatar_url = f"/mypuls/avatar/{cid}"
+        if not avatar_url:
+            avatar_url = _identity_avatar_url(ident)
         avatar = (
             f"<img src='{avatar_url}' style='width:40px;height:40px;border-radius:50%;object-fit:cover'>"
             if avatar_url else
