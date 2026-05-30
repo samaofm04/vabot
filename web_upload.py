@@ -1675,9 +1675,13 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><polyline points="9 14 11 16 15 12"/></svg>
       SFS Planning
     </button>
-    <button class="item" id="tab-sfssetup" onclick="showTab('business','sfssetup','Setup SFS','Infos modeles - genere un message a copier-coller')">
+    <button class="item" id="tab-sfssetupmym" onclick="showTab('business','sfssetupmym','Setup SFS MYM','Infos modeles MyM - genere un message a copier-coller')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
-      Setup SFS
+      Setup SFS MYM
+    </button>
+    <button class="item" id="tab-sfssetupof" onclick="showTab('business','sfssetupof','Setup SFS OF','Infos modeles OnlyFans - genere un message a copier-coller')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+      Setup SFS OF
     </button>
     <button class="item" id="tab-revenus" onclick="showTab('business','revenus','💬 Revenus chatteurs','Revenus OnlyFans par chatteur et identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
@@ -2284,9 +2288,14 @@ document.addEventListener('keydown', function(e){
 {schedule_html}
 </div>
 
-<!-- BUSINESS - SETUP SFS (message generator) -->
-<div class="form-section" id="form-sfssetup" style="display:none">
-{sfssetup_html}
+<!-- BUSINESS - SETUP SFS MYM -->
+<div class="form-section" id="form-sfssetupmym" style="display:none">
+{sfssetupmym_html}
+</div>
+
+<!-- BUSINESS - SETUP SFS OF -->
+<div class="form-section" id="form-sfssetupof" style="display:none">
+{sfssetupof_html}
 </div>
 
 <!-- BUSINESS - MYPULS LIVE PUSH -->
@@ -8804,12 +8813,18 @@ def _render_vtg_html() -> str:
     )
 
 
-def _render_sfssetup_html() -> str:
-    """Setup SFS : form par identite pour generer un message a copier-coller."""
+def _render_sfssetup_html(platform: str = "mym") -> str:
+    """Setup SFS : form par identite pour generer un message a copier-coller.
+
+    platform : "mym" ou "of"
+    """
     try:
         import sfs_setup
     except Exception as e:
         return f"<p style='color:#f99'>Module sfs_setup indispo : {e}</p>"
+
+    platform_label = "MyM" if platform == "mym" else "OnlyFans"
+    platform_color = "#a855f7" if platform == "mym" else "#0099ff"
 
     try:
         identities = sorted(_list_identities())
@@ -8819,7 +8834,7 @@ def _render_sfssetup_html() -> str:
     if not identities:
         return (
             "<div style='max-width:680px'>"
-            "<h2 style='margin:0 0 6px;font-size:20px'>Setup SFS</h2>"
+            f"<h2 style='margin:0 0 6px;font-size:20px'>Setup SFS {platform_label}</h2>"
             "<p style='color:#888;font-size:13px'>Aucune identite. Cree-en dans Management -> VAs.</p>"
             "</div>"
         )
@@ -8827,7 +8842,7 @@ def _render_sfssetup_html() -> str:
     # Cards par identite
     cards = []
     for i, ident in enumerate(identities):
-        info = sfs_setup.get_identity(ident)
+        info = sfs_setup.get_identity(platform, ident)
         emoji = info.get("emoji") or sfs_setup.DEFAULT_EMOJIS[i % len(sfs_setup.DEFAULT_EMOJIS)]
         enabled = info.get("enabled", True)
         # Avatar
@@ -8840,14 +8855,19 @@ def _render_sfssetup_html() -> str:
         # Inputs
         fields_html = ""
         for f in sfs_setup.FIELDS:
-            val = (info.get(f) or "").replace('"', '&quot;')
+            val = (info.get(f) or "")
+            # Defaut "free" pour abonnement
+            if f == "abonnement" and not val:
+                val = sfs_setup.DEFAULT_ABONNEMENT
+            val_safe = val.replace('"', '&quot;')
             label = sfs_setup.FIELD_LABELS[f]
+            placeholder = "ex: free" if f == "abonnement" else "ex: BCP"
             fields_html += (
                 f"<div>"
                 f"<label style='font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;display:block;margin-bottom:4px'>{label}</label>"
-                f"<input type='text' name='{f}' value='{val}' placeholder='ex: BCP' "
+                f"<input type='text' name='{f}' value='{val_safe}' placeholder='{placeholder}' "
                 f"oninput='setupDirty(this)' "
-                f"data-ident='{ident}' data-field='{f}' "
+                f"data-ident='{ident}' data-field='{f}' data-platform='{platform}' "
                 f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
                 f"</div>"
             )
@@ -8856,16 +8876,16 @@ def _render_sfssetup_html() -> str:
             f"<div class='sfssetup-card' data-ident='{ident}' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px;{'opacity:0.5' if not enabled else ''}'>"
             # Header card
             f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>"
-            f"<input type='text' value='{emoji}' maxlength='8' data-ident='{ident}' data-field='emoji' oninput='setupDirty(this)' "
+            f"<input type='text' value='{emoji}' maxlength='8' data-ident='{ident}' data-field='emoji' data-platform='{platform}' oninput='setupDirty(this)' "
             f"style='width:50px;text-align:center;padding:7px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:20px'>"
             f"{avatar}"
             f"<div style='flex:1'>"
             f"<div style='font-weight:700;font-size:15px;color:#fff'>{ident.title()}</div>"
-            f"<div style='font-size:11px;color:#666;margin-top:1px'>Modele</div>"
+            f"<div style='font-size:11px;color:#666;margin-top:1px'>Modele · {platform_label}</div>"
             f"</div>"
             # Toggle enabled
             f"<label style='display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:12px'>"
-            f"<input type='checkbox' {checked} data-ident='{ident}' data-field='enabled' onchange='setupToggle(this)' style='accent-color:#22c55e;width:16px;height:16px'>"
+            f"<input type='checkbox' {checked} data-ident='{ident}' data-field='enabled' data-platform='{platform}' onchange='setupToggle(this)' style='accent-color:#22c55e;width:16px;height:16px'>"
             f"<span>Inclure</span></label>"
             f"</div>"
             # Grid champs
@@ -8879,37 +8899,38 @@ def _render_sfssetup_html() -> str:
 
     return (
         "<div style='max-width:1100px'>"
-        "<h2 style='margin:0 0 6px;font-size:20px'>📋 Setup SFS</h2>"
-        "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
-        "Remplis les infos pour chaque modele. Au final clique <b>Générer le message</b> "
-        "→ tu obtiens un texte prêt à copier-coller (format Discord/Telegram)."
-        "</p>"
+        f"<h2 style='margin:0 0 6px;font-size:20px;display:flex;align-items:center;gap:10px'>📋 Setup SFS "
+        f"<span style='background:{platform_color};color:#fff;padding:3px 12px;border-radius:8px;font-size:12px;font-weight:800;letter-spacing:.5px'>{platform_label.upper()}</span></h2>"
+        f"<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+        f"Remplis les infos pour chaque modele {platform_label}. Au final clique <b>Générer le message</b> "
+        f"→ tu obtiens un texte prêt à copier-coller (format Discord/Telegram).</p>"
         # Cards
         + cards_html
-        # Bouton generate + output
+        # Bouton generate + output (avec id specifique a la plateforme)
         + "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-top:18px'>"
-        "<div style='display:flex;gap:10px;align-items:center;margin-bottom:12px'>"
-        "<button type='button' onclick='setupGenerate()' "
-        "style='background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:12px 22px;border-radius:10px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(59,130,246,.3)'>"
-        "✨ Générer le message</button>"
-        "<button type='button' onclick='setupCopy()' id='setup-copy-btn' "
-        "style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:none'>"
-        "📋 Copier</button>"
-        "<small id='setup-save-status' style='color:#666;margin-left:auto;font-size:12px'></small>"
-        "</div>"
-        "<textarea id='setup-output' rows='14' placeholder='Le message généré apparaîtra ici...' "
-        "style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'></textarea>"
-        "</div>"
+        f"<div style='display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap'>"
+        f"<button type='button' onclick='setupGenerate_{platform}()' "
+        f"style='background:linear-gradient(135deg,#3b82f6,{platform_color});color:#fff;border:0;padding:12px 22px;border-radius:10px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(59,130,246,.3)'>"
+        f"✨ Générer le message {platform_label}</button>"
+        f"<button type='button' onclick='setupCopy_{platform}()' id='setup-copy-btn-{platform}' "
+        f"style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:none'>"
+        f"📋 Copier</button>"
+        f"<small id='setup-save-status-{platform}' style='color:#666;margin-left:auto;font-size:12px'></small>"
+        f"</div>"
+        f"<textarea id='setup-output-{platform}' rows='14' placeholder='Le message généré apparaîtra ici...' "
+        f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'></textarea>"
+        f"</div>"
 
-        # JS
-        "<script>"
+        # JS - utilise le panel parent pour scoper les querySelectors
+        + "<script>"
+        f"window.__sfs_platform_{platform} = '{platform}';"
         "function setupDirty(el){"
-        "  const ident=el.dataset.ident, field=el.dataset.field, value=el.value;"
+        "  const ident=el.dataset.ident, field=el.dataset.field, value=el.value, platform=el.dataset.platform || 'mym';"
         "  clearTimeout(window.__setupSaveTimer);"
         "  window.__setupSaveTimer = setTimeout(function(){"
-        "    const fd=new FormData(); fd.set('identity',ident); fd.set('field',field); fd.set('value',value);"
+        "    const fd=new FormData(); fd.set('platform', platform); fd.set('identity',ident); fd.set('field',field); fd.set('value',value);"
         "    fetch('/sfssetup/save',{method:'POST',body:fd}).then(r=>r.json()).then(j=>{"
-        "      const s=document.getElementById('setup-save-status');"
+        f"      const s=document.querySelector('#form-sfssetup{platform} #setup-save-status-{platform}');"
         "      if(s){ s.textContent='✓ Sauve'; s.style.color='#22c55e'; setTimeout(()=>{s.textContent='';}, 1500); }"
         "    });"
         "  }, 400);"
@@ -8917,22 +8938,24 @@ def _render_sfssetup_html() -> str:
         "function setupToggle(cb){"
         "  const card=cb.closest('.sfssetup-card');"
         "  if(card) card.style.opacity = cb.checked ? '1' : '0.5';"
-        "  const fd=new FormData(); fd.set('identity',cb.dataset.ident); fd.set('field','enabled'); fd.set('value',cb.checked?'1':'0');"
+        "  const fd=new FormData(); fd.set('platform', cb.dataset.platform || 'mym'); fd.set('identity',cb.dataset.ident); fd.set('field','enabled'); fd.set('value',cb.checked?'1':'0');"
         "  fetch('/sfssetup/save',{method:'POST',body:fd});"
         "}"
-        "async function setupGenerate(){"
-        "  const r=await fetch('/sfssetup/generate');"
-        "  const j=await r.json();"
-        "  document.getElementById('setup-output').value = j.message || '';"
-        "  document.getElementById('setup-copy-btn').style.display = j.message ? 'inline-flex' : 'none';"
-        "}"
-        "function setupCopy(){"
-        "  const ta=document.getElementById('setup-output');"
-        "  ta.select(); document.execCommand('copy');"
-        "  const btn=document.getElementById('setup-copy-btn');"
-        "  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
-        "  setTimeout(()=>{ btn.innerHTML=orig; }, 1500);"
-        "}"
+        f"async function setupGenerate_{platform}(){{"
+        f"  const r=await fetch('/sfssetup/generate?platform={platform}');"
+        f"  const j=await r.json();"
+        f"  const ta=document.getElementById('setup-output-{platform}');"
+        f"  if(ta) ta.value = j.message || '';"
+        f"  const btn=document.getElementById('setup-copy-btn-{platform}');"
+        f"  if(btn) btn.style.display = j.message ? 'inline-flex' : 'none';"
+        f"}}"
+        f"function setupCopy_{platform}(){{"
+        f"  const ta=document.getElementById('setup-output-{platform}');"
+        f"  if(!ta) return; ta.select(); document.execCommand('copy');"
+        f"  const btn=document.getElementById('setup-copy-btn-{platform}');"
+        f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
+        f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
+        f"}}"
         "</script>"
         "</div>"
     )
@@ -12194,7 +12217,8 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
-        .replace("{sfssetup_html}", _render_sfssetup_html())
+        .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
+        .replace("{sfssetupof_html}", _render_sfssetup_html("of"))
         .replace("{vtg_html}", _render_vtg_html())
         .replace("{veille_feed_html}", _render_veille_feed_html())
         .replace("{mypulslive_html}", _render_mypulslive_html())
@@ -13287,23 +13311,23 @@ def create_app():
             import sfs_setup
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+        platform = (request.form.get("platform") or "mym").strip().lower()
         ident = (request.form.get("identity") or "").strip().lower()
         field = (request.form.get("field") or "").strip()
         value = request.form.get("value") or ""
         if not ident or not field:
             return jsonify({"ok": False, "error": "missing identity/field"})
-        # Recharge l'info existante et merge
-        current = sfs_setup.get_identity(ident)
+        current = sfs_setup.get_identity(platform, ident)
         if field == "enabled":
             sfs_setup.save_identity(
-                ident,
+                platform, ident,
                 {f: current.get(f, "") for f in sfs_setup.FIELDS},
                 emoji=current.get("emoji", ""),
                 enabled=(value == "1"),
             )
         elif field == "emoji":
             sfs_setup.save_identity(
-                ident,
+                platform, ident,
                 {f: current.get(f, "") for f in sfs_setup.FIELDS},
                 emoji=value,
                 enabled=current.get("enabled", True),
@@ -13312,7 +13336,7 @@ def create_app():
             updated = {f: current.get(f, "") for f in sfs_setup.FIELDS}
             updated[field] = value
             sfs_setup.save_identity(
-                ident,
+                platform, ident,
                 updated,
                 emoji=current.get("emoji", ""),
                 enabled=current.get("enabled", True),
@@ -13331,11 +13355,12 @@ def create_app():
             import sfs_setup
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+        platform = (request.args.get("platform") or "mym").strip().lower()
         try:
             idents = sorted(_list_identities())
         except Exception:
             idents = []
-        msg = sfs_setup.generate_message(idents)
+        msg = sfs_setup.generate_message(platform, idents)
         return jsonify({"ok": True, "message": msg})
 
     @app.route("/debug/reel_raw", methods=["GET"])
