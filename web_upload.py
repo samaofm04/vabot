@@ -7898,7 +7898,7 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
   </div>
 
   <!-- Auto-delete posts -->
-  <div class='mpl-row'>
+  <div class='mpl-row' id='mpl-autodelete-block'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/></svg></div>
       <div class='mpl-row-text'>
@@ -7911,12 +7911,12 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       <div class='mpl-2col'>
         <div>
           <label>Activer auto-delete</label>
-          <select name='post_action'>
+          <select name='post_action' id='mpl-post-action' onchange='updatePostAction()'>
             <option value='delete' selected>Oui, supprimer apres delai</option>
             <option value='none'>Non, garder</option>
           </select>
         </div>
-        <div>
+        <div id='mpl-post-delay-wrap'>
           <label>Apres combien de jours</label>
           <input type='number' name='post_delete_days' value='2' min='1' max='30' step='1'>
           <small>Defaut 2 jours = 48h. MyPuls le gere nativement.</small>
@@ -7979,12 +7979,12 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
   </div>
 
   <!-- Captions -->
-  <div class='mpl-row'>
+  <div class='mpl-row' id='mpl-captions-block'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg></div>
       <div class='mpl-row-text'>
         <div class='mpl-row-title'>Captions <span class='mpl-mini-badge' id='mpl-cap-count'>{captions_count}</span></div>
-        <div class='mpl-row-sub'>Textes des posts (tirees au hasard)</div>
+        <div class='mpl-row-sub'>Textes des posts (tirees au hasard) — non utilise pour les stories</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
@@ -8028,7 +8028,7 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     <div class='mpl-stats'>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div><div class='mpl-stat-lbl'>CAPTIONS</div></div>
-      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-perday'>9</div><div class='mpl-stat-lbl'>POSTS/JOUR</div></div>
+      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-perday'>9</div><div class='mpl-stat-lbl mpl-stat-lbl-perday'>POSTS / JOUR</div></div>
     </div>
 
     {form}
@@ -8121,7 +8121,9 @@ function addStorySlot(){{
 function syncSlots(){{
   document.getElementById('mpl-post-slots-json').value = JSON.stringify(postSlots);
   document.getElementById('mpl-story-slots-json').value = JSON.stringify(storySlots);
-  document.getElementById('mpl-stat-perday').textContent = postSlots.length;
+  // Stat /jour : reflete le type courant
+  var t = document.getElementById('mpl-content-type').value;
+  document.getElementById('mpl-stat-perday').textContent = (t==='story')?storySlots.length:postSlots.length;
   var pt = document.getElementById('mpl-posts-tag');
   if(pt) pt.textContent = postSlots.length + ' / jour';
   var st = document.getElementById('mpl-stories-tag');
@@ -8130,8 +8132,29 @@ function syncSlots(){{
 
 function updateContentType(){{
   const t = document.getElementById('mpl-content-type').value;
-  document.getElementById('mpl-posts-block').style.display = (t==='post'||t==='both')?'':'none';
-  document.getElementById('mpl-stories-block').style.display = (t==='story'||t==='both')?'':'none';
+  const showPosts = (t==='post'||t==='both');
+  const showStories = (t==='story'||t==='both');
+  // Cards Posts / Stories
+  document.getElementById('mpl-posts-block').style.display = showPosts?'':'none';
+  document.getElementById('mpl-stories-block').style.display = showStories?'':'none';
+  // Auto-delete posts : visible UNIQUEMENT si on a des posts
+  const ad = document.getElementById('mpl-autodelete-block');
+  if(ad) ad.style.display = showPosts?'':'none';
+  // Captions : visibles UNIQUEMENT si on a des posts (les stories n'ont pas de captions)
+  const cap = document.getElementById('mpl-captions-block');
+  if(cap) cap.style.display = showPosts?'':'none';
+  // Stat POSTS/JOUR : on adapte le label selon le mode
+  const lbl = document.querySelector('.mpl-stat-lbl-perday');
+  if(lbl) lbl.textContent = (t==='story')?'STORIES / JOUR':'POSTS / JOUR';
+  // Stat valeur : posts si posts visible, sinon stories
+  const v = document.getElementById('mpl-stat-perday');
+  if(v) v.textContent = showPosts?postSlots.length:storySlots.length;
+}}
+function updatePostAction(){{
+  // Cache l'input "Apres combien de jours" si "Non, garder"
+  const a = document.getElementById('mpl-post-action');
+  const w = document.getElementById('mpl-post-delay-wrap');
+  if(a && w) w.style.display = (a.value==='delete')?'':'none';
 }}
 
 function toggleOpt(elId, hiddenId){{
@@ -8199,6 +8222,7 @@ document.getElementById('mpl-stories-count').value = storySlots.length;
 renderPostSlots();
 renderStorySlots();
 updateContentType();
+updatePostAction();
 updateMediaCount();
 updateCapCount();
 </script>
