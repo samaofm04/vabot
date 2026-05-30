@@ -5827,10 +5827,10 @@ def _render_insta_trends_grid_html() -> str:
     </div>
     <!-- Bottom stack DANS la card : expand au-dessus, trending + username en bas (toujours visibles) -->
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:2">
-      <!-- Expand panel : slide UP depuis le bas, caption + sound (cachee par defaut) -->
+      <!-- Expand panel : slide UP depuis le bas, caption COMPLETE + sound -->
       <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:8px">
-          {f'<div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:100px;overflow-y:auto;margin-bottom:8px;font-weight:500">{caption_short}</div>' if caption_short else ''}
+          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{caption if caption else '<span style=color:#888;font-style:italic>Pas de description</span>'}</div>
           <div style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:11.5px">
             <span style="color:#3b82f6">🎵</span><span style="color:#aaa">Sound:</span>
             <span style="color:#fff;font-weight:600">Original audio</span>
