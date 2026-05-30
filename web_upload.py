@@ -7942,6 +7942,26 @@ body.light .mpl-card{background:#fff;border-color:#e5e7eb}
 body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
 body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
 
+/* === Custom WHEEL time picker (style iOS) === */
+.mpl-wheel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .15s}
+.mpl-wheel-overlay.show{opacity:1;pointer-events:auto}
+.mpl-wheel-modal{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:16px;width:330px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);transform:translateY(20px);transition:transform .2s}
+.mpl-wheel-overlay.show .mpl-wheel-modal{transform:translateY(0)}
+.mpl-wheel-head{padding:18px 22px 14px;border-bottom:1px solid #232323}
+.mpl-wheel-head-title{font-size:11px;color:#888;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:4px}
+.mpl-wheel-head-sub{color:#fff;font-size:16px;font-weight:600;border-bottom:2px solid #3b82f6;padding-bottom:6px;display:inline-block}
+.mpl-wheel-body{display:flex;justify-content:center;align-items:center;gap:24px;padding:18px 0;position:relative}
+.mpl-wheel-body::before{content:'';position:absolute;left:30px;right:30px;top:50%;height:46px;transform:translateY(-50%);background:rgba(59,130,246,.06);border-top:1px solid rgba(59,130,246,.18);border-bottom:1px solid rgba(59,130,246,.18);pointer-events:none;border-radius:6px}
+.mpl-wheel-col{height:240px;overflow-y:scroll;width:80px;scroll-snap-type:y mandatory;scrollbar-width:none;text-align:center;-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 25%,#000 75%,transparent 100%);mask-image:linear-gradient(180deg,transparent 0%,#000 25%,#000 75%,transparent 100%)}
+.mpl-wheel-col::-webkit-scrollbar{display:none}
+.mpl-wheel-item{height:46px;line-height:46px;font-size:22px;color:#666;scroll-snap-align:center;font-weight:500;transition:color .15s,font-size .15s,font-weight .15s}
+.mpl-wheel-item.center{color:#3b82f6;font-weight:700;font-size:24px}
+.mpl-wheel-sep{font-size:24px;color:#444;font-weight:300}
+.mpl-wheel-foot{display:flex;border-top:1px solid #232323}
+.mpl-wheel-btn{flex:1;background:transparent;border:0;color:#3b82f6;padding:14px;font-size:13px;font-weight:700;letter-spacing:1px;cursor:pointer;font-family:inherit;text-transform:uppercase}
+.mpl-wheel-btn:hover{background:#222}
+.mpl-wheel-btn.cancel{color:#888}
+
 /* === Flatpickr custom dark theme (matches dashboard) === */
 .flatpickr-calendar{background:#1a1a1a!important;border:1px solid #2a2a2a!important;border-radius:14px!important;box-shadow:0 12px 40px rgba(0,0,0,.5)!important;color:#fff!important;font-family:inherit!important}
 .flatpickr-calendar::before,.flatpickr-calendar::after{display:none!important}
@@ -8960,11 +8980,10 @@ function submitMyPulsForm(ev){{
   return false;
 }}
 
-// === Flatpickr init (date + time pickers) ===
+// === Flatpickr DATE only (time inputs sont gérés par notre wheel custom) ===
 function applyFlatpickr(){{
   if(typeof flatpickr === 'undefined') return;
   try{{ flatpickr.localize(flatpickr.l10ns.fr); }}catch(e){{}}
-  // Date pickers
   document.querySelectorAll('#form-mypulslive input[type=date]:not([data-fp])').forEach(el=>{{
     el.dataset.fp = '1';
     flatpickr(el, {{
@@ -8975,18 +8994,133 @@ function applyFlatpickr(){{
       disableMobile: true,
     }});
   }});
-  // Time pickers
-  document.querySelectorAll('#form-mypulslive input[type=time]:not([data-fp])').forEach(el=>{{
-    el.dataset.fp = '1';
-    flatpickr(el, {{
-      enableTime: true,
-      noCalendar: true,
-      dateFormat: 'H:i',
-      time_24hr: true,
-      minuteIncrement: 1,
-      disableMobile: true,
+  // Time inputs : wheel picker custom (interceptes au click)
+  document.querySelectorAll('#form-mypulslive input[type=time]:not([data-tp])').forEach(el=>{{
+    el.dataset.tp = '1';
+    el.setAttribute('readonly', 'readonly');
+    el.style.cursor = 'pointer';
+    el.addEventListener('focus', e=>{{ e.target.blur(); openTimeWheel(e.target); }});
+    el.addEventListener('click', e=>{{ openTimeWheel(e.target); }});
+  }});
+}}
+
+// === Wheel time picker (style iOS) ===
+let __twTarget = null;
+let __twHour = 0;
+let __twMinute = 0;
+
+function openTimeWheel(input){{
+  __twTarget = input;
+  const val = (input.value || '00:00').split(':');
+  __twHour = parseInt(val[0])||0;
+  __twMinute = parseInt(val[1])||0;
+  buildTimeWheelIfNeeded();
+  // Headers
+  const sub = document.getElementById('mpl-tw-sub');
+  if(sub) sub.textContent = 'Heure';
+  // Scroll vers les valeurs initiales
+  const colH = document.getElementById('mpl-tw-hour');
+  const colM = document.getElementById('mpl-tw-min');
+  // Hauteur d'un item = 46px, top padding fait que item 0 est centré
+  colH.scrollTop = __twHour * 46;
+  colM.scrollTop = __twMinute * 46;
+  // Mettre a jour les classes 'center'
+  setTimeout(()=>{{ updateWheelCenter(colH); updateWheelCenter(colM); }}, 30);
+  document.getElementById('mpl-tw-overlay').classList.add('show');
+}}
+function closeTimeWheel(save){{
+  const ov = document.getElementById('mpl-tw-overlay');
+  if(ov) ov.classList.remove('show');
+  if(save && __twTarget){{
+    const hh = String(__twHour).padStart(2,'0');
+    const mm = String(__twMinute).padStart(2,'0');
+    __twTarget.value = hh+':'+mm;
+    // Trigger change pour que les slot listeners reagissent
+    __twTarget.dispatchEvent(new Event('change', {{bubbles:true}}));
+  }}
+}}
+function updateWheelCenter(col){{
+  if(!col) return;
+  const items = col.querySelectorAll('.mpl-wheel-item');
+  const colRect = col.getBoundingClientRect();
+  const colMid = colRect.top + colRect.height/2;
+  let bestEl = null, bestDist = Infinity;
+  items.forEach(it=>{{
+    const r = it.getBoundingClientRect();
+    const mid = r.top + r.height/2;
+    const d = Math.abs(mid - colMid);
+    if(d < bestDist){{ bestDist = d; bestEl = it; }}
+  }});
+  items.forEach(it=>it.classList.toggle('center', it===bestEl));
+  if(bestEl){{
+    const val = parseInt(bestEl.dataset.val);
+    if(col.id === 'mpl-tw-hour') __twHour = val;
+    else __twMinute = val;
+  }}
+}}
+function buildTimeWheelIfNeeded(){{
+  if(document.getElementById('mpl-tw-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'mpl-tw-overlay';
+  overlay.className = 'mpl-wheel-overlay';
+  overlay.addEventListener('click', e=>{{ if(e.target===overlay) closeTimeWheel(false); }});
+  let hours = '';
+  for(let i=0;i<24;i++){{
+    hours += '<div class="mpl-wheel-item" data-val="'+i+'">'+String(i).padStart(2,'0')+'</div>';
+  }}
+  let mins = '';
+  for(let i=0;i<60;i++){{
+    mins += '<div class="mpl-wheel-item" data-val="'+i+'">'+String(i).padStart(2,'0')+'</div>';
+  }}
+  overlay.innerHTML = '<div class="mpl-wheel-modal">'
+    + '<div class="mpl-wheel-head">'
+    + '<div class="mpl-wheel-head-title">Programmer</div>'
+    + '<div class="mpl-wheel-head-sub" id="mpl-tw-sub">Heure</div>'
+    + '</div>'
+    + '<div class="mpl-wheel-body">'
+    + '<div class="mpl-wheel-col" id="mpl-tw-hour"><div style="height:97px"></div>'+hours+'<div style="height:97px"></div></div>'
+    + '<div class="mpl-wheel-sep">:</div>'
+    + '<div class="mpl-wheel-col" id="mpl-tw-min"><div style="height:97px"></div>'+mins+'<div style="height:97px"></div></div>'
+    + '</div>'
+    + '<div class="mpl-wheel-foot">'
+    + '<button type="button" class="mpl-wheel-btn cancel" onclick="closeTimeWheel(false)">Annuler</button>'
+    + '<button type="button" class="mpl-wheel-btn" onclick="closeTimeWheel(true)">Valider</button>'
+    + '</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+  // Scroll listeners pour mettre a jour la valeur centrale
+  let scrollTimer1, scrollTimer2;
+  const colH = document.getElementById('mpl-tw-hour');
+  const colM = document.getElementById('mpl-tw-min');
+  colH.addEventListener('scroll', ()=>{{ updateWheelCenter(colH); clearTimeout(scrollTimer1); scrollTimer1=setTimeout(()=>snapWheel(colH), 90); }});
+  colM.addEventListener('scroll', ()=>{{ updateWheelCenter(colM); clearTimeout(scrollTimer2); scrollTimer2=setTimeout(()=>snapWheel(colM), 90); }});
+  // Click sur un item -> scroll dessus
+  [colH, colM].forEach(col=>{{
+    col.addEventListener('click', e=>{{
+      const it = e.target.closest('.mpl-wheel-item');
+      if(it){{
+        const itTop = it.offsetTop - col.clientHeight/2 + it.clientHeight/2;
+        col.scrollTo({{top: itTop, behavior:'smooth'}});
+      }}
     }});
   }});
+}}
+function snapWheel(col){{
+  // Snap au centre l'item le plus proche
+  const items = col.querySelectorAll('.mpl-wheel-item');
+  const colRect = col.getBoundingClientRect();
+  const colMid = colRect.top + colRect.height/2;
+  let bestEl = null, bestDist = Infinity;
+  items.forEach(it=>{{
+    const r = it.getBoundingClientRect();
+    const mid = r.top + r.height/2;
+    const d = Math.abs(mid - colMid);
+    if(d < bestDist){{ bestDist = d; bestEl = it; }}
+  }});
+  if(bestEl && bestDist > 1){{
+    const itTop = bestEl.offsetTop - col.clientHeight/2 + bestEl.clientHeight/2;
+    col.scrollTo({{top: itTop, behavior:'smooth'}});
+  }}
 }}
 // Re-init quand on re-render les slots
 const __oldRenderPost = renderPostSlots;
