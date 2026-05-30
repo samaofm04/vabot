@@ -1513,6 +1513,10 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
       Schedule
     </button>
+    <button class="item" id="tab-mypulslive" onclick="showTab('business','mypulslive','MyPuls Live — Push direct','Pousse stories/posts directement dans le scheduler MyPuls via cookies')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      MyPuls Live
+    </button>
   </div>
 </div>
 
@@ -1919,6 +1923,11 @@ function showFeed(btn,name){
 <!-- BUSINESS - SCHEDULE (AUTO-POST XLSX) -->
 <div class="form-section" id="form-schedule" style="display:none">
 {schedule_html}
+</div>
+
+<!-- BUSINESS - MYPULS LIVE PUSH -->
+<div class="form-section" id="form-mypulslive" style="display:none">
+{mypulslive_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -7669,6 +7678,199 @@ def _render_schedule_html() -> str:
     )
 
 
+def _render_mypulslive_html() -> str:
+    """Page MyPuls Live - push direct de stories/posts dans MyPuls via cookies."""
+    import datetime as _dt
+
+    # Verifier que mypuls est configure
+    try:
+        import mypuls
+    except Exception as e:
+        return f"<p style='color:#f99'>Module mypuls indispo : {e}</p>"
+
+    if not mypuls.is_configured():
+        return (
+            "<div style='max-width:680px'>"
+            "<h2 style='margin:0 0 6px;font-size:20px'>MyPuls Live</h2>"
+            "<div style='background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
+            "border-radius:10px;padding:18px;color:#f99;margin-top:14px'>"
+            "<b>Cookies MyPuls non configures.</b><br>"
+            "Va dans <a href='?tab=mypuls' style='color:#3b82f6'>Settings → MyPuls</a> "
+            "et colle tes cookies de session avant d utiliser le scheduler live."
+            "</div></div>"
+        )
+
+    # Recuperer les createurs MyPuls (cache 1h)
+    res = mypuls.list_creators()
+    creators_map = res.get("creators", {}) if res.get("ok") else {}
+    creators_opts = "".join(
+        f"<option value='{cid}'>{name} (id {cid})</option>"
+        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
+    ) or "<option value=''>(aucun createur — verifie tes cookies)</option>"
+
+    # Captions defaut (depuis le module xlsx)
+    try:
+        from schedule_xlsx import DEFAULT_CAPTIONS
+        captions_default = "\n".join(DEFAULT_CAPTIONS)
+    except Exception:
+        captions_default = (
+            "Ton abonnement 100% GRATUIT + un CADEAU aujourd'hui seulement \U0001F609❤️\n"
+            "Abonnement gratuit sans code, si tu likes mes derniers posts = \U0001F381\n"
+            "Abonnement gratuit sans code et si tu likes mes 5 derniers posts = cadeau\n"
+            "Abonnement gratuit sans code + surprise si tu likes mes posts \U0001F48B\n"
+            "Abonnement gratuit 0€ + des surprises si tu likes mes derniers post\n"
+            "Abonnement 100% gratuit sans code + des surprises en prive"
+        )
+
+    today = _dt.date.today()
+    week_later = today + _dt.timedelta(days=6)
+    d_start = today.isoformat()
+    d_end = week_later.isoformat()
+
+    return (
+        "<div style='max-width:1100px'>"
+        "<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
+        "<h2 style='margin:0;font-size:20px'>MyPuls Live</h2>"
+        "<span style='background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;"
+        "padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:.5px'>"
+        "LIVE PUSH ⚡</span>"
+        "</div>"
+        "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+        "Pousse <b>directement</b> tes stories et posts dans le scheduler MyPuls via leurs API. "
+        "Pas de fichier xlsx a importer, tout se passe en live. Tu choisis le createur, "
+        "les dates/heures, et le bot envoie tout. Les minutes sont randomisees <b>:03 a :25</b>. "
+        "<span style='color:#22c55e'>Cookies actifs ✓</span>"
+        "</p>"
+
+        "<form method='POST' action='/mypulslive/push' class='box' style='border:1px solid #2a2a2a' "
+        "onsubmit='return confirm(&quot;Pousser le batch dans MyPuls maintenant ? Cette action est IRREVERSIBLE (sauf cleanup manuel ensuite).&quot;)'>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px'>"
+        "<div>"
+        "<label>Createur MyPuls <span style='color:#f99'>*</span></label>"
+        f"<select name='creator_id' required>{creators_opts}</select>"
+        "</div>"
+        "<div>"
+        "<label>Type <span style='color:#f99'>*</span></label>"
+        "<select name='content_type' required>"
+        "<option value='story'>Story (uniquement story)</option>"
+        "<option value='post'>Post (feed public/prive)</option>"
+        "<option value='both'>Les 2 (story + post en parallele)</option>"
+        "</select>"
+        "</div>"
+        "</div>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px'>"
+        "<div>"
+        "<label>Date debut <span style='color:#f99'>*</span></label>"
+        f"<input type='date' name='date_start' value='{d_start}' required>"
+        "</div>"
+        "<div>"
+        "<label>Date fin <span style='color:#f99'>*</span></label>"
+        f"<input type='date' name='date_end' value='{d_end}' required>"
+        "</div>"
+        "</div>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px'>"
+        "<div style='background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:14px'>"
+        "<h4 style='margin:0 0 8px;color:#22c55e;font-size:14px'>\U0001F30D Heures PUBLIQUES</h4>"
+        "<label>Posts publics (si type=post)</label>"
+        "<input type='text' name='public_hours' placeholder='ex: 9, 14, 20' value='9, 14, 20'>"
+        "<small>1 post public a chaque heure indiquee, chaque jour</small>"
+        "</div>"
+        "<div style='background:rgba(168,85,247,.05);border:1px solid rgba(168,85,247,.2);border-radius:10px;padding:14px'>"
+        "<h4 style='margin:0 0 8px;color:#a855f7;font-size:14px'>\U0001F512 Heures PRIVEES</h4>"
+        "<label>Posts prives (si type=post)</label>"
+        "<input type='text' name='private_hours' placeholder='ex: 11, 17, 23' value='11, 17, 23'>"
+        "<small>1 post prive a chaque heure indiquee, chaque jour</small>"
+        "</div>"
+        "</div>"
+
+        "<div style='background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:14px;margin-top:6px'>"
+        "<h4 style='margin:0 0 8px;color:#3b82f6;font-size:14px'>\U0001F4F1 Heures STORIES</h4>"
+        "<label>Stories (si type=story ou both)</label>"
+        "<input type='text' name='story_hours' placeholder='ex: 8, 12, 16, 20' value='8, 12, 16, 20'>"
+        "<small>1 story a chaque heure indiquee, chaque jour. Audience par defaut : <code>everyone</code></small>"
+        "</div>"
+
+        # Media IDs avec bouton fetch
+        "<div style='display:flex;align-items:center;justify-content:space-between;margin-top:14px'>"
+        "<label style='margin:0'>media_id <span style='color:#f99'>*</span> "
+        "<span style='color:#888;font-weight:400'>(un par ligne)</span></label>"
+        "<button type='button' onclick='fetchMyPulsMedia()' "
+        "style='background:#1a1a1a;border:1px solid #3b82f6;color:#3b82f6;padding:6px 12px;"
+        "border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>"
+        "↓ Recuperer depuis MyPuls"
+        "</button>"
+        "</div>"
+        "<textarea name='media_ids' id='mp-media-ids' rows='8' required "
+        "placeholder='75784227&#10;75784226&#10;...' "
+        "style='font-family:monospace;font-size:13px;margin-top:6px'></textarea>"
+        "<small id='mp-media-status' style='color:#888'></small>"
+
+        # Captions (seulement pour posts)
+        "<label style='margin-top:14px'>Captions "
+        "<span style='color:#888;font-weight:400'>(une par ligne — utilise uniquement pour les posts)</span></label>"
+        f"<textarea name='captions' rows='8' style='font-family:inherit;font-size:13px'>{captions_default}</textarea>"
+
+        # Options post action
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px'>"
+        "<div>"
+        "<label>Auto-delete posts publics</label>"
+        "<select name='post_action'>"
+        "<option value='delete'>Oui, supprimer apres delai</option>"
+        "<option value='none'>Non, garder</option>"
+        "</select>"
+        "</div>"
+        "<div>"
+        "<label>Delai avant delete (secondes)</label>"
+        "<input type='number' name='delay_sec' value='172800' min='3600' max='2592000'>"
+        "<small>Defaut 172800 = 48h. Min 1h, max 30j</small>"
+        "</div>"
+        "</div>"
+
+        "<button type='submit' style='margin-top:16px;background:linear-gradient(135deg,#3b82f6,#a855f7);"
+        "color:#fff;border:0;padding:13px 24px;border-radius:10px;font-weight:700;font-size:14px;"
+        "cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,.3)'>"
+        "⚡ Pousser dans MyPuls (LIVE)"
+        "</button>"
+        "</form>"
+
+        # JS pour fetch media
+        "<script>"
+        "async function fetchMyPulsMedia(){"
+        "  var sel=document.querySelector('select[name=creator_id]');"
+        "  var cid=sel?sel.value:null;"
+        "  if(!cid){alert('Choisis un createur d abord.');return;}"
+        "  var status=document.getElementById('mp-media-status');"
+        "  status.textContent='Fetching media library...';"
+        "  status.style.color='#3b82f6';"
+        "  try{"
+        "    var r=await fetch('/mypulslive/fetch_media?creator='+cid);"
+        "    var j=await r.json();"
+        "    if(j.ok){"
+        "      document.getElementById('mp-media-ids').value=j.ids.join('\\n');"
+        "      status.textContent='✓ '+j.ids.length+' media_id recuperes';"
+        "      status.style.color='#22c55e';"
+        "    } else { status.textContent='Erreur: '+(j.error||'?'); status.style.color='#f99'; }"
+        "  }catch(e){ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }"
+        "}"
+        "</script>"
+
+        "<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;margin-top:18px;font-size:13px;color:#aaa;line-height:1.7'>"
+        "<h4 style='margin:0 0 8px;color:#fff'>ℹ Comment ca marche</h4>"
+        "1. Choisis ton createur MyPuls (Amelia, Julia, etc)<br>"
+        "2. Clique <b>↓ Recuperer depuis MyPuls</b> pour auto-remplir la liste media_ids<br>"
+        "3. Definis tes heures (publiques/privees pour posts, story pour stories)<br>"
+        "4. Clique <b>⚡ Pousser dans MyPuls</b> — le batch part en live<br><br>"
+        "<b>Rappel :</b> les minutes sont randomisees :03-:25 (jamais l'heure pile). "
+        "Pour les posts prives, MyPuls force <code>action=none</code> (pas d auto-delete prive)."
+        "</div>"
+
+        "</div>"
+    )
+
+
 def _render_bilan_html() -> str:
     try:
         from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
@@ -8571,6 +8773,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
+        .replace("{mypulslive_html}", _render_mypulslive_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{profile_pic_html}", _render_profile_pic_html())
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
@@ -9648,6 +9851,139 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/mypulslive/fetch_media", methods=["GET"])
+    def mypulslive_fetch_media():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls_scheduler
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        try:
+            cid = int(request.args.get("creator") or 0)
+        except Exception:
+            return jsonify({"ok": False, "error": "creator id invalide"})
+        if not cid:
+            return jsonify({"ok": False, "error": "creator manquant"})
+        res = mypuls_scheduler.list_all_media(cid, hard_limit=500)
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error", "fetch echoue")})
+        ids = [int(m["id"]) for m in res.get("items", []) if m.get("id")]
+        return jsonify({"ok": True, "ids": ids, "total": len(ids)})
+
+    @app.route("/mypulslive/push", methods=["POST"])
+    def mypulslive_push():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls_scheduler
+        except Exception as e:
+            return _error(f"❌ Module mypuls_scheduler indispo : {e}", tab="mypulslive")
+
+        try:
+            creator_id = int(request.form.get("creator_id") or 0)
+        except Exception:
+            return _error("❌ Createur invalide", tab="mypulslive")
+        if not creator_id:
+            return _error("❌ Createur manquant", tab="mypulslive")
+
+        content_type = (request.form.get("content_type") or "story").strip()
+        date_start = (request.form.get("date_start") or "").strip()
+        date_end = (request.form.get("date_end") or "").strip()
+        public_hours_raw = (request.form.get("public_hours") or "").strip()
+        private_hours_raw = (request.form.get("private_hours") or "").strip()
+        story_hours_raw = (request.form.get("story_hours") or "").strip()
+        media_ids_raw = request.form.get("media_ids") or ""
+        captions_raw = request.form.get("captions") or ""
+        post_action = (request.form.get("post_action") or "delete").strip()
+        try:
+            delay_sec = int(request.form.get("delay_sec") or 172800)
+        except Exception:
+            delay_sec = 172800
+
+        if not date_start or not date_end:
+            return _error("❌ Dates manquantes", tab="mypulslive")
+
+        # Parse helpers
+        def _parse_ints(raw):
+            out = []
+            for part in (raw or "").replace("\n", ",").replace(";", ",").split(","):
+                p = part.strip()
+                if not p:
+                    continue
+                try:
+                    v = int(p)
+                    if 0 <= v <= 23:
+                        out.append(v)
+                except Exception:
+                    pass
+            return out
+
+        def _parse_lines(raw):
+            return [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+
+        media_ids_str = _parse_lines(media_ids_raw)
+        try:
+            media_ids = [int(m) for m in media_ids_str]
+        except Exception:
+            return _error("❌ media_ids doivent etre des entiers", tab="mypulslive")
+        if not media_ids:
+            return _error("❌ Aucun media_id", tab="mypulslive")
+
+        captions = _parse_lines(captions_raw) or [""]
+
+        summary_parts = []
+        all_errors = []
+
+        # Story push
+        if content_type in ("story", "both"):
+            sh = _parse_ints(story_hours_raw)
+            if sh:
+                res = mypuls_scheduler.bulk_schedule_stories(
+                    creator_id=creator_id,
+                    media_ids=media_ids,
+                    date_start=date_start,
+                    date_end=date_end,
+                    hour_slots=sh,
+                )
+                summary_parts.append(
+                    f"📱 Stories : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
+                )
+                if res.get("errors"):
+                    all_errors.extend(res["errors"][:3])
+
+        # Post push
+        if content_type in ("post", "both"):
+            pub = _parse_ints(public_hours_raw)
+            priv = _parse_ints(private_hours_raw)
+            if pub or priv:
+                res = mypuls_scheduler.bulk_schedule_posts(
+                    creator_id=creator_id,
+                    media_ids=media_ids,
+                    captions=captions,
+                    date_start=date_start,
+                    date_end=date_end,
+                    public_hours=pub,
+                    private_hours=priv,
+                    action=post_action,
+                    delay_sec=delay_sec,
+                )
+                summary_parts.append(
+                    f"📰 Posts : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
+                )
+                if res.get("errors"):
+                    all_errors.extend(res["errors"][:3])
+
+        if not summary_parts:
+            return _error("❌ Aucune heure indiquee pour le type choisi", tab="mypulslive")
+
+        msg = "✅ Push live termine — " + " | ".join(summary_parts)
+        if all_errors:
+            msg += " | Premieres erreurs : " + "; ".join(all_errors[:3])
+        return _success(msg, tab="mypulslive")
 
     @app.route("/schedule/generate", methods=["POST"])
     def schedule_generate():
