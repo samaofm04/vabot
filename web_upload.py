@@ -8275,7 +8275,6 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
 
 <script>
 // ============= Slot management =============
-// Default seed slots inspired du screenshot du user (9 posts mix pub/priv)
 const DEFAULT_POST_SLOTS = [
   {{time:'01:00', visibility:'public'}}, {{time:'02:00', visibility:'private'}},
   {{time:'04:00', visibility:'public'}}, {{time:'08:00', visibility:'private'}},
@@ -8283,7 +8282,19 @@ const DEFAULT_POST_SLOTS = [
   {{time:'18:00', visibility:'public'}}, {{time:'19:00', visibility:'private'}},
   {{time:'20:00', visibility:'public'}},
 ];
-const DEFAULT_STORY_SLOTS = ['08:00','12:00','16:00','20:00'];
+// Story slots : {{time, audience}} - audience values doivent matcher l API MyPuls
+const STORY_AUDIENCES = [
+  {{value:'everyone', label:'Tous MYM'}},
+  {{value:'subscribers', label:'Abonnes'}},
+  {{value:'former_subscribers', label:'Ex-abonnes'}},
+  {{value:'interested', label:'Interesses'}},
+];
+const DEFAULT_STORY_SLOTS = [
+  {{time:'08:00', audience:'everyone'}},
+  {{time:'12:00', audience:'everyone'}},
+  {{time:'16:00', audience:'subscribers'}},
+  {{time:'20:00', audience:'everyone'}},
+];
 
 let postSlots = DEFAULT_POST_SLOTS.slice();
 let storySlots = DEFAULT_STORY_SLOTS.slice();
@@ -8329,17 +8340,25 @@ function addPostSlot(){{
 
 function renderStorySlots(){{
   const cnt = parseInt(document.getElementById('mpl-stories-count').value)||0;
+  // Migration : si on a une ancienne string, la convertir en objet
+  storySlots = storySlots.map(s=> typeof s === 'string' ? {{time:s, audience:'everyone'}} : s);
   while(storySlots.length < cnt){{
-    const lastH = storySlots.length?parseInt(storySlots[storySlots.length-1].split(':')[0]):0;
+    const lastSlot = storySlots[storySlots.length-1];
+    const lastH = lastSlot ? parseInt(lastSlot.time.split(':')[0]) : 0;
     const nextH = Math.min(23,(lastH+4));
-    storySlots.push(String(nextH).padStart(2,'0')+':00');
+    storySlots.push({{time:String(nextH).padStart(2,'0')+':00', audience:'everyone'}});
   }}
   while(storySlots.length > cnt) storySlots.pop();
+  // Options HTML pour audience
+  const audOpts = STORY_AUDIENCES.map(a=>'<option value=\"'+a.value+'\">'+a.label+'</option>').join('');
   const c = document.getElementById('mpl-story-slots');
-  c.innerHTML = storySlots.map((t,i)=>`
+  c.innerHTML = storySlots.map((s,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge' style='background:rgba(59,130,246,.15);color:#3b82f6'>#${{i+1}}</div>
-      <input type='time' class='mpl-slot-time' value='${{t}}' onchange='storySlots[${{i}}]=this.value;syncSlots()'>
+      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='storySlots[${{i}}].time=this.value;syncSlots()'>
+      <select class='mpl-slot-aud' onchange='storySlots[${{i}}].audience=this.value;syncSlots()' style='flex-shrink:0;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:8px;font-size:13px;cursor:pointer'>
+        ${{audOpts.replace('value=\"'+s.audience+'\"','value=\"'+s.audience+'\" selected')}}
+      </select>
       <button type='button' class='mpl-slot-rm' onclick='removeStorySlot(${{i}})' title='Retirer'>×</button>
     </div>
   `).join('');
@@ -8351,7 +8370,7 @@ function removeStorySlot(i){{
   renderStorySlots();
 }}
 function addStorySlot(){{
-  storySlots.push('12:00');
+  storySlots.push({{time:'12:00', audience:'everyone'}});
   document.getElementById('mpl-stories-count').value = storySlots.length;
   renderStorySlots();
 }}

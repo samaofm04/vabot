@@ -495,24 +495,28 @@ def _parse_time_slot(s: str) -> Optional[tuple]:
     return None
 
 
+VALID_STORY_AUDIENCES = {"everyone", "subscribers", "former_subscribers", "interested"}
+
+
 def bulk_schedule_stories(
     creator_id: int,
     media_ids: List[int],
     date_start: str,
     date_end: str,
-    story_slots: List[str],  # ["HH:MM", ...]
-    audience: str = "everyone",
+    story_slots,  # liste de "HH:MM" OU liste de {time, audience}
+    audience: str = "everyone",  # fallback global si slot n'a pas d audience
     auto_delete_after_sec: Optional[int] = None,
     shuffle_media: bool = False,
     randomize_minutes: bool = True,
-    # Backward compat : hour_slots (int) accepte aussi
     hour_slots: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Planifie en masse des stories.
 
-    story_slots = liste de "HH:MM". Si randomize_minutes=True, on randomise
-    les minutes entre 3 et 25 (override le MM specifie).
-    shuffle_media : si True, shuffle l ordre des media_ids avant utilisation.
+    story_slots :
+      - liste de "HH:MM" (backward compat -> audience globale appliquee)
+      - OU liste de {"time":"HH:MM", "audience":"everyone|subscribers|former_subscribers|interested"}
+
+    Si randomize_minutes : minutes overridees aleatoirement (3-25).
     """
     import random
     from datetime import datetime, timedelta
@@ -529,14 +533,23 @@ def bulk_schedule_stories(
     if d_end < d_start:
         return {"ok": False, "error": "date_end < date_start"}
 
-    # Parse slots
-    parsed_slots: List[tuple] = []
+    # Parse slots avec audience
+    parsed_slots: List[tuple] = []  # (hour, minute, audience)
     if hour_slots:  # backward compat
-        parsed_slots = [(int(h), 0) for h in hour_slots]
+        for h in hour_slots:
+            parsed_slots.append((int(h), 0, audience))
     for sl in (story_slots or []):
-        p = _parse_time_slot(sl)
+        if isinstance(sl, dict):
+            t = sl.get("time", "")
+            aud = (sl.get("audience") or audience or "everyone").strip()
+            if aud not in VALID_STORY_AUDIENCES:
+                aud = "everyone"
+        else:
+            t = str(sl)
+            aud = audience
+        p = _parse_time_slot(t)
         if p:
-            parsed_slots.append(p)
+            parsed_slots.append((p[0], p[1], aud))
     if not parsed_slots:
         return {"ok": False, "error": "Aucun creneau horaire valide"}
 
@@ -550,7 +563,7 @@ def bulk_schedule_stories(
     media_idx = 0
     day = d_start
     while day <= d_end:
-        for (h, base_m) in parsed_slots:
+        for (h, base_m, aud) in parsed_slots:
             m = random.randint(3, 25) if randomize_minutes else base_m
             dt = datetime(day.year, day.month, day.day, h, m, 0)
             mid = media_ids[media_idx % len(media_ids)]
@@ -558,7 +571,7 @@ def bulk_schedule_stories(
                 creator_id=creator_id,
                 media_id=mid,
                 date_iso=dt.strftime("%Y-%m-%d %H:%M:%S"),
-                audience=audience,
+                audience=aud,
                 auto_delete_after_sec=auto_delete_after_sec,
             )
             if res.get("ok"):
@@ -568,7 +581,7 @@ def bulk_schedule_stories(
             else:
                 failed += 1
                 if len(errors) < 5:
-                    errors.append(f"{dt}: {res.get('error', '?')[:80]}")
+                    errors.append(f"{dt} [{aud}]: {res.get('error', '?')[:80]}")
             media_idx += 1
         day += timedelta(days=1)
     return {
