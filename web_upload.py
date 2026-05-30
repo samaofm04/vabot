@@ -7720,18 +7720,40 @@ def _render_chatplanning_html() -> str:
     week_lbl = chatting.week_label(active_week)
     iso_w = chatting.iso_week_number(active_week)
 
-    # Si pas d EDT, prompt creation simple
+    # Si pas d EDT, propose les 2 presets + custom
     if not edts:
         return (
-            "<div style='max-width:520px;text-align:center;padding:60px 20px'>"
+            "<div style='max-width:680px;text-align:center;padding:50px 20px'>"
             "<div style='font-size:48px;margin-bottom:12px'>💬</div>"
             "<h2 style='margin:0 0 6px;font-size:22px'>Emploi du temps chatteurs</h2>"
-            "<p style='margin:0 0 24px;color:#888;font-size:14px'>Cree ton premier planning pour commencer.<br>Tu rempliras toi-meme les chatteurs et leurs horaires.</p>"
-            "<form method='POST' action='/chatting/create_edt' style='display:flex;gap:10px;align-items:stretch;max-width:380px;margin:0 auto'>"
-            "<input type='text' name='name' placeholder='ex: EDT 1 OF' required "
-            "style='flex:1;padding:12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-size:14px'>"
-            "<button type='submit' style='background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px;white-space:nowrap'>+ Creer</button>"
+            "<p style='margin:0 0 28px;color:#888;font-size:14px'>Cree tes plannings — un par plateforme.</p>"
+            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:520px;margin:0 auto 20px'>"
+            # OF preset
+            "<form method='POST' action='/chatting/create_preset' style='margin:0'>"
+            "<input type='hidden' name='preset' value='of'>"
+            "<button type='submit' style='width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;padding:24px 14px;background:linear-gradient(135deg,#0099ff,#0066cc);border:0;color:#fff;border-radius:14px;cursor:pointer;font-family:inherit;box-shadow:0 6px 18px rgba(0,153,255,.25)'>"
+            "<span style='font-size:30px'>💌</span>"
+            "<span style='font-weight:800;font-size:15px;letter-spacing:.3px'>EDT OnlyFans</span>"
+            "<span style='font-size:11px;opacity:.85;font-weight:500'>Planning OF</span>"
+            "</button>"
             "</form>"
+            # MYM preset
+            "<form method='POST' action='/chatting/create_preset' style='margin:0'>"
+            "<input type='hidden' name='preset' value='mym'>"
+            "<button type='submit' style='width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;padding:24px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:14px;cursor:pointer;font-family:inherit;box-shadow:0 6px 18px rgba(255,77,141,.25)'>"
+            "<span style='font-size:30px'>📱</span>"
+            "<span style='font-weight:800;font-size:15px;letter-spacing:.3px'>EDT MYM</span>"
+            "<span style='font-size:11px;opacity:.85;font-weight:500'>Planning MYM</span>"
+            "</button>"
+            "</form>"
+            "</div>"
+            "<div style='color:#444;font-size:12px;margin:14px 0'>— OU —</div>"
+            "<form method='POST' action='/chatting/create_edt' style='display:flex;gap:10px;align-items:stretch;max-width:380px;margin:0 auto'>"
+            "<input type='text' name='name' placeholder='Nom custom' "
+            "style='flex:1;padding:11px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-size:13px'>"
+            "<button type='submit' style='background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:11px 20px;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap'>+ Custom</button>"
+            "</form>"
+            "<div style='font-size:11px;color:#666;margin-top:8px'>Tu pourras toujours en ajouter d'autres apres</div>"
             "</div>"
         )
 
@@ -7775,9 +7797,27 @@ def _render_chatplanning_html() -> str:
         f"text-decoration:none;border-radius:10px;font-size:13px;font-weight:600'>{e['name']}</a>"
         for e in edts
     )
-    add_tab = (
+    # Detecte les presets deja crees (par nom contient OF / MYM)
+    has_of = any("of" in (e.get("name","").lower()) for e in edts)
+    has_mym = any("mym" in (e.get("name","").lower()) for e in edts)
+    quick_btns = ""
+    if not has_of:
+        quick_btns += (
+            "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
+            "<input type='hidden' name='preset' value='of'>"
+            "<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#0099ff,#0066cc);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px'>💌 + EDT OF</button>"
+            "</form>"
+        )
+    if not has_mym:
+        quick_btns += (
+            "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
+            "<input type='hidden' name='preset' value='mym'>"
+            "<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px'>📱 + EDT MYM</button>"
+            "</form>"
+        )
+    add_tab = quick_btns + (
         "<button type='button' onclick=\"const n=prompt('Nom du nouveau planning ?'); if(n){const f=document.createElement('form');f.method='POST';f.action='/chatting/create_edt';f.innerHTML='<input name=name value=\\''+n+'\\'>';document.body.appendChild(f);f.submit();}\" "
-        "style='padding:9px 14px;background:transparent;border:1px dashed #3b82f6;color:#3b82f6;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer'>+ Nouveau planning</button>"
+        "style='padding:9px 14px;background:transparent;border:1px dashed #3b82f6;color:#3b82f6;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer'>+ Custom</button>"
     )
     # Renommer/Supprimer EDT actif
     edt_actions = (
@@ -11710,7 +11750,27 @@ def create_app():
         if not name:
             return _error("❌ Nom manquant", tab="chatplanning")
         edt = chatting.create_edt(name)
-        # Pre-rempli 1 ligne vide par creneau pour que l user puisse commencer
+        for cre in chatting.CRENEAUX:
+            chatting.add_row(edt["id"], cre)
+        return redirect(f"/?tab=chatplanning&edt_id={edt['id']}")
+
+    @app.route("/chatting/create_preset", methods=["POST"])
+    def chatting_create_preset():
+        if not is_auth():
+            return redirect("/")
+        import chatting
+        preset = (request.form.get("preset") or "").strip().lower()
+        if preset == "of":
+            name = "EDT OnlyFans"
+        elif preset == "mym":
+            name = "EDT MYM"
+        else:
+            return _error("❌ Preset invalide", tab="chatplanning")
+        # Verifier qu il n existe pas deja
+        for e in chatting.list_edts():
+            if e.get("name", "").lower() == name.lower():
+                return redirect(f"/?tab=chatplanning&edt_id={e['id']}")
+        edt = chatting.create_edt(name)
         for cre in chatting.CRENEAUX:
             chatting.add_row(edt["id"], cre)
         return redirect(f"/?tab=chatplanning&edt_id={edt['id']}")
