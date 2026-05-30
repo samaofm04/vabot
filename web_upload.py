@@ -7698,7 +7698,7 @@ def _render_schedule_html() -> str:
 
 
 def _render_chatplanning_html() -> str:
-    """Emploi du temps des chatteurs - style tableau Excel multi-EDT."""
+    """Emploi du temps chatteurs - tableau Excel-style multi-EDT multi-semaines."""
     try:
         import chatting
     except Exception as e:
@@ -7706,6 +7706,19 @@ def _render_chatplanning_html() -> str:
 
     from flask import request as _req
     edts = chatting.list_edts()
+
+    # Week navigation : ?week_start=YYYY-MM-DD
+    ws_param = (_req.args.get("week_start") or "").strip()
+    if ws_param:
+        active_week = chatting.parse_week_start(ws_param)
+    else:
+        active_week = chatting.current_week_start()
+    prev_week = chatting.shift_week(active_week, -1)
+    next_week = chatting.shift_week(active_week, +1)
+    today_week = chatting.current_week_start()
+    week_dates = chatting.week_dates(active_week)
+    week_lbl = chatting.week_label(active_week)
+    iso_w = chatting.iso_week_number(active_week)
 
     # Si pas d EDT, prompt creation simple
     if not edts:
@@ -7834,7 +7847,8 @@ def _render_chatplanning_html() -> str:
         cre_color = creneau_colors[creneau]
         first = True
         for r in rows_in:
-            counts = chatting.row_counts(r)
+            counts = chatting.row_counts(r, active_week)
+            pres_for_row = chatting.row_presence(r, active_week)
             cre_cell = ""
             if first:
                 cre_cell = (
@@ -7854,10 +7868,10 @@ def _render_chatplanning_html() -> str:
             modele_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'modele', r.get('modele', ''), modele_opts(r.get('modele', '')), '#1a1a1a', '#fff', 150)}</td>"
             # OFF
             off_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'off', r.get('off', ''), off_opts(r.get('off', '')), '#1a1a1a', '#aaa', 110)}</td>"
-            # Days
+            # Days - presence pour la semaine active
             day_cells = ""
             for dk in chatting.DAYS:
-                pv = r.get("presence", {}).get(dk, "Present")
+                pv = pres_for_row.get(dk, "Present")
                 pc = pres_colors.get(pv, pres_colors["Present"])
                 day_cells += f"<td style='padding:4px 4px'>{_select_cell(r['id'], dk, pv, pres_opts(pv), pc['bg'], pc['fg'], 85)}</td>"
             # Retards/absences
@@ -7874,16 +7888,21 @@ def _render_chatplanning_html() -> str:
             f"<form method='POST' action='/chatting/add_row' style='margin:0'>"
             f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
             f"<input type='hidden' name='creneau' value='{creneau}'>"
+            f"<input type='hidden' name='week_start' value='{active_week}'>"
             f"<button type='submit' style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%'>"
             f"+ ajouter une ligne sur {creneau}</button>"
             f"</form>"
             f"</td></tr>"
         )
 
-    # Header tableau
+    # Header tableau - jours avec dates de la semaine
+    today_iso = chatting.current_week_start()  # used only as a marker
+    today_real = chatting.date.today().isoformat()
     day_headers = "".join(
-        f"<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 8px;font-size:12px'>{d}</th>"
-        for d in chatting.DAYS_FULL
+        f"<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 8px;font-size:12px;{'border-bottom:2px solid #3b82f6' if d.isoformat() == today_real else ''}'>"
+        f"{name}<div style='font-size:10px;color:#888;font-weight:500;margin-top:2px'>{d.day:02d}/{d.month:02d}</div>"
+        f"</th>"
+        for d, name in zip(week_dates, chatting.DAYS_FULL)
     )
     header = (
         "<thead><tr>"
@@ -7928,6 +7947,7 @@ async function saveCell(el){
   fd.set('row_id', el.dataset.row);
   fd.set('field', el.dataset.field);
   fd.set('value', el.value);
+  fd.set('week_start', '""" + active_week + """');
   // Si c'est un select de presence, mettre a jour la couleur immediatement
   const PRES_COL = {Present:['#86efac','#14532d'], Absent:['#fca5a5','#7f1d1d'], Retard:['#fed7aa','#7c2d12'], Coupure:['#fef08a','#713f12'], OFF:['#525252','#e5e5e5']};
   const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
@@ -7968,17 +7988,55 @@ async function deleteRow(rid){
 </script>
 """
 
+    # === Navigation semaine ===
+    is_current = (active_week == today_week)
+    week_nav = (
+        f"<div style='display:flex;align-items:center;justify-content:space-between;"
+        f"padding:14px 18px;background:linear-gradient(135deg,#161616,#0f0f0f);"
+        f"border:1px solid #2a2a2a;border-radius:14px;margin-bottom:14px;flex-wrap:wrap;gap:10px'>"
+        # Prev arrow
+        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={prev_week}' "
+        f"style='display:flex;align-items:center;gap:8px;color:#fff;text-decoration:none;"
+        f"padding:8px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;"
+        f"font-size:13px;font-weight:600;transition:.12s' "
+        f"onmouseover='this.style.background=\"#222\"' onmouseout='this.style.background=\"#1a1a1a\"'>"
+        f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' "
+        f"stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='15 18 9 12 15 6'/></svg>"
+        f"Semaine precedente</a>"
+        # Middle (current week info)
+        f"<div style='display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;flex:1;min-width:200px'>"
+        f"<div style='display:flex;align-items:center;gap:10px'>"
+        f"<span style='font-size:11px;color:#888;letter-spacing:1.5px;text-transform:uppercase'>Semaine {iso_w}</span>"
+        + (f"<span style='background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;letter-spacing:.5px'>EN COURS</span>" if is_current else f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={today_week}' style='background:#3b82f6;color:#fff;font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer'>Revenir a aujourd hui</a>")
+        + f"</div>"
+        f"<div style='color:#fff;font-size:17px;font-weight:700;letter-spacing:-.01em'>{week_lbl}</div>"
+        f"</div>"
+        # Next arrow
+        f"<a href='?tab=chatplanning&edt_id={active_edt['id']}&week_start={next_week}' "
+        f"style='display:flex;align-items:center;gap:8px;color:#fff;text-decoration:none;"
+        f"padding:8px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;"
+        f"font-size:13px;font-weight:600;transition:.12s' "
+        f"onmouseover='this.style.background=\"#222\"' onmouseout='this.style.background=\"#1a1a1a\"'>"
+        f"Semaine suivante"
+        f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' "
+        f"stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='9 18 15 12 9 6'/></svg>"
+        f"</a>"
+        f"</div>"
+    )
+
     return (
         "<div style='max-width:1500px'>"
         "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
         "<p style='margin:0 0 16px;color:#888;font-size:13px'>"
-        f"Planning <b>{active_edt['name']}</b> — clique sur n importe quelle cellule pour la modifier."
+        f"Planning <b>{active_edt['name']}</b> — clique sur n importe quelle cellule pour la modifier. "
+        f"Les pseudos / statuts / modeles restent fixes, la <b>presence change par semaine</b>."
         "</p>"
         # Tabs EDTs
         "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;align-items:center'>"
         + tabs_html + add_tab +
         "</div>"
         f"<div style='margin:0 0 14px;color:#666;font-size:11px'>{edt_actions}</div>"
+        + week_nav
         + table
         + legend
         + js
@@ -11683,8 +11741,12 @@ def create_app():
         import chatting
         edt_id = (request.form.get("edt_id") or "").strip()
         cre = (request.form.get("creneau") or "02h-08h").strip()
+        ws = (request.form.get("week_start") or "").strip()
         chatting.add_row(edt_id, cre)
-        return redirect(f"/?tab=chatplanning&edt_id={edt_id}")
+        url = f"/?tab=chatplanning&edt_id={edt_id}"
+        if ws:
+            url += f"&week_start={ws}"
+        return redirect(url)
 
     @app.route("/chatting/delete_row", methods=["POST"])
     def chatting_delete_row():
@@ -11711,6 +11773,7 @@ def create_app():
             (request.form.get("row_id") or "").strip(),
             (request.form.get("field") or "").strip(),
             (request.form.get("value") or "").strip(),
+            week_start=(request.form.get("week_start") or "").strip(),
         )
         return jsonify({"ok": ok})
 
