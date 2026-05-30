@@ -4413,22 +4413,22 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
-    # Defer : data-src au lieu de src + un placeholder transparent (pas de requete HTTP)
+    # Skeleton placeholder + lazy image fade-in
     if deferred:
         img_tag = (
-            f"<img data-src='{thumb_url}' class='vault-defer-img' loading='lazy' "
+            f"<img data-src='{thumb_url}' class='vault-defer-img vault-img-load' loading='lazy' "
             f"src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg==' "
-            f"style='width:100%;height:100%;object-fit:cover;display:block;background:#1a1a1a'>"
+            f"style='width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .25s'>"
         )
     else:
         img_tag = (
-            f"<img src='{thumb_url}' loading='lazy' "
-            f"style='width:100%;height:100%;object-fit:cover;display:block'>"
+            f"<img src='{thumb_url}' loading='lazy' class='vault-img-load' onload='this.style.opacity=1' "
+            f"style='width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .25s'>"
         )
     media_html = (
         f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\",\"{example_safe}\")' "
-        f"title='{name}' "
-        f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;background:#000;border-radius:10px;overflow:hidden'>"
+        f"title='{name}' class='vault-card-bg' "
+        f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden'>"
         f"{img_tag}"
         f"{play_badge}"
         f"{date_badge}"
@@ -4888,6 +4888,14 @@ body.light .up-edit-name{color:#111}
 .up-submit{margin-top:6px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:14px 26px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.3);letter-spacing:.01em;width:100%;font-family:inherit}
 .up-submit:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.4)}
 
+/* === Skeleton placeholder (gradient gris anime) avant chargement thumb === */
+.vault-card-bg{background:linear-gradient(110deg,#1a1a1a 8%,#262626 18%,#1a1a1a 33%);background-size:200% 100%;animation:vaultSkel 1.4s linear infinite}
+body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 18%,#eceff1 33%);background-size:200% 100%}
+@keyframes vaultSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+/* L image apparait en fade quand elle a chargee */
+.vault-img-load{opacity:0}
+.vault-img-load.loaded{opacity:1}
+
 /* === SFW blur mode === */
 /* Tout flou par defaut quand SFW est ON */
 body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5);transition:filter .25s}
@@ -5040,6 +5048,12 @@ document.addEventListener('click', function(e){
         if(img.dataset.src){
           img.src = img.dataset.src;
           delete img.dataset.src;
+          img.addEventListener('load', function(){
+            img.style.opacity = '1';
+            // Arret du skeleton apres chargement
+            const card = img.closest('.vault-card-bg');
+            if(card) card.style.animation = 'none';
+          }, {once:true});
           io.unobserve(img);
           loaded++;
           if(status) status.textContent = loaded + ' / ' + total + ' charges';
@@ -5050,6 +5064,21 @@ document.addEventListener('click', function(e){
   }, {rootMargin: '300px'});  // pre-charge avant que l img n entre dans le viewport
   imgs.forEach(img=>io.observe(img));
 })();
+
+// Pour les imgs eager (premiers 24) : aussi stop le skeleton apres load
+document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(function(img){
+  if(img.complete && img.naturalHeight !== 0){
+    img.style.opacity = '1';
+    const card = img.closest('.vault-card-bg');
+    if(card) card.style.animation = 'none';
+  } else {
+    img.addEventListener('load', function(){
+      img.style.opacity = '1';
+      const card = img.closest('.vault-card-bg');
+      if(card) card.style.animation = 'none';
+    }, {once:true});
+  }
+});
 </script>
 """
 
