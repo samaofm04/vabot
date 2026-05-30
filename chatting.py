@@ -47,10 +47,22 @@ OFF_OPTIONS = ["FULLTIME", "Lundi", "Mardi", "Mercredi", "Jeudi",
                "Vendredi", "Samedi", "Dimanche", "PAS DE REPONSE"]
 PRESENCE_VALUES = ["Present", "Absent", "Retard", "Coupure", "OFF"]
 
-DEFAULT_MODELES = ["", "Julia", "Amelia", "Lola", "Sarah", "Emma",
-                   "Amelia+Lola", "Lola+Emma", "Julia+Sarah",
-                   "Les 3 (Julia+Amelia+Lola)",
-                   "Toutes (Julia+Amelia+Lola+Sarah+Emma)"]
+DEFAULT_MODELES = ["", "Julia", "Amelia", "Lola", "Sarah", "Emma", "Kiara"]
+
+# Listes des modeles par plateforme (utilisees pour le multi-select)
+MODELES_OF = ["Julia", "Amelia", "Lola"]
+MODELES_MYM = ["Lola", "Julia", "Amelia", "Kiara", "Sarah", "Emma"]
+
+
+def models_for_edt(edt_name: str) -> List[str]:
+    """Retourne la liste des modeles disponibles pour un EDT (selon son nom)."""
+    n = (edt_name or "").lower()
+    if "mym" in n:
+        return MODELES_MYM
+    if "of" in n or "onlyfans" in n:
+        return MODELES_OF
+    # Defaut : union des deux
+    return sorted(set(MODELES_OF + MODELES_MYM))
 
 
 # ==================== Week helpers ====================

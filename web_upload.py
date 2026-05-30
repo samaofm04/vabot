@@ -7959,13 +7959,8 @@ def _render_chatplanning_html() -> str:
     off_opts = lambda v: "<option value=''></option>" + "".join(
         f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.OFF_OPTIONS
     )
-    modele_opts = lambda v: "".join(
-        f"<option value=\"{s}\" {'selected' if s == v else ''}>{s}</option>"
-        for s in chatting.DEFAULT_MODELES
-    ) + (
-        f"<option value=\"{v}\" selected>{v}</option>"
-        if v and v not in chatting.DEFAULT_MODELES else ""
-    )
+    # Liste des modeles disponibles pour cet EDT (Of ou MyM)
+    available_modeles = chatting.models_for_edt(active_edt.get("name", ""))
     pres_opts = lambda v: "".join(
         f"<option value='{p}' {'selected' if p == v else ''}>{p}</option>"
         for p in chatting.PRESENCE_VALUES
@@ -8028,8 +8023,28 @@ def _render_chatplanning_html() -> str:
             # Statut
             sc = statut_colors.get(r.get("statut", "Nouveau"), statut_colors["Nouveau"])
             statut_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'statut', r.get('statut', 'Nouveau'), statut_opts(r.get('statut', 'Nouveau')), sc['bg'], sc['fg'], 90)}</td>"
-            # Modele
-            modele_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'modele', r.get('modele', ''), modele_opts(r.get('modele', '')), '#1a1a1a', '#fff', 150)}</td>"
+            # Modele : multi-select (genere "Amelia+Lola" alpha auto)
+            current_mod = r.get('modele', '')
+            current_set = set([m.strip() for m in current_mod.split('+') if m.strip()])
+            chips_html = ""
+            for m in available_modeles:
+                checked = m in current_set
+                chips_html += (
+                    f"<label style='display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#ccc' onmouseover=\"this.style.background='#222'\" onmouseout=\"this.style.background='transparent'\">"
+                    f"<input type='checkbox' value='{m}' {'checked' if checked else ''} onchange='modelToggle(this, \"{r['id']}\")' style='accent-color:#3b82f6'>"
+                    f"<span>{m}</span></label>"
+                )
+            display = current_mod if current_mod else "—"
+            modele_cell = (
+                f"<td style='padding:4px 6px;position:relative'>"
+                f"<button type='button' class='mod-trigger' data-row='{r['id']}' onclick='modelOpen(this)' "
+                f"style='width:150px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:6px 10px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                f"{display} ▾</button>"
+                f"<div class='mod-pop' style='display:none;position:absolute;top:100%;left:6px;z-index:60;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:4px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);margin-top:4px'>"
+                f"{chips_html}"
+                f"</div>"
+                f"</td>"
+            )
             # OFF
             off_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'off', r.get('off', ''), off_opts(r.get('off', '')), '#1a1a1a', '#aaa', 110)}</td>"
             # Days - presence pour la semaine active
@@ -8223,6 +8238,31 @@ const MODELE_OPTS = ['','Julia','Amelia','Lola','Sarah','Emma','Amelia+Lola','Lo
 // Pas de label '(vide)' - on laisse l option vide
 function _opt(v, sel){ return '<option value=\"'+v+'\"'+(v===sel?' selected':'')+'>'+v+'</option>'; }
 
+// === Multi-select Modele ===
+window.AVAILABLE_MODELES = """ + json.dumps(available_modeles) + """;
+
+function modelOpen(btn){
+  document.querySelectorAll('.mod-pop').forEach(p=>{ if(p !== btn.nextElementSibling) p.style.display='none'; });
+  const pop = btn.nextElementSibling;
+  pop.style.display = (pop.style.display === 'block') ? 'none' : 'block';
+}
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.mod-trigger') && !e.target.closest('.mod-pop')){
+    document.querySelectorAll('.mod-pop').forEach(p=>p.style.display='none');
+  }
+});
+
+function modelToggle(checkbox, rowId){
+  const pop = checkbox.closest('.mod-pop');
+  const checked = Array.from(pop.querySelectorAll('input[type=checkbox]:checked')).map(c=>c.value);
+  checked.sort();
+  const value = checked.join('+');
+  const trigger = pop.previousElementSibling;
+  if(trigger) trigger.innerHTML = (value || '—') + ' ▾';
+  const fake = {dataset:{row:rowId, field:'modele'}, value:value};
+  saveCell(fake);
+}
+
 async function addChatRow(creneau){
   const fd = new FormData();
   fd.set('edt_id', '""" + active_edt['id'] + """');
@@ -8238,7 +8278,12 @@ async function addChatRow(creneau){
   const sta = 'Nouveau';
   const stCol = STA_COL[sta];
   const statutSel = '<select class=chat-cell data-row='+rid+' data-field=statut onchange=saveCell(this) style=\"width:90px;background:'+stCol[0]+';color:'+stCol[1]+';border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + STA_OPTS.map(o=>_opt(o,sta)).join('') + '</select>';
-  const modeleSel = '<select class=chat-cell data-row='+rid+' data-field=modele onchange=saveCell(this) style=\"width:150px;background:#1a1a1a;color:#fff;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + MODELE_OPTS.map(o=>_opt(o,'')).join('') + '</select>';
+  // Modele : multi-select wrapper
+  let chipsHtml = '';
+  (window.AVAILABLE_MODELES || []).forEach(m=>{
+    chipsHtml += '<label style=\"display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#ccc\" onmouseover=\"this.style.background=\\'#222\\'\" onmouseout=\"this.style.background=\\'transparent\\'\"><input type=checkbox value=\"'+m+'\" onchange=\"modelToggle(this,\\''+rid+'\\')\" style=accent-color:#3b82f6><span>'+m+'</span></label>';
+  });
+  const modeleSel = '<div style=position:relative><button type=button class=mod-trigger data-row='+rid+' onclick=modelOpen(this) style=\"width:150px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:6px 10px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-align:center\">— ▾</button><div class=mod-pop style=\"display:none;position:absolute;top:100%;left:0;z-index:60;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:4px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);margin-top:4px\">'+chipsHtml+'</div></div>';
   const offSel = '<select class=chat-cell data-row='+rid+' data-field=off onchange=saveCell(this) style=\"width:110px;background:#1a1a1a;color:#aaa;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + OFF_OPTS.map(o=>_opt(o,'')).join('') + '</select>';
   const days = ['lun','mar','mer','jeu','ven','sam','dim'];
   let dayCells = '';
