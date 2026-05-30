@@ -8166,7 +8166,6 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     <div class='mpl-name' id='mpl-name'>
       <img id='mpl-name-avatar' src='/mypuls/avatar/{first_creator_id}' alt='' style='width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.4);margin-right:6px' onerror="this.style.display='none'">
       <span id='mpl-name-text'>{first_creator_name or '—'}</span>
-      <span class='mpl-badge'>∞ INFINI</span>
     </div>
     <div class='mpl-handle' id='mpl-handle'>id #{first_creator_id}</div>
 
