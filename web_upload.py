@@ -5683,6 +5683,22 @@ def _format_count(n) -> str:
     return str(n)
 
 
+def _format_caption_html(caption: str) -> str:
+    """Style les hashtags et @mentions en bleu (look Instagram).
+
+    Input : texte brut (deja escape pour HTML, eg les guillemets sont &quot;)
+    Output : HTML avec spans bleus sur les # et @.
+    """
+    if not caption:
+        return ""
+    import re as _re
+    # Hashtags
+    s = _re.sub(r'#([\w_]+)', r'<span style="color:#3b82f6;font-weight:600">#\1</span>', caption)
+    # @mentions (sans intercepter les @ deja transformes ci-dessus)
+    s = _re.sub(r'(?<!\w)@([\w_.]+)', r'<span style="color:#3b82f6;font-weight:600">@\1</span>', s)
+    return s
+
+
 def _time_ago(ts) -> str:
     """Timestamp Unix -> '3 days ago' / 'just now'..."""
     import time
@@ -5830,7 +5846,7 @@ def _render_insta_trends_grid_html() -> str:
       <!-- Expand panel : slide UP depuis le bas, caption COMPLETE + sound -->
       <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:8px">
-          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{caption if caption else '<span style=color:#888;font-style:italic>Pas de description</span>'}</div>
+          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{_format_caption_html(caption) if caption else '<span style=color:#888;font-style:italic>Pas de description</span>'}</div>
           <div style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:11.5px">
             <span style="color:#3b82f6">🎵</span><span style="color:#aaa">Sound:</span>
             <span style="color:#fff;font-weight:600">Original audio</span>
