@@ -1648,17 +1648,36 @@ window.upClearPrefill = function(utab){
 {msg_html}
 
 <div class="form-section" id="form-reel" style="display:none">
-<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*" data-multi="1">
+<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
 </div>
+
+<!-- Conteneur des slots de reel (1 slot = 1 reel complet) -->
+<div id="reel-slots-container">
+<!-- Le 1er slot est cree au load par initReelSlots() -->
+</div>
+
+<button type="button" id="add-reel-slot" class="up-add-slot">+ Ajouter un autre reel</button>
+
+<button type="submit" class="up-submit">⬆ Uploader tous les reels</button>
+</form>
+</div>
+
+<!-- Template HTML pour 1 reel slot (clone par initReelSlots) -->
+<template id="reel-slot-template">
+<div class="reel-slot" data-slot-idx="0">
+<div class="reel-slot-header">
+<div class="reel-slot-num">#1</div>
+<button type="button" class="reel-slot-remove" onclick="removeReelSlot(this)" title="Retirer ce reel">×</button>
+</div>
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Vidéo CLEAN <span class="up-req">(obligatoire)</span></h3></div>
 <label class="up-drop">
-<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
+<input type="file" data-name="video" accept="video/*" required class="up-file-main">
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop video file(s) — tu peux selectionner plusieurs vidéos d un coup</div>
+<div class="up-drop-hint">Drag and drop the clean video here</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
@@ -1668,20 +1687,20 @@ window.upClearPrefill = function(utab){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Vidéo EXEMPLE <span class="up-opt">(optionnel)</span></h3></div>
 <label class="up-drop up-drop-small">
-<input type="file" name="example" accept="video/*" class="up-file-example">
+<input type="file" data-name="example" accept="video/*" class="up-file-example">
 <div class="up-drop-inner-small"><div class="up-plus">+</div><div class="up-plus-lbl">Ajouter exemple</div></div>
 </label>
 </div>
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Textes</h3></div>
 <label class="up-mini-label">Caption (overlay sur la vidéo)</label>
-<textarea name="caption" placeholder="Pov : j'ai fait la maline..." class="up-input"></textarea>
+<textarea data-name="caption" placeholder="Pov : j'ai fait la maline..." class="up-input"></textarea>
 <label class="up-mini-label" style="margin-top:14px">Description (texte du post)</label>
-<textarea name="description" placeholder="Ouais bon on va espérer hein 💀" class="up-input"></textarea>
+<textarea data-name="description" placeholder="Ouais bon on va espérer hein 💀" class="up-input"></textarea>
 </div>
-<button type="submit" class="up-submit">⬆ Uploader le reel</button>
-</form>
+<div class="reel-slot-status"></div>
 </div>
+</template>
 
 <div class="form-section" id="form-post" style="display:none">
 <form method="POST" action="/upload/post" enctype="multipart/form-data" class="up-form" data-utype="post" data-accept="image/*">
@@ -4889,6 +4908,22 @@ body.light .up-edit-name{color:#111}
 .up-submit{margin-top:6px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:14px 26px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.3);letter-spacing:.01em;width:100%;font-family:inherit}
 .up-submit:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.4)}
 
+/* === Reel slots (multi-reel upload) === */
+.reel-slot{position:relative;background:#121212;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:14px}
+body.light .reel-slot{background:#f9fafb;border-color:#e5e7eb}
+.reel-slot .up-card{background:#1a1a1a;margin-bottom:10px}
+body.light .reel-slot .up-card{background:#fff}
+.reel-slot-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:4px 4px 0}
+.reel-slot-num{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border-radius:10px;font-size:12px;font-weight:800;letter-spacing:.5px}
+.reel-slot-remove{background:transparent;border:1px solid #333;color:#ef4444;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;transition:.15s}
+.reel-slot-remove:hover{background:rgba(239,68,68,.15);transform:scale(1.1)}
+.up-add-slot{display:flex;align-items:center;justify-content:center;width:100%;padding:14px;background:transparent;border:2px dashed rgba(59,130,246,.4);color:#3b82f6;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s;margin-bottom:14px}
+.up-add-slot:hover{background:rgba(59,130,246,.06);border-color:rgba(59,130,246,.7)}
+.reel-slot-status{padding:8px 4px 0;font-size:12px;color:#888;text-align:center}
+.reel-slot-status.ok{color:#22c55e;font-weight:700}
+.reel-slot-status.err{color:#ef4444;font-weight:700}
+.reel-slot-status.uploading{color:#3b82f6;font-weight:700}
+
 /* === Skeleton placeholder (gradient gris anime) avant chargement thumb === */
 .vault-card-bg{background:linear-gradient(110deg,#1a1a1a 8%,#262626 18%,#1a1a1a 33%);background-size:200% 100%;animation:vaultSkel 1.4s linear infinite}
 body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 18%,#eceff1 33%);background-size:200% 100%}
@@ -4983,10 +5018,120 @@ document.addEventListener('change', function(e){
   }
 });
 
+// === REEL SLOTS : multi-reel preparation + bulk push ===
+function _reelRenumberSlots(){
+  const slots = document.querySelectorAll('#reel-slots-container .reel-slot');
+  slots.forEach((s, i)=>{
+    s.dataset.slotIdx = String(i);
+    const num = s.querySelector('.reel-slot-num');
+    if(num) num.textContent = '#' + (i+1);
+    // Cache le bouton X si c'est le seul slot
+    const rm = s.querySelector('.reel-slot-remove');
+    if(rm) rm.style.visibility = slots.length === 1 ? 'hidden' : 'visible';
+  });
+}
+function addReelSlot(){
+  const tpl = document.getElementById('reel-slot-template');
+  const container = document.getElementById('reel-slots-container');
+  if(!tpl || !container) return;
+  const clone = tpl.content.cloneNode(true);
+  container.appendChild(clone);
+  _reelRenumberSlots();
+}
+function removeReelSlot(btn){
+  const slot = btn.closest('.reel-slot');
+  if(slot){ slot.remove(); _reelRenumberSlots(); }
+}
+function initReelSlots(){
+  const container = document.getElementById('reel-slots-container');
+  if(!container) return;
+  // Si le conteneur est vide, on ajoute le premier slot
+  if(container.querySelectorAll('.reel-slot').length === 0){
+    addReelSlot();
+  }
+  const addBtn = document.getElementById('add-reel-slot');
+  if(addBtn && !addBtn.dataset.bound){
+    addBtn.dataset.bound = '1';
+    addBtn.addEventListener('click', addReelSlot);
+  }
+}
+// Lance l init au load et apres chaque switch de tab
+document.addEventListener('DOMContentLoaded', initReelSlots);
+window.initReelSlots = initReelSlots;
+
+// === BULK REEL UPLOAD ===
+async function pushAllReels(form){
+  const slots = Array.from(form.querySelectorAll('#reel-slots-container .reel-slot'));
+  if(!slots.length) return;
+  const identity = form.querySelector('select[name=identity]')?.value;
+  if(!identity){ alert('Selectionne une identite'); return; }
+  // Verifier que chaque slot a au moins une video clean
+  for(const s of slots){
+    const v = s.querySelector('input.up-file-main');
+    if(!v || !v.files || !v.files.length){
+      alert('Le reel #' + (parseInt(s.dataset.slotIdx)+1) + ' n a pas de vidéo CLEAN. Ajoute-en une ou supprime ce slot.');
+      return;
+    }
+  }
+  const submitBtn = form.querySelector('.up-submit');
+  let done = 0, errs = 0;
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = '⬆ Upload 0 / ' + slots.length + '...'; }
+  async function pushOne(slot, idx){
+    const fd = new FormData();
+    fd.append('identity', identity);
+    const cleanInput = slot.querySelector('input[data-name=video]');
+    const exampleInput = slot.querySelector('input[data-name=example]');
+    const captionT = slot.querySelector('textarea[data-name=caption]');
+    const descT = slot.querySelector('textarea[data-name=description]');
+    if(cleanInput && cleanInput.files[0]) fd.append('video', cleanInput.files[0], cleanInput.files[0].name);
+    if(exampleInput && exampleInput.files[0]) fd.append('example', exampleInput.files[0], exampleInput.files[0].name);
+    if(captionT) fd.append('caption', captionT.value || '');
+    if(descT) fd.append('description', descT.value || '');
+    const status = slot.querySelector('.reel-slot-status');
+    if(status){ status.className = 'reel-slot-status uploading'; status.textContent = '⏳ Upload en cours...'; }
+    try {
+      const r = await fetch(form.action, {method:'POST', body:fd, credentials:'same-origin'});
+      if(r.ok){
+        done++;
+        if(status){ status.className = 'reel-slot-status ok'; status.textContent = '✓ Upload OK'; }
+      } else {
+        errs++;
+        if(status){ status.className = 'reel-slot-status err'; status.textContent = '✗ Erreur ' + r.status; }
+      }
+    } catch(e){
+      errs++;
+      if(status){ status.className = 'reel-slot-status err'; status.textContent = '✗ Erreur réseau'; }
+    }
+    if(submitBtn) submitBtn.textContent = '⬆ Upload ' + (done+errs) + ' / ' + slots.length + '...';
+  }
+  // Push 2 reels en parallele max (videos lourdes)
+  const CONCURRENCY = 2;
+  for(let i = 0; i < slots.length; i += CONCURRENCY){
+    await Promise.all(slots.slice(i, i + CONCURRENCY).map((s, j)=>pushOne(s, i+j)));
+  }
+  if(submitBtn){
+    submitBtn.disabled = false;
+    submitBtn.textContent = '✅ ' + done + ' reel(s) OK' + (errs?' · '+errs+' erreur(s)':'');
+    submitBtn.style.background = errs ? 'linear-gradient(135deg,#22c55e,#ef4444)' : 'linear-gradient(135deg,#22c55e,#16a34a)';
+  }
+  setTimeout(()=>{
+    if(submitBtn){
+      submitBtn.textContent = '⬆ Uploader tous les reels';
+      submitBtn.style.background = '';
+    }
+  }, 3500);
+}
+
 // === BULK UPLOAD : intercepte submit, envoie chaque file separement ===
 document.addEventListener('submit', function(e){
   const form = e.target;
   if(!form.classList || !form.classList.contains('up-form')) return;
+  // Reel form : utilise les slots de reel (bulk reel push)
+  if(form.dataset.utype === 'reel' && form.querySelector('#reel-slots-container')){
+    e.preventDefault();
+    pushAllReels(form);
+    return;
+  }
   const mainInput = form.querySelector('.up-file-main');
   if(!mainInput || !mainInput.files || mainInput.files.length <= 1) return; // <=1 file : laisse le submit natif
   e.preventDefault();
