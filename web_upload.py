@@ -7941,7 +7941,40 @@ body.light .mpl-pillnav button:hover{background:#fff;color:#111}
 body.light .mpl-card{background:#fff;border-color:#e5e7eb}
 body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
 body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
+
+/* === Flatpickr custom dark theme (matches dashboard) === */
+.flatpickr-calendar{background:#1a1a1a!important;border:1px solid #2a2a2a!important;border-radius:14px!important;box-shadow:0 12px 40px rgba(0,0,0,.5)!important;color:#fff!important;font-family:inherit!important}
+.flatpickr-calendar::before,.flatpickr-calendar::after{display:none!important}
+.flatpickr-months{background:transparent;color:#fff;padding:14px 12px 6px;border-bottom:1px solid #2a2a2a}
+.flatpickr-months .flatpickr-month{background:transparent;color:#fff;height:auto}
+.flatpickr-current-month{padding:0;font-size:14px;font-weight:600}
+.flatpickr-current-month input.cur-year,.flatpickr-current-month .cur-month{color:#fff!important;font-weight:600!important;background:transparent!important}
+.flatpickr-current-month .cur-month:hover{background:transparent!important}
+.flatpickr-monthDropdown-months{background:#1a1a1a!important;color:#fff!important;border:0!important}
+.flatpickr-monthDropdown-month{background:#1a1a1a!important;color:#fff!important}
+.flatpickr-prev-month,.flatpickr-next-month{color:#888!important;fill:#888!important;padding:8px!important}
+.flatpickr-prev-month:hover,.flatpickr-next-month:hover{color:#fff!important;fill:#fff!important;background:#262626!important;border-radius:6px!important}
+.flatpickr-weekdays{background:transparent;padding:8px 0 4px}
+span.flatpickr-weekday{color:#888!important;font-weight:600!important;background:transparent!important;font-size:11px!important;letter-spacing:.5px;text-transform:uppercase}
+.flatpickr-day{color:#ccc!important;border-radius:50%!important;height:36px!important;line-height:36px!important;font-size:13.5px!important;border:0!important}
+.flatpickr-day:hover{background:#262626!important;color:#fff!important;border-color:#262626!important}
+.flatpickr-day.today{background:transparent!important;border:1px solid #3b82f6!important;color:#3b82f6!important;font-weight:700}
+.flatpickr-day.selected,.flatpickr-day.selected:hover{background:#3b82f6!important;color:#fff!important;border-color:#3b82f6!important;font-weight:700;box-shadow:0 0 0 4px rgba(59,130,246,.18)!important}
+.flatpickr-day.flatpickr-disabled,.flatpickr-day.prevMonthDay,.flatpickr-day.nextMonthDay{color:#444!important;opacity:.5}
+.flatpickr-day.flatpickr-disabled:hover,.flatpickr-day.prevMonthDay:hover{background:transparent!important}
+
+/* Time picker */
+.flatpickr-time{border-top:1px solid #2a2a2a!important;background:transparent!important;padding:8px 0}
+.flatpickr-time input{color:#fff!important;background:transparent!important;font-size:20px!important;font-weight:700;font-family:inherit!important}
+.flatpickr-time input:hover,.flatpickr-time input:focus{background:#262626!important}
+.flatpickr-time .flatpickr-time-separator{color:#666!important;font-size:20px}
+.flatpickr-time .numInputWrapper:hover{background:#262626!important}
+.flatpickr-time .arrowUp:after{border-bottom-color:#888!important}
+.flatpickr-time .arrowDown:after{border-top-color:#888!important}
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/fr.js"></script>
 """
 
     form = f"""
@@ -8927,6 +8960,40 @@ function submitMyPulsForm(ev){{
   return false;
 }}
 
+// === Flatpickr init (date + time pickers) ===
+function applyFlatpickr(){{
+  if(typeof flatpickr === 'undefined') return;
+  try{{ flatpickr.localize(flatpickr.l10ns.fr); }}catch(e){{}}
+  // Date pickers
+  document.querySelectorAll('#form-mypulslive input[type=date]:not([data-fp])').forEach(el=>{{
+    el.dataset.fp = '1';
+    flatpickr(el, {{
+      dateFormat: 'Y-m-d',
+      altInput: true,
+      altFormat: 'j F Y',
+      monthSelectorType: 'static',
+      disableMobile: true,
+    }});
+  }});
+  // Time pickers
+  document.querySelectorAll('#form-mypulslive input[type=time]:not([data-fp])').forEach(el=>{{
+    el.dataset.fp = '1';
+    flatpickr(el, {{
+      enableTime: true,
+      noCalendar: true,
+      dateFormat: 'H:i',
+      time_24hr: true,
+      minuteIncrement: 1,
+      disableMobile: true,
+    }});
+  }});
+}}
+// Re-init quand on re-render les slots
+const __oldRenderPost = renderPostSlots;
+renderPostSlots = function(){{ __oldRenderPost.apply(this, arguments); setTimeout(applyFlatpickr, 0); }};
+const __oldRenderStory = renderStorySlots;
+renderStorySlots = function(){{ __oldRenderStory.apply(this, arguments); setTimeout(applyFlatpickr, 0); }};
+
 // Init
 document.getElementById('mpl-posts-count').value = postSlots.length;
 document.getElementById('mpl-stories-count').value = storySlots.length;
@@ -8936,6 +9003,12 @@ switchTab('post');
 updatePostAction();
 updateMediaCount();
 updateCapCount();
+// Charge flatpickr apres l init des slots
+setTimeout(applyFlatpickr, 100);
+// Re-essai si CDN charge tard (max 3s)
+setTimeout(applyFlatpickr, 500);
+setTimeout(applyFlatpickr, 1500);
+setTimeout(applyFlatpickr, 3000);
 // Init calendrier au mois courant + auto-load (le block est open par defaut)
 const __initD = new Date();
 __calYear = __initD.getFullYear();
