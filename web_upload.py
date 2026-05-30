@@ -1307,40 +1307,10 @@ function showTab(group,name,title,subtitle){
 
 <div class="section-label">Contenu</div>
 
-<div class="group" id="grp-upload">
-  <button class="group-head" onclick="toggleGroup('upload')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
-    <span class="label">Upload</span>
-    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-  </button>
-  <div class="items">
-    <button class="item" id="tab-reel" onclick="showTab('upload','reel','Upload Reel','Vidéo clean + caption + description (+ exemple optionnel)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-      Reel
-    </button>
-    <button class="item" id="tab-post" onclick="showTab('upload','post','Upload Post','Photo + caption + description')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-      Post
-    </button>
-    <button class="item" id="tab-story" onclick="showTab('upload','story','Upload Story','Photo simple pour story')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-      Story
-    </button>
-    <button class="item" id="tab-storycta" onclick="showTab('upload','storycta','Story CTA','Photo 1080x1920 pour CTA + lien')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
-      Story CTA
-    </button>
-    <button class="item" id="tab-pp" onclick="showTab('upload','pp','Photo de profil','Pool partagé entre toutes les identités')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
-      PP partagé
-    </button>
-  </div>
-</div>
-
 <div class="group" id="grp-cloud">
   <button class="group-head" onclick="toggleGroup('cloud')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-    <span class="label">Dossier sécurisé</span>
+    <span class="label">Bibliothèque</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
@@ -4575,11 +4545,34 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             + "</div>"
         )
 
+    # Mapping subdir -> upload tab name (pour le bouton + Add media)
+    upload_tab_map = {
+        "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description"),
+        "posts": ("post", "Upload Post", "Photo + caption + description"),
+        "stories": ("story", "Upload Story", "Photo simple pour story"),
+        "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien"),
+    }
+    add_media_btn = ""
+    if subdir in upload_tab_map:
+        utab, utitle, usub = upload_tab_map[subdir]
+        # Pre-fill l identite selectionnee dans le form upload via JS
+        add_media_btn = (
+            f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
+            f"setTimeout(function(){{var s=document.querySelector('#form-{utab} select[name=identity]');if(s){{s.value='{selected}';s.dispatchEvent(new Event('change'));}}}}, 50);\" "
+            f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+            f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
+            f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
+            f"box-shadow:0 4px 12px rgba(59,130,246,.25);letter-spacing:.01em'>"
+            f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
+            f"Add media</button>"
+        )
+
     gallery_header = (
         f"<div class='vault-gallery-header'>"
         f"{sel_avatar_html}"
         f"<div style='flex:1'><div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
         f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div></div>"
+        f"{add_media_btn}"
         f"{sort_btn_html}"
         f"</div>"
         + type_filter_html
@@ -4749,13 +4742,22 @@ document.addEventListener('click', function(e){
 
 
 def _render_cloud_pps_html() -> str:
-    """PPs partagées avec preview en grille."""
+    """PPs partagées avec preview en grille + bouton + Add media."""
+    add_btn = (
+        "<button type='button' onclick=\"showTab('upload','pp','Photo de profil','Pool partagé entre toutes les identités')\" "
+        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+        "background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
+        "border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
+        "box-shadow:0 4px 12px rgba(59,130,246,.25);margin-bottom:14px'>"
+        "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
+        "Add media (PP)</button>"
+    )
     if not PROFILE_PICS_DIR.exists():
-        return "<p style='color:#888'>Aucune PP uploadée.</p>"
+        return add_btn + "<p style='color:#888'>Aucune PP uploadée.</p>"
     files = sorted([p for p in PROFILE_PICS_DIR.iterdir() if p.is_file()])
     if not files:
-        return "<p style='color:#888'>Aucune PP uploadée.</p>"
-    rows = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
+        return add_btn + "<p style='color:#888'>Aucune PP uploadée.</p>"
+    rows = [add_btn, "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
     for p in files:
         url = f"/cloud/pp/{p.name}"
         thumb_url = f"/cloud/thumb/pp/{p.name}"
