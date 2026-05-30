@@ -8861,6 +8861,13 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     platform_label = "MyM" if platform == "mym" else "OnlyFans"
     platform_color = "#a855f7" if platform == "mym" else "#0099ff"
 
+    # Auto-fill MyPuls a chaque ouverture de la page MyM (cache 5min)
+    if platform == "mym":
+        try:
+            sfs_setup.autofill_mypuls_if_stale()
+        except Exception:
+            pass
+
     identities = _sfssetup_identities(platform)
 
     if not identities:
@@ -13485,29 +13492,10 @@ def create_app():
             import sfs_setup
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
-        # Charge les counts depuis MyPuls (stub pour l instant)
-        subs_data = sfs_setup.fetch_mypuls_subscribers()
-        if not subs_data:
+        # Force refresh (bypass cache) - le bouton est un override manuel
+        applied = sfs_setup.autofill_mypuls_if_stale(force=True)
+        if applied == 0:
             return jsonify({"ok": True, "applied": 0, "note": "MyPuls non configure ou pas de donnees"})
-        # Pour chaque createur, si on a des donnees on les sauve
-        applied = 0
-        for ident, data in subs_data.items():
-            if not data:
-                continue
-            current = sfs_setup.get_identity("mym", ident)
-            updated = {f: current.get(f, "") for f in sfs_setup.FIELDS}
-            if data.get("abonnes"):
-                updated["abonnes"] = data["abonnes"]
-            if data.get("anciens"):
-                updated["anciens"] = data["anciens"]
-            if data.get("interesses"):
-                updated["interesses"] = data["interesses"]
-            sfs_setup.save_identity(
-                "mym", ident, updated,
-                emoji=current.get("emoji", ""),
-                enabled=current.get("enabled", True),
-            )
-            applied += 1
         return jsonify({"ok": True, "applied": applied})
 
     @app.route("/sfssetup/generate", methods=["GET"])

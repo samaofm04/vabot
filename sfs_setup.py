@@ -203,6 +203,51 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
     return "\n".join(lines).rstrip()
 
 
+# Cache TTL pour l auto-fetch MyPuls (en secondes)
+_MYPULS_CACHE_TTL = 300  # 5 min
+_mypuls_last_autofetch = {"ts": 0.0}
+
+
+def autofill_mypuls_if_stale(force: bool = False) -> int:
+    """Lance fetch_mypuls_subscribers() si le cache est plus vieux que TTL,
+    et applique les counts a chaque identite MyM stockee, en preservant les
+    autres champs (niche, age, abonnement deja saisis manuellement).
+
+    Retourne le nombre d'identites mises a jour.
+    """
+    import time
+    now = time.time()
+    if not force and (now - _mypuls_last_autofetch["ts"]) < _MYPULS_CACHE_TTL:
+        return 0
+    try:
+        data = fetch_mypuls_subscribers()
+    except Exception:
+        return 0
+    if not data:
+        return 0
+    applied = 0
+    for ident, counts in data.items():
+        if not counts:
+            continue
+        # Charge les champs actuels (niche/age/abonnement preserves)
+        current = get_identity("mym", ident)
+        updated = {f: current.get(f, "") for f in fields_for("mym")}
+        if counts.get("abonnes"):
+            updated["abonnes"] = counts["abonnes"]
+        if counts.get("anciens"):
+            updated["anciens"] = counts["anciens"]
+        if counts.get("interesses"):
+            updated["interesses"] = counts["interesses"]
+        save_identity(
+            "mym", ident, updated,
+            emoji=current.get("emoji", ""),
+            enabled=current.get("enabled", True),
+        )
+        applied += 1
+    _mypuls_last_autofetch["ts"] = now
+    return applied
+
+
 def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     """Fetch les counts d'abonnes / anciens / interesses depuis MyPuls.
 
