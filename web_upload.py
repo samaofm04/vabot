@@ -7851,7 +7851,7 @@ def _render_chatplanning_html() -> str:
         f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.OFF_OPTIONS
     )
     modele_opts = lambda v: "".join(
-        f"<option value=\"{s}\" {'selected' if s == v else ''}>{s or '(vide)'}</option>"
+        f"<option value=\"{s}\" {'selected' if s == v else ''}>{s}</option>"
         for s in chatting.DEFAULT_MODELES
     ) + (
         f"<option value=\"{v}\" selected>{v}</option>"
@@ -7885,6 +7885,21 @@ def _render_chatplanning_html() -> str:
     for creneau in chatting.CRENEAUX:
         rows_in = rows_by_cre.get(creneau, [])
         cre_color = creneau_colors[creneau]
+        # Si pas de lignes, ajoute une ligne placeholder avec le creneau cell
+        if not rows_in:
+            cre_only_cell = (
+                f"<td class='chat-cre-cell' data-creneau='{creneau}' rowspan='1' "
+                f"style='background:{cre_color};color:#fff;font-weight:700;text-align:center;"
+                f"font-size:13px;padding:8px;border-right:2px solid #0a0a0a'>"
+                f"{creneau.replace('h-', 'h - ').replace('-', ' - ')}h"
+                f"</td>"
+            )
+            body_rows.append(
+                f"<tr class='chat-empty-placeholder' data-creneau='{creneau}'>"
+                f"{cre_only_cell}"
+                f"<td colspan='13' style='padding:14px;color:#444;text-align:center;font-size:12px;font-style:italic'>aucune ligne — clique ci-dessous</td>"
+                f"</tr>"
+            )
         first = True
         for r in rows_in:
             counts = chatting.row_counts(r, active_week)
@@ -7892,7 +7907,7 @@ def _render_chatplanning_html() -> str:
             cre_cell = ""
             if first:
                 cre_cell = (
-                    f"<td rowspan='{len(rows_in)}' "
+                    f"<td class='chat-cre-cell' data-creneau='{creneau}' rowspan='{len(rows_in)}' "
                     f"style='background:{cre_color};color:#fff;font-weight:700;text-align:center;"
                     f"font-size:13px;padding:8px;writing-mode:initial;border-right:2px solid #0a0a0a'>"
                     f"{creneau.replace('h-', 'h - ').replace('-', ' - ')}h"
@@ -8019,9 +8034,39 @@ async function deleteRow(rid){
   fd.set('edt_id', '""" + active_edt['id'] + """');
   fd.set('row_id', rid);
   await fetch('/chatting/delete_row', {method:'POST', body:fd});
-  // Retirer la ligne du DOM (no reload)
   const tr = document.querySelector('tr[data-rowid=\"'+rid+'\"]');
-  if(tr) tr.remove();
+  if(!tr) return;
+  // Si cette tr contient la cellule creneau rowspan, il faut la transferer a la suivante
+  const creCell = tr.querySelector('td.chat-cre-cell');
+  if(creCell){
+    const creneau = creCell.dataset.creneau;
+    const curSpan = parseInt(creCell.getAttribute('rowspan')||'1');
+    if(curSpan > 1){
+      // Trouve la TR suivante dans le meme groupe et lui pose la cellule en debut
+      const nextTr = tr.nextElementSibling;
+      if(nextTr && nextTr.dataset.rowid){
+        const clone = creCell.cloneNode(true);
+        clone.setAttribute('rowspan', String(curSpan - 1));
+        nextTr.insertBefore(clone, nextTr.firstChild);
+      }
+    }
+  } else {
+    // Decremente le rowspan du creneau cell trouve dans une autre tr
+    const trAnyInGroup = tr.previousElementSibling || tr.nextElementSibling;
+    let groupCell = document.querySelector('td.chat-cre-cell');
+    // Cherche la cellule chat-cre-cell du meme groupe (parcours les soeurs)
+    let cur = tr;
+    while(cur){
+      const cc = cur.querySelector?.('td.chat-cre-cell');
+      if(cc){ groupCell = cc; break; }
+      cur = cur.previousElementSibling;
+    }
+    if(groupCell){
+      const cur2 = parseInt(groupCell.getAttribute('rowspan')||'1');
+      if(cur2 > 1) groupCell.setAttribute('rowspan', String(cur2 - 1));
+    }
+  }
+  tr.remove();
 }
 
 // Liste des options par select
@@ -8030,7 +8075,8 @@ const STA_OPTS = ['Ancien','Nouveau','Support'];
 const OFF_OPTS = ['', 'FULLTIME','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche','PAS DE REPONSE'];
 const MODELE_OPTS = ['','Julia','Amelia','Lola','Sarah','Emma','Amelia+Lola','Lola+Emma','Julia+Sarah','Les 3 (Julia+Amelia+Lola)','Toutes (Julia+Amelia+Lola+Sarah+Emma)'];
 
-function _opt(v, sel){ return '<option value=\"'+v+'\"'+(v===sel?' selected':'')+'>'+(v||'(vide)')+'</option>'; }
+// Pas de label '(vide)' - on laisse l option vide
+function _opt(v, sel){ return '<option value=\"'+v+'\"'+(v===sel?' selected':'')+'>'+v+'</option>'; }
 
 async function addChatRow(creneau){
   const fd = new FormData();
@@ -8039,8 +8085,10 @@ async function addChatRow(creneau){
   const r = await fetch('/chatting/add_row', {method:'POST', body:fd});
   const j = await r.json();
   if(!j.ok){ alert('Erreur: '+(j.error||'?')); return; }
-  // Build la HTML de la nouvelle ligne
   const rid = j.row_id;
+  // Si une row placeholder 'aucune ligne' existait, on la vire
+  const placeholder = document.querySelector('tr.chat-empty-placeholder[data-creneau=\"'+creneau+'\"]');
+  if(placeholder) placeholder.remove();
   const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
   const sta = 'Nouveau';
   const stCol = STA_COL[sta];
@@ -8053,10 +8101,22 @@ async function addChatRow(creneau){
     const opts = PRES_OPTS.map(o=>_opt(o,'Present')).join('');
     dayCells += '<td style=padding:4px><select class=chat-cell data-row='+rid+' data-field='+dk+' onchange=saveCell(this) style=\"width:85px;background:#86efac;color:#14532d;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">'+opts+'</select></td>';
   });
+  // Chercher si une cellule rowspan existe deja pour ce creneau
+  const existingCreCell = document.querySelector('td.chat-cre-cell[data-creneau=\"'+creneau+'\"]');
+  let creCellHtml = '';
+  if(existingCreCell){
+    // Extend le rowspan
+    const cur = parseInt(existingCreCell.getAttribute('rowspan')||'1');
+    existingCreCell.setAttribute('rowspan', String(cur+1));
+  } else {
+    // Premier element du groupe : creer la creneau cell
+    const CRE_COLORS = {'02h-08h':'#1d4ed8','08h-14h':'#0e7490','14h-20h':'#c2410c','20h-02h':'#7e22ce'};
+    creCellHtml = '<td class=chat-cre-cell data-creneau=\"'+creneau+'\" rowspan=1 style=\"background:'+CRE_COLORS[creneau]+';color:#fff;font-weight:700;text-align:center;font-size:13px;padding:8px;border-right:2px solid #0a0a0a\">'+creneau.replace('h-','h - ').replace('-',' - ')+'h</td>';
+  }
   const tr = document.createElement('tr');
   tr.dataset.rowid = rid;
-  tr.innerHTML =
-    '<td style=padding:4px><input type=text class=chat-cell data-row='+rid+' data-field=pseudo value=\"\" placeholder=Pseudo onchange=saveCell(this) style=\"background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;border-radius:6px;font-size:12px;width:120px\"></td>'
+  tr.innerHTML = creCellHtml
+    + '<td style=padding:4px><input type=text class=chat-cell data-row='+rid+' data-field=pseudo value=\"\" placeholder=Pseudo onchange=saveCell(this) style=\"background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;border-radius:6px;font-size:12px;width:120px\"></td>'
     + '<td style=padding:4px>'+statutSel+'</td>'
     + '<td style=padding:4px>'+modeleSel+'</td>'
     + '<td style=padding:4px>'+offSel+'</td>'
@@ -8064,7 +8124,6 @@ async function addChatRow(creneau){
     + '<td id=retards-'+rid+' style=\"text-align:center;color:#666;font-weight:700;padding:6px\">0</td>'
     + '<td id=absences-'+rid+' style=\"text-align:center;color:#666;font-weight:700;padding:6px\">0</td>'
     + '<td style=text-align:center><button type=button onclick=deleteRow(\"'+rid+'\") style=\"background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px\">×</button></td>';
-  // Insere avant le bouton "+ ajouter ligne"
   const anchor = document.getElementById('addrow-'+creneau);
   anchor.parentNode.insertBefore(tr, anchor);
 }
