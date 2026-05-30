@@ -8204,12 +8204,12 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     {campaigns_html}
 
     <!-- Planning mensuel par createur -->
-    <div class='mpl-row' id='mpl-calendar-block' style='margin-bottom:18px'>
+    <div class='mpl-row open' id='mpl-calendar-block' style='margin-bottom:18px'>
       <div class='mpl-row-head' onclick='mplToggle(this.parentElement); if(this.parentElement.classList.contains("open")) loadCalendar();'>
         <div class='mpl-row-icon' style='background:rgba(168,85,247,.12);color:#a855f7'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
         <div class='mpl-row-text'>
-          <div class='mpl-row-title'>📅 Planning <span class='mpl-mini-badge' id='mpl-cal-month-badge' style='background:rgba(168,85,247,.15);color:#a855f7'></span></div>
-          <div class='mpl-row-sub'>Calendrier des events planifies pour le createur selectionne</div>
+          <div class='mpl-row-title' style='font-size:15px'>Emploi du temps <span class='mpl-mini-badge' id='mpl-cal-month-badge' style='background:rgba(168,85,247,.15);color:#a855f7'>...</span></div>
+          <div class='mpl-row-sub'>Calendrier des posts et stories planifies sur MyPuls</div>
         </div>
         <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
       </div>
@@ -8784,11 +8784,13 @@ switchTab('post');
 updatePostAction();
 updateMediaCount();
 updateCapCount();
-// Init calendrier au mois courant (sans charger : c'est collapsible)
+// Init calendrier au mois courant + auto-load (le block est open par defaut)
 const __initD = new Date();
 __calYear = __initD.getFullYear();
 __calMonth = __initD.getMonth();
 document.getElementById('mpl-cal-month-name').textContent = FR_MONTHS[__calMonth] + ' ' + __calYear;
+// Auto-fetch les events pour le createur par defaut (delai pour eviter de bloquer l init)
+setTimeout(()=>loadCalendar(), 300);
 </script>
 """)
 
