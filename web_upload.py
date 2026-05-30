@@ -1509,6 +1509,10 @@ function showTab(group,name,title,subtitle){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
       GetMySocial
     </button>
+    <button class="item" id="tab-schedule" onclick="showTab('business','schedule','Schedule — Auto-post','Genere un fichier Excel template d import de posts planifies')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
+      Schedule
+    </button>
   </div>
 </div>
 
@@ -1910,6 +1914,11 @@ function showFeed(btn,name){
 <!-- BUSINESS - GETMYSOCIAL -->
 <div class="form-section" id="form-gms" style="display:none">
 {gms_html}
+</div>
+
+<!-- BUSINESS - SCHEDULE (AUTO-POST XLSX) -->
+<div class="form-section" id="form-schedule" style="display:none">
+{schedule_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -7552,6 +7561,114 @@ function gmsFilter(btn, cat){
     )
 
 
+def _render_schedule_html() -> str:
+    """Page Schedule : formulaire pour generer un fichier Excel d'import de posts planifies."""
+    import datetime as _dt
+
+    # Liste des modeles depuis les identites
+    try:
+        identities = sorted(_list_identities())
+    except Exception:
+        identities = []
+
+    # Captions par defaut
+    try:
+        from schedule_xlsx import DEFAULT_CAPTIONS
+        captions_default = "\n".join(DEFAULT_CAPTIONS)
+    except Exception:
+        captions_default = (
+            "Ton abonnement 100% GRATUIT + un CADEAU aujourd'hui seulement \U0001F609❤️\n"
+            "Abonnement gratuit sans code, si tu likes mes derniers posts = \U0001F381\n"
+            "Abonnement gratuit sans code et si tu likes mes 5 derniers posts = cadeau\n"
+            "Abonnement gratuit sans code + surprise si tu likes mes posts \U0001F48B\n"
+            "Abonnement gratuit 0€ + des surprises si tu likes mes derniers post\n"
+            "Abonnement 100% gratuit sans code + des surprises en prive"
+        )
+
+    # Dates par defaut : aujourd hui -> +7 jours
+    today = _dt.date.today()
+    week_later = today + _dt.timedelta(days=6)
+    d_start = today.isoformat()
+    d_end = week_later.isoformat()
+
+    # Datalist des modeles existants
+    datalist_opts = "".join(f"<option value='{i}'></option>" for i in identities)
+
+    return (
+        "<div style='max-width:980px'>"
+        "<h2 style='margin:0 0 6px;font-size:20px'>Schedule — Auto-post</h2>"
+        "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+        "Genere un fichier <b>Excel template d'import</b> de posts planifies. "
+        "Tu definis le modele, la periode, le nombre de posts par jour et les heures. "
+        "Tu colles tes <b>media_id</b> (un par ligne) et tes <b>captions</b> (les 6 captions par defaut sont pre-remplies). "
+        "Les minutes sont randomisees entre <b>:03</b> et <b>:25</b> pour faire humain. "
+        "Chaque post sera supprime automatiquement <b>48h</b> apres publication (post_action=delete, delay=172800)."
+        "</p>"
+
+        "<form method='POST' action='/schedule/generate' class='box' style='border:1px solid #2a2a2a'>"
+
+        "<datalist id='schedule-models'>" + datalist_opts + "</datalist>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px'>"
+        "<div>"
+        "<label>Modele / prenom <span style='color:#f99'>*</span></label>"
+        "<input type='text' name='model_name' list='schedule-models' placeholder='ex: amelia' required>"
+        "<small>Sert pour le nom du fichier <code>template_import_[PRENOM]_[PERIODE].xlsx</code></small>"
+        "</div>"
+        "<div></div>"
+        "</div>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px'>"
+        "<div>"
+        "<label>Date de debut <span style='color:#f99'>*</span></label>"
+        f"<input type='date' name='date_start' value='{d_start}' required>"
+        "</div>"
+        "<div>"
+        "<label>Date de fin <span style='color:#f99'>*</span></label>"
+        f"<input type='date' name='date_end' value='{d_end}' required>"
+        "</div>"
+        "</div>"
+
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px'>"
+        "<div style='background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:14px'>"
+        "<h4 style='margin:0 0 8px;color:#22c55e;font-size:14px'>\U0001F30D Posts PUBLICS</h4>"
+        "<label>Heures (separer par virgules)</label>"
+        "<input type='text' name='public_hours' placeholder='ex: 9, 14, 20' value='9, 14, 20'>"
+        "<small>1 post public sera planifie a chaque heure indiquee, chaque jour de la periode. Minutes aleatoires :03 a :25.</small>"
+        "</div>"
+        "<div style='background:rgba(168,85,247,.05);border:1px solid rgba(168,85,247,.2);border-radius:10px;padding:14px'>"
+        "<h4 style='margin:0 0 8px;color:#a855f7;font-size:14px'>\U0001F512 Posts PRIVES</h4>"
+        "<label>Heures (separer par virgules)</label>"
+        "<input type='text' name='private_hours' placeholder='ex: 11, 17, 23' value='11, 17, 23'>"
+        "<small>1 post prive sera planifie a chaque heure indiquee, chaque jour. Minutes aleatoires :03 a :25.</small>"
+        "</div>"
+        "</div>"
+
+        "<label style='margin-top:14px'>media_id <span style='color:#f99'>*</span> "
+        "<span style='color:#888;font-weight:400'>(un par ligne, recycles en ordre si pas assez)</span></label>"
+        "<textarea name='media_ids' rows='8' placeholder='media_id_1&#10;media_id_2&#10;media_id_3&#10;...' required style='font-family:monospace;font-size:13px'></textarea>"
+
+        "<label style='margin-top:8px'>Captions "
+        "<span style='color:#888;font-weight:400'>(une par ligne — tirees au hasard pour chaque post)</span></label>"
+        f"<textarea name='captions' rows='8' style='font-family:inherit;font-size:13px'>{captions_default}</textarea>"
+
+        "<button type='submit' style='margin-top:14px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer'>"
+        "⬇ Generer le fichier Excel"
+        "</button>"
+        "</form>"
+
+        "<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;margin-top:18px;font-size:13px;color:#aaa;line-height:1.7'>"
+        "<h4 style='margin:0 0 8px;color:#fff'>ℹ Structure du fichier genere</h4>"
+        "Colonnes : <code>media_id</code> | <code>date_schedule</code> | <code>feed_visibility</code> | <code>post_action</code> | <code>post_action_delay_seconds</code> | <code>caption</code><br>"
+        "Sheet : <b>Posts</b> — Date format : <code>yyyy-mm-dd hh:mm:ss</code><br>"
+        "Tous les posts : <code>post_action=delete</code>, <code>post_action_delay_seconds=172800</code> (48h)<br>"
+        "Trie par date croissante."
+        "</div>"
+
+        "</div>"
+    )
+
+
 def _render_bilan_html() -> str:
     try:
         from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
@@ -8453,6 +8570,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{paievas_html}", _render_paievas_html())
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{gms_html}", _render_gms_html())
+        .replace("{schedule_html}", _render_schedule_html())
         .replace("{bilan_html}", _render_bilan_html())
         .replace("{profile_pic_html}", _render_profile_pic_html())
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
@@ -9530,6 +9648,63 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/schedule/generate", methods=["POST"])
+    def schedule_generate():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import schedule_xlsx
+        except Exception as e:
+            return _error(f"❌ Module schedule_xlsx indispo (pip install openpyxl ?) : {e}", tab="schedule")
+
+        model_name = (request.form.get("model_name") or "").strip()
+        date_start = (request.form.get("date_start") or "").strip()
+        date_end = (request.form.get("date_end") or "").strip()
+        public_hours = (request.form.get("public_hours") or "").strip()
+        private_hours = (request.form.get("private_hours") or "").strip()
+        media_ids = request.form.get("media_ids") or ""
+        captions = request.form.get("captions") or ""
+
+        if not model_name:
+            return _error("❌ Nom du modele manquant", tab="schedule")
+        if not date_start or not date_end:
+            return _error("❌ Dates manquantes", tab="schedule")
+        if not media_ids.strip():
+            return _error("❌ Aucun media_id fourni", tab="schedule")
+        if not public_hours and not private_hours:
+            return _error("❌ Au moins une heure (publique ou privee) doit etre indiquee", tab="schedule")
+
+        try:
+            xlsx_bytes, filename = schedule_xlsx.generate_xlsx(
+                model_name=model_name,
+                date_start=date_start,
+                date_end=date_end,
+                public_hours_raw=public_hours,
+                private_hours_raw=private_hours,
+                media_ids_raw=media_ids,
+                captions_raw=captions,
+            )
+        except ValueError as e:
+            return _error(f"❌ {e}", tab="schedule")
+        except Exception as e:
+            return _error(f"❌ Generation echouee : {type(e).__name__}: {e}", tab="schedule")
+
+        from flask import Response
+        resp = Response(
+            xlsx_bytes,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        # ASCII-safe disposition (RFC 5987 for unicode filename)
+        try:
+            ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "template_import.xlsx"
+        except Exception:
+            ascii_name = "template_import.xlsx"
+        from urllib.parse import quote
+        resp.headers["Content-Disposition"] = (
+            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''" + quote(filename)
+        )
+        return resp
 
     @app.route("/gms/delete", methods=["POST"])
     def gms_delete():
