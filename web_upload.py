@@ -864,6 +864,25 @@ window.addEventListener('DOMContentLoaded', function(){
     if(btn) btn.click();  // Synchrone (pas de setTimeout pour éviter flicker)
   }
 });
+// === Debug : voir les donnees brutes scrappees d'un reel ===
+window.debugReel = async function(url){
+  try {
+    const r = await fetch('/debug/reel_raw?url=' + encodeURIComponent(url));
+    const j = await r.json();
+    if(!j.ok){ alert('Erreur: ' + j.error); return; }
+    const txt = '=== REEL DEBUG ===\n' +
+      'URL: ' + url + '\n\n' +
+      'CAPTION present: ' + j.caption_present + '\n' +
+      'CAPTION length: ' + j.caption_length + '\n' +
+      'CAPTION preview: ' + JSON.stringify(j.caption_preview) + '\n\n' +
+      '=== RAW CACHE ===\n' + JSON.stringify(j.raw, null, 2);
+    // Affiche dans une popup
+    const w = window.open('', '_blank', 'width=800,height=600');
+    w.document.write('<pre style="font-family:monospace;font-size:12px;padding:20px;background:#0f0f0f;color:#fff;white-space:pre-wrap">' +
+      txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>');
+  } catch(e){ alert('Erreur: ' + e); }
+};
+
 // === Reel hover play + expand panel ===
 window.igHoverPlay = function(media){
   if(!media) return;
@@ -5843,6 +5862,7 @@ def _render_insta_trends_grid_html() -> str:
       <button onclick='openLightbox("{video_url or thumb}", {"true" if is_video else "false"}, "@{owner}")' title="Plein écran" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       </button>
+      <button onclick='debugReel("{url}")' title="Debug : voir les donnees brutes scrappees" style="width:28px;height:28px;background:rgba(168,85,247,.7);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;font-size:14px">🐛</button>
     </div>
     <!-- Bottom: caption overlay + stats right -->
     <div style="position:absolute;bottom:50px;left:10px;right:80px;color:#fff;font-size:12px;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.9);max-height:60px;overflow:hidden;z-index:1;pointer-events:none">{caption_short}</div>
@@ -13065,6 +13085,32 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/debug/reel_raw", methods=["GET"])
+    def debug_reel_raw():
+        """Retourne les donnees raw d'un reel scrappe pour debug caption."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            from insta_scraper import get_all_cached_reels
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        url = (request.args.get("url") or "").strip()
+        if not url:
+            return jsonify({"ok": False, "error": "url manquant"})
+        for r in get_all_cached_reels():
+            if r.get("url") == url:
+                # Renvoie le reel + un check sur la caption
+                return jsonify({
+                    "ok": True,
+                    "raw": r,
+                    "caption_present": bool((r.get("caption") or "").strip()),
+                    "caption_length": len(r.get("caption") or ""),
+                    "caption_preview": (r.get("caption") or "")[:100],
+                })
+        return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
 
     @app.route("/veille/add", methods=["POST"])
     def veille_add():
