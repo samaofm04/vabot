@@ -7723,6 +7723,15 @@ def _render_mypulslive_html() -> str:
         first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
         first_creator_id = creators_map[first_creator_name]
 
+    # Couleur deterministe par createur (HSL, hue depend du nom)
+    import hashlib as _hash
+    def _color_for(name: str) -> tuple:
+        h = int(_hash.md5((name or "?").lower().encode()).hexdigest()[:8], 16)
+        hue = h % 360
+        return (hue, f"hsl({hue},70%,60%)", f"hsla({hue},70%,60%,0.18)", f"hsla({hue},70%,60%,0.40)")
+
+    first_hue, first_color, first_color_bg, first_color_border = _color_for(first_creator_name)
+
     # Campagnes actives
     try:
         import mypuls_campaigns
@@ -7741,15 +7750,17 @@ def _render_mypulslive_html() -> str:
         active_color = "#22c55e" if active else "#666"
         active_label = "ACTIF" if active else "PAUSE"
         type_color = "#22c55e" if ctype == "post" else "#3b82f6"
+        # Couleur deterministe du createur
+        _hue, cr_color, cr_bg, cr_border = _color_for(cname)
         # Action buttons
         toggle_action = "pause" if active else "resume"
         toggle_label = "⏸" if active else "▶"
         return (
             f"<div style='display:flex;align-items:center;gap:10px;padding:11px 14px;"
-            f"background:#0f0f0f;border:1px solid #232323;border-radius:10px;margin-bottom:6px'>"
-            f"<img src='/mypuls/avatar/{c.get('creator_id')}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"background:#0f0f0f;border:1px solid #232323;border-left:3px solid {cr_color};border-radius:10px;margin-bottom:6px'>"
+            f"<img src='/mypuls/avatar/{c.get('creator_id')}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid {cr_color}' onerror=\"this.style.display='none'\">"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='color:#fff;font-weight:600;font-size:13px'>{cname} <span style='color:{type_color};font-size:10px;letter-spacing:.5px;padding:2px 6px;background:rgba({34 if ctype=='post' else 59},{197 if ctype=='post' else 130},{94 if ctype=='post' else 246},.15);border-radius:5px;margin-left:6px'>{ctype.upper()}</span></div>"
+            f"<div style='color:{cr_color};font-weight:700;font-size:13px'>{cname} <span style='color:{type_color};font-size:10px;letter-spacing:.5px;padding:2px 6px;background:rgba({34 if ctype=='post' else 59},{197 if ctype=='post' else 130},{94 if ctype=='post' else 246},.15);border-radius:5px;margin-left:6px'>{ctype.upper()}</span></div>"
             f"<div style='color:#888;font-size:11px;font-family:monospace;margin-top:2px'>{slots_count}/jour · planifie jusqu au {sched_until} · {planned} total</div>"
             f"</div>"
             f"<span style='color:{active_color};font-size:10px;font-weight:700;letter-spacing:.5px;padding:3px 8px;background:rgba({34 if active else 100},{197 if active else 100},{94 if active else 100},.12);border-radius:5px;flex-shrink:0'>{active_label}</span>"
@@ -7770,12 +7781,15 @@ def _render_mypulslive_html() -> str:
             "</div>"
         )
 
-    # Cards de createurs avec avatars
+    # Cards de createurs avec avatars + couleur unique
     def _creator_card(name, cid, active=False):
+        hue, color, color_bg, color_border = _color_for(name)
         active_cls = " active" if active else ""
         return (
             f"<button type='button' class='mpl-cr-card{active_cls}' "
-            f"data-id='{cid}' data-name='{name}' onclick='selectCreator({cid}, \"{name}\")'>"
+            f"data-id='{cid}' data-name='{name}' data-color='{color}' data-hue='{hue}' "
+            f"style='--cr-color:{color};--cr-bg:{color_bg};--cr-border:{color_border}' "
+            f"onclick='selectCreator({cid}, \"{name}\", \"{color}\", {hue})'>"
             f"<img src='/mypuls/avatar/{cid}' alt='{name}' loading='lazy' onerror=\"this.style.display='none'\">"
             f"<div class='mpl-cr-info'>"
             f"<div class='mpl-cr-name'>{name}</div>"
@@ -7863,11 +7877,12 @@ def _render_mypulslive_html() -> str:
 .mpl-cr-bar::-webkit-scrollbar-track{background:#0f0f0f;border-radius:3px}
 .mpl-cr-bar::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
 .mpl-cr-bar::-webkit-scrollbar-thumb:hover{background:#3b82f6}
-.mpl-cr-card{flex-shrink:0;display:flex;align-items:center;gap:10px;background:#0f0f0f;border:1px solid #232323;padding:8px 14px 8px 8px;border-radius:14px;cursor:pointer;transition:.15s;font-family:inherit;color:#ccc;min-width:160px}
-.mpl-cr-card:hover{background:#1a1a1a;border-color:#444;transform:translateY(-1px)}
-.mpl-cr-card.active{background:linear-gradient(135deg,rgba(59,130,246,.18),rgba(168,85,247,.10));border-color:rgba(59,130,246,.55);box-shadow:0 4px 14px rgba(59,130,246,.25);color:#fff}
+.mpl-cr-card{flex-shrink:0;display:flex;align-items:center;gap:10px;background:#0f0f0f;border:1px solid #232323;padding:8px 14px 8px 8px;border-radius:14px;cursor:pointer;transition:.15s;font-family:inherit;color:#ccc;min-width:160px;--cr-color:#3b82f6;--cr-bg:rgba(59,130,246,.18);--cr-border:rgba(59,130,246,.55)}
+.mpl-cr-card:hover{background:#1a1a1a;border-color:var(--cr-border);transform:translateY(-1px)}
+.mpl-cr-card.active{background:linear-gradient(135deg,var(--cr-bg),rgba(0,0,0,0.05));border-color:var(--cr-border);box-shadow:0 4px 14px var(--cr-bg);color:#fff}
 .mpl-cr-card img{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#222;flex-shrink:0;border:1.5px solid rgba(255,255,255,.06)}
-.mpl-cr-card.active img{border-color:rgba(59,130,246,.6)}
+.mpl-cr-card.active img{border-color:var(--cr-color)}
+.mpl-cr-card.active .mpl-cr-name{color:var(--cr-color)}
 .mpl-cr-info{display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;text-align:left}
 .mpl-cr-name{font-size:14px;font-weight:700;letter-spacing:-.01em}
 .mpl-cr-id{font-size:11px;color:#666;font-family:monospace;margin-top:2px}
@@ -8209,8 +8224,8 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
 
     <div class='mpl-name' id='mpl-name'>
-      <img id='mpl-name-avatar' src='/mypuls/avatar/{first_creator_id}' alt='' style='width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.4);margin-right:6px' onerror="this.style.display='none'">
-      <span id='mpl-name-text'>{first_creator_name or '—'}</span>
+      <img id='mpl-name-avatar' src='/mypuls/avatar/{first_creator_id}' alt='' style='width:48px;height:48px;border-radius:50%;object-fit:cover;border:2.5px solid {first_color};margin-right:6px;box-shadow:0 0 0 4px {first_color_bg}' onerror="this.style.display='none'">
+      <span id='mpl-name-text' style='color:{first_color}'>{first_creator_name or '—'}</span>
     </div>
     <div class='mpl-handle' id='mpl-handle'>id #{first_creator_id}</div>
 
@@ -8706,15 +8721,28 @@ function toggleOpt(elId, hiddenId){{
 
 function mplToggle(el){{ el.classList.toggle('open'); }}
 
-function selectCreator(cid, name){{
+function selectCreator(cid, name, color, hue){{
   document.querySelectorAll('.mpl-cr-card').forEach(c=>{{
     c.classList.toggle('active', String(c.dataset.id)===String(cid));
   }});
   document.getElementById('mpl-creator-id').value = cid;
+  // Color glow par createur
+  if(!color){{
+    // Fallback : recalcule depuis le nom
+    let h=0; for(let i=0;i<name.length;i++) h=name.charCodeAt(i)+((h<<5)-h);
+    hue=Math.abs(h)%360;
+    color='hsl('+hue+',70%,60%)';
+  }}
+  var colorBg = 'hsla('+hue+',70%,60%,0.18)';
   var nt = document.getElementById('mpl-name-text');
-  if(nt) nt.textContent = name;
+  if(nt){{ nt.textContent = name; nt.style.color = color; }}
   var av = document.getElementById('mpl-name-avatar');
-  if(av){{ av.src = '/mypuls/avatar/'+cid; av.style.display=''; }}
+  if(av){{
+    av.src = '/mypuls/avatar/'+cid;
+    av.style.display='';
+    av.style.borderColor = color;
+    av.style.boxShadow = '0 0 0 4px '+colorBg;
+  }}
   document.getElementById('mpl-handle').textContent = 'id #' + cid;
   // Reset media + events
   var ta = document.getElementById('mpl-media-ids');
