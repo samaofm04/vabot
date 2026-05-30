@@ -7717,16 +7717,29 @@ def _render_mypulslive_html() -> str:
     d_start = today.isoformat()
     d_end = week_later.isoformat()
 
-    creators_opts = "".join(
-        f"<option value='{cid}' data-name='{name}'>{name}</option>"
-        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
-    ) or "<option value=''>(aucun createur)</option>"
-
     first_creator_name = ""
     first_creator_id = 0
     if creators_map:
         first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
         first_creator_id = creators_map[first_creator_name]
+
+    # Cards de createurs avec avatars
+    def _creator_card(name, cid, active=False):
+        active_cls = " active" if active else ""
+        return (
+            f"<button type='button' class='mpl-cr-card{active_cls}' "
+            f"data-id='{cid}' data-name='{name}' onclick='selectCreator({cid}, \"{name}\")'>"
+            f"<img src='/mypuls/avatar/{cid}' alt='{name}' loading='lazy' onerror=\"this.style.display='none'\">"
+            f"<div class='mpl-cr-info'>"
+            f"<div class='mpl-cr-name'>{name}</div>"
+            f"<div class='mpl-cr-id'>#{cid}</div>"
+            f"</div>"
+            f"</button>"
+        )
+    creators_cards = "".join(
+        _creator_card(name, cid, active=(cid == first_creator_id))
+        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
+    ) or "<div style='color:#666;padding:20px;text-align:center;font-size:13px'>Aucun createur. Verifie tes cookies MyPuls.</div>"
 
     style = """
 <style>
@@ -7796,6 +7809,25 @@ def _render_mypulslive_html() -> str:
 /* Distinct visual identity per type */
 .mpl-card-posts{border-left:3px solid rgba(34,197,94,.5)}
 .mpl-card-stories{border-left:3px solid rgba(59,130,246,.5)}
+
+/* === Creator cards (avatar + name + id) === */
+.mpl-cr-bar{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 8px;margin-bottom:20px;scrollbar-width:thin;scrollbar-color:#3b82f6 #1a1a1a}
+.mpl-cr-bar::-webkit-scrollbar{height:6px}
+.mpl-cr-bar::-webkit-scrollbar-track{background:#0f0f0f;border-radius:3px}
+.mpl-cr-bar::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+.mpl-cr-bar::-webkit-scrollbar-thumb:hover{background:#3b82f6}
+.mpl-cr-card{flex-shrink:0;display:flex;align-items:center;gap:10px;background:#0f0f0f;border:1px solid #232323;padding:8px 14px 8px 8px;border-radius:14px;cursor:pointer;transition:.15s;font-family:inherit;color:#ccc;min-width:160px}
+.mpl-cr-card:hover{background:#1a1a1a;border-color:#444;transform:translateY(-1px)}
+.mpl-cr-card.active{background:linear-gradient(135deg,rgba(59,130,246,.18),rgba(168,85,247,.10));border-color:rgba(59,130,246,.55);box-shadow:0 4px 14px rgba(59,130,246,.25);color:#fff}
+.mpl-cr-card img{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#222;flex-shrink:0;border:1.5px solid rgba(255,255,255,.06)}
+.mpl-cr-card.active img{border-color:rgba(59,130,246,.6)}
+.mpl-cr-info{display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;text-align:left}
+.mpl-cr-name{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.mpl-cr-id{font-size:11px;color:#666;font-family:monospace;margin-top:2px}
+.mpl-cr-card.active .mpl-cr-id{color:#aaa}
+body.light .mpl-cr-card{background:#f9fafb;border-color:#e5e7eb;color:#374151}
+body.light .mpl-cr-card:hover{background:#fff;border-color:#9ca3af}
+body.light .mpl-cr-card.active{background:linear-gradient(135deg,#dbeafe,#ede9fe);color:#111;border-color:#3b82f6}
 
 /* === PILL NAV (Auto-Post / Auto-Story / Auto-Delete) === */
 .mpl-pillnav{display:flex;gap:6px;padding:6px;background:#0f0f0f;border:1px solid #232323;border-radius:14px;margin-bottom:20px}
@@ -8065,14 +8097,19 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
       <a href='?tab=mypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
     </div>
 
-    <div style='display:flex;align-items:center;gap:14px;margin-bottom:12px'>
-      <label style='margin:0;flex-shrink:0;color:#888;font-size:13px'>Createur :</label>
-      <select id='mpl-creator-sel' onchange='changeCreator(this)' style='flex:1;max-width:340px'>
-        {creators_opts}
-      </select>
+    <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
+      <span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>Createur</span>
+      <span style='color:#666;font-size:11px' id='mpl-cr-count'>{len(creators_map)} createurs</span>
+    </div>
+    <div class='mpl-cr-bar'>
+      {creators_cards}
     </div>
 
-    <div class='mpl-name' id='mpl-name'>{first_creator_name or '—'} <span class='mpl-badge'>∞ INFINI</span></div>
+    <div class='mpl-name' id='mpl-name'>
+      <img id='mpl-name-avatar' src='/mypuls/avatar/{first_creator_id}' alt='' style='width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid rgba(59,130,246,.4);margin-right:6px' onerror="this.style.display='none'">
+      <span id='mpl-name-text'>{first_creator_name or '—'}</span>
+      <span class='mpl-badge'>∞ INFINI</span>
+    </div>
     <div class='mpl-handle' id='mpl-handle'>id #{first_creator_id}</div>
 
     <div class='mpl-banner'>
@@ -8331,15 +8368,25 @@ function toggleOpt(elId, hiddenId){{
 
 function mplToggle(el){{ el.classList.toggle('open'); }}
 
-function changeCreator(sel){{
-  const opt = sel.options[sel.selectedIndex];
-  document.getElementById('mpl-creator-id').value = sel.value;
-  document.getElementById('mpl-name').firstChild.nodeValue = opt.dataset.name + ' ';
-  document.getElementById('mpl-handle').textContent = 'id #' + sel.value;
-  const ta = document.getElementById('mpl-media-ids');
+function selectCreator(cid, name){{
+  document.querySelectorAll('.mpl-cr-card').forEach(c=>{{
+    c.classList.toggle('active', String(c.dataset.id)===String(cid));
+  }});
+  document.getElementById('mpl-creator-id').value = cid;
+  var nt = document.getElementById('mpl-name-text');
+  if(nt) nt.textContent = name;
+  var av = document.getElementById('mpl-name-avatar');
+  if(av){{ av.src = '/mypuls/avatar/'+cid; av.style.display=''; }}
+  document.getElementById('mpl-handle').textContent = 'id #' + cid;
+  // Reset media + events
+  var ta = document.getElementById('mpl-media-ids');
   if(ta){{ ta.value = ''; updateMediaCount(); }}
-  const s = document.getElementById('mpl-media-status');
+  var s = document.getElementById('mpl-media-status');
   if(s){{ s.textContent = 'Aucun media charge. Clique pour fetch.'; s.style.color = '#888'; }}
+  var el = document.getElementById('mpl-events-list');
+  if(el) el.innerHTML = '';
+  var es = document.getElementById('mpl-events-status');
+  if(es){{ es.textContent = 'Choisis une periode + clique "Charger events"'; es.style.color='#888'; }}
 }}
 function updateMediaCount(){{
   const ta = document.getElementById('mpl-media-ids');
@@ -8405,404 +8452,6 @@ updateMediaCount();
 updateCapCount();
 </script>
 """)
-    import datetime as _dt
-    try:
-        import mypuls
-        import mypuls_scheduler
-    except Exception as e:
-        return f"<p style='color:#f99'>Module mypuls indispo : {e}</p>"
-
-    if not mypuls.is_configured():
-        return (
-            "<div style='max-width:680px'>"
-            "<h2 style='margin:0 0 6px;font-size:20px'>MyPuls Live</h2>"
-            "<div style='background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
-            "border-radius:10px;padding:18px;color:#f99;margin-top:14px'>"
-            "<b>Cookies MyPuls non configures.</b><br>"
-            "Va dans <a href='?tab=mypuls' style='color:#3b82f6'>Settings → MyPuls</a> "
-            "et colle tes cookies de session avant d utiliser le scheduler live."
-            "</div></div>"
-        )
-
-    # Createurs MyPuls
-    res = mypuls.list_creators()
-    creators_map = res.get("creators", {}) if res.get("ok") else {}
-
-    # Captions defaut
-    try:
-        from schedule_xlsx import DEFAULT_CAPTIONS
-        captions_default = "\n".join(DEFAULT_CAPTIONS)
-        captions_count = len(DEFAULT_CAPTIONS)
-    except Exception:
-        captions_default = (
-            "Ton abonnement 100% GRATUIT + un CADEAU aujourd'hui seulement \U0001F609❤️\n"
-            "Abonnement gratuit sans code, si tu likes mes derniers posts = \U0001F381\n"
-            "Abonnement gratuit sans code et si tu likes mes 5 derniers posts = cadeau\n"
-            "Abonnement gratuit sans code + surprise si tu likes mes posts \U0001F48B\n"
-            "Abonnement gratuit 0€ + des surprises si tu likes mes derniers post\n"
-            "Abonnement 100% gratuit sans code + des surprises en prive"
-        )
-        captions_count = 6
-
-    today = _dt.date.today()
-    week_later = today + _dt.timedelta(days=6)
-    d_start = today.isoformat()
-    d_end = week_later.isoformat()
-
-    creators_opts = "".join(
-        f"<option value='{cid}' data-name='{name}'>{name}</option>"
-        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
-    ) or "<option value=''>(aucun createur)</option>"
-
-    # Default creator
-    first_creator_name = ""
-    first_creator_id = 0
-    if creators_map:
-        first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
-        first_creator_id = creators_map[first_creator_name]
-
-    # Pending deletes count
-    pending = mypuls_scheduler.list_pending_deletes()
-    pending_count = len(pending)
-
-    # CSS prive a cette page - palette inspiree MyPuls
-    style = """
-<style>
-.mpl-shell{max-width:920px;margin:0 auto}
-.mpl-card{background:#161616;border:1px solid #232323;border-radius:18px;padding:28px;margin-bottom:22px}
-.mpl-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
-.mpl-back{color:#3b82f6;font-size:14px;display:flex;align-items:center;gap:6px;cursor:pointer;background:none;border:0;padding:0}
-.mpl-back:hover{text-decoration:underline}
-.mpl-name{font-size:24px;font-weight:700;color:#fff;display:flex;align-items:center;gap:10px;margin:6px 0}
-.mpl-badge{background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;padding:3px 12px;border-radius:14px;font-size:11px;font-weight:700;letter-spacing:.5px}
-.mpl-handle{color:#888;font-size:14px;margin-bottom:18px}
-.mpl-banner{display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.25);border-radius:14px;margin-bottom:18px}
-.mpl-banner-dot{width:10px;height:10px;border-radius:50%;background:#f59e0b}
-.mpl-banner.active{background:rgba(34,197,94,.05);border-color:rgba(34,197,94,.25)}
-.mpl-banner.active .mpl-banner-dot{background:#22c55e}
-.mpl-banner-title{color:#fff;font-weight:600;font-size:14px;margin:0}
-.mpl-banner-sub{color:#888;font-size:12.5px;margin:2px 0 0}
-.mpl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
-.mpl-stat{background:#1a1a1a;border:1px solid #262626;border-radius:14px;padding:18px;text-align:center}
-.mpl-stat-num{font-size:30px;font-weight:800;color:#fff;line-height:1}
-.mpl-stat-lbl{font-size:11px;color:#888;letter-spacing:1px;margin-top:6px;text-transform:uppercase}
-.mpl-section-label{font-size:11px;color:#666;letter-spacing:1.5px;text-transform:uppercase;margin:14px 0 8px;padding-left:4px}
-.mpl-row{background:#1a1a1a;border:1px solid #262626;border-radius:14px;margin-bottom:8px;transition:background .15s}
-.mpl-row:hover{background:#1e1e1e}
-.mpl-row-head{display:flex;align-items:center;gap:14px;padding:16px 18px;cursor:pointer;user-select:none}
-.mpl-row-icon{width:38px;height:38px;border-radius:10px;background:#222;display:flex;align-items:center;justify-content:center;color:#aaa;flex-shrink:0}
-.mpl-row-icon svg{width:20px;height:20px}
-.mpl-row-text{flex:1;min-width:0}
-.mpl-row-title{color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
-.mpl-row-sub{color:#888;font-size:12.5px;margin-top:2px}
-.mpl-row-arrow{color:#888;transition:transform .15s}
-.mpl-row.open .mpl-row-arrow{transform:rotate(180deg)}
-.mpl-row-body{display:none;padding:0 18px 18px;border-top:1px solid #232323;margin-top:0}
-.mpl-row.open .mpl-row-body{display:block;padding-top:14px}
-.mpl-mini-badge{padding:2px 8px;font-size:10px;background:#262626;color:#888;border-radius:6px;letter-spacing:.5px;font-weight:700}
-.mpl-mini-badge.green{background:rgba(34,197,94,.15);color:#22c55e}
-.mpl-mini-badge.red{background:rgba(239,68,68,.15);color:#ef4444}
-.mpl-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mpl-3col{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.mpl-block-pub{background:rgba(34,197,94,.04);border:1px solid rgba(34,197,94,.18);border-radius:10px;padding:12px}
-.mpl-block-priv{background:rgba(168,85,247,.04);border:1px solid rgba(168,85,247,.18);border-radius:10px;padding:12px}
-.mpl-block-story{background:rgba(59,130,246,.04);border:1px solid rgba(59,130,246,.18);border-radius:10px;padding:12px}
-.mpl-block h5{margin:0 0 6px;font-size:13px;font-weight:700}
-.mpl-block-pub h5{color:#22c55e}
-.mpl-block-priv h5{color:#a855f7}
-.mpl-block-story h5{color:#3b82f6}
-.mpl-push-btn{background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:14px 28px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.35);display:inline-flex;align-items:center;gap:8px;letter-spacing:.3px}
-.mpl-push-btn:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.45)}
-.mpl-fetch-btn{background:#1a1a1a;border:1px solid #3b82f6;color:#3b82f6;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
-.mpl-fetch-btn:hover{background:rgba(59,130,246,.1)}
-.mpl-icon-toggle{width:42px;height:24px;background:#2a2a2a;border-radius:14px;position:relative;cursor:pointer;border:0}
-.mpl-icon-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;background:#666;border-radius:50%;transition:.2s}
-body.light .mpl-card{background:#fff;border-color:#e5e7eb}
-body.light .mpl-stat,body.light .mpl-row{background:#f9fafb;border-color:#e5e7eb}
-body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name{color:#111}
-</style>
-"""
-
-    # Build sections (Planification, Boosts, Partage, Contenu)
-    # We use one big form that wraps the planification + push button
-    form = f"""
-<form method='POST' action='/mypulslive/push' id='mpl-form' onsubmit='return confirmPush(event)'>
-  <input type='hidden' name='creator_id' id='mpl-creator-id' value='{first_creator_id}'>
-
-  <!-- Section: Planification -->
-  <div class='mpl-row open' id='mpl-row-planif'>
-    <div class='mpl-row-head' onclick='mplToggle("mpl-row-planif")'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/></svg></div>
-      <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Planification</div>
-        <div class='mpl-row-sub'>Type, dates, heures et mode de publication</div>
-      </div>
-      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-    </div>
-    <div class='mpl-row-body'>
-      <label>Type de publication</label>
-      <select name='content_type' id='mpl-content-type'>
-        <option value='story'>Story</option>
-        <option value='post'>Post (feed)</option>
-        <option value='both'>Les 2 en parallele</option>
-      </select>
-
-      <div class='mpl-2col' style='margin-top:10px'>
-        <div>
-          <label>Date debut</label>
-          <input type='date' name='date_start' value='{d_start}' required>
-        </div>
-        <div>
-          <label>Date fin</label>
-          <input type='date' name='date_end' value='{d_end}' required>
-        </div>
-      </div>
-
-      <div class='mpl-block mpl-block-story' style='margin-top:12px'>
-        <h5>\U0001F4F1 Heures STORIES</h5>
-        <input type='text' name='story_hours' placeholder='ex: 8, 12, 16, 20' value='8, 12, 16, 20'>
-        <small>1 story a chaque heure. Audience par defaut : <code>everyone</code>.</small>
-      </div>
-
-      <div class='mpl-2col' style='margin-top:10px'>
-        <div class='mpl-block mpl-block-pub'>
-          <h5>\U0001F30D Posts PUBLICS</h5>
-          <input type='text' name='public_hours' placeholder='ex: 9, 14, 20' value='9, 14, 20'>
-          <small>1 post public a chaque heure</small>
-        </div>
-        <div class='mpl-block mpl-block-priv'>
-          <h5>\U0001F512 Posts PRIVES</h5>
-          <input type='text' name='private_hours' placeholder='ex: 11, 17, 23' value='11, 17, 23'>
-          <small>1 post prive a chaque heure</small>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class='mpl-section-label'>Auto-delete</div>
-
-  <!-- Section: Auto-delete posts -->
-  <div class='mpl-row'>
-    <div class='mpl-row-head' onclick='mplToggle("mpl-row-deletepost")'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/></svg></div>
-      <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Auto-delete posts <span class='mpl-mini-badge green'>NATIF MYPULS</span></div>
-        <div class='mpl-row-sub'>Supprime automatiquement les posts publics apres delai</div>
-      </div>
-      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-    </div>
-    <div class='mpl-row-body' id='mpl-row-deletepost'>
-      <div class='mpl-2col'>
-        <div>
-          <label>Activer auto-delete posts publics</label>
-          <select name='post_action'>
-            <option value='delete'>Oui, supprimer apres delai</option>
-            <option value='none'>Non, garder</option>
-          </select>
-        </div>
-        <div>
-          <label>Apres combien de jours</label>
-          <input type='number' name='post_delete_days' value='2' min='1' max='30' step='1'>
-          <small>Defaut 2 jours (48h). MyPuls le gere nativement pour posts publics uniquement.</small>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Section: Auto-delete stories -->
-  <div class='mpl-row'>
-    <div class='mpl-row-head' onclick='mplToggle("mpl-row-deletestory")'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg></div>
-      <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Auto-delete stories <span class='mpl-mini-badge'>GERE CHEZ NOUS</span></div>
-        <div class='mpl-row-sub'>Supprime les stories planifiees apres X jours (cron toutes les 10 min)</div>
-      </div>
-      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-    </div>
-    <div class='mpl-row-body'>
-      <div class='mpl-2col'>
-        <div>
-          <label>Activer auto-delete stories</label>
-          <select name='story_action'>
-            <option value='none'>Non, garder les stories</option>
-            <option value='delete'>Oui, supprimer apres delai</option>
-          </select>
-        </div>
-        <div>
-          <label>Apres combien de jours</label>
-          <input type='number' name='story_delete_days' value='1' min='1' max='30' step='1'>
-          <small>Defaut 1 jour (24h). MyPuls n'a pas l auto-delete pour stories, on le gere via cron local.</small>
-        </div>
-      </div>
-      <small style='display:block;margin-top:10px;color:#888'>
-        File d attente actuelle : <b>{pending_count}</b> suppressions programmees.
-      </small>
-    </div>
-  </div>
-
-  <div class='mpl-section-label'>Contenu</div>
-
-  <!-- Section: Bibliotheque Medias -->
-  <div class='mpl-row'>
-    <div class='mpl-row-head' onclick='mplToggle("mpl-row-media")'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
-      <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Bibliotheque Medias <span class='mpl-mini-badge' id='mpl-media-count'>0</span></div>
-        <div class='mpl-row-sub'>Tes media_id MyPuls qui vont etre planifies (recycles en ordre)</div>
-      </div>
-      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-    </div>
-    <div class='mpl-row-body'>
-      <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
-        <small style='color:#888' id='mpl-media-status'>Aucun media charge. Clique pour fetch.</small>
-        <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
-      </div>
-      <textarea name='media_ids' id='mpl-media-ids' rows='8' required
-                placeholder='75784227&#10;75784226&#10;...'
-                style='font-family:monospace;font-size:13px' oninput='updateMediaCount()'></textarea>
-    </div>
-  </div>
-
-  <!-- Section: Captions -->
-  <div class='mpl-row'>
-    <div class='mpl-row-head' onclick='mplToggle("mpl-row-cap")'>
-      <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg></div>
-      <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Captions <span class='mpl-mini-badge' id='mpl-cap-count'>{captions_count}</span></div>
-        <div class='mpl-row-sub'>Textes qui accompagnent chaque post (tirees au hasard)</div>
-      </div>
-      <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-    </div>
-    <div class='mpl-row-body'>
-      <textarea name='captions' id='mpl-captions' rows='8' style='font-family:inherit;font-size:13px' oninput='updateCapCount()'>{captions_default}</textarea>
-    </div>
-  </div>
-
-  <div style='text-align:center;margin-top:24px'>
-    <button type='submit' class='mpl-push-btn'>
-      ⚡ Pousser dans MyPuls (LIVE)
-    </button>
-  </div>
-</form>
-"""
-
-    # Build the page
-    return (
-        style +
-        f"""
-<div class='mpl-shell'>
-  <div class='mpl-card'>
-    <div class='mpl-card-header'>
-      <span style='color:#888;font-size:12px;letter-spacing:1px;text-transform:uppercase'>MyPuls Live ⚡</span>
-      <a href='?tab=mypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
-    </div>
-
-    <!-- Selecteur createur -->
-    <div style='display:flex;align-items:center;gap:14px;margin-bottom:12px'>
-      <label style='margin:0;flex-shrink:0;color:#888;font-size:13px'>Createur :</label>
-      <select id='mpl-creator-sel' onchange='changeCreator(this)' style='flex:1;max-width:340px'>
-        {creators_opts}
-      </select>
-    </div>
-
-    <div class='mpl-name' id='mpl-name'>{first_creator_name or '—'} <span class='mpl-badge'>∞ INFINI</span></div>
-    <div class='mpl-handle' id='mpl-handle'>id #{first_creator_id}</div>
-
-    <div class='mpl-banner' id='mpl-banner'>
-      <div class='mpl-banner-dot'></div>
-      <div>
-        <p class='mpl-banner-title'>Push manuel (pas de campagne recurrente)</p>
-        <p class='mpl-banner-sub'>Clique sur ⚡ pour pousser le batch. Le scheduler MyPuls executera aux dates/heures prevues.</p>
-      </div>
-    </div>
-
-    <div class='mpl-stats'>
-      <div class='mpl-stat'>
-        <div class='mpl-stat-num' id='mpl-stat-media'>0</div>
-        <div class='mpl-stat-lbl'>MEDIAS</div>
-      </div>
-      <div class='mpl-stat'>
-        <div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div>
-        <div class='mpl-stat-lbl'>CAPTIONS</div>
-      </div>
-      <div class='mpl-stat'>
-        <div class='mpl-stat-num' id='mpl-stat-pending'>{pending_count}</div>
-        <div class='mpl-stat-lbl'>DELETES EN ATTENTE</div>
-      </div>
-    </div>
-
-    {form}
-  </div>
-</div>
-
-<script>
-function mplToggle(rowId){{
-  var el = document.getElementById(rowId) || event.currentTarget.parentElement;
-  if(!el.classList.contains('mpl-row')) el = event.currentTarget.parentElement;
-  el.classList.toggle('open');
-}}
-function changeCreator(sel){{
-  var opt = sel.options[sel.selectedIndex];
-  document.getElementById('mpl-creator-id').value = sel.value;
-  document.getElementById('mpl-name').firstChild.nodeValue = opt.dataset.name + ' ';
-  document.getElementById('mpl-handle').textContent = 'id #' + sel.value;
-  // Reset media library when changing creator
-  var ta = document.getElementById('mpl-media-ids');
-  if(ta) {{ ta.value = ''; updateMediaCount(); }}
-  var s = document.getElementById('mpl-media-status');
-  if(s) {{ s.textContent = 'Aucun media charge. Clique pour fetch.'; s.style.color = '#888'; }}
-}}
-function updateMediaCount(){{
-  var ta = document.getElementById('mpl-media-ids');
-  var n = ta.value.split('\\n').filter(x=>x.trim()).length;
-  document.getElementById('mpl-stat-media').textContent = n;
-  document.getElementById('mpl-media-count').textContent = n;
-}}
-function updateCapCount(){{
-  var ta = document.getElementById('mpl-captions');
-  var n = ta.value.split('\\n').filter(x=>x.trim()).length;
-  document.getElementById('mpl-stat-cap').textContent = n;
-  document.getElementById('mpl-cap-count').textContent = n;
-}}
-async function fetchMyPulsMedia(){{
-  var cid = document.getElementById('mpl-creator-id').value;
-  if(!cid){{ alert('Pas de createur'); return; }}
-  var status = document.getElementById('mpl-media-status');
-  status.textContent = 'Fetching media library...';
-  status.style.color = '#3b82f6';
-  try{{
-    var r = await fetch('/mypulslive/fetch_media?creator=' + cid);
-    var j = await r.json();
-    if(j.ok){{
-      document.getElementById('mpl-media-ids').value = j.ids.join('\\n');
-      status.textContent = '✓ ' + j.ids.length + ' medias recuperes depuis MyPuls';
-      status.style.color = '#22c55e';
-      updateMediaCount();
-    }} else {{
-      status.textContent = 'Erreur: ' + (j.error || '?');
-      status.style.color = '#f99';
-    }}
-  }} catch(e) {{
-    status.textContent = 'Erreur reseau: ' + e;
-    status.style.color = '#f99';
-  }}
-}}
-function confirmPush(ev){{
-  ev.preventDefault();
-  var ds = document.querySelector('input[name=date_start]').value;
-  var de = document.querySelector('input[name=date_end]').value;
-  var ct = document.getElementById('mpl-content-type').value;
-  var ok = confirm('Pousser le batch dans MyPuls du ' + ds + ' au ' + de + ' (' + ct + ') ?\\n\\nCette action est IRREVERSIBLE (sauf cleanup manuel ensuite).');
-  if(ok) ev.target.submit();
-  return false;
-}}
-// Init counts
-updateMediaCount();
-updateCapCount();
-</script>
-"""
-    )
-
 
 def _render_bilan_html() -> str:
     try:
