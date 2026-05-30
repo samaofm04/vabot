@@ -1274,6 +1274,13 @@ function showTab(group,name,title,subtitle){
       s.textContent = 'html.light-pre,html.light-pre body{background:#f9fafb !important;color:#111827 !important}';
       document.head.appendChild(s);
     }
+    // SFW pre-apply : floute les images avant qu'elles s'affichent si actif
+    if(localStorage.getItem('vault_sfw') === '1'){
+      var ss = document.createElement('style');
+      ss.id = '__sfw-pre';
+      ss.textContent = '.vault-gallery img,.vault-thumb img,.file-thumb img,.preview-card img{filter:blur(22px) saturate(.5)!important}';
+      document.head.appendChild(ss);
+    }
   }catch(e){}
 })();
 // Run AVANT le premier rendu : cache form-home et affiche le bon form-<tab>
@@ -1550,6 +1557,13 @@ function showTab(group,name,title,subtitle){
 
 </div>
 <div class="main">
+<!-- SFW global toggle (style Inflow) -->
+<div id="sfw-floating" style="position:fixed;top:18px;right:24px;z-index:90;display:flex;align-items:center;gap:6px;padding:6px 12px 6px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:20px;box-shadow:0 4px 16px rgba(0,0,0,.08);cursor:pointer;user-select:none;transition:all .15s" onclick="toggleSFW()" title="Safe For Work — floute les images">
+  <span class="sfw-switch" style="position:relative;width:36px;height:20px;background:#e5e7eb;border-radius:11px;transition:background .2s;flex-shrink:0">
+    <span class="sfw-thumb" style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s"></span>
+  </span>
+  <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
+</div>
 <h1 id="page-title">Dashboard</h1>
 <div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
 {msg_html}
@@ -4566,19 +4580,8 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             f"Add media</button>"
         )
 
-    # Bouton SFW toggle
-    sfw_btn = (
-        "<button type='button' onclick='toggleSFW()' id='sfw-toggle' "
-        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;"
-        "background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:10px;"
-        "font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.5px' "
-        "title='Floute les images (Safe For Work)'>"
-        "<span class='sfw-led' style='width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;transition:.15s'></span>"
-        "SFW</button>"
-    )
-
     gallery_header = (
-        # === Row 1 : identite a gauche + boutons SFW & Add media a droite ===
+        # === Row 1 : identite a gauche + Add media a droite ===
         f"<div class='vault-gallery-header' style='justify-content:space-between'>"
         f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"{sel_avatar_html}"
@@ -4587,7 +4590,6 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        f"{sfw_btn}"
         f"{add_media_btn}"
         f"</div>"
         f"</div>"
@@ -4701,25 +4703,30 @@ body.light .vault-sort-item:hover{background:#f3f4f6}
 body.light .vault-sort-sep{background:#e5e7eb}
 
 /* === SFW blur mode === */
-body.sfw-on .vault-gallery img{filter:blur(22px) saturate(.5)!important;transition:filter .25s}
-body.sfw-on .vault-gallery img:hover{filter:blur(0)!important}
-#sfw-toggle.active{background:linear-gradient(135deg,#ff6b6b,#fa5252)!important;color:#fff!important;border-color:#fa5252!important;box-shadow:0 4px 12px rgba(250,82,82,.3)!important}
-#sfw-toggle.active .sfw-led{background:#fff!important;box-shadow:0 0 8px #fff!important}
+body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5)!important;transition:filter .25s}
+body.sfw-on .vault-gallery img:hover,body.sfw-on .vault-thumb img:hover{filter:blur(0)!important}
+
+/* SFW floating toggle (style iOS, dark theme adapte) */
+#sfw-floating{}
+body.dark #sfw-floating,body:not(.light) #sfw-floating{background:#161616!important;border-color:#2a2a2a!important}
+body.dark #sfw-floating .sfw-switch,body:not(.light) #sfw-floating .sfw-switch{background:#2a2a2a!important}
+#sfw-floating:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,.15)}
+/* Etat ON : orange (matche le screenshot Inflow) */
+body.sfw-on #sfw-floating .sfw-switch{background:#fb923c!important;box-shadow:0 0 0 1px #fb923c,0 0 12px rgba(251,146,60,.45) inset}
+body.sfw-on #sfw-floating .sfw-thumb{transform:translateX(16px)!important}
+body.sfw-on #sfw-floating span:last-child{color:#fb923c!important}
+@media(max-width:768px){#sfw-floating{top:12px;right:12px;padding:5px 10px 5px 6px}}
 </style>
 <script>
-// === SFW toggle (blur all images) ===
+// === SFW toggle global (floute toutes les images de la dashboard) ===
 function toggleSFW(){
   document.body.classList.toggle('sfw-on');
-  const on = document.body.classList.contains('sfw-on');
-  localStorage.setItem('vault_sfw', on ? '1' : '0');
-  // Re-apply state on all toggles
-  document.querySelectorAll('#sfw-toggle').forEach(b=>b.classList.toggle('active', on));
+  localStorage.setItem('vault_sfw', document.body.classList.contains('sfw-on') ? '1' : '0');
 }
-// Init au load
+// Init : si SFW etait actif a la derniere visite, ré-applique direct
 (function(){
   if(localStorage.getItem('vault_sfw') === '1'){
     document.body.classList.add('sfw-on');
-    setTimeout(()=>{ document.querySelectorAll('#sfw-toggle').forEach(b=>b.classList.add('active')); }, 50);
   }
 })();
 
