@@ -1569,70 +1569,134 @@ function showTab(group,name,title,subtitle){
 {msg_html}
 
 <div class="form-section" id="form-reel" style="display:none">
-<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="box">
-<label>Identité</label>
-<select name="identity" required>{ident_opts}</select>
-<label>Vidéo CLEAN (obligatoire)</label>
-<input type="file" name="video" accept="video/*" required>
-<label>Vidéo EXEMPLE (optionnel)</label>
-<input type="file" name="example" accept="video/*">
-<label>Caption (overlay sur la vidéo)</label>
-<textarea name="caption" placeholder="Pov : j'ai fait la maline..."></textarea>
-<label>Description (texte du post)</label>
-<textarea name="description" placeholder="Ouais bon on va espérer hein 💀"></textarea>
-<button type="submit">Uploader le reel</button>
+<form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Vidéo CLEAN <span class="up-req">(obligatoire)</span></h3></div>
+<label class="up-drop">
+<input type="file" name="video" accept="video/*" required class="up-file-main">
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop video file here or click to select</div>
+<div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Vidéo EXEMPLE <span class="up-opt">(optionnel)</span></h3></div>
+<label class="up-drop up-drop-small">
+<input type="file" name="example" accept="video/*" class="up-file-example">
+<div class="up-drop-inner-small"><div class="up-plus">+</div><div class="up-plus-lbl">Ajouter exemple</div></div>
+</label>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Textes</h3></div>
+<label class="up-mini-label">Caption (overlay sur la vidéo)</label>
+<textarea name="caption" placeholder="Pov : j'ai fait la maline..." class="up-input"></textarea>
+<label class="up-mini-label" style="margin-top:14px">Description (texte du post)</label>
+<textarea name="description" placeholder="Ouais bon on va espérer hein 💀" class="up-input"></textarea>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader le reel</button>
 </form>
 </div>
 
 <div class="form-section" id="form-post" style="display:none">
-<form method="POST" action="/upload/post" enctype="multipart/form-data" class="box">
-<label>Identité</label>
-<select name="identity" required>{ident_opts}</select>
-<label>Photo CLEAN</label>
-<input type="file" name="photo" accept="image/*" required>
-<label>Photo EXEMPLE (optionnel)</label>
-<input type="file" name="example" accept="image/*">
-<label>Caption (overlay)</label>
-<textarea name="caption"></textarea>
-<label>Description</label>
-<textarea name="description"></textarea>
-<button type="submit">Uploader le post</button>
+<form method="POST" action="/upload/post" enctype="multipart/form-data" class="up-form" data-utype="post" data-accept="image/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<label class="up-drop">
+<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop media file(s) here or select them from your computer</div>
+<div class="up-drop-limits"><span>Image size limit: 100MB</span><span>·</span><span>Dimensions: 16px to 10000px</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Textes</h3></div>
+<label class="up-mini-label">Caption (overlay)</label>
+<textarea name="caption" class="up-input"></textarea>
+<label class="up-mini-label" style="margin-top:14px">Description</label>
+<textarea name="description" class="up-input"></textarea>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader le post</button>
 </form>
 </div>
 
 <div class="form-section" id="form-story" style="display:none">
-<form method="POST" action="/upload/story" enctype="multipart/form-data" class="box">
-<label>Identité</label>
-<select name="identity" required>{ident_opts}</select>
-<label>Photo CLEAN</label>
-<input type="file" name="photo" accept="image/*" required>
-<label>Photo EXEMPLE (optionnel)</label>
-<input type="file" name="example" accept="image/*">
-<label>Caption</label>
-<textarea name="caption"></textarea>
-<label>Description</label>
-<textarea name="description"></textarea>
-<button type="submit">Uploader la story</button>
+<form method="POST" action="/upload/story" enctype="multipart/form-data" class="up-form" data-utype="story" data-accept="image/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<label class="up-drop">
+<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop media file(s) here or select them from your computer</div>
+<div class="up-drop-limits"><span>Image size limit: 100MB</span><span>·</span><span>Dimensions: 16px to 10000px</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader la story</button>
 </form>
 </div>
 
 <div class="form-section" id="form-storycta" style="display:none">
-<form method="POST" action="/upload/storycta" enctype="multipart/form-data" class="box">
-<label>Identité</label>
-<select name="identity" required>{ident_opts}</select>
-<label>Photo</label>
-<input type="file" name="photo" accept="image/*" required>
-<small>Les captions storycta sont partagées (utilise /addstoryctacaptions sur Discord)</small>
-<button type="submit">Uploader story CTA</button>
+<form method="POST" action="/upload/storycta" enctype="multipart/form-data" class="up-form" data-utype="storycta" data-accept="image/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<label class="up-drop">
+<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop 1080x1920 image here</div>
+<div class="up-drop-limits"><span>Story CTA · captions partagées via /addstoryctacaptions</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader story CTA</button>
 </form>
 </div>
 
 <div class="form-section" id="form-pp" style="display:none">
-<form method="POST" action="/upload/pp" enctype="multipart/form-data" class="box">
-<small>Pool partagé entre toutes les identités</small>
-<label>Photo de profil</label>
-<input type="file" name="photo" accept="image/*" required>
-<button type="submit">Uploader la PP</button>
+<form method="POST" action="/upload/pp" enctype="multipart/form-data" class="up-form" data-utype="pp" data-accept="image/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Photo de profil</h3></div>
+<small style="color:#888;margin-bottom:10px;display:block">Pool partagé entre toutes les identités</small>
+<label class="up-drop">
+<input type="file" name="photo" accept="image/*" required class="up-file-main">
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop your profile picture here</div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader la PP</button>
 </form>
 </div>
 
@@ -4703,6 +4767,54 @@ body.light .vault-sort-item{color:#111}
 body.light .vault-sort-item:hover{background:#f3f4f6}
 body.light .vault-sort-sep{background:#e5e7eb}
 
+/* === UPLOAD STYLE INFLOW === */
+.up-form{max-width:880px}
+.up-card{position:relative;background:#161616;border:1px solid #232323;border-radius:14px;padding:22px 24px;margin-bottom:14px}
+body.light .up-card{background:#fff;border-color:#e5e7eb}
+.up-step{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.up-step .up-dot{width:11px;height:11px;border-radius:50%;background:#3b82f6;flex-shrink:0;box-shadow:0 0 0 4px rgba(59,130,246,.15)}
+.up-step h3{margin:0;font-size:15px;font-weight:700;color:#fff;letter-spacing:-.01em}
+body.light .up-step h3{color:#111}
+.up-step .up-req{color:#888;font-weight:500;font-size:13px;margin-left:4px}
+.up-step .up-opt{color:#666;font-weight:500;font-size:13px;margin-left:4px;font-style:italic}
+.up-input{background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:11px 14px;border-radius:10px;font-family:inherit;font-size:14px;width:100%;outline:none;transition:.15s}
+.up-input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+body.light .up-input{background:#f9fafb;border-color:#e5e7eb;color:#111}
+.up-mini-label{display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px}
+textarea.up-input{min-height:72px;resize:vertical}
+
+/* === DROP zone === */
+.up-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(59,130,246,.04);border:2px dashed rgba(59,130,246,.3);border-radius:12px;padding:36px 16px;cursor:pointer;transition:.15s;position:relative}
+.up-drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.up-drop:hover{background:rgba(59,130,246,.07);border-color:rgba(59,130,246,.55)}
+.up-drop.dragover{background:rgba(59,130,246,.12);border-color:#3b82f6;transform:scale(1.005)}
+.up-drop.has-file{background:rgba(34,197,94,.05);border-color:rgba(34,197,94,.3);border-style:solid;padding:18px 14px}
+body.light .up-drop{background:rgba(59,130,246,.05)}
+.up-drop-inner{display:flex;flex-direction:column;align-items:center;gap:4px;background:#fff;border:1px dashed rgba(59,130,246,.4);border-radius:12px;padding:14px 22px;color:#3b82f6;font-weight:700;font-size:13px;letter-spacing:-.01em;pointer-events:none;box-shadow:0 4px 12px rgba(59,130,246,.08)}
+.up-drop-inner-small{display:flex;align-items:center;gap:8px;background:#fff;border:1px dashed rgba(59,130,246,.4);border-radius:10px;padding:10px 16px;color:#3b82f6;font-weight:700;font-size:13px;pointer-events:none}
+.up-drop-small{padding:14px 16px}
+.up-plus{font-size:22px;line-height:1;color:#3b82f6}
+.up-plus-lbl{font-size:13px}
+.up-drop-hint{color:#666;font-size:13px;text-align:center;pointer-events:none}
+.up-drop-limits{display:flex;gap:8px;color:#888;font-size:11px;flex-wrap:wrap;justify-content:center;pointer-events:none}
+.up-drop-limits span{padding:0 4px}
+
+/* === Edit table (apres drop) === */
+.up-edit-table{margin-top:14px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden}
+body.light .up-edit-table{background:#fff;border-color:#e5e7eb}
+.up-edit-head{display:grid;grid-template-columns:1fr 60px;padding:10px 16px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;color:#888;font-size:11px;letter-spacing:.5px;text-transform:uppercase;font-weight:700}
+body.light .up-edit-head{background:#f9fafb;border-bottom-color:#e5e7eb}
+.up-edit-row{display:grid;grid-template-columns:1fr 60px;align-items:center;padding:12px 16px;border-bottom:1px solid #1a1a1a}
+.up-edit-row:last-child{border-bottom:0}
+.up-edit-name{font-size:13px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.light .up-edit-name{color:#111}
+.up-edit-thumb{display:inline-block;width:42px;height:42px;border-radius:8px;background:#262626;margin-right:10px;vertical-align:middle;object-fit:cover}
+.up-rm{background:transparent;border:0;color:#ef4444;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:.15s}
+.up-rm:hover{background:rgba(239,68,68,.15)}
+
+.up-submit{margin-top:6px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:14px 26px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.3);letter-spacing:.01em;width:100%;font-family:inherit}
+.up-submit:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(59,130,246,.4)}
+
 /* === SFW blur mode === */
 body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5)!important;transition:filter .25s}
 body.sfw-on .vault-gallery img:hover,body.sfw-on .vault-thumb img:hover{filter:blur(0)!important}
@@ -4719,6 +4831,69 @@ body.sfw-on #sfw-floating span:last-child{color:#fb923c!important}
 @media(max-width:768px){#sfw-floating{top:12px;right:12px;padding:5px 10px 5px 6px}}
 </style>
 <script>
+// === Upload drag&drop + preview ===
+function _upHumanSize(b){
+  if(b<1024) return b+' B';
+  if(b<1024*1024) return (b/1024).toFixed(1)+' KB';
+  if(b<1024*1024*1024) return (b/(1024*1024)).toFixed(1)+' MB';
+  return (b/(1024*1024*1024)).toFixed(2)+' GB';
+}
+function _upRefreshTable(input){
+  const dropZone = input.closest('.up-drop');
+  const card = dropZone.closest('.up-card');
+  const table = card.querySelector('.up-edit-table');
+  if(!table) return;
+  const file = input.files && input.files[0];
+  if(!file){
+    table.style.display = 'none';
+    dropZone.classList.remove('has-file');
+    dropZone.querySelector('.up-drop-inner, .up-drop-inner-small').style.display = '';
+    dropZone.querySelector('.up-drop-hint')?.removeAttribute('hidden');
+    return;
+  }
+  // Cache l'inner zone, montre la table
+  dropZone.classList.add('has-file');
+  const inner = dropZone.querySelector('.up-drop-inner, .up-drop-inner-small');
+  if(inner) inner.style.display = 'none';
+  const hint = dropZone.querySelector('.up-drop-hint');
+  if(hint) hint.textContent = '✓ Fichier prêt — clique pour changer';
+  const limits = dropZone.querySelector('.up-drop-limits');
+  if(limits) limits.style.display = 'none';
+  table.style.display = '';
+  const row = table.querySelector('.up-edit-row[data-file=main] .up-edit-name');
+  if(row){
+    // Mini thumbnail si image
+    let thumbHtml = '';
+    if(file.type && file.type.startsWith('image/')){
+      const url = URL.createObjectURL(file);
+      thumbHtml = '<img class=up-edit-thumb src="'+url+'">';
+    } else if(file.type && file.type.startsWith('video/')){
+      thumbHtml = '<span class=up-edit-thumb style="display:inline-flex;align-items:center;justify-content:center;color:#aaa;font-size:18px">🎬</span>';
+    }
+    row.innerHTML = thumbHtml + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span>';
+  }
+}
+function upClearMain(btn){
+  const card = btn.closest('.up-card');
+  const input = card.querySelector('.up-file-main, .up-file-example');
+  if(input) input.value = '';
+  _upRefreshTable(input);
+}
+document.addEventListener('change', function(e){
+  const input = e.target;
+  if(input.matches('.up-file-main, .up-file-example')){
+    _upRefreshTable(input);
+  }
+});
+document.addEventListener('dragover', function(e){
+  const drop = e.target.closest('.up-drop');
+  if(drop){ e.preventDefault(); drop.classList.add('dragover'); }
+});
+document.addEventListener('dragleave', function(e){
+  const drop = e.target.closest('.up-drop');
+  if(drop){ drop.classList.remove('dragover'); }
+});
+
 // === SFW toggle global (floute toutes les images de la dashboard) ===
 function toggleSFW(){
   document.body.classList.toggle('sfw-on');
