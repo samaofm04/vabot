@@ -4548,7 +4548,9 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             )
         active_class = "vault-item-active" if ident == selected else ""
         vault_items.append(
-            f"<a href='?tab={tab_name}&{subdir_key}={ident}' onclick='return vaultSwitchTo(this.href)' "
+            f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
@@ -5011,24 +5013,73 @@ document.addEventListener('click', function(e){
   });
 });
 
-// === Scroll preservation entre switches d identite (sessionStorage) ===
-(function(){
-  // Au load : restaure la position scroll precedente si on a switche dans la vault
-  try{
-    const saved = sessionStorage.getItem('vault_scroll');
-    if(saved){
-      window.scrollTo(0, parseInt(saved) || 0);
-      sessionStorage.removeItem('vault_scroll');
-    }
-  }catch(e){}
-  // Au click sur un vault-item ou tri/pill : sauve la position actuelle
-  document.addEventListener('click', function(e){
-    const a = e.target.closest('a[data-no-loader]');
-    if(a){
-      try{ sessionStorage.setItem('vault_scroll', String(window.scrollY)); }catch(e){}
-    }
-  }, true);
-})();
+// === Vault : AJAX switch instantane + prefetch on hover ===
+window.__vaultPrefetchCache = window.__vaultPrefetchCache || {};
+window.__vaultPrefetchInflight = window.__vaultPrefetchInflight || {};
+
+window.vaultPrefetch = function(url){
+  if(!url || window.__vaultPrefetchCache[url] || window.__vaultPrefetchInflight[url]) return;
+  window.__vaultPrefetchInflight[url] = true;
+  fetch(url, {credentials:'same-origin'})
+    .then(r=>r.text())
+    .then(html=>{
+      window.__vaultPrefetchCache[url] = html;
+      delete window.__vaultPrefetchInflight[url];
+    })
+    .catch(()=>{ delete window.__vaultPrefetchInflight[url]; });
+};
+
+window.vaultGoTo = function(ev, url){
+  if(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey)) return true;
+  ev.preventDefault();
+  // Active item sidebar (UI feedback instant)
+  const allItems = document.querySelectorAll('.vault-item');
+  allItems.forEach(i=>{
+    const same = i.getAttribute('href') === url || (i.href === url);
+    i.classList.toggle('vault-item-active', same);
+  });
+  // Met a jour l URL
+  try{ history.pushState({}, '', url); }catch(e){}
+  // Trouve la section ciblee (form-cloud<...>)
+  let sec = document.querySelector('.form-section[id^="form-cloud"]');
+  // Choisis la section visible (style block), sinon premiere matchant
+  document.querySelectorAll('.form-section[id^="form-cloud"]').forEach(s=>{
+    if(s.style.display && s.style.display !== 'none') sec = s;
+  });
+  if(!sec) { window.location.href = url; return false; }
+  // Skeleton instant : remplace les images existantes par placeholder
+  sec.querySelectorAll('.vault-card-bg img').forEach(img=>{
+    img.style.opacity = '0';
+  });
+  sec.querySelectorAll('.vault-card-bg').forEach(c=>{
+    c.style.animation = '';
+  });
+  // Charge le nouveau HTML
+  const apply = (html)=>{
+    try{
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const newSec = doc.getElementById(sec.id);
+      if(!newSec){ window.location.href = url; return; }
+      sec.innerHTML = newSec.innerHTML;
+      // Re-execute les scripts inline
+      sec.querySelectorAll('script').forEach(oldS=>{
+        const newS = document.createElement('script');
+        newS.textContent = oldS.textContent;
+        oldS.parentNode.replaceChild(newS, oldS);
+      });
+    } catch(e){ window.location.href = url; }
+  };
+  if(window.__vaultPrefetchCache[url]){
+    apply(window.__vaultPrefetchCache[url]);
+  } else {
+    fetch(url, {credentials:'same-origin'}).then(r=>r.text()).then(apply).catch(()=>{ window.location.href = url; });
+  }
+  return false;
+};
+window.addEventListener('popstate', function(){
+  // Re-render la section actuelle en fonction de l URL
+  window.vaultGoTo({preventDefault:()=>{}, ctrlKey:false}, window.location.href);
+});
 
 // === Lazy loading des thumbnails differees (IntersectionObserver) ===
 (function(){
