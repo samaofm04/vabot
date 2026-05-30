@@ -308,11 +308,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         continue
                     shortcode = media.get("code") or media.get("shortcode") or ""
                     is_video = media.get("media_type") == 2 or media.get("is_video", True)
-                    caption_obj = media.get("caption")
-                    if isinstance(caption_obj, dict):
-                        caption = caption_obj.get("text", "")
-                    else:
-                        caption = str(caption_obj) if caption_obj else ""
+                    caption = _extract_caption_robust(media)
                     thumb = ""
                     iv2 = media.get("image_versions2", {})
                     candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
@@ -437,8 +433,7 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
     for edge in edges[:limit]:
         node = edge.get("node", {})
         try:
-            caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
-            caption = caption_edges[0].get("node", {}).get("text", "") if caption_edges else ""
+            caption = _extract_caption_robust(node)
             shortcode = node.get("shortcode", "")
             is_video = node.get("is_video", False)
             reel = {
@@ -574,6 +569,61 @@ def get_cached(username: str) -> Optional[dict]:
         return json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _extract_caption_robust(media_or_node: dict) -> str:
+    """Essaie plusieurs champs Instagram pour trouver la caption.
+
+    Champs possibles selon l'endpoint :
+    - REST API :    media.caption.text (objet ou string)
+    - GraphQL :     node.edge_media_to_caption.edges[0].node.text
+    - clip media :  media.clips_metadata.clips_caption.text
+    - fallback :    media.title
+
+    Retourne "" si rien trouve.
+    """
+    if not isinstance(media_or_node, dict):
+        return ""
+    # Path 1 : caption (REST)
+    cap_obj = media_or_node.get("caption")
+    if isinstance(cap_obj, dict):
+        text = cap_obj.get("text", "")
+        if text:
+            return str(text)
+    elif isinstance(cap_obj, str) and cap_obj:
+        return cap_obj
+    # Path 2 : edge_media_to_caption (GraphQL)
+    edges = media_or_node.get("edge_media_to_caption", {})
+    if isinstance(edges, dict):
+        e_list = edges.get("edges", [])
+        if e_list and isinstance(e_list, list):
+            first = e_list[0]
+            if isinstance(first, dict):
+                node = first.get("node", {})
+                if isinstance(node, dict):
+                    text = node.get("text", "")
+                    if text:
+                        return str(text)
+    # Path 3 : clips_metadata (reels-specific)
+    clips = media_or_node.get("clips_metadata", {})
+    if isinstance(clips, dict):
+        cc = clips.get("clips_caption", {})
+        if isinstance(cc, dict):
+            text = cc.get("text", "")
+            if text:
+                return str(text)
+        # Music caption ?
+        music = clips.get("music_info", {})
+        if isinstance(music, dict):
+            sub = music.get("music_asset_info", {})
+            if isinstance(sub, dict):
+                title = sub.get("title", "")
+                # Ne pas retourner le titre du son comme caption (different !)
+    # Path 4 : title fallback
+    title = media_or_node.get("title")
+    if isinstance(title, str) and title:
+        return title
+    return ""
 
 
 def get_all_cached_reels() -> list:
