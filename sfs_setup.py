@@ -206,16 +206,19 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
 def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     """Fetch les counts d'abonnes / anciens / interesses depuis MyPuls.
 
-    Pour chaque createur, switche le contexte puis appelle les endpoints
-    DataTables qui renvoient {recordsTotal: N}.
+    Approche : GET /creators retourne UNE page server-rendered qui contient
+    les cards de TOUS les createurs avec les 3 stats deja calculees (les
+    memes que celles affichees dans le widget agence). Beaucoup plus rapide
+    qu un appel par createur, et donne les vraies valeurs (les endpoints
+    DataTables /fans/data?old=1 comptent TOUS les anciens jamais inscrits,
+    alors que le widget affiche un nombre filtre - actifs recuperables).
 
-    Endpoints utilises (reverse-engineered, verifies en live) :
-    - GET  /switch-creator/<id>?from=app_fans  -> bascule le contexte
-    - GET  /fans/data?old=0    -> abonnes actuels (DataTables)
-    - GET  /fans/data?old=1    -> anciens abonnes
-    - POST /interested/data    -> vrais "Interesses" (NON /fans/new qui
-      est en fait "Nouveaux abonnes 48h" - tres different)
-      Requiert _token CSRF + corps DataTables minimum
+    Pattern HTML par card :
+      <h5 class="...fw-bold">NomCreator</h5>
+      ...
+      <div class="stat-val">N</div><div class="stat-lbl">Abonnes</div>
+      <div class="stat-val">M</div><div class="stat-lbl">Anciens</div>
+      <div class="stat-val">K</div><div class="stat-lbl">Interesses</div>
 
     Retourne {identity_lowercase: {"abonnes": "N", "anciens": "M", "interesses": "K"}}
     """
@@ -227,76 +230,41 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
         return out
     if not mypuls.is_configured():
         return out
-    res = mypuls.list_creators()
-    if not res.get("ok"):
-        return out
-    creators_map = res.get("creators", {})
     s = mypuls._make_session()
     if s is None:
         return out
-    headers = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+    try:
+        r = s.get(f"{mypuls.BASE_URL}/creators", timeout=20)
+        if r.status_code != 200:
+            return out
+    except Exception:
+        return out
 
-    def _grab_csrf(html: str) -> str:
-        for pat in (
-            r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)',
-            r'name=["\']_token["\']\s+value=["\']([^"\']+)',
-        ):
-            m = _re.search(pat, html)
-            if m:
-                return m.group(1)
-        return ""
+    pattern = _re.compile(
+        r'<h5\s+class="[^"]*fw-bold[^"]*">([^<]+)</h5>'
+        r'.*?'
+        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
+        r'<div\s+class="stat-lbl">Abonn[eé]s</div>'
+        r'.*?'
+        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
+        r'<div\s+class="stat-lbl">Anciens</div>'
+        r'.*?'
+        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
+        r'<div\s+class="stat-lbl">Int[eé]ress[eé]s</div>',
+        _re.DOTALL,
+    )
 
-    def _count_get(path: str) -> str:
-        try:
-            r = s.get(f"{mypuls.BASE_URL}{path}", timeout=20, headers=headers)
-            if r.status_code != 200:
-                return ""
-            tot = r.json().get("recordsTotal")
-            return str(tot) if isinstance(tot, int) else ""
-        except Exception:
-            return ""
+    def _clean_num(v: str) -> str:
+        # Retire espaces et separateurs de milliers
+        return _re.sub(r'[\s.,]', '', v).strip()
 
-    def _count_post(path: str, csrf: str) -> str:
-        try:
-            r = s.post(
-                f"{mypuls.BASE_URL}{path}",
-                data={"draw": "1", "start": "0", "length": "10", "_token": csrf},
-                timeout=20,
-                headers=headers,
-            )
-            if r.status_code != 200:
-                return ""
-            tot = r.json().get("recordsTotal")
-            return str(tot) if isinstance(tot, int) else ""
-        except Exception:
-            return ""
-
-    for name, cid in creators_map.items():
-        try:
-            # Switch context vers ce createur
-            s.get(
-                f"{mypuls.BASE_URL}/switch-creator/{int(cid)}?from=app_fans",
-                timeout=15,
-                allow_redirects=True,
-            )
-            abonnes = _count_get("/fans/data?old=0")
-            anciens = _count_get("/fans/data?old=1")
-            # Pour les "vrais" interesses, on doit POST /interested/data avec un CSRF
-            # token frais (lie au scope du createur courant)
-            interesses = ""
-            try:
-                rp = s.get(f"{mypuls.BASE_URL}/interested", timeout=15)
-                if rp.status_code == 200:
-                    csrf = _grab_csrf(rp.text)
-                    if csrf:
-                        interesses = _count_post("/interested/data", csrf)
-            except Exception:
-                pass
-            out[name.lower().strip()] = {
-                "abonnes": abonnes,
-                "anciens": anciens,
-                "interesses": interesses,
-            }
-        except Exception:
+    for m in pattern.finditer(r.text):
+        name = m.group(1).strip()
+        if not name:
             continue
+        out[name.lower().strip()] = {
+            "abonnes": _clean_num(m.group(2)),
+            "anciens": _clean_num(m.group(3)),
+            "interesses": _clean_num(m.group(4)),
+        }
     return out
