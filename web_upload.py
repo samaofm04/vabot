@@ -8572,7 +8572,24 @@ def _render_veille_feed_html() -> str:
     fr_months = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
                  "juill.", "août", "sept.", "oct.", "nov.", "déc."]
 
-    sections = []
+    # Bandeau d'actions globales : selection + bulk send
+    if tg_configured and s['unsent_count'] > 0:
+        bulk_bar = (
+            "<div style='position:sticky;top:0;z-index:20;background:#0a0a0a;display:flex;align-items:center;gap:14px;padding:14px 18px;margin-bottom:18px;border:1px solid #2a2a2a;border-radius:12px'>"
+            "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px;cursor:pointer'>"
+            "<input type='checkbox' id='veille-select-all' onchange='veilleSelectAll(this)' style='width:18px;height:18px;cursor:pointer;accent-color:#3b82f6'>"
+            "<span>Tout sélectionner (non envoyés)</span>"
+            "</label>"
+            "<div style='margin-left:auto;color:#888;font-size:12px'><span id='veille-selected-count'>0</span> sélectionné(s)</div>"
+            "<button onclick='sendSelectedVeille()' id='veille-send-selected-btn' disabled "
+            "style='background:#0088cc;color:#fff;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;opacity:0.4'>"
+            "📤 Envoyer la sélection</button>"
+            "</div>"
+        )
+    else:
+        bulk_bar = ""
+
+    sections = [bulk_bar]
     for day in sorted(by_day.keys(), reverse=True):
         reels = by_day[day]
         # Format date
@@ -8599,9 +8616,9 @@ def _render_veille_feed_html() -> str:
         )
         if unsent_count > 0 and tg_configured:
             section_html += (
-                f"<button onclick=\"sendAllVeilleDay('{day}')\" "
-                f"style='background:#0088cc;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px'>"
-                f"📤 Envoyer tout ({unsent_count})</button>"
+                f"<button onclick=\"selectDayVeille('{day}')\" "
+                f"style='background:transparent;color:#3b82f6;border:1px solid #3b82f6;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>"
+                f"☑ Sélectionner ce jour ({unsent_count})</button>"
             )
         section_html += "</div>"
 
@@ -8611,33 +8628,33 @@ def _render_veille_feed_html() -> str:
             sent = r.get("sent_to_telegram", False)
             ribbon = ""
             if sent:
-                ribbon = ("<div style='position:absolute;top:8px;left:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
+                ribbon = ("<div style='position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:3px 8px;border-radius:6px;z-index:3;letter-spacing:.3px'>✓ ENVOYÉ</div>")
-            send_btn = ""
+
+            # Checkbox de selection (top-left)
+            cb_html = ""
             if not sent and tg_configured:
-                send_btn = (
-                    f"<button onclick=\"sendVeilleReel('{r['id']}', this)\" "
-                    f"style='flex:1;background:#0088cc;color:#fff;border:0;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700'>"
-                    f"📤 Telegram</button>"
+                cb_html = (
+                    f"<div style='position:absolute;top:8px;left:8px;z-index:3' onclick='event.stopPropagation()'>"
+                    f"<label style='display:block;cursor:pointer'>"
+                    f"<input type='checkbox' class='veille-cb' data-rid='{r['id']}' data-day='{day}' onchange='veilleOnSelect()' "
+                    f"style='width:22px;height:22px;cursor:pointer;accent-color:#3b82f6;background:#fff'>"
+                    f"</label></div>"
                 )
-            else:
-                send_btn = (
-                    f"<button disabled style='flex:1;background:#1a1a1a;color:#22c55e;border:1px solid #22c55e;padding:7px;border-radius:6px;font-size:12px;font-weight:700;cursor:default'>"
-                    f"✓ Envoyé</button>"
-                )
+
             section_html += (
-                f"<div style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
+                f"<div class='veille-card' data-rid='{r['id']}' data-day='{day}' data-sent='{1 if sent else 0}' style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
                 f"<div style='position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer' onclick=\"window.open('{r['url']}','_blank')\">"
+                f"{cb_html}"
                 f"{ribbon}"
                 f"<img src='{r.get('thumb', '')}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
                 f"<div style='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:10px;color:#fff;font-size:11px'>"
                 f"<div style='font-weight:700'>@{r.get('owner', '?')}</div>"
                 f"<div style='display:flex;gap:8px;color:#ddd;margin-top:3px;font-size:11px'>▶ {_format_count(r.get('views', 0))} · ♥ {_format_count(r.get('likes', 0))}</div>"
                 f"</div></div>"
-                f"<div style='padding:10px;display:flex;gap:6px'>"
-                + send_btn +
+                f"<div style='padding:8px 10px;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid #1a1a1a;background:#0a0a0a'>"
                 f"<button onclick=\"removeVeilleReel('{r['id']}', this)\" "
-                f"style='background:transparent;border:1px solid #5a2020;color:#ef4444;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px' title='Retirer de la veille'>🗑</button>"
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px' title='Retirer de la veille'>🗑 Retirer</button>"
                 f"</div>"
                 f"</div>"
             )
@@ -8646,40 +8663,65 @@ def _render_veille_feed_html() -> str:
 
     js = """
 <script>
-async function sendVeilleReel(rid, btn){
-  if(!confirm('Envoyer ce reel sur Telegram ?')) return;
-  const orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '⏳ Envoi...';
-  const fd = new FormData(); fd.set('reel_id', rid);
-  const r = await fetch('/veille/send', {method:'POST', body:fd});
-  const j = await r.json();
-  if(j.ok){
-    btn.innerHTML = '✓ Envoyé'; btn.style.background = '#22c55e';
-    setTimeout(()=>location.reload(), 800);
-  } else {
-    btn.innerHTML = '✗ ' + (j.error||'Erreur');
-    btn.style.background = '#ef4444';
-    setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = '#0088cc'; btn.disabled = false; }, 3000);
+// Selection helpers
+function veilleOnSelect(){
+  const cbs = document.querySelectorAll('.veille-cb:checked');
+  const count = cbs.length;
+  const cntEl = document.getElementById('veille-selected-count');
+  if(cntEl) cntEl.textContent = count;
+  const btn = document.getElementById('veille-send-selected-btn');
+  if(btn){
+    btn.disabled = count === 0;
+    btn.style.opacity = count === 0 ? '0.4' : '1';
+  }
+  // Update select-all checkbox state
+  const all = document.querySelectorAll('.veille-cb');
+  const allEl = document.getElementById('veille-select-all');
+  if(allEl){
+    if(count === 0) allEl.checked = false;
+    else if(count === all.length) allEl.checked = true;
+    else allEl.indeterminate = true;
   }
 }
-async function sendAllVeilleDay(day){
-  if(!confirm('Envoyer TOUS les reels non envoyés du ' + day + ' sur Telegram ?')) return;
-  const fd = new FormData(); fd.set('day', day);
-  const r = await fetch('/veille/send_day', {method:'POST', body:fd});
-  const j = await r.json();
-  if(j.ok){
-    showToast('✅ ' + j.sent + ' reels envoyés' + (j.failed?' · ' + j.failed + ' fail':''), j.failed?'error':'success');
-    setTimeout(()=>location.reload(), 800);
-  } else {
-    alert('Erreur: ' + (j.error || '?'));
+function veilleSelectAll(cb){
+  document.querySelectorAll('.veille-cb').forEach(c => { c.checked = cb.checked; });
+  veilleOnSelect();
+}
+function selectDayVeille(day){
+  document.querySelectorAll('.veille-cb[data-day="' + day + '"]').forEach(c => { c.checked = true; });
+  veilleOnSelect();
+}
+async function sendSelectedVeille(){
+  const cbs = document.querySelectorAll('.veille-cb:checked');
+  const ids = Array.from(cbs).map(c => c.dataset.rid);
+  if(!ids.length){ alert('Aucun reel sélectionné'); return; }
+  if(!confirm('Envoyer ' + ids.length + ' reel(s) sur Telegram ?')) return;
+  const btn = document.getElementById('veille-send-selected-btn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  let done = 0, errs = 0;
+  for(const rid of ids){
+    btn.innerHTML = '⏳ Envoi ' + (done+errs+1) + '/' + ids.length + '...';
+    const fd = new FormData(); fd.set('reel_id', rid);
+    try {
+      const r = await fetch('/veille/send', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok) done++; else errs++;
+    } catch(e){ errs++; }
   }
+  btn.innerHTML = '✓ ' + done + ' envoyé(s)' + (errs ? ' · ' + errs + ' erreur(s)' : '');
+  btn.style.background = errs ? '#f59e0b' : '#22c55e';
+  setTimeout(() => location.reload(), 1500);
 }
 async function removeVeilleReel(rid, btn){
   if(!confirm('Retirer ce reel de la veille ?')) return;
   const fd = new FormData(); fd.set('reel_id', rid);
-  const r = await fetch('/veille/remove', {method:'POST', body:fd});
-  const card = btn.closest('div[style*="aspect-ratio"]')?.parentNode;
-  if(card) card.style.opacity = '0.3';
+  await fetch('/veille/remove', {method:'POST', body:fd});
+  const card = btn.closest('.veille-card');
+  if(card){
+    card.style.transition = 'opacity .3s';
+    card.style.opacity = '0.3';
+  }
   setTimeout(()=>location.reload(), 400);
 }
 </script>
