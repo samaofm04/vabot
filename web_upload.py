@@ -886,29 +886,34 @@ window.toggleReelExpand = function(card){
   var panel = card.querySelector('.reel-expand');
   var chev = card.querySelector('.reel-chevron');
   if(!panel) return;
-  var isOpen = panel.style.display !== 'none' && panel.style.display !== '';
+  var inner = panel.querySelector('.reel-expand-inner');
+  var isOpen = panel.classList.contains('open');
   if(isOpen){
-    panel.style.display = 'none';
+    // Ferme : remet max-height 0 + chevron pointe en bas
+    panel.style.maxHeight = '0';
+    panel.style.borderTopWidth = '0';
+    panel.classList.remove('open');
     if(chev) chev.style.transform = 'rotate(0deg)';
   } else {
-    panel.style.display = '';
+    // Ouvre : calcule la hauteur naturelle + chevron pointe en haut
+    panel.classList.add('open');
+    panel.style.borderTopWidth = '1px';
+    if(inner) panel.style.maxHeight = inner.scrollHeight + 'px';
     if(chev) chev.style.transform = 'rotate(180deg)';
-    // Charge la duree depuis le video element
+    // Charge la duree
     var v = card.querySelector('.reel-video');
     var label = panel.querySelector('.reel-dur-label');
     if(v && label){
+      var setDur = function(){
+        if(v.duration && !isNaN(v.duration)){
+          var d = Math.round(v.duration);
+          label.textContent = Math.floor(d/60) + ':' + ('0' + (d%60)).slice(-2);
+        }
+      };
       if(v.duration && !isNaN(v.duration)){
-        var d = Math.round(v.duration);
-        label.textContent = Math.floor(d/60) + ':' + ('0' + (d%60)).slice(-2);
+        setDur();
       } else {
-        // Pas encore chargee : ecoute l'event loadedmetadata
-        v.addEventListener('loadedmetadata', function(){
-          if(v.duration && !isNaN(v.duration)){
-            var d = Math.round(v.duration);
-            label.textContent = Math.floor(d/60) + ':' + ('0' + (d%60)).slice(-2);
-          }
-        }, {once:true});
-        // Force le chargement si preload='none'
+        v.addEventListener('loadedmetadata', setDur, {once:true});
         if(v.preload === 'none') v.preload = 'metadata';
         try{ v.load(); }catch(e){}
       }
@@ -5825,17 +5830,20 @@ def _render_insta_trends_grid_html() -> str:
       {trending_html}
       <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Voir caption, son, durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
         {avatar}<span style="flex:1">@{owner}</span>
-        <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .2s"><polyline points="6 15 12 9 18 15"/></svg>
+        <!-- Chevron pointe en BAS par defaut (= click pour ouvrir), HAUT quand ouvert -->
+        <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .25s ease"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
     </div>
   </div>
-  <!-- Expand panel : caption + sound (cachee par defaut) -->
-  <div class="reel-expand" style="display:none;padding:12px;background:#0f0f0f;border-top:1px solid #232323;font-size:12.5px;color:#ddd;line-height:1.5">
-    <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto">{caption_short if caption_short else '<span style=color:#666>Aucune caption</span>'}</div>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #1a1a1a;color:#888;font-size:11.5px">
-      <span style="color:#3b82f6">🎵</span> <span>Sound:</span>
-      <span style="color:#ccc">Original audio</span>
-      <span style="margin-left:auto;color:#3b82f6;font-weight:700" class="reel-dur-label">--:--</span>
+  <!-- Expand panel : caption + sound (slide smooth) -->
+  <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;background:#0f0f0f;border-top:0 solid #232323;font-size:12.5px;color:#ddd;line-height:1.5">
+    <div class="reel-expand-inner" style="padding:12px">
+      {f'<div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:10px">{caption_short}</div>' if caption_short else ''}
+      <div style="display:flex;align-items:center;gap:6px;color:#aaa;font-size:11.5px">
+        <span style="color:#3b82f6">🎵</span><span style="color:#888">Sound:</span>
+        <span style="color:#ccc;font-weight:600">Original audio</span>
+        <span style="margin-left:auto;color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
+      </div>
     </div>
   </div>
 </div>""")
