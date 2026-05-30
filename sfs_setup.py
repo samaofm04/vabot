@@ -171,19 +171,24 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
 
     Ne sort QUE les champs de la plateforme (ex: pas de niche pour OF).
     Skip les champs vides (mais "abonnement" tombe sur 'free' par defaut).
+    Pas d emoji sur la ligne MODELE - juste "MODELE N :".
     """
     data = all_info(platform)
     lines: List[str] = []
     idx_actif = 0
     plat_fields = fields_for(platform)
+    has_any_field = False
     for ident in identities_ordered:
         key = ident.lower().strip()
         info = data.get(key, {})
         if not info or not info.get("enabled", True):
             continue
+        # Skip les identites qui n ont AUCUN champ rempli (sauf abonnement default)
+        any_filled = any((info.get(f) or "").strip() for f in plat_fields)
+        if not any_filled:
+            continue
         idx_actif += 1
-        emoji = info.get("emoji") or DEFAULT_EMOJIS[(idx_actif - 1) % len(DEFAULT_EMOJIS)]
-        lines.append(f"{emoji} MODELE {idx_actif} :")
+        lines.append(f"MODELE {idx_actif} :")
         for f in plat_fields:
             label = FIELD_LABELS.get(f, f)
             val = (info.get(f) or "").strip()
@@ -191,9 +196,9 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
                 if f == "abonnement":
                     val = DEFAULT_ABONNEMENT
                 else:
-                    # Champ vide : on skip carrement la ligne
                     continue
             lines.append(f"-> {label} : {val}")
+            has_any_field = True
         lines.append("")
     return "\n".join(lines).rstrip()
 

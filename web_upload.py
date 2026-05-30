@@ -8813,6 +8813,41 @@ def _render_vtg_html() -> str:
     )
 
 
+def _sfssetup_identities(platform: str) -> list:
+    """Retourne la liste d identites a afficher / utiliser pour Setup SFS.
+
+    MyM : creators MyPuls (Amelia_xoxo, Lolatacrush, ...) si configures.
+    OF  : identites locales.
+    Fallback : identites locales + cles deja sauvegardees pour cette plateforme.
+    """
+    identities: list = []
+    if platform == "mym":
+        try:
+            import mypuls
+            if mypuls.is_configured():
+                res = mypuls.list_creators()
+                if res.get("ok"):
+                    identities = sorted(res.get("creators", {}).keys(), key=str.lower)
+        except Exception:
+            identities = []
+    if not identities:
+        try:
+            identities = sorted(_list_identities())
+        except Exception:
+            identities = []
+    # Toujours inclure les identites deja stockees pour cette plateforme
+    try:
+        import sfs_setup
+        stored = list(sfs_setup.all_info(platform).keys())
+        existing_lower = {x.lower() for x in identities}
+        for s in stored:
+            if s.lower() not in existing_lower:
+                identities.append(s)
+    except Exception:
+        pass
+    return identities
+
+
 def _render_sfssetup_html(platform: str = "mym") -> str:
     """Setup SFS : form par identite pour generer un message a copier-coller.
 
@@ -8826,24 +8861,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     platform_label = "MyM" if platform == "mym" else "OnlyFans"
     platform_color = "#a855f7" if platform == "mym" else "#0099ff"
 
-    # Pour MyM, on charge la liste des createurs MyPuls (peut depasser les identites locales)
-    identities: list = []
-    if platform == "mym":
-        try:
-            import mypuls
-            if mypuls.is_configured():
-                res = mypuls.list_creators()
-                if res.get("ok"):
-                    # Noms des createurs MyPuls
-                    identities = sorted(res.get("creators", {}).keys(), key=str.lower)
-        except Exception:
-            identities = []
-    # Fallback : identites locales si pas de MyPuls ou si OF
-    if not identities:
-        try:
-            identities = sorted(_list_identities())
-        except Exception:
-            identities = []
+    identities = _sfssetup_identities(platform)
 
     if not identities:
         return (
@@ -8897,10 +8915,8 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         checked = "checked" if enabled else ""
         cards.append(
             f"<div class='sfssetup-card' data-ident='{ident}' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px;{'opacity:0.5' if not enabled else ''}'>"
-            # Header card
+            # Header card (sans input emoji - le message n en utilise plus)
             f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>"
-            f"<input type='text' value='{emoji}' maxlength='8' data-ident='{ident}' data-field='emoji' data-platform='{platform}' oninput='setupDirty(this)' "
-            f"style='width:50px;text-align:center;padding:7px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:20px'>"
             f"{avatar}"
             f"<div style='flex:1'>"
             f"<div style='font-weight:700;font-size:15px;color:#fff'>{ident.title()}</div>"
@@ -13505,10 +13521,8 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         platform = (request.args.get("platform") or "mym").strip().lower()
-        try:
-            idents = sorted(_list_identities())
-        except Exception:
-            idents = []
+        # Memes identites que la page rendue (cards) - fix bug "Abonnement: free" vide
+        idents = _sfssetup_identities(platform)
         msg = sfs_setup.generate_message(platform, idents)
         return jsonify({"ok": True, "message": msg})
 
