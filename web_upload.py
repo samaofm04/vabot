@@ -8051,25 +8051,59 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
   </div>
 
-  <!-- Auto-Delete panel (events planifies) -->
+  <!-- Auto-Delete panel : Emploi du temps + Clean rapide -->
   <div class='mpl-row open' id='mpl-delete-block' style='display:none;border-left:3px solid rgba(239,68,68,.5)'>
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
-      <div class='mpl-row-icon' style='background:rgba(239,68,68,.12);color:#ef4444'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/><line x1='10' x2='10' y1='11' y2='17'/><line x1='14' x2='14' y1='11' y2='17'/></svg></div>
+      <div class='mpl-row-icon' style='background:rgba(239,68,68,.12);color:#ef4444'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Events planifies <span class='mpl-mini-badge' style='background:rgba(239,68,68,.15);color:#ef4444' id='mpl-del-count'>0</span></div>
-        <div class='mpl-row-sub'>Liste des posts et stories deja planifies sur MyPuls (selectionne ceux a supprimer)</div>
+        <div class='mpl-row-title' style='font-size:15px'>Emploi du temps <span class='mpl-mini-badge' style='background:rgba(239,68,68,.15);color:#ef4444' id='mpl-del-count'>0</span></div>
+        <div class='mpl-row-sub'>Calendrier des posts/stories planifies — clique un jour pour voir et supprimer</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
-    <div class='mpl-row-body'>
+    <div class='mpl-row-body' id='mpl-calendar-block'>
+      <!-- CALENDRIER (header + grille + detail) -->
+      <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px'>
+        <div style='display:flex;align-items:center;gap:4px'>
+          <button type='button' onclick='calNav(-1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>‹</button>
+          <button type='button' onclick='calNav(1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>›</button>
+          <h4 id='mpl-cal-month-name' style='margin:0 0 0 10px;font-size:15px;font-weight:600;color:#fff;text-transform:capitalize'>mois</h4>
+          <span class='mpl-mini-badge' id='mpl-cal-month-badge' style='background:rgba(168,85,247,.15);color:#a855f7;margin-left:8px'>...</span>
+        </div>
+        <div style='display:flex;align-items:center;gap:12px;font-size:11px;color:#888'>
+          <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#22c55e;border-radius:3px'></span>Posts</span>
+          <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#3b82f6;border-radius:3px'></span>Stories</span>
+          <button type='button' onclick='calToday()' style='padding:5px 11px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>Aujourd hui</button>
+        </div>
+      </div>
+
+      <!-- Header jours de la semaine -->
+      <div style='display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px'>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Lun</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mar</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mer</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Jeu</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Ven</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Sam</div>
+        <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Dim</div>
+      </div>
+
+      <!-- Grille du mois (rempli en JS) -->
+      <div id='mpl-cal-grid' style='display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid #1a1a1a;border-left:1px solid #1a1a1a;border-radius:8px;overflow:hidden;min-height:240px'>
+        <div style='grid-column:1/-1;padding:60px;text-align:center;color:#666;font-size:13px'>Chargement...</div>
+      </div>
+
+      <!-- Detail jour selectionne (avec bouton delete) -->
+      <div id='mpl-cal-day-detail' style='display:none;margin-top:14px;padding:14px;background:#0f0f0f;border:1px solid #232323;border-radius:10px'></div>
+
       <!-- Quick clean depuis date X -->
-      <div style='background:linear-gradient(135deg,rgba(239,68,68,.06),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.25);border-radius:12px;padding:14px;margin-bottom:14px'>
+      <div style='background:linear-gradient(135deg,rgba(239,68,68,.06),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.25);border-radius:12px;padding:14px;margin-top:14px'>
         <div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>
           <svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/></svg>
           <span style='color:#ef4444;font-weight:700;font-size:13px;letter-spacing:.3px'>🧹 Clean rapide</span>
         </div>
         <p style='color:#aaa;font-size:12.5px;margin:0 0 10px;line-height:1.5'>
-          Supprime <b>TOUS</b> les events planifies a partir d une date — utile pour repartir de zero sur ce createur.
+          Supprime <b>TOUS</b> les events a partir d une date (utile pour repartir de zero).
         </p>
         <div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>
           <input type='date' id='mpl-clean-from' value='{d_start}' style='flex:0 0 auto;max-width:180px'>
@@ -8080,19 +8114,6 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
         </div>
       </div>
 
-      <div style='display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase'>
-        <span style='flex:1;height:1px;background:#222'></span>
-        <span>OU selection manuelle</span>
-        <span style='flex:1;height:1px;background:#222'></span>
-      </div>
-
-      <div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px'>
-        <button type='button' class='mpl-fetch-btn' style='border-color:#ef4444;color:#ef4444' onclick='fetchEvents()'>↓ Charger events</button>
-        <button type='button' class='mpl-fetch-btn' onclick='toggleSelectAll()'>☑ Tout selectionner</button>
-        <button type='button' class='mpl-fetch-btn' onclick='unselectAll()'>☐ Tout deselectionner</button>
-        <small id='mpl-events-status' style='color:#888;margin-left:8px'>Choisis une periode + clique "Charger events"</small>
-      </div>
-      <div class='mpl-events' id='mpl-events-list'></div>
       <input type='hidden' name='delete_ids' id='mpl-delete-ids' value=''>
     </div>
   </div>
@@ -8202,52 +8223,6 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
 
     {campaigns_html}
-
-    <!-- Planning mensuel par createur -->
-    <div class='mpl-row open' id='mpl-calendar-block' style='margin-bottom:18px'>
-      <div class='mpl-row-head' onclick='mplToggle(this.parentElement); if(this.parentElement.classList.contains("open")) loadCalendar();'>
-        <div class='mpl-row-icon' style='background:rgba(168,85,247,.12);color:#a855f7'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='4' rx='2' ry='2'/><line x1='16' x2='16' y1='2' y2='6'/><line x1='8' x2='8' y1='2' y2='6'/><line x1='3' x2='21' y1='10' y2='10'/></svg></div>
-        <div class='mpl-row-text'>
-          <div class='mpl-row-title' style='font-size:15px'>Emploi du temps <span class='mpl-mini-badge' id='mpl-cal-month-badge' style='background:rgba(168,85,247,.15);color:#a855f7'>...</span></div>
-          <div class='mpl-row-sub'>Calendrier des posts et stories planifies sur MyPuls</div>
-        </div>
-        <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
-      </div>
-      <div class='mpl-row-body'>
-        <!-- Header navigation mois -->
-        <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px'>
-          <div style='display:flex;align-items:center;gap:4px'>
-            <button type='button' onclick='calNav(-1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>‹</button>
-            <button type='button' onclick='calNav(1)' style='width:32px;height:32px;background:#1a1a1a;color:#aaa;border:0;border-radius:8px;cursor:pointer;font-size:16px'>›</button>
-            <h4 id='mpl-cal-month-name' style='margin:0 0 0 10px;font-size:15px;font-weight:600;color:#fff;text-transform:capitalize'>mois</h4>
-          </div>
-          <div style='display:flex;align-items:center;gap:12px;font-size:11px;color:#888'>
-            <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#22c55e;border-radius:3px'></span>Posts</span>
-            <span style='display:flex;align-items:center;gap:5px'><span style='width:10px;height:10px;background:#3b82f6;border-radius:3px'></span>Stories</span>
-            <button type='button' onclick='calToday()' style='padding:5px 11px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer'>Aujourd hui</button>
-          </div>
-        </div>
-
-        <!-- Header jours de la semaine -->
-        <div style='display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px'>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Lun</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mar</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Mer</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Jeu</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Ven</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Sam</div>
-          <div style='font-size:10.5px;color:#666;font-weight:600;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px'>Dim</div>
-        </div>
-
-        <!-- Grille du mois (rempli en JS) -->
-        <div id='mpl-cal-grid' style='display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid #1a1a1a;border-left:1px solid #1a1a1a;border-radius:8px;overflow:hidden;min-height:240px'>
-          <div style='grid-column:1/-1;padding:60px;text-align:center;color:#666;font-size:13px'>Clique pour charger le planning</div>
-        </div>
-
-        <!-- Detail jour selectionne -->
-        <div id='mpl-cal-day-detail' style='display:none;margin-top:14px;padding:14px;background:#0f0f0f;border:1px solid #232323;border-radius:10px'></div>
-      </div>
-    </div>
 
     <div class='mpl-stats'>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
@@ -8406,10 +8381,18 @@ function switchTab(tab){{
   // Bouton push : adapter le texte
   const btn = document.querySelector('.mpl-push-btn');
   if(btn){{
-    if(showDelete) btn.innerHTML = '🗑️ Supprimer la selection';
-    else if(showStories) btn.innerHTML = '⚡ Pousser les stories';
-    else btn.innerHTML = '⚡ Pousser les posts';
+    if(showDelete){{ btn.style.display = 'none'; }}
+    else {{
+      btn.style.display = '';
+      if(showStories) btn.innerHTML = '⚡ Pousser les stories';
+      else btn.innerHTML = '⚡ Pousser les posts';
+    }}
   }}
+  // Cache aussi le bloc dates en mode delete (le calendrier a sa propre nav)
+  const datesBlk = document.getElementById('mpl-dates-block');
+  if(datesBlk) datesBlk.style.display = showDelete?'none':'';
+  // Auto-charge le calendrier en mode delete
+  if(showDelete) setTimeout(()=>loadCalendar(), 100);
 }}
 function updatePostAction(){{
   const a = document.getElementById('mpl-post-action');
@@ -8628,18 +8611,42 @@ function calDayDetail(iso){{
     det.style.display = '';
     return;
   }}
-  let html = '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:10px\"><strong style=\"color:#fff;font-size:14px\">'+iso+'</strong><span style=\"color:#888;font-size:12px\">'+all.length+' event(s)</span></div>';
+  const allIds = all.map(e=>e.id).join(',');
+  let html = '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:10px\"><strong style=\"color:#fff;font-size:14px\">'+iso+'</strong><div style=\"display:flex;align-items:center;gap:10px\"><span style=\"color:#888;font-size:12px\">'+all.length+' event(s)</span><button type=\"button\" onclick=\"deleteAllDay(\\''+iso+'\\',\\''+allIds+'\\')\" style=\"background:#ef4444;border:0;color:#fff;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer\">🗑 Tout supprimer ce jour</button></div></div>';
   html += all.map(e=>{{
     const ep = e.extendedProps||{{}};
     const typ = ep.type || 'feed';
     const time = (e.start||'').substring(11,16);
-    const title = (e.title||'').substring(0,60);
+    const title = (e.title||'').substring(0,55);
     const color = typ==='story'?'#3b82f6':'#22c55e';
     const bg = 'rgba('+(typ==='story'?'59,130,246':'34,197,94')+',.10)';
-    return '<div style=\"display:flex;align-items:center;gap:10px;padding:7px 10px;background:'+bg+';border-radius:6px;margin-bottom:4px;font-size:12.5px\"><span style=\"color:'+color+';font-weight:700;font-family:monospace\">'+time+'</span><span style=\"color:'+color+';font-size:10px;padding:1px 6px;background:'+color+';color:#fff;border-radius:3px\">'+typ.toUpperCase()+'</span><span style=\"flex:1;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">'+title+'</span></div>';
+    return '<div style=\"display:flex;align-items:center;gap:10px;padding:7px 10px;background:'+bg+';border-radius:6px;margin-bottom:4px;font-size:12.5px\">'
+      + '<span style=\"color:'+color+';font-weight:700;font-family:monospace\">'+time+'</span>'
+      + '<span style=\"font-size:10px;padding:1px 6px;background:'+color+';color:#fff;border-radius:3px;font-weight:700\">'+typ.toUpperCase()+'</span>'
+      + '<span style=\"flex:1;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">'+title+'</span>'
+      + '<button type=\"button\" onclick=\"deleteOneEvent('+e.id+')\" title=\"Supprimer cet event\" style=\"background:transparent;border:1px solid #5a2020;color:#ef4444;padding:3px 9px;border-radius:5px;font-size:11px;cursor:pointer\">×</button>'
+      + '</div>';
   }}).join('');
   det.innerHTML = html;
   det.style.display = '';
+}}
+
+async function deleteOneEvent(eventId){{
+  if(!confirm('Supprimer cet event ?')) return;
+  const fd = new FormData();
+  fd.set('delete_ids', String(eventId));
+  const r = await fetch('/mypulslive/delete_events', {{method:'POST', body:fd}});
+  if(r.redirected) window.location.href = r.url; else window.location.reload();
+}}
+
+async function deleteAllDay(iso, ids){{
+  const idArr = ids.split(',').filter(Boolean);
+  if(!idArr.length) return;
+  if(!confirm('Supprimer les '+idArr.length+' events du '+iso+' ?\\n\\nAction IRREVERSIBLE.')) return;
+  const fd = new FormData();
+  fd.set('delete_ids', ids);
+  const r = await fetch('/mypulslive/delete_events', {{method:'POST', body:fd}});
+  if(r.redirected) window.location.href = r.url; else window.location.reload();
 }}
 
 async function quickClean(){{
