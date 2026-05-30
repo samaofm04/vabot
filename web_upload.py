@@ -7920,18 +7920,14 @@ def _render_chatplanning_html() -> str:
             # Delete
             del_btn = f"<td style='text-align:center'><button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px'>×</button></td>"
             body_rows.append(
-                f"<tr>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
+                f"<tr data-rowid='{r['id']}'>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
             )
-        # Bouton "+ ajouter ligne" sous chaque creneau
+        # Bouton "+ ajouter ligne" sous chaque creneau (AJAX, no reload)
         body_rows.append(
-            f"<tr><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
-            f"<form method='POST' action='/chatting/add_row' style='margin:0'>"
-            f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
-            f"<input type='hidden' name='creneau' value='{creneau}'>"
-            f"<input type='hidden' name='week_start' value='{active_week}'>"
-            f"<button type='submit' style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%'>"
+            f"<tr id='addrow-{creneau}'><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
+            f"<button type='button' onclick='addChatRow(\"{creneau}\")' "
+            f"style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%;font-family:inherit'>"
             f"+ ajouter une ligne sur {creneau}</button>"
-            f"</form>"
             f"</td></tr>"
         )
 
@@ -8023,7 +8019,54 @@ async function deleteRow(rid){
   fd.set('edt_id', '""" + active_edt['id'] + """');
   fd.set('row_id', rid);
   await fetch('/chatting/delete_row', {method:'POST', body:fd});
-  location.reload();
+  // Retirer la ligne du DOM (no reload)
+  const tr = document.querySelector('tr[data-rowid=\"'+rid+'\"]');
+  if(tr) tr.remove();
+}
+
+// Liste des options par select
+const PRES_OPTS = ['Present','Absent','Retard','Coupure','OFF'];
+const STA_OPTS = ['Ancien','Nouveau','Support'];
+const OFF_OPTS = ['', 'FULLTIME','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche','PAS DE REPONSE'];
+const MODELE_OPTS = ['','Julia','Amelia','Lola','Sarah','Emma','Amelia+Lola','Lola+Emma','Julia+Sarah','Les 3 (Julia+Amelia+Lola)','Toutes (Julia+Amelia+Lola+Sarah+Emma)'];
+
+function _opt(v, sel){ return '<option value=\"'+v+'\"'+(v===sel?' selected':'')+'>'+(v||'(vide)')+'</option>'; }
+
+async function addChatRow(creneau){
+  const fd = new FormData();
+  fd.set('edt_id', '""" + active_edt['id'] + """');
+  fd.set('creneau', creneau);
+  const r = await fetch('/chatting/add_row', {method:'POST', body:fd});
+  const j = await r.json();
+  if(!j.ok){ alert('Erreur: '+(j.error||'?')); return; }
+  // Build la HTML de la nouvelle ligne
+  const rid = j.row_id;
+  const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
+  const sta = 'Nouveau';
+  const stCol = STA_COL[sta];
+  const statutSel = '<select class=chat-cell data-row='+rid+' data-field=statut onchange=saveCell(this) style=\"width:90px;background:'+stCol[0]+';color:'+stCol[1]+';border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + STA_OPTS.map(o=>_opt(o,sta)).join('') + '</select>';
+  const modeleSel = '<select class=chat-cell data-row='+rid+' data-field=modele onchange=saveCell(this) style=\"width:150px;background:#1a1a1a;color:#fff;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + MODELE_OPTS.map(o=>_opt(o,'')).join('') + '</select>';
+  const offSel = '<select class=chat-cell data-row='+rid+' data-field=off onchange=saveCell(this) style=\"width:110px;background:#1a1a1a;color:#aaa;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + OFF_OPTS.map(o=>_opt(o,'')).join('') + '</select>';
+  const days = ['lun','mar','mer','jeu','ven','sam','dim'];
+  let dayCells = '';
+  days.forEach(dk=>{
+    const opts = PRES_OPTS.map(o=>_opt(o,'Present')).join('');
+    dayCells += '<td style=padding:4px><select class=chat-cell data-row='+rid+' data-field='+dk+' onchange=saveCell(this) style=\"width:85px;background:#86efac;color:#14532d;border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">'+opts+'</select></td>';
+  });
+  const tr = document.createElement('tr');
+  tr.dataset.rowid = rid;
+  tr.innerHTML =
+    '<td style=padding:4px><input type=text class=chat-cell data-row='+rid+' data-field=pseudo value=\"\" placeholder=Pseudo onchange=saveCell(this) style=\"background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;border-radius:6px;font-size:12px;width:120px\"></td>'
+    + '<td style=padding:4px>'+statutSel+'</td>'
+    + '<td style=padding:4px>'+modeleSel+'</td>'
+    + '<td style=padding:4px>'+offSel+'</td>'
+    + dayCells
+    + '<td id=retards-'+rid+' style=\"text-align:center;color:#666;font-weight:700;padding:6px\">0</td>'
+    + '<td id=absences-'+rid+' style=\"text-align:center;color:#666;font-weight:700;padding:6px\">0</td>'
+    + '<td style=text-align:center><button type=button onclick=deleteRow(\"'+rid+'\") style=\"background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px\">×</button></td>';
+  // Insere avant le bouton "+ ajouter ligne"
+  const anchor = document.getElementById('addrow-'+creneau);
+  anchor.parentNode.insertBefore(tr, anchor);
 }
 </script>
 """
@@ -11797,16 +11840,16 @@ def create_app():
     @app.route("/chatting/add_row", methods=["POST"])
     def chatting_add_row():
         if not is_auth():
-            return redirect("/")
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
         import chatting
+        from flask import jsonify
         edt_id = (request.form.get("edt_id") or "").strip()
         cre = (request.form.get("creneau") or "02h-08h").strip()
-        ws = (request.form.get("week_start") or "").strip()
-        chatting.add_row(edt_id, cre)
-        url = f"/?tab=chatplanning&edt_id={edt_id}"
-        if ws:
-            url += f"&week_start={ws}"
-        return redirect(url)
+        row = chatting.add_row(edt_id, cre)
+        if not row:
+            return jsonify({"ok": False, "error": "EDT introuvable"})
+        return jsonify({"ok": True, "row_id": row["id"], "creneau": cre})
 
     @app.route("/chatting/delete_row", methods=["POST"])
     def chatting_delete_row():
