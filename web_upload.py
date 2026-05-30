@@ -870,13 +870,18 @@ window.debugReel = async function(url){
     const r = await fetch('/debug/reel_raw?url=' + encodeURIComponent(url));
     const j = await r.json();
     if(!j.ok){ alert('Erreur: ' + j.error); return; }
-    const txt = '=== REEL DEBUG ===\n' +
-      'URL: ' + url + '\n\n' +
-      'CAPTION present: ' + j.caption_present + '\n' +
-      'CAPTION length: ' + j.caption_length + '\n' +
-      'CAPTION preview: ' + JSON.stringify(j.caption_preview) + '\n\n' +
-      '=== RAW CACHE ===\n' + JSON.stringify(j.raw, null, 2);
-    // Affiche dans une popup
+    const NL = String.fromCharCode(10);
+    const parts = [];
+    parts.push('=== REEL DEBUG ===');
+    parts.push('URL: ' + url);
+    parts.push('');
+    parts.push('CAPTION present: ' + j.caption_present);
+    parts.push('CAPTION length: ' + j.caption_length);
+    parts.push('CAPTION preview: ' + JSON.stringify(j.caption_preview));
+    parts.push('');
+    parts.push('=== RAW CACHE ===');
+    parts.push(JSON.stringify(j.raw, null, 2));
+    const txt = parts.join(NL);
     const w = window.open('', '_blank', 'width=800,height=600');
     w.document.write('<pre style="font-family:monospace;font-size:12px;padding:20px;background:#0f0f0f;color:#fff;white-space:pre-wrap">' +
       txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>');
