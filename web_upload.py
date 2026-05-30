@@ -7707,27 +7707,19 @@ def _render_chatplanning_html() -> str:
     from flask import request as _req
     edts = chatting.list_edts()
 
-    # Si pas d EDT, prompt creation
+    # Si pas d EDT, prompt creation simple
     if not edts:
         return (
-            "<div style='max-width:680px'>"
-            "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
-            "<p style='margin:0 0 18px;color:#888;font-size:13px'>Aucun planning pour l instant. Cree-en un ou importe ton fichier Excel existant.</p>"
-            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px'>"
-            "<form method='POST' action='/chatting/create_edt' class='box'>"
-            "<h3 style='margin:0 0 10px;font-size:14px'>➕ Creer un nouveau planning</h3>"
-            "<label>Nom du planning</label>"
-            "<input type='text' name='name' placeholder='ex: EDT 1 OF' required>"
-            "<button type='submit' style='margin-top:12px;background:#3b82f6;color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer'>+ Creer un EDT</button>"
+            "<div style='max-width:520px;text-align:center;padding:60px 20px'>"
+            "<div style='font-size:48px;margin-bottom:12px'>💬</div>"
+            "<h2 style='margin:0 0 6px;font-size:22px'>Emploi du temps chatteurs</h2>"
+            "<p style='margin:0 0 24px;color:#888;font-size:14px'>Cree ton premier planning pour commencer.<br>Tu rempliras toi-meme les chatteurs et leurs horaires.</p>"
+            "<form method='POST' action='/chatting/create_edt' style='display:flex;gap:10px;align-items:stretch;max-width:380px;margin:0 auto'>"
+            "<input type='text' name='name' placeholder='ex: EDT 1 OF' required "
+            "style='flex:1;padding:12px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-size:14px'>"
+            "<button type='submit' style='background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px;white-space:nowrap'>+ Creer</button>"
             "</form>"
-            "<form method='POST' action='/chatting/import_xlsx' enctype='multipart/form-data' class='box' style='border:2px dashed #3b82f6'>"
-            "<h3 style='margin:0 0 10px;font-size:14px'>📥 Importer depuis Excel</h3>"
-            "<small style='color:#888;font-size:12px'>Format attendu : meme structure que ton xlsx (colonnes Creneau, Pseudo, Statut, Modele/OFF, jours, etc).</small>"
-            "<label style='margin-top:12px'>Fichier .xlsx</label>"
-            "<input type='file' name='xlsx_file' accept='.xlsx' required>"
-            "<button type='submit' style='margin-top:12px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer'>↑ Importer</button>"
-            "</form>"
-            "</div></div>"
+            "</div>"
         )
 
     # Determiner l EDT actif
@@ -11651,91 +11643,6 @@ def create_app():
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
 
-    @app.route("/chatting/import_xlsx", methods=["POST"])
-    def chatting_import_xlsx():
-        if not is_auth():
-            return redirect("/")
-        try:
-            import chatting
-            import openpyxl
-        except Exception as e:
-            return _error(f"❌ openpyxl indispo : {e}", tab="chatplanning")
-        f = request.files.get("xlsx_file")
-        if not f or not f.filename:
-            return _error("❌ Aucun fichier", tab="chatplanning")
-        import io as _io
-        try:
-            wb = openpyxl.load_workbook(_io.BytesIO(f.read()), data_only=True)
-        except Exception as e:
-            return _error(f"❌ Fichier xlsx invalide : {e}", tab="chatplanning")
-
-        CRENEAU_MAP = {"02h - 08h": "02h-08h", "08h - 14h": "08h-14h",
-                       "14h - 20h": "14h-20h", "20h - 02h": "20h-02h"}
-
-        def _normalize_creneau(v):
-            if not v:
-                return None
-            s = str(v).strip().replace("\n", " ").replace("  ", " ")
-            for k, val in CRENEAU_MAP.items():
-                if k.replace(" ", "") == s.replace(" ", ""):
-                    return val
-            return None
-
-        total_rows = 0
-        for sname in wb.sheetnames:
-            ws = wb[sname]
-            rows_data = []
-            current_creneau = None
-            # Auto-detecter si OFF est en col 4 ou 5 (Modele en l autre)
-            # Lire la row 3 (headers)
-            headers = [str(ws.cell(row=3, column=c).value or "").strip().lower()
-                       for c in range(1, 15)]
-            try:
-                off_col = headers.index("off") + 1
-                modele_col = headers.index("modèle") + 1 if "modèle" in headers else (
-                    headers.index("modele") + 1 if "modele" in headers else 4
-                )
-            except ValueError:
-                off_col, modele_col = 5, 4
-            for r in range(4, ws.max_row + 1):
-                cells = [ws.cell(row=r, column=c).value for c in range(1, 15)]
-                cre_val = _normalize_creneau(cells[0])
-                if cre_val:
-                    current_creneau = cre_val
-                pseudo = (str(cells[1]).strip() if cells[1] else "")
-                statut = (str(cells[2]).strip() if cells[2] else "")
-                if pseudo.startswith("Présence") or pseudo.startswith("Statut"):
-                    continue
-                off = (str(cells[off_col - 1]).strip() if cells[off_col - 1] else "")
-                modele = (str(cells[modele_col - 1]).strip() if cells[modele_col - 1] else "")
-                days_keys = chatting.DAYS
-                presence = {}
-                for i, dk in enumerate(days_keys):
-                    v = cells[5 + i]
-                    v = (str(v).strip() if v else "Present")
-                    if v in ("Présent", "present"):
-                        v = "Present"
-                    if v not in chatting.PRESENCE_VALUES:
-                        v = "Present"
-                    presence[dk] = v
-                if not pseudo and not statut:
-                    continue
-                rows_data.append({
-                    "creneau": current_creneau or "02h-08h",
-                    "pseudo": pseudo,
-                    "statut": statut if statut in chatting.STATUTS else "Nouveau",
-                    "modele": modele,
-                    "off": off,
-                    "presence": presence,
-                })
-            if rows_data:
-                chatting.import_from_xlsx_data(sname, rows_data)
-                total_rows += len(rows_data)
-        return _success(
-            f"✅ {len(wb.sheetnames)} planning(s) importe(s), {total_rows} chatteurs au total",
-            tab="chatplanning",
-        )
-
     @app.route("/chatting/create_edt", methods=["POST"])
     def chatting_create_edt():
         if not is_auth():
@@ -11745,6 +11652,9 @@ def create_app():
         if not name:
             return _error("❌ Nom manquant", tab="chatplanning")
         edt = chatting.create_edt(name)
+        # Pre-rempli 1 ligne vide par creneau pour que l user puisse commencer
+        for cre in chatting.CRENEAUX:
+            chatting.add_row(edt["id"], cre)
         return redirect(f"/?tab=chatplanning&edt_id={edt['id']}")
 
     @app.route("/chatting/rename_edt", methods=["POST"])
