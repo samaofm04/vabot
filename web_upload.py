@@ -1262,6 +1262,37 @@ function showTab(group,name,title,subtitle){
   }catch(e){}
 }
 
+// === Send to Veille Telegram ===
+window.sendToVeille = async function(btn, url){
+  if(!url || !btn) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="20" style="animation:plSpin 1s linear infinite;transform-origin:center"/></svg>';
+  try {
+    const fd = new FormData();
+    fd.set('url', url);
+    const r = await fetch('/trends/send_to_veille', {method:'POST', body:fd, credentials:'same-origin'});
+    const j = await r.json();
+    if(j.ok){
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e"><path d="M20 6L9 17l-5-5"/></svg>';
+      btn.style.background = 'rgba(34,197,94,.3)';
+      if(typeof showToast === 'function') showToast('✅ Envoyé à Veille Telegram', 'success');
+      setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.6)'; btn.disabled = false; }, 2000);
+    } else {
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#ef4444" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      btn.style.background = 'rgba(239,68,68,.3)';
+      if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur'), 'error');
+      else alert('Erreur Telegram : ' + (j.error || '?'));
+      setTimeout(()=>{ btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.6)'; btn.disabled = false; }, 3000);
+    }
+  } catch(e){
+    btn.innerHTML = orig;
+    btn.style.background = 'rgba(0,0,0,.6)';
+    btn.disabled = false;
+    if(typeof showToast === 'function') showToast('❌ Erreur réseau', 'error');
+  }
+};
+
 // === GLOBAL : Pre-fill identite + cache la card + badge "Pour @xxx" ===
 window.upPrefillIdentity = function(utab, ident){
   setTimeout(function(){
@@ -1624,6 +1655,10 @@ window.upClearPrefill = function(utab){
     <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
       Cookies Instagram
+    </button>
+    <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+      Veille Telegram
     </button>
   </div>
 </div>
@@ -2090,6 +2125,10 @@ function showFeed(btn,name){
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
+<div class="form-section" id="form-vtg" style="display:none">
+{vtg_html}
+</div>
+
 <div class="form-section" id="form-sinsta" style="display:none">
 
 <!-- RapidAPI - méthode recommandée -->
@@ -5624,6 +5663,9 @@ def _render_insta_trends_grid_html() -> str:
       <a href="{video_url or url}" target="_blank" download title="Télécharger" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </a>
+      <button onclick='sendToVeille(this, "{url}")' title="Envoyer à Veille Telegram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#0088cc;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+      </button>
       <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
@@ -8268,6 +8310,71 @@ function gmsFilter(btn, cat){
         + (key_form if not configured else "")
         + links_section
         + js
+    )
+
+
+def _render_vtg_html() -> str:
+    """Settings : Veille Telegram (bot token + chat ID)."""
+    try:
+        import veille_telegram
+    except Exception as e:
+        return f"<p style='color:#f99'>Module veille_telegram indispo : {e}</p>"
+
+    cfg = veille_telegram.load_config()
+    configured = veille_telegram.is_configured()
+    masked_token = ""
+    if cfg.get("bot_token"):
+        t = cfg["bot_token"]
+        masked_token = t[:10] + "..." + t[-4:] if len(t) > 16 else t[:4] + "..."
+
+    status_html = ""
+    if configured:
+        status_html = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:10px;margin-bottom:18px'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#22c55e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6L9 17l-5-5'/></svg>"
+            f"<div style='flex:1'><div style='font-weight:600;color:#22c55e;font-size:13px'>Bot Telegram configuré</div>"
+            f"<div style='font-size:12px;color:#888;font-family:monospace'>{masked_token} · chat_id: <code>{cfg.get('chat_id', '?')}</code></div></div>"
+            "<form method='POST' action='/settings/veille_telegram/test' style='margin:0'>"
+            "<button type='submit' style='background:#22c55e;border:0;color:#000;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer'>▶ Tester</button></form>"
+            "</div>"
+        )
+    else:
+        status_html = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
+            "<div style='font-weight:600;color:#ef4444;font-size:13px'>Bot Telegram pas encore configuré</div>"
+            "</div>"
+        )
+
+    return (
+        "<div style='max-width:680px'>"
+        "<h2 style='margin:0 0 6px;font-size:20px'>📤 Veille Telegram</h2>"
+        "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+        "Configure ton bot Telegram pour envoyer les reels intéressants au groupe de veille en 1 clic. "
+        "Tu utilises un <b>bot downloader</b> (style @downloaderbot ou ton propre bot) qui se charge ensuite de télécharger la vidéo."
+        "</p>"
+        + status_html +
+        "<form method='POST' action='/settings/veille_telegram' class='box'>"
+        "<h3 style='margin:0 0 10px;font-size:14px'>🔑 Configuration</h3>"
+        "<label>Bot token <span style='color:#f99'>*</span></label>"
+        "<input type='password' name='bot_token' placeholder='123456789:ABCDEF...' "
+        f"value='{cfg.get('bot_token', '')}' required>"
+        "<small style='color:#888'>Crée un bot via <code>@BotFather</code> sur Telegram, il te donne un token.</small>"
+        "<label style='margin-top:14px'>Chat ID du groupe Veille <span style='color:#f99'>*</span></label>"
+        "<input type='text' name='chat_id' placeholder='-100123456789' "
+        f"value='{cfg.get('chat_id', '')}' required>"
+        "<small style='color:#888'>ID du groupe Telegram où poster les liens. Ajoute le bot au groupe puis va sur <code>https://api.telegram.org/bot[TOKEN]/getUpdates</code> pour voir le chat_id.</small>"
+        "<button type='submit' style='margin-top:14px;background:#0088cc;color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px'>💾 Sauvegarder</button>"
+        "</form>"
+        "<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;margin-top:18px;font-size:13px;color:#aaa;line-height:1.7'>"
+        "<h4 style='margin:0 0 8px;color:#fff'>📖 Comment ça marche</h4>"
+        "1. <b>Crée un bot</b> via @BotFather sur Telegram, copie le token<br>"
+        "2. <b>Ajoute ton bot au groupe</b> Veille (et donne-lui les droits d'écrire)<br>"
+        "3. <b>Récupère le chat_id</b> : envoie un message dans le groupe puis va sur <code>https://api.telegram.org/bot[TOKEN]/getUpdates</code><br>"
+        "4. <b>Sauve les 2 valeurs</b> ici → clique <b>Tester</b> pour vérifier<br>"
+        "5. Sur n'importe quel reel des Trends, clique le bouton 📤 → le lien part au bot downloader"
+        "</div>"
+        "</div>"
     )
 
 
@@ -11527,6 +11634,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
+        .replace("{vtg_html}", _render_vtg_html())
         .replace("{mypulslive_html}", _render_mypulslive_html())
         .replace("{chatplanning_html}", _render_chatplanning_html())
         .replace("{bilan_html}", _render_bilan_html())
@@ -12606,6 +12714,52 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/trends/send_to_veille", methods=["POST"])
+    def trends_send_to_veille():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import veille_telegram
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        url = (request.form.get("url") or "").strip()
+        if not url:
+            return jsonify({"ok": False, "error": "URL manquant"})
+        if not veille_telegram.is_configured():
+            return jsonify({"ok": False, "error": "Bot Telegram non configuré (Settings → Veille Telegram)"})
+        res = veille_telegram.send_url(url)
+        return jsonify(res)
+
+    @app.route("/settings/veille_telegram", methods=["POST"])
+    def settings_veille_telegram():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import veille_telegram
+        except Exception as e:
+            return _error(f"❌ Module veille_telegram indispo : {e}", tab="vtg")
+        bot_token = (request.form.get("bot_token") or "").strip()
+        chat_id = (request.form.get("chat_id") or "").strip()
+        if not bot_token or not chat_id:
+            return _error("❌ Bot token + chat ID requis", tab="vtg")
+        veille_telegram.set_credentials(bot_token, chat_id)
+        return _success("✅ Config Veille Telegram sauvegardée", tab="vtg")
+
+    @app.route("/settings/veille_telegram/test", methods=["POST"])
+    def settings_veille_telegram_test():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import veille_telegram
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="vtg")
+        res = veille_telegram.test_connection()
+        if res.get("ok"):
+            return _success("✅ Connexion OK — message test envoyé sur le chat", tab="vtg")
+        return _error(f"❌ {res.get('error', 'Erreur inconnue')}", tab="vtg")
 
     @app.route("/chatting/create_edt", methods=["POST"])
     def chatting_create_edt():
