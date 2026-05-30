@@ -8879,8 +8879,10 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
                 placeholder = "ex: free"
             elif f == "age":
                 placeholder = "ex: 50 ans"
+            elif f == "sub_total":
+                placeholder = "ex: 20K9"
             elif f == "last_30d":
-                placeholder = "ex: 200"
+                placeholder = "ex: 6172"
             else:
                 placeholder = "ex: BCP"
             fields_html += (
@@ -8930,7 +8932,8 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         "niche":      {"icon": "🎯", "label": "Niche",       "placeholder": "ex: CAISSE"},
         "age":        {"icon": "🎂", "label": "Âge",         "placeholder": "ex: 50 ans"},
         "abonnement": {"icon": "💳", "label": "Abonnement",  "placeholder": "ex: free"},
-        "last_30d":   {"icon": "📅", "label": "Last 30 days","placeholder": "ex: 200"},
+        "sub_total":  {"icon": "👥", "label": "SUB Total",   "placeholder": "ex: 20K9"},
+        "last_30d":   {"icon": "📅", "label": "Last 30 Day", "placeholder": "ex: 6172"},
     }
     bulk_inputs_html = ""
     for f in sfs_setup.bulk_fields_for(platform):

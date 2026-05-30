@@ -42,12 +42,13 @@ DEFAULT_EMOJIS = [
 ]
 
 # Champs par plateforme - chaque plateforme a sa propre structure
+# OF : que SUB Total + Last 30 Day (pas d abonnement, pas de niche, pas d age)
 PLATFORM_FIELDS: Dict[str, List[str]] = {
     "mym": ["niche", "age", "abonnement", "abonnes", "anciens", "interesses"],
-    "of":  ["abonnement", "last_30d"],
+    "of":  ["sub_total", "last_30d"],
 }
 # Liste union pour la persistance / compat
-FIELDS = ["niche", "age", "abonnement", "abonnes", "anciens", "interesses", "last_30d"]
+FIELDS = ["niche", "age", "abonnement", "abonnes", "anciens", "interesses", "sub_total", "last_30d"]
 FIELD_LABELS = {
     "niche": "Niche",
     "age": "Âge",
@@ -55,14 +56,15 @@ FIELD_LABELS = {
     "abonnes": "Abonnes",
     "anciens": "Anciens abonnes",
     "interesses": "Interesses",
-    "last_30d": "Last 30 days",
+    "sub_total": "SUB Total",
+    "last_30d": "Last 30 Day",
 }
 PLATFORMS = ("mym", "of")
 DEFAULT_ABONNEMENT = "free"
 # Champs eligibles au bulk-apply (Appliquer a TOUS) par plateforme
 PLATFORM_BULK_FIELDS: Dict[str, tuple] = {
     "mym": ("niche", "age", "abonnement"),
-    "of":  ("abonnement", "last_30d"),
+    "of":  ("sub_total", "last_30d"),
 }
 # Compat (pointe sur mym par defaut)
 BULK_FIELDS = PLATFORM_BULK_FIELDS["mym"]
