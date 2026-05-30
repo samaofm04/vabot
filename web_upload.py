@@ -7781,25 +7781,41 @@ def _render_mypulslive_html() -> str:
             "</div>"
         )
 
-    # Cards de createurs avec avatars + couleur unique
+    # Cards de createurs avec avatars + couleur unique + drag&drop
     def _creator_card(name, cid, active=False):
         hue, color, color_bg, color_border = _color_for(name)
         active_cls = " active" if active else ""
         return (
-            f"<button type='button' class='mpl-cr-card{active_cls}' "
+            f"<div class='mpl-cr-card{active_cls}' draggable='true' "
             f"data-id='{cid}' data-name='{name}' data-color='{color}' data-hue='{hue}' "
             f"style='--cr-color:{color};--cr-bg:{color_bg};--cr-border:{color_border}' "
-            f"onclick='selectCreator({cid}, \"{name}\", \"{color}\", {hue})'>"
+            f"onclick='if(!this.__dragging) selectCreator({cid}, \"{name}\", \"{color}\", {hue})' "
+            f"ondragstart='crDragStart(event)' ondragover='crDragOver(event)' "
+            f"ondragleave='crDragLeave(event)' ondrop='crDrop(event)' ondragend='crDragEnd(event)'>"
+            f"<div class='mpl-cr-grip'><svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='9' cy='5' r='1'/><circle cx='9' cy='12' r='1'/><circle cx='9' cy='19' r='1'/><circle cx='15' cy='5' r='1'/><circle cx='15' cy='12' r='1'/><circle cx='15' cy='19' r='1'/></svg></div>"
             f"<img src='/mypuls/avatar/{cid}' alt='{name}' loading='lazy' onerror=\"this.style.display='none'\">"
             f"<div class='mpl-cr-info'>"
             f"<div class='mpl-cr-name'>{name}</div>"
             f"<div class='mpl-cr-id'>#{cid}</div>"
             f"</div>"
-            f"</button>"
+            f"</div>"
         )
+    # Appliquer l ordre custom de l user si dispo
+    saved_order = mypuls.load_creator_order()
+    name_by_id = {cid: name for name, cid in creators_map.items()}
+    ordered_pairs = []
+    seen = set()
+    for cid in saved_order:
+        if cid in name_by_id and cid not in seen:
+            ordered_pairs.append((name_by_id[cid], cid))
+            seen.add(cid)
+    # Ajoute les nouveaux createurs (pas encore dans l ordre custom) a la fin, alphabetique
+    for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower()):
+        if cid not in seen:
+            ordered_pairs.append((name, cid))
     creators_cards = "".join(
         _creator_card(name, cid, active=(cid == first_creator_id))
-        for name, cid in sorted(creators_map.items(), key=lambda x: x[0].lower())
+        for name, cid in ordered_pairs
     ) or "<div style='color:#666;padding:20px;text-align:center;font-size:13px'>Aucun createur. Verifie tes cookies MyPuls.</div>"
 
     style = """
@@ -7883,6 +7899,13 @@ def _render_mypulslive_html() -> str:
 .mpl-cr-card img{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#222;flex-shrink:0;border:1.5px solid rgba(255,255,255,.06)}
 .mpl-cr-card.active img{border-color:var(--cr-color)}
 .mpl-cr-card.active .mpl-cr-name{color:var(--cr-color)}
+.mpl-cr-grip{color:#444;opacity:0;transition:.15s;cursor:grab;flex-shrink:0;display:flex;align-items:center}
+.mpl-cr-card:hover .mpl-cr-grip{opacity:1;color:#666}
+.mpl-cr-card:active .mpl-cr-grip{cursor:grabbing}
+.mpl-cr-card.dragging{opacity:.4;transform:scale(.95)}
+.mpl-cr-card.drop-target{border-color:var(--cr-color);box-shadow:0 0 0 2px var(--cr-color) inset;transform:translateY(-2px)}
+.mpl-cr-saved-hint{display:inline-block;font-size:10px;color:#22c55e;margin-left:6px;opacity:0;transition:opacity .2s}
+.mpl-cr-saved-hint.show{opacity:1}
 .mpl-cr-info{display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;text-align:left}
 .mpl-cr-name{font-size:14px;font-weight:700;letter-spacing:-.01em}
 .mpl-cr-id{font-size:11px;color:#666;font-family:monospace;margin-top:2px}
@@ -8216,8 +8239,8 @@ body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.lig
     </div>
 
     <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
-      <span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>Createur</span>
-      <span style='color:#666;font-size:11px' id='mpl-cr-count'>{len(creators_map)} createurs</span>
+      <span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>Createur <span style='color:#444;font-size:10px;margin-left:6px'>(drag pour reorganiser)</span></span>
+      <span style='color:#666;font-size:11px'><span id='mpl-cr-count'>{len(creators_map)} createurs</span><span class='mpl-cr-saved-hint' id='mpl-cr-saved'></span></span>
     </div>
     <div class='mpl-cr-bar'>
       {creators_cards}
@@ -8720,6 +8743,63 @@ function toggleOpt(elId, hiddenId){{
 }}
 
 function mplToggle(el){{ el.classList.toggle('open'); }}
+
+// === Drag & drop des cards createurs ===
+let __crDragSrc = null;
+function crDragStart(ev){{
+  __crDragSrc = ev.currentTarget;
+  __crDragSrc.classList.add('dragging');
+  __crDragSrc.__dragging = true;
+  ev.dataTransfer.effectAllowed = 'move';
+  // Astuce safari/chrome : il faut setData
+  try{{ ev.dataTransfer.setData('text/plain', __crDragSrc.dataset.id || ''); }}catch(e){{}}
+}}
+function crDragOver(ev){{
+  if(!__crDragSrc) return;
+  ev.preventDefault();
+  const t = ev.currentTarget;
+  if(t === __crDragSrc) return;
+  // Supprimer drop-target des autres
+  document.querySelectorAll('.mpl-cr-card.drop-target').forEach(c=>{{ if(c!==t) c.classList.remove('drop-target'); }});
+  t.classList.add('drop-target');
+}}
+function crDragLeave(ev){{
+  ev.currentTarget.classList.remove('drop-target');
+}}
+function crDrop(ev){{
+  ev.preventDefault();
+  const target = ev.currentTarget;
+  target.classList.remove('drop-target');
+  if(!__crDragSrc || target === __crDragSrc) return;
+  // Determiner si on insere avant ou apres target
+  const bar = target.parentElement;
+  const cards = Array.from(bar.children).filter(c=>c.classList.contains('mpl-cr-card'));
+  const srcIdx = cards.indexOf(__crDragSrc);
+  const dstIdx = cards.indexOf(target);
+  if(srcIdx < dstIdx) bar.insertBefore(__crDragSrc, target.nextSibling);
+  else bar.insertBefore(__crDragSrc, target);
+  // Sauve le nouvel ordre
+  saveCreatorOrder();
+}}
+function crDragEnd(ev){{
+  if(__crDragSrc){{
+    __crDragSrc.classList.remove('dragging');
+    setTimeout(()=>{{ if(__crDragSrc) __crDragSrc.__dragging = false; __crDragSrc = null; }}, 50);
+  }}
+  document.querySelectorAll('.mpl-cr-card.drop-target').forEach(c=>c.classList.remove('drop-target'));
+}}
+async function saveCreatorOrder(){{
+  const ids = Array.from(document.querySelectorAll('.mpl-cr-card')).map(c=>c.dataset.id);
+  const fd = new FormData();
+  fd.set('order', ids.join(','));
+  const r = await fetch('/mypulslive/reorder_creators', {{method:'POST', body:fd}});
+  const hint = document.getElementById('mpl-cr-saved');
+  if(hint){{
+    hint.textContent = '✓ ordre sauvegarde';
+    hint.classList.add('show');
+    setTimeout(()=>hint.classList.remove('show'), 1500);
+  }}
+}}
 
 function selectCreator(cid, name, color, hue){{
   document.querySelectorAll('.mpl-cr-card').forEach(c=>{{
@@ -10809,6 +10889,26 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"❌ {res.get('error', 'Test échoué')}")
+
+    @app.route("/mypulslive/reorder_creators", methods=["POST"])
+    def mypulslive_reorder_creators():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        raw = (request.form.get("order") or "").strip()
+        if not raw:
+            return jsonify({"ok": False, "error": "order vide"})
+        try:
+            ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
+        except Exception:
+            return jsonify({"ok": False, "error": "ids invalides"})
+        mypuls.save_creator_order(ids)
+        return jsonify({"ok": True, "saved": len(ids)})
 
     @app.route("/mypulslive/campaign/pause", methods=["POST"])
     def mypulslive_campaign_pause():

@@ -594,6 +594,27 @@ def delete_crypto_file(name: str) -> bool:
     return False
 
 
+CREATOR_ORDER_FILE = DATA_DIR / "mypuls_creator_order.json"
+
+
+def load_creator_order() -> List[int]:
+    """Liste des creator IDs dans l ordre choisi par l user. [] si jamais reorder."""
+    if not CREATOR_ORDER_FILE.exists():
+        return []
+    try:
+        data = json.loads(CREATOR_ORDER_FILE.read_text(encoding="utf-8"))
+        return [int(x) for x in data if isinstance(x, (int, str)) and str(x).isdigit()]
+    except Exception:
+        return []
+
+
+def save_creator_order(creator_ids: List[int]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CREATOR_ORDER_FILE.write_text(
+        json.dumps([int(x) for x in creator_ids], indent=2), encoding="utf-8"
+    )
+
+
 def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     """Liste les créateurs gérés avec leur ID MyPuls.
 
