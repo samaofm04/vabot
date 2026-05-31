@@ -8762,12 +8762,15 @@ def _render_onboarding_html() -> str:
             # Media list
             + media_html
             # Upload zone
-            + f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px'>"
-            f"<label style='flex:1;min-width:200px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;background:#0f0f0f;border:1.5px dashed #3b82f6;border-radius:10px;color:#3b82f6;font-size:12px;font-weight:700;transition:background .15s'>"
+            + f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:12px'>"
+            f"<label style='cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;background:#0f0f0f;border:1.5px dashed #3b82f6;border-radius:10px;color:#3b82f6;font-size:12px;font-weight:700;transition:background .15s'>"
             f"<input type='file' multiple onchange=\"obUploadFiles('{sid}', this)\" style='display:none'>"
             f"📎 Ajouter fichier(s)</label>"
+            f"<button onclick=\"obImportMessage('{sid}')\" "
+            f"style='padding:10px 14px;background:#0f0f0f;border:1.5px dashed #5865f2;border-radius:10px;color:#5865f2;font-size:12px;font-weight:700;cursor:pointer'>"
+            f"📥 Importer un message Discord</button>"
             f"<button onclick=\"obAddLink('{sid}')\" "
-            f"style='flex:1;min-width:200px;padding:10px 14px;background:#0f0f0f;border:1.5px dashed #444;border-radius:10px;color:#aaa;font-size:12px;font-weight:700;cursor:pointer'>"
+            f"style='padding:10px 14px;background:#0f0f0f;border:1.5px dashed #444;border-radius:10px;color:#aaa;font-size:12px;font-weight:700;cursor:pointer'>"
             f"🔗 Coller un lien</button>"
             f"</div>"
             f"</div>"
@@ -8817,6 +8820,27 @@ async function obAddLink(sid){
     const j = await r.json();
     if(j.ok){ obRefresh(); }
     else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+  } catch(e){
+    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+  }
+}
+async function obImportMessage(sid){
+  const url = prompt('Colle l URL du message Discord :\\n(clic droit sur le message > Copier le lien du message)\\n\\nExemple : https://discord.com/channels/123/456/789');
+  if(!url) return;
+  if(typeof showToast==='function') showToast('⏳ Telechargement des attachments...', 'info', 3000);
+  const fd = new FormData(); fd.set('step_id', sid); fd.set('url', url);
+  try {
+    const r = await fetch('/onboarding/import_message', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      let msg = `✓ ${j.imported}/${j.total} fichier(s) importe(s)`;
+      if(j.note) msg += ' - ' + j.note;
+      if(typeof showToast==='function') showToast(msg, 'success', 5000);
+      if(j.errors && j.errors.length) console.warn('Erreurs:', j.errors);
+      obRefresh();
+    } else {
+      if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error', 6000);
+    }
   } catch(e){
     if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
   }
@@ -14217,6 +14241,24 @@ def create_app():
             return _render_onboarding_html()
         except Exception as e:
             return f"<div style='color:#f99;padding:14px'>Erreur render onboarding : {type(e).__name__}: {e}</div>", 500
+
+    @app.route("/onboarding/import_message", methods=["POST"])
+    def onboarding_import_message():
+        """Fetch les attachments d un message Discord via l API + ajoute
+        comme medias d une etape."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        url = (request.form.get("url") or "").strip()
+        if not sid or not url:
+            return jsonify({"ok": False, "error": "step_id ou url manquant"})
+        return jsonify(ob.import_from_discord_message_url(sid, url))
 
     @app.route("/onboarding/import_discord", methods=["POST"])
     def onboarding_import_discord():

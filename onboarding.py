@@ -28,10 +28,14 @@ Structure :
 from __future__ import annotations
 
 import json
+import os
+import re
 import uuid
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+import requests
 
 DATA_DIR = Path("data")
 ONBOARDING_FILE = DATA_DIR / "onboarding.json"
@@ -409,6 +413,122 @@ def stats() -> Dict[str, Any]:
         "step_count": len(steps),
         "media_count": total_media,
         "total_size_mb": round(total_size / (1024 * 1024), 1),
+    }
+
+
+def _load_bot_token() -> Optional[str]:
+    """Recupere le DISCORD_TOKEN du .env."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+    tok = os.getenv("DISCORD_TOKEN", "").strip()
+    return tok or None
+
+
+def fetch_discord_message(message_url: str) -> Dict[str, Any]:
+    """Fetch un message Discord via l API (GET /channels/{ch}/messages/{msg}).
+
+    URL accepte : https://discord.com/channels/{guild|@me}/{channel}/{message}
+    Retourne {ok, content, attachments, author, error}.
+    """
+    token = _load_bot_token()
+    if not token:
+        return {"ok": False, "error": "DISCORD_TOKEN absent du .env serveur"}
+    m = re.search(r'/channels/(?:\d+|@me)/(\d+)/(\d+)', message_url or '')
+    if not m:
+        return {"ok": False, "error": "URL Discord invalide (format attendu : .../channels/X/Y/Z)"}
+    channel_id, message_id = m.group(1), m.group(2)
+    try:
+        r = requests.get(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}",
+            headers={"Authorization": f"Bot {token}", "User-Agent": "VA-AUTO Onboarding/1.0"},
+            timeout=15,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur reseau Discord : {e}"}
+    if r.status_code != 200:
+        try:
+            j = r.json()
+            return {"ok": False, "error": f"Discord {r.status_code}: {j.get('message', '?')}"}
+        except Exception:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+    try:
+        msg = r.json()
+    except Exception:
+        return {"ok": False, "error": "Reponse Discord non-JSON"}
+    return {
+        "ok": True,
+        "content": msg.get("content", ""),
+        "attachments": msg.get("attachments", []),
+        "author": (msg.get("author") or {}).get("username", "?"),
+        "channel_id": channel_id,
+        "message_id": message_id,
+    }
+
+
+def import_from_discord_message_url(step_id: str, message_url: str) -> Dict[str, Any]:
+    """Telecharge tous les attachments d un message Discord et les ajoute
+    comme medias de l etape donnee.
+
+    Retourne {ok, imported, total, errors}.
+    """
+    if not get_step(step_id):
+        return {"ok": False, "error": "Etape introuvable"}
+    info = fetch_discord_message(message_url)
+    if not info.get("ok"):
+        return info
+    attachments = info.get("attachments", [])
+    if not attachments:
+        # Si pas d attachment, on essaie d ajouter le lien comme media link
+        # (utile si le user voulait juste reference au message)
+        res = add_media_link(step_id, message_url, name=f"Discord (par @{info.get('author', '?')})")
+        if res.get("ok"):
+            return {"ok": True, "imported": 0, "total": 0, "errors": [],
+                    "note": "Message sans attachment - ajoute comme lien"}
+        return {"ok": False, "error": "Aucun attachment et impossible de stocker comme lien"}
+
+    imported = 0
+    errors: List[str] = []
+    for att in attachments:
+        try:
+            url = att.get("url") or att.get("proxy_url")
+            if not url:
+                errors.append(f"{att.get('filename', '?')}: pas d URL CDN")
+                continue
+            r = requests.get(url, timeout=60, stream=True)
+            if r.status_code != 200:
+                errors.append(f"{att.get('filename', '?')}: HTTP {r.status_code}")
+                continue
+            # Lit en chunks pour respecter MAX_FILE_SIZE
+            chunks = []
+            total = 0
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_FILE_SIZE:
+                    errors.append(f"{att.get('filename', '?')}: > {MAX_FILE_SIZE // (1024*1024)} MB")
+                    chunks = []
+                    break
+            if not chunks:
+                continue
+            content = b"".join(chunks)
+            res = add_media_file(step_id, att.get("filename", "discord_media"), content)
+            if res.get("ok"):
+                imported += 1
+            else:
+                errors.append(f"{att.get('filename', '?')}: {res.get('error', '?')}")
+        except Exception as e:
+            errors.append(f"{att.get('filename', '?')}: {e}")
+
+    return {
+        "ok": True,
+        "imported": imported,
+        "total": len(attachments),
+        "errors": errors,
     }
 
 
