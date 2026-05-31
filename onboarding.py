@@ -46,17 +46,121 @@ PDF_EXT = {"pdf"}
 # Limite par fichier - cohérent avec Telegram bot upload limit
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
-# Etapes par defaut (copie du screenshot user)
+# Etapes par defaut - importees depuis cogs/onboarding.py (le bot Discord)
 DEFAULT_STEPS = [
-    {"icon": "👋", "title": "Bienvenue dans l'agence !", "description": ""},
-    {"icon": "📅", "title": "JOUR 0 — Création du compte Instagram", "description": ""},
-    {"icon": "⏳", "title": "ATTENDRE 24H à 48H", "description": "Laisse passer 24-48h avant la suite"},
-    {"icon": "📅", "title": "JOUR 1 — Premier engagement + photo de profil", "description": ""},
-    {"icon": "📅", "title": "JOUR 2 — Bio + première story + premier post", "description": ""},
-    {"icon": "📅", "title": "JOUR 3 — Story + post + premier reel", "description": ""},
-    {"icon": "📅", "title": "JOUR 4 — Carousels + bulle à la une", "description": ""},
-    {"icon": "📅", "title": "JOUR 5 — Remplissage des stories à la une", "description": ""},
-    {"icon": "📅", "title": "JOUR 6+ — Routine quotidienne (warmup terminé)", "description": ""},
+    {
+        "icon": "👋",
+        "title": "Bienvenue dans l'agence !",
+        "description": (
+            "Voici une vidéo explicative qui va te montrer comment va se dérouler ton job "
+            "en tant que VA dans l'agence.\n\n"
+            "Tout va t'être expliqué étape par étape par le bot.\n\n"
+            "*(La vidéo d'explication sera ajoutée ici par le boss bientôt.)*\n\n"
+            "Quand tu es prêt, clique sur l'étape suivante."
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 0 — Création du compte Instagram",
+        "description": (
+            "Sur ton téléphone, fais cette séquence :\n\n"
+            "1) Rotate l'IP : mode avion 10 sec → enlève → remets la 5G\n"
+            "2) Crée un Gmail qui aura comme base le futur nom Insta\n"
+            "3) Inscris le Gmail sur Instagram\n"
+            "4) Mets le code reçu par mail\n"
+            "5) Crée un mot de passe fort\n"
+            "6) Mets un name (display) → fais /name ici, je t'en donne un\n"
+            "7) Mets un username → fais /username ici, je t'en donne un\n\n"
+            "⚠️ Numéro US requis — demande au boss.\n\n"
+            "Quand le compte est créé → passe à la suite."
+        ),
+    },
+    {
+        "icon": "⏳",
+        "title": "ATTENDRE 24H à 48H",
+        "description": (
+            "NE FAIS RIEN sur le compte pendant 24 à 48h.\n\n"
+            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite, "
+            "shadowban garanti.\n\n"
+            "Reviens cliquer quand 24-48h sont passées."
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 1 — Premier engagement + photo de profil",
+        "description": (
+            "Engagement (10-15 min) :\n"
+            "• Va sur les reels et swipe naturellement comme un humain\n"
+            "• Like seulement des filles au début (algo doit comprendre ton feed)\n"
+            "• Quand tu tombes sur une fille OnlyFans, va sur son profil :\n"
+            "   - Like ses reels\n"
+            "   - Mets un commentaire humain (pas \"trop belle mv\" générique — adapte au contenu)\n"
+            "   - Regarde ses stories\n"
+            "   - Abonne-toi\n\n"
+            "⚠️ Max 3 abonnements + max 5-6 commentaires aujourd'hui.\n\n"
+            "Photo de profil : fais /profilepic ici → upload sur ton compte Insta.\n\n"
+            "Ferme Insta. Passe à la suite quand c'est fait."
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 2 — Bio + première story + premier post",
+        "description": (
+            "• Interagis 10 min (5-6 commentaires + max 3 abonnements)\n"
+            "• Ajoute la bio → fais /bio ici, je t'en donne une\n"
+            "• Poste 1 story simple (photo ou vidéo neutre) → fais /story\n"
+            "• Crée une bulle à la une appelée \"me\" + ajoute ta story dedans\n"
+            "• Poste 1 publication photo sur le feed avec musique → fais /post"
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 3 — Story + post + premier reel",
+        "description": (
+            "• Interagis 10 min (5-6 commentaires + 3 abonnements)\n"
+            "• Poste 1 story simple → fais /story\n"
+            "• Crée une bulle à la une appelée \"life\" + ajoute ta story dedans\n"
+            "• Poste 1 publication photo avec musique → fais /post\n"
+            "• 🎬 PUBLIE TON PREMIER REEL entre 18h et 21h → fais /reel"
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 4 — Carousels + bulle à la une",
+        "description": (
+            "• Interagis 10 min (commentaires + 3 abonnements)\n"
+            "• Poste 1 story simple → fais /story\n"
+            "• Crée une bulle à la une appelée \"travel\" + ajoute ta story\n"
+            "• PIN les 3 carousels (épingle les 3 derniers posts en haut du profil)\n"
+            "• 🎬 Publie 1 reel entre 18h et 21h → fais /reel"
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 5 — Remplissage des stories à la une",
+        "description": (
+            "• Interagis 10 min (commentaires + 3 abonnements)\n"
+            "• Poste 12 stories aujourd'hui → fais /story (refais la commande pour chaque story)\n"
+            "• Répartis-les : 4 stories par bulle à la une (me / life / travel)\n"
+            "• 🎬 Publie 1 reel à 20h heure française → fais /reel"
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 6+ — Routine quotidienne (warmup terminé)",
+        "description": (
+            "Routine quotidienne à appliquer chaque jour :\n\n"
+            "• Interagir 2-3 min/jour (commentaire + 3 abonnements)\n"
+            "• 1 story quotidienne → fais /story\n"
+            "• 🎬 1 reel entre 18h et 21h → fais /reel\n"
+            "• Repost le reel de la veille en story avec texte CTA\n"
+            "• 📲 Story CTA + lien redirection → fais /storycta\n"
+            "• Crée une bulle à la une \"LINKS\" pour stocker les CTAs\n\n"
+            "🎉 Le warmup est terminé ! À partir de maintenant tu enchaînes la routine "
+            "et tu utilises /reel, /post, /story, /storycta quand tu en as besoin.\n\n"
+            "Bon courage 💪"
+        ),
+    },
 ]
 
 
@@ -306,3 +410,106 @@ def stats() -> Dict[str, Any]:
         "media_count": total_media,
         "total_size_mb": round(total_size / (1024 * 1024), 1),
     }
+
+
+def import_from_discord_cog() -> Dict[str, Any]:
+    """Re-importe les textes du cog Discord + scanne data/onboarding_media/.
+
+    - Met a jour les titres + descriptions des etapes existantes a partir
+      de DEFAULT_STEPS (qui est la copie du cog Discord).
+    - Pour chaque step_N dans data/onboarding_media/ : copie les fichiers
+      qui ne sont pas deja dans data/onboarding/<step_id>/ (par nom).
+    - Lit les _links.json et ajoute les liens Discord comme media kind=link
+      (le user pourra cliquer dessus, Discord ne les decode pas mais on
+      sait ce que c est).
+
+    Retourne {ok, steps_updated, files_imported, links_imported, errors}.
+    """
+    out = {
+        "ok": True,
+        "steps_updated": 0,
+        "files_imported": 0,
+        "links_imported": 0,
+        "errors": [],
+    }
+    data = _load()
+    cog_media_root = Path("data/onboarding_media")
+
+    # 1) Refresh les textes des etapes par ordre - on assume meme ordre
+    # que DEFAULT_STEPS
+    steps_sorted = sorted(data["steps"], key=lambda s: s.get("order", 0))
+    for i, step in enumerate(steps_sorted):
+        if i >= len(DEFAULT_STEPS):
+            break
+        ref = DEFAULT_STEPS[i]
+        if step.get("title") != ref["title"] or step.get("description") != ref["description"] or step.get("icon") != ref["icon"]:
+            step["icon"] = ref["icon"]
+            step["title"] = ref["title"]
+            step["description"] = ref["description"]
+            out["steps_updated"] += 1
+
+    # 2) Scan dossiers step_N pour les fichiers media + _links.json
+    if cog_media_root.exists():
+        for i, step in enumerate(steps_sorted):
+            cog_dir = cog_media_root / f"step_{i + 1}"
+            if not cog_dir.exists():
+                continue
+            sid = step["id"]
+            target_dir = MEDIA_ROOT / sid
+            target_dir.mkdir(parents=True, exist_ok=True)
+            # Fichiers media
+            existing_names = {m.get("name", "") for m in step.get("media", [])}
+            for f in sorted(cog_dir.iterdir()):
+                if not f.is_file() or f.name.startswith("_"):
+                    continue
+                if f.name in existing_names:
+                    continue
+                try:
+                    target = target_dir / f.name
+                    if not target.exists():
+                        shutil.copy2(f, target)
+                    size = target.stat().st_size
+                    media = {
+                        "id": uuid.uuid4().hex[:12],
+                        "kind": kind_for_filename(f.name),
+                        "name": f.name,
+                        "path": str(target.as_posix()),
+                        "url": "",
+                        "size": size,
+                    }
+                    step.setdefault("media", []).append(media)
+                    out["files_imported"] += 1
+                except Exception as e:
+                    out["errors"].append(f"step_{i+1}/{f.name}: {e}")
+            # Liens Discord
+            links_file = cog_dir / "_links.json"
+            if links_file.exists():
+                try:
+                    raw = json.loads(links_file.read_text(encoding="utf-8"))
+                    existing_urls = {m.get("url", "") for m in step.get("media", [])}
+                    for entry in raw:
+                        ch = entry.get("channel_id")
+                        msg = entry.get("message_id")
+                        if not ch or not msg:
+                            continue
+                        # Pas de guild_id stocke -> on construit avec @me
+                        url = f"https://discord.com/channels/@me/{ch}/{msg}"
+                        if url in existing_urls:
+                            continue
+                        files = entry.get("filenames", []) or []
+                        name = files[0] if files else f"Discord msg {msg}"
+                        media = {
+                            "id": uuid.uuid4().hex[:12],
+                            "kind": "link",
+                            "name": name,
+                            "path": "",
+                            "url": url,
+                            "size": 0,
+                        }
+                        step.setdefault("media", []).append(media)
+                        out["links_imported"] += 1
+                except Exception as e:
+                    out["errors"].append(f"step_{i+1}/_links.json: {e}")
+
+    _save(data)
+    return out

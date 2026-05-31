@@ -8602,7 +8602,7 @@ def _render_onboarding_html() -> str:
     steps = ob.list_steps()
     s = ob.stats()
 
-    # Header stats
+    # Header stats + bouton import Discord
     header_html = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
@@ -8611,7 +8611,10 @@ def _render_onboarding_html() -> str:
         "<span style='font-size:11px;background:#3b82f6;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>VA</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Plan etape par etape avec medias jouables inline (videos, images, liens).</p>"
         "</div>"
-        f"<div style='display:flex;gap:18px'>"
+        f"<div style='display:flex;gap:18px;align-items:center'>"
+        f"<button onclick='obImportDiscord()' "
+        f"style='background:#5865f2;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px'>"
+        f"🔄 Importer depuis Discord</button>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#fff'>{s['step_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>ETAPES</div></div>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{s['media_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>MEDIAS</div></div>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#3b82f6'>{s['total_size_mb']} MB</div><div style='font-size:10px;color:#888;letter-spacing:1px'>POIDS</div></div>"
@@ -8709,18 +8712,18 @@ def _render_onboarding_html() -> str:
                 "</div>"
             )
 
-        desc_html = desc if desc else "<i style='color:#444'>+ description</i>"
+        desc_html = desc if desc else "<i style='color:#444'>+ description (cliquer pour ajouter)</i>"
         cards_html += (
             f"<div class='ob-step' data-sid='{sid}' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px'>"
             # Header step
-            f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>"
-            f"<div class='ob-step-icon' style='font-size:28px;width:50px;height:50px;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border:1px solid #232323;border-radius:12px;cursor:pointer' "
+            f"<div style='display:flex;align-items:flex-start;gap:12px;margin-bottom:14px'>"
+            f"<div class='ob-step-icon' style='font-size:28px;width:50px;height:50px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border:1px solid #232323;border-radius:12px;cursor:pointer' "
             f"onclick=\"obEditIcon('{sid}', this)\" title='Cliquer pour changer l icone'>{icon}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div class='ob-step-title' style='font-weight:700;color:#fff;font-size:15px;cursor:pointer' "
+            f"<div class='ob-step-title' style='font-weight:700;color:#fff;font-size:16px;cursor:pointer;margin-bottom:6px' "
             f"onclick=\"obEditTitle('{sid}', this)\" title='Cliquer pour renommer'>{title}</div>"
-            f"<div class='ob-step-desc' style='color:#888;font-size:12px;margin-top:3px;cursor:pointer' "
-            f"onclick=\"obEditDesc('{sid}', this)\" title='Cliquer pour ajouter une description'>{desc_html}</div>"
+            f"<div class='ob-step-desc' style='color:#bbb;font-size:13px;line-height:1.55;cursor:pointer;white-space:pre-wrap;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px' "
+            f"onclick=\"obEditDesc('{sid}', this)\" title='Cliquer pour modifier'>{desc_html}</div>"
             f"</div>"
             f"<button onclick=\"obDeleteStep('{sid}')\" "
             f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer l étape'>🗑</button>"
@@ -8858,6 +8861,26 @@ async function obRefresh(){
     const target = document.getElementById('form-onboarding');
     if(target) target.innerHTML = html;
   } catch(e){}
+}
+async function obImportDiscord(){
+  if(!confirm('Importer les textes du bot Discord (cogs/onboarding.py) et les fichiers MP4 stockes dans data/onboarding_media/ ?\\n\\nLes textes des etapes seront mis a jour avec les versions du bot.')) return;
+  try {
+    if(typeof showToast==='function') showToast('⏳ Import en cours...', 'info', 2000);
+    const r = await fetch('/onboarding/import_discord', {method:'POST'});
+    const j = await r.json();
+    if(j.ok){
+      const msg = `✓ Import OK : ${j.steps_updated} etape(s) mise(s) a jour, ${j.files_imported} fichier(s) importe(s), ${j.links_imported} lien(s) Discord`;
+      if(typeof showToast==='function') showToast(msg, 'success', 5000);
+      if(j.errors && j.errors.length){
+        console.warn('Erreurs import :', j.errors);
+      }
+      obRefresh();
+    } else {
+      if(typeof showToast==='function') showToast('❌ Import echoue', 'error');
+    }
+  } catch(e){
+    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+  }
 }
 </script>
 """
@@ -14163,6 +14186,20 @@ def create_app():
             return _render_onboarding_html()
         except Exception as e:
             return f"<div style='color:#f99;padding:14px'>Erreur render onboarding : {type(e).__name__}: {e}</div>", 500
+
+    @app.route("/onboarding/import_discord", methods=["POST"])
+    def onboarding_import_discord():
+        """Re-importe textes + medias depuis le cog Discord (DEFAULT_STEPS +
+        data/onboarding_media/)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        return jsonify(ob.import_from_discord_cog())
 
     @app.route("/onboarding/step/add", methods=["POST"])
     def onboarding_step_add():
