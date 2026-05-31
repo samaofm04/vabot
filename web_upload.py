@@ -13604,6 +13604,20 @@ def create_app():
         ok = veille.remove_reel(rid)
         return jsonify({"ok": ok})
 
+    def _veille_caption(reel: dict) -> str:
+        """Format Telegram : @owner + description + lien IG en bas."""
+        parts = []
+        owner = (reel.get("owner") or "").strip()
+        if owner:
+            parts.append(f"📌 @{owner}")
+        desc = (reel.get("caption") or "").strip()
+        if desc:
+            parts.append(desc)
+        url = (reel.get("url") or "").strip()
+        if url:
+            parts.append(url)
+        return "\n\n".join(parts)
+
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
         if not is_auth():
@@ -13623,7 +13637,14 @@ def create_app():
             return jsonify({"ok": False, "error": "Reel introuvable"})
         if not veille_telegram.is_configured():
             return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
-        res = veille_telegram.send_url(reel.get("url", ""), caption=f"📌 @{reel.get('owner', '?')}")
+        caption = _veille_caption(reel)
+        url = (reel.get("url") or "").strip()
+        # 1) Tente download + sendVideo, fallback sur lien si echec
+        res = veille_telegram.send_video_from_url(
+            reel.get("video_url", ""),
+            caption=caption,
+            fallback_url=url,
+        )
         if res.get("ok"):
             veille.mark_sent(rid)
         return jsonify(res)
@@ -13650,7 +13671,13 @@ def create_app():
         for r in reels:
             if r.get("sent_to_telegram"):
                 continue
-            res = veille_telegram.send_url(r.get("url", ""), caption=f"📌 @{r.get('owner', '?')}")
+            caption = _veille_caption(r)
+            url = (r.get("url") or "").strip()
+            res = veille_telegram.send_video_from_url(
+                r.get("video_url", ""),
+                caption=caption,
+                fallback_url=url,
+            )
             if res.get("ok"):
                 veille.mark_sent(r["id"])
                 sent += 1
