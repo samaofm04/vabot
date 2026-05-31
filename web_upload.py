@@ -8892,29 +8892,69 @@ def _render_vtg_html() -> str:
         "<h2 style='margin:0 0 6px;font-size:20px'>📤 Veille Telegram</h2>"
         "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
         "Configure ton bot Telegram pour envoyer les reels intéressants au groupe de veille en 1 clic. "
-        "Tu utilises un <b>bot downloader</b> (style @downloaderbot ou ton propre bot) qui se charge ensuite de télécharger la vidéo."
+        "Le serveur télécharge la vidéo IG et l'upload directement comme fichier vidéo (comme un bot downloader Discord)."
         "</p>"
         + status_html +
-        "<form method='POST' action='/settings/veille_telegram' class='box'>"
+        "<form method='POST' action='/settings/veille_telegram' class='box' id='vtg-form'>"
         "<h3 style='margin:0 0 10px;font-size:14px'>🔑 Configuration</h3>"
         "<label>Bot token <span style='color:#f99'>*</span></label>"
-        "<input type='password' name='bot_token' placeholder='123456789:ABCDEF...' "
+        "<input type='password' name='bot_token' id='vtg-token' placeholder='123456789:ABCDEF...' "
         f"value='{cfg.get('bot_token', '')}' required>"
         "<small style='color:#888'>Crée un bot via <code>@BotFather</code> sur Telegram, il te donne un token.</small>"
         "<label style='margin-top:14px'>Chat ID du groupe Veille <span style='color:#f99'>*</span></label>"
-        "<input type='text' name='chat_id' placeholder='-100123456789' "
-        f"value='{cfg.get('chat_id', '')}' required>"
-        "<small style='color:#888'>ID du groupe Telegram où poster les liens. Ajoute le bot au groupe puis va sur <code>https://api.telegram.org/bot[TOKEN]/getUpdates</code> pour voir le chat_id.</small>"
+        "<div style='display:flex;gap:8px;align-items:stretch'>"
+        "<input type='text' name='chat_id' id='vtg-chatid' placeholder='-100123456789' "
+        f"value='{cfg.get('chat_id', '')}' required style='flex:1'>"
+        "<button type='button' onclick='vtgDetectChatId()' "
+        "style='background:#3b82f6;color:#fff;border:0;padding:0 16px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap'>"
+        "🔍 Détecter</button>"
+        "</div>"
+        "<small style='color:#888'>Ajoute le bot au groupe → envoie un message → clique <b>🔍 Détecter</b> ci-dessus.</small>"
+        "<div id='vtg-chats-list' style='margin-top:10px'></div>"
         "<button type='submit' style='margin-top:14px;background:#0088cc;color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px'>💾 Sauvegarder</button>"
         "</form>"
         "<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;margin-top:18px;font-size:13px;color:#aaa;line-height:1.7'>"
         "<h4 style='margin:0 0 8px;color:#fff'>📖 Comment ça marche</h4>"
-        "1. <b>Crée un bot</b> via @BotFather sur Telegram, copie le token<br>"
+        "1. <b>Crée un bot</b> via <a href='https://t.me/BotFather' target='_blank' style='color:#3b82f6'>@BotFather</a> sur Telegram, copie le token<br>"
         "2. <b>Ajoute ton bot au groupe</b> Veille (et donne-lui les droits d'écrire)<br>"
-        "3. <b>Récupère le chat_id</b> : envoie un message dans le groupe puis va sur <code>https://api.telegram.org/bot[TOKEN]/getUpdates</code><br>"
-        "4. <b>Sauve les 2 valeurs</b> ici → clique <b>Tester</b> pour vérifier<br>"
-        "5. Sur n'importe quel reel des Trends, clique le bouton 📤 → le lien part au bot downloader"
+        "3. <b>Envoie un message</b> dans le groupe (n'importe quoi : 'test')<br>"
+        "4. <b>Colle le token</b> ci-dessus puis clique <b>🔍 Détecter</b> → la liste des groupes apparaît<br>"
+        "5. <b>Sauvegarde</b> → tu peux maintenant cocher des reels sur Veille et cliquer Envoyer"
         "</div>"
+        "<script>"
+        "async function vtgDetectChatId(){"
+        "  const tokenEl = document.getElementById('vtg-token');"
+        "  const listEl = document.getElementById('vtg-chats-list');"
+        "  const chatEl = document.getElementById('vtg-chatid');"
+        "  const token = (tokenEl.value || '').trim();"
+        "  if(!token){ alert('Colle d abord le bot token au-dessus'); tokenEl.focus(); return; }"
+        "  listEl.innerHTML = '<div style=\"color:#888;font-size:12px;padding:8px\">⏳ Recherche des chats...</div>';"
+        "  const fd = new FormData(); fd.set('bot_token', token);"
+        "  try {"
+        "    const r = await fetch('/settings/veille_telegram/detect_chats', {method:'POST', body:fd});"
+        "    const j = await r.json();"
+        "    if(!j.ok){"
+        "      listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px\">❌ '+(j.error||'Erreur')+'</div>';"
+        "      return;"
+        "    }"
+        "    if(!j.chats || j.chats.length===0){"
+        "      listEl.innerHTML = '<div style=\"color:#f59e0b;font-size:12px;padding:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;line-height:1.5\">⚠ Aucun chat trouvé.<br>1) Vérifie que le bot est dans le groupe<br>2) Envoie un message dans le groupe<br>3) Clique à nouveau Détecter</div>';"
+        "      return;"
+        "    }"
+        "    let html = '<div style=\"font-size:11px;color:#888;margin:6px 0;letter-spacing:.5px;text-transform:uppercase;font-weight:700\">'+j.chats.length+' chat(s) détecté(s) - clique pour sélectionner</div>';"
+        "    for(const c of j.chats){"
+        "      const typeBadge = c.type==='supergroup'||c.type==='group' ? '👥 GROUPE' : (c.type==='channel' ? '📣 CANAL' : '👤 '+c.type.toUpperCase());"
+        "      html += `<div onclick=\"document.getElementById('vtg-chatid').value='${c.id}';this.parentNode.querySelectorAll('.vtg-chat-item').forEach(e=>e.style.borderColor='#2a2a2a');this.style.borderColor='#3b82f6'\" class=\"vtg-chat-item\" style=\"cursor:pointer;padding:10px 12px;background:#0f0f0f;border:1.5px solid #2a2a2a;border-radius:8px;margin-bottom:6px;transition:border-color .15s\">`;"
+        "      html += `<div style=\"display:flex;align-items:center;gap:8px\"><span style=\"font-weight:700;color:#fff;font-size:13px\">${c.title||c.username||'?'}</span><span style=\"font-size:9px;color:#888;background:#1a1a1a;padding:2px 6px;border-radius:4px;letter-spacing:.5px\">${typeBadge}</span></div>`;"
+        "      html += `<div style=\"font-family:monospace;color:#3b82f6;font-size:11px;margin-top:3px\">${c.id}</div>`;"
+        "      html += '</div>';"
+        "    }"
+        "    listEl.innerHTML = html;"
+        "  } catch(e) {"
+        "    listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px\">❌ Erreur réseau : '+e+'</div>';"
+        "  }"
+        "}"
+        "</script>"
         "</div>"
     )
 
@@ -13818,6 +13858,67 @@ def create_app():
         if res.get("ok"):
             return _success("✅ Connexion OK — message test envoyé sur le chat", tab="vtg")
         return _error(f"❌ {res.get('error', 'Erreur inconnue')}", tab="vtg")
+
+    @app.route("/settings/veille_telegram/detect_chats", methods=["POST"])
+    def settings_veille_telegram_detect_chats():
+        """Detecte les chats accessibles au bot via getUpdates.
+
+        Renvoie {ok, chats: [{id, type, title, username}]}.
+        """
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import requests as _req
+        bot_token = (request.form.get("bot_token") or "").strip()
+        if not bot_token:
+            return jsonify({"ok": False, "error": "bot_token manquant"})
+        try:
+            r = _req.get(
+                f"https://api.telegram.org/bot{bot_token}/getUpdates",
+                timeout=15,
+            )
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Erreur réseau Telegram : {e}"})
+        if r.status_code != 200:
+            try:
+                j = r.json()
+                return jsonify({"ok": False, "error": f"HTTP {r.status_code}: {j.get('description', '?')}"})
+            except Exception:
+                return jsonify({"ok": False, "error": f"HTTP {r.status_code}"})
+        try:
+            j = r.json()
+        except Exception:
+            return jsonify({"ok": False, "error": "Réponse Telegram non-JSON"})
+        if not j.get("ok"):
+            return jsonify({"ok": False, "error": j.get("description", "Telegram error")})
+        # Dédup par chat.id, garde le 1er title rencontré
+        seen: dict = {}
+        for upd in j.get("result", []):
+            # Cherche un objet chat dans message / channel_post / edited_message...
+            chat = None
+            for key in ("message", "channel_post", "edited_message", "edited_channel_post",
+                        "my_chat_member", "chat_member"):
+                obj = upd.get(key)
+                if obj and obj.get("chat"):
+                    chat = obj["chat"]
+                    break
+            if not chat:
+                continue
+            cid = chat.get("id")
+            if cid is None or cid in seen:
+                continue
+            seen[cid] = {
+                "id": cid,
+                "type": chat.get("type", "?"),
+                "title": chat.get("title") or "",
+                "username": chat.get("username") or "",
+                "first_name": chat.get("first_name") or "",
+            }
+        chats = list(seen.values())
+        # Groupes/canaux en premier (plus probable pour la veille)
+        chats.sort(key=lambda c: (0 if c["type"] in ("supergroup", "group", "channel") else 1, str(c["title"]).lower()))
+        return jsonify({"ok": True, "chats": chats})
 
     @app.route("/chatting/create_edt", methods=["POST"])
     def chatting_create_edt():
