@@ -13829,17 +13829,20 @@ def create_app():
         return jsonify({"ok": ok})
 
     def _veille_caption(reel: dict) -> str:
-        """Format Telegram : @owner + description + lien IG en bas."""
+        """Format Telegram : lien en premier, puis description (legendes).
+
+        Apparait en dessous de la video dans Telegram :
+          [video]
+          https://instagram.com/reel/XXX
+          <description complete>
+        """
         parts = []
-        owner = (reel.get("owner") or "").strip()
-        if owner:
-            parts.append(f"📌 @{owner}")
-        desc = (reel.get("caption") or "").strip()
-        if desc:
-            parts.append(desc)
         url = (reel.get("url") or "").strip()
         if url:
             parts.append(url)
+        desc = (reel.get("caption") or "").strip()
+        if desc:
+            parts.append(desc)
         return "\n\n".join(parts)
 
     @app.route("/veille/send", methods=["POST"])

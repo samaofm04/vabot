@@ -52,16 +52,24 @@ def set_credentials(bot_token: str, chat_id: str):
 
 
 def send_url(url: str, caption: Optional[str] = None) -> Dict[str, Any]:
-    """Envoie un URL au chat configure. Retourne {ok, result|error}."""
+    """Envoie un URL au chat configure. Retourne {ok, result|error}.
+
+    Note : si le caption contient deja l URL, on ne la duplique pas.
+    """
     cfg = load_config()
     token = cfg.get("bot_token")
     chat_id = cfg.get("chat_id")
     if not token or not chat_id:
         return {"ok": False, "error": "Bot Telegram non configure"}
 
-    text = url
+    # Construit le texte final - evite la duplication de l URL
     if caption:
-        text = f"{caption}\n{url}"
+        if url and url in caption:
+            text = caption  # URL deja dans le caption, pas besoin de l ajouter
+        else:
+            text = f"{caption}\n{url}" if url else caption
+    else:
+        text = url
     try:
         r = requests.post(
             f"{TG_API_BASE}/bot{token}/sendMessage",
@@ -130,6 +138,33 @@ def download_video_bytes(video_url: str, timeout: int = 60) -> Optional[bytes]:
         return None
 
 
+def _refresh_video_url(post_url: str) -> Optional[str]:
+    """Re-scrape le video_url depuis le permalink IG (le stocke peut etre
+    expire - les CDN IG signent les URLs avec une TTL de quelques heures).
+
+    Utilise instaloader si dispo, retourne None sinon.
+    """
+    import re as _re
+    if not post_url:
+        return None
+    m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url)
+    if not m:
+        return None
+    shortcode = m.group(1)
+    try:
+        import insta_scraper
+        loader = insta_scraper._make_loader()
+        if loader is None:
+            return None
+        import instaloader
+        post = instaloader.Post.from_shortcode(loader.context, shortcode)
+        if post.is_video:
+            return post.video_url
+    except Exception:
+        pass
+    return None
+
+
 def send_video_from_url(video_url: str, caption: str = "",
                         fallback_url: str = "") -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
@@ -164,8 +199,19 @@ def send_video_from_url(video_url: str, caption: str = "",
 
     # 1) Telecharge la video depuis l URL IG
     video_bytes = download_video_bytes(video_url)
+    last_err = ""
     if not video_bytes:
-        return _fallback("Telechargement video impossible (URL morte ou >50MB)")
+        last_err = "URL video manquante / expiree / >50MB"
+        # Retry : re-scrape un video_url frais depuis le permalink IG
+        fresh = _refresh_video_url(fallback_url)
+        if fresh and fresh != video_url:
+            video_bytes = download_video_bytes(fresh)
+            if video_bytes:
+                last_err = ""
+            else:
+                last_err = "URL refresh OK mais download IG echoue"
+    if not video_bytes:
+        return _fallback(f"Telechargement impossible : {last_err}")
 
     # 2) Upload via sendVideo (multipart, fichier en memoire)
     try:
