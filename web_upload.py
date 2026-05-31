@@ -730,10 +730,32 @@ function setTheme(theme){
     }
   }catch(e){}
 })();
+// === Wrapper fetch global : intercepte les 401 (session expirée) ===
+(function(){
+  var origFetch = window.fetch;
+  var unauthHandled = false;
+  window.fetch = function(){
+    var args = arguments;
+    var p = origFetch.apply(this, args);
+    return p.then(function(r){
+      if(r && r.status === 401 && !unauthHandled){
+        unauthHandled = true;
+        if(typeof showToast === 'function'){
+          showToast('🔒 Session expirée — reconnexion...', 'error', 2500);
+        }
+        setTimeout(function(){ window.location.href = '/'; }, 1800);
+      }
+      return r;
+    });
+  };
+})();
 // === SYSTÈME DE TOASTS ===
 function showToast(message, type, duration){
   type = type || 'info';
   duration = duration || 4500;
+  // Skip les messages d auth (geres par le wrapper fetch global qui redirige)
+  var msgLower = (message || '').toString().toLowerCase();
+  if(msgLower.indexOf('unauth') !== -1) return;
   var container = document.getElementById('toast-container');
   if(!container){
     container = document.createElement('div');
