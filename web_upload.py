@@ -1583,6 +1583,10 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
+    <button class="item" id="tab-textpool" onclick="showTab('cloud','textpool','Bibliothèque texte','Pool de Names, Usernames, Bios, CTAs')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Bibliothèque texte
+    </button>
     <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','Pool partagé des PPs')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       Photos profil
@@ -2319,6 +2323,11 @@ document.addEventListener('keydown', function(e){
 <!-- ONBOARDING -->
 <div class="form-section" id="form-onboarding" style="display:none">
 {onboarding_html}
+</div>
+
+<!-- TEXT POOL (Bibliotheque texte) -->
+<div class="form-section" id="form-textpool" style="display:none">
+{textpool_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -8623,6 +8632,187 @@ function gmsFilter(btn, cat){
     )
 
 
+def _render_textpool_html() -> str:
+    """Bibliotheque de textes : Names / Usernames / Bios / CTAs en 4 colonnes."""
+    try:
+        import text_pool as tp
+    except Exception as e:
+        return f"<p style='color:#f99'>Module text_pool indispo : {e}</p>"
+
+    s = tp.stats()
+
+    # Header global avec KPI
+    total_all = sum(v["total"] for v in s.values())
+    avail_all = sum(v["available"] for v in s.values())
+    used_all = sum(v["used"] for v in s.values())
+    header_html = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<div>"
+        "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>📚 Bibliothèque texte</h2>"
+        "<p style='margin:0;color:#888;font-size:13px'>Pools de Names, Usernames, Bios, CTAs - prets a piocher pour les VAs.</p>"
+        "</div>"
+        f"<div style='display:flex;gap:18px'>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#fff'>{total_all}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>TOTAL</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{avail_all}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>DISPO</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#888'>{used_all}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>UTILISES</div></div>"
+        "</div></div>"
+    )
+
+    columns_html = ""
+    for cat in tp.CATEGORIES:
+        meta = tp.CATEGORY_META[cat]
+        cstats = s[cat]
+        items = tp.list_entries(cat)
+
+        # Items list
+        items_html = ""
+        for e in items:
+            eid = e["id"]
+            text = (e.get("text") or "").replace("<", "&lt;").replace(">", "&gt;")
+            used_by = e.get("used_by")
+            used_badge = ""
+            opacity = "1"
+            if used_by:
+                opacity = "0.55"
+                used_badge = (
+                    f"<span style='font-size:9px;background:#1a1a1a;color:#888;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:.5px;margin-right:6px'>@{used_by}</span>"
+                )
+            items_html += (
+                f"<div data-id='{eid}' data-cat='{cat}' style='display:flex;align-items:center;gap:6px;background:#0a0a0a;border:1px solid #1f1f1f;border-radius:8px;padding:9px 11px;margin-bottom:6px;opacity:{opacity}'>"
+                f"<div style='flex:1;min-width:0;color:#ddd;font-size:13px;word-break:break-word'>{used_badge}{text}</div>"
+                f"<button onclick=\"tpCopy(this, {json.dumps(e.get('text', ''))})\" "
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Copier'>📋</button>"
+                f"<button onclick=\"tpToggleUsed('{cat}', '{eid}', this)\" "
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Marquer utilise / dispo'>{'↺' if used_by else '✓'}</button>"
+                f"<button onclick=\"tpDelete('{cat}', '{eid}', this)\" "
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Supprimer'>🗑</button>"
+                f"</div>"
+            )
+        if not items_html:
+            items_html = "<div style='color:#666;font-size:12px;padding:14px;text-align:center;border:1px dashed #2a2a2a;border-radius:8px'>aucune entree - ajoute en ci-dessous</div>"
+
+        # Extract dict values to avoid backslash-in-fstring-expression issues
+        meta_color = meta["color"]
+        meta_icon = meta["icon"]
+        meta_label = meta["label"]
+        meta_desc = meta["desc"]
+        meta_placeholder = meta["placeholder"]
+        meta_max_len = meta["max_len"]
+        # Column card
+        columns_html += (
+            f"<div class='tp-col' data-cat='{cat}' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;display:flex;flex-direction:column'>"
+            # Header avec icon + label + stats
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:{meta_color}22;color:{meta_color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800'>{meta_icon}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:800;color:#fff;font-size:15px'>{meta_label}</div>"
+            f"<div style='font-size:11px;color:#888'>{cstats['available']} dispo / {cstats['total']} total</div>"
+            f"</div></div>"
+            f"<div style='font-size:11px;color:#666;margin-bottom:10px;line-height:1.4'>{meta_desc}</div>"
+            # Quick add
+            f"<div style='display:flex;gap:6px;margin-bottom:8px'>"
+            f"<input type='text' id='tp-input-{cat}' placeholder='{meta_placeholder}' maxlength='{meta_max_len}' "
+            f'onkeydown=\'if(event.key==="Enter"){{tpAdd("{cat}")}}\' '
+            f"style='flex:1;padding:8px 10px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:13px;font-family:inherit'>"
+            f'<button onclick=\'tpAdd("{cat}")\' '
+            f"style='background:{meta_color};color:#fff;border:0;padding:8px 14px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer'>+</button>"
+            f"</div>"
+            f'<button onclick=\'tpBulk("{cat}")\' '
+            f"style='background:transparent;border:1px dashed #444;color:#888;padding:6px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;margin-bottom:10px'>"
+            f"📋 Bulk paste (1 par ligne)</button>"
+            # Items
+            f"<div class='tp-items' data-cat='{cat}' style='flex:1;overflow-y:auto;max-height:480px'>{items_html}</div>"
+            f"</div>"
+        )
+
+    grid_html = (
+        "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px'>"
+        + columns_html + "</div>"
+    )
+
+    js = """
+<script>
+async function tpAdd(cat){
+  const inp = document.getElementById('tp-input-'+cat);
+  const text = (inp.value || '').trim();
+  if(!text){ inp.focus(); return; }
+  const fd = new FormData(); fd.set('category', cat); fd.set('text', text);
+  try {
+    const r = await fetch('/textpool/add', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      inp.value = '';
+      tpRefresh();
+    } else if(j.error === 'already_exists') {
+      if(typeof showToast==='function') showToast('⚠ Deja dans la liste', 'warning', 2000);
+      inp.value = '';
+    } else {
+      if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+    }
+  } catch(e){
+    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+  }
+}
+async function tpBulk(cat){
+  const raw = prompt('Colle plusieurs entrees (1 par ligne) :');
+  if(!raw) return;
+  const fd = new FormData(); fd.set('category', cat); fd.set('text', raw);
+  try {
+    const r = await fetch('/textpool/bulk_add', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      const msg = `✓ ${j.added} ajoute(s)` + (j.duplicates ? ` · ${j.duplicates} doublon(s)` : '');
+      if(typeof showToast==='function') showToast(msg, 'success', 3000);
+      tpRefresh();
+    }
+  } catch(e){}
+}
+async function tpDelete(cat, eid, btn){
+  const row = btn.closest('[data-id]');
+  if(row){ row.style.transition='all .2s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; }
+  const fd = new FormData(); fd.set('category', cat); fd.set('entry_id', eid);
+  try {
+    await fetch('/textpool/delete', {method:'POST', body:fd});
+    setTimeout(tpRefresh, 250);
+  } catch(e){}
+}
+async function tpToggleUsed(cat, eid, btn){
+  const row = btn.closest('[data-id]');
+  const isUsed = row && row.style.opacity !== '1';
+  let identity = '';
+  if(!isUsed){
+    identity = prompt('Marquer comme utilise par quelle identite ?', '') || '';
+    if(!identity.trim()) return;
+  }
+  const fd = new FormData(); fd.set('category', cat); fd.set('entry_id', eid); fd.set('identity', identity);
+  try {
+    await fetch('/textpool/mark_used', {method:'POST', body:fd});
+    tpRefresh();
+  } catch(e){}
+}
+function tpCopy(btn, text){
+  navigator.clipboard.writeText(text || '').then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '✓';
+    btn.style.color = '#22c55e';
+    setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 1200);
+  });
+}
+async function tpRefresh(){
+  try {
+    const r = await fetch('/textpool/render');
+    if(!r.ok) return;
+    const html = await r.text();
+    const target = document.getElementById('form-textpool');
+    if(target) target.innerHTML = html;
+  } catch(e){}
+}
+</script>
+"""
+
+    return header_html + grid_html + js
+
+
 def _render_onboarding_html() -> str:
     """Plan d onboarding par etapes (JOUR 0, JOUR 1...) avec medias inline."""
     try:
@@ -13052,6 +13242,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{paievas_html}", _render_paievas_html())
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{onboarding_html}", _render_onboarding_html())
+        .replace("{textpool_html}", _render_textpool_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
@@ -14239,6 +14430,73 @@ def create_app():
                     "caption_preview": (r.get("caption") or "")[:100],
                 })
         return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
+
+    # ============ TEXT POOL (Bibliotheque) ============
+    @app.route("/textpool/render", methods=["GET"])
+    def textpool_render():
+        if not is_auth():
+            return "", 401
+        try:
+            return _render_textpool_html()
+        except Exception as e:
+            return f"<div style='color:#f99'>Erreur : {e}</div>", 500
+
+    @app.route("/textpool/add", methods=["POST"])
+    def textpool_add():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        cat = (request.form.get("category") or "").strip()
+        text = (request.form.get("text") or "").strip()
+        return jsonify(tp.add_entry(cat, text))
+
+    @app.route("/textpool/bulk_add", methods=["POST"])
+    def textpool_bulk_add():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        cat = (request.form.get("category") or "").strip()
+        text = request.form.get("text") or ""
+        return jsonify(tp.add_bulk(cat, text))
+
+    @app.route("/textpool/delete", methods=["POST"])
+    def textpool_delete():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        cat = (request.form.get("category") or "").strip()
+        eid = (request.form.get("entry_id") or "").strip()
+        return jsonify({"ok": tp.delete_entry(cat, eid)})
+
+    @app.route("/textpool/mark_used", methods=["POST"])
+    def textpool_mark_used():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        cat = (request.form.get("category") or "").strip()
+        eid = (request.form.get("entry_id") or "").strip()
+        ident = (request.form.get("identity") or "").strip()
+        return jsonify({"ok": tp.mark_used(cat, eid, ident)})
 
     # ============ ONBOARDING ============
     @app.route("/onboarding/render", methods=["GET"])
