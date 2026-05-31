@@ -8715,6 +8715,14 @@ def _render_onboarding_html() -> str:
                         f"style='display:flex;align-items:center;gap:10px;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;color:#3b82f6;text-decoration:none;word-break:break-all'>"
                         f"🔗 {url}</a>"
                     )
+            elif kind == "note":
+                # Texte d un embed Discord ou note rich
+                note_text = (m.get("text", "") or "").replace("<", "&lt;").replace(">", "&gt;")
+                preview = (
+                    f"<div style='white-space:pre-wrap;color:#ddd;font-size:13px;line-height:1.6;"
+                    f"background:#0f0f0f;border-left:3px solid #5865f2;border-radius:6px;padding:12px 16px'>"
+                    f"{note_text}</div>"
+                )
             else:  # autre fichier
                 preview = (
                     f"<a href='{media_url}' download='{name}' "

@@ -431,7 +431,7 @@ def fetch_discord_message(message_url: str) -> Dict[str, Any]:
     """Fetch un message Discord via l API (GET /channels/{ch}/messages/{msg}).
 
     URL accepte : https://discord.com/channels/{guild|@me}/{channel}/{message}
-    Retourne {ok, content, attachments, author, error}.
+    Retourne {ok, content, attachments, embeds, author, error}.
     """
     token = _load_bot_token()
     if not token:
@@ -462,32 +462,57 @@ def fetch_discord_message(message_url: str) -> Dict[str, Any]:
         "ok": True,
         "content": msg.get("content", ""),
         "attachments": msg.get("attachments", []),
+        "embeds": msg.get("embeds", []),
         "author": (msg.get("author") or {}).get("username", "?"),
         "channel_id": channel_id,
         "message_id": message_id,
     }
 
 
-def import_from_discord_message_url(step_id: str, message_url: str) -> Dict[str, Any]:
-    """Telecharge tous les attachments d un message Discord et les ajoute
-    comme medias de l etape donnee.
+def _build_text_from_embeds(embeds: list, fallback_content: str = "") -> str:
+    """Concatene title + description des embeds Discord en un seul texte propre."""
+    parts: List[str] = []
+    for emb in embeds or []:
+        t = (emb.get("title") or "").strip()
+        d = (emb.get("description") or "").strip()
+        if t:
+            parts.append(t)
+        if d:
+            parts.append(d)
+        # Fields = sous-sections
+        for f in emb.get("fields") or []:
+            fn = (f.get("name") or "").strip()
+            fv = (f.get("value") or "").strip()
+            if fn or fv:
+                parts.append(f"{fn}\n{fv}" if fn and fv else (fn or fv))
+    if fallback_content and fallback_content.strip():
+        parts.insert(0, fallback_content.strip())
+    return "\n\n".join(parts).strip()
 
-    Retourne {ok, imported, total, errors}.
+
+def import_from_discord_message_url(step_id: str, message_url: str,
+                                    use_text_as_description: bool = True) -> Dict[str, Any]:
+    """Importe un message Discord (attachments + embeds) dans une etape.
+
+    Comportement :
+    - Telecharge TOUS les attachments (fichiers) comme medias locaux
+    - Extrait le TEXTE des embeds (title + description + fields)
+    - Si l etape n a pas encore de description (ou si use_text_as_description=True),
+      met le texte de l embed dans step.description
+    - Sinon, ajoute le texte comme media kind=note
+
+    Retourne {ok, imported, total, text_imported, errors}.
     """
     if not get_step(step_id):
         return {"ok": False, "error": "Etape introuvable"}
     info = fetch_discord_message(message_url)
     if not info.get("ok"):
         return info
-    attachments = info.get("attachments", [])
-    if not attachments:
-        # Si pas d attachment, on essaie d ajouter le lien comme media link
-        # (utile si le user voulait juste reference au message)
-        res = add_media_link(step_id, message_url, name=f"Discord (par @{info.get('author', '?')})")
-        if res.get("ok"):
-            return {"ok": True, "imported": 0, "total": 0, "errors": [],
-                    "note": "Message sans attachment - ajoute comme lien"}
-        return {"ok": False, "error": "Aucun attachment et impossible de stocker comme lien"}
+
+    attachments = info.get("attachments") or []
+    embeds = info.get("embeds") or []
+    content = (info.get("content") or "").strip()
+    embed_text = _build_text_from_embeds(embeds, fallback_content=content)
 
     imported = 0
     errors: List[str] = []
@@ -501,7 +526,6 @@ def import_from_discord_message_url(step_id: str, message_url: str) -> Dict[str,
             if r.status_code != 200:
                 errors.append(f"{att.get('filename', '?')}: HTTP {r.status_code}")
                 continue
-            # Lit en chunks pour respecter MAX_FILE_SIZE
             chunks = []
             total = 0
             for chunk in r.iter_content(chunk_size=64 * 1024):
@@ -515,8 +539,8 @@ def import_from_discord_message_url(step_id: str, message_url: str) -> Dict[str,
                     break
             if not chunks:
                 continue
-            content = b"".join(chunks)
-            res = add_media_file(step_id, att.get("filename", "discord_media"), content)
+            bytes_ = b"".join(chunks)
+            res = add_media_file(step_id, att.get("filename", "discord_media"), bytes_)
             if res.get("ok"):
                 imported += 1
             else:
@@ -524,10 +548,45 @@ def import_from_discord_message_url(step_id: str, message_url: str) -> Dict[str,
         except Exception as e:
             errors.append(f"{att.get('filename', '?')}: {e}")
 
+    text_imported = False
+    if embed_text:
+        step = get_step(step_id)
+        existing_desc = (step.get("description") or "").strip()
+        if use_text_as_description and (not existing_desc or len(embed_text) > len(existing_desc) + 50):
+            # On utilise le texte de l embed comme description de l etape
+            update_step(step_id, description=embed_text)
+            text_imported = True
+        else:
+            # On garde la description et on ajoute le texte comme note media
+            data = _load()
+            note_media = {
+                "id": uuid.uuid4().hex[:12],
+                "kind": "note",
+                "name": f"Note Discord (par @{info.get('author', '?')})",
+                "path": "",
+                "url": "",
+                "text": embed_text[:4000],
+                "size": 0,
+            }
+            for s in data["steps"]:
+                if s.get("id") == step_id:
+                    s.setdefault("media", []).append(note_media)
+                    text_imported = True
+                    break
+            _save(data)
+
+    if imported == 0 and not text_imported:
+        # Vraiment rien d utile -> fallback link
+        res = add_media_link(step_id, message_url, name=f"Discord (par @{info.get('author', '?')})")
+        if res.get("ok"):
+            return {"ok": True, "imported": 0, "total": 0, "text_imported": False, "errors": errors,
+                    "note": "Aucun attachment ni texte - ajoute comme simple lien"}
+
     return {
         "ok": True,
         "imported": imported,
         "total": len(attachments),
+        "text_imported": text_imported,
         "errors": errors,
     }
 
