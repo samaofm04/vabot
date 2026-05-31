@@ -1366,6 +1366,27 @@ function showTab(group,name,title,subtitle){
 }
 
 // === Add to Veille (bookmark) ===
+// Helper : refresh la section Veille AJAX (sans reloader la page entiere)
+window.refreshVeilleSection = async function(){
+  try {
+    const r = await fetch('/veille/render', {credentials:'same-origin'});
+    if(!r.ok) return;
+    const html = await r.text();
+    const target = document.getElementById('feed-veille');
+    if(target) target.innerHTML = html;
+  } catch(e){}
+};
+// Update le badge "Veille (N)" sur la sub-tab
+window.updateVeilleBadge = function(total){
+  const badge = document.getElementById('veille-count-badge');
+  if(!badge) return;
+  if(total > 0){
+    badge.textContent = total;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+};
 window.addToVeille = async function(btn, payload){
   if(!payload || !payload.url) return;
   const orig = btn.innerHTML;
@@ -1383,8 +1404,10 @@ window.addToVeille = async function(btn, payload){
       btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e" stroke="#22c55e" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
       btn.style.background = 'rgba(34,197,94,.3)';
       if(typeof showToast === 'function') showToast('🔖 Ajouté à la Veille', 'success');
-      // Reste filled
       btn.disabled = false;
+      // Refresh la section Veille en background + update badge
+      if(typeof j.veille_total === 'number') window.updateVeilleBadge(j.veille_total);
+      window.refreshVeilleSection();
     } else if(j.error === 'already_exists'){
       btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#3b82f6" stroke="#3b82f6" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
       btn.style.background = 'rgba(59,130,246,.3)';
@@ -13863,7 +13886,24 @@ def create_app():
         except Exception:
             payload = {}
         res = veille.add_reel(payload)
+        # Compteur total pour mettre a jour le badge en live cote frontend
+        try:
+            res["veille_total"] = len(veille.list_reels())
+        except Exception:
+            pass
         return jsonify(res)
+
+    @app.route("/veille/render", methods=["GET"])
+    def veille_render():
+        """Renvoie le HTML brut de la section Veille (pour refresh AJAX
+        sans reloader toute la page apres un bookmark)."""
+        if not is_auth():
+            return "", 401
+        try:
+            html = _render_veille_feed_html()
+            return html
+        except Exception as e:
+            return f"<div style='color:#f99;padding:14px'>Erreur render veille : {type(e).__name__}: {e}</div>", 500
 
     @app.route("/veille/remove", methods=["POST"])
     def veille_remove():
