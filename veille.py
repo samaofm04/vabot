@@ -124,6 +124,21 @@ def mark_sent(reel_id: str) -> bool:
     return False
 
 
+def update_reel(reel_id: str, **fields) -> bool:
+    """Met a jour des champs d un reel stocke (caption, video_url, thumb...)."""
+    if not fields:
+        return False
+    data = _load()
+    for r in data["reels"]:
+        if r.get("id") == reel_id:
+            for k, v in fields.items():
+                if v:
+                    r[k] = v
+            _save(data)
+            return True
+    return False
+
+
 def get_reel(reel_id: str) -> Dict[str, Any]:
     for r in list_reels():
         if r.get("id") == reel_id:

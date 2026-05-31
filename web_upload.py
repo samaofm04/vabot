@@ -13895,8 +13895,23 @@ def create_app():
             return jsonify({"ok": False, "error": "Reel introuvable"})
         if not veille_telegram.is_configured():
             return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
-        caption = _veille_caption(reel)
         url = (reel.get("url") or "").strip()
+        # Si la description ou le video_url manquent, re-scrape via instaloader
+        # (les caption sont souvent vides depuis le scraping initial des trends)
+        needs_refresh = not (reel.get("caption") or "").strip() or not (reel.get("video_url") or "").strip()
+        if needs_refresh and url:
+            fresh = veille_telegram.refresh_post_data(url)
+            updated_fields = {}
+            if fresh.get("caption") and not (reel.get("caption") or "").strip():
+                reel["caption"] = fresh["caption"]
+                updated_fields["caption"] = fresh["caption"]
+            if fresh.get("video_url"):
+                # On override toujours (l ancien peut etre expire)
+                reel["video_url"] = fresh["video_url"]
+                # Mais on persiste pas le video_url - il expirera de toute facon
+            if updated_fields:
+                veille.update_reel(rid, **updated_fields)
+        caption = _veille_caption(reel)
         # 1) Tente download + sendVideo, fallback sur lien si echec
         res = veille_telegram.send_video_from_url(
             reel.get("video_url", ""),
@@ -13929,8 +13944,16 @@ def create_app():
         for r in reels:
             if r.get("sent_to_telegram"):
                 continue
-            caption = _veille_caption(r)
             url = (r.get("url") or "").strip()
+            # Refresh caption/video_url si manquants
+            if url and (not (r.get("caption") or "").strip() or not (r.get("video_url") or "").strip()):
+                fresh = veille_telegram.refresh_post_data(url)
+                if fresh.get("caption") and not (r.get("caption") or "").strip():
+                    r["caption"] = fresh["caption"]
+                    veille.update_reel(r["id"], caption=fresh["caption"])
+                if fresh.get("video_url"):
+                    r["video_url"] = fresh["video_url"]
+            caption = _veille_caption(r)
             res = veille_telegram.send_video_from_url(
                 r.get("video_url", ""),
                 caption=caption,

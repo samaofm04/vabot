@@ -139,35 +139,97 @@ def download_video_bytes(video_url: str, timeout: int = 25) -> Optional[bytes]:
 
 
 def _refresh_video_url(post_url: str) -> Optional[str]:
-    """Re-scrape le video_url depuis le permalink IG (le stocke peut etre
-    expire - les CDN IG signent les URLs avec une TTL de quelques heures).
+    """Compat : wrapper qui retourne juste le video_url frais."""
+    data = refresh_post_data(post_url)
+    return data.get("video_url") or None
 
-    Utilise instaloader si configure et dispo. Retourne None sinon
-    rapidement (pas de hang).
-    """
-    import re as _re
+
+def _scrape_og_caption(post_url: str) -> str:
+    """Fallback no-auth : recupere le og:description meta tag de la page IG
+    publique. Ne marche pas toujours (IG cache certains posts derriere un
+    wall) mais utile quand instaloader n est pas configure."""
     if not post_url:
-        return None
-    m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url)
-    if not m:
-        return None
-    shortcode = m.group(1)
+        return ""
     try:
-        import insta_scraper
-        # Si pas d auth IG configuree, ne pas tenter (evite un hang)
-        if hasattr(insta_scraper, "is_auth_configured"):
-            if not insta_scraper.is_auth_configured():
-                return None
-        loader = insta_scraper._make_loader()
-        if loader is None:
-            return None
-        import instaloader
-        post = instaloader.Post.from_shortcode(loader.context, shortcode)
-        if post.is_video:
-            return post.video_url
+        import re as _re
+        from html import unescape
+        r = requests.get(
+            post_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (compatible; Telegrambot/1.0; "
+                    "+http://telegram.org)"
+                ),
+                "Accept": "text/html",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=15,
+            allow_redirects=True,
+        )
+        if r.status_code != 200:
+            return ""
+        # og:description ou meta description
+        for pat in (
+            r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\']',
+        ):
+            m = _re.search(pat, r.text)
+            if m:
+                desc = unescape(m.group(1)).strip()
+                # IG met souvent un prefixe "X likes, Y comments - @user on..."
+                # On extrait juste le texte de la legende qui est apres le ':'
+                # Format typique : '127 likes, 8 comments - "Caption ici"'
+                # ou '@user on Instagram: "Caption ici"'
+                quote_m = _re.search(r'[:""]\s*["“]([^"”]+)["”]', desc)
+                if quote_m:
+                    return quote_m.group(1).strip()[:1000]
+                # Fallback : on prend tout apres le dernier ':' si y en a un
+                if ':' in desc:
+                    return desc.rsplit(':', 1)[1].strip().strip('"').strip()[:1000]
+                return desc[:1000]
     except Exception:
         pass
-    return None
+    return ""
+
+
+def refresh_post_data(post_url: str) -> Dict[str, str]:
+    """Re-scrape video_url ET caption depuis le permalink IG.
+
+    Strategie multi-source :
+    - instaloader (si configure) : video_url + caption en une passe
+    - fallback no-auth : og:description meta tag pour le caption seulement
+
+    Retourne {video_url, caption}. Tous les champs vides si tout echoue.
+    """
+    import re as _re
+    out: Dict[str, str] = {"video_url": "", "caption": ""}
+    if not post_url:
+        return out
+    m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url)
+    if not m:
+        return out
+    shortcode = m.group(1)
+    # 1) instaloader (le plus complet si auth dispo)
+    try:
+        import insta_scraper
+        auth_ok = True
+        if hasattr(insta_scraper, "is_auth_configured"):
+            auth_ok = bool(insta_scraper.is_auth_configured())
+        if auth_ok:
+            loader = insta_scraper._make_loader()
+            if loader is not None:
+                import instaloader
+                post = instaloader.Post.from_shortcode(loader.context, shortcode)
+                if post.is_video:
+                    out["video_url"] = post.video_url or ""
+                out["caption"] = (post.caption or "")[:1000]
+    except Exception:
+        pass
+    # 2) Fallback no-auth pour le caption uniquement
+    if not out["caption"]:
+        out["caption"] = _scrape_og_caption(post_url)
+    return out
 
 
 def send_video_from_url(video_url: str, caption: str = "",
