@@ -8649,28 +8649,48 @@ def _render_veille_feed_html() -> str:
                 ribbon = ("<div style='position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:3px 8px;border-radius:6px;z-index:3;letter-spacing:.3px'>✓ ENVOYÉ</div>")
 
-            # Checkbox de selection (top-left)
+            # Checkbox de selection (top-left) - toujours visible si non envoye
+            # peu importe que Telegram soit configure (le bouton Envoyer gere ca)
             cb_html = ""
-            if not sent and tg_configured:
+            if not sent:
                 cb_html = (
-                    f"<div style='position:absolute;top:8px;left:8px;z-index:3' onclick='event.stopPropagation()'>"
+                    f"<div style='position:absolute;top:8px;left:8px;z-index:5' onclick='event.stopPropagation()'>"
                     f"<label style='display:block;cursor:pointer'>"
                     f"<input type='checkbox' class='veille-cb' data-rid='{r['id']}' data-day='{day}' onchange='veilleOnSelect()' "
                     f"style='width:22px;height:22px;cursor:pointer;accent-color:#3b82f6;background:#fff'>"
                     f"</label></div>"
                 )
 
+            video_url_safe = (r.get("video_url") or "").replace('"', '&quot;')
+            thumb_safe = (r.get("thumb") or "").replace('"', '&quot;')
+            # Bouton play (lecteur inline) - swap thumb <-> video au click
+            play_btn_html = ""
+            if video_url_safe:
+                play_btn_html = (
+                    f"<div class='veille-play-btn' onclick=\"event.stopPropagation();veillePlayToggle(this)\" "
+                    f"data-video=\"{video_url_safe}\" data-thumb=\"{thumb_safe}\" "
+                    f"style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+                    f"width:50px;height:50px;border-radius:50%;background:rgba(0,0,0,.65);"
+                    f"display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4;"
+                    f"backdrop-filter:blur(4px);border:1.5px solid rgba(255,255,255,.4)'>"
+                    f"<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M8 5v14l11-7z'/></svg>"
+                    f"</div>"
+                )
+
             section_html += (
                 f"<div class='veille-card' data-rid='{r['id']}' data-day='{day}' data-sent='{1 if sent else 0}' style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
-                f"<div style='position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer' onclick=\"window.open('{r['url']}','_blank')\">"
+                f"<div class='veille-media' style='position:relative;width:100%;aspect-ratio:9/16;background:#000;overflow:hidden'>"
                 f"{cb_html}"
                 f"{ribbon}"
-                f"<img src='{r.get('thumb', '')}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
-                f"<div style='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:10px;color:#fff;font-size:11px'>"
+                f"<img class='veille-thumb' src='{r.get('thumb', '')}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
+                f"{play_btn_html}"
+                f"<div class='veille-overlay' style='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);padding:10px;color:#fff;font-size:11px;z-index:3'>"
                 f"<div style='font-weight:700'>@{r.get('owner', '?')}</div>"
                 f"<div style='display:flex;gap:8px;color:#ddd;margin-top:3px;font-size:11px'>▶ {_format_count(r.get('views', 0))} · ♥ {_format_count(r.get('likes', 0))}</div>"
                 f"</div></div>"
-                f"<div style='padding:8px 10px;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid #1a1a1a;background:#0a0a0a'>"
+                f"<div style='padding:8px 10px;display:flex;gap:6px;justify-content:space-between;border-top:1px solid #1a1a1a;background:#0a0a0a'>"
+                f"<a href='{r['url']}' target='_blank' rel='noopener' "
+                f"style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;text-decoration:none' title='Ouvrir sur Instagram'>↗ IG</a>"
                 f"<button onclick=\"removeVeilleReel('{r['id']}', this)\" "
                 f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px' title='Retirer de la veille'>🗑 Retirer</button>"
                 f"</div>"
@@ -8713,23 +8733,69 @@ async function sendSelectedVeille(){
   const cbs = document.querySelectorAll('.veille-cb:checked');
   const ids = Array.from(cbs).map(c => c.dataset.rid);
   if(!ids.length){ alert('Aucun reel sélectionné'); return; }
-  if(!confirm('Envoyer ' + ids.length + ' reel(s) sur Telegram ?')) return;
+  if(!confirm('Envoyer ' + ids.length + ' reel(s) sur Telegram ?\\n(Vidéo téléchargée + description + lien)')) return;
   const btn = document.getElementById('veille-send-selected-btn');
   const orig = btn.innerHTML;
   btn.disabled = true;
   let done = 0, errs = 0;
+  let firstErr = '';
   for(const rid of ids){
     btn.innerHTML = '⏳ Envoi ' + (done+errs+1) + '/' + ids.length + '...';
     const fd = new FormData(); fd.set('reel_id', rid);
     try {
       const r = await fetch('/veille/send', {method:'POST', body:fd});
       const j = await r.json();
-      if(j.ok) done++; else errs++;
-    } catch(e){ errs++; }
+      if(j.ok) done++; else { errs++; if(!firstErr) firstErr = j.error || '?'; }
+    } catch(e){ errs++; if(!firstErr) firstErr = String(e); }
   }
   btn.innerHTML = '✓ ' + done + ' envoyé(s)' + (errs ? ' · ' + errs + ' erreur(s)' : '');
   btn.style.background = errs ? '#f59e0b' : '#22c55e';
+  if(errs && firstErr){
+    alert('Première erreur : ' + firstErr + '\\n\\n(Vérifie ta config Telegram dans Settings → Veille Telegram)');
+  }
   setTimeout(() => location.reload(), 1500);
+}
+// Lecteur inline : swap thumb <-> video au click sur le bouton play
+function veillePlayToggle(btn){
+  const media = btn.closest('.veille-media');
+  if(!media) return;
+  let video = media.querySelector('video.veille-video');
+  const thumb = media.querySelector('.veille-thumb');
+  if(video){
+    // Toggle play/pause
+    if(video.paused){
+      video.play();
+      btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M6 4h4v16H6zm8 0h4v16h-4z'/></svg>";
+    } else {
+      video.pause();
+      btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M8 5v14l11-7z'/></svg>";
+    }
+    return;
+  }
+  // Crée le <video> et le démarre
+  const vsrc = btn.dataset.video;
+  if(!vsrc) return;
+  video = document.createElement('video');
+  video.className = 'veille-video';
+  video.src = vsrc;
+  video.loop = true;
+  video.playsInline = true;
+  video.muted = false;
+  video.controls = false;
+  video.style.cssText = 'width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;z-index:1';
+  if(thumb) thumb.style.display = 'none';
+  media.insertBefore(video, btn);
+  video.play().catch(e => {
+    // Autoplay sans son peut nécessiter muted
+    video.muted = true;
+    video.play();
+  });
+  btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M6 4h4v16H6zm8 0h4v16h-4z'/></svg>";
+  // Click sur la vidéo elle-même = toggle play/pause aussi
+  video.addEventListener('click', function(e){
+    e.stopPropagation();
+    veillePlayToggle(btn);
+  });
 }
 async function removeVeilleReel(rid, btn){
   if(!confirm('Retirer ce reel de la veille ?')) return;
