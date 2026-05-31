@@ -110,12 +110,12 @@ _IG_HEADERS = {
 }
 
 
-def download_video_bytes(video_url: str, timeout: int = 60) -> Optional[bytes]:
+def download_video_bytes(video_url: str, timeout: int = 25) -> Optional[bytes]:
     """Telecharge une video depuis un CDN Instagram.
 
-    Retourne les bytes (ou None si erreur / >50 MB).
-    Telegram limite les uploads de bot a 50 MB - les reels typiques (10-30s)
-    sont generalement < 10 MB.
+    Retourne les bytes (ou None si erreur / >50 MB / timeout).
+    - timeout = 25s (un reel 10-30s pese 2-15 MB, doit downloader en ~5s)
+    - 50 MB max (limite Telegram bot upload)
     """
     if not video_url:
         return None
@@ -142,7 +142,8 @@ def _refresh_video_url(post_url: str) -> Optional[str]:
     """Re-scrape le video_url depuis le permalink IG (le stocke peut etre
     expire - les CDN IG signent les URLs avec une TTL de quelques heures).
 
-    Utilise instaloader si dispo, retourne None sinon.
+    Utilise instaloader si configure et dispo. Retourne None sinon
+    rapidement (pas de hang).
     """
     import re as _re
     if not post_url:
@@ -153,6 +154,10 @@ def _refresh_video_url(post_url: str) -> Optional[str]:
     shortcode = m.group(1)
     try:
         import insta_scraper
+        # Si pas d auth IG configuree, ne pas tenter (evite un hang)
+        if hasattr(insta_scraper, "is_auth_configured"):
+            if not insta_scraper.is_auth_configured():
+                return None
         loader = insta_scraper._make_loader()
         if loader is None:
             return None
@@ -223,7 +228,7 @@ def send_video_from_url(video_url: str, caption: str = "",
                 "supports_streaming": "true",
             },
             files={"video": ("reel.mp4", video_bytes, "video/mp4")},
-            timeout=120,
+            timeout=60,  # 60s suffit pour un upload de <50MB
         )
     except Exception as e:
         return _fallback(f"Erreur reseau Telegram : {e}")

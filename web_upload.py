@@ -8773,27 +8773,58 @@ async function sendSelectedVeille(){
   const cbs = document.querySelectorAll('.veille-cb:checked');
   const ids = Array.from(cbs).map(c => c.dataset.rid);
   if(!ids.length){ alert('Aucun reel sélectionné'); return; }
-  if(!confirm('Envoyer ' + ids.length + ' reel(s) sur Telegram ?\\n(Vidéo téléchargée + description + lien)')) return;
   const btn = document.getElementById('veille-send-selected-btn');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  let done = 0, errs = 0;
+  let done = 0, errs = 0, videos = 0, links = 0;
   let firstErr = '';
-  for(const rid of ids){
-    btn.innerHTML = '⏳ Envoi ' + (done+errs+1) + '/' + ids.length + '...';
+  for(let i = 0; i < ids.length; i++){
+    const rid = ids[i];
+    btn.innerHTML = '⏳ Téléchargement & envoi ' + (i+1) + '/' + ids.length + '...';
     const fd = new FormData(); fd.set('reel_id', rid);
     try {
       const r = await fetch('/veille/send', {method:'POST', body:fd});
       const j = await r.json();
-      if(j.ok) done++; else { errs++; if(!firstErr) firstErr = j.error || '?'; }
+      if(j.ok){
+        done++;
+        if(j.mode === 'video') videos++;
+        else if(j.mode === 'link') links++;
+        // Marque la card comme envoyee visuellement
+        const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
+        if(card){
+          card.classList.remove('is-picked');
+          const cb = card.querySelector('.veille-cb');
+          if(cb) cb.checked = false;
+          // Ajoute le ruban vert
+          const media = card.querySelector('.veille-media');
+          if(media && !media.querySelector('.veille-sent-ribbon')){
+            const r2 = document.createElement('div');
+            r2.className = 'veille-sent-ribbon';
+            r2.style.cssText = 'position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6;letter-spacing:.3px';
+            r2.textContent = '✓ ENVOYÉ';
+            media.appendChild(r2);
+          }
+        }
+      } else { errs++; if(!firstErr) firstErr = j.error || '?'; }
     } catch(e){ errs++; if(!firstErr) firstErr = String(e); }
   }
-  btn.innerHTML = '✓ ' + done + ' envoyé(s)' + (errs ? ' · ' + errs + ' erreur(s)' : '');
+  // Compteur final
+  let summary = '✓ ' + done + ' envoyé(s)';
+  if(videos > 0 && links > 0) summary += ' (' + videos + ' vidéo, ' + links + ' lien)';
+  else if(videos > 0) summary += ' (vidéo)';
+  else if(links > 0) summary += ' (lien)';
+  if(errs) summary += ' · ' + errs + ' erreur(s)';
+  btn.innerHTML = summary;
   btn.style.background = errs ? '#f59e0b' : '#22c55e';
   if(errs && firstErr){
     alert('Première erreur : ' + firstErr + '\\n\\n(Vérifie ta config Telegram dans Settings → Veille Telegram)');
   }
-  setTimeout(() => location.reload(), 1500);
+  // Reset les selecteurs apres 2s
+  setTimeout(() => {
+    btn.innerHTML = orig;
+    btn.style.background = '#0088cc';
+    veilleOnSelect();  // recalcule l etat des bouton/compteurs
+  }, 2500);
 }
 // Lecteur inline : swap thumb <-> video au click sur le bouton play
 function veillePlayToggle(btn){
