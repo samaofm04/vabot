@@ -1607,6 +1607,10 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
       Stats par identité
     </button>
+    <button class="item" id="tab-onboarding" onclick="showTab('va','onboarding','Onboarding','Plan etape par etape (JOUR 0, JOUR 1...) avec medias')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      Onboarding
+    </button>
   </div>
 </div>
 
@@ -2279,6 +2283,11 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">📊 Statistiques par identité</h3>
 {identity_stats_html}
 </div>
+</div>
+
+<!-- ONBOARDING -->
+<div class="form-section" id="form-onboarding" style="display:none">
+{onboarding_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -8583,6 +8592,279 @@ function gmsFilter(btn, cat){
     )
 
 
+def _render_onboarding_html() -> str:
+    """Plan d onboarding par etapes (JOUR 0, JOUR 1...) avec medias inline."""
+    try:
+        import onboarding as ob
+    except Exception as e:
+        return f"<p style='color:#f99'>Module onboarding indispo : {e}</p>"
+
+    steps = ob.list_steps()
+    s = ob.stats()
+
+    # Header stats
+    header_html = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<div>"
+        "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
+        "🎓 Onboarding"
+        "<span style='font-size:11px;background:#3b82f6;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>VA</span></h2>"
+        "<p style='margin:0;color:#888;font-size:13px'>Plan etape par etape avec medias jouables inline (videos, images, liens).</p>"
+        "</div>"
+        f"<div style='display:flex;gap:18px'>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#fff'>{s['step_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>ETAPES</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{s['media_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>MEDIAS</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#3b82f6'>{s['total_size_mb']} MB</div><div style='font-size:10px;color:#888;letter-spacing:1px'>POIDS</div></div>"
+        "</div>"
+        "</div>"
+    )
+
+    # Steps cards
+    cards_html = ""
+    for step in steps:
+        sid = step["id"]
+        icon = step.get("icon", "📅")
+        title = step.get("title", "?").replace("<", "&lt;").replace(">", "&gt;")
+        desc = step.get("description", "").replace("<", "&lt;").replace(">", "&gt;")
+        media_list = step.get("media", [])
+
+        # Media tiles
+        media_html = ""
+        for m in media_list:
+            mid = m.get("id", "")
+            kind = m.get("kind", "file")
+            name = (m.get("name") or "?").replace("<", "&lt;").replace(">", "&gt;")
+            size_mb = (m.get("size", 0) or 0) / (1024 * 1024)
+            size_label = f"{size_mb:.1f} MB" if size_mb >= 0.05 else f"{int(m.get('size', 0) / 1024)} KB"
+            ok_badge = "✅" if size_mb <= 10 else ("❌" if size_mb > 10 else "")
+            if kind == "link":
+                ok_badge = "🔗"
+                size_label = "lien"
+            media_url = f"/onboarding/media/{sid}/{mid}" if kind != "link" else (m.get("url", ""))
+
+            # Player inline selon le type
+            preview = ""
+            if kind == "video":
+                preview = (
+                    f"<video controls preload='metadata' style='width:100%;max-height:360px;background:#000;border-radius:8px'>"
+                    f"<source src='{media_url}'></video>"
+                )
+            elif kind == "image":
+                preview = (
+                    f"<img src='{media_url}' style='width:100%;max-height:360px;object-fit:contain;background:#000;border-radius:8px;cursor:zoom-in' "
+                    f"onclick='window.open(this.src,\"_blank\")'>"
+                )
+            elif kind == "audio":
+                preview = f"<audio controls src='{media_url}' style='width:100%'></audio>"
+            elif kind == "pdf":
+                preview = (
+                    f"<iframe src='{media_url}' style='width:100%;height:480px;border:0;border-radius:8px;background:#0a0a0a'></iframe>"
+                )
+            elif kind == "link":
+                # On essaie d embed si c est YouTube / Vimeo
+                url = m.get("url", "")
+                lower = url.lower()
+                yt_id = ""
+                import re as _re
+                m_yt = _re.search(r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/))([A-Za-z0-9_-]{6,})", url)
+                if m_yt:
+                    yt_id = m_yt.group(1)
+                if yt_id:
+                    preview = (
+                        f"<iframe src='https://www.youtube.com/embed/{yt_id}' "
+                        f"style='width:100%;aspect-ratio:16/9;border:0;border-radius:8px;background:#000' "
+                        f"allowfullscreen></iframe>"
+                    )
+                else:
+                    preview = (
+                        f"<a href='{url}' target='_blank' rel='noopener' "
+                        f"style='display:flex;align-items:center;gap:10px;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;color:#3b82f6;text-decoration:none;word-break:break-all'>"
+                        f"🔗 {url}</a>"
+                    )
+            else:  # autre fichier
+                preview = (
+                    f"<a href='{media_url}' download='{name}' "
+                    f"style='display:inline-flex;align-items:center;gap:10px;padding:12px 18px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;color:#fff;text-decoration:none'>"
+                    f"📎 Télécharger</a>"
+                )
+
+            media_html += (
+                f"<div class='ob-media' data-step='{sid}' data-mid='{mid}' "
+                f"style='background:#0a0a0a;border:1px solid #232323;border-radius:12px;padding:14px;margin-bottom:12px'>"
+                f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px'>"
+                f"<span style='font-size:14px'>{ok_badge}</span>"
+                f"<div style='font-weight:700;color:#fff;font-size:13px;flex:1;word-break:break-word'>{name}</div>"
+                f"<span style='font-size:10px;color:#666;background:#1a1a1a;padding:3px 8px;border-radius:5px;letter-spacing:.5px;font-family:monospace'>{size_label}</span>"
+                f"<button onclick=\"obDeleteMedia('{sid}','{mid}',this)\" "
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer ce media'>🗑</button>"
+                f"</div>"
+                f"{preview}"
+                f"</div>"
+            )
+
+        if not media_html:
+            media_html = (
+                "<div style='color:#666;font-size:12px;padding:14px;background:#0a0a0a;border:1px dashed #2a2a2a;border-radius:10px;text-align:center'>"
+                "aucun media — ajoute des fichiers ou un lien ci-dessous"
+                "</div>"
+            )
+
+        desc_html = desc if desc else "<i style='color:#444'>+ description</i>"
+        cards_html += (
+            f"<div class='ob-step' data-sid='{sid}' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px'>"
+            # Header step
+            f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:14px'>"
+            f"<div class='ob-step-icon' style='font-size:28px;width:50px;height:50px;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border:1px solid #232323;border-radius:12px;cursor:pointer' "
+            f"onclick=\"obEditIcon('{sid}', this)\" title='Cliquer pour changer l icone'>{icon}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div class='ob-step-title' style='font-weight:700;color:#fff;font-size:15px;cursor:pointer' "
+            f"onclick=\"obEditTitle('{sid}', this)\" title='Cliquer pour renommer'>{title}</div>"
+            f"<div class='ob-step-desc' style='color:#888;font-size:12px;margin-top:3px;cursor:pointer' "
+            f"onclick=\"obEditDesc('{sid}', this)\" title='Cliquer pour ajouter une description'>{desc_html}</div>"
+            f"</div>"
+            f"<button onclick=\"obDeleteStep('{sid}')\" "
+            f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer l étape'>🗑</button>"
+            f"</div>"
+            # Media list
+            + media_html
+            # Upload zone
+            + f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px'>"
+            f"<label style='flex:1;min-width:200px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;background:#0f0f0f;border:1.5px dashed #3b82f6;border-radius:10px;color:#3b82f6;font-size:12px;font-weight:700;transition:background .15s'>"
+            f"<input type='file' multiple onchange=\"obUploadFiles('{sid}', this)\" style='display:none'>"
+            f"📎 Ajouter fichier(s)</label>"
+            f"<button onclick=\"obAddLink('{sid}')\" "
+            f"style='flex:1;min-width:200px;padding:10px 14px;background:#0f0f0f;border:1.5px dashed #444;border-radius:10px;color:#aaa;font-size:12px;font-weight:700;cursor:pointer'>"
+            f"🔗 Coller un lien</button>"
+            f"</div>"
+            f"</div>"
+        )
+
+    # Bouton "Ajouter une etape"
+    add_step_html = (
+        "<button onclick='obAddStep()' "
+        "style='width:100%;padding:14px;background:transparent;border:2px dashed #3b82f6;border-radius:12px;color:#3b82f6;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;transition:background .15s'>"
+        "➕ Ajouter une étape</button>"
+    )
+
+    # JS pour interactions
+    js = """
+<script>
+async function obUploadFiles(sid, input){
+  if(!input.files || !input.files.length) return;
+  for(const f of input.files){
+    if(f.size > 50*1024*1024){
+      if(typeof showToast==='function') showToast('❌ '+f.name+' > 50 MB', 'error');
+      continue;
+    }
+    const fd = new FormData();
+    fd.set('step_id', sid);
+    fd.set('file', f, f.name);
+    try {
+      if(typeof showToast==='function') showToast('⏳ Upload '+f.name+'...', 'info', 1500);
+      const r = await fetch('/onboarding/media/upload', {method:'POST', body:fd});
+      const j = await r.json();
+      if(!j.ok){
+        if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+      }
+    } catch(e){
+      if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    }
+  }
+  obRefresh();
+}
+async function obAddLink(sid){
+  const url = prompt('URL du lien (YouTube, vimeo, ou autre) :');
+  if(!url) return;
+  const name = prompt('Nom du lien (optionnel) :', '') || '';
+  const fd = new FormData();
+  fd.set('step_id', sid); fd.set('url', url); fd.set('name', name);
+  try {
+    const r = await fetch('/onboarding/media/link', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){ obRefresh(); }
+    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+  } catch(e){
+    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+  }
+}
+async function obDeleteMedia(sid, mid, btn){
+  if(!confirm('Supprimer ce media ?')) return;
+  const fd = new FormData();
+  fd.set('step_id', sid); fd.set('media_id', mid);
+  try {
+    const r = await fetch('/onboarding/media/delete', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      const el = btn.closest('.ob-media');
+      if(el){ el.style.transition='all .2s'; el.style.opacity='0'; el.style.transform='scale(.95)'; setTimeout(obRefresh, 250); }
+    }
+  } catch(e){}
+}
+async function obAddStep(){
+  const title = prompt('Titre de la nouvelle etape :', 'JOUR X — ...');
+  if(!title) return;
+  const icon = prompt('Icone (emoji) :', '📅') || '📅';
+  const fd = new FormData();
+  fd.set('title', title); fd.set('icon', icon);
+  try {
+    const r = await fetch('/onboarding/step/add', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok) obRefresh();
+    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+  } catch(e){}
+}
+async function obDeleteStep(sid){
+  if(!confirm('Supprimer cette etape ET tous ses medias ? Irreversible.')) return;
+  const fd = new FormData(); fd.set('step_id', sid);
+  try {
+    const r = await fetch('/onboarding/step/delete', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok) obRefresh();
+  } catch(e){}
+}
+async function obEditTitle(sid, el){
+  const cur = el.textContent.trim();
+  const v = prompt('Renommer l etape :', cur);
+  if(v === null || v.trim() === '') return;
+  await obUpdateStep(sid, {title: v.trim()});
+}
+async function obEditIcon(sid, el){
+  const cur = el.textContent.trim();
+  const v = prompt('Nouvelle icone (emoji) :', cur);
+  if(v === null) return;
+  await obUpdateStep(sid, {icon: v.trim() || '📅'});
+}
+async function obEditDesc(sid, el){
+  const cur = el.textContent.trim();
+  const isPlaceholder = el.querySelector('i') !== null;
+  const v = prompt('Description (vide pour effacer) :', isPlaceholder ? '' : cur);
+  if(v === null) return;
+  await obUpdateStep(sid, {description: v});
+}
+async function obUpdateStep(sid, fields){
+  const fd = new FormData(); fd.set('step_id', sid);
+  for(const k in fields) fd.set(k, fields[k]);
+  try {
+    const r = await fetch('/onboarding/step/update', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok) obRefresh();
+  } catch(e){}
+}
+async function obRefresh(){
+  try {
+    const r = await fetch('/onboarding/render');
+    if(!r.ok) return;
+    const html = await r.text();
+    const target = document.getElementById('form-onboarding');
+    if(target) target.innerHTML = html;
+  } catch(e){}
+}
+</script>
+"""
+
+    return header_html + cards_html + add_step_html + js
+
+
 def _render_veille_feed_html() -> str:
     """Liste des reels veille, groupes par jour. Bouton 'Send to Telegram' par reel."""
     try:
@@ -12683,6 +12965,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{depenses_html}", _render_depenses_html())
         .replace("{paievas_html}", _render_paievas_html())
         .replace("{biolinks_html}", _render_biolinks_html())
+        .replace("{onboarding_html}", _render_onboarding_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
@@ -13870,6 +14153,150 @@ def create_app():
                     "caption_preview": (r.get("caption") or "")[:100],
                 })
         return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
+
+    # ============ ONBOARDING ============
+    @app.route("/onboarding/render", methods=["GET"])
+    def onboarding_render():
+        if not is_auth():
+            return "", 401
+        try:
+            return _render_onboarding_html()
+        except Exception as e:
+            return f"<div style='color:#f99;padding:14px'>Erreur render onboarding : {type(e).__name__}: {e}</div>", 500
+
+    @app.route("/onboarding/step/add", methods=["POST"])
+    def onboarding_step_add():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        icon = (request.form.get("icon") or "📅").strip()
+        title = (request.form.get("title") or "Nouvelle étape").strip()
+        desc = (request.form.get("description") or "").strip()
+        step = ob.add_step(icon=icon, title=title, description=desc)
+        return jsonify({"ok": True, "step": step})
+
+    @app.route("/onboarding/step/update", methods=["POST"])
+    def onboarding_step_update():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        if not sid:
+            return jsonify({"ok": False, "error": "step_id manquant"})
+        fields = {}
+        for k in ("icon", "title", "description"):
+            v = request.form.get(k)
+            if v is not None:
+                fields[k] = v
+        ok = ob.update_step(sid, **fields)
+        return jsonify({"ok": ok})
+
+    @app.route("/onboarding/step/delete", methods=["POST"])
+    def onboarding_step_delete():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        ok = ob.delete_step(sid)
+        return jsonify({"ok": ok})
+
+    @app.route("/onboarding/step/reorder", methods=["POST"])
+    def onboarding_step_reorder():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        raw = (request.form.get("order") or "").strip()
+        ids = [x.strip() for x in raw.split(",") if x.strip()]
+        ob.reorder_steps(ids)
+        return jsonify({"ok": True})
+
+    @app.route("/onboarding/media/upload", methods=["POST"])
+    def onboarding_media_upload():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        f = request.files.get("file")
+        if not sid or not f:
+            return jsonify({"ok": False, "error": "step_id ou file manquant"})
+        try:
+            content = f.read()
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Lecture echouee : {e}"})
+        return jsonify(ob.add_media_file(sid, f.filename or "media", content))
+
+    @app.route("/onboarding/media/link", methods=["POST"])
+    def onboarding_media_link():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        url = (request.form.get("url") or "").strip()
+        name = (request.form.get("name") or "").strip()
+        return jsonify(ob.add_media_link(sid, url, name))
+
+    @app.route("/onboarding/media/delete", methods=["POST"])
+    def onboarding_media_delete():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import onboarding as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("step_id") or "").strip()
+        mid = (request.form.get("media_id") or "").strip()
+        ok = ob.delete_media(sid, mid)
+        return jsonify({"ok": ok})
+
+    @app.route("/onboarding/media/<step_id>/<media_id>")
+    def onboarding_media_serve(step_id, media_id):
+        if not is_auth():
+            return "", 401
+        try:
+            import onboarding as ob
+        except Exception:
+            return "", 500
+        m = ob.get_media(step_id, media_id)
+        if not m or not m.get("path"):
+            return "", 404
+        from flask import send_file
+        from pathlib import Path as _P
+        p = _P(m["path"])
+        if not p.exists():
+            return "", 404
+        return send_file(str(p), conditional=True)
 
     @app.route("/veille/add", methods=["POST"])
     def veille_add():
