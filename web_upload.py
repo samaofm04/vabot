@@ -8837,16 +8837,94 @@ function veillePlayToggle(btn){
     veillePlayToggle(btn);
   });
 }
-async function removeVeilleReel(rid, btn){
-  if(!confirm('Retirer ce reel de la veille ?')) return;
-  const fd = new FormData(); fd.set('reel_id', rid);
-  await fetch('/veille/remove', {method:'POST', body:fd});
+// Map des suppressions en cours : rid -> {timer, card, displayBefore}
+window.__vlPendingRemoves = window.__vlPendingRemoves || {};
+function removeVeilleReel(rid, btn){
   const card = btn.closest('.veille-card');
-  if(card){
-    card.style.transition = 'opacity .3s';
-    card.style.opacity = '0.3';
+  if(!card) return;
+  // Si deja en cours de suppression -> stop (double-click safety)
+  if(window.__vlPendingRemoves[rid]) return;
+  // 1) Anime la card en out instantanement (pas de dialog)
+  card.style.transition = 'all .25s ease';
+  card.style.transform = 'scale(.92)';
+  card.style.opacity = '0';
+  card.style.pointerEvents = 'none';
+  // 2) Apres l anim, collapse height pour reflow doux
+  setTimeout(() => {
+    card.style.maxHeight = card.offsetHeight + 'px';
+    requestAnimationFrame(() => {
+      card.style.transition = 'all .25s ease, max-height .25s ease, margin .25s ease, padding .25s ease';
+      card.style.maxHeight = '0';
+      card.style.margin = '0';
+      card.style.padding = '0';
+      card.style.border = '0';
+    });
+  }, 230);
+  // 3) Toast Annuler en bas (5s pour cancel)
+  const toast = veilleToast('🗑 Reel retiré', 'Annuler', () => {
+    // Cancel : rollback la card
+    clearTimeout(window.__vlPendingRemoves[rid].timer);
+    delete window.__vlPendingRemoves[rid];
+    card.style.transition = 'all .25s ease';
+    card.style.maxHeight = '';
+    card.style.margin = '';
+    card.style.padding = '';
+    card.style.border = '';
+    card.style.transform = 'scale(1)';
+    card.style.opacity = '1';
+    card.style.pointerEvents = '';
+  });
+  // 4) Apres 5s : commit cote serveur + drop la card du DOM
+  const timer = setTimeout(async () => {
+    const fd = new FormData(); fd.set('reel_id', rid);
+    try { await fetch('/veille/remove', {method:'POST', body:fd}); } catch(e){}
+    if(card && card.parentNode) card.parentNode.removeChild(card);
+    if(toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    delete window.__vlPendingRemoves[rid];
+  }, 5000);
+  window.__vlPendingRemoves[rid] = {timer: timer, card: card, toast: toast};
+}
+// Toast generique avec bouton d action
+function veilleToast(message, actionLabel, onAction){
+  // Container toast (singleton en bas a droite)
+  let host = document.getElementById('vl-toast-host');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'vl-toast-host';
+    host.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none';
+    document.body.appendChild(host);
   }
-  setTimeout(()=>location.reload(), 400);
+  const toast = document.createElement('div');
+  toast.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:14px;color:#fff;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:auto;transform:translateY(20px);opacity:0;transition:all .25s ease;min-width:260px';
+  const msgEl = document.createElement('span');
+  msgEl.textContent = message;
+  msgEl.style.cssText = 'flex:1';
+  toast.appendChild(msgEl);
+  if(actionLabel && onAction){
+    const actBtn = document.createElement('button');
+    actBtn.textContent = actionLabel;
+    actBtn.style.cssText = 'background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700';
+    actBtn.onclick = function(){
+      onAction();
+      // Anime out
+      toast.style.transform = 'translateY(20px)';
+      toast.style.opacity = '0';
+      setTimeout(()=> { if(toast.parentNode) toast.parentNode.removeChild(toast); }, 250);
+    };
+    toast.appendChild(actBtn);
+  }
+  host.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.style.transform = 'translateY(0)';
+    toast.style.opacity = '1';
+  });
+  // Auto-dismiss apres 5s
+  setTimeout(() => {
+    toast.style.transform = 'translateY(20px)';
+    toast.style.opacity = '0';
+    setTimeout(()=> { if(toast.parentNode) toast.parentNode.removeChild(toast); }, 250);
+  }, 5000);
+  return toast;
 }
 </script>
 """
