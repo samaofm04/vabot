@@ -233,19 +233,24 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
 
 
 def send_video_from_url(video_url: str, caption: str = "",
-                        fallback_url: str = "") -> Dict[str, Any]:
+                        fallback_url: str = "",
+                        followup_text: str = "") -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
 
     Comportement comme un bot downloader Discord/Telegram :
     - On telecharge la video Instagram en local (bytes)
     - On l upload sur Telegram via sendVideo (multipart)
-    - La caption (description + lien) apparait en dessous de la video
+    - La caption (lien) apparait en dessous de la video
+    - Si followup_text est fourni, on envoie un 2e message texte juste
+      apres (utilise pour separer la description de la video)
 
     Args:
-        video_url    : URL CDN de la video Instagram (champ video_url du reel)
-        caption      : Texte de caption (max 1024 char par Telegram)
-        fallback_url : Si le download / sendVideo echoue, on retombe sur
-                       sendMessage avec ce lien Instagram
+        video_url      : URL CDN de la video Instagram
+        caption        : Caption sous la video (typiquement juste le lien IG)
+        fallback_url   : Si le download / sendVideo echoue, on retombe sur
+                         sendMessage avec ce lien Instagram
+        followup_text  : Texte d un 2e message envoye juste apres la video
+                         (typiquement la description du reel)
 
     Retourne {ok, mode: "video"|"link", message_id|error}.
     """
@@ -258,10 +263,26 @@ def send_video_from_url(video_url: str, caption: str = "",
     def _fallback(reason: str) -> Dict[str, Any]:
         if not fallback_url:
             return {"ok": False, "error": reason}
+        # Lien Instagram en premier message
         res = send_url(fallback_url, caption=caption)
         if res.get("ok"):
             res["mode"] = "link"
             res["fallback_reason"] = reason
+            # 2e message texte avec la description si dispo
+            if followup_text and followup_text.strip():
+                try:
+                    requests.post(
+                        f"{TG_API_BASE}/bot{token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": followup_text.strip()[:4000],
+                            "disable_web_page_preview": True,
+                            "reply_to_message_id": res.get("message_id"),
+                        },
+                        timeout=15,
+                    )
+                except Exception:
+                    pass
         return res
 
     # 1) Telecharge la video depuis l URL IG
@@ -306,13 +327,30 @@ def send_video_from_url(video_url: str, caption: str = "",
         j = r.json()
         if not j.get("ok"):
             return _fallback(j.get("description", "Reponse Telegram non ok"))
-        return {
-            "ok": True,
-            "mode": "video",
-            "message_id": j.get("result", {}).get("message_id"),
-        }
+        msg_id = j.get("result", {}).get("message_id")
     except Exception as e:
         return _fallback(f"Reponse invalide : {e}")
+
+    # 3) Followup texte (la description IG) en message separe
+    if followup_text and followup_text.strip():
+        try:
+            requests.post(
+                f"{TG_API_BASE}/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": followup_text.strip()[:4000],  # Telegram cap 4096
+                    "disable_web_page_preview": True,  # Pas d apercu, c est juste du texte
+                    "reply_to_message_id": msg_id,  # Threade sous la video
+                },
+                timeout=15,
+            )
+        except Exception:
+            pass  # Followup pas critique, on log pas
+    return {
+        "ok": True,
+        "mode": "video",
+        "message_id": msg_id,
+    }
 
 
 def test_connection() -> Dict[str, Any]:

@@ -13860,21 +13860,14 @@ def create_app():
         return jsonify({"ok": ok})
 
     def _veille_caption(reel: dict) -> str:
-        """Format Telegram : lien en premier, puis description (legendes).
+        """Caption sous la video Telegram : JUSTE le lien IG.
 
-        Apparait en dessous de la video dans Telegram :
-          [video]
-          https://instagram.com/reel/XXX
-          <description complete>
+        La description (legende) part dans un 2e message via followup_text.
+        Resultat dans Telegram :
+          Message 1 : [video] + lien IG en dessous
+          Message 2 : description complete (en reply au 1er)
         """
-        parts = []
-        url = (reel.get("url") or "").strip()
-        if url:
-            parts.append(url)
-        desc = (reel.get("caption") or "").strip()
-        if desc:
-            parts.append(desc)
-        return "\n\n".join(parts)
+        return (reel.get("url") or "").strip()
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
@@ -13912,11 +13905,14 @@ def create_app():
             if updated_fields:
                 veille.update_reel(rid, **updated_fields)
         caption = _veille_caption(reel)
+        description = (reel.get("caption") or "").strip()
         # 1) Tente download + sendVideo, fallback sur lien si echec
+        #    + followup texte avec la description IG si elle existe
         res = veille_telegram.send_video_from_url(
             reel.get("video_url", ""),
             caption=caption,
             fallback_url=url,
+            followup_text=description,
         )
         if res.get("ok"):
             veille.mark_sent(rid)
@@ -13954,10 +13950,12 @@ def create_app():
                 if fresh.get("video_url"):
                     r["video_url"] = fresh["video_url"]
             caption = _veille_caption(r)
+            description = (r.get("caption") or "").strip()
             res = veille_telegram.send_video_from_url(
                 r.get("video_url", ""),
                 caption=caption,
                 fallback_url=url,
+                followup_text=description,
             )
             if res.get("ok"):
                 veille.mark_sent(r["id"])
