@@ -8591,13 +8591,16 @@ def _render_veille_feed_html() -> str:
                  "juill.", "août", "sept.", "oct.", "nov.", "déc."]
 
     # Bandeau d'actions globales : selection + bulk send
-    if tg_configured and s['unsent_count'] > 0:
+    if s['unsent_count'] > 0:
         bulk_bar = (
             "<div style='position:sticky;top:0;z-index:20;background:#0a0a0a;display:flex;align-items:center;gap:14px;padding:14px 18px;margin-bottom:18px;border:1px solid #2a2a2a;border-radius:12px'>"
-            "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px;cursor:pointer'>"
-            "<input type='checkbox' id='veille-select-all' onchange='veilleSelectAll(this)' style='width:18px;height:18px;cursor:pointer;accent-color:#3b82f6'>"
-            "<span>Tout sélectionner (non envoyés)</span>"
+            "<label class='vl-pick vl-pick-sm' style='cursor:pointer;display:inline-flex'>"
+            "<input type='checkbox' id='veille-select-all' onchange='veilleSelectAll(this)'>"
+            "<span class='vl-pick-circle'>"
+            "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
+            "</span>"
             "</label>"
+            "<span style='color:#aaa;font-size:13px'>Tout sélectionner (non envoyés)</span>"
             "<div style='margin-left:auto;color:#888;font-size:12px'><span id='veille-selected-count'>0</span> sélectionné(s)</div>"
             "<button onclick='sendSelectedVeille()' id='veille-send-selected-btn' disabled "
             "style='background:#0088cc;color:#fff;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;opacity:0.4'>"
@@ -8649,16 +8652,16 @@ def _render_veille_feed_html() -> str:
                 ribbon = ("<div style='position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:3px 8px;border-radius:6px;z-index:3;letter-spacing:.3px'>✓ ENVOYÉ</div>")
 
-            # Checkbox de selection (top-left) - toujours visible si non envoye
-            # peu importe que Telegram soit configure (le bouton Envoyer gere ca)
+            # Selecteur rond Inflow-style (top-left)
             cb_html = ""
             if not sent:
                 cb_html = (
-                    f"<div style='position:absolute;top:8px;left:8px;z-index:5' onclick='event.stopPropagation()'>"
-                    f"<label style='display:block;cursor:pointer'>"
-                    f"<input type='checkbox' class='veille-cb' data-rid='{r['id']}' data-day='{day}' onchange='veilleOnSelect()' "
-                    f"style='width:22px;height:22px;cursor:pointer;accent-color:#3b82f6;background:#fff'>"
-                    f"</label></div>"
+                    f"<label class='vl-pick' onclick='event.stopPropagation()' style='position:absolute;top:10px;left:10px;z-index:5'>"
+                    f"<input type='checkbox' class='veille-cb' data-rid='{r['id']}' data-day='{day}' onchange='veilleOnSelect()'>"
+                    f"<span class='vl-pick-circle'>"
+                    f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
+                    f"</span>"
+                    f"</label>"
                 )
 
             video_url_safe = (r.get("video_url") or "").replace('"', '&quot;')
@@ -8700,6 +8703,37 @@ def _render_veille_feed_html() -> str:
         sections.append(section_html)
 
     js = """
+<style>
+/* Selecteur rond style Inflow - cercle vide -> rempli avec check anime */
+.vl-pick { position:relative; display:inline-block; width:28px; height:28px; cursor:pointer;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+.vl-pick-sm { width:22px; height:22px; }
+.vl-pick input[type=checkbox] { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
+.vl-pick-circle {
+  position:absolute; inset:0; border-radius:50%;
+  background:rgba(255,255,255,.18); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  border:2px solid rgba(255,255,255,.85);
+  display:flex; align-items:center; justify-content:center;
+  transition:background-color .18s ease, border-color .18s ease, transform .15s ease;
+}
+.vl-pick-circle svg { opacity:0; transform:scale(.4); transition:opacity .15s ease .03s, transform .18s cubic-bezier(.34,1.56,.64,1) .03s; }
+.vl-pick:hover .vl-pick-circle { transform:scale(1.06); border-color:#fff; }
+.vl-pick:active .vl-pick-circle { transform:scale(.92); }
+.vl-pick input:checked ~ .vl-pick-circle {
+  background:#3b82f6; border-color:#3b82f6;
+  box-shadow:0 0 0 4px rgba(59,130,246,.18);
+}
+.vl-pick input:checked ~ .vl-pick-circle svg { opacity:1; transform:scale(1); }
+.vl-pick input:indeterminate ~ .vl-pick-circle {
+  background:#3b82f6; border-color:#3b82f6;
+}
+.vl-pick input:indeterminate ~ .vl-pick-circle svg { display:none; }
+.vl-pick input:indeterminate ~ .vl-pick-circle::after {
+  content:''; display:block; width:10px; height:2.5px; background:#fff; border-radius:2px;
+}
+/* Card aspect quand selectionnee */
+.veille-card.is-picked { border-color:#3b82f6 !important; box-shadow:0 0 0 1px #3b82f6, 0 6px 18px rgba(59,130,246,.18); }
+</style>
 <script>
 // Selection helpers
 function veilleOnSelect(){
@@ -8712,13 +8746,19 @@ function veilleOnSelect(){
     btn.disabled = count === 0;
     btn.style.opacity = count === 0 ? '0.4' : '1';
   }
+  // Highlight des cards cochees
+  document.querySelectorAll('.veille-card').forEach(card => {
+    const cb = card.querySelector('.veille-cb');
+    card.classList.toggle('is-picked', cb && cb.checked);
+  });
   // Update select-all checkbox state
   const all = document.querySelectorAll('.veille-cb');
   const allEl = document.getElementById('veille-select-all');
   if(allEl){
+    allEl.indeterminate = false;
     if(count === 0) allEl.checked = false;
     else if(count === all.length) allEl.checked = true;
-    else allEl.indeterminate = true;
+    else { allEl.checked = false; allEl.indeterminate = true; }
   }
 }
 function veilleSelectAll(cb){
