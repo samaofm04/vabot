@@ -12344,47 +12344,141 @@ function renderMediaSlots(){{
   `).join('');
   syncMediaSlots();
 }}
-// Bulk paste explicite via bouton "📋 Bulk paste"
-// Ouvre un prompt multi-ligne, ajoute chaque ligne comme un nouveau slot
-function bulkPasteMedia(){{
-  const raw = prompt(
-    'Colle plusieurs media_id (1 par ligne).\\n\\n'+
-    'Comportement :\\n'+
-    '- "Remplacer" : ecrase la liste actuelle\\n'+
-    '- "Ajouter" : ajoute a la fin (defaut Annuler dans le 2e prompt)'
-  );
-  if(!raw) return;
-  const lines = raw.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
-  if(!lines.length) return;
-  // Demande mode : remplacer (OK) ou ajouter (Annuler)
-  const replace = window.mediaSlots.length === 0 ? true :
-    confirm(`Tu as deja ${{window.mediaSlots.length}} media(s). Cliquer "OK" pour REMPLACER, "Annuler" pour AJOUTER ${{lines.length}} a la fin.`);
-  if(replace) window.mediaSlots = lines.slice();
-  else window.mediaSlots.push(...lines);
-  renderMediaSlots();
-  if(typeof showToast === 'function'){{
-    const verb = replace ? 'remplaces par' : 'ajoutes :';
-    showToast('✓ ' + lines.length + ' media_ids ' + verb, 'success', 3000);
+// Bulk paste modal custom (au lieu du prompt natif moche)
+// Ouvre un overlay avec textarea multi-ligne + boutons Remplacer / Ajouter / Annuler
+function showBulkPasteModal(opts){{
+  // opts : {{title, subtitle, placeholder, existingCount, onApply(lines, mode)}}
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.onclick = (e) => {{ if(e.target === overlay) close(); }};
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:580px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column';
+
+  // Header
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:20px 24px 12px;border-bottom:1px solid #232323';
+  head.innerHTML = `
+    <div style='display:flex;align-items:center;gap:10px;margin-bottom:6px'>
+      <div style='width:34px;height:34px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px'>📋</div>
+      <h3 style='margin:0;color:#fff;font-size:17px;font-weight:700'>${{opts.title || 'Bulk paste'}}</h3>
+    </div>
+    <p style='margin:0;color:#888;font-size:13px;line-height:1.5'>${{opts.subtitle || 'Colle ton contenu (1 entree par ligne)'}}</p>
+  `;
+  card.appendChild(head);
+
+  // Textarea zone
+  const body = document.createElement('div');
+  body.style.cssText = 'padding:16px 24px';
+  const ta = document.createElement('textarea');
+  ta.placeholder = opts.placeholder || '';
+  ta.style.cssText = 'width:100%;min-height:280px;background:#0a0a0a;border:1px solid #232323;color:#fff;border-radius:12px;padding:14px;font-family:monospace;font-size:13px;line-height:1.5;resize:vertical;outline:none';
+  ta.onfocus = () => {{ ta.style.borderColor = '#3b82f6'; }};
+  ta.onblur = () => {{ ta.style.borderColor = '#232323'; }};
+  body.appendChild(ta);
+
+  // Counter
+  const counter = document.createElement('div');
+  counter.style.cssText = 'color:#666;font-size:11px;margin-top:8px;text-align:right;letter-spacing:.5px';
+  counter.textContent = '0 ligne';
+  ta.oninput = () => {{
+    const n = ta.value.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean).length;
+    counter.textContent = n + ' ligne' + (n>1?'s':'');
+    counter.style.color = n > 0 ? '#22c55e' : '#666';
+  }};
+  body.appendChild(counter);
+  card.appendChild(body);
+
+  // Footer
+  const foot = document.createElement('div');
+  foot.style.cssText = 'padding:14px 24px 18px;display:flex;gap:10px;justify-content:flex-end;align-items:center;flex-wrap:wrap;border-top:1px solid #232323;background:#0f0f0f';
+  const existing = opts.existingCount || 0;
+  if(existing > 0){{
+    const info = document.createElement('span');
+    info.textContent = existing + ' entree(s) deja presentes';
+    info.style.cssText = 'flex:1;color:#888;font-size:12px';
+    foot.appendChild(info);
+  }}
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = 'Annuler';
+  cancelBtn.style.cssText = 'background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600';
+  cancelBtn.onclick = close;
+  foot.appendChild(cancelBtn);
+
+  if(existing > 0){{
+    const appendBtn = document.createElement('button');
+    appendBtn.type = 'button';
+    appendBtn.textContent = '+ Ajouter a la fin';
+    appendBtn.style.cssText = 'background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700';
+    appendBtn.onclick = () => apply('append');
+    foot.appendChild(appendBtn);
+  }}
+
+  const replaceBtn = document.createElement('button');
+  replaceBtn.type = 'button';
+  replaceBtn.textContent = existing > 0 ? '↻ Remplacer tout' : '✓ Ajouter';
+  replaceBtn.style.cssText = 'background:#3b82f6;color:#fff;border:0;padding:9px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 12px rgba(59,130,246,.3)';
+  replaceBtn.onclick = () => apply('replace');
+  foot.appendChild(replaceBtn);
+
+  card.appendChild(foot);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(() => ta.focus(), 50);
+
+  // ESC pour fermer
+  function onKey(e){{ if(e.key === 'Escape') close(); }}
+  document.addEventListener('keydown', onKey);
+
+  function apply(mode){{
+    const lines = ta.value.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
+    if(!lines.length){{
+      if(typeof showToast === 'function') showToast('⚠ Rien a coller', 'warning', 2000);
+      return;
+    }}
+    opts.onApply(lines, mode);
+    close();
+  }}
+  function close(){{
+    document.removeEventListener('keydown', onKey);
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }}
 }}
+function bulkPasteMedia(){{
+  showBulkPasteModal({{
+    title: 'Bulk paste — Bibliotheque Medias',
+    subtitle: 'Colle les media_id MyPuls (1 par ligne). L ordre sera respecte.',
+    placeholder: '75113819\\n75113817\\n75113815\\n...',
+    existingCount: window.mediaSlots.length,
+    onApply: (lines, mode) => {{
+      if(mode === 'replace') window.mediaSlots = lines.slice();
+      else window.mediaSlots.push(...lines);
+      renderMediaSlots();
+      if(typeof showToast === 'function'){{
+        const verb = mode === 'replace' ? 'remplaces par' : 'ajoutes :';
+        showToast('✓ ' + lines.length + ' media_ids ' + verb, 'success', 3000);
+      }}
+    }}
+  }});
+}}
 function bulkPasteCaptions(){{
-  const raw = prompt(
-    'Colle plusieurs captions (1 par ligne).\\n\\n'+
-    '- "Remplacer" : ecrase la liste actuelle\\n'+
-    '- "Ajouter" : ajoute a la fin'
-  );
-  if(!raw) return;
-  const lines = raw.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
-  if(!lines.length) return;
-  const replace = window.captionSlots.length === 0 ? true :
-    confirm(`Tu as deja ${{window.captionSlots.length}} caption(s). Cliquer "OK" pour REMPLACER, "Annuler" pour AJOUTER ${{lines.length}} a la fin.`);
-  if(replace) window.captionSlots = lines.slice();
-  else window.captionSlots.push(...lines);
-  renderCaptionSlots();
-  if(typeof showToast === 'function'){{
-    const verb = replace ? 'remplacees par' : 'ajoutees :';
-    showToast('✓ ' + lines.length + ' captions ' + verb, 'success', 3000);
-  }}
+  showBulkPasteModal({{
+    title: 'Bulk paste — Captions',
+    subtitle: 'Colle tes captions (1 par ligne). Tirage au hasard a la planification.',
+    placeholder: 'Caption 1...\\nCaption 2...\\nCaption 3...',
+    existingCount: window.captionSlots.length,
+    onApply: (lines, mode) => {{
+      if(mode === 'replace') window.captionSlots = lines.slice();
+      else window.captionSlots.push(...lines);
+      renderCaptionSlots();
+      if(typeof showToast === 'function'){{
+        const verb = mode === 'replace' ? 'remplacees par' : 'ajoutees :';
+        showToast('✓ ' + lines.length + ' captions ' + verb, 'success', 3000);
+      }}
+    }}
+  }});
 }}
 // Detecte un paste multi-ligne et explose en plusieurs slots
 function handleMediaPaste(e, idx){{
