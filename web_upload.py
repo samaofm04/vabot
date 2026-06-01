@@ -4016,8 +4016,9 @@ body.light .va-id{color:#9ca3af}
                 btn_label = "Aucun"
                 tooltip = "Aucun lien assigné. Clic pour attribuer."
 
+            _ident_safe = (identity or "").replace(chr(39), chr(92)+chr(39))
             links_btn_html = (
-                f"<button type='button' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"<button type='button' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}', '{_ident_safe}')\" "
                 f"class='va-links-btn' title=\"{tooltip}\">"
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
                 f"<span class='va-links-btn-label'>{btn_label}</span>"
@@ -4607,10 +4608,12 @@ function vaPaySave(){
         "<button onclick='vaLinksClose()' class='vlm-close'>×</button>"
         "</div>"
         "<input type='text' id='vlm-search' placeholder='Rechercher un lien…' oninput='vaLinksFilter(this.value)'>"
+        "<div id='vlm-pills'></div>"
         "<div id='vlm-list'></div>"
         "<div class='vlm-foot'>"
-        "<button onclick='vaLinksClose()' class='vlm-cancel'>Annuler</button>"
-        "<button onclick='vaLinksSave()' class='vlm-save'>Enregistrer</button>"
+        "<button type='button' onclick='vaLinksClose()' class='vlm-cancel'>Annuler</button>"
+        "<button type='button' onclick='vaLinksDuplicateSelected()' class='vlm-dup'>⎘ Dupliquer sélection</button>"
+        "<button type='button' onclick='vaLinksSave()' class='vlm-save'>Enregistrer</button>"
         "</div>"
         "</div>"
         "</div>"
@@ -4627,8 +4630,14 @@ function vaPaySave(){
 #vlm-subtitle{font-size:11px;color:#888;font-weight:400}
 .vlm-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
 .vlm-close:hover{color:#fff}
-#vlm-search{margin:14px 18px;padding:9px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;width:calc(100% - 36px)}
+#vlm-search{margin:14px 18px 8px;padding:9px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;width:calc(100% - 36px)}
 #vlm-search:focus{border-color:#a855f7;outline:none}
+#vlm-pills{display:flex;gap:6px;flex-wrap:wrap;padding:0 18px 10px;border-bottom:1px solid #1a1a1a}
+.vlm-pill{padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px}
+.vlm-pill:hover{border-color:#a855f7;color:#fff}
+.vlm-pill.active{background:#a855f7;border-color:#a855f7;color:#fff}
+.vlm-pill-count{font-size:10px;opacity:.7;background:rgba(0,0,0,.2);padding:1px 5px;border-radius:999px}
+.vlm-pill.active .vlm-pill-count{background:rgba(0,0,0,.25)}
 #vlm-list{flex:1;overflow-y:auto;padding:6px 14px 14px}
 .vlm-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent}
 .vlm-item:hover{background:rgba(255,255,255,.04)}
@@ -4643,6 +4652,11 @@ function vaPaySave(){
 .vlm-badge{background:rgba(168,85,247,.15);color:#a855f7;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px}
 .vlm-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
 .vlm-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
+.vlm-dup{background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
+.vlm-dup:hover{background:rgba(59,130,246,.12)}
+.vlm-dup:disabled{opacity:.45;cursor:not-allowed}
+.vlm-row-dup{background:transparent;border:1px solid #2a2a2a;color:#777;width:26px;height:26px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s}
+.vlm-row-dup:hover{border-color:#3b82f6;color:#3b82f6}
 .vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
 .vlm-save:hover{background:#9333ea}
 body.light .vlm-box{background:#fff;border-color:#e5e7eb}
@@ -4653,35 +4667,84 @@ body.light .vlm-cancel{color:#666;border-color:#e5e7eb}
 </style>
 <script>
 var _vlmCurrentUid = null;
-function vaLinksOpen(uid, username){
+var _vlmCurrentIdent = '';
+var _vlmActiveModel = '__all__';
+function vaLinksOpen(uid, username, identity){
   _vlmCurrentUid = uid;
+  _vlmCurrentIdent = (identity || '').toLowerCase().trim();
   document.getElementById('vlm-subtitle').textContent = '@' + username;
   document.getElementById('vlm-search').value = '';
-  var current = (window.__vaLinksData || {})[uid] || [];
-  // Construire la liste
+  // Construire les pills par identite/folder
+  var allLinks = window.__gmsAllLinks || [];
+  var counts = {};
+  allLinks.forEach(function(l){
+    var m = (l.model || '(sans dossier)');
+    counts[m] = (counts[m] || 0) + 1;
+  });
+  var models = Object.keys(counts).sort(function(a,b){ return a.localeCompare(b); });
+  // Auto-select : si l identite du VA matche un folder, on filtre dessus
+  var matchModel = null;
+  models.forEach(function(m){
+    if(m.toLowerCase() === _vlmCurrentIdent) matchModel = m;
+  });
+  _vlmActiveModel = matchModel || '__all__';
+  var pillsHtml = '<button type="button" class="vlm-pill ' + (_vlmActiveModel === '__all__' ? 'active' : '') + '" onclick="vaLinksSetModel(\'__all__\')">Tous <span class="vlm-pill-count">' + allLinks.length + '</span></button>';
+  models.forEach(function(m){
+    var active = (m === _vlmActiveModel) ? 'active' : '';
+    var safeM = m.replace(/'/g, "\\'");
+    pillsHtml += '<button type="button" class="vlm-pill ' + active + '" onclick="vaLinksSetModel(\'' + safeM + '\')">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span></button>';
+  });
+  document.getElementById('vlm-pills').innerHTML = pillsHtml;
+  // Render la liste
+  vaLinksRender();
+  document.getElementById('va-links-modal').classList.add('show');
+}
+function vaLinksRender(){
+  var current = (window.__vaLinksData || {})[_vlmCurrentUid] || [];
+  var allLinks = window.__gmsAllLinks || [];
   var listEl = document.getElementById('vlm-list');
   var html = '';
   var groupedByModel = {};
-  (window.__gmsAllLinks || []).forEach(function(l){
-    (groupedByModel[l.model] = groupedByModel[l.model] || []).push(l);
+  allLinks.forEach(function(l){
+    var m = (l.model || '(sans dossier)');
+    if(_vlmActiveModel !== '__all__' && m !== _vlmActiveModel) return;
+    (groupedByModel[m] = groupedByModel[m] || []).push(l);
   });
   Object.keys(groupedByModel).sort().forEach(function(model){
     html += '<div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:14px 8px 6px">' + model + '</div>';
     groupedByModel[model].forEach(function(l){
       var checked = current.indexOf(l.id) !== -1;
-      html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this)">'
+      html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this, event)">'
         + '<div class="vlm-cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
         + '<div class="vlm-info">'
         + '<div class="vlm-name">' + l.name + '</div>'
         + '<div class="vlm-meta">/' + l.shortcode + '</div>'
         + '</div>'
+        + '<button type="button" class="vlm-row-dup" title="Dupliquer ce lien dans le meme dossier" onclick="vaLinksDuplicateOne(event, \'' + l.id + '\')">⎘</button>'
         + '</div>';
     });
   });
-  listEl.innerHTML = html || '<p style="color:#888;text-align:center;padding:30px">Aucun lien disponible.</p>';
-  document.getElementById('va-links-modal').classList.add('show');
+  if(!html){
+    html = '<p style="color:#888;text-align:center;padding:30px">Aucun lien dans ce dossier.</p>';
+  }
+  listEl.innerHTML = html;
 }
-function vaLinksToggle(el){
+function vaLinksSetModel(m){
+  _vlmActiveModel = m;
+  document.querySelectorAll('.vlm-pill').forEach(function(p){ p.classList.remove('active'); });
+  // Re-render pills active state
+  document.querySelectorAll('.vlm-pill').forEach(function(p){
+    var lbl = (p.firstChild && p.firstChild.nodeValue || '').trim();
+    if(m === '__all__' && lbl === 'Tous') p.classList.add('active');
+    else if(lbl === m) p.classList.add('active');
+  });
+  vaLinksRender();
+  // Re-apply search filter
+  var q = (document.getElementById('vlm-search').value || '').toLowerCase().trim();
+  if(q) vaLinksFilter(q);
+}
+function vaLinksToggle(el, e){
+  if(e && e.target && e.target.classList && e.target.classList.contains('vlm-row-dup')) return;
   el.classList.toggle('checked');
 }
 function vaLinksFilter(q){
@@ -4690,6 +4753,55 @@ function vaLinksFilter(q){
     var s = el.getAttribute('data-search') || '';
     el.style.display = (!q || s.indexOf(q) !== -1) ? '' : 'none';
   });
+}
+function vaLinksDuplicateOne(e, linkId){
+  if(e){ e.stopPropagation(); e.preventDefault(); }
+  if(!linkId) return;
+  if(typeof showToast === 'function') showToast('Duplication en cours…', 'info');
+  var fd = new FormData();
+  fd.append('link_id', linkId);
+  fetch('/linkscale/duplicate', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Lien dupliqué ✓ Recharge…', 'success');
+        setTimeout(function(){ window.location.reload(); }, 600);
+      } else {
+        if(typeof showToast === 'function') showToast('Erreur dup: ' + (d && d.error || '?'), 'error');
+      }
+    })
+    .catch(function(err){
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+}
+function vaLinksDuplicateSelected(){
+  var ids = [];
+  document.querySelectorAll('.vlm-item.checked').forEach(function(el){
+    var id = el.getAttribute('data-link-id');
+    if(id) ids.push(id);
+  });
+  if(!ids.length){
+    if(typeof showToast === 'function') showToast('Sélectionne au moins 1 lien à dupliquer', 'error');
+    return;
+  }
+  if(!confirm('Dupliquer ' + ids.length + ' lien(s) dans le même dossier ?')) return;
+  if(typeof showToast === 'function') showToast('Duplication de ' + ids.length + ' lien(s)…', 'info');
+  var done = 0, fail = 0;
+  function next(){
+    if(!ids.length){
+      if(typeof showToast === 'function') showToast('Terminé : ' + done + ' OK, ' + fail + ' échec(s). Recharge…', 'success');
+      setTimeout(function(){ window.location.reload(); }, 700);
+      return;
+    }
+    var id = ids.shift();
+    var fd = new FormData();
+    fd.append('link_id', id);
+    fetch('/linkscale/duplicate', {method:'POST', body:fd})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.ok) done++; else fail++; next(); })
+      .catch(function(){ fail++; next(); });
+  }
+  next();
 }
 function vaLinksClose(e){
   if(e && e.target && e.target.id !== 'va-links-modal' && e.target !== this) return;
