@@ -12749,8 +12749,17 @@ function mplConfirmAction(opts){{
   document.getElementById('mpl-conf-cancel').onclick = close;
   document.getElementById('mpl-conf-ok').onclick = confirm_;
   function confirm_(){{
-    if(typeof opts.onConfirm === 'function') opts.onConfirm();
-    close();
+    // Ferme le modal AVANT de declencher l action (sinon le loader page
+    // arrive par-dessus le modal qui reste visible derriere)
+    closeFast();
+    if(typeof opts.onConfirm === 'function'){{
+      // Petit delai pour laisser le DOM se mettre a jour avant le submit
+      setTimeout(opts.onConfirm, 30);
+    }}
+  }}
+  function closeFast(){{
+    document.removeEventListener('keydown', onKey);
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }}
   function close(){{
     document.removeEventListener('keydown', onKey);
