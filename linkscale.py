@@ -71,8 +71,12 @@ def _headers() -> Dict[str, str]:
 
 
 def _request(method: str, path: str, *, params: Optional[dict] = None,
-             json_body: Optional[dict] = None) -> Dict[str, Any]:
-    """Appel HTTP unifie. Retourne {ok, data|error, status}."""
+             json_body: Optional[dict] = None, _retry: int = 1) -> Dict[str, Any]:
+    """Appel HTTP unifie. Retourne {ok, data|error, status}.
+
+    Retry automatique sur 429 (rate limit) jusqu a _retry fois apres un sleep.
+    """
+    import time as _t
     if not is_configured():
         return {"ok": False, "error": "Cle API Linkscale non configuree (prefix lk_)"}
     url = BASE_URL + path
@@ -92,6 +96,10 @@ def _request(method: str, path: str, *, params: Optional[dict] = None,
             return {"ok": True, "data": None, "status": 204}
         return {"ok": True, "data": body.get("data") if isinstance(body, dict) else body,
                 "raw": body, "status": r.status_code}
+    # Retry sur rate limit
+    if r.status_code == 429 and _retry > 0:
+        _t.sleep(1.0)
+        return _request(method, path, params=params, json_body=json_body, _retry=_retry - 1)
     err_msg = ""
     if isinstance(body, dict):
         err_msg = body.get("message") or body.get("error") or str(body)[:200]
@@ -99,6 +107,18 @@ def _request(method: str, path: str, *, params: Optional[dict] = None,
         err_msg = str(body)[:200]
     return {"ok": False, "error": f"HTTP {r.status_code}: {err_msg}",
             "status": r.status_code, "raw": body}
+
+
+def _debug_log(msg: str):
+    """Append a debug line to data/linkscale_debug.log for live troubleshooting."""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = DATA_DIR / "linkscale_debug.log"
+        from datetime import datetime
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.utcnow().isoformat(timespec='seconds')}] {msg}\n")
+    except Exception:
+        pass
 
 
 # ============ Public API ============
@@ -425,18 +445,25 @@ def get_all_links_in_folder(folder_name: str) -> List[Dict[str, Any]]:
     """Retourne TOUS les links d un folder (actifs + inactifs).
 
     Cross-reference :
-    1. cs_template -> folder mapping (cache 5min)
+    1. cs_template -> folder mapping (cache disque)
     2. Filtre les 88 links totaux par leur cs_template
     """
     if not folder_name:
+        _debug_log("get_all_links_in_folder: folder_name vide")
         return []
     tpl_map = get_template_to_folder_map()
+    _debug_log(f"get_all_links_in_folder({folder_name!r}) tpl_map={len(tpl_map)} entries")
     # Find cs_template(s) for this folder name
     target_templates = {tpl for tpl, fname in tpl_map.items() if fname.lower() == folder_name.lower()}
     if not target_templates:
+        _debug_log(f"get_all_links_in_folder({folder_name!r}) AUCUN template trouve - tpl_map: {tpl_map}")
         return []
+    _debug_log(f"get_all_links_in_folder({folder_name!r}) target_templates={target_templates}")
     all_links = list_all_links_full()
-    return [l for l in all_links if l.get("cs_template") in target_templates]
+    _debug_log(f"list_all_links_full -> {len(all_links)} links")
+    result = [l for l in all_links if l.get("cs_template") in target_templates]
+    _debug_log(f"get_all_links_in_folder({folder_name!r}) -> {len(result)} links matchent")
+    return result
 
 
 def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any]:
