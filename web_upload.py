@@ -11580,16 +11580,16 @@ const DEFAULT_STORY_SLOTS = [
 let postSlots = DEFAULT_POST_SLOTS.slice();
 let storySlots = DEFAULT_STORY_SLOTS.slice();
 
-// Tri par heure ascendante (private apres public a heure egale)
+// Tri par heure ascendante. A heure egale : preserve l ordre d insertion
+// (Array.sort est stable en ES2019+, donc return 0 garde l ordre courant).
+// Ca permet a l user de choisir librement le visibility entre 2 slots a la
+// meme heure (ex: 15:00 Privé puis 15:00 Public si il veut).
 function sortSlotsByTime(arr){{
   if(!Array.isArray(arr)) return;
   arr.sort((a,b)=>{{
     const ta = (a.time || '00:00');
     const tb = (b.time || '00:00');
-    if(ta !== tb) return ta.localeCompare(tb);
-    // A heure egale : public en premier
-    if(a.visibility === b.visibility) return 0;
-    return a.visibility === 'public' ? -1 : 1;
+    return ta.localeCompare(tb);  // 0 si egal -> insertion order preserve
   }});
 }}
 function renderPostSlots(){{
