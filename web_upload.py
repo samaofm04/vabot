@@ -3527,8 +3527,43 @@ def _render_linkscale_clicks_widget() -> str:
                "juil", "août", "sept", "oct", "nov", "déc"]
     period_label_short = f"{start_dt.day} → {end_dt.day} {mois_fr[start_dt.month - 1]}"
 
+    # CSS inline (les classes .vac-* viennent du widget GMS, on les inclut ici
+    # pour que ce widget rende meme si _render_gms_clicks_widget n est pas appele)
+    css = """
+<style>
+.vac-widget{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:20px}
+.vac-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.vac-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;letter-spacing:-.01em}
+.vac-title svg{color:#3b82f6}
+.vac-subtitle{font-size:11px;color:#888;font-weight:400;margin-left:6px}
+.vac-period-row{display:flex;gap:5px;flex-wrap:wrap}
+.vac-btn{padding:6px 12px;background:transparent;border:1px solid #2a2a2a;color:#aaa;border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;transition:all .15s}
+.vac-btn:hover{background:rgba(255,255,255,.05);color:#fff}
+.vac-btn-active{background:#3b82f6 !important;border-color:#3b82f6 !important;color:#fff !important}
+.vac-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.vac-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px;transition:all .15s;position:relative;overflow:hidden}
+.vac-card:hover{border-color:rgba(59,130,246,.4);transform:translateY(-2px)}
+.vac-card-head{display:flex;align-items:center;gap:10px}
+.vac-card-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a;flex-shrink:0}
+.vac-card-avatar-fallback{background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;border:0}
+.vac-card-info{flex:1;min-width:0}
+.vac-card-name{font-weight:700;font-size:13px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vac-card-sub{font-size:10px;color:#888;margin-top:2px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.vac-card-trend{font-size:16px;font-weight:800;line-height:1}
+.vac-card-value{font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1;margin-top:4px}
+.vac-card-label{font-size:11px;color:#888;font-weight:600;letter-spacing:.02em}
+.vac-card-spark{margin-top:auto;display:flex;align-items:center;justify-content:center;opacity:.9}
+body.light .vac-widget{background:#fff;border-color:#e5e7eb}
+body.light .vac-btn{color:#666;border-color:#e5e7eb}
+body.light .vac-btn:hover{background:#f3f4f6;color:#111}
+body.light .vac-card{background:#f9fafb;border-color:#e5e7eb}
+body.light .vac-card-name{color:#111}
+</style>
+"""
+
     return (
-        "<div class='vac-widget'>"
+        css
+        + "<div class='vac-widget'>"
         + "<div class='vac-head'>"
         + "<div class='vac-title'>"
         + "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>"
@@ -4502,40 +4537,63 @@ function vaPaySave(){
 </script>
 """
 
-    # ====== Modal d'attribution de liens GMS (récupération de la liste à l'ouverture) ======
+    # ====== Modal d'attribution de liens (priorite Linkscale, fallback GMS) ======
     all_va_links = _load_va_links()
     import json as _json_va
     va_links_json = _json_va.dumps(all_va_links, ensure_ascii=False)
 
-    # Récupérer la liste de tous les liens GMS (par modèle)
-    grouped_for_modal = {}
+    # Construire la liste de tous les liens disponibles, groupes par modele
+    all_links_info = []
+    link_source = "?"  # "linkscale" ou "gms"
+
+    # 1. Essayer Linkscale en priorite
     try:
-        import gms
-        if gms.is_configured():
-            grouped_for_modal = gms.get_links_grouped_by_model() or {}
+        import linkscale
+        if linkscale.is_configured():
+            link_source = "linkscale"
+            tpl_map = linkscale.get_template_to_folder_map()  # {cs_template: folder_name}
+            all_links = linkscale.list_all_links_full()
+            for link in all_links:
+                cs = link.get("cs_template", "")
+                model = tpl_map.get(cs, "(sans dossier)")
+                # URL : pour bio link c est /shortcode, pour direct c est .url
+                u = link.get("u", "")
+                domain = link.get("domain") or "monsecret.vip"
+                ltype = link.get("t", "?")
+                url = link.get("url") if ltype == "d_l" else f"https://{domain}/{u}"
+                all_links_info.append({
+                    "id": link.get("_id"),
+                    "shortcode": u,
+                    "name": link.get("n") or u,
+                    "model": model,
+                    "url": url or "(landing)",
+                    "status": "active" if link.get("enabled", True) else "disabled",
+                })
+            all_links_info.sort(key=lambda l: (l["model"], l["name"].lower()))
     except Exception:
         pass
 
-    # Construire un dict {link_id: {shortcode, display_name, model, url}}
-    all_links_info = []
-    try:
-        import gms
-        if gms.is_configured():
-            res_all = gms.list_all_links()
-            if res_all.get("ok"):
-                for link in res_all["links"]:
-                    model = gms.categorize_link(link)
-                    all_links_info.append({
-                        "id": link.get("id"),
-                        "shortcode": link.get("shortcode", ""),
-                        "name": link.get("display_name") or "—",
-                        "model": model,
-                        "url": link.get("url") or "(landing)",
-                        "status": link.get("status", "active"),
-                    })
-            all_links_info.sort(key=lambda l: (l["model"], l["name"]))
-    except Exception:
-        pass
+    # 2. Fallback GMS si pas de links Linkscale
+    if not all_links_info:
+        try:
+            import gms
+            if gms.is_configured():
+                link_source = "gms"
+                res_all = gms.list_all_links()
+                if res_all.get("ok"):
+                    for link in res_all["links"]:
+                        model = gms.categorize_link(link)
+                        all_links_info.append({
+                            "id": link.get("id"),
+                            "shortcode": link.get("shortcode", ""),
+                            "name": link.get("display_name") or "—",
+                            "model": model,
+                            "url": link.get("url") or "(landing)",
+                            "status": link.get("status", "active"),
+                        })
+                all_links_info.sort(key=lambda l: (l["model"], l["name"]))
+        except Exception:
+            pass
 
     links_json = _json_va.dumps(all_links_info, ensure_ascii=False)
 
@@ -4544,7 +4602,7 @@ function vaPaySave(){
         "<div class='vlm-box' onclick='event.stopPropagation()'>"
         "<div class='vlm-head'>"
         "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#a855f7' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
-        "<div>Attribuer des liens GMS</div>"
+        f"<div>Attribuer des liens {'Linkscale' if link_source == 'linkscale' else 'GMS'}</div>"
         "<div id='vlm-subtitle'></div>"
         "<button onclick='vaLinksClose()' class='vlm-close'>×</button>"
         "</div>"
@@ -4620,7 +4678,7 @@ function vaLinksOpen(uid, username){
         + '</div>';
     });
   });
-  listEl.innerHTML = html || '<p style="color:#888;text-align:center;padding:30px">Aucun lien GMS disponible.</p>';
+  listEl.innerHTML = html || '<p style="color:#888;text-align:center;padding:30px">Aucun lien disponible.</p>';
   document.getElementById('va-links-modal').classList.add('show');
 }
 function vaLinksToggle(el){
