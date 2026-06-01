@@ -8454,44 +8454,67 @@ def _render_linkscale_html() -> str:
             "</div></div>"
         )
 
-    # Si un folder est selectionne, fetch ses links avec clicks
+    # Si un folder est selectionne, fetch TOUS ses links (actifs + inactifs)
+    # via le mapping cs_template -> folder
     if selected_folder and selected_folder.get("id"):
         try:
-            res = linkscale.get_folder_links_with_clicks(selected_folder["id"], days=7)
-            folder_links = res.get("links", []) or []
+            all_links = linkscale.get_all_links_in_folder(selected_folder["name"])
+            active_res = linkscale.get_folder_links_with_clicks(selected_folder["id"], days=7)
+            active_links = active_res.get("links", []) or []
+            # Map link_id -> clicks
+            clicks_by_id = {l["id"]: l.get("clicks", 0) for l in active_links}
         except Exception:
-            folder_links = []
+            all_links = []
+            clicks_by_id = {}
         list_html = ""
-        if not folder_links:
+        if not all_links:
             list_html = (
                 "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
                 "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
-                "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link actif dans ce dossier (7 derniers jours)</div>"
-                "<div style='color:#555;font-size:11px'>Les links sans clicks recents n apparaissent pas ici - voir directement sur Linkscale</div>"
+                "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link dans ce dossier</div>"
+                "<div style='color:#555;font-size:11px'>Click sur \"+ Creer un link\" pour ajouter dans ce dossier</div>"
                 "</div>"
             )
         else:
+            # Tri : par clicks descendant, puis par enabled, puis par u alphabetique
+            def _sort_key(l):
+                lid = l.get("_id") or l.get("id") or ""
+                c = clicks_by_id.get(lid, 0)
+                return (-c, 0 if l.get("enabled") else 1, (l.get("u") or "").lower())
+            all_links.sort(key=_sort_key)
+
+            total_actifs = sum(1 for l in all_links if clicks_by_id.get(l.get("_id") or l.get("id"), 0) > 0)
             list_html = (
                 "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px'>"
                 f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
                 f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📁</div>"
-                f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Links dans {selected_folder['name']} ({len(folder_links)} actifs)</div>"
-                f"<div style='font-size:11px;color:#666'>Tries par clicks descendant - 7 derniers jours</div></div>"
+                f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Links dans {selected_folder['name']} ({len(all_links)} total · {total_actifs} actifs)</div>"
+                f"<div style='font-size:11px;color:#666'>Tries par clicks descendant - clicks comptes sur 7 derniers jours</div></div>"
                 f"</div>"
             )
-            for lk in folder_links:
-                lid = lk.get("id", "")
+            for lk in all_links:
+                lid = lk.get("_id") or lk.get("id") or ""
                 u = (lk.get("u") or "?").replace("<", "&lt;")
-                url = (lk.get("url") or "").replace("<", "&lt;")
-                clicks = lk.get("clicks", 0)
-                bots = lk.get("bots", 0)
+                domain = lk.get("domain") or "monsecret.vip"
+                # Pour les bio links (l_p) il n y a pas de url, juste le shortcode
+                ltype = lk.get("t") or "?"
+                if ltype == "d_l":
+                    url = (lk.get("url") or "").replace("<", "&lt;")
+                else:
+                    url = f"https://{domain}/{u}"
+                enabled = lk.get("enabled", True)
+                clicks = clicks_by_id.get(lid, 0)
                 # Color selon nb de clicks
                 if clicks >= 50: clicks_color = "#22c55e"
                 elif clicks >= 10: clicks_color = "#3b82f6"
                 elif clicks >= 1: clicks_color = "#a855f7"
-                else: clicks_color = "#666"
+                else: clicks_color = "#555"
+                disabled_style = "opacity:.5" if not enabled else ""
+                type_color = "#3b82f6" if ltype == "d_l" else "#a855f7"
+                type_label = "DIRECT" if ltype == "d_l" else "BIO"
                 list_html += (
-                    f"<div style='display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;margin-bottom:6px'>"
+                    f"<div style='display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;margin-bottom:6px;{disabled_style}'>"
+                    f"<span style='font-size:9px;color:#fff;background:{type_color};padding:2px 6px;border-radius:4px;font-weight:800;letter-spacing:.5px'>{type_label}</span>"
                     f"<div style='flex:1;min-width:0'>"
                     f"<div style='color:#fff;font-weight:600;font-size:13px;font-family:monospace'>/{u}</div>"
                     f"<div style='color:#888;font-size:11px;margin-top:2px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{url}</div>"

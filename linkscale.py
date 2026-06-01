@@ -314,6 +314,89 @@ def get_link_click_summary(link_id: str) -> Dict[str, int]:
     return out
 
 
+def list_all_links_full() -> List[Dict[str, Any]]:
+    """Fetch TOUS les links du projet via pagination /links?limit=100.
+
+    Retourne la liste plate des link objects (avec _id, u, url, cs_template,
+    enabled, created_at, etc.).
+    """
+    out: List[Dict[str, Any]] = []
+    offset = 0
+    page = 1
+    while True:
+        res = _request("GET", "/links", params={"page": page, "limit": 100})
+        if not res.get("ok"):
+            break
+        raw = res.get("raw") or {}
+        links = raw.get("links") or []
+        if not isinstance(links, list) or not links:
+            break
+        out.extend(links)
+        # Check pagination
+        pag = raw.get("pagination") or {}
+        if not pag.get("has_more"):
+            break
+        page += 1
+        if page > 20:  # safety
+            break
+    return out
+
+
+# Cache en memoire pour le mapping cs_template -> folder_name
+_TEMPLATE_FOLDER_CACHE: Dict[str, Any] = {"ts": 0, "map": {}}
+
+
+def get_template_to_folder_map(force_refresh: bool = False) -> Dict[str, str]:
+    """Retourne {cs_template_id: folder_name}. Cache 5 min.
+
+    Strategie : pour chaque folder, fetch 1 link actif via stats et lit
+    son cs_template. C est l unique facon de relier cs_template <-> folder.
+    """
+    import time
+    if not force_refresh and _TEMPLATE_FOLDER_CACHE["map"] and (time.time() - _TEMPLATE_FOLDER_CACHE["ts"]) < 300:
+        return _TEMPLATE_FOLDER_CACHE["map"]
+    folders = list_folders()
+    mapping: Dict[str, str] = {}
+    for f in folders:
+        try:
+            res = get_folder_links_with_clicks(f["id"], days=7)
+            active = res.get("links") or []
+            if not active:
+                # Fallback : try 30 days (peut crash sur les gros folders)
+                res = get_folder_links_with_clicks(f["id"], days=30)
+                active = res.get("links") or []
+            if not active:
+                continue
+            detail = get_link(active[0]["id"])
+            cs = detail.get("raw", {}).get("link", {}).get("cs_template")
+            if cs:
+                mapping[cs] = f["name"]
+            time.sleep(0.6)  # rate limit safe
+        except Exception:
+            continue
+    _TEMPLATE_FOLDER_CACHE["map"] = mapping
+    _TEMPLATE_FOLDER_CACHE["ts"] = time.time()
+    return mapping
+
+
+def get_all_links_in_folder(folder_name: str) -> List[Dict[str, Any]]:
+    """Retourne TOUS les links d un folder (actifs + inactifs).
+
+    Cross-reference :
+    1. cs_template -> folder mapping (cache 5min)
+    2. Filtre les 88 links totaux par leur cs_template
+    """
+    if not folder_name:
+        return []
+    tpl_map = get_template_to_folder_map()
+    # Find cs_template(s) for this folder name
+    target_templates = {tpl for tpl, fname in tpl_map.items() if fname.lower() == folder_name.lower()}
+    if not target_templates:
+        return []
+    all_links = list_all_links_full()
+    return [l for l in all_links if l.get("cs_template") in target_templates]
+
+
 def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any]:
     """Retourne {ok, links: [{id, u, url, clicks}]} pour un folder donne.
 
