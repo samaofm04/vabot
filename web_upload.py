@@ -16590,7 +16590,20 @@ def create_app():
         # Genere le shortcode : prefix + 4 lettres random (lowercase)
         random_part = "".join(random.choices(string.ascii_lowercase, k=4))
         new_shortcode = prefix + random_part
-        return jsonify(linkscale.duplicate_link(template_id, new_shortcode=new_shortcode))
+        # Resolve le folder_id pour forcer le placement (Linkscale n'expose
+        # pas folders dans /links/{id} -> sans ca le link tombe dans 'sans dossier')
+        folders_override = None
+        try:
+            fid = linkscale.get_folder_id_by_name(folder_name)
+            if fid:
+                folders_override = [fid]
+        except Exception:
+            pass
+        return jsonify(linkscale.duplicate_link(
+            template_id,
+            new_shortcode=new_shortcode,
+            folders=folders_override,
+        ))
 
     @app.route("/linkscale/toggle", methods=["POST"])
     def linkscale_toggle():

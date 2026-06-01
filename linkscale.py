@@ -209,13 +209,17 @@ def disable_link(link_id: str) -> Dict[str, Any]:
     return update_link(link_id, {"enabled": False})
 
 
-def duplicate_link(link_id: str, new_shortcode: str = "") -> Dict[str, Any]:
+def duplicate_link(link_id: str, new_shortcode: str = "",
+                   folders: Optional[List[str]] = None) -> Dict[str, Any]:
     """Duplique un link en gardant ses folders + tous les autres champs.
 
     User wants : "quand je duplique je veux que tu range dans le meme dossier"
     -> on copie folders[] tel quel dans le nouveau link.
 
     Si new_shortcode est vide, on append "_copy" au shortcode original.
+    Si folders est fourni (liste d'IDs), il override le folder source - utile
+    quand la source n'expose pas folders (Linkscale stocke la relation via
+    cs_template, pas exposee dans /links/{id}).
     """
     src = get_link(link_id)
     if not src.get("ok"):
@@ -253,6 +257,24 @@ def duplicate_link(link_id: str, new_shortcode: str = "") -> Dict[str, Any]:
     for k in ("domain", "n", "note", "folders", "enabled"):
         if data.get(k) is not None:
             payload[k] = data[k]
+    # Override folders si fourni explicitement (le caller sait dans quel folder
+    # placer le link - Linkscale n'expose pas folders dans /links/{id}).
+    if folders:
+        payload["folders"] = list(folders)
+    # Fallback : si pas de folders ET source a un cs_template -> resolve via
+    # le mapping cs_template->folder pour ne pas perdre le rangement.
+    if not payload.get("folders"):
+        cs = data.get("cs_template")
+        if cs:
+            try:
+                tpl_map = get_template_to_folder_map()
+                folder_name = tpl_map.get(cs)
+                if folder_name:
+                    fid = get_folder_id_by_name(folder_name)
+                    if fid:
+                        payload["folders"] = [fid]
+            except Exception:
+                pass
     if ltype == "d_l":
         # Direct link : url cible obligatoire
         if data.get("url"):
