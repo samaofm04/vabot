@@ -12114,7 +12114,142 @@ function selectCreator(cid, name, color, hue){{
   // Reload calendrier si visible
   var cal = document.getElementById('mpl-calendar-block');
   if(cal && cal.classList.contains('open')) loadCalendar();
+  // Auto-load settings persistes pour ce createur (defensive)
+  try{{ mplLoadSettings(cid); }}catch(e){{ console.warn('mplLoadSettings err:', e); }}
 }}
+// === Per-creator settings persistence ===
+window.__mplSaveTimers = window.__mplSaveTimers || {{}};
+window.__mplLoadingSettings = false;
+async function mplLoadSettings(cid){{
+  if(!cid) return;
+  window.__mplLoadingSettings = true;
+  try{{
+    const r = await fetch('/mypulslive/settings/' + encodeURIComponent(cid));
+    const j = await r.json();
+    if(!j.ok || !j.settings) return;
+    const s = j.settings;
+    // Dates periode
+    const ds = document.querySelector('input[name=date_start]');
+    if(ds && s.start_date) ds.value = s.start_date;
+    const de = document.querySelector('input[name=date_end]');
+    if(de && s.end_date) de.value = s.end_date;
+    // Infinite mode
+    const inf = document.getElementById('mpl-infinite');
+    if(inf && typeof s.infinite_mode === 'boolean'){{
+      inf.value = s.infinite_mode ? '1' : '0';
+      const t = document.getElementById('mpl-infinite-toggle');
+      if(t) t.classList.toggle('active', s.infinite_mode);
+    }}
+    // Posts count + slots
+    if(s.posts){{
+      const pc = document.getElementById('mpl-posts-count');
+      if(pc && typeof s.posts.count === 'number') pc.value = s.posts.count;
+      if(typeof renderPostSlots === 'function') renderPostSlots();
+      // Restore visibility/time apres render (asynchrone)
+      setTimeout(() => mplApplySlotData('mpl-slots', s.posts.slots || []), 50);
+    }}
+    // Stories slots
+    if(s.stories && s.stories.slots){{
+      const sj = document.getElementById('mpl-story-slots-json');
+      if(sj) sj.value = JSON.stringify(s.stories.slots);
+      if(typeof renderStorySlots === 'function') renderStorySlots();
+    }}
+    // Captions
+    const cap = document.getElementById('mpl-captions');
+    if(cap && Array.isArray(s.captions) && s.captions.length){{
+      cap.value = s.captions.join('\\n');
+      if(typeof updateCapCount === 'function') updateCapCount();
+    }}
+    // Media pool
+    const mi = document.getElementById('mpl-media-ids');
+    if(mi && Array.isArray(s.media_pool) && s.media_pool.length){{
+      mi.value = s.media_pool.join('\\n');
+      if(typeof updateMediaCount === 'function') updateMediaCount();
+    }}
+  }} catch(e){{ console.warn('mplLoadSettings:', e); }}
+  finally{{ setTimeout(() => {{ window.__mplLoadingSettings = false; }}, 100); }}
+}}
+function mplApplySlotData(containerId, slots){{
+  if(!Array.isArray(slots)) return;
+  const c = document.getElementById(containerId);
+  if(!c) return;
+  const rows = c.querySelectorAll('.mpl-slot');
+  rows.forEach((row, i) => {{
+    if(i >= slots.length) return;
+    const data = slots[i] || {{}};
+    const t = row.querySelector('input[type=time]');
+    if(t && data.time) t.value = data.time;
+    const vis = row.querySelector('[data-visibility]');
+    if(vis && data.visibility) vis.dataset.visibility = data.visibility;
+  }});
+}}
+function mplGetCurrentSettings(){{
+  // Capture l etat actuel du form pour persistance
+  const ds = document.querySelector('input[name=date_start]');
+  const de = document.querySelector('input[name=date_end]');
+  const inf = document.getElementById('mpl-infinite');
+  const pc = document.getElementById('mpl-posts-count');
+  const cap = document.getElementById('mpl-captions');
+  const mi = document.getElementById('mpl-media-ids');
+  const sj = document.getElementById('mpl-story-slots-json');
+  // Extract post slots
+  const postSlots = [];
+  document.querySelectorAll('#mpl-slots .mpl-slot').forEach(row => {{
+    const t = row.querySelector('input[type=time]');
+    const vis = row.querySelector('[data-visibility]');
+    if(t) postSlots.push({{time: t.value || '', visibility: (vis && vis.dataset.visibility) || 'public'}});
+  }});
+  let storySlots = [];
+  try{{ storySlots = sj ? JSON.parse(sj.value || '[]') : []; }}catch(e){{}}
+  return {{
+    start_date: ds ? ds.value : '',
+    end_date: de ? de.value : '',
+    infinite_mode: inf ? inf.value === '1' : false,
+    posts: {{
+      count: pc ? parseInt(pc.value || '0', 10) : 0,
+      slots: postSlots,
+    }},
+    stories: {{
+      count: storySlots.length,
+      slots: storySlots,
+    }},
+    captions: cap ? cap.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
+    media_pool: mi ? mi.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
+  }};
+}}
+function mplScheduleSave(){{
+  if(window.__mplLoadingSettings) return;
+  const cid = document.getElementById('mpl-creator-id');
+  if(!cid || !cid.value) return;
+  const id = cid.value;
+  clearTimeout(window.__mplSaveTimers[id]);
+  window.__mplSaveTimers[id] = setTimeout(async () => {{
+    try{{
+      const settings = mplGetCurrentSettings();
+      await fetch('/mypulslive/settings/' + encodeURIComponent(id), {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(settings),
+      }});
+    }} catch(e){{ console.warn('mplScheduleSave:', e); }}
+  }}, 600);
+}}
+// Hook les events sur la section MyPuls Live
+document.addEventListener('DOMContentLoaded', () => {{
+  const section = document.getElementById('form-mypulslive');
+  if(!section) return;
+  ['input', 'change', 'click'].forEach(ev => {{
+    section.addEventListener(ev, (e) => {{
+      const t = e.target;
+      if(!t) return;
+      // Skip les boutons d action (Pousser, Charger, etc.)
+      if(t.tagName === 'BUTTON' && !t.dataset.visibility) return;
+      // Skip clicks sur les cards creator (gere par selectCreator)
+      if(t.closest && t.closest('.mpl-cr-card')) return;
+      mplScheduleSave();
+    }}, true);
+  }});
+}});
 function updateMediaCount(){{
   const ta = document.getElementById('mpl-media-ids');
   const n = ta.value.split('\\n').filter(x=>x.trim()).length;
@@ -15012,6 +15147,49 @@ def create_app():
             (request.form.get("value") or "").strip(),
             week_start=(request.form.get("week_start") or "").strip(),
         )
+        return jsonify({"ok": ok})
+
+    # ============ MyPuls Live - settings persistes par createur ============
+    @app.route("/mypulslive/settings/<creator_id>", methods=["GET"])
+    def mypulslive_settings_get(creator_id):
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls_creator_settings as mcs
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        return jsonify({"ok": True, "settings": mcs.get_settings(creator_id)})
+
+    @app.route("/mypulslive/settings/<creator_id>", methods=["POST"])
+    def mypulslive_settings_save(creator_id):
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls_creator_settings as mcs
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        # Le payload peut etre :
+        # - Un JSON body complet -> save_settings (overwrite)
+        # - Un form-data avec field=KEY value=VALUE_JSON -> update_settings (patch)
+        from flask import request as _r
+        if _r.is_json:
+            payload = _r.get_json(silent=True) or {}
+            ok = mcs.save_settings(creator_id, payload)
+            return jsonify({"ok": ok})
+        # Patch mode : field + value (value est un JSON string)
+        field = (_r.form.get("field") or "").strip()
+        raw_value = _r.form.get("value")
+        if not field:
+            return jsonify({"ok": False, "error": "field manquant"})
+        try:
+            value = json.loads(raw_value) if raw_value else None
+        except Exception:
+            value = raw_value
+        ok = mcs.update_settings(creator_id, **{field: value})
         return jsonify({"ok": ok})
 
     @app.route("/mypulslive/refresh_creators", methods=["GET"])
