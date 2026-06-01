@@ -12165,18 +12165,28 @@ async function mplLoadSettings(cid){{
       const t = document.getElementById('mpl-infinite-toggle');
       if(t) t.classList.toggle('active', s.infinite_mode);
     }}
-    // Posts count + slots
+    // Posts count + slots : on remplace direct le array global
     if(s.posts){{
+      if(Array.isArray(s.posts.slots)){{
+        if(typeof postSlots !== 'undefined') {{ postSlots.length = 0; s.posts.slots.forEach(x => postSlots.push(x)); }}
+      }}
       const pc = document.getElementById('mpl-posts-count');
-      if(pc && typeof s.posts.count === 'number') pc.value = s.posts.count;
+      if(pc){{
+        pc.value = (typeof postSlots !== 'undefined') ? postSlots.length : (s.posts.count || 0);
+      }}
       if(typeof renderPostSlots === 'function') renderPostSlots();
-      // Restore visibility/time apres render (asynchrone)
-      setTimeout(() => mplApplySlotData('mpl-slots', s.posts.slots || []), 50);
     }}
-    // Stories slots
-    if(s.stories && s.stories.slots){{
+    // Stories : pareil, on remplace le array global storySlots
+    if(s.stories){{
+      if(Array.isArray(s.stories.slots)){{
+        if(typeof storySlots !== 'undefined') {{ storySlots.length = 0; s.stories.slots.forEach(x => storySlots.push(x)); }}
+      }}
+      const sc = document.getElementById('mpl-stories-count');
+      if(sc){{
+        sc.value = (typeof storySlots !== 'undefined') ? storySlots.length : (s.stories.count || 0);
+      }}
       const sj = document.getElementById('mpl-story-slots-json');
-      if(sj) sj.value = JSON.stringify(s.stories.slots);
+      if(sj && Array.isArray(s.stories.slots)) sj.value = JSON.stringify(s.stories.slots);
       if(typeof renderStorySlots === 'function') renderStorySlots();
     }}
     // Captions
@@ -12213,34 +12223,28 @@ function mplApplySlotData(containerId, slots){{
   }});
 }}
 function mplGetCurrentSettings(){{
-  // Capture l etat actuel du form pour persistance
+  // Capture l etat actuel pour persistance.
+  // On lit DIRECTEMENT les arrays globaux postSlots/storySlots (la source
+  // de verite cote JS), pas le DOM, pour eviter les race conditions
+  // pendant les renders.
   const ds = document.querySelector('input[name=date_start]');
   const de = document.querySelector('input[name=date_end]');
   const inf = document.getElementById('mpl-infinite');
-  const pc = document.getElementById('mpl-posts-count');
   const cap = document.getElementById('mpl-captions');
   const mi = document.getElementById('mpl-media-ids');
-  const sj = document.getElementById('mpl-story-slots-json');
-  // Extract post slots
-  const postSlots = [];
-  document.querySelectorAll('#mpl-slots .mpl-slot').forEach(row => {{
-    const t = row.querySelector('input[type=time]');
-    const vis = row.querySelector('[data-visibility]');
-    if(t) postSlots.push({{time: t.value || '', visibility: (vis && vis.dataset.visibility) || 'public'}});
-  }});
-  let storySlots = [];
-  try{{ storySlots = sj ? JSON.parse(sj.value || '[]') : []; }}catch(e){{}}
+  const ps = (typeof postSlots !== 'undefined' && Array.isArray(postSlots)) ? postSlots.slice() : [];
+  const ss = (typeof storySlots !== 'undefined' && Array.isArray(storySlots)) ? storySlots.slice() : [];
   return {{
     start_date: ds ? ds.value : '',
     end_date: de ? de.value : '',
     infinite_mode: inf ? inf.value === '1' : false,
     posts: {{
-      count: pc ? parseInt(pc.value || '0', 10) : 0,
-      slots: postSlots,
+      count: ps.length,
+      slots: ps,
     }},
     stories: {{
-      count: storySlots.length,
-      slots: storySlots,
+      count: ss.length,
+      slots: ss,
     }},
     captions: cap ? cap.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
     media_pool: mi ? mi.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
