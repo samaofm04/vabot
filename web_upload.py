@@ -8814,15 +8814,12 @@ def _render_geelark_html() -> str:
         )
 
     # JS interactions + data inject pour le modal create
-    js = f"""
-<style>
-@keyframes vbPulse {{{{0%,100%{{{{opacity:1}}}}50%{{{{opacity:.3}}}}}}}}
-</style>
-<script>
-window.__glGroups = {groups_json};
-window.__glIdentities = {identities_json};
-</script>
-""" + """
+    # Note : on construit le bout f-string puis le concat avec une string
+    # normale qui contient toute la logique JS (sans escape de braces).
+    js = (
+        "<style>@keyframes vbPulse{0%,100%{opacity:1}50%{opacity:.3}}</style>\n"
+        f"<script>\nwindow.__glGroups = {groups_json};\nwindow.__glIdentities = {identities_json};\n</script>\n"
+    ) + """
 <script>
 function glOpenCreateModal(){
   const overlay = document.createElement('div');
