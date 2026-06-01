@@ -214,10 +214,26 @@ def duplicate_link(link_id: str, new_shortcode: str = "") -> Dict[str, Any]:
     src = get_link(link_id)
     if not src.get("ok"):
         return src
+    # Linkscale peut renvoyer le link sous differentes formes :
+    # - {data: {_id, u, ...}}  -> raw.data
+    # - {link: {_id, u, ...}}  -> raw.link
+    # - {_id, u, ...}          -> raw direct
     raw = src.get("raw") or {}
-    data = raw.get("data") if isinstance(raw, dict) else raw
+    data = None
+    if isinstance(raw, dict):
+        if isinstance(raw.get("data"), dict):
+            data = raw["data"]
+        elif isinstance(raw.get("link"), dict):
+            data = raw["link"]
+        elif raw.get("_id") or raw.get("u"):
+            data = raw
     if not isinstance(data, dict):
-        return {"ok": False, "error": "donnees du link source invalides"}
+        # Fallback : utiliser src.data si dispo
+        sd = src.get("data")
+        if isinstance(sd, dict) and (sd.get("_id") or sd.get("u")):
+            data = sd
+    if not isinstance(data, dict):
+        return {"ok": False, "error": f"donnees du link source invalides (raw keys: {list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__})"}
     # Copy les fields createur
     payload: Dict[str, Any] = {}
     for k in ("type", "u", "domain", "url", "n", "bio", "links", "pp", "cover",

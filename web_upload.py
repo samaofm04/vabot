@@ -4666,6 +4666,10 @@ function vaPaySave(){
 .vlm-gen:disabled{opacity:.45;cursor:not-allowed}
 .vlm-row-dup{background:transparent;border:1px solid #2a2a2a;color:#777;width:26px;height:26px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s}
 .vlm-row-dup:hover{border-color:#3b82f6;color:#3b82f6}
+.vlm-row-star{background:transparent;border:1px solid #2a2a2a;color:#666;width:26px;height:26px;border-radius:6px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s;margin-right:4px}
+.vlm-row-star:hover{border-color:#fbbf24;color:#fbbf24}
+.vlm-row-star.active{border-color:#fbbf24;color:#fbbf24;background:rgba(251,191,36,.08)}
+.vlm-star-badge{font-size:11px;margin-left:4px}
 .vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
 .vlm-save:hover{background:#9333ea}
 body.light .vlm-box{background:#fff;border-color:#e5e7eb}
@@ -4728,12 +4732,14 @@ function vaLinksRender(){
     html += '<div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:14px 8px 6px">' + model + '</div>';
     groupedByModel[model].forEach(function(l){
       var checked = current.indexOf(l.id) !== -1;
+      var isStar = vaLinksGetTemplate(l.model) === l.id;
       html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this, event)">'
         + '<div class="vlm-cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
         + '<div class="vlm-info">'
-        + '<div class="vlm-name">' + l.name + '</div>'
+        + '<div class="vlm-name">' + l.name + (isStar ? ' <span class="vlm-star-badge" title="Template du dossier">⭐</span>' : '') + '</div>'
         + '<div class="vlm-meta">/' + l.shortcode + '</div>'
         + '</div>'
+        + '<button type="button" class="vlm-row-star ' + (isStar ? 'active' : '') + '" data-star-id="' + l.id + '" data-star-folder="' + l.model.replace(/"/g, '&quot;') + '" title="Definir comme template du dossier (Generer dupliquera celui-ci)" onclick="vaLinksToggleTemplate(event, this)">' + (isStar ? '⭐' : '☆') + '</button>'
         + '<button type="button" class="vlm-row-dup" data-dup-id="' + l.id + '" title="Dupliquer ce lien dans le meme dossier" onclick="vaLinksDuplicateOne(event, this)">⎘</button>'
         + '</div>';
     });
@@ -4755,8 +4761,42 @@ function vaLinksSetModel(btn){
   if(q) vaLinksFilter(q);
 }
 function vaLinksToggle(el, e){
-  if(e && e.target && e.target.classList && e.target.classList.contains('vlm-row-dup')) return;
+  if(e && e.target && e.target.classList){
+    if(e.target.classList.contains('vlm-row-dup')) return;
+    if(e.target.classList.contains('vlm-row-star')) return;
+  }
   el.classList.toggle('checked');
+}
+function vaLinksGetTemplate(folder){
+  try{
+    var saved = localStorage.getItem('vabot_lks_template_' + (folder||'').toLowerCase());
+    return saved || '';
+  }catch(e){ return ''; }
+}
+function vaLinksSetTemplate(folder, linkId){
+  try{
+    if(linkId){
+      localStorage.setItem('vabot_lks_template_' + folder.toLowerCase(), linkId);
+    } else {
+      localStorage.removeItem('vabot_lks_template_' + folder.toLowerCase());
+    }
+  }catch(e){}
+}
+function vaLinksToggleTemplate(e, btn){
+  if(e){ e.stopPropagation(); e.preventDefault(); }
+  var folder = btn.getAttribute('data-star-folder') || '';
+  var linkId = btn.getAttribute('data-star-id') || '';
+  if(!folder || !linkId) return;
+  var current = vaLinksGetTemplate(folder);
+  if(current === linkId){
+    // Toggle off
+    vaLinksSetTemplate(folder, '');
+    if(typeof showToast === 'function') showToast('Template retire pour ' + folder, 'info');
+  } else {
+    vaLinksSetTemplate(folder, linkId);
+    if(typeof showToast === 'function') showToast('⭐ Template defini pour ' + folder, 'success');
+  }
+  vaLinksRender();
 }
 function vaLinksFilter(q){
   q = (q||'').toLowerCase().trim();
@@ -4864,6 +4904,9 @@ function vaLinksGenerate(){
   var fd = new FormData();
   fd.append('folder_name', folder);
   fd.append('prefix', prefix);
+  // Si l'utilisateur a defini un template (⭐), l'envoyer pour dupliquer celui-ci
+  var templateId = vaLinksGetTemplate(folder);
+  if(templateId) fd.append('template_link_id', templateId);
   fetch('/linkscale/generate', {method:'POST', body:fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -16520,12 +16563,26 @@ def create_app():
                         break
                 if not target_cs:
                     return jsonify({"ok": False, "error": f"folder '{folder_name}' inconnu (pas de template mappe)"})
-                # Cherche un lien du folder
+                # Cherche le PREMIER LIEN ACTIVE du folder (eviter les bio/landing
+                # pages qui peuvent avoir une structure differente)
                 all_links = linkscale.list_all_links_full()
+                # 1ere passe : direct link (d_l) actif
                 for link in all_links:
-                    if link.get("cs_template") == target_cs:
+                    if link.get("cs_template") == target_cs and link.get("t") == "d_l" and link.get("enabled", True):
                         template_id = link.get("_id")
                         break
+                # 2eme passe : nimporte quel direct link
+                if not template_id:
+                    for link in all_links:
+                        if link.get("cs_template") == target_cs and link.get("t") == "d_l":
+                            template_id = link.get("_id")
+                            break
+                # 3eme passe : nimporte quel lien du folder
+                if not template_id:
+                    for link in all_links:
+                        if link.get("cs_template") == target_cs:
+                            template_id = link.get("_id")
+                            break
                 if not template_id:
                     return jsonify({"ok": False, "error": f"aucun lien template trouve dans '{folder_name}'"})
             except Exception as e:
