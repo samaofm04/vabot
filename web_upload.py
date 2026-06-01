@@ -4876,7 +4876,7 @@ function vaLinksEditPrefix(btn){
   var folder = btn.getAttribute('data-pill-edit') || '';
   if(!folder) return;
   var current = vaLinksGetPrefix(folder);
-  var p = prompt('Préfixe par défaut pour ' + folder + ' (vide = reset, 4 lettres random toujours ajoutées) :', current);
+  var p = prompt('Texte pour ' + folder + ' (vide = nom du folder). Le shortcode final sera : <4 lettres random>' + (current||'<texte>') + ' (ex: xkqp' + (current||folder.toLowerCase()) + ')', current);
   if(p === null) return;
   vaLinksSetPrefix(folder, p);
   if(typeof showToast === 'function') showToast('Préfixe sauvegardé pour ' + folder, 'success');
@@ -16587,9 +16587,9 @@ def create_app():
                     return jsonify({"ok": False, "error": f"aucun lien template trouve dans '{folder_name}'"})
             except Exception as e:
                 return jsonify({"ok": False, "error": f"resolution template: {e}"})
-        # Genere le shortcode : prefix + 4 lettres random (lowercase)
+        # Genere le shortcode : 4 lettres random + prefix (user veut "xxxxamelia")
         random_part = "".join(random.choices(string.ascii_lowercase, k=4))
-        new_shortcode = prefix + random_part
+        new_shortcode = random_part + prefix
         # Resolve le folder_id pour forcer le placement (Linkscale n'expose
         # pas folders dans /links/{id} -> sans ca le link tombe dans 'sans dossier')
         folders_override = None
