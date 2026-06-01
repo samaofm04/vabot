@@ -8454,19 +8454,64 @@ def _render_linkscale_html() -> str:
             "</div></div>"
         )
 
-    # Filtre la liste si un folder est selectionne
-    if selected_folder_name:
-        grouped = {k: v for k, v in grouped.items() if k.lower() == selected_folder_name.lower()}
-        total_links = sum(len(v) for v in grouped.values())
-
-    # Liste groupee par folder
-    if total_links == 0:
-        empty_msg = "Aucun link dans ce dossier" if selected_folder_name else "Aucun link pour le moment"
+    # Si un folder est selectionne, fetch ses links avec clicks
+    if selected_folder and selected_folder.get("id"):
+        try:
+            res = linkscale.get_folder_links_with_clicks(selected_folder["id"], days=7)
+            folder_links = res.get("links", []) or []
+        except Exception:
+            folder_links = []
+        list_html = ""
+        if not folder_links:
+            list_html = (
+                "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
+                "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
+                "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link actif dans ce dossier (7 derniers jours)</div>"
+                "<div style='color:#555;font-size:11px'>Les links sans clicks recents n apparaissent pas ici - voir directement sur Linkscale</div>"
+                "</div>"
+            )
+        else:
+            list_html = (
+                "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px'>"
+                f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+                f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📁</div>"
+                f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Links dans {selected_folder['name']} ({len(folder_links)} actifs)</div>"
+                f"<div style='font-size:11px;color:#666'>Tries par clicks descendant - 7 derniers jours</div></div>"
+                f"</div>"
+            )
+            for lk in folder_links:
+                lid = lk.get("id", "")
+                u = (lk.get("u") or "?").replace("<", "&lt;")
+                url = (lk.get("url") or "").replace("<", "&lt;")
+                clicks = lk.get("clicks", 0)
+                bots = lk.get("bots", 0)
+                # Color selon nb de clicks
+                if clicks >= 50: clicks_color = "#22c55e"
+                elif clicks >= 10: clicks_color = "#3b82f6"
+                elif clicks >= 1: clicks_color = "#a855f7"
+                else: clicks_color = "#666"
+                list_html += (
+                    f"<div style='display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;margin-bottom:6px'>"
+                    f"<div style='flex:1;min-width:0'>"
+                    f"<div style='color:#fff;font-weight:600;font-size:13px;font-family:monospace'>/{u}</div>"
+                    f"<div style='color:#888;font-size:11px;margin-top:2px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{url}</div>"
+                    f"</div>"
+                    f"<div style='display:flex;flex-direction:column;align-items:center;min-width:64px'>"
+                    f"<div style='font-size:20px;font-weight:800;color:{clicks_color}'>{clicks}</div>"
+                    f"<div style='font-size:9px;color:#666;letter-spacing:.5px'>CLICKS 7J</div>"
+                    f"</div>"
+                    f"<button type='button' onclick=\"lsDuplicate('{lid}', this)\" style='background:transparent;border:1px solid #2a3a5a;color:#3b82f6;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Dupliquer dans le meme dossier'>⎘</button>"
+                    f"<button type='button' onclick=\"lsDelete('{lid}', this)\" style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer'>🗑</button>"
+                    f"</div>"
+                )
+            list_html += "</div>"
+    elif total_links == 0:
+        empty_msg = "Aucun link pour le moment - clique sur un dossier ci-dessus"
         list_html = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
             "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
             f"<div style='color:#888;font-size:13px;margin-bottom:6px'>{empty_msg}</div>"
-            "<div style='color:#555;font-size:11px'>Clique sur \"+ Creer un link\" pour commencer</div>"
+            "<div style='color:#555;font-size:11px'>Selectionne un dossier (emma, lola, amelia...) pour voir ses links</div>"
             "</div>"
         )
     else:

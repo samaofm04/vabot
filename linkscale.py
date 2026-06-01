@@ -314,44 +314,58 @@ def get_link_click_summary(link_id: str) -> Dict[str, int]:
     return out
 
 
-def get_links_grouped_by_folder() -> Dict[str, List[Dict[str, Any]]]:
-    """Retourne {folder_name: [links...]} - utile pour l UI groupee.
+def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any]:
+    """Retourne {ok, links: [{id, u, url, clicks}]} pour un folder donne.
 
-    Strategie :
-    1. Recupere la liste des folders (les noms + ids)
-    2. Recupere tous les links
-    3. Pour chaque link, regarde son champ folders[] (peut etre [id, ...] ou
-       [{_id, name, ...}, ...])
-    4. Resout l id -> name via la map de folders
+    L API expose les links d un folder via /folders/{id}/stats avec
+    include_clicks=true et traffic_data_type=links. Sur 1 a 7 jours
+    typiquement (sinon memory limit serveur).
+
+    Note : les links inactifs (0 clicks) ne sont PAS renvoyes par cet
+    endpoint. Donc on n a que les "active" links du folder.
     """
-    folders = list_folders()
-    id_to_name = {f.get("id"): f.get("name") for f in folders if f.get("id")}
-
-    all_res = list_all_links()
-    if not all_res.get("ok"):
-        # Au moins on a les folders meme si pas de links
-        return {f["name"]: [] for f in folders}
-
-    out: Dict[str, List[Dict[str, Any]]] = {f["name"]: [] for f in folders}
-    out["(sans dossier)"] = []
-
-    for link in all_res.get("links", []):
-        link_folders = link.get("folders") or []
-        if not link_folders:
-            out["(sans dossier)"].append(link)
+    if not folder_id:
+        return {"ok": False, "links": []}
+    res = _request("GET", f"/folders/{folder_id}/stats", params={
+        "from": _iso_date_offset(days),
+        "to": _iso_date_offset(0),
+        "include_clicks": "true",
+        "traffic_data_type": "links",
+    })
+    if not res.get("ok"):
+        return {"ok": False, "links": [], "error": res.get("error")}
+    raw = res.get("raw") or {}
+    stats = raw.get("stats", {}) if isinstance(raw, dict) else {}
+    traffic = stats.get("trafficByLinks") or stats.get("traffic_by_links") or []
+    if not isinstance(traffic, list):
+        return {"ok": True, "links": []}
+    # Aggrege par link _id (sum des clicks sur la periode)
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for t in traffic:
+        if not isinstance(t, dict):
             continue
-        placed = False
-        for f in link_folders:
-            if isinstance(f, dict):
-                fname = f.get("name") or id_to_name.get(f.get("_id") or f.get("id"))
-            else:
-                fname = id_to_name.get(str(f)) or str(f)
-            if fname:
-                out.setdefault(fname, []).append(link)
-                placed = True
-        if not placed:
-            out["(sans dossier)"].append(link)
-    # Drop les groupes vides "(sans dossier)" si rien dedans
-    if not out.get("(sans dossier)"):
-        out.pop("(sans dossier)", None)
-    return out
+        lid = t.get("id") or t.get("_id")
+        if not lid:
+            continue
+        if lid not in by_id:
+            by_id[lid] = {
+                "id": lid,
+                "u": t.get("u") or "?",
+                "url": t.get("url") or "",
+                "host": t.get("host") or "",
+                "note": t.get("note") or "",
+                "clicks": 0,
+                "bots": 0,
+            }
+        by_id[lid]["clicks"] += int(t.get("clicks") or 0)
+        by_id[lid]["bots"] += int(t.get("bots") or 0)
+    # Tri par clicks descendant
+    out = sorted(by_id.values(), key=lambda x: -x["clicks"])
+    return {"ok": True, "links": out}
+
+
+def get_links_grouped_by_folder() -> Dict[str, List[Dict[str, Any]]]:
+    """Retourne {folder_name: [...]} - vide pour les folders, juste pour
+    initialiser la structure UI. Le detail des links est fetch lazy au
+    click sur un folder (via get_folder_links_with_clicks)."""
+    return {f["name"]: [] for f in list_folders()}
