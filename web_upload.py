@@ -12195,9 +12195,20 @@ function selectCreator(cid, name, color, hue){{
   if(el) el.innerHTML = '';
   var es = document.getElementById('mpl-events-status');
   if(es){{ es.textContent = 'Choisis une periode + clique "Charger events"'; es.style.color='#888'; }}
-  // Reload calendrier si visible
+  // Reload calendrier si l element existe (peu importe son etat ouvert/ferme)
+  // Le user a pu switcher de tab vers "Emploi du temps" et le bloc n a pas
+  // forcement la class 'open' tout en etant visible.
   var cal = document.getElementById('mpl-calendar-block');
-  if(cal && cal.classList.contains('open')) loadCalendar();
+  if(cal && typeof loadCalendar === 'function'){{
+    // Petit delai pour laisser mplLoadSettings finir de charger les dates
+    setTimeout(() => {{
+      try{{ loadCalendar(); }}catch(e){{ console.warn('loadCalendar err:', e); }}
+    }}, 80);
+  }}
+  // Reset aussi les events selectionnes (cleared) + status text
+  if(typeof window.__mplSelectedEvents !== 'undefined') window.__mplSelectedEvents = new Set();
+  var elist = document.getElementById('mpl-events-list');
+  if(elist) elist.innerHTML = '';
   // Auto-load settings persistes pour ce createur (defensive)
   try{{ mplLoadSettings(cid); }}catch(e){{ console.warn('mplLoadSettings err:', e); }}
 }}
