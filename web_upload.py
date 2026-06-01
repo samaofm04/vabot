@@ -8822,72 +8822,65 @@ def _render_geelark_html() -> str:
     ) + """
 <script>
 function glOpenCreateModal(){
+  console.log('glOpenCreateModal called');
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
-  overlay.onclick = (e) => { if(e.target === overlay) close(); };
+  overlay.onclick = function(e){ if(e.target === overlay) close(); };
   const card = document.createElement('div');
   card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden';
-  const grps = window.__glGroups || [];
-  const idents = window.__glIdentities || [];
-  const grpOpts = grps.length ? grps.map(g => `<option value="${g.name}">${g.name}</option>`).join('') : '';
-  const identOpts = idents.length ? idents.map(i => `<option value="${i}">${i}</option>`).join('') : '';
-  card.innerHTML = `
-    <div style='padding:20px 24px;border-bottom:1px solid #232323'>
-      <div style='display:flex;align-items:center;gap:10px'>
-        <div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📱</div>
-        <div>
-          <div style='color:#fff;font-weight:700;font-size:16px'>Créer un push GeeLark</div>
-          <div style='color:#888;font-size:12px;margin-top:2px'>Quotidien à l\\'heure de Paris</div>
-        </div>
-      </div>
-    </div>
-    <div style='padding:18px 24px;display:flex;flex-direction:column;gap:14px'>
-      <div>
-        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Groupe GeeLark *</label>
-        ${grps.length ? `
-          <select id='gl-cr-group' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
-            <option value=''>-- choisir --</option>${grpOpts}
-          </select>
-        ` : `
-          <input type='text' id='gl-cr-group' placeholder='Nom du groupe GeeLark' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
-          <small style='color:#888;font-size:11px'>API GeeLark indisponible - tape le nom manuellement</small>
-        `}
-      </div>
-      <div>
-        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Identité *</label>
-        ${idents.length ? `
-          <select id='gl-cr-ident' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
-            <option value=''>-- choisir --</option>${identOpts}
-          </select>
-        ` : `
-          <input type='text' id='gl-cr-ident' placeholder='nom de l identité (ex: emma)' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
-        `}
-      </div>
-      <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px'>
-        <div>
-          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Reels</label>
-          <input type='number' id='gl-cr-reels' value='1' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
-        </div>
-        <div>
-          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Stories</label>
-          <input type='number' id='gl-cr-stories' value='3' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
-        </div>
-        <div>
-          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>CTAs</label>
-          <input type='number' id='gl-cr-ctas' value='1' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
-        </div>
-      </div>
-      <div>
-        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Heure de push (heure Paris) *</label>
-        <input type='time' id='gl-cr-time' value='22:00' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
-        <small style='color:#666;font-size:11px;display:block;margin-top:4px'>Le push s exécute chaque jour à cette heure</small>
-      </div>
-    </div>
-    <div style='padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f'>
-      <button type='button' id='gl-cr-cancel' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>
-      <button type='button' id='gl-cr-save' style='background:#a855f7;color:#fff;border:0;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.3)'>Créer</button>
-    </div>
-  `;
+  var grps = window.__glGroups || [];
+  var idents = window.__glIdentities || [];
+  // Build options via DOM-safe concat (pas de template literals nested)
+  var grpField = '';
+  if(grps.length){
+    var grpOpts = '';
+    for(var i=0; i<grps.length; i++) grpOpts += '<option value="' + grps[i].name + '">' + grps[i].name + '</option>';
+    grpField = '<select id="gl-cr-group" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><option value="">-- choisir --</option>' + grpOpts + '</select>';
+  } else {
+    grpField = '<input type="text" id="gl-cr-group" placeholder="Nom du groupe GeeLark" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><small style="color:#888;font-size:11px">API GeeLark indisponible - tape le nom manuellement</small>';
+  }
+  var identField = '';
+  if(idents.length){
+    var identOpts = '';
+    for(var k=0; k<idents.length; k++) identOpts += '<option value="' + idents[k] + '">' + idents[k] + '</option>';
+    identField = '<select id="gl-cr-ident" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><option value="">-- choisir --</option>' + identOpts + '</select>';
+  } else {
+    identField = '<input type="text" id="gl-cr-ident" placeholder="nom de l identite (ex: emma)" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">';
+  }
+  card.innerHTML =
+    '<div style="padding:20px 24px;border-bottom:1px solid #232323">' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px">📱</div>' +
+        '<div>' +
+          '<div style="color:#fff;font-weight:700;font-size:16px">Créer un push GeeLark</div>' +
+          '<div style="color:#888;font-size:12px;margin-top:2px">Quotidien a heure de Paris</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:18px 24px;display:flex;flex-direction:column;gap:14px">' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Groupe GeeLark *</label>' +
+        grpField +
+      '</div>' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Identite *</label>' +
+        identField +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Reels</label><input type="number" id="gl-cr-reels" value="1" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Stories</label><input type="number" id="gl-cr-stories" value="3" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">CTAs</label><input type="number" id="gl-cr-ctas" value="1" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+      '</div>' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Heure de push (heure Paris) *</label>' +
+        '<input type="time" id="gl-cr-time" value="22:00" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' +
+        '<small style="color:#666;font-size:11px;display:block;margin-top:4px">Le push s execute chaque jour a cette heure</small>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f">' +
+      '<button type="button" id="gl-cr-cancel" style="background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">Annuler</button>' +
+      '<button type="button" id="gl-cr-save" style="background:#a855f7;color:#fff;border:0;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.3)">Creer</button>' +
+    '</div>';
   overlay.appendChild(card);
   document.body.appendChild(overlay);
   setTimeout(() => {
