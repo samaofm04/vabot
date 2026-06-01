@@ -11458,9 +11458,12 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
-      <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
+      <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap'>
         <small style='color:#888' id='mpl-media-status'>Liste des media_id MyPuls. Ordre = ordre de publication.</small>
-        <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
+        <div style='display:flex;gap:6px'>
+          <button type='button' class='mpl-fetch-btn' onclick='bulkPasteMedia()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>📋 Bulk paste</button>
+          <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
+        </div>
       </div>
       <div class='mpl-slots' id='mpl-media-list'></div>
       <button type='button' class='mpl-add-slot' onclick='addMediaSlot()'>+ Ajouter un media_id</button>
@@ -11480,6 +11483,9 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
+      <div style='display:flex;justify-content:flex-end;margin-bottom:8px'>
+        <button type='button' class='mpl-fetch-btn' onclick='bulkPasteCaptions()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>📋 Bulk paste</button>
+      </div>
       <div class='mpl-slots' id='mpl-captions-list'></div>
       <button type='button' class='mpl-add-slot' onclick='addCaptionSlot()'>+ Ajouter une caption</button>
       <!-- Hidden textarea pour compat form submit -->
@@ -12337,6 +12343,48 @@ function renderMediaSlots(){{
     </div>
   `).join('');
   syncMediaSlots();
+}}
+// Bulk paste explicite via bouton "📋 Bulk paste"
+// Ouvre un prompt multi-ligne, ajoute chaque ligne comme un nouveau slot
+function bulkPasteMedia(){{
+  const raw = prompt(
+    'Colle plusieurs media_id (1 par ligne).\\n\\n'+
+    'Comportement :\\n'+
+    '- "Remplacer" : ecrase la liste actuelle\\n'+
+    '- "Ajouter" : ajoute a la fin (defaut Annuler dans le 2e prompt)'
+  );
+  if(!raw) return;
+  const lines = raw.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
+  if(!lines.length) return;
+  // Demande mode : remplacer (OK) ou ajouter (Annuler)
+  const replace = window.mediaSlots.length === 0 ? true :
+    confirm(`Tu as deja ${{window.mediaSlots.length}} media(s). Cliquer "OK" pour REMPLACER, "Annuler" pour AJOUTER ${{lines.length}} a la fin.`);
+  if(replace) window.mediaSlots = lines.slice();
+  else window.mediaSlots.push(...lines);
+  renderMediaSlots();
+  if(typeof showToast === 'function'){{
+    const verb = replace ? 'remplaces par' : 'ajoutes :';
+    showToast('✓ ' + lines.length + ' media_ids ' + verb, 'success', 3000);
+  }}
+}}
+function bulkPasteCaptions(){{
+  const raw = prompt(
+    'Colle plusieurs captions (1 par ligne).\\n\\n'+
+    '- "Remplacer" : ecrase la liste actuelle\\n'+
+    '- "Ajouter" : ajoute a la fin'
+  );
+  if(!raw) return;
+  const lines = raw.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
+  if(!lines.length) return;
+  const replace = window.captionSlots.length === 0 ? true :
+    confirm(`Tu as deja ${{window.captionSlots.length}} caption(s). Cliquer "OK" pour REMPLACER, "Annuler" pour AJOUTER ${{lines.length}} a la fin.`);
+  if(replace) window.captionSlots = lines.slice();
+  else window.captionSlots.push(...lines);
+  renderCaptionSlots();
+  if(typeof showToast === 'function'){{
+    const verb = replace ? 'remplacees par' : 'ajoutees :';
+    showToast('✓ ' + lines.length + ' captions ' + verb, 'success', 3000);
+  }}
 }}
 // Detecte un paste multi-ligne et explose en plusieurs slots
 function handleMediaPaste(e, idx){{
