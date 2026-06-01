@@ -11295,7 +11295,10 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       </div>
       <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:18px 0 6px'>Horaires de publication</div>
       <div class='mpl-slots' id='mpl-post-slots'></div>
-      <button type='button' onclick='addPostSlot()' style='margin-top:10px;background:transparent;border:1px dashed #2e6f4e;color:#22c55e;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter un creneau post</button>
+      <div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>
+        <button type='button' onclick='addPostSlot()' style='flex:1;background:transparent;border:1px dashed #2e6f4e;color:#22c55e;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter un creneau post</button>
+        <button type='button' onclick='resetPostSlotsToDefault()' title='Reset aux 14 horaires par defaut' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600'>↻ Reset 14 horaires</button>
+      </div>
     </div>
   </div>
 
@@ -11622,6 +11625,31 @@ function removePostSlot(i){{
   postSlots.splice(i,1);
   document.getElementById('mpl-posts-count').value = postSlots.length;
   renderPostSlots();
+}}
+const DEFAULT_14_POST_SLOTS = [
+  {{time:'01:00', visibility:'public'}},  {{time:'02:00', visibility:'private'}},
+  {{time:'08:00', visibility:'public'}},  {{time:'08:00', visibility:'private'}},
+  {{time:'13:00', visibility:'public'}},  {{time:'15:00', visibility:'private'}},
+  {{time:'15:00', visibility:'public'}},  {{time:'16:00', visibility:'private'}},
+  {{time:'18:00', visibility:'public'}},  {{time:'19:00', visibility:'private'}},
+  {{time:'20:00', visibility:'public'}},  {{time:'21:00', visibility:'private'}},
+  {{time:'22:00', visibility:'public'}},  {{time:'23:00', visibility:'private'}},
+];
+function resetPostSlotsToDefault(){{
+  mplConfirmAction({{
+    icon: '↻',
+    title: 'Reset aux 14 horaires par defaut ?',
+    subtitle: 'La liste actuelle de ' + postSlots.length + ' creneaux sera remplacee par les 14 horaires standards (01h, 02h, 08hx2, 13h, 15hx2, 16h, 18-23h).',
+    confirmLabel: 'Reset',
+    danger: false,
+    onConfirm: () => {{
+      postSlots.length = 0;
+      DEFAULT_14_POST_SLOTS.forEach(s => postSlots.push({{time:s.time, visibility:s.visibility}}));
+      document.getElementById('mpl-posts-count').value = 14;
+      renderPostSlots();
+      if(typeof showToast === 'function') showToast('✓ 14 horaires par defaut appliques', 'success', 2500);
+    }}
+  }});
 }}
 function addPostSlot(){{
   postSlots.push({{time:'12:00', visibility:'public'}});
@@ -12663,19 +12691,73 @@ function submitMyPulsForm(ev){{
   if(ct==='delete'){{
     const ids = parseSelectedIds();
     if(!ids.length){{ alert('Aucun event selectionne.'); return false; }}
-    if(confirm('Supprimer '+ids.length+' event(s) planifie(s) sur MyPuls ? Action IRREVERSIBLE.')){{
-      // Set form action to delete endpoint
-      ev.target.action = '/mypulslive/delete_events';
-      ev.target.submit();
-    }}
+    mplConfirmAction({{
+      icon: '🗑',
+      title: 'Supprimer ' + ids.length + ' event(s) ?',
+      subtitle: 'Action IRREVERSIBLE - les posts/stories sur MyPuls seront supprimes definitivement.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+      onConfirm: () => {{
+        ev.target.action = '/mypulslive/delete_events';
+        ev.target.submit();
+      }}
+    }});
     return false;
   }}
   const label = (ct==='story')?'stories':'posts';
-  if(confirm('Pousser les '+label+' dans MyPuls du '+ds+' au '+de+' ?\\n\\nCette action est IRREVERSIBLE.')){{
-    ev.target.action = '/mypulslive/push';
-    ev.target.submit();
-  }}
+  mplConfirmAction({{
+    icon: '⚡',
+    title: 'Pousser les ' + label + ' dans MyPuls ?',
+    subtitle: 'Du ' + ds + ' au ' + de + ' - Action IRREVERSIBLE.',
+    confirmLabel: 'Pousser',
+    danger: false,
+    onConfirm: () => {{
+      ev.target.action = '/mypulslive/push';
+      ev.target.submit();
+    }}
+  }});
   return false;
+}}
+// === Modal de confirmation dark theme custom (remplace confirm() natif) ===
+function mplConfirmAction(opts){{
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);animation:vbFadeIn .15s ease-out';
+  overlay.onclick = (e) => {{ if(e.target === overlay) close(); }};
+  const card = document.createElement('div');
+  const accent = opts.danger ? '#ef4444' : '#3b82f6';
+  const accentGlow = opts.danger ? 'rgba(239,68,68,.3)' : 'rgba(59,130,246,.3)';
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:440px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden';
+  card.innerHTML = `
+    <div style='padding:24px 24px 18px;text-align:center'>
+      <div style='width:54px;height:54px;border-radius:50%;background:${{opts.danger?'rgba(239,68,68,.12)':'rgba(59,130,246,.12)'}};color:${{accent}};display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 14px'>${{opts.icon || '?'}}</div>
+      <div style='color:#fff;font-size:17px;font-weight:700;margin-bottom:6px'>${{opts.title || 'Confirmer ?'}}</div>
+      <div style='color:#888;font-size:13px;line-height:1.5'>${{opts.subtitle || ''}}</div>
+    </div>
+    <div style='padding:14px 22px 20px;display:flex;gap:10px;justify-content:center'>
+      <button type='button' id='mpl-conf-cancel' style='flex:1;background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:11px 18px;border-radius:11px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>
+      <button type='button' id='mpl-conf-ok' style='flex:1;background:${{accent}};color:#fff;border:0;padding:11px 18px;border-radius:11px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px ${{accentGlow}}'>${{opts.confirmLabel || 'Confirmer'}}</button>
+    </div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('mpl-conf-ok').focus(), 50);
+  function onKey(e){{
+    if(e.key === 'Escape') close();
+    else if(e.key === 'Enter') {{ confirm_(); }}
+  }}
+  document.addEventListener('keydown', onKey);
+  document.getElementById('mpl-conf-cancel').onclick = close;
+  document.getElementById('mpl-conf-ok').onclick = confirm_;
+  function confirm_(){{
+    if(typeof opts.onConfirm === 'function') opts.onConfirm();
+    close();
+  }}
+  function close(){{
+    document.removeEventListener('keydown', onKey);
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity .15s';
+    setTimeout(() => {{ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }}, 150);
+  }}
 }}
 
 // === Flatpickr DATE only (time inputs sont gérés par notre wheel custom) ===
