@@ -11565,6 +11565,18 @@ const DEFAULT_STORY_SLOTS = [
 let postSlots = DEFAULT_POST_SLOTS.slice();
 let storySlots = DEFAULT_STORY_SLOTS.slice();
 
+// Tri par heure ascendante (private apres public a heure egale)
+function sortSlotsByTime(arr){{
+  if(!Array.isArray(arr)) return;
+  arr.sort((a,b)=>{{
+    const ta = (a.time || '00:00');
+    const tb = (b.time || '00:00');
+    if(ta !== tb) return ta.localeCompare(tb);
+    // A heure egale : public en premier
+    if(a.visibility === b.visibility) return 0;
+    return a.visibility === 'public' ? -1 : 1;
+  }});
+}}
 function renderPostSlots(){{
   const cnt = parseInt(document.getElementById('mpl-posts-count').value)||0;
   // resize
@@ -11576,11 +11588,12 @@ function renderPostSlots(){{
     postSlots.push({{time:String(nextH).padStart(2,'0')+':00', visibility:v}});
   }}
   while(postSlots.length > cnt) postSlots.pop();
+  sortSlotsByTime(postSlots);
   const c = document.getElementById('mpl-post-slots');
   c.innerHTML = postSlots.map((s,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge'>#${{i+1}}</div>
-      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='postSlots[${{i}}].time=this.value;syncSlots()'>
+      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='postSlots[${{i}}].time=this.value;sortSlotsByTime(postSlots);renderPostSlots();syncSlots()'>
       <button type='button' class='mpl-slot-vis ${{s.visibility}}' onclick='togglePostVis(${{i}})'>
         ${{s.visibility==='public'?'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20\"/><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/></svg> Public':'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> Prive'}}
       </button>
@@ -11615,13 +11628,15 @@ function renderStorySlots(){{
     storySlots.push({{time:String(nextH).padStart(2,'0')+':00', audience:'everyone'}});
   }}
   while(storySlots.length > cnt) storySlots.pop();
+  // Tri par heure ascendante
+  storySlots.sort((a,b)=>(a.time || '00:00').localeCompare(b.time || '00:00'));
   // Options HTML pour audience
   const audOpts = STORY_AUDIENCES.map(a=>'<option value=\"'+a.value+'\">'+a.label+'</option>').join('');
   const c = document.getElementById('mpl-story-slots');
   c.innerHTML = storySlots.map((s,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge' style='background:rgba(59,130,246,.15);color:#3b82f6'>#${{i+1}}</div>
-      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='storySlots[${{i}}].time=this.value;syncSlots()'>
+      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='storySlots[${{i}}].time=this.value;storySlots.sort((a,b)=>(a.time||"00:00").localeCompare(b.time||"00:00"));renderStorySlots();syncSlots()'>
       <select class='mpl-slot-aud' onchange='storySlots[${{i}}].audience=this.value;syncSlots()' style='flex-shrink:0;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:8px;font-size:13px;cursor:pointer'>
         ${{audOpts.replace('value=\"'+s.audience+'\"','value=\"'+s.audience+'\" selected')}}
       </select>
