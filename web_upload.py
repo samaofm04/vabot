@@ -1762,6 +1762,10 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
       Schedule Excel
     </button>
+    <button class="item" id="tab-geelark" onclick="showTab('autopost','geelark','GeeLark — Push cloud phones','Push reels/stories/CTAs sur les cloud phones GeeLark')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+      GeeLark
+    </button>
   </div>
 </div>
 
@@ -2328,6 +2332,11 @@ document.addEventListener('keydown', function(e){
 <!-- TEXT POOL (Bibliotheque texte) -->
 <div class="form-section" id="form-textpool" style="display:none">
 {textpool_html}
+</div>
+
+<!-- GEELARK -->
+<div class="form-section" id="form-geelark" style="display:none">
+{geelark_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -8632,6 +8641,216 @@ function gmsFilter(btn, cat){
     )
 
 
+def _render_geelark_html() -> str:
+    """Page GeeLark : push planifies + watchers + historique.
+
+    Affiche en lecture-seule + suppression. La creation se fait via le bot
+    Discord (/geelarkpush) - pas d UI de creation web pour l instant.
+    """
+    try:
+        import geelark_view as gv
+    except Exception as e:
+        return f"<p style='color:#f99'>Module geelark_view indispo : {e}</p>"
+
+    s = gv.stats()
+    schedules = gv.list_schedules()
+    watchers = gv.list_watchers()
+    history = gv.list_history(limit=20)
+
+    # Header avec KPI
+    header_html = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<div>"
+        "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
+        "📱 GeeLark"
+        "<span style='font-size:11px;background:#a855f7;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>CLOUD PHONES</span></h2>"
+        "<p style='margin:0;color:#888;font-size:13px'>Push reels/stories/CTAs sur les phones cloud GeeLark - mode sequentiel pour eviter les rate-limits.</p>"
+        "</div>"
+        f"<div style='display:flex;gap:18px'>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#3b82f6'>{s['schedules_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>PUSH PROG</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#a855f7'>{s['watchers_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>WATCHERS</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{s['phones_success_recent']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>OK RECENT</div></div>"
+        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#ef4444'>{s['phones_failed_recent']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>ECHEC</div></div>"
+        "</div></div>"
+    )
+
+    # Section Push planifies
+    if schedules:
+        schedules_html = ""
+        for sc in schedules:
+            sid = sc.get("id", "")
+            grp = (sc.get("groupe") or "?").replace("<", "&lt;")
+            ident = (sc.get("identite") or "?").replace("<", "&lt;")
+            h = sc.get("hour_paris", 0)
+            mn = sc.get("minute_paris", 0)
+            time_str = f"{h:02d}:{mn:02d}"
+            reels = sc.get("reels", 0)
+            stories = sc.get("stories", 0)
+            ctas = sc.get("storyctas", 0)
+            last_run = sc.get("last_run_date", "") or "jamais"
+            schedules_html += (
+                f"<div style='display:flex;align-items:center;gap:14px;padding:14px;background:#0f0f0f;border:1px solid #232323;border-radius:12px;margin-bottom:10px'>"
+                f"<div style='font-family:monospace;font-size:18px;font-weight:800;color:#3b82f6;background:rgba(59,130,246,.1);padding:8px 12px;border-radius:8px;letter-spacing:1px'>{time_str}</div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='color:#fff;font-weight:700;font-size:14px'>{grp} · <span style='color:#a855f7'>@{ident}</span></div>"
+                f"<div style='color:#888;font-size:12px;margin-top:3px'>"
+                f"{reels} reels · {stories} stories · {ctas} CTAs &nbsp;·&nbsp; last : <code style='color:#666'>{last_run}</code></div>"
+                f"</div>"
+                f"<button onclick=\"glDeleteSchedule('{sid}', this)\" "
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer'>🗑</button>"
+                f"</div>"
+            )
+        schedules_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px'>⏰</div>"
+            f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Push planifies (quotidiens)</div>"
+            f"<div style='font-size:11px;color:#666'>S executent chaque jour a l heure indiquee (heure Paris)</div></div>"
+            f"</div>"
+            + schedules_html
+            + "</div>"
+        )
+    else:
+        schedules_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;margin-bottom:18px;text-align:center'>"
+            "<div style='font-size:32px;margin-bottom:8px'>⏰</div>"
+            "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun push planifie</div>"
+            "<div style='color:#555;font-size:11px'>Cree-en via Discord : <code style='color:#3b82f6'>/geelarkpush</code> avec heure + minute</div>"
+            "</div>"
+        )
+
+    # Section Watchers
+    if watchers:
+        watchers_html = ""
+        for w in watchers:
+            wid = w.get("id", "")
+            grp = (w.get("groupe") or "?").replace("<", "&lt;")
+            ident = (w.get("identite") or "?").replace("<", "&lt;")
+            reels = w.get("reels", 0)
+            stories = w.get("stories", 0)
+            ctas = w.get("storyctas", 0)
+            watchers_html += (
+                f"<div style='display:flex;align-items:center;gap:14px;padding:14px;background:#0f0f0f;border:1px solid #232323;border-radius:12px;margin-bottom:10px'>"
+                f"<div style='position:relative;display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:10px;background:rgba(168,85,247,.12);color:#a855f7'>"
+                f"<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><circle cx='12' cy='12' r='3'/><path d='M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z'/></svg>"
+                f"<span style='position:absolute;top:-2px;right:-2px;width:10px;height:10px;background:#22c55e;border:2px solid #161616;border-radius:50%;animation:vbPulse 1.5s infinite'></span>"
+                f"</div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='color:#fff;font-weight:700;font-size:14px'>{grp} · <span style='color:#a855f7'>@{ident}</span></div>"
+                f"<div style='color:#888;font-size:12px;margin-top:3px'>"
+                f"Par phone allumee : {reels} reels · {stories} stories · {ctas} CTAs</div>"
+                f"</div>"
+                f"<button onclick=\"glDeleteWatcher('{wid}', this)\" "
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Stop watcher'>🗑</button>"
+                f"</div>"
+            )
+        watchers_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>👁</div>"
+            f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Watchers actifs</div>"
+            f"<div style='font-size:11px;color:#666'>Surveille les phones et uploade automatiquement quand une phone s allume</div></div>"
+            f"</div>"
+            + watchers_html
+            + "</div>"
+        )
+    else:
+        watchers_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;margin-bottom:18px;text-align:center'>"
+            "<div style='font-size:32px;margin-bottom:8px'>👁</div>"
+            "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun watcher actif</div>"
+            "<div style='color:#555;font-size:11px'>Cree-en via Discord : <code style='color:#a855f7'>/geelarkwatch</code></div>"
+            "</div>"
+        )
+
+    # Section History (recent)
+    if history:
+        hist_html = ""
+        for h in history:
+            grp = (h.get("groupe") or "?").replace("<", "&lt;")
+            ident = (h.get("identite") or "?").replace("<", "&lt;")
+            phones_total = h.get("phones_total", 0)
+            phones_ok = h.get("phones_ok", 0)
+            phones_failed = h.get("phones_failed", 0)
+            success_rate = (phones_ok / phones_total * 100) if phones_total else 0
+            color = "#22c55e" if success_rate >= 80 else ("#f59e0b" if success_rate >= 40 else "#ef4444")
+            finished = (h.get("finished_at") or "?")[:16].replace("T", " ")
+            hist_html += (
+                f"<div style='display:flex;align-items:center;gap:14px;padding:12px 14px;background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid {color};border-radius:10px;margin-bottom:6px'>"
+                f"<div style='font-family:monospace;font-size:11px;color:#666;letter-spacing:.5px'>{finished}</div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='color:#fff;font-weight:600;font-size:13px'>{grp} · <span style='color:#a855f7'>@{ident}</span></div>"
+                f"</div>"
+                f"<div style='font-size:12px;color:{color};font-weight:700;white-space:nowrap'>{phones_ok}/{phones_total} OK</div>"
+                f"<div style='font-size:11px;color:#888;white-space:nowrap'>· {phones_failed} échec</div>"
+                f"</div>"
+            )
+        history_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(34,197,94,.15);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:16px'>📊</div>"
+            f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Historique des runs</div>"
+            f"<div style='font-size:11px;color:#666'>20 dernieres executions</div></div>"
+            f"</div>"
+            + hist_html
+            + "</div>"
+        )
+    else:
+        history_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
+            "<div style='font-size:32px;margin-bottom:8px'>📊</div>"
+            "<div style='color:#888;font-size:13px'>Aucun run dans l historique pour l instant</div>"
+            "</div>"
+        )
+
+    # JS interactions
+    js = """
+<style>
+@keyframes vbPulse {{0%,100%{{opacity:1}}50%{{opacity:.3}}}}
+</style>
+<script>
+async function glDeleteSchedule(id, btn){
+  mplConfirmAction({
+    icon: '🗑',
+    title: 'Supprimer ce push programme ?',
+    subtitle: 'Le push quotidien sera annule. Tu peux le recreer via /geelarkpush sur Discord.',
+    confirmLabel: 'Supprimer',
+    danger: true,
+    onConfirm: async () => {
+      const fd = new FormData(); fd.set('schedule_id', id);
+      const r = await fetch('/geelark/delete_schedule', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        const row = btn.closest('div[style*="background:#0f0f0f"]');
+        if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; setTimeout(()=>location.reload(), 300); }
+      }
+    }
+  });
+}
+async function glDeleteWatcher(id, btn){
+  mplConfirmAction({
+    icon: '🛑',
+    title: 'Arreter ce watcher ?',
+    subtitle: 'Le bot ne surveillera plus ces phones automatiquement.',
+    confirmLabel: 'Arreter',
+    danger: true,
+    onConfirm: async () => {
+      const fd = new FormData(); fd.set('watcher_id', id);
+      const r = await fetch('/geelark/delete_watcher', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        const row = btn.closest('div[style*="background:#0f0f0f"]');
+        if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; setTimeout(()=>location.reload(), 300); }
+      }
+    }
+  });
+}
+</script>
+"""
+
+    return header_html + schedules_block + watchers_block + history_block + js
+
+
 def _render_textpool_html() -> str:
     """Bibliotheque de textes : Names / Usernames / Bios / CTAs en 4 colonnes."""
     try:
@@ -13855,6 +14074,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{biolinks_html}", _render_biolinks_html())
         .replace("{onboarding_html}", _render_onboarding_html())
         .replace("{textpool_html}", _render_textpool_html())
+        .replace("{geelark_html}", _render_geelark_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
@@ -15042,6 +15262,33 @@ def create_app():
                     "caption_preview": (r.get("caption") or "")[:100],
                 })
         return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
+
+    # ============ GEELARK ============
+    @app.route("/geelark/delete_schedule", methods=["POST"])
+    def geelark_delete_schedule():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import geelark_view as gv
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        sid = (request.form.get("schedule_id") or "").strip()
+        return jsonify({"ok": gv.delete_schedule(sid)})
+
+    @app.route("/geelark/delete_watcher", methods=["POST"])
+    def geelark_delete_watcher():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import geelark_view as gv
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        wid = (request.form.get("watcher_id") or "").strip()
+        return jsonify({"ok": gv.delete_watcher(wid)})
 
     # ============ TEXT POOL (Bibliotheque) ============
     @app.route("/textpool/render", methods=["GET"])
