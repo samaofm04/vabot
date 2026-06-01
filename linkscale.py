@@ -213,27 +213,80 @@ def duplicate_link(link_id: str, new_shortcode: str = "") -> Dict[str, Any]:
 
 # ============ Folders ============
 
-def list_folders() -> Dict[str, Any]:
-    """Liste les dossiers (groupes) avec leur count de links."""
-    return _request("GET", "/folders")
+def list_folders() -> List[Dict[str, Any]]:
+    """Retourne la liste plate des dossiers Linkscale : [{id, name, links_count}].
+
+    L API renvoie : {project_id, project, folders: [{_id, name, links_count,
+    created_at, ...}]}.
+    """
+    res = _request("GET", "/folders")
+    if not res.get("ok"):
+        return []
+    raw = res.get("raw") or {}
+    folders = raw.get("folders") if isinstance(raw, dict) else []
+    if not isinstance(folders, list):
+        return []
+    out = []
+    for f in folders:
+        if isinstance(f, dict):
+            out.append({
+                "id": f.get("_id") or f.get("id") or "",
+                "name": f.get("name") or "?",
+                "links_count": int(f.get("links_count") or 0),
+                "created_at": f.get("created_at") or "",
+            })
+    return out
+
+
+def get_folder_id_by_name(name: str) -> Optional[str]:
+    """Cherche un folder par nom (case-insensitive). Retourne son _id ou None."""
+    if not name:
+        return None
+    needle = name.strip().lower()
+    for f in list_folders():
+        if f.get("name", "").strip().lower() == needle:
+            return f.get("id")
+    return None
 
 
 def get_links_grouped_by_folder() -> Dict[str, List[Dict[str, Any]]]:
-    """Retourne {folder_name: [links...]} - utile pour l UI groupee."""
+    """Retourne {folder_name: [links...]} - utile pour l UI groupee.
+
+    Strategie :
+    1. Recupere la liste des folders (les noms + ids)
+    2. Recupere tous les links
+    3. Pour chaque link, regarde son champ folders[] (peut etre [id, ...] ou
+       [{_id, name, ...}, ...])
+    4. Resout l id -> name via la map de folders
+    """
+    folders = list_folders()
+    id_to_name = {f.get("id"): f.get("name") for f in folders if f.get("id")}
+
     all_res = list_all_links()
     if not all_res.get("ok"):
-        return {}
-    out: Dict[str, List[Dict[str, Any]]] = {"(sans dossier)": []}
+        # Au moins on a les folders meme si pas de links
+        return {f["name"]: [] for f in folders}
+
+    out: Dict[str, List[Dict[str, Any]]] = {f["name"]: [] for f in folders}
+    out["(sans dossier)"] = []
+
     for link in all_res.get("links", []):
-        folders = link.get("folders") or []
-        if not folders:
+        link_folders = link.get("folders") or []
+        if not link_folders:
             out["(sans dossier)"].append(link)
             continue
-        for f in folders:
-            # folder peut etre un id string ou un dict {id, name}
-            fname = f.get("name") if isinstance(f, dict) else str(f)
-            out.setdefault(fname or "(sans dossier)", []).append(link)
-    # Drop la categorie vide
+        placed = False
+        for f in link_folders:
+            if isinstance(f, dict):
+                fname = f.get("name") or id_to_name.get(f.get("_id") or f.get("id"))
+            else:
+                fname = id_to_name.get(str(f)) or str(f)
+            if fname:
+                out.setdefault(fname, []).append(link)
+                placed = True
+        if not placed:
+            out["(sans dossier)"].append(link)
+    # Drop les groupes vides "(sans dossier)" si rien dedans
     if not out.get("(sans dossier)"):
         out.pop("(sans dossier)", None)
     return out

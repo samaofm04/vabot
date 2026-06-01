@@ -8368,9 +8368,14 @@ def _render_linkscale_html() -> str:
             + "</div>"
         )
 
-    # Configure - on liste les links groupes par folder
+    # Configure - on liste les folders + les links groupes
+    folders_list = linkscale.list_folders()
     grouped = linkscale.get_links_grouped_by_folder()
     total_links = sum(len(v) for v in grouped.values())
+
+    # JSON des folders pour injecter dans le modal JS (selecteur)
+    import json as _json
+    folders_json = _json.dumps([{"id": f["id"], "name": f["name"], "count": f.get("links_count", 0)} for f in folders_list])
 
     # Header stats
     header = (
@@ -8383,9 +8388,25 @@ def _render_linkscale_html() -> str:
         f"<div style='display:flex;gap:18px;align-items:center'>"
         f"<button type='button' onclick='lsOpenCreateModal()' style='background:#3b82f6;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700'>+ Creer un link</button>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#fff'>{total_links}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>LINKS</div></div>"
-        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#a855f7'>{len(grouped)}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>FOLDERS</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#a855f7'>{len(folders_list)}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>FOLDERS</div></div>"
         "</div></div>"
     )
+
+    # Folder pills (apercu rapide des dossiers comme dans Linkscale dashboard)
+    if folders_list:
+        pills_html = "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px'>"
+        for f in folders_list:
+            fname = (f.get("name") or "?").replace("<", "&lt;")
+            count = f.get("links_count", 0)
+            pills_html += (
+                f"<div style='display:inline-flex;align-items:center;gap:6px;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:6px 11px;border-radius:8px;font-size:12px;font-weight:600'>"
+                f"<span style='color:#a855f7'>📁</span> {fname}"
+                f"<span style='color:#666;font-size:11px'>({count})</span>"
+                f"</div>"
+            )
+        pills_html += "</div>"
+    else:
+        pills_html = ""
 
     # Liste groupee par folder
     if total_links == 0:
@@ -8438,8 +8459,10 @@ def _render_linkscale_html() -> str:
                 )
             list_html += "</div>"
 
-    # JS
-    js = """
+    # JS + injection de la liste des folders pour le modal
+    js = (
+        f"<script>window.__lsFolders = {folders_json};</script>"
+        + """
 <script>
 async function lsDuplicate(id, btn){
   btn.disabled = true; btn.textContent = '...';
@@ -8485,27 +8508,85 @@ async function lsDelete(id, btn){
   });
 }
 function lsOpenCreateModal(){
-  const url = prompt('URL cible (https://...) :');
-  if(!url) return;
-  const shortcode = prompt('Shortcode unique (sera /ton-shortcode) :');
-  if(!shortcode) return;
-  const fd = new FormData();
-  fd.set('type', 'd_l');
-  fd.set('u', shortcode);
-  fd.set('url', url);
-  fetch('/linkscale/create', {method:'POST', body:fd}).then(r => r.json()).then(j => {
-    if(j.ok){
-      if(typeof showToast==='function') showToast('✓ Link cree', 'success', 2500);
-      setTimeout(()=>location.reload(), 700);
-    } else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
-  });
+  var folders = window.__lsFolders || [];
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.onclick = function(e){ if(e.target === overlay) close(); };
+  var card = document.createElement('div');
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden';
+  var folderOpts = '<option value="">-- Aucun dossier --</option>';
+  for(var i=0; i<folders.length; i++){
+    folderOpts += '<option value="' + folders[i].id + '">' + folders[i].name + ' (' + folders[i].count + ')</option>';
+  }
+  card.innerHTML =
+    '<div style="padding:20px 24px;border-bottom:1px solid #232323">' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px">🔗</div>' +
+        '<div><div style="color:#fff;font-weight:700;font-size:16px">Creer un link Linkscale</div>' +
+        '<div style="color:#888;font-size:12px;margin-top:2px">Direct link ou bio link, ranged dans un dossier</div></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:18px 24px;display:flex;flex-direction:column;gap:14px">' +
+      '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Type</label>' +
+        '<select id="ls-cr-type" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' +
+          '<option value="d_l">Direct Link (redirige direct vers une URL)</option>' +
+          '<option value="l_p">Landing Page / Bio (page custom)</option>' +
+        '</select></div>' +
+      '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Shortcode *</label>' +
+        '<input type="text" id="ls-cr-shortcode" placeholder="ex: emma-promo" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;font-family:monospace">' +
+        '<small style="color:#666;font-size:11px;display:block;margin-top:4px">Sera accessible via /shortcode sur ton domaine Linkscale</small></div>' +
+      '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">URL cible *</label>' +
+        '<input type="url" id="ls-cr-url" placeholder="https://onlyfans.com/emma" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"></div>' +
+      '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Dossier (optionnel)</label>' +
+        '<select id="ls-cr-folder" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' + folderOpts + '</select>' +
+        '<small style="color:#666;font-size:11px;display:block;margin-top:4px">Range le link dans un dossier existant (emma, lola, ...)</small></div>' +
+    '</div>' +
+    '<div style="padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f">' +
+      '<button type="button" id="ls-cr-cancel" style="background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">Annuler</button>' +
+      '<button type="button" id="ls-cr-save" style="background:#3b82f6;color:#fff;border:0;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700">Creer</button>' +
+    '</div>';
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(function(){ document.getElementById('ls-cr-shortcode').focus(); }, 50);
+  function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); document.removeEventListener('keydown', onKey); }
+  function onKey(e){ if(e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  document.getElementById('ls-cr-cancel').onclick = close;
+  document.getElementById('ls-cr-save').onclick = async function(){
+    var type = document.getElementById('ls-cr-type').value;
+    var u = (document.getElementById('ls-cr-shortcode').value || '').trim();
+    var url = (document.getElementById('ls-cr-url').value || '').trim();
+    var folderId = (document.getElementById('ls-cr-folder').value || '').trim();
+    if(!u || !url){
+      if(typeof showToast==='function') showToast('⚠ Shortcode et URL requis', 'warning', 2500);
+      return;
+    }
+    var fd = new FormData();
+    fd.set('type', type);
+    fd.set('u', u);
+    fd.set('url', url);
+    if(folderId) fd.set('folder_id', folderId);
+    try {
+      var r = await fetch('/linkscale/create', {method:'POST', body:fd});
+      var j = await r.json();
+      if(j.ok){
+        if(typeof showToast==='function') showToast('✓ Link cree' + (folderId ? ' dans le dossier' : ''), 'success', 2500);
+        close();
+        setTimeout(function(){ location.reload(); }, 600);
+      } else {
+        if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error');
+      }
+    } catch(e){
+      if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    }
+  };
 }
 </script>
-"""
+""")
 
     return (
         "<div style='max-width:1000px'>"
-        + header + key_status + list_html + js
+        + header + key_status + pills_html + list_html + js
         + "</div>"
     )
 
@@ -15737,6 +15818,13 @@ def create_app():
             v = (request.form.get(k) or "").strip()
             if v:
                 payload[k] = v
+        # folder_id ou folder_name -> resolve to folder _id puis folders=[id]
+        folder_id = (request.form.get("folder_id") or "").strip()
+        folder_name = (request.form.get("folder_name") or "").strip()
+        if folder_name and not folder_id:
+            folder_id = linkscale.get_folder_id_by_name(folder_name) or ""
+        if folder_id:
+            payload["folders"] = [folder_id]
         if not payload["u"] or not payload["url"]:
             return jsonify({"ok": False, "error": "shortcode et url requis"})
         return jsonify(linkscale.create_link(payload))
