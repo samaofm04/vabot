@@ -11,14 +11,21 @@ Storages :
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+import requests
 
 DATA_DIR = Path("data")
 SCHEDULES_FILE = DATA_DIR / "geelark_schedules.json"
 WATCHERS_FILE = DATA_DIR / "geelark_watchers.json"
 HISTORY_FILE = DATA_DIR / "geelark_history.json"
+
+GEELARK_BASE = "https://openapi.geelark.com"
+IDENTITIES_DIR = DATA_DIR / "identities"
 
 
 def _load(file_path: Path, default=None) -> List[Dict[str, Any]]:
@@ -74,6 +81,99 @@ def delete_watcher(watcher_id: str) -> bool:
         )
         return True
     return False
+
+
+def _bearer() -> Optional[str]:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+    tok = os.getenv("GEELARK_BEARER", "").strip()
+    return tok or None
+
+
+def list_geelark_groups() -> List[Dict[str, Any]]:
+    """Fetch les groupes GeeLark via l API. Retourne [{id, name}, ...]."""
+    tok = _bearer()
+    if not tok:
+        return []
+    try:
+        r = requests.post(
+            f"{GEELARK_BASE}/open/v1/phone/list",
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Content-Type": "application/json",
+                "trace-id": uuid.uuid4().hex,
+            },
+            json={"page": 1, "page_size": 1, "groups": []},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return []
+        # GeeLark renvoie les groupes dans un endpoint specifique
+        rr = requests.post(
+            f"{GEELARK_BASE}/open/v1/phone/group/list",
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Content-Type": "application/json",
+                "trace-id": uuid.uuid4().hex,
+            },
+            json={"page": 1, "page_size": 100},
+            timeout=15,
+        )
+        if rr.status_code != 200:
+            return []
+        j = rr.json()
+        items = j.get("data", {}).get("items", []) or []
+        return [{"id": g.get("id", ""), "name": g.get("name", "?")} for g in items]
+    except Exception:
+        return []
+
+
+def list_local_identities() -> List[str]:
+    """Liste les identites disponibles localement (dossiers data/identities/*)."""
+    if not IDENTITIES_DIR.exists():
+        return []
+    return sorted([p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir()])
+
+
+def create_schedule(groupe: str, identite: str,
+                    reels: int = 0, stories: int = 0, storyctas: int = 0,
+                    hour_paris: int = 0, minute_paris: int = 0) -> Dict[str, Any]:
+    """Cree un push planifie quotidien. Retourne {ok, schedule|error}."""
+    groupe = (groupe or "").strip()
+    identite = (identite or "").strip()
+    if not groupe or not identite:
+        return {"ok": False, "error": "groupe et identite requis"}
+    if not (0 <= hour_paris <= 23) or not (0 <= minute_paris <= 59):
+        return {"ok": False, "error": "heure/minute invalides"}
+    if reels < 0 or stories < 0 or storyctas < 0:
+        return {"ok": False, "error": "comptes negatifs"}
+    if reels + stories + storyctas == 0:
+        return {"ok": False, "error": "au moins 1 reel/story/CTA"}
+    schedule = {
+        "id": uuid.uuid4().hex[:8],
+        "groupe": groupe,
+        "identite": identite,
+        "reels": int(reels),
+        "stories": int(stories),
+        "storyctas": int(storyctas),
+        "hour_paris": int(hour_paris),
+        "minute_paris": int(minute_paris),
+        "recurring": True,
+        "channel_id": None,
+        "created_by": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_run_date": None,
+    }
+    items = _load(SCHEDULES_FILE)
+    items.append(schedule)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SCHEDULES_FILE.write_text(
+        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return {"ok": True, "schedule": schedule}
 
 
 def stats() -> Dict[str, Any]:

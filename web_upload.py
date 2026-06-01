@@ -8657,7 +8657,13 @@ def _render_geelark_html() -> str:
     watchers = gv.list_watchers()
     history = gv.list_history(limit=20)
 
-    # Header avec KPI
+    # Liste des groupes GeeLark + identites locales pour le selector du modal
+    groups = gv.list_geelark_groups()
+    identities = gv.list_local_identities()
+    groups_json = json.dumps([{"id": g.get("id", ""), "name": g.get("name", "")} for g in groups])
+    identities_json = json.dumps(identities)
+
+    # Header avec KPI + bouton creer
     header_html = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
@@ -8666,12 +8672,16 @@ def _render_geelark_html() -> str:
         "<span style='font-size:11px;background:#a855f7;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>CLOUD PHONES</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Push reels/stories/CTAs sur les phones cloud GeeLark - mode sequentiel pour eviter les rate-limits.</p>"
         "</div>"
-        f"<div style='display:flex;gap:18px'>"
-        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#3b82f6'>{s['schedules_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>PUSH PROG</div></div>"
-        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#a855f7'>{s['watchers_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>WATCHERS</div></div>"
-        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{s['phones_success_recent']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>OK RECENT</div></div>"
-        f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#ef4444'>{s['phones_failed_recent']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>ECHEC</div></div>"
-        "</div></div>"
+        f"<div style='display:flex;gap:14px;align-items:center;flex-wrap:wrap'>"
+        f"<button onclick='glOpenCreateModal()' style='background:#a855f7;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.35)'>+ Créer un push</button>"
+        f"<div style='display:flex;gap:14px'>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{s['schedules_count']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>PUSH PROG</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#a855f7'>{s['watchers_count']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>WATCHERS</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#22c55e'>{s['phones_success_recent']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>OK</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#ef4444'>{s['phones_failed_recent']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>ECHEC</div></div>"
+        f"</div>"
+        f"</div>"
+        "</div>"
     )
 
     # Section Push planifies
@@ -8803,12 +8813,137 @@ def _render_geelark_html() -> str:
             "</div>"
         )
 
-    # JS interactions
-    js = """
+    # JS interactions + data inject pour le modal create
+    js = f"""
 <style>
-@keyframes vbPulse {{0%,100%{{opacity:1}}50%{{opacity:.3}}}}
+@keyframes vbPulse {{{{0%,100%{{{{opacity:1}}}}50%{{{{opacity:.3}}}}}}}}
 </style>
 <script>
+window.__glGroups = {groups_json};
+window.__glIdentities = {identities_json};
+</script>
+""" + """
+<script>
+function glOpenCreateModal(){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.onclick = (e) => { if(e.target === overlay) close(); };
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden';
+  const grps = window.__glGroups || [];
+  const idents = window.__glIdentities || [];
+  const grpOpts = grps.length ? grps.map(g => `<option value="${g.name}">${g.name}</option>`).join('') : '';
+  const identOpts = idents.length ? idents.map(i => `<option value="${i}">${i}</option>`).join('') : '';
+  card.innerHTML = `
+    <div style='padding:20px 24px;border-bottom:1px solid #232323'>
+      <div style='display:flex;align-items:center;gap:10px'>
+        <div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📱</div>
+        <div>
+          <div style='color:#fff;font-weight:700;font-size:16px'>Créer un push GeeLark</div>
+          <div style='color:#888;font-size:12px;margin-top:2px'>Quotidien à l\\'heure de Paris</div>
+        </div>
+      </div>
+    </div>
+    <div style='padding:18px 24px;display:flex;flex-direction:column;gap:14px'>
+      <div>
+        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Groupe GeeLark *</label>
+        ${grps.length ? `
+          <select id='gl-cr-group' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
+            <option value=''>-- choisir --</option>${grpOpts}
+          </select>
+        ` : `
+          <input type='text' id='gl-cr-group' placeholder='Nom du groupe GeeLark' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
+          <small style='color:#888;font-size:11px'>API GeeLark indisponible - tape le nom manuellement</small>
+        `}
+      </div>
+      <div>
+        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Identité *</label>
+        ${idents.length ? `
+          <select id='gl-cr-ident' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
+            <option value=''>-- choisir --</option>${identOpts}
+          </select>
+        ` : `
+          <input type='text' id='gl-cr-ident' placeholder='nom de l identité (ex: emma)' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
+        `}
+      </div>
+      <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px'>
+        <div>
+          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Reels</label>
+          <input type='number' id='gl-cr-reels' value='1' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
+        </div>
+        <div>
+          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Stories</label>
+          <input type='number' id='gl-cr-stories' value='3' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
+        </div>
+        <div>
+          <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>CTAs</label>
+          <input type='number' id='gl-cr-ctas' value='1' min='0' max='20' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center'>
+        </div>
+      </div>
+      <div>
+        <label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px'>Heure de push (heure Paris) *</label>
+        <input type='time' id='gl-cr-time' value='22:00' style='width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px'>
+        <small style='color:#666;font-size:11px;display:block;margin-top:4px'>Le push s exécute chaque jour à cette heure</small>
+      </div>
+    </div>
+    <div style='padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f'>
+      <button type='button' id='gl-cr-cancel' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>
+      <button type='button' id='gl-cr-save' style='background:#a855f7;color:#fff;border:0;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.3)'>Créer</button>
+    </div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const f = document.getElementById('gl-cr-group');
+    if(f) f.focus();
+  }, 50);
+  function onKey(e){ if(e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  document.getElementById('gl-cr-cancel').onclick = close;
+  document.getElementById('gl-cr-save').onclick = save;
+  async function save(){
+    const grp = (document.getElementById('gl-cr-group').value || '').trim();
+    const ident = (document.getElementById('gl-cr-ident').value || '').trim();
+    const reels = parseInt(document.getElementById('gl-cr-reels').value || '0', 10);
+    const stories = parseInt(document.getElementById('gl-cr-stories').value || '0', 10);
+    const ctas = parseInt(document.getElementById('gl-cr-ctas').value || '0', 10);
+    const time = (document.getElementById('gl-cr-time').value || '00:00').trim();
+    if(!grp || !ident){
+      if(typeof showToast==='function') showToast('⚠ Groupe et identité requis', 'warning', 2500);
+      return;
+    }
+    if(reels + stories + ctas === 0){
+      if(typeof showToast==='function') showToast('⚠ Au moins 1 reel/story/CTA', 'warning', 2500);
+      return;
+    }
+    const [h, m] = time.split(':');
+    const fd = new FormData();
+    fd.set('groupe', grp);
+    fd.set('identite', ident);
+    fd.set('reels', String(reels));
+    fd.set('stories', String(stories));
+    fd.set('storyctas', String(ctas));
+    fd.set('hour_paris', h);
+    fd.set('minute_paris', m);
+    try {
+      const r = await fetch('/geelark/create_schedule', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        if(typeof showToast==='function') showToast('✓ Push planifié créé', 'success', 2500);
+        close();
+        setTimeout(() => location.reload(), 600);
+      } else {
+        if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error', 3000);
+      }
+    } catch(e){
+      if(typeof showToast==='function') showToast('❌ Erreur réseau', 'error');
+    }
+  }
+  function close(){
+    document.removeEventListener('keydown', onKey);
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+}
 async function glDeleteSchedule(id, btn){
   mplConfirmAction({
     icon: '🗑',
@@ -15264,6 +15399,29 @@ def create_app():
         return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
 
     # ============ GEELARK ============
+    @app.route("/geelark/create_schedule", methods=["POST"])
+    def geelark_create_schedule():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import geelark_view as gv
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        try:
+            return jsonify(gv.create_schedule(
+                groupe=(request.form.get("groupe") or "").strip(),
+                identite=(request.form.get("identite") or "").strip(),
+                reels=int(request.form.get("reels") or 0),
+                stories=int(request.form.get("stories") or 0),
+                storyctas=int(request.form.get("storyctas") or 0),
+                hour_paris=int(request.form.get("hour_paris") or 0),
+                minute_paris=int(request.form.get("minute_paris") or 0),
+            ))
+        except (ValueError, TypeError) as e:
+            return jsonify({"ok": False, "error": f"params invalides: {e}"})
+
     @app.route("/geelark/delete_schedule", methods=["POST"])
     def geelark_delete_schedule():
         if not is_auth():
