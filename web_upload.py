@@ -1780,9 +1780,9 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       Bio Links
     </button>
-    <button class="item" id="tab-gms" onclick="showTab('public','gms','GetMySocial','Gere tes liens GMS depuis le site')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-      GetMySocial
+    <button class="item" id="tab-linkscale" onclick="showTab('public','linkscale','Linkscale','Gere tes liens Linkscale depuis le site')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      Linkscale
     </button>
   </div>
 </div>
@@ -2384,6 +2384,11 @@ document.addEventListener('keydown', function(e){
 <!-- BUSINESS - GETMYSOCIAL -->
 <div class="form-section" id="form-gms" style="display:none">
 {gms_html}
+</div>
+
+<!-- LINKSCALE -->
+<div class="form-section" id="form-linkscale" style="display:none">
+{linkscale_html}
 </div>
 
 <!-- BUSINESS - SCHEDULE (AUTO-POST XLSX) -->
@@ -8305,6 +8310,204 @@ body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:10
 </div>
 </body>
 </html>"""
+
+
+def _render_linkscale_html() -> str:
+    """Page Linkscale : gestion cle API + liste/creation/suppression/dup links.
+
+    Le user veut "quand je duplique je veux que tu range dans le meme dossier"
+    -> le bouton "Dupliquer" appelle linkscale.duplicate_link() qui preserve
+    le tableau folders[] du link source.
+    """
+    try:
+        import linkscale
+    except Exception as e:
+        return f"<p style='color:#f99'>Module linkscale indispo : {e}</p>"
+
+    configured = linkscale.is_configured()
+    key = linkscale.get_api_key()
+    key_masked = (key[:9] + "..." + key[-6:]) if key and len(key) > 18 else (key or "")
+
+    # Status + form cle
+    if configured:
+        key_status = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:10px;margin-bottom:18px'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#22c55e' stroke-width='2.5'><path d='M20 6L9 17l-5-5'/></svg>"
+            f"<div style='flex:1'><div style='font-weight:600;color:#22c55e;font-size:13px'>Cle API Linkscale configuree</div>"
+            f"<div style='font-size:12px;color:#888;font-family:monospace'>{key_masked}</div></div>"
+            "<form method='POST' action='/linkscale/test' style='margin:0'><button type='submit' style='background:#22c55e;border:0;color:#000;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer'>▶ Tester</button></form>"
+            "</div>"
+        )
+    else:
+        key_status = (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2.5'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
+            "<div style='flex:1;font-weight:600;color:#ef4444;font-size:13px'>Aucune cle API - entre la ci-dessous (prefix lk_)</div>"
+            "</div>"
+        )
+
+    key_form = (
+        "<div class='box' style='margin-bottom:24px'>"
+        "<h3 style='margin:0 0 4px;font-size:15px'>Cle API Linkscale</h3>"
+        "<p style='color:#888;font-size:12px;margin:0 0 12px'>Genere-la sur <a href='https://dashboard.linkscale.to/' target='_blank' style='color:#3b82f6'>dashboard.linkscale.to</a> -> Settings -> API Keys (prefix <code>lk_</code>).</p>"
+        "<form method='POST' action='/linkscale/save_key' style='display:flex;gap:8px'>"
+        "<input type='password' name='api_key' placeholder='lk_...' required minlength='20' style='flex:1'>"
+        "<button type='submit'>Enregistrer</button>"
+        "</form>"
+        "</div>"
+    )
+
+    # Si pas configure, on s arrete la
+    if not configured:
+        return (
+            "<div style='max-width:880px'>"
+            "<h2 style='margin:0 0 6px;font-size:20px'>🔗 Linkscale</h2>"
+            "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
+            "Gere tes liens Linkscale (bio links, direct links) directement depuis le dashboard.</p>"
+            + key_status + key_form
+            + "</div>"
+        )
+
+    # Configure - on liste les links groupes par folder
+    grouped = linkscale.get_links_grouped_by_folder()
+    total_links = sum(len(v) for v in grouped.values())
+
+    # Header stats
+    header = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<div>"
+        "<h2 style='margin:0 0 4px;font-size:20px;display:flex;align-items:center;gap:10px'>🔗 Linkscale "
+        "<span style='font-size:11px;background:#3b82f6;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>BIO LINKS</span></h2>"
+        "<p style='margin:0;color:#888;font-size:13px'>Bio links + direct links - duplique pour copier dans le meme dossier.</p>"
+        "</div>"
+        f"<div style='display:flex;gap:18px;align-items:center'>"
+        f"<button type='button' onclick='lsOpenCreateModal()' style='background:#3b82f6;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700'>+ Creer un link</button>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#fff'>{total_links}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>LINKS</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#a855f7'>{len(grouped)}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>FOLDERS</div></div>"
+        "</div></div>"
+    )
+
+    # Liste groupee par folder
+    if total_links == 0:
+        list_html = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
+            "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
+            "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link pour le moment</div>"
+            "<div style='color:#555;font-size:11px'>Clique sur \"+ Creer un link\" pour commencer</div>"
+            "</div>"
+        )
+    else:
+        list_html = ""
+        for folder_name, links in sorted(grouped.items()):
+            list_html += (
+                f"<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:14px'>"
+                f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px'>"
+                f"<div style='width:32px;height:32px;border-radius:8px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:14px'>📁</div>"
+                f"<div style='flex:1'><div style='color:#fff;font-weight:700;font-size:14px'>{folder_name}</div>"
+                f"<div style='color:#666;font-size:11px'>{len(links)} link(s)</div></div>"
+                f"</div>"
+            )
+            for lk in links:
+                lid = lk.get("id", "") or lk.get("_id", "")
+                shortcode = (lk.get("u") or "?").replace("<", "&lt;")
+                name = (lk.get("n") or "").replace("<", "&lt;")
+                url = (lk.get("url") or "").replace("<", "&lt;")
+                enabled = lk.get("enabled", True)
+                status_color = "#22c55e" if enabled else "#666"
+                status_label = "ACTIF" if enabled else "DESACTIVE"
+                ltype = lk.get("type", "?")
+                type_color = "#3b82f6" if ltype == "d_l" else "#a855f7"
+                type_label = "DIRECT" if ltype == "d_l" else "BIO"
+                # Extract HTML chunks pour eviter backslash dans f-string
+                name_html = f" <span style='color:#666;font-size:11px;font-weight:400'>— {name}</span>" if name else ""
+                toggle_title = "Desactiver" if enabled else "Activer"
+                toggle_icon = "⏸" if enabled else "▶"
+                toggle_val = 1 if enabled else 0
+                list_html += (
+                    f"<div style='display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;margin-bottom:6px'>"
+                    f"<span style='font-size:9px;color:#fff;background:{type_color};padding:2px 7px;border-radius:5px;font-weight:800;letter-spacing:.5px'>{type_label}</span>"
+                    f"<div style='flex:1;min-width:0'>"
+                    f"<div style='color:#fff;font-weight:600;font-size:13px'>/{shortcode}{name_html}</div>"
+                    f"<div style='color:#888;font-size:11px;margin-top:2px;font-family:monospace;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{url}</div>"
+                    f"</div>"
+                    f"<span style='font-size:9px;color:{status_color};font-weight:700;letter-spacing:.5px'>{status_label}</span>"
+                    f"<button type='button' onclick=\"lsDuplicate('{lid}', this)\" style='background:transparent;border:1px solid #2a3a5a;color:#3b82f6;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600' title='Dupliquer dans le meme dossier'>⎘</button>"
+                    f"<button type='button' onclick=\"lsToggle('{lid}', {toggle_val}, this)\" style='background:transparent;border:1px solid #444;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='{toggle_title}'>{toggle_icon}</button>"
+                    f"<button type='button' onclick=\"lsDelete('{lid}', this)\" style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer'>🗑</button>"
+                    f"</div>"
+                )
+            list_html += "</div>"
+
+    # JS
+    js = """
+<script>
+async function lsDuplicate(id, btn){
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const fd = new FormData(); fd.set('link_id', id);
+    const r = await fetch('/linkscale/duplicate', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      if(typeof showToast==='function') showToast('✓ Link duplique dans le meme dossier', 'success', 2500);
+      setTimeout(()=>location.reload(), 700);
+    } else {
+      btn.textContent = '⎘'; btn.disabled = false;
+      if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error');
+    }
+  } catch(e){ btn.textContent = '⎘'; btn.disabled = false; }
+}
+async function lsToggle(id, enabled, btn){
+  const fd = new FormData(); fd.set('link_id', id); fd.set('enable', enabled ? '0' : '1');
+  try {
+    const r = await fetch('/linkscale/toggle', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){ setTimeout(()=>location.reload(), 400); }
+    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+  } catch(e){}
+}
+async function lsDelete(id, btn){
+  mplConfirmAction({
+    icon: '🗑',
+    title: 'Supprimer ce link ?',
+    subtitle: 'La suppression est definitive sur Linkscale.',
+    confirmLabel: 'Supprimer',
+    danger: true,
+    onConfirm: async () => {
+      const fd = new FormData(); fd.set('link_id', id);
+      const r = await fetch('/linkscale/delete', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        const row = btn.closest('div[style*="background:#0f0f0f"]');
+        if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; }
+        setTimeout(()=>location.reload(), 300);
+      } else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+    }
+  });
+}
+function lsOpenCreateModal(){
+  const url = prompt('URL cible (https://...) :');
+  if(!url) return;
+  const shortcode = prompt('Shortcode unique (sera /ton-shortcode) :');
+  if(!shortcode) return;
+  const fd = new FormData();
+  fd.set('type', 'd_l');
+  fd.set('u', shortcode);
+  fd.set('url', url);
+  fetch('/linkscale/create', {method:'POST', body:fd}).then(r => r.json()).then(j => {
+    if(j.ok){
+      if(typeof showToast==='function') showToast('✓ Link cree', 'success', 2500);
+      setTimeout(()=>location.reload(), 700);
+    } else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+  });
+}
+</script>
+"""
+
+    return (
+        "<div style='max-width:1000px'>"
+        + header + key_status + list_html + js
+        + "</div>"
+    )
 
 
 def _render_gms_html() -> str:
@@ -14298,6 +14501,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{textpool_html}", _render_textpool_html())
         .replace("{geelark_html}", _render_geelark_html())
         .replace("{gms_html}", _render_gms_html())
+        .replace("{linkscale_html}", _render_linkscale_html())
         .replace("{schedule_html}", _render_schedule_html())
         .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
         .replace("{sfssetupof_html}", _render_sfssetup_html("of"))
@@ -15484,6 +15688,105 @@ def create_app():
                     "caption_preview": (r.get("caption") or "")[:100],
                 })
         return jsonify({"ok": False, "error": "reel introuvable dans le cache"})
+
+    # ============ LINKSCALE ============
+    @app.route("/linkscale/save_key", methods=["POST"])
+    def linkscale_save_key():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import linkscale
+        except Exception as e:
+            return _error(f"❌ Module linkscale indispo : {e}", tab="linkscale")
+        key = (request.form.get("api_key") or "").strip()
+        if not key.startswith("lk_") or len(key) < 20:
+            return _error("❌ Cle Linkscale invalide (doit commencer par lk_)", tab="linkscale")
+        linkscale.save_api_key(key)
+        return _success("✅ Cle Linkscale enregistree", tab="linkscale")
+
+    @app.route("/linkscale/test", methods=["POST"])
+    def linkscale_test():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import linkscale
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="linkscale")
+        res = linkscale.ping()
+        if res.get("ok"):
+            return _success("✅ Connexion Linkscale OK", tab="linkscale")
+        return _error(f"❌ {res.get('error', 'Inconnu')}", tab="linkscale")
+
+    @app.route("/linkscale/create", methods=["POST"])
+    def linkscale_create():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        payload = {
+            "type": (request.form.get("type") or "d_l").strip(),
+            "u": (request.form.get("u") or "").strip(),
+            "url": (request.form.get("url") or "").strip(),
+        }
+        # Optionnels
+        for k in ("n", "bio", "note", "domain"):
+            v = (request.form.get(k) or "").strip()
+            if v:
+                payload[k] = v
+        if not payload["u"] or not payload["url"]:
+            return jsonify({"ok": False, "error": "shortcode et url requis"})
+        return jsonify(linkscale.create_link(payload))
+
+    @app.route("/linkscale/duplicate", methods=["POST"])
+    def linkscale_duplicate():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        link_id = (request.form.get("link_id") or "").strip()
+        if not link_id:
+            return jsonify({"ok": False, "error": "link_id manquant"})
+        # duplicate_link preserve les folders[] -> meme dossier
+        return jsonify(linkscale.duplicate_link(link_id))
+
+    @app.route("/linkscale/toggle", methods=["POST"])
+    def linkscale_toggle():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        link_id = (request.form.get("link_id") or "").strip()
+        enable = (request.form.get("enable") or "1") == "1"
+        if not link_id:
+            return jsonify({"ok": False, "error": "link_id manquant"})
+        return jsonify(linkscale.enable_link(link_id) if enable else linkscale.disable_link(link_id))
+
+    @app.route("/linkscale/delete", methods=["POST"])
+    def linkscale_delete():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        link_id = (request.form.get("link_id") or "").strip()
+        if not link_id:
+            return jsonify({"ok": False, "error": "link_id manquant"})
+        return jsonify(linkscale.delete_link(link_id))
 
     # ============ GEELARK ============
     @app.route("/geelark/create_schedule", methods=["POST"])
