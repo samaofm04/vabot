@@ -342,41 +342,83 @@ def list_all_links_full() -> List[Dict[str, Any]]:
     return out
 
 
-# Cache en memoire pour le mapping cs_template -> folder_name
-_TEMPLATE_FOLDER_CACHE: Dict[str, Any] = {"ts": 0, "map": {}}
+# Cache persistant disque pour le mapping cs_template -> folder_name
+TEMPLATE_MAP_FILE = DATA_DIR / "linkscale_template_map.json"
+
+# Mappings pre-decouverts pour les folders de l user (precharger pour eviter
+# les 27s de fetch au premier load). Ces IDs sont stables tant que les
+# templates Linkscale ne changent pas.
+KNOWN_TEMPLATE_MAP = {
+    "69ecd46f0cb2b33cddd8569a": "amelia",
+    "69ecd814a2e60929d5faa36a": "julia",
+    "69ecd5a9409d299cce8a0eaf": "lola",
+    "69ecffa1320e209903fcab14": "emma",
+    "6a0e6170c6728b3ed29d0e77": "Jessy",
+}
+
+
+def _load_template_map() -> Dict[str, Any]:
+    if not TEMPLATE_MAP_FILE.exists():
+        return {"ts": 0, "map": dict(KNOWN_TEMPLATE_MAP)}
+    try:
+        d = json.loads(TEMPLATE_MAP_FILE.read_text(encoding="utf-8"))
+        # Merge avec les known pour ne jamais perdre les pre-decouverts
+        merged = dict(KNOWN_TEMPLATE_MAP)
+        merged.update(d.get("map", {}))
+        return {"ts": d.get("ts", 0), "map": merged}
+    except Exception:
+        return {"ts": 0, "map": dict(KNOWN_TEMPLATE_MAP)}
+
+
+def _save_template_map(cache: Dict[str, Any]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATE_MAP_FILE.write_text(
+        json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def get_template_to_folder_map(force_refresh: bool = False) -> Dict[str, str]:
-    """Retourne {cs_template_id: folder_name}. Cache 5 min.
+    """Retourne {cs_template_id: folder_name}.
 
-    Strategie : pour chaque folder, fetch 1 link actif via stats et lit
-    son cs_template. C est l unique facon de relier cs_template <-> folder.
+    - Cache disque (data/linkscale_template_map.json), valide 24h
+    - Pre-charge avec KNOWN_TEMPLATE_MAP au premier load (instantane)
+    - Refresh asynchrone si > 24h ou force_refresh
+
+    Strategie pour les nouvelles entrees : pour chaque folder NON deja dans
+    le map, fetch 1 link actif et lit son cs_template.
     """
     import time
-    if not force_refresh and _TEMPLATE_FOLDER_CACHE["map"] and (time.time() - _TEMPLATE_FOLDER_CACHE["ts"]) < 300:
-        return _TEMPLATE_FOLDER_CACHE["map"]
-    folders = list_folders()
-    mapping: Dict[str, str] = {}
+    cache = _load_template_map()
+    age = time.time() - cache.get("ts", 0)
+    current_map = cache.get("map", {})
+    # Si on a des entries connues et cache jeune, retourne direct
+    if not force_refresh and current_map and age < 86400:
+        return current_map
+    # Sinon, fetch les folders manquants
+    try:
+        folders = list_folders()
+    except Exception:
+        return current_map
+    existing_names = {v.lower() for v in current_map.values()}
+    new_map = dict(current_map)
     for f in folders:
+        fname = f.get("name", "")
+        if not fname or fname.lower() in existing_names:
+            continue
         try:
             res = get_folder_links_with_clicks(f["id"], days=7)
             active = res.get("links") or []
-            if not active:
-                # Fallback : try 30 days (peut crash sur les gros folders)
-                res = get_folder_links_with_clicks(f["id"], days=30)
-                active = res.get("links") or []
             if not active:
                 continue
             detail = get_link(active[0]["id"])
             cs = detail.get("raw", {}).get("link", {}).get("cs_template")
             if cs:
-                mapping[cs] = f["name"]
-            time.sleep(0.6)  # rate limit safe
+                new_map[cs] = fname
+            time.sleep(0.7)  # respect rate limit 2/sec
         except Exception:
             continue
-    _TEMPLATE_FOLDER_CACHE["map"] = mapping
-    _TEMPLATE_FOLDER_CACHE["ts"] = time.time()
-    return mapping
+    _save_template_map({"ts": time.time(), "map": new_map})
+    return new_map
 
 
 def get_all_links_in_folder(folder_name: str) -> List[Dict[str, Any]]:
