@@ -4853,18 +4853,14 @@ function vaLinksGenerate(){
     if(typeof showToast === 'function') showToast("Selectionne d'abord un dossier (clique une pill)", 'error');
     return;
   }
-  // Demande le prefix au user (default = prefix sauvegarde, sinon nom du folder)
-  var defaultPrefix = vaLinksGetPrefix(folder);
-  var prefix = prompt('Préfixe du nouveau lien (4 lettres random seront ajoutées) :', defaultPrefix);
-  if(prefix === null) return;
-  prefix = (prefix || '').trim();
+  // Utilise directement le prefix sauvegarde (ou nom du folder par defaut)
+  // L'edition se fait via ✏️ a cote de la pill -> pas de prompt ici
+  var prefix = vaLinksGetPrefix(folder);
   if(!prefix){
-    if(typeof showToast === 'function') showToast('Préfixe vide', 'error');
+    if(typeof showToast === 'function') showToast("Préfixe vide - clique ✏️ pour le definir", 'error');
     return;
   }
-  // Sauvegarde le prefix pour les prochaines fois
-  vaLinksSetPrefix(folder, prefix);
-  if(typeof showToast === 'function') showToast('Génération en cours…', 'info');
+  if(typeof showToast === 'function') showToast('Génération avec prefixe "' + prefix + '"…', 'info');
   var fd = new FormData();
   fd.append('folder_name', folder);
   fd.append('prefix', prefix);
