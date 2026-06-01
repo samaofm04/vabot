@@ -8673,7 +8673,7 @@ def _render_geelark_html() -> str:
         "<p style='margin:0;color:#888;font-size:13px'>Push reels/stories/CTAs sur les phones cloud GeeLark - mode sequentiel pour eviter les rate-limits.</p>"
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center;flex-wrap:wrap'>"
-        f"<button onclick='glOpenCreateModal()' style='background:#a855f7;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.35)'>+ Créer un push</button>"
+        f"<button type='button' onclick='glOpenCreateModal()' style='background:#a855f7;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.35)'>+ Créer un push</button>"
         f"<div style='display:flex;gap:14px'>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{s['schedules_count']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>PUSH PROG</div></div>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#a855f7'>{s['watchers_count']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>WATCHERS</div></div>"
@@ -8706,7 +8706,7 @@ def _render_geelark_html() -> str:
                 f"<div style='color:#888;font-size:12px;margin-top:3px'>"
                 f"{reels} reels · {stories} stories · {ctas} CTAs &nbsp;·&nbsp; last : <code style='color:#666'>{last_run}</code></div>"
                 f"</div>"
-                f"<button onclick=\"glDeleteSchedule('{sid}', this)\" "
+                f"<button type='button' onclick=\"glDeleteSchedule('{sid}', this)\" "
                 f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer'>🗑</button>"
                 f"</div>"
             )
@@ -8750,7 +8750,7 @@ def _render_geelark_html() -> str:
                 f"<div style='color:#888;font-size:12px;margin-top:3px'>"
                 f"Par phone allumee : {reels} reels · {stories} stories · {ctas} CTAs</div>"
                 f"</div>"
-                f"<button onclick=\"glDeleteWatcher('{wid}', this)\" "
+                f"<button type='button' onclick=\"glDeleteWatcher('{wid}', this)\" "
                 f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Stop watcher'>🗑</button>"
                 f"</div>"
             )
