@@ -10914,11 +10914,17 @@ def _render_mypulslive_html() -> str:
         first_settings = mcs.get_settings(first_creator_id) if first_creator_id else {}
     except Exception:
         first_settings = {}
-    first_media_pool = "\n".join(first_settings.get("media_pool", []) or [])
+    first_media_pool_posts = first_settings.get("media_pool_posts", []) or []
+    first_media_pool_stories = first_settings.get("media_pool_stories", []) or []
+    first_media_pool = "\n".join(first_media_pool_posts)  # affiche posts par defaut
     first_captions_list = first_settings.get("captions", []) or []
     first_captions = "\n".join(first_captions_list)
-    first_media_count = len([x for x in first_media_pool.split("\n") if x.strip()])
+    first_media_count = len(first_media_pool_posts)
     first_cap_count = len(first_captions_list)
+    # JSON pour init JS des deux pools
+    import json as _json
+    first_media_pool_posts_json = _json.dumps(first_media_pool_posts)
+    first_media_pool_stories_json = _json.dumps(first_media_pool_stories)
 
     # Si l user a deja saisi des captions persos pour le 1er creator -> on les utilise
     # Sinon -> on prend DEFAULT_CAPTIONS
@@ -11452,7 +11458,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Bibliotheque Medias <span class='mpl-mini-badge' id='mpl-media-count'>{first_media_count}</span></div>
+        <div class='mpl-row-title'>Bibliotheque Medias <span id='mpl-media-mode-badge' style='font-size:9px;background:#3b82f6;color:#fff;padding:2px 7px;border-radius:5px;font-weight:800;letter-spacing:.5px;margin:0 5px;vertical-align:middle'>POSTS</span><span class='mpl-mini-badge' id='mpl-media-count'>{first_media_count}</span></div>
         <div class='mpl-row-sub'>Tes media_id MyPuls qui seront planifies</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
@@ -11697,6 +11703,10 @@ function switchTab(tab){{
   // Captions (lie aux posts)
   const cap = document.getElementById('mpl-captions-block');
   if(cap) cap.style.display = showPosts?'':'none';
+  // Swap media pool : posts <-> stories. En mode delete, on garde le pool posts.
+  if(typeof swapMediaPool === 'function'){{
+    swapMediaPool(showStories ? 'story' : 'post');
+  }}
   // Delete panel
   const del = document.getElementById('mpl-delete-block');
   if(del) del.style.display = showDelete?'':'none';
@@ -12218,14 +12228,16 @@ async function mplLoadSettings(cid){{
       if(typeof renderCaptionSlots === 'function') renderCaptionSlots();
       else if(typeof updateCapCount === 'function') updateCapCount();
     }}
-    // Media pool
+    // Media pools : posts ET stories (2 pools separes)
+    window.mediaPoolsByMode = window.mediaPoolsByMode || {{post: [], story: []}};
+    if(Array.isArray(s.media_pool_posts)) window.mediaPoolsByMode.post = s.media_pool_posts.slice();
+    if(Array.isArray(s.media_pool_stories)) window.mediaPoolsByMode.story = s.media_pool_stories.slice();
+    // Pool actif selon le mode courant
+    window.mediaSlots = (window.mediaPoolsByMode[window.currentMediaMode] || []).slice();
     const mi = document.getElementById('mpl-media-ids');
-    if(mi && Array.isArray(s.media_pool)){{
-      mi.value = s.media_pool.join('\\n');
-      window.mediaSlots = s.media_pool.slice();
-      if(typeof renderMediaSlots === 'function') renderMediaSlots();
-      else if(typeof updateMediaCount === 'function') updateMediaCount();
-    }}
+    if(mi) mi.value = window.mediaSlots.join('\\n');
+    if(typeof renderMediaSlots === 'function') renderMediaSlots();
+    else if(typeof updateMediaCount === 'function') updateMediaCount();
   }} catch(e){{ console.warn('mplLoadSettings:', e); }}
   finally{{ setTimeout(() => {{ window.__mplLoadingSettings = false; }}, 100); }}
 }}
@@ -12268,7 +12280,8 @@ function mplGetCurrentSettings(){{
       slots: ss,
     }},
     captions: cap ? cap.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
-    media_pool: mi ? mi.value.split('\\n').map(x => x.trim()).filter(Boolean) : [],
+    media_pool_posts: (window.mediaPoolsByMode && window.mediaPoolsByMode.post) ? window.mediaPoolsByMode.post.slice() : [],
+    media_pool_stories: (window.mediaPoolsByMode && window.mediaPoolsByMode.story) ? window.mediaPoolsByMode.story.slice() : [],
   }};
 }}
 function mplScheduleSave(){{
@@ -12328,8 +12341,22 @@ function updateCapCount(){{
   const cc = document.getElementById('mpl-cap-count');
   if(cc) cc.textContent = n;
 }}
-// === Media slots (rangees individuelles avec badge #N) ===
+// === Media slots SEPARES par mode (posts vs stories) ===
+// L array actif window.mediaSlots est swappe selon le mode (post/story).
+// Les 2 pools sont conserves en parallele dans mediaPoolsByMode.
+window.mediaPoolsByMode = window.mediaPoolsByMode || {{post: [], story: []}};
 window.mediaSlots = window.mediaSlots || [];
+window.currentMediaMode = window.currentMediaMode || 'post';
+function swapMediaPool(newMode){{
+  // Sauve l array courant avant de switcher
+  window.mediaPoolsByMode[window.currentMediaMode] = window.mediaSlots.slice();
+  window.currentMediaMode = (newMode === 'story') ? 'story' : 'post';
+  window.mediaSlots = (window.mediaPoolsByMode[window.currentMediaMode] || []).slice();
+  // Update le label de la section + le badge mode
+  const tb = document.getElementById('mpl-media-mode-badge');
+  if(tb) tb.textContent = window.currentMediaMode === 'story' ? 'STORIES' : 'POSTS';
+  renderMediaSlots();
+}}
 function renderMediaSlots(){{
   const c = document.getElementById('mpl-media-list');
   if(!c) return;
@@ -12532,10 +12559,12 @@ function removeMediaSlot(i){{
   renderMediaSlots();
 }}
 function syncMediaSlots(){{
-  // Met a jour la textarea cachee + les compteurs
+  // Met a jour la textarea cachee + les compteurs + le pool du mode actif
   const cleaned = window.mediaSlots.map(x=>(x||'').trim()).filter(Boolean);
   const ta = document.getElementById('mpl-media-ids');
   if(ta) ta.value = cleaned.join('\\n');
+  // Snapshot le pool courant pour le mode actif (la source de verite pour save)
+  window.mediaPoolsByMode[window.currentMediaMode] = window.mediaSlots.slice();
   updateMediaCount();
   // Trigger l auto-save per-creator (debounced)
   if(typeof mplScheduleSave === 'function') mplScheduleSave();
@@ -12588,13 +12617,18 @@ function syncCaptionSlots(){{
   updateCapCount();
   if(typeof mplScheduleSave === 'function') mplScheduleSave();
 }}
-// Init au boot : peuple mediaSlots / captionSlots depuis les textareas hidden
+// Init au boot : peuple les 2 pools media (posts + stories) + captionSlots
 document.addEventListener('DOMContentLoaded', () => {{
-  const ta = document.getElementById('mpl-media-ids');
-  if(ta && ta.value){{
-    window.mediaSlots = ta.value.split('\\n').map(x=>x.trim()).filter(Boolean);
-    renderMediaSlots();
-  }} else {{ renderMediaSlots(); }}
+  // Posts pool depuis le JSON server-side pre-fill
+  try {{
+    window.mediaPoolsByMode = {{
+      post: {first_media_pool_posts_json},
+      story: {first_media_pool_stories_json}
+    }};
+  }} catch(e){{ window.mediaPoolsByMode = {{post: [], story: []}}; }}
+  window.currentMediaMode = 'post';  // tab par defaut
+  window.mediaSlots = (window.mediaPoolsByMode.post || []).slice();
+  renderMediaSlots();
   const ca = document.getElementById('mpl-captions');
   if(ca && ca.value){{
     window.captionSlots = ca.value.split('\\n').map(x=>x.trim()).filter(Boolean);

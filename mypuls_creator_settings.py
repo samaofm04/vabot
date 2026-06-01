@@ -75,9 +75,12 @@ DEFAULT_GLOBAL = {
 }
 
 # Defaults par createur (les fields per-identite)
+# media_pool_posts / media_pool_stories : pools SEPARES pour ne pas melanger
+# les contenus videos longues / photos posts vs courts contenus stories
 DEFAULT_CREATOR = {
     "captions": [],
-    "media_pool": [],
+    "media_pool_posts": [],
+    "media_pool_stories": [],
 }
 
 
@@ -167,7 +170,11 @@ def save_global_settings(payload: Dict[str, Any]) -> bool:
 # ===== PER-CREATOR settings =====
 
 def get_creator_settings(creator_id) -> Dict[str, Any]:
-    """Retourne les settings per-creator (captions + media_pool)."""
+    """Retourne les settings per-creator (captions + media_pool_posts + media_pool_stories).
+
+    Migration : si l ancien field 'media_pool' existe (avant le split posts/stories),
+    on le mappe vers 'media_pool_posts' par defaut.
+    """
     cid = _normalize_id(creator_id)
     if not cid:
         return dict(DEFAULT_CREATOR)
@@ -176,6 +183,9 @@ def get_creator_settings(creator_id) -> Dict[str, Any]:
     out = json.loads(json.dumps(DEFAULT_CREATOR))
     for k, v in stored.items():
         out[k] = v
+    # Migration de l ancien 'media_pool' (avant split)
+    if "media_pool" in stored and not out.get("media_pool_posts"):
+        out["media_pool_posts"] = stored["media_pool"]
     return out
 
 
@@ -200,7 +210,10 @@ def get_settings(creator_id) -> Dict[str, Any]:
     c = get_creator_settings(creator_id)
     out = dict(g)
     out["captions"] = c.get("captions", [])
-    out["media_pool"] = c.get("media_pool", [])
+    out["media_pool_posts"] = c.get("media_pool_posts", [])
+    out["media_pool_stories"] = c.get("media_pool_stories", [])
+    # Compat : expose aussi media_pool (= posts) pour code legacy
+    out["media_pool"] = out["media_pool_posts"]
     return out
 
 
@@ -208,9 +221,12 @@ def save_settings(creator_id, payload: Dict[str, Any]) -> bool:
     """Compat helper : split le payload entre global et per-creator."""
     if not isinstance(payload, dict):
         return False
-    creator_fields = ("captions", "media_pool")
+    creator_fields = ("captions", "media_pool", "media_pool_posts", "media_pool_stories")
     global_payload = {k: v for k, v in payload.items() if k not in creator_fields}
     creator_payload = {k: payload[k] for k in creator_fields if k in payload}
+    # Si on recoit le legacy 'media_pool', on le mappe vers media_pool_posts
+    if "media_pool" in creator_payload and "media_pool_posts" not in creator_payload:
+        creator_payload["media_pool_posts"] = creator_payload.pop("media_pool")
     ok_g = True
     ok_c = True
     if global_payload:
