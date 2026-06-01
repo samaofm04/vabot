@@ -8656,6 +8656,7 @@ def _render_geelark_html() -> str:
     schedules = gv.list_schedules()
     watchers = gv.list_watchers()
     history = gv.list_history(limit=20)
+    upcoming = gv.upcoming_executions(limit=10)
 
     # Liste des groupes GeeLark + identites locales pour le selector du modal
     groups = gv.list_geelark_groups()
@@ -8772,6 +8773,48 @@ def _render_geelark_html() -> str:
             "<div style='color:#555;font-size:11px'>Cree-en via Discord : <code style='color:#a855f7'>/geelarkwatch</code></div>"
             "</div>"
         )
+
+    # Section A venir (prochaines executions)
+    if upcoming:
+        upcoming_html = ""
+        for u in upcoming:
+            in_min = u.get("in_minutes", 0)
+            # Format humain : "dans 2h 30min" / "dans 15min"
+            if in_min < 60:
+                eta = f"dans {in_min} min"
+            elif in_min < 1440:
+                h = in_min // 60
+                m = in_min % 60
+                eta = f"dans {h}h" + (f" {m}min" if m else "")
+            else:
+                eta = f"dans {in_min // 1440}j"
+            grp = (u.get("groupe") or "?").replace("<", "&lt;")
+            ident = (u.get("identite") or "?").replace("<", "&lt;")
+            upcoming_html += (
+                f"<div style='display:flex;align-items:center;gap:14px;padding:12px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-left:3px solid #3b82f6;border-radius:10px;margin-bottom:6px'>"
+                f"<div style='display:flex;flex-direction:column;align-items:center;min-width:64px'>"
+                f"<div style='font-family:monospace;font-size:15px;font-weight:800;color:#3b82f6;letter-spacing:1px'>{u.get('when_label', '--:--')}</div>"
+                f"<div style='font-size:9px;color:#666;letter-spacing:1px;margin-top:2px'>{u.get('when_day', '?')}</div>"
+                f"</div>"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='color:#fff;font-weight:600;font-size:13px'>{grp} · <span style='color:#a855f7'>@{ident}</span></div>"
+                f"<div style='color:#888;font-size:11px;margin-top:2px'>{u.get('reels',0)} reels · {u.get('stories',0)} stories · {u.get('storyctas',0)} CTAs</div>"
+                f"</div>"
+                f"<div style='font-size:11px;color:#3b82f6;background:rgba(59,130,246,.1);padding:5px 10px;border-radius:6px;font-weight:600;white-space:nowrap'>{eta}</div>"
+                f"</div>"
+            )
+        upcoming_block = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px'>⏭</div>"
+            f"<div><div style='font-weight:800;color:#fff;font-size:15px'>À venir</div>"
+            f"<div style='font-size:11px;color:#666'>Prochaines exécutions ({len(upcoming)})</div></div>"
+            f"</div>"
+            + upcoming_html
+            + "</div>"
+        )
+    else:
+        upcoming_block = ""
 
     # Section History (recent)
     if history:
@@ -8973,7 +9016,7 @@ async function glDeleteWatcher(id, btn){
 </script>
 """
 
-    return header_html + schedules_block + watchers_block + history_block + js
+    return header_html + upcoming_block + schedules_block + watchers_block + history_block + js
 
 
 def _render_textpool_html() -> str:

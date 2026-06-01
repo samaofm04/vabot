@@ -94,41 +94,49 @@ def _bearer() -> Optional[str]:
 
 
 def list_geelark_groups() -> List[Dict[str, Any]]:
-    """Fetch les groupes GeeLark via l API. Retourne [{id, name}, ...]."""
+    """Fetch les groupes GeeLark via l API. Retourne [{id, name}, ...].
+
+    Utilise EXACTEMENT le meme endpoint que le cog Discord :
+    POST /open/v1/group/list avec {page, pageSize} et reponse dans data.list.
+    """
     tok = _bearer()
     if not tok:
         return []
+    headers = {
+        "Authorization": f"Bearer {tok}",
+        "Content-Type": "application/json",
+    }
+    out: List[Dict[str, Any]] = []
+    page = 1
     try:
-        r = requests.post(
-            f"{GEELARK_BASE}/open/v1/phone/list",
-            headers={
-                "Authorization": f"Bearer {tok}",
-                "Content-Type": "application/json",
-                "trace-id": uuid.uuid4().hex,
-            },
-            json={"page": 1, "page_size": 1, "groups": []},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return []
-        # GeeLark renvoie les groupes dans un endpoint specifique
-        rr = requests.post(
-            f"{GEELARK_BASE}/open/v1/phone/group/list",
-            headers={
-                "Authorization": f"Bearer {tok}",
-                "Content-Type": "application/json",
-                "trace-id": uuid.uuid4().hex,
-            },
-            json={"page": 1, "page_size": 100},
-            timeout=15,
-        )
-        if rr.status_code != 200:
-            return []
-        j = rr.json()
-        items = j.get("data", {}).get("items", []) or []
-        return [{"id": g.get("id", ""), "name": g.get("name", "?")} for g in items]
+        while len(out) < 200:
+            r = requests.post(
+                f"{GEELARK_BASE}/open/v1/group/list",
+                headers=headers,
+                json={"page": page, "pageSize": 100},
+                timeout=15,
+            )
+            if r.status_code != 200:
+                break
+            body = r.json()
+            if body.get("code") != 0:
+                break
+            data = body.get("data", {}) or {}
+            items = data.get("list", []) or []
+            if not items:
+                break
+            for g in items:
+                out.append({
+                    "id": str(g.get("id", "")),
+                    "name": g.get("name", "?"),
+                })
+            total = data.get("total", 0)
+            if len(out) >= total:
+                break
+            page += 1
     except Exception:
-        return []
+        return out
+    return out
 
 
 def list_local_identities() -> List[str]:
@@ -174,6 +182,51 @@ def create_schedule(groupe: str, identite: str,
         json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     return {"ok": True, "schedule": schedule}
+
+
+def upcoming_executions(limit: int = 10) -> List[Dict[str, Any]]:
+    """Pour chaque schedule recurrent, calcule la prochaine execution
+    (aujourd hui si HH:MM pas encore passe, sinon demain). Trie par
+    distance ascendante.
+
+    Retourne [{id, groupe, identite, reels, stories, storyctas, when,
+              when_label, in_minutes}]
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        paris_tz = ZoneInfo("Europe/Paris")
+    except Exception:
+        from datetime import timezone as _tz, timedelta as _td
+        paris_tz = _tz(_td(hours=1))
+
+    now = datetime.now(paris_tz)
+    out: List[Dict[str, Any]] = []
+    for s in list_schedules():
+        try:
+            h = int(s.get("hour_paris", 0))
+            mn = int(s.get("minute_paris", 0))
+        except Exception:
+            continue
+        # Prochain run : aujourd hui a HH:MM si pas encore passe, sinon demain
+        from datetime import timedelta as _td
+        candidate = now.replace(hour=h, minute=mn, second=0, microsecond=0)
+        if candidate <= now:
+            candidate = candidate + _td(days=1)
+        diff_minutes = int((candidate - now).total_seconds() // 60)
+        out.append({
+            "id": s.get("id"),
+            "groupe": s.get("groupe"),
+            "identite": s.get("identite"),
+            "reels": s.get("reels", 0),
+            "stories": s.get("stories", 0),
+            "storyctas": s.get("storyctas", 0),
+            "when": candidate.isoformat(),
+            "when_label": candidate.strftime("%H:%M"),
+            "when_day": "Aujourd'hui" if candidate.date() == now.date() else "Demain",
+            "in_minutes": diff_minutes,
+        })
+    out.sort(key=lambda x: x.get("in_minutes", 9999))
+    return out[:limit]
 
 
 def stats() -> Dict[str, Any]:
