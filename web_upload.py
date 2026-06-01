@@ -8315,14 +8315,15 @@ body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:10
 def _render_linkscale_html() -> str:
     """Page Linkscale : gestion cle API + liste/creation/suppression/dup links.
 
-    Le user veut "quand je duplique je veux que tu range dans le meme dossier"
-    -> le bouton "Dupliquer" appelle linkscale.duplicate_link() qui preserve
-    le tableau folders[] du link source.
+    Click sur une pill folder -> page reload avec ?ls_folder=NAME et la liste
+    se filtre + un mini-dash affiche les clicks today/7j/30j du folder.
     """
     try:
         import linkscale
     except Exception as e:
         return f"<p style='color:#f99'>Module linkscale indispo : {e}</p>"
+    from flask import request as _r
+    selected_folder_name = (_r.args.get("ls_folder") or "").strip() if _r else ""
 
     configured = linkscale.is_configured()
     key = linkscale.get_api_key()
@@ -8392,28 +8393,79 @@ def _render_linkscale_html() -> str:
         "</div></div>"
     )
 
-    # Folder pills (apercu rapide des dossiers comme dans Linkscale dashboard)
+    # Folder pills CLIQUABLES (apercu rapide + filter au click)
+    selected_folder = None
     if folders_list:
         pills_html = "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px'>"
+        # Pill "Tous" en premier
+        active_all = "" if selected_folder_name else " style='background:#3b82f6;border-color:#3b82f6;color:#fff'"
+        pills_html += (
+            f"<a href='?tab=linkscale' data-no-loader='1' "
+            f"style='display:inline-flex;align-items:center;gap:6px;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:6px 11px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer'{active_all}>"
+            f"<span>★</span> Tous"
+            f"</a>"
+        )
         for f in folders_list:
             fname = (f.get("name") or "?").replace("<", "&lt;")
             count = f.get("links_count", 0)
+            is_active = (selected_folder_name and fname.lower() == selected_folder_name.lower())
+            if is_active:
+                selected_folder = f
+                style_extra = "background:#a855f7;border-color:#a855f7;color:#fff"
+            else:
+                style_extra = "background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa"
+            from urllib.parse import quote as _q
             pills_html += (
-                f"<div style='display:inline-flex;align-items:center;gap:6px;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:6px 11px;border-radius:8px;font-size:12px;font-weight:600'>"
-                f"<span style='color:#a855f7'>📁</span> {fname}"
-                f"<span style='color:#666;font-size:11px'>({count})</span>"
-                f"</div>"
+                f"<a href='?tab=linkscale&ls_folder={_q(fname)}' data-no-loader='1' "
+                f"style='display:inline-flex;align-items:center;gap:6px;{style_extra};padding:6px 11px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer'>"
+                f"<span>📁</span> {fname}"
+                f"<span style='opacity:.7;font-size:11px'>({count})</span>"
+                f"</a>"
             )
         pills_html += "</div>"
     else:
         pills_html = ""
 
+    # Mini-dash stats du folder selectionne (3 cards : today / 7j / 30j)
+    mini_dash_html = ""
+    if selected_folder:
+        try:
+            summary = linkscale.get_folder_click_summary(selected_folder["id"])
+        except Exception:
+            summary = {"today": 0, "last_7d": 0, "last_30d": 0}
+        fname_safe = (selected_folder.get("name") or "?").replace("<", "&lt;")
+        mini_dash_html = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📊</div>"
+            f"<div><div style='color:#fff;font-weight:800;font-size:15px'>Stats du dossier {fname_safe}</div>"
+            f"<div style='font-size:11px;color:#666'>Clicks comptabilises sur les links de ce dossier</div></div>"
+            "</div>"
+            "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px'>"
+            f"<div style='background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;padding:14px;text-align:center'>"
+            f"<div style='font-size:26px;font-weight:800;color:#22c55e'>{summary.get('today', 0)}</div>"
+            f"<div style='font-size:10px;color:#888;letter-spacing:1px;margin-top:2px'>AUJOURD'HUI</div></div>"
+            f"<div style='background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;padding:14px;text-align:center'>"
+            f"<div style='font-size:26px;font-weight:800;color:#3b82f6'>{summary.get('last_7d', 0)}</div>"
+            f"<div style='font-size:10px;color:#888;letter-spacing:1px;margin-top:2px'>7 DERNIERS JOURS</div></div>"
+            f"<div style='background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;padding:14px;text-align:center'>"
+            f"<div style='font-size:26px;font-weight:800;color:#a855f7'>{summary.get('last_30d', 0)}</div>"
+            f"<div style='font-size:10px;color:#888;letter-spacing:1px;margin-top:2px'>30 DERNIERS JOURS</div></div>"
+            "</div></div>"
+        )
+
+    # Filtre la liste si un folder est selectionne
+    if selected_folder_name:
+        grouped = {k: v for k, v in grouped.items() if k.lower() == selected_folder_name.lower()}
+        total_links = sum(len(v) for v in grouped.values())
+
     # Liste groupee par folder
     if total_links == 0:
+        empty_msg = "Aucun link dans ce dossier" if selected_folder_name else "Aucun link pour le moment"
         list_html = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
             "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
-            "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link pour le moment</div>"
+            f"<div style='color:#888;font-size:13px;margin-bottom:6px'>{empty_msg}</div>"
             "<div style='color:#555;font-size:11px'>Clique sur \"+ Creer un link\" pour commencer</div>"
             "</div>"
         )
@@ -8586,7 +8638,7 @@ function lsOpenCreateModal(){
 
     return (
         "<div style='max-width:1000px'>"
-        + header + key_status + pills_html + list_html + js
+        + header + key_status + pills_html + mini_dash_html + list_html + js
         + "</div>"
     )
 

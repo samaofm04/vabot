@@ -249,6 +249,71 @@ def get_folder_id_by_name(name: str) -> Optional[str]:
     return None
 
 
+def _iso_date_offset(days: int) -> str:
+    """Retourne YYYY-MM-DD du jour - N jours (today si days=0)."""
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=max(days, 0))).isoformat()
+
+
+def get_folder_stats(folder_id: str, from_date: str = "", to_date: str = "") -> Dict[str, Any]:
+    """Stats d un folder Linkscale. Format response :
+    {options, folder_id, date_range, project, stats: {summary, daily_traffic, ...}}
+
+    Note : include_clicks=true crashe le serveur (memory limit) donc on ne le
+    passe pas. On obtient juste les totaux dans stats.summary.
+    """
+    if not folder_id:
+        return {"ok": False, "error": "folder_id requis"}
+    params: Dict[str, Any] = {}
+    if from_date:
+        params["from"] = from_date
+    if to_date:
+        params["to"] = to_date
+    return _request("GET", f"/folders/{folder_id}/stats", params=params)
+
+
+def _extract_total_clicks(stats_response: Dict[str, Any]) -> int:
+    """Extrait stats.summary.totalClicks du raw response."""
+    if not stats_response.get("ok"):
+        return 0
+    raw = stats_response.get("raw") or {}
+    if not isinstance(raw, dict):
+        return 0
+    stats = raw.get("stats") or {}
+    summary = stats.get("summary") if isinstance(stats, dict) else {}
+    if not isinstance(summary, dict):
+        return 0
+    return int(summary.get("totalClicks") or summary.get("uniqueUsers") or 0)
+
+
+def get_folder_click_summary(folder_id: str) -> Dict[str, int]:
+    """Resume click pour un folder : {today, last_7d, last_30d}.
+
+    Fait 3 appels API courts (1 par range). Plus rapide qu une seule grosse
+    requete qui crashait le serveur Linkscale.
+    """
+    out = {"today": 0, "last_7d": 0, "last_30d": 0}
+    if not folder_id:
+        return out
+    today = _iso_date_offset(0)
+    out["today"] = _extract_total_clicks(get_folder_stats(folder_id, today, today))
+    out["last_7d"] = _extract_total_clicks(get_folder_stats(folder_id, _iso_date_offset(6), today))
+    out["last_30d"] = _extract_total_clicks(get_folder_stats(folder_id, _iso_date_offset(29), today))
+    return out
+
+
+def get_link_click_summary(link_id: str) -> Dict[str, int]:
+    """Idem pour un link individuel (3 appels API)."""
+    out = {"today": 0, "last_7d": 0, "last_30d": 0}
+    if not link_id:
+        return out
+    today = _iso_date_offset(0)
+    out["today"] = _extract_total_clicks(_request("GET", f"/links/{link_id}/stats", params={"from": today, "to": today}))
+    out["last_7d"] = _extract_total_clicks(_request("GET", f"/links/{link_id}/stats", params={"from": _iso_date_offset(6), "to": today}))
+    out["last_30d"] = _extract_total_clicks(_request("GET", f"/links/{link_id}/stats", params={"from": _iso_date_offset(29), "to": today}))
+    return out
+
+
 def get_links_grouped_by_folder() -> Dict[str, List[Dict[str, Any]]]:
     """Retourne {folder_name: [links...]} - utile pour l UI groupee.
 
