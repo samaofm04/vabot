@@ -12249,6 +12249,14 @@ document.addEventListener('DOMContentLoaded', () => {{
       mplScheduleSave();
     }}, true);
   }});
+  // Auto-load settings du createur initial au chargement de la page
+  // (selectCreator n est pas appele explicitement au boot)
+  setTimeout(() => {{
+    const ci = document.getElementById('mpl-creator-id');
+    if(ci && ci.value){{
+      try{{ mplLoadSettings(ci.value); }}catch(e){{ console.warn(e); }}
+    }}
+  }}, 200);
 }});
 function updateMediaCount(){{
   const ta = document.getElementById('mpl-media-ids');
