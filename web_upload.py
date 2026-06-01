@@ -12344,93 +12344,113 @@ function renderMediaSlots(){{
   `).join('');
   syncMediaSlots();
 }}
-// Bulk paste modal custom (au lieu du prompt natif moche)
-// Ouvre un overlay avec textarea multi-ligne + boutons Remplacer / Ajouter / Annuler
+// Bulk paste modal custom avec icones flottantes (style minimaliste)
+// Bouton + en haut-gauche = AJOUTER a la fin ; Bouton save en bas-droite = REMPLACER
 function showBulkPasteModal(opts){{
-  // opts : {{title, subtitle, placeholder, existingCount, onApply(lines, mode)}}
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);animation:vbFadeIn .15s ease-out';
   overlay.onclick = (e) => {{ if(e.target === overlay) close(); }};
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:580px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column';
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:620px;box-shadow:0 24px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden';
 
-  // Header
+  // Header compact
   const head = document.createElement('div');
-  head.style.cssText = 'padding:20px 24px 12px;border-bottom:1px solid #232323';
+  head.style.cssText = 'padding:18px 22px;border-bottom:1px solid #232323;display:flex;align-items:center;justify-content:space-between;gap:10px';
   head.innerHTML = `
-    <div style='display:flex;align-items:center;gap:10px;margin-bottom:6px'>
-      <div style='width:34px;height:34px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px'>📋</div>
-      <h3 style='margin:0;color:#fff;font-size:17px;font-weight:700'>${{opts.title || 'Bulk paste'}}</h3>
+    <div>
+      <div style='font-weight:700;color:#fff;font-size:15px'>${{opts.title || 'Bulk paste'}}</div>
+      <div style='color:#888;font-size:12px;margin-top:2px'>${{opts.subtitle || ''}}</div>
     </div>
-    <p style='margin:0;color:#888;font-size:13px;line-height:1.5'>${{opts.subtitle || 'Colle ton contenu (1 entree par ligne)'}}</p>
+    <button type='button' aria-label='Fermer' style='background:transparent;border:0;color:#666;cursor:pointer;font-size:22px;padding:0 4px;line-height:1' id='vb-bp-close'>×</button>
   `;
   card.appendChild(head);
 
-  // Textarea zone
+  // Body : wrapper position:relative + textarea + 2 icones flottantes
   const body = document.createElement('div');
-  body.style.cssText = 'padding:16px 24px';
+  body.style.cssText = 'padding:18px 22px';
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative';
   const ta = document.createElement('textarea');
-  ta.placeholder = opts.placeholder || '';
-  ta.style.cssText = 'width:100%;min-height:280px;background:#0a0a0a;border:1px solid #232323;color:#fff;border-radius:12px;padding:14px;font-family:monospace;font-size:13px;line-height:1.5;resize:vertical;outline:none';
+  ta.placeholder = opts.placeholder || 'Un texte par ligne...';
+  ta.style.cssText = 'width:100%;min-height:260px;background:#0a0a0a;border:1.5px solid #232323;color:#fff;border-radius:14px;padding:42px 16px 42px 52px;font-family:monospace;font-size:13px;line-height:1.5;resize:vertical;outline:none;transition:border-color .15s';
   ta.onfocus = () => {{ ta.style.borderColor = '#3b82f6'; }};
   ta.onblur = () => {{ ta.style.borderColor = '#232323'; }};
-  body.appendChild(ta);
+  wrap.appendChild(ta);
 
-  // Counter
+  // Bouton + (ajouter a la fin) en haut-gauche
+  const existing = opts.existingCount || 0;
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.title = existing > 0 ? 'Ajouter a la fin de la liste' : 'Ajouter les lignes';
+  addBtn.style.cssText = 'position:absolute;top:10px;left:10px;width:32px;height:32px;border-radius:50%;background:#22c55e;border:0;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(34,197,94,.35);transition:transform .12s';
+  addBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  addBtn.onmouseenter = () => {{ addBtn.style.transform = 'scale(1.08)'; }};
+  addBtn.onmouseleave = () => {{ addBtn.style.transform = 'scale(1)'; }};
+  addBtn.onclick = () => apply('append');
+  wrap.appendChild(addBtn);
+
+  // Bouton save (remplacer) en bas-droite
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.title = existing > 0 ? 'REMPLACER la liste actuelle' : 'Sauvegarder';
+  saveBtn.style.cssText = 'position:absolute;bottom:14px;right:14px;width:32px;height:32px;border-radius:50%;background:#22c55e;border:0;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(34,197,94,.35);transition:transform .12s';
+  saveBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+  saveBtn.onmouseenter = () => {{ saveBtn.style.transform = 'scale(1.08)'; }};
+  saveBtn.onmouseleave = () => {{ saveBtn.style.transform = 'scale(1)'; }};
+  saveBtn.onclick = () => apply('replace');
+  wrap.appendChild(saveBtn);
+
+  body.appendChild(wrap);
+
+  // Counter + legende des actions
   const counter = document.createElement('div');
-  counter.style.cssText = 'color:#666;font-size:11px;margin-top:8px;text-align:right;letter-spacing:.5px';
-  counter.textContent = '0 ligne';
+  counter.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:10px;font-size:11px;color:#666';
+  const cnt = document.createElement('div');
+  cnt.textContent = '0 texte';
+  cnt.style.cssText = 'letter-spacing:.5px';
+  const legend = document.createElement('div');
+  legend.innerHTML = `<span style='color:#22c55e'>●</span> + = Ajouter &nbsp;·&nbsp; <span style='color:#22c55e'>●</span> 💾 = Remplacer`;
+  legend.style.cssText = 'display:flex;gap:14px;font-size:11px';
+  counter.appendChild(cnt);
+  counter.appendChild(legend);
+  body.appendChild(counter);
+
   ta.oninput = () => {{
     const n = ta.value.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean).length;
-    counter.textContent = n + ' ligne' + (n>1?'s':'');
-    counter.style.color = n > 0 ? '#22c55e' : '#666';
+    cnt.textContent = n + ' texte' + (n>1?'s':'');
+    cnt.style.color = n > 0 ? '#22c55e' : '#666';
   }};
-  body.appendChild(counter);
-  card.appendChild(body);
 
-  // Footer
-  const foot = document.createElement('div');
-  foot.style.cssText = 'padding:14px 24px 18px;display:flex;gap:10px;justify-content:flex-end;align-items:center;flex-wrap:wrap;border-top:1px solid #232323;background:#0f0f0f';
-  const existing = opts.existingCount || 0;
+  // Footer minimaliste avec compteur entrees existantes
   if(existing > 0){{
-    const info = document.createElement('span');
-    info.textContent = existing + ' entree(s) deja presentes';
-    info.style.cssText = 'flex:1;color:#888;font-size:12px';
-    foot.appendChild(info);
+    const foot = document.createElement('div');
+    foot.style.cssText = 'padding:10px 22px;background:#0f0f0f;border-top:1px solid #232323;color:#888;font-size:11px;text-align:center;letter-spacing:.5px';
+    foot.textContent = existing + ' entree(s) deja dans la liste';
+    card.appendChild(body);
+    card.appendChild(foot);
+  }} else {{
+    card.appendChild(body);
   }}
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.textContent = 'Annuler';
-  cancelBtn.style.cssText = 'background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600';
-  cancelBtn.onclick = close;
-  foot.appendChild(cancelBtn);
-
-  if(existing > 0){{
-    const appendBtn = document.createElement('button');
-    appendBtn.type = 'button';
-    appendBtn.textContent = '+ Ajouter a la fin';
-    appendBtn.style.cssText = 'background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700';
-    appendBtn.onclick = () => apply('append');
-    foot.appendChild(appendBtn);
+  // Style animation
+  if(!document.getElementById('vb-bp-style')){{
+    const st = document.createElement('style');
+    st.id = 'vb-bp-style';
+    st.textContent = '@keyframes vbFadeIn{{from{{opacity:0}}to{{opacity:1}}}}';
+    document.head.appendChild(st);
   }}
 
-  const replaceBtn = document.createElement('button');
-  replaceBtn.type = 'button';
-  replaceBtn.textContent = existing > 0 ? '↻ Remplacer tout' : '✓ Ajouter';
-  replaceBtn.style.cssText = 'background:#3b82f6;color:#fff;border:0;padding:9px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 12px rgba(59,130,246,.3)';
-  replaceBtn.onclick = () => apply('replace');
-  foot.appendChild(replaceBtn);
-
-  card.appendChild(foot);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
   setTimeout(() => ta.focus(), 50);
 
-  // ESC pour fermer
-  function onKey(e){{ if(e.key === 'Escape') close(); }}
+  function onKey(e){{
+    if(e.key === 'Escape') close();
+    else if((e.ctrlKey || e.metaKey) && e.key === 'Enter') apply('replace');
+  }}
   document.addEventListener('keydown', onKey);
+  document.getElementById('vb-bp-close').onclick = close;
 
   function apply(mode){{
     const lines = ta.value.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
@@ -12443,7 +12463,9 @@ function showBulkPasteModal(opts){{
   }}
   function close(){{
     document.removeEventListener('keydown', onKey);
-    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity .15s';
+    setTimeout(() => {{ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }}, 150);
   }}
 }}
 function bulkPasteMedia(){{
