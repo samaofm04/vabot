@@ -16508,6 +16508,46 @@ def create_app():
             return jsonify({"ok": False, "error": "shortcode et url requis"})
         return jsonify(linkscale.create_link(payload))
 
+    @app.route("/geelark/run_batch_script", methods=["POST"])
+    def geelark_run_batch_script():
+        """Endpoint admin one-shot pour creer un batch de phones GeeLark via
+        scripts/create_amelia_phones.py. Body POST : script_name (juste le nom
+        du fichier sous scripts/, ex: 'create_amelia_phones.py').
+
+        Securite : auth + whitelist des scripts pour eviter exec arbitraire.
+        Renvoie stdout/stderr complets en JSON.
+        """
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import subprocess
+        script_name = (request.form.get("script_name") or "").strip()
+        # Whitelist : seulement les scripts qu'on connait
+        ALLOWED = {"create_amelia_phones.py"}
+        if script_name not in ALLOWED:
+            return jsonify({"ok": False, "error": f"script non autorise: {script_name}"})
+        from pathlib import Path
+        script_path = Path(__file__).resolve().parent / "scripts" / script_name
+        if not script_path.exists():
+            return jsonify({"ok": False, "error": f"introuvable: {script_path}"})
+        try:
+            proc = subprocess.run(
+                ["python3", str(script_path)],
+                cwd=str(script_path.parent.parent),
+                capture_output=True, text=True, timeout=300,
+            )
+            return jsonify({
+                "ok": proc.returncode == 0,
+                "returncode": proc.returncode,
+                "stdout": proc.stdout[-5000:],
+                "stderr": proc.stderr[-3000:],
+            })
+        except subprocess.TimeoutExpired:
+            return jsonify({"ok": False, "error": "timeout (5 min)"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
     @app.route("/linkscale/duplicate", methods=["POST"])
     def linkscale_duplicate():
         if not is_auth():
