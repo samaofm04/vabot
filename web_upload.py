@@ -4612,6 +4612,7 @@ function vaPaySave(){
         "<div id='vlm-list'></div>"
         "<div class='vlm-foot'>"
         "<button type='button' onclick='vaLinksClose()' class='vlm-cancel'>Annuler</button>"
+        "<button type='button' onclick='vaLinksGenerate()' class='vlm-gen'>✨ Générer</button>"
         "<button type='button' onclick='vaLinksDuplicateSelected()' class='vlm-dup'>⎘ Dupliquer sélection</button>"
         "<button type='button' onclick='vaLinksSave()' class='vlm-save'>Enregistrer</button>"
         "</div>"
@@ -4652,9 +4653,12 @@ function vaPaySave(){
 .vlm-badge{background:rgba(168,85,247,.15);color:#a855f7;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px}
 .vlm-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
 .vlm-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
-.vlm-dup{background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
+.vlm-dup{background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
 .vlm-dup:hover{background:rgba(59,130,246,.12)}
 .vlm-dup:disabled{opacity:.45;cursor:not-allowed}
+.vlm-gen{background:transparent;border:1px solid #22c55e;color:#22c55e;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
+.vlm-gen:hover{background:rgba(34,197,94,.12)}
+.vlm-gen:disabled{opacity:.45;cursor:not-allowed}
 .vlm-row-dup{background:transparent;border:1px solid #2a2a2a;color:#777;width:26px;height:26px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s}
 .vlm-row-dup:hover{border-color:#3b82f6;color:#3b82f6}
 .vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
@@ -4800,6 +4804,40 @@ function vaLinksDuplicateSelected(){
       .catch(function(){ fail++; next(); });
   }
   next();
+}
+function vaLinksGenerate(){
+  // Determine le folder actif (la pill selectionnee)
+  var folder = _vlmActiveModel;
+  if(folder === '__all__'){
+    if(typeof showToast === 'function') showToast('Sélectionne d\'abord un dossier (clique une pill)', 'error');
+    return;
+  }
+  // Demande le prefix au user (default = nom du folder)
+  var defaultPrefix = folder.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  var prefix = prompt('Préfixe du nouveau lien (4 lettres random seront ajoutées) :', defaultPrefix);
+  if(prefix === null) return;
+  prefix = (prefix || '').trim();
+  if(!prefix){
+    if(typeof showToast === 'function') showToast('Préfixe vide', 'error');
+    return;
+  }
+  if(typeof showToast === 'function') showToast('Génération en cours…', 'info');
+  var fd = new FormData();
+  fd.append('folder_name', folder);
+  fd.append('prefix', prefix);
+  fetch('/linkscale/generate', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Lien généré ✓ Recharge…', 'success');
+        setTimeout(function(){ window.location.reload(); }, 700);
+      } else {
+        if(typeof showToast === 'function') showToast('Erreur: ' + (d && d.error || '?'), 'error');
+      }
+    })
+    .catch(function(err){
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
 }
 function vaLinksClose(e){
   if(e && e.target && e.target.id !== 'va-links-modal' && e.target !== this) return;
@@ -16399,10 +16437,64 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         link_id = (request.form.get("link_id") or "").strip()
+        new_shortcode = (request.form.get("new_shortcode") or "").strip()
         if not link_id:
             return jsonify({"ok": False, "error": "link_id manquant"})
         # duplicate_link preserve les folders[] -> meme dossier
-        return jsonify(linkscale.duplicate_link(link_id))
+        return jsonify(linkscale.duplicate_link(link_id, new_shortcode=new_shortcode))
+
+    @app.route("/linkscale/generate", methods=["POST"])
+    def linkscale_generate():
+        """Genere un nouveau lien dans un folder avec shortcode = prefix + 4 random.
+        Body : folder_name, prefix (optionnel, sinon == folder_name), template_link_id
+        (optionnel, sinon on prend le 1er lien actif du folder)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import random, string
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        folder_name = (request.form.get("folder_name") or "").strip()
+        prefix = (request.form.get("prefix") or "").strip()
+        template_id = (request.form.get("template_link_id") or "").strip()
+        if not folder_name:
+            return jsonify({"ok": False, "error": "folder_name requis"})
+        # Si pas de prefix, on prend le nom du folder
+        if not prefix:
+            prefix = folder_name.lower()
+        # Nettoie le prefix (alphanumeric + _ uniquement)
+        prefix = "".join(c for c in prefix if c.isalnum() or c == "_").lower()
+        if not prefix:
+            return jsonify({"ok": False, "error": "prefix invalide apres nettoyage"})
+        # Si pas de template_id, on prend le 1er lien du folder
+        if not template_id:
+            try:
+                tpl_map = linkscale.get_template_to_folder_map()
+                # Trouve le cs_template du folder
+                target_cs = None
+                for cs, name in tpl_map.items():
+                    if name.lower() == folder_name.lower():
+                        target_cs = cs
+                        break
+                if not target_cs:
+                    return jsonify({"ok": False, "error": f"folder '{folder_name}' inconnu (pas de template mappe)"})
+                # Cherche un lien du folder
+                all_links = linkscale.list_all_links_full()
+                for link in all_links:
+                    if link.get("cs_template") == target_cs:
+                        template_id = link.get("_id")
+                        break
+                if not template_id:
+                    return jsonify({"ok": False, "error": f"aucun lien template trouve dans '{folder_name}'"})
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"resolution template: {e}"})
+        # Genere le shortcode : prefix + 4 lettres random (lowercase)
+        random_part = "".join(random.choices(string.ascii_lowercase, k=4))
+        new_shortcode = prefix + random_part
+        return jsonify(linkscale.duplicate_link(template_id, new_shortcode=new_shortcode))
 
     @app.route("/linkscale/toggle", methods=["POST"])
     def linkscale_toggle():
