@@ -4634,11 +4634,16 @@ function vaPaySave(){
 #vlm-search{margin:14px 18px 8px;padding:9px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;width:calc(100% - 36px)}
 #vlm-search:focus{border-color:#a855f7;outline:none}
 #vlm-pills{display:flex;gap:6px;flex-wrap:wrap;padding:0 18px 10px;border-bottom:1px solid #1a1a1a}
-.vlm-pill{padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px}
+.vlm-pill-wrap{display:inline-flex;align-items:center;gap:0}
+.vlm-pill{padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:999px 0 0 999px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px;border-right:0}
 .vlm-pill:hover{border-color:#a855f7;color:#fff}
 .vlm-pill.active{background:#a855f7;border-color:#a855f7;color:#fff}
 .vlm-pill-count{font-size:10px;opacity:.7;background:rgba(0,0,0,.2);padding:1px 5px;border-radius:999px}
 .vlm-pill.active .vlm-pill-count{background:rgba(0,0,0,.25)}
+.vlm-pill-prefix{font-size:10px;opacity:.8;background:rgba(34,197,94,.15);color:#22c55e;padding:1px 6px;border-radius:999px;font-weight:600}
+.vlm-pill.active .vlm-pill-prefix{background:rgba(255,255,255,.2);color:#fff}
+.vlm-pill-edit{padding:5px 7px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:0 999px 999px 0;cursor:pointer;font-size:10px;transition:all .12s;height:100%;line-height:1}
+.vlm-pill-edit:hover{border-color:#22c55e;background:rgba(34,197,94,.1)}
 #vlm-list{flex:1;overflow-y:auto;padding:6px 14px 14px}
 .vlm-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent}
 .vlm-item:hover{background:rgba(255,255,255,.04)}
@@ -4696,7 +4701,12 @@ function vaLinksOpen(uid, username, identity){
   models.forEach(function(m){
     var active = (m === _vlmActiveModel) ? 'active' : '';
     var safeAttr = m.replace(/"/g, '&quot;');
-    pillsHtml += '<button type="button" class="vlm-pill ' + active + '" data-pill-model="' + safeAttr + '" onclick="vaLinksSetModel(this)">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span></button>';
+    var prefix = vaLinksGetPrefix(m);
+    var prefixLabel = (prefix && prefix !== m.toLowerCase()) ? '<span class="vlm-pill-prefix" title="Préfixe enregistré">→ ' + prefix + '</span>' : '';
+    pillsHtml += '<span class="vlm-pill-wrap">'
+      + '<button type="button" class="vlm-pill ' + active + '" data-pill-model="' + safeAttr + '" onclick="vaLinksSetModel(this)">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span>' + prefixLabel + '</button>'
+      + '<button type="button" class="vlm-pill-edit" data-pill-edit="' + safeAttr + '" title="Définir le préfixe par défaut" onclick="vaLinksEditPrefix(this)">✏️</button>'
+      + '</span>';
   });
   document.getElementById('vlm-pills').innerHTML = pillsHtml;
   // Render la liste
@@ -4805,6 +4815,37 @@ function vaLinksDuplicateSelected(){
   }
   next();
 }
+function vaLinksGetPrefix(folder){
+  try{
+    var saved = localStorage.getItem('vabot_lks_prefix_' + folder.toLowerCase());
+    if(saved && saved.trim()) return saved.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+  }catch(e){}
+  return folder.toLowerCase().replace(/[^a-z0-9_]/g, '');
+}
+function vaLinksSetPrefix(folder, prefix){
+  try{
+    var clean = (prefix || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if(clean){
+      localStorage.setItem('vabot_lks_prefix_' + folder.toLowerCase(), clean);
+    }else{
+      localStorage.removeItem('vabot_lks_prefix_' + folder.toLowerCase());
+    }
+  }catch(e){}
+}
+function vaLinksEditPrefix(btn){
+  var folder = btn.getAttribute('data-pill-edit') || '';
+  if(!folder) return;
+  var current = vaLinksGetPrefix(folder);
+  var p = prompt('Préfixe par défaut pour ' + folder + ' (vide = reset, 4 lettres random toujours ajoutées) :', current);
+  if(p === null) return;
+  vaLinksSetPrefix(folder, p);
+  if(typeof showToast === 'function') showToast('Préfixe sauvegardé pour ' + folder, 'success');
+  // Re-render les pills pour montrer le badge
+  var uid = _vlmCurrentUid;
+  var subtitle = document.getElementById('vlm-subtitle').textContent || '';
+  var username = subtitle.replace(/^@/, '');
+  vaLinksOpen(uid, username, _vlmCurrentIdent);
+}
 function vaLinksGenerate(){
   // Determine le folder actif (la pill selectionnee)
   var folder = _vlmActiveModel;
@@ -4812,8 +4853,8 @@ function vaLinksGenerate(){
     if(typeof showToast === 'function') showToast("Selectionne d'abord un dossier (clique une pill)", 'error');
     return;
   }
-  // Demande le prefix au user (default = nom du folder)
-  var defaultPrefix = folder.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  // Demande le prefix au user (default = prefix sauvegarde, sinon nom du folder)
+  var defaultPrefix = vaLinksGetPrefix(folder);
   var prefix = prompt('Préfixe du nouveau lien (4 lettres random seront ajoutées) :', defaultPrefix);
   if(prefix === null) return;
   prefix = (prefix || '').trim();
@@ -4821,6 +4862,8 @@ function vaLinksGenerate(){
     if(typeof showToast === 'function') showToast('Préfixe vide', 'error');
     return;
   }
+  // Sauvegarde le prefix pour les prochaines fois
+  vaLinksSetPrefix(folder, prefix);
   if(typeof showToast === 'function') showToast('Génération en cours…', 'info');
   var fd = new FormData();
   fd.append('folder_name', folder);
