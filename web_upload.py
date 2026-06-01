@@ -16211,6 +16211,97 @@ def create_app():
         mypuls.save_config(cfg)
         return _success("✅ Cookies MyPuls supprimés")
 
+    @app.route("/mypuls/sales_window", methods=["GET"])
+    def mypuls_sales_window():
+        """Calcule le total des ventes MyPuls avec filtres :
+        - start, end : YYYY-MM-DD (inclusif des 2 cotes)
+        - exclude : creator(s) a exclure, separes par virgule (case-insensitive)
+        - hour_start, hour_end : fenetre horaire, ex 14..2 = de 14h a 2h du lendemain
+        Renvoie : {ok, total, by_creator, by_chatter, count, sample}
+        """
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        start = (request.args.get("start") or "").strip()
+        end = (request.args.get("end") or "").strip()
+        exclude_raw = (request.args.get("exclude") or "").strip()
+        try:
+            hour_start = int(request.args.get("hour_start", "0"))
+        except Exception:
+            hour_start = 0
+        try:
+            hour_end = int(request.args.get("hour_end", "24"))
+        except Exception:
+            hour_end = 24
+        # Resolve liste exclusions (case-insensitive)
+        excludes = {x.strip().lower() for x in exclude_raw.split(",") if x.strip()}
+
+        res = mypuls.fetch_team_stats(start, end, use_cache=False)
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error")})
+        txs = res.get("transactions", []) or []
+
+        # Filtre fenetre horaire (14h-2h = h>=14 OR h<2)
+        def in_window(date_str: str) -> bool:
+            # Format MyPuls: "29/05/2026 05:36"
+            try:
+                hm = date_str.split(" ", 1)[1] if " " in date_str else ""
+                h = int(hm.split(":", 1)[0]) if ":" in hm else -1
+            except Exception:
+                return False
+            if h < 0:
+                return False
+            if hour_start <= hour_end:
+                # Fenetre simple ex 9-17
+                return hour_start <= h < hour_end
+            else:
+                # Wraparound ex 14-2 = [14..23] U [0..1]
+                return h >= hour_start or h < hour_end
+
+        kept = []
+        for tx in txs:
+            creator = (tx.get("creator") or "").strip().lower()
+            if creator in excludes:
+                continue
+            if not in_window(tx.get("date") or ""):
+                continue
+            kept.append(tx)
+
+        total = round(sum(tx.get("amount", 0) for tx in kept), 2)
+        by_creator = {}
+        by_chatter = {}
+        for tx in kept:
+            c = tx.get("creator") or "?"
+            ch = tx.get("chatter") or "?"
+            by_creator[c] = round(by_creator.get(c, 0) + tx.get("amount", 0), 2)
+            by_chatter[ch] = round(by_chatter.get(ch, 0) + tx.get("amount", 0), 2)
+        # Tri desc
+        by_creator = dict(sorted(by_creator.items(), key=lambda x: -x[1]))
+        by_chatter = dict(sorted(by_chatter.items(), key=lambda x: -x[1]))
+        return jsonify({
+            "ok": True,
+            "filters": {
+                "start": start, "end": end,
+                "exclude": list(excludes),
+                "hour_start": hour_start, "hour_end": hour_end,
+            },
+            "total": total,
+            "count_kept": len(kept),
+            "count_total": len(txs),
+            "by_creator": by_creator,
+            "by_chatter": by_chatter,
+            "sample": [
+                {"date": tx.get("date"), "creator": tx.get("creator"),
+                 "chatter": tx.get("chatter"), "amount": tx.get("amount")}
+                for tx in kept[:5]
+            ],
+        })
+
     @app.route("/mypuls/refresh_rate", methods=["POST"])
     def mypuls_refresh_rate():
         if not is_auth():
