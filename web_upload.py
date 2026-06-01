@@ -12311,11 +12311,29 @@ function renderMediaSlots(){{
   c.innerHTML = window.mediaSlots.map((id,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge'>#${{i+1}}</div>
-      <input type='text' class='mpl-slot-time' style='font-family:monospace' value='${{id}}' onchange='mediaSlots[${{i}}]=this.value;syncMediaSlots()'>
+      <input type='text' class='mpl-slot-time' style='font-family:monospace' value='${{id}}'
+             onchange='mediaSlots[${{i}}]=this.value;syncMediaSlots()'
+             onpaste='handleMediaPaste(event, ${{i}})'>
       <button type='button' class='mpl-slot-rm' onclick='removeMediaSlot(${{i}})' title='Retirer'>×</button>
     </div>
   `).join('');
   syncMediaSlots();
+}}
+// Detecte un paste multi-ligne et explose en plusieurs slots
+function handleMediaPaste(e, idx){{
+  const data = (e.clipboardData || window.clipboardData).getData('text');
+  if(!data) return;
+  // Compte les lignes non vides
+  const lines = data.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
+  if(lines.length <= 1) return; // 1 seule valeur -> comportement natif
+  e.preventDefault();
+  // Remplace la slot courante par la 1ere ligne, et ajoute les autres apres
+  window.mediaSlots[idx] = lines[0];
+  for(let j = 1; j < lines.length; j++){{
+    window.mediaSlots.splice(idx + j, 0, lines[j]);
+  }}
+  renderMediaSlots();
+  if(typeof showToast === 'function') showToast('✓ ' + lines.length + ' media_ids ajoutes', 'success', 2500);
 }}
 function addMediaSlot(){{
   window.mediaSlots.push('');
@@ -12347,11 +12365,26 @@ function renderCaptionSlots(){{
   c.innerHTML = window.captionSlots.map((txt,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge'>#${{i+1}}</div>
-      <input type='text' class='mpl-slot-time' value='${{(txt||'').replace(/'/g, '&apos;').replace(/"/g, '&quot;')}}' onchange='captionSlots[${{i}}]=this.value;syncCaptionSlots()'>
+      <input type='text' class='mpl-slot-time' value='${{(txt||'').replace(/'/g, '&apos;').replace(/"/g, '&quot;')}}'
+             onchange='captionSlots[${{i}}]=this.value;syncCaptionSlots()'
+             onpaste='handleCaptionPaste(event, ${{i}})'>
       <button type='button' class='mpl-slot-rm' onclick='removeCaptionSlot(${{i}})' title='Retirer'>×</button>
     </div>
   `).join('');
   syncCaptionSlots();
+}}
+function handleCaptionPaste(e, idx){{
+  const data = (e.clipboardData || window.clipboardData).getData('text');
+  if(!data) return;
+  const lines = data.split(/[\\r\\n]+/).map(x=>x.trim()).filter(Boolean);
+  if(lines.length <= 1) return;
+  e.preventDefault();
+  window.captionSlots[idx] = lines[0];
+  for(let j = 1; j < lines.length; j++){{
+    window.captionSlots.splice(idx + j, 0, lines[j]);
+  }}
+  renderCaptionSlots();
+  if(typeof showToast === 'function') showToast('✓ ' + lines.length + ' captions ajoutees', 'success', 2500);
 }}
 function addCaptionSlot(){{
   window.captionSlots.push('');
