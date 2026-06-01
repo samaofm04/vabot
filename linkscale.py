@@ -244,25 +244,20 @@ def duplicate_link(link_id: str, new_shortcode: str = "",
             data = sd
     if not isinstance(data, dict):
         return {"ok": False, "error": f"donnees du link source invalides (raw keys: {list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__})"}
-    # Copy SEULEMENT les fields essentiels - les autres (cs_template,
-    # dynamic_informations, etc.) sont auto-calcules ou peuvent declencher
-    # "Validation failed" cote API Linkscale.
-    # Champs supportes par create_link selon le type:
-    #   d_l : type, u, url, domain, n, note, folders, enabled
-    #   l_p : type, u, n, bio, links, pp, cover, background, template,
-    #         shield, domain, folders, enabled, note
+    # Copy les fields essentiels. cs_template EST la relation au folder dans
+    # Linkscale (chaque folder = 1 cs_template unique). Si on l'omet -> le link
+    # tombe dans "(sans dossier)". On EXCLUT dynamic_informations qui est
+    # auto-calcule et peut declencher "Validation failed".
     ltype = data.get("t") or data.get("type") or "d_l"
     payload: Dict[str, Any] = {"type": ltype if ltype != "?" else "d_l"}
-    # Champs communs
-    for k in ("domain", "n", "note", "folders", "enabled"):
+    # Champs communs - cs_template OBLIGATOIRE pour le rangement folder
+    for k in ("domain", "n", "note", "folders", "enabled", "cs_template"):
         if data.get(k) is not None:
             payload[k] = data[k]
-    # Override folders si fourni explicitement (le caller sait dans quel folder
-    # placer le link - Linkscale n'expose pas folders dans /links/{id}).
+    # Override folders si fourni explicitement
     if folders:
         payload["folders"] = list(folders)
-    # Fallback : si pas de folders ET source a un cs_template -> resolve via
-    # le mapping cs_template->folder pour ne pas perdre le rangement.
+    # Fallback : si pas de folders mais on a cs_template -> resolve folder_id
     if not payload.get("folders"):
         cs = data.get("cs_template")
         if cs:
