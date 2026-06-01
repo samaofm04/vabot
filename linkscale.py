@@ -102,9 +102,15 @@ def _request(method: str, path: str, *, params: Optional[dict] = None,
         return _request(method, path, params=params, json_body=json_body, _retry=_retry - 1)
     err_msg = ""
     if isinstance(body, dict):
-        err_msg = body.get("message") or body.get("error") or str(body)[:200]
+        err_msg = body.get("message") or body.get("error") or ""
+        # Linkscale renvoie souvent un detail dans 'errors' (dict) ou 'details'
+        details = body.get("errors") or body.get("details") or body.get("validation")
+        if details:
+            err_msg = f"{err_msg} | {details}" if err_msg else str(details)
+        if not err_msg:
+            err_msg = str(body)[:300]
     else:
-        err_msg = str(body)[:200]
+        err_msg = str(body)[:300]
     return {"ok": False, "error": f"HTTP {r.status_code}: {err_msg}",
             "status": r.status_code, "raw": body}
 
@@ -234,13 +240,28 @@ def duplicate_link(link_id: str, new_shortcode: str = "") -> Dict[str, Any]:
             data = sd
     if not isinstance(data, dict):
         return {"ok": False, "error": f"donnees du link source invalides (raw keys: {list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__})"}
-    # Copy les fields createur
-    payload: Dict[str, Any] = {}
-    for k in ("type", "u", "domain", "url", "n", "bio", "links", "pp", "cover",
-              "background", "template", "cs_template", "shield", "folders",
-              "enabled", "note", "dynamic_informations"):
-        if k in data:
+    # Copy SEULEMENT les fields essentiels - les autres (cs_template,
+    # dynamic_informations, etc.) sont auto-calcules ou peuvent declencher
+    # "Validation failed" cote API Linkscale.
+    # Champs supportes par create_link selon le type:
+    #   d_l : type, u, url, domain, n, note, folders, enabled
+    #   l_p : type, u, n, bio, links, pp, cover, background, template,
+    #         shield, domain, folders, enabled, note
+    ltype = data.get("t") or data.get("type") or "d_l"
+    payload: Dict[str, Any] = {"type": ltype if ltype != "?" else "d_l"}
+    # Champs communs
+    for k in ("domain", "n", "note", "folders", "enabled"):
+        if data.get(k) is not None:
             payload[k] = data[k]
+    if ltype == "d_l":
+        # Direct link : url cible obligatoire
+        if data.get("url"):
+            payload["url"] = data["url"]
+    else:
+        # Bio link (l_p) : copier les fields design
+        for k in ("bio", "links", "pp", "cover", "background", "template", "shield"):
+            if data.get(k) is not None:
+                payload[k] = data[k]
     # Override shortcode pour eviter collision
     orig_u = data.get("u") or ""
     payload["u"] = (new_shortcode or (orig_u + "_copy")).strip()
