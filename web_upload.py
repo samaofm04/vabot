@@ -10887,7 +10887,7 @@ def _render_mypulslive_html() -> str:
     res = mypuls.list_creators()
     creators_map = res.get("creators", {}) if res.get("ok") else {}
 
-    # Captions defaut
+    # Captions defaut (fallback si rien stocke pour ce creator)
     try:
         from schedule_xlsx import DEFAULT_CAPTIONS
         captions_default = "\n".join(DEFAULT_CAPTIONS)
@@ -10895,6 +10895,12 @@ def _render_mypulslive_html() -> str:
     except Exception:
         captions_default = ""
         captions_count = 0
+    # Si l user a deja saisi des captions persos pour le 1er creator -> on les utilise
+    # Sinon -> on prend DEFAULT_CAPTIONS
+    first_captions_or_default = first_captions if first_captions else captions_default
+    if first_captions:
+        captions_count = first_cap_count
+    first_count_for_badge = first_media_count if first_media_count else 0
 
     today = _dt.date.today()
     week_later = today + _dt.timedelta(days=6)
@@ -10906,6 +10912,19 @@ def _render_mypulslive_html() -> str:
     if creators_map:
         first_creator_name = sorted(creators_map.keys(), key=str.lower)[0]
         first_creator_id = creators_map[first_creator_name]
+
+    # Pre-fill server-side : recupere les settings du creator par defaut
+    # (Amelia_xoxo si seedee, sinon ce que renvoient les defaults)
+    try:
+        import mypuls_creator_settings as mcs
+        first_settings = mcs.get_settings(first_creator_id) if first_creator_id else {}
+    except Exception:
+        first_settings = {}
+    first_media_pool = "\n".join(first_settings.get("media_pool", []) or [])
+    first_captions_list = first_settings.get("captions", []) or []
+    first_captions = "\n".join(first_captions_list)
+    first_media_count = len([x for x in first_media_pool.split("\n") if x.strip()])
+    first_cap_count = len(first_captions_list)
 
     # Couleur deterministe par createur (HSL, hue depend du nom)
     import hashlib as _hash
@@ -11431,7 +11450,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>Bibliotheque Medias <span class='mpl-mini-badge' id='mpl-media-count'>0</span></div>
+        <div class='mpl-row-title'>Bibliotheque Medias <span class='mpl-mini-badge' id='mpl-media-count'>{first_media_count}</span></div>
         <div class='mpl-row-sub'>Tes media_id MyPuls qui seront planifies</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
@@ -11443,7 +11462,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       </div>
       <textarea name='media_ids' id='mpl-media-ids' rows='8' required
                 placeholder='75784227&#10;75784226&#10;...'
-                style='font-family:monospace;font-size:13px' oninput='updateMediaCount()'></textarea>
+                style='font-family:monospace;font-size:13px' oninput='updateMediaCount()'>{first_media_pool}</textarea>
     </div>
   </div>
 
@@ -11458,7 +11477,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
-      <textarea name='captions' id='mpl-captions' rows='8' style='font-family:inherit;font-size:13px' oninput='updateCapCount()'>{captions_default}</textarea>
+      <textarea name='captions' id='mpl-captions' rows='8' style='font-family:inherit;font-size:13px' oninput='updateCapCount()'>{first_captions_or_default}</textarea>
     </div>
   </div>
 
@@ -11505,7 +11524,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     {campaigns_html}
 
     <div class='mpl-stats'>
-      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>0</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
+      <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-media'>{first_media_count}</div><div class='mpl-stat-lbl'>MEDIAS</div></div>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-cap'>{captions_count}</div><div class='mpl-stat-lbl'>CAPTIONS</div></div>
       <div class='mpl-stat'><div class='mpl-stat-num' id='mpl-stat-perday'>9</div><div class='mpl-stat-lbl mpl-stat-lbl-perday'>POSTS / JOUR</div></div>
     </div>
