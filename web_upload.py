@@ -4688,11 +4688,11 @@ function vaLinksOpen(uid, username, identity){
     if(m.toLowerCase() === _vlmCurrentIdent) matchModel = m;
   });
   _vlmActiveModel = matchModel || '__all__';
-  var pillsHtml = '<button type="button" class="vlm-pill ' + (_vlmActiveModel === '__all__' ? 'active' : '') + '" onclick="vaLinksSetModel(\'__all__\')">Tous <span class="vlm-pill-count">' + allLinks.length + '</span></button>';
+  var pillsHtml = '<button type="button" class="vlm-pill ' + (_vlmActiveModel === '__all__' ? 'active' : '') + '" data-pill-model="__all__" onclick="vaLinksSetModel(this)">Tous <span class="vlm-pill-count">' + allLinks.length + '</span></button>';
   models.forEach(function(m){
     var active = (m === _vlmActiveModel) ? 'active' : '';
-    var safeM = m.replace(/'/g, "\\'");
-    pillsHtml += '<button type="button" class="vlm-pill ' + active + '" onclick="vaLinksSetModel(\'' + safeM + '\')">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span></button>';
+    var safeAttr = m.replace(/"/g, '&quot;');
+    pillsHtml += '<button type="button" class="vlm-pill ' + active + '" data-pill-model="' + safeAttr + '" onclick="vaLinksSetModel(this)">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span></button>';
   });
   document.getElementById('vlm-pills').innerHTML = pillsHtml;
   // Render la liste
@@ -4720,7 +4720,7 @@ function vaLinksRender(){
         + '<div class="vlm-name">' + l.name + '</div>'
         + '<div class="vlm-meta">/' + l.shortcode + '</div>'
         + '</div>'
-        + '<button type="button" class="vlm-row-dup" title="Dupliquer ce lien dans le meme dossier" onclick="vaLinksDuplicateOne(event, \'' + l.id + '\')">⎘</button>'
+        + '<button type="button" class="vlm-row-dup" data-dup-id="' + l.id + '" title="Dupliquer ce lien dans le meme dossier" onclick="vaLinksDuplicateOne(event, this)">⎘</button>'
         + '</div>';
     });
   });
@@ -4729,14 +4729,11 @@ function vaLinksRender(){
   }
   listEl.innerHTML = html;
 }
-function vaLinksSetModel(m){
+function vaLinksSetModel(btn){
+  var m = btn.getAttribute('data-pill-model') || '__all__';
   _vlmActiveModel = m;
-  document.querySelectorAll('.vlm-pill').forEach(function(p){ p.classList.remove('active'); });
-  // Re-render pills active state
   document.querySelectorAll('.vlm-pill').forEach(function(p){
-    var lbl = (p.firstChild && p.firstChild.nodeValue || '').trim();
-    if(m === '__all__' && lbl === 'Tous') p.classList.add('active');
-    else if(lbl === m) p.classList.add('active');
+    p.classList.toggle('active', p.getAttribute('data-pill-model') === m);
   });
   vaLinksRender();
   // Re-apply search filter
@@ -4754,8 +4751,9 @@ function vaLinksFilter(q){
     el.style.display = (!q || s.indexOf(q) !== -1) ? '' : 'none';
   });
 }
-function vaLinksDuplicateOne(e, linkId){
+function vaLinksDuplicateOne(e, btn){
   if(e){ e.stopPropagation(); e.preventDefault(); }
+  var linkId = btn ? btn.getAttribute('data-dup-id') : '';
   if(!linkId) return;
   if(typeof showToast === 'function') showToast('Duplication en cours…', 'info');
   var fd = new FormData();
