@@ -148,8 +148,18 @@ def list_local_identities() -> List[str]:
 
 def create_schedule(groupe: str, identite: str,
                     reels: int = 0, stories: int = 0, storyctas: int = 0,
-                    hour_paris: int = 0, minute_paris: int = 0) -> Dict[str, Any]:
-    """Cree un push planifie quotidien. Retourne {ok, schedule|error}."""
+                    hour_paris: int = 0, minute_paris: int = 0,
+                    frequency: str = "daily",
+                    days_of_week: Optional[List[int]] = None) -> Dict[str, Any]:
+    """Cree un push planifie. Retourne {ok, schedule|error}.
+
+    frequency :
+    - 'daily' : tous les jours (default)
+    - 'weekdays' : lun-ven
+    - 'weekend' : sam-dim
+    - 'custom' : days_of_week explicite
+    - 'once' : une seule fois puis le bot supprime le schedule
+    """
     groupe = (groupe or "").strip()
     identite = (identite or "").strip()
     if not groupe or not identite:
@@ -160,6 +170,25 @@ def create_schedule(groupe: str, identite: str,
         return {"ok": False, "error": "comptes negatifs"}
     if reels + stories + storyctas == 0:
         return {"ok": False, "error": "au moins 1 reel/story/CTA"}
+    # Validation/normalisation de la frequence
+    valid_freqs = ("daily", "weekdays", "weekend", "custom", "once")
+    if frequency not in valid_freqs:
+        frequency = "daily"
+    if days_of_week is None:
+        if frequency == "daily":
+            days_of_week = [0, 1, 2, 3, 4, 5, 6]
+        elif frequency == "weekdays":
+            days_of_week = [0, 1, 2, 3, 4]
+        elif frequency == "weekend":
+            days_of_week = [5, 6]
+        elif frequency == "once":
+            days_of_week = []
+        else:
+            days_of_week = []
+    # Filtre les valeurs valides 0-6
+    days_of_week = sorted({int(d) for d in days_of_week if 0 <= int(d) <= 6})
+    if frequency == "custom" and not days_of_week:
+        return {"ok": False, "error": "au moins 1 jour requis en mode custom"}
     schedule = {
         "id": uuid.uuid4().hex[:8],
         "groupe": groupe,
@@ -169,7 +198,9 @@ def create_schedule(groupe: str, identite: str,
         "storyctas": int(storyctas),
         "hour_paris": int(hour_paris),
         "minute_paris": int(minute_paris),
-        "recurring": True,
+        "frequency": frequency,
+        "days_of_week": days_of_week,
+        "recurring": frequency != "once",
         "channel_id": None,
         "created_by": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -184,20 +215,41 @@ def create_schedule(groupe: str, identite: str,
     return {"ok": True, "schedule": schedule}
 
 
-def upcoming_executions(limit: int = 10) -> List[Dict[str, Any]]:
-    """Pour chaque schedule recurrent, calcule la prochaine execution
-    (aujourd hui si HH:MM pas encore passe, sinon demain). Trie par
-    distance ascendante.
+FREQ_LABELS = {
+    "daily": "Tous les jours",
+    "weekdays": "Lun-Ven",
+    "weekend": "Sam-Dim",
+    "custom": "Custom",
+    "once": "Une fois",
+}
+DAY_NAMES_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
 
-    Retourne [{id, groupe, identite, reels, stories, storyctas, when,
-              when_label, in_minutes}]
+
+def freq_label(s: Dict[str, Any]) -> str:
+    """Label humain de la frequence du schedule."""
+    freq = s.get("frequency", "daily")
+    if freq == "custom":
+        days = s.get("days_of_week") or []
+        return ", ".join(DAY_NAMES_FR[d] for d in days if 0 <= d <= 6) or "Custom"
+    return FREQ_LABELS.get(freq, freq)
+
+
+def upcoming_executions(limit: int = 10) -> List[Dict[str, Any]]:
+    """Pour chaque schedule, calcule la prochaine execution selon la
+    frequency. Trie par distance ascendante.
+
+    - daily / weekdays / weekend / custom : prochain jour qui matche
+      days_of_week a HH:MM (aujourd hui si pas encore passe, sinon
+      le prochain jour valide)
+    - once : prochain HH:MM si jamais run, sinon skip
     """
     try:
         from zoneinfo import ZoneInfo
         paris_tz = ZoneInfo("Europe/Paris")
     except Exception:
-        from datetime import timezone as _tz, timedelta as _td
-        paris_tz = _tz(_td(hours=1))
+        from datetime import timezone as _tz, timedelta as _td_only
+        paris_tz = _tz(_td_only(hours=1))
+    from datetime import timedelta as _td
 
     now = datetime.now(paris_tz)
     out: List[Dict[str, Any]] = []
@@ -207,11 +259,25 @@ def upcoming_executions(limit: int = 10) -> List[Dict[str, Any]]:
             mn = int(s.get("minute_paris", 0))
         except Exception:
             continue
-        # Prochain run : aujourd hui a HH:MM si pas encore passe, sinon demain
-        from datetime import timedelta as _td
-        candidate = now.replace(hour=h, minute=mn, second=0, microsecond=0)
-        if candidate <= now:
-            candidate = candidate + _td(days=1)
+        freq = s.get("frequency", "daily")
+        # Cas 'once' : si deja lance -> skip
+        if freq == "once" and s.get("last_run_date"):
+            continue
+        # Determine les jours valides (0=Mon ... 6=Sun)
+        days = s.get("days_of_week") or [0, 1, 2, 3, 4, 5, 6]
+        if not days:
+            days = [0, 1, 2, 3, 4, 5, 6]
+        # Cherche le prochain jour de la semaine qui matche
+        candidate = None
+        for delta in range(8):  # max 7 jours en avant
+            cand = (now + _td(days=delta)).replace(hour=h, minute=mn, second=0, microsecond=0)
+            if cand <= now:
+                continue
+            if cand.weekday() in days:
+                candidate = cand
+                break
+        if not candidate:
+            continue
         diff_minutes = int((candidate - now).total_seconds() // 60)
         out.append({
             "id": s.get("id"),
@@ -220,9 +286,14 @@ def upcoming_executions(limit: int = 10) -> List[Dict[str, Any]]:
             "reels": s.get("reels", 0),
             "stories": s.get("stories", 0),
             "storyctas": s.get("storyctas", 0),
+            "frequency": freq,
+            "freq_label": freq_label(s),
             "when": candidate.isoformat(),
             "when_label": candidate.strftime("%H:%M"),
-            "when_day": "Aujourd'hui" if candidate.date() == now.date() else "Demain",
+            "when_day": "Aujourd'hui" if candidate.date() == now.date() else (
+                "Demain" if candidate.date() == (now + _td(days=1)).date() else
+                candidate.strftime("%a %d %b")
+            ),
             "in_minutes": diff_minutes,
         })
     out.sort(key=lambda x: x.get("in_minutes", 9999))

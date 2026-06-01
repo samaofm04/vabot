@@ -8864,6 +8864,25 @@ def _render_geelark_html() -> str:
         f"<script>\nwindow.__glGroups = {groups_json};\nwindow.__glIdentities = {identities_json};\n</script>\n"
     ) + """
 <script>
+function glFreqChanged(){
+  var freq = document.getElementById('gl-cr-freq').value;
+  var custom = document.getElementById('gl-cr-custom-days');
+  var hint = document.getElementById('gl-cr-freq-hint');
+  if(custom){
+    custom.style.display = (freq === 'custom') ? 'flex' : 'none';
+  }
+  if(hint){
+    var msg = '';
+    switch(freq){
+      case 'daily': msg = 'Le push s execute chaque jour a cette heure'; break;
+      case 'weekdays': msg = 'Le push s execute du lundi au vendredi'; break;
+      case 'weekend': msg = 'Le push s execute samedi et dimanche'; break;
+      case 'custom': msg = 'Le push s execute uniquement les jours coches'; break;
+      case 'once': msg = 'Push UNIQUE - une seule execution puis suppression'; break;
+    }
+    hint.textContent = msg;
+  }
+}
 function glOpenCreateModal(){
   console.log('glOpenCreateModal called');
   const overlay = document.createElement('div');
@@ -8917,7 +8936,26 @@ function glOpenCreateModal(){
       '<div>' +
         '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Heure de push (heure Paris) *</label>' +
         '<input type="time" id="gl-cr-time" value="22:00" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' +
-        '<small style="color:#666;font-size:11px;display:block;margin-top:4px">Le push s execute chaque jour a cette heure</small>' +
+      '</div>' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Fréquence</label>' +
+        '<select id="gl-cr-freq" onchange="glFreqChanged()" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' +
+          '<option value="daily">Tous les jours</option>' +
+          '<option value="weekdays">Lundi → Vendredi (semaine)</option>' +
+          '<option value="weekend">Samedi + Dimanche (weekend)</option>' +
+          '<option value="custom">Jours spécifiques...</option>' +
+          '<option value="once">Une seule fois (one-shot)</option>' +
+        '</select>' +
+        '<div id="gl-cr-custom-days" style="display:none;margin-top:10px;gap:6px;flex-wrap:wrap" data-flex="1">' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="0" style="margin:0"> Lun</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="1" style="margin:0"> Mar</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="2" style="margin:0"> Mer</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="3" style="margin:0"> Jeu</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="4" style="margin:0"> Ven</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="5" style="margin:0"> Sam</label>' +
+          '<label style="cursor:pointer;background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="gl-cr-day" value="6" style="margin:0"> Dim</label>' +
+        '</div>' +
+        '<small id="gl-cr-freq-hint" style="color:#666;font-size:11px;display:block;margin-top:4px">Le push s execute chaque jour a cette heure</small>' +
       '</div>' +
     '</div>' +
     '<div style="padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f">' +
@@ -8941,6 +8979,20 @@ function glOpenCreateModal(){
     const stories = parseInt(document.getElementById('gl-cr-stories').value || '0', 10);
     const ctas = parseInt(document.getElementById('gl-cr-ctas').value || '0', 10);
     const time = (document.getElementById('gl-cr-time').value || '00:00').trim();
+    const freq = document.getElementById('gl-cr-freq').value || 'daily';
+    var daysOfWeek = [];
+    if(freq === 'weekdays') daysOfWeek = [0,1,2,3,4];
+    else if(freq === 'weekend') daysOfWeek = [5,6];
+    else if(freq === 'custom'){
+      var cbs = document.querySelectorAll('.gl-cr-day:checked');
+      for(var i=0; i<cbs.length; i++) daysOfWeek.push(parseInt(cbs[i].value, 10));
+      if(!daysOfWeek.length){
+        if(typeof showToast==='function') showToast('⚠ Choisis au moins 1 jour', 'warning', 2500);
+        return;
+      }
+    }
+    // 'daily' -> [0..6] (tous les jours), 'once' -> [] (no recurrence)
+    if(freq === 'daily') daysOfWeek = [0,1,2,3,4,5,6];
     if(!grp || !ident){
       if(typeof showToast==='function') showToast('⚠ Groupe et identité requis', 'warning', 2500);
       return;
@@ -8958,6 +9010,8 @@ function glOpenCreateModal(){
     fd.set('storyctas', String(ctas));
     fd.set('hour_paris', h);
     fd.set('minute_paris', m);
+    fd.set('frequency', freq);
+    fd.set('days_of_week', daysOfWeek.join(','));
     try {
       const r = await fetch('/geelark/create_schedule', {method:'POST', body:fd});
       const j = await r.json();
@@ -15443,6 +15497,11 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         try:
+            # Parse days_of_week (comma-separated)
+            raw_days = (request.form.get("days_of_week") or "").strip()
+            days_of_week = []
+            if raw_days:
+                days_of_week = [int(x.strip()) for x in raw_days.split(",") if x.strip().isdigit()]
             return jsonify(gv.create_schedule(
                 groupe=(request.form.get("groupe") or "").strip(),
                 identite=(request.form.get("identite") or "").strip(),
@@ -15451,6 +15510,8 @@ def create_app():
                 storyctas=int(request.form.get("storyctas") or 0),
                 hour_paris=int(request.form.get("hour_paris") or 0),
                 minute_paris=int(request.form.get("minute_paris") or 0),
+                frequency=(request.form.get("frequency") or "daily").strip(),
+                days_of_week=days_of_week,
             ))
         except (ValueError, TypeError) as e:
             return jsonify({"ok": False, "error": f"params invalides: {e}"})
