@@ -1,47 +1,29 @@
-"""mypuls_creator_settings.py - Settings persistes par createur MyPuls Live.
+"""mypuls_creator_settings.py - Settings MyPuls Live : global + par createur.
 
-Pour chaque createur, on stocke :
-- start_date / end_date (periode)
-- infinite_mode (campagne continue)
-- mode_active ('autopost' | 'autostory' | 'edt')
-- posts (count + slots [{time, visibility}])
-- stories (count + slots [{time, visibility}])
-- captions (texte par defaut + overrides specifiques)
-- media_pool (refs vers les fichiers selectionnes pour ce createur)
-- auto_delete (config de suppression automatique)
+Le user veut :
+- HORAIRES / DATES / SLOTS : partages entre TOUS les createurs (changement
+  sur Amelia se propage a Julia, Lola, etc.)
+- CAPTIONS : par identite (chaque createur a ses propres captions)
+- MEDIA POOL : par identite (chaque createur a sa propre bibliotheque)
 
 Stockage : data/mypuls_creator_settings.json
 Structure :
 {
+    "global": {
+        "start_date": "...",
+        "end_date": "...",
+        "infinite_mode": false,
+        "mode_active": "autopost",
+        "posts": {"count": 9, "slots": [...]},
+        "stories": {"count": 0, "slots": []},
+        "auto_delete": {...},
+        "updated_at": "ISO"
+    },
     "creators": {
         "769": {
-            "start_date": "2026-06-01",
-            "end_date": "2026-06-07",
-            "infinite_mode": false,
-            "mode_active": "autopost",
-            "posts": {
-                "count": 9,
-                "slots": [
-                    {"time": "01:00", "visibility": "public"},
-                    {"time": "02:00", "visibility": "private"},
-                    ...
-                ]
-            },
-            "stories": {
-                "count": 0,
-                "slots": []
-            },
-            "captions": [
-                "Caption 1",
-                "Caption 2"
-            ],
-            "media_pool": [],
-            "auto_delete": {
-                "enabled": false,
-                "after_days": null,
-                "from_date": null
-            },
-            "updated_at": "ISO timestamp"
+            "captions": ["..."],
+            "media_pool": ["abc", "def"],
+            "updated_at": "ISO"
         }
     }
 }
@@ -51,14 +33,13 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 DATA_DIR = Path("data")
 SETTINGS_FILE = DATA_DIR / "mypuls_creator_settings.json"
 
-
-# Defaults par createur (utilises si jamais ouvert)
-DEFAULT_SETTINGS = {
+# Defaults globaux (partages)
+DEFAULT_GLOBAL = {
     "start_date": "",
     "end_date": "",
     "infinite_mode": False,
@@ -81,8 +62,6 @@ DEFAULT_SETTINGS = {
         "count": 0,
         "slots": [],
     },
-    "captions": [],
-    "media_pool": [],
     "auto_delete": {
         "enabled": False,
         "after_days": None,
@@ -90,17 +69,56 @@ DEFAULT_SETTINGS = {
     },
 }
 
+# Defaults par createur (les fields per-identite)
+DEFAULT_CREATOR = {
+    "captions": [],
+    "media_pool": [],
+}
+
 
 def _load() -> Dict[str, Any]:
     if not SETTINGS_FILE.exists():
-        return {"creators": {}}
+        return {"global": {}, "creators": {}}
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        # Migration depuis l ancien format (per-creator complet)
+        if "creators" in data and "global" not in data:
+            data = _migrate_from_v1(data)
+        if "global" not in data:
+            data["global"] = {}
         if "creators" not in data:
             data["creators"] = {}
         return data
     except Exception:
-        return {"creators": {}}
+        return {"global": {}, "creators": {}}
+
+
+def _migrate_from_v1(old_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migration depuis l ancien schema ou TOUT etait per-creator."""
+    new_data: Dict[str, Any] = {"global": {}, "creators": {}}
+    creators = old_data.get("creators", {})
+    if not creators:
+        return new_data
+    # Prend les settings du PREMIER creator comme global (les horaires, dates...)
+    first_cid = next(iter(creators))
+    first = creators[first_cid]
+    global_fields = ("start_date", "end_date", "infinite_mode", "mode_active",
+                     "posts", "stories", "auto_delete")
+    for f in global_fields:
+        if f in first:
+            new_data["global"][f] = first[f]
+    new_data["global"]["updated_at"] = first.get("updated_at", "")
+    # Garde les fields per-creator pour chaque
+    for cid, settings in creators.items():
+        creator_data = {}
+        for f in ("captions", "media_pool"):
+            if f in settings:
+                creator_data[f] = settings[f]
+        if "updated_at" in settings:
+            creator_data["updated_at"] = settings["updated_at"]
+        if creator_data:
+            new_data["creators"][cid] = creator_data
+    return new_data
 
 
 def _save(data: Dict[str, Any]):
@@ -111,71 +129,87 @@ def _save(data: Dict[str, Any]):
 
 
 def _normalize_id(creator_id) -> str:
-    """Cast to str pour les cles json."""
     try:
         return str(int(creator_id))
     except (TypeError, ValueError):
         return str(creator_id or "").strip()
 
 
-def get_settings(creator_id) -> Dict[str, Any]:
-    """Retourne les settings d un createur. Si jamais saved, renvoie les defaults
-    (mais ne les persiste pas - lazy)."""
-    cid = _normalize_id(creator_id)
-    if not cid:
-        return dict(DEFAULT_SETTINGS)
+# ===== GLOBAL settings =====
+
+def get_global_settings() -> Dict[str, Any]:
+    """Retourne les settings globaux (horaires, dates, slots, auto_delete).
+    Merge avec defaults pour les fields manquants."""
     data = _load()
-    stored = data["creators"].get(cid, {})
-    # Merge avec defaults pour gerer les fields manquants
-    out = json.loads(json.dumps(DEFAULT_SETTINGS))  # deep copy
+    stored = data.get("global", {})
+    out = json.loads(json.dumps(DEFAULT_GLOBAL))  # deep copy
     for k, v in stored.items():
         out[k] = v
     return out
 
 
-def save_settings(creator_id, settings: Dict[str, Any]) -> bool:
-    """Sauvegarde COMPLETE des settings d un createur (overwrite)."""
-    cid = _normalize_id(creator_id)
-    if not cid:
-        return False
-    if not isinstance(settings, dict):
+def save_global_settings(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
         return False
     data = _load()
-    settings = dict(settings)
-    settings["updated_at"] = datetime.utcnow().isoformat(timespec="seconds")
-    data["creators"][cid] = settings
+    payload = dict(payload)
+    payload["updated_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    data["global"] = payload
     _save(data)
     return True
 
 
-def update_settings(creator_id, **partial) -> bool:
-    """Patch partiel : merge les fields fournis sans toucher au reste."""
+# ===== PER-CREATOR settings =====
+
+def get_creator_settings(creator_id) -> Dict[str, Any]:
+    """Retourne les settings per-creator (captions + media_pool)."""
     cid = _normalize_id(creator_id)
     if not cid:
+        return dict(DEFAULT_CREATOR)
+    data = _load()
+    stored = data["creators"].get(cid, {})
+    out = json.loads(json.dumps(DEFAULT_CREATOR))
+    for k, v in stored.items():
+        out[k] = v
+    return out
+
+
+def save_creator_settings(creator_id, payload: Dict[str, Any]) -> bool:
+    cid = _normalize_id(creator_id)
+    if not cid or not isinstance(payload, dict):
         return False
     data = _load()
-    existing = data["creators"].get(cid, dict(DEFAULT_SETTINGS))
-    for k, v in partial.items():
-        if v is not None:
-            existing[k] = v
-    existing["updated_at"] = datetime.utcnow().isoformat(timespec="seconds")
-    data["creators"][cid] = existing
+    payload = dict(payload)
+    payload["updated_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    data["creators"][cid] = payload
     _save(data)
     return True
 
 
-def list_creators_with_settings() -> Dict[str, Dict[str, Any]]:
-    """Retourne tous les creators ayant des settings."""
-    return _load().get("creators", {})
+# ===== Combined : helper pour le front =====
+
+def get_settings(creator_id) -> Dict[str, Any]:
+    """Retourne le merge global + per-creator pour un creator.
+    C est ce que renvoie l API /mypulslive/settings/<cid>."""
+    g = get_global_settings()
+    c = get_creator_settings(creator_id)
+    out = dict(g)
+    out["captions"] = c.get("captions", [])
+    out["media_pool"] = c.get("media_pool", [])
+    return out
 
 
-def delete_settings(creator_id) -> bool:
-    cid = _normalize_id(creator_id)
-    if not cid:
+def save_settings(creator_id, payload: Dict[str, Any]) -> bool:
+    """Compat helper : split le payload entre global et per-creator."""
+    if not isinstance(payload, dict):
         return False
-    data = _load()
-    if cid in data["creators"]:
-        del data["creators"][cid]
-        _save(data)
-        return True
-    return False
+    creator_fields = ("captions", "media_pool")
+    global_payload = {k: v for k, v in payload.items() if k not in creator_fields}
+    creator_payload = {k: payload[k] for k in creator_fields if k in payload}
+    ok_g = True
+    ok_c = True
+    if global_payload:
+        ok_g = save_global_settings(global_payload)
+    if creator_payload:
+        ok_c = save_creator_settings(creator_id, creator_payload)
+    return ok_g and ok_c
