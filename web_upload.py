@@ -11057,6 +11057,8 @@ def _render_mypulslive_html() -> str:
 /* SLOTS */
 .mpl-count-input{width:90px;text-align:center;font-size:18px;font-weight:700;padding:8px 10px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;color:#fff}
 .mpl-slots{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.mpl-add-slot{margin-top:10px;background:transparent;border:1px dashed #2e6f4e;color:#22c55e;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;width:100%}
+.mpl-add-slot:hover{background:rgba(34,197,94,.06)}
 .mpl-slot{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#0f0f0f;border:1px solid #232323;border-radius:12px}
 .mpl-slot-badge{flex-shrink:0;width:42px;height:28px;border-radius:14px;background:rgba(59,130,246,.12);color:#3b82f6;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:.5px}
 .mpl-slot-time{flex:1;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;color:#fff;font-size:14px;font-family:inherit}
@@ -11457,12 +11459,13 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     </div>
     <div class='mpl-row-body'>
       <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
-        <small style='color:#888' id='mpl-media-status'>Aucun media. Clique pour fetch.</small>
+        <small style='color:#888' id='mpl-media-status'>Liste des media_id MyPuls. Ordre = ordre de publication.</small>
         <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
       </div>
-      <textarea name='media_ids' id='mpl-media-ids' rows='8' required
-                placeholder='75784227&#10;75784226&#10;...'
-                style='font-family:monospace;font-size:13px' oninput='updateMediaCount()'>{first_media_pool}</textarea>
+      <div class='mpl-slots' id='mpl-media-list'></div>
+      <button type='button' class='mpl-add-slot' onclick='addMediaSlot()'>+ Ajouter un media_id</button>
+      <!-- Hidden textarea pour compat form submit -->
+      <textarea name='media_ids' id='mpl-media-ids' required hidden>{first_media_pool}</textarea>
     </div>
   </div>
 
@@ -11477,7 +11480,10 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
     </div>
     <div class='mpl-row-body'>
-      <textarea name='captions' id='mpl-captions' rows='8' style='font-family:inherit;font-size:13px' oninput='updateCapCount()'>{first_captions_or_default}</textarea>
+      <div class='mpl-slots' id='mpl-captions-list'></div>
+      <button type='button' class='mpl-add-slot' onclick='addCaptionSlot()'>+ Ajouter une caption</button>
+      <!-- Hidden textarea pour compat form submit -->
+      <textarea name='captions' id='mpl-captions' hidden>{first_captions_or_default}</textarea>
     </div>
   </div>
 
@@ -12175,15 +12181,19 @@ async function mplLoadSettings(cid){{
     }}
     // Captions
     const cap = document.getElementById('mpl-captions');
-    if(cap && Array.isArray(s.captions) && s.captions.length){{
+    if(cap && Array.isArray(s.captions)){{
       cap.value = s.captions.join('\\n');
-      if(typeof updateCapCount === 'function') updateCapCount();
+      window.captionSlots = s.captions.slice();
+      if(typeof renderCaptionSlots === 'function') renderCaptionSlots();
+      else if(typeof updateCapCount === 'function') updateCapCount();
     }}
     // Media pool
     const mi = document.getElementById('mpl-media-ids');
-    if(mi && Array.isArray(s.media_pool) && s.media_pool.length){{
+    if(mi && Array.isArray(s.media_pool)){{
       mi.value = s.media_pool.join('\\n');
-      if(typeof updateMediaCount === 'function') updateMediaCount();
+      window.mediaSlots = s.media_pool.slice();
+      if(typeof renderMediaSlots === 'function') renderMediaSlots();
+      else if(typeof updateMediaCount === 'function') updateMediaCount();
     }}
   }} catch(e){{ console.warn('mplLoadSettings:', e); }}
   finally{{ setTimeout(() => {{ window.__mplLoadingSettings = false; }}, 100); }}
@@ -12280,15 +12290,101 @@ document.addEventListener('DOMContentLoaded', () => {{
 function updateMediaCount(){{
   const ta = document.getElementById('mpl-media-ids');
   const n = ta.value.split('\\n').filter(x=>x.trim()).length;
-  document.getElementById('mpl-stat-media').textContent = n;
-  document.getElementById('mpl-media-count').textContent = n;
+  const sm = document.getElementById('mpl-stat-media');
+  if(sm) sm.textContent = n;
+  const mc = document.getElementById('mpl-media-count');
+  if(mc) mc.textContent = n;
 }}
 function updateCapCount(){{
   const ta = document.getElementById('mpl-captions');
   const n = ta.value.split('\\n').filter(x=>x.trim()).length;
-  document.getElementById('mpl-stat-cap').textContent = n;
-  document.getElementById('mpl-cap-count').textContent = n;
+  const sc = document.getElementById('mpl-stat-cap');
+  if(sc) sc.textContent = n;
+  const cc = document.getElementById('mpl-cap-count');
+  if(cc) cc.textContent = n;
 }}
+// === Media slots (rangees individuelles avec badge #N) ===
+window.mediaSlots = window.mediaSlots || [];
+function renderMediaSlots(){{
+  const c = document.getElementById('mpl-media-list');
+  if(!c) return;
+  c.innerHTML = window.mediaSlots.map((id,i)=>`
+    <div class='mpl-slot' data-idx='${{i}}'>
+      <div class='mpl-slot-badge'>#${{i+1}}</div>
+      <input type='text' class='mpl-slot-time' style='font-family:monospace' value='${{id}}' onchange='mediaSlots[${{i}}]=this.value;syncMediaSlots()'>
+      <button type='button' class='mpl-slot-rm' onclick='removeMediaSlot(${{i}})' title='Retirer'>×</button>
+    </div>
+  `).join('');
+  syncMediaSlots();
+}}
+function addMediaSlot(){{
+  window.mediaSlots.push('');
+  renderMediaSlots();
+  // focus le nouveau input
+  setTimeout(()=>{{
+    const last = document.querySelectorAll('#mpl-media-list .mpl-slot input');
+    if(last.length) last[last.length-1].focus();
+  }}, 50);
+}}
+function removeMediaSlot(i){{
+  window.mediaSlots.splice(i,1);
+  renderMediaSlots();
+}}
+function syncMediaSlots(){{
+  // Met a jour la textarea cachee + les compteurs
+  const cleaned = window.mediaSlots.map(x=>(x||'').trim()).filter(Boolean);
+  const ta = document.getElementById('mpl-media-ids');
+  if(ta) ta.value = cleaned.join('\\n');
+  updateMediaCount();
+  // Trigger l auto-save per-creator (debounced)
+  if(typeof mplScheduleSave === 'function') mplScheduleSave();
+}}
+// === Caption slots ===
+window.captionSlots = window.captionSlots || [];
+function renderCaptionSlots(){{
+  const c = document.getElementById('mpl-captions-list');
+  if(!c) return;
+  c.innerHTML = window.captionSlots.map((txt,i)=>`
+    <div class='mpl-slot' data-idx='${{i}}'>
+      <div class='mpl-slot-badge'>#${{i+1}}</div>
+      <input type='text' class='mpl-slot-time' value='${{(txt||'').replace(/'/g, '&apos;').replace(/"/g, '&quot;')}}' onchange='captionSlots[${{i}}]=this.value;syncCaptionSlots()'>
+      <button type='button' class='mpl-slot-rm' onclick='removeCaptionSlot(${{i}})' title='Retirer'>×</button>
+    </div>
+  `).join('');
+  syncCaptionSlots();
+}}
+function addCaptionSlot(){{
+  window.captionSlots.push('');
+  renderCaptionSlots();
+  setTimeout(()=>{{
+    const last = document.querySelectorAll('#mpl-captions-list .mpl-slot input');
+    if(last.length) last[last.length-1].focus();
+  }}, 50);
+}}
+function removeCaptionSlot(i){{
+  window.captionSlots.splice(i,1);
+  renderCaptionSlots();
+}}
+function syncCaptionSlots(){{
+  const cleaned = window.captionSlots.map(x=>(x||'').trim()).filter(Boolean);
+  const ta = document.getElementById('mpl-captions');
+  if(ta) ta.value = cleaned.join('\\n');
+  updateCapCount();
+  if(typeof mplScheduleSave === 'function') mplScheduleSave();
+}}
+// Init au boot : peuple mediaSlots / captionSlots depuis les textareas hidden
+document.addEventListener('DOMContentLoaded', () => {{
+  const ta = document.getElementById('mpl-media-ids');
+  if(ta && ta.value){{
+    window.mediaSlots = ta.value.split('\\n').map(x=>x.trim()).filter(Boolean);
+    renderMediaSlots();
+  }} else {{ renderMediaSlots(); }}
+  const ca = document.getElementById('mpl-captions');
+  if(ca && ca.value){{
+    window.captionSlots = ca.value.split('\\n').map(x=>x.trim()).filter(Boolean);
+    renderCaptionSlots();
+  }} else {{ renderCaptionSlots(); }}
+}});
 async function fetchMyPulsMedia(){{
   const cid = document.getElementById('mpl-creator-id').value;
   if(!cid){{ alert('Pas de createur'); return; }}
@@ -12300,6 +12396,8 @@ async function fetchMyPulsMedia(){{
     const j = await r.json();
     if(j.ok){{
       document.getElementById('mpl-media-ids').value = j.ids.join('\\n');
+      window.mediaSlots = j.ids.slice();
+      if(typeof renderMediaSlots === 'function') renderMediaSlots();
       status.textContent = '✓ '+j.ids.length+' medias recuperes';
       status.style.color = '#22c55e';
       updateMediaCount();
