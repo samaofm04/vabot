@@ -322,6 +322,52 @@ def get_folder_click_summary(folder_id: str) -> Dict[str, int]:
     return out
 
 
+def get_folder_total_clicks(folder_id: str, from_date: str, to_date: str) -> int:
+    """Retourne juste le total de clicks d un folder sur une periode arbitraire.
+
+    N appel pas include_clicks=true (qui crashe sur >7j) - juste summary.
+    Marche jusqu a 30+ jours.
+    """
+    if not folder_id:
+        return 0
+    res = get_folder_stats(folder_id, from_date=from_date, to_date=to_date)
+    return _extract_total_clicks(res)
+
+
+def get_folder_daily_clicks(folder_id: str, days: int = 7) -> List[int]:
+    """Liste des clicks par jour sur les N derniers jours.
+
+    Utilise include_clicks=true qui crashe sur >7j, donc on cap a 7.
+    Pour periodes plus longues -> on retourne des zeros aux jours hors range.
+    """
+    if not folder_id:
+        return [0] * days
+    # Capped a 7 pour eviter le crash
+    span = min(days, 7)
+    res = _request("GET", f"/folders/{folder_id}/stats", params={
+        "from": _iso_date_offset(span),
+        "to": _iso_date_offset(0),
+        "include_clicks": "true",
+        "traffic_data_type": "links",
+    })
+    daily_map: Dict[str, int] = {}
+    if res.get("ok"):
+        raw = res.get("raw") or {}
+        stats = raw.get("stats", {}) if isinstance(raw, dict) else {}
+        traffic = stats.get("trafficByLinks") or []
+        for t in traffic if isinstance(traffic, list) else []:
+            date_raw = (t.get("date") or "")[:10]
+            if date_raw:
+                daily_map[date_raw] = daily_map.get(date_raw, 0) + int(t.get("clicks") or 0)
+    # Build la liste sur N jours (vieux -> recent), 0 si jour pas trouve
+    from datetime import date, timedelta
+    out = []
+    for i in range(days):
+        d = (date.today() - timedelta(days=days - 1 - i)).isoformat()
+        out.append(daily_map.get(d, 0))
+    return out
+
+
 def get_link_click_summary(link_id: str) -> Dict[str, int]:
     """Idem pour un link individuel (3 appels API)."""
     out = {"today": 0, "last_7d": 0, "last_30d": 0}

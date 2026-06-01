@@ -3350,7 +3350,15 @@ body.light .vac-card-name{color:#111}
 
 def _render_va_list_html() -> str:
     try:
-        clicks_widget = _render_gms_clicks_widget()
+        # Priorite Linkscale (nouveau), fallback GMS si rien
+        try:
+            import linkscale
+            if linkscale.is_configured():
+                clicks_widget = _render_linkscale_clicks_widget()
+            else:
+                clicks_widget = _render_gms_clicks_widget()
+        except Exception:
+            clicks_widget = _render_gms_clicks_widget()
     except Exception:
         clicks_widget = ""
     try:
@@ -3360,6 +3368,184 @@ def _render_va_list_html() -> str:
             f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
             f"border-radius:10px;color:#ef4444;font-size:13px'>❌ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
         )
+
+
+def _render_linkscale_clicks_widget() -> str:
+    """Widget clicks Linkscale par modele - clone du widget GMS mais branche
+    sur les folders Linkscale (emma, lola, amelia, ...)."""
+    try:
+        import linkscale
+        if not linkscale.is_configured():
+            return ""
+    except Exception:
+        return ""
+
+    from flask import request as _req
+    import datetime as _dt
+    from concurrent.futures import ThreadPoolExecutor
+
+    today = _dt.date.today()
+    period = "current_h2" if today.day > 15 else "current_h1"
+    try:
+        period = _req.args.get("va_clicks_period", period) or period
+    except Exception:
+        pass
+
+    def _range_for(p):
+        first_of_month = today.replace(day=1)
+        if p == "current_h1":
+            s = first_of_month
+            e = min(first_of_month + _dt.timedelta(days=14), today)
+        elif p == "current_h2":
+            s = first_of_month + _dt.timedelta(days=15)
+            if first_of_month.month == 12:
+                nm = first_of_month.replace(year=first_of_month.year + 1, month=1)
+            else:
+                nm = first_of_month.replace(month=first_of_month.month + 1)
+            e = min(nm - _dt.timedelta(days=1), today)
+        elif p == "prev_h2":
+            if first_of_month.month == 1:
+                pf = first_of_month.replace(year=first_of_month.year - 1, month=12)
+            else:
+                pf = first_of_month.replace(month=first_of_month.month - 1)
+            s = pf + _dt.timedelta(days=15)
+            e = first_of_month - _dt.timedelta(days=1)
+        else:
+            if first_of_month.month == 1:
+                pf = first_of_month.replace(year=first_of_month.year - 1, month=12)
+            else:
+                pf = first_of_month.replace(month=first_of_month.month - 1)
+            s = pf
+            e = pf + _dt.timedelta(days=14)
+        return s, e
+
+    start_dt, end_dt = _range_for(period)
+    days_count = (end_dt - start_dt).days + 1
+    from_str = start_dt.isoformat()
+    to_str = end_dt.isoformat()
+
+    # Recupere les folders Linkscale et map sur les identites locales
+    try:
+        folders = linkscale.list_folders()
+    except Exception:
+        folders = []
+    # Map identite locale -> folder Linkscale (case-insensitive)
+    ident_to_folder = {}
+    for f in folders:
+        fname = (f.get("name") or "").lower()
+        if fname:
+            ident_to_folder[fname] = f
+
+    identities = _list_identities() if callable(_list_identities) else []
+    # Ajoute aussi les folders Linkscale qui ne sont pas dans les identites locales
+    all_idents_set = set(identities)
+    for fname in ident_to_folder.keys():
+        all_idents_set.add(fname)
+    sorted_idents = sorted(all_idents_set)
+
+    def _fetch_one(ident):
+        folder = ident_to_folder.get(ident.lower())
+        if not folder:
+            return ident, {"total": 0, "daily": [0] * days_count, "n_links": 0}
+        try:
+            total = linkscale.get_folder_total_clicks(folder["id"], from_str, to_str)
+            # Daily : pour la sparkline, on prend les 7 derniers jours max
+            daily_count = min(days_count, 7)
+            daily = linkscale.get_folder_daily_clicks(folder["id"], days=daily_count)
+            # Pad si < days_count
+            if len(daily) < days_count:
+                daily = [0] * (days_count - len(daily)) + daily
+            return ident, {
+                "total": int(total),
+                "daily": daily,
+                "n_links": int(folder.get("links_count", 0)),
+            }
+        except Exception:
+            return ident, {"total": 0, "daily": [0] * days_count, "n_links": 0}
+
+    results = {}
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, len(sorted_idents) or 1)) as pool:
+            for ident, data in pool.map(_fetch_one, sorted_idents):
+                results[ident] = data
+    except Exception:
+        for ident in sorted_idents:
+            results[ident] = {"total": 0, "daily": [0] * days_count, "n_links": 0}
+
+    cards_html = []
+    total_clicks = 0
+    for ident in sorted_idents:
+        data = results.get(ident) or {"total": 0, "daily": [0] * days_count, "n_links": 0}
+        clicks = int(data.get("total", 0))
+        daily = data.get("daily", []) or [0] * days_count
+        n_links = data.get("n_links", 0)
+        total_clicks += clicks
+
+        # Avatar
+        avatar_url = _identity_avatar_url(ident) if callable(_identity_avatar_url) else ""
+        avatar_html = (
+            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy'>"
+            if avatar_url else
+            f"<div class='vac-card-avatar vac-card-avatar-fallback'>{ident[:1].upper()}</div>"
+        )
+        # Trend
+        if clicks > 0 and len(daily) >= 2:
+            trend_up = daily[-1] >= daily[-2]
+            trend_color = "#22c55e" if trend_up else "#ef4444"
+            trend_arrow = "↑" if trend_up else "↓"
+        else:
+            trend_color = "#6b7280"
+            trend_arrow = "—"
+        # Sparkline
+        spark_color = "#3b82f6" if clicks > 0 else "#6b7280"
+        spark = _sparkline_svg(daily, width=140, height=32, color=spark_color) if callable(_sparkline_svg) else ""
+
+        cards_html.append(
+            f"<div class='vac-card'>"
+            f"<div class='vac-card-head'>"
+            f"{avatar_html}"
+            f"<div class='vac-card-info'>"
+            f"<div class='vac-card-name'>@{ident}</div>"
+            f"<div class='vac-card-sub'>{n_links} lien{'s' if n_links > 1 else ''}</div>"
+            f"</div>"
+            f"<div class='vac-card-trend' style='color:{trend_color}'>{trend_arrow}</div>"
+            f"</div>"
+            f"<div class='vac-card-value'>{clicks:,}</div>"
+            f"<div class='vac-card-label'>clicks</div>"
+            f"<div class='vac-card-spark'>{spark}</div>"
+            f"</div>"
+        )
+
+    if not cards_html:
+        return ""
+
+    def _btn(p, txt):
+        active = "vac-btn-active" if p == period else ""
+        return f"<a href='?tab=valist&va_clicks_period={p}' class='vac-btn {active}'>{txt}</a>"
+
+    mois_fr = ["janv", "févr", "mars", "avr", "mai", "juin",
+               "juil", "août", "sept", "oct", "nov", "déc"]
+    period_label_short = f"{start_dt.day} → {end_dt.day} {mois_fr[start_dt.month - 1]}"
+
+    return (
+        "<div class='vac-widget'>"
+        + "<div class='vac-head'>"
+        + "<div class='vac-title'>"
+        + "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>"
+        + f"Performance des modèles<span class='vac-subtitle'>{period_label_short} · {total_clicks} clicks · <span style='color:#3b82f6'>via Linkscale</span></span>"
+        + "</div>"
+        + "<div class='vac-period-row'>"
+        + _btn("prev_h1", "M-1 · 1-15")
+        + _btn("prev_h2", "M-1 · 16-fin")
+        + _btn("current_h1", "Ce mois · 1-15")
+        + _btn("current_h2", "Ce mois · 16-fin")
+        + "</div>"
+        + "</div>"
+        + "<div class='vac-grid'>"
+        + "".join(cards_html)
+        + "</div>"
+        + "</div>"
+    )
 
 
 def _render_va_list_html_inner() -> str:
