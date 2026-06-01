@@ -38,24 +38,29 @@ from typing import Dict, Any
 DATA_DIR = Path("data")
 SETTINGS_FILE = DATA_DIR / "mypuls_creator_settings.json"
 
-# Defaults globaux (partages)
+# Defaults globaux (partages) - 14 slots posts comme demande par l user
 DEFAULT_GLOBAL = {
     "start_date": "",
     "end_date": "",
     "infinite_mode": False,
     "mode_active": "autopost",
     "posts": {
-        "count": 9,
+        "count": 14,
         "slots": [
-            {"time": "01:00", "visibility": "public"},
-            {"time": "02:00", "visibility": "private"},
-            {"time": "04:00", "visibility": "public"},
-            {"time": "08:00", "visibility": "private"},
-            {"time": "13:00", "visibility": "public"},
-            {"time": "15:00", "visibility": "private"},
-            {"time": "18:00", "visibility": "public"},
-            {"time": "19:00", "visibility": "private"},
-            {"time": "20:00", "visibility": "public"},
+            {"time": "01:00", "visibility": "public"},   # 01:00 AM
+            {"time": "02:00", "visibility": "private"},  # 02:00 AM
+            {"time": "08:00", "visibility": "public"},   # 08:00 AM
+            {"time": "08:00", "visibility": "private"},  # 08:00 AM (doublon)
+            {"time": "13:00", "visibility": "public"},   # 01:00 PM
+            {"time": "15:00", "visibility": "private"},  # 03:00 PM
+            {"time": "15:00", "visibility": "public"},   # 03:00 PM (doublon)
+            {"time": "16:00", "visibility": "private"},  # 04:00 PM
+            {"time": "18:00", "visibility": "public"},   # 06:00 PM
+            {"time": "19:00", "visibility": "private"},  # 07:00 PM
+            {"time": "20:00", "visibility": "public"},   # 08:00 PM
+            {"time": "21:00", "visibility": "private"},  # 09:00 PM
+            {"time": "22:00", "visibility": "public"},   # 10:00 PM
+            {"time": "23:00", "visibility": "private"},  # 11:00 PM
         ],
     },
     "stories": {
