@@ -11636,8 +11636,8 @@ function renderStorySlots(){{
   c.innerHTML = storySlots.map((s,i)=>`
     <div class='mpl-slot' data-idx='${{i}}'>
       <div class='mpl-slot-badge' style='background:rgba(59,130,246,.15);color:#3b82f6'>#${{i+1}}</div>
-      <input type='time' class='mpl-slot-time' value='${{s.time}}' onchange='storySlots[${{i}}].time=this.value;storySlots.sort((a,b)=>(a.time||"00:00").localeCompare(b.time||"00:00"));renderStorySlots();syncSlots()'>
-      <select class='mpl-slot-aud' onchange='storySlots[${{i}}].audience=this.value;syncSlots()' style='flex-shrink:0;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:8px;font-size:13px;cursor:pointer'>
+      <input type='time' class='mpl-slot-time' value='${{s.time}}' style='flex:1;min-width:0' onchange='storySlots[${{i}}].time=this.value;storySlots.sort((a,b)=>(a.time||"00:00").localeCompare(b.time||"00:00"));renderStorySlots();syncSlots()'>
+      <select class='mpl-slot-aud' onchange='storySlots[${{i}}].audience=this.value;syncSlots()' style='flex:0 0 145px;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer'>
         ${{audOpts.replace('value=\"'+s.audience+'\"','value=\"'+s.audience+'\" selected')}}
       </select>
       <button type='button' class='mpl-slot-rm' onclick='removeStorySlot(${{i}})' title='Retirer'>×</button>
