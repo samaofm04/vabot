@@ -11215,7 +11215,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
   <input type='hidden' name='story_slots_json' id='mpl-story-slots-json' value='[]'>
   <input type='hidden' name='shuffle_media' id='mpl-shuffle-media' value='0'>
   <input type='hidden' name='infinite_recycle' id='mpl-recycle' value='1'>
-  <input type='hidden' name='randomize_minutes' id='mpl-random-min' value='1'>
+  <input type='hidden' name='randomize_minutes' id='mpl-random-min' value='0'>
 
   <!-- PILL NAV : Auto-Post / Auto-Story / Auto-Delete -->
   <div class='mpl-pillnav'>
@@ -11445,11 +11445,11 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     <div class='mpl-opt-toggle'></div>
   </div>
 
-  <div class='mpl-opt active' id='opt-randmin' onclick='toggleOpt("opt-randmin","mpl-random-min")'>
+  <div class='mpl-opt' id='opt-randmin' onclick='toggleOpt("opt-randmin","mpl-random-min")'>
     <div class='mpl-opt-icon'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='1 4 1 10 7 10'/><polyline points='23 20 23 14 17 14'/><path d='M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15'/></svg></div>
     <div class='mpl-opt-text'>
       <p class='mpl-opt-title'>🎲 Randomiser les minutes</p>
-      <p class='mpl-opt-sub'>Les minutes varient (3 a 25) chaque jour pour eviter les patterns detectables</p>
+      <p class='mpl-opt-sub'>Les minutes varient (3 a 25) chaque jour. Desactive par defaut - les horaires exacts du planning sont conserves (20:00 reste 20:00).</p>
     </div>
     <div class='mpl-opt-toggle'></div>
   </div>
