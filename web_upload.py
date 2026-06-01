@@ -8455,17 +8455,16 @@ def _render_linkscale_html() -> str:
         )
 
     # Si un folder est selectionne, fetch TOUS ses links (actifs + inactifs)
-    # via le mapping cs_template -> folder
     if selected_folder and selected_folder.get("id"):
         try:
             all_links = linkscale.get_all_links_in_folder(selected_folder["name"])
             active_res = linkscale.get_folder_links_with_clicks(selected_folder["id"], days=7)
             active_links = active_res.get("links", []) or []
-            # Map link_id -> clicks
-            clicks_by_id = {l["id"]: l.get("clicks", 0) for l in active_links}
+            # Map link_id -> {clicks, today, daily}
+            stats_by_id = {l["id"]: l for l in active_links}
         except Exception:
             all_links = []
-            clicks_by_id = {}
+            stats_by_id = {}
         list_html = ""
         if not all_links:
             list_html = (
@@ -8476,55 +8475,100 @@ def _render_linkscale_html() -> str:
                 "</div>"
             )
         else:
-            # Tri : par clicks descendant, puis par enabled, puis par u alphabetique
+            # Tri par clicks descendant
             def _sort_key(l):
                 lid = l.get("_id") or l.get("id") or ""
-                c = clicks_by_id.get(lid, 0)
+                c = stats_by_id.get(lid, {}).get("clicks", 0)
                 return (-c, 0 if l.get("enabled") else 1, (l.get("u") or "").lower())
             all_links.sort(key=_sort_key)
 
-            total_actifs = sum(1 for l in all_links if clicks_by_id.get(l.get("_id") or l.get("id"), 0) > 0)
+            total_actifs = sum(1 for l in all_links if stats_by_id.get(l.get("_id") or l.get("id"), {}).get("clicks", 0) > 0)
+
+            def _make_sparkline(daily_list, color="#a855f7"):
+                """Genere un mini SVG sparkline depuis [{date, clicks}, ...]."""
+                if not daily_list:
+                    return f"<svg width='90' height='28' viewBox='0 0 90 28'><line x1='0' y1='14' x2='90' y2='14' stroke='#2a2a2a' stroke-width='1.5'/></svg>"
+                vals = [d.get("clicks", 0) for d in daily_list]
+                vmax = max(vals) or 1
+                w, h = 90, 28
+                step = w / max(len(vals) - 1, 1)
+                pts = []
+                for i, v in enumerate(vals):
+                    x = i * step
+                    y = h - (v / vmax) * (h - 4) - 2
+                    pts.append(f"{x:.1f},{y:.1f}")
+                path = " ".join(pts)
+                return f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}'><polyline points='{path}' fill='none' stroke='{color}' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>"
+
+            # Header du tableau
             list_html = (
-                "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px'>"
-                f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
+                "<div style='background:#161616;border:1px solid #232323;border-radius:14px;overflow:hidden'>"
+                f"<div style='display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #232323'>"
                 f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📁</div>"
-                f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Links dans {selected_folder['name']} ({len(all_links)} total · {total_actifs} actifs)</div>"
-                f"<div style='font-size:11px;color:#666'>Tries par clicks descendant - clicks comptes sur 7 derniers jours</div></div>"
+                f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Links dans {selected_folder['name']} <span style='color:#666;font-weight:500;font-size:12px'>({len(all_links)} total · {total_actifs} actifs)</span></div>"
+                f"<div style='font-size:11px;color:#666'>Tries par clicks descendant - 7 derniers jours</div></div>"
                 f"</div>"
+                # Table header
+                "<div style='display:grid;grid-template-columns:1fr 120px 90px 70px 70px 40px;gap:14px;padding:10px 18px;border-bottom:1px solid #1a1a1a;background:#0a0a0a;font-size:10px;color:#666;letter-spacing:1.5px;text-transform:uppercase;font-weight:700'>"
+                "<div>Title</div><div>Notes</div><div style='text-align:center'>Trend 7j</div><div style='text-align:center'>Today</div><div style='text-align:right'>CTR</div><div></div>"
+                "</div>"
             )
             for lk in all_links:
                 lid = lk.get("_id") or lk.get("id") or ""
                 u = (lk.get("u") or "?").replace("<", "&lt;")
                 domain = lk.get("domain") or "monsecret.vip"
-                # Pour les bio links (l_p) il n y a pas de url, juste le shortcode
                 ltype = lk.get("t") or "?"
                 if ltype == "d_l":
                     url = (lk.get("url") or "").replace("<", "&lt;")
                 else:
                     url = f"https://{domain}/{u}"
                 enabled = lk.get("enabled", True)
-                clicks = clicks_by_id.get(lid, 0)
-                # Color selon nb de clicks
-                if clicks >= 50: clicks_color = "#22c55e"
-                elif clicks >= 10: clicks_color = "#3b82f6"
-                elif clicks >= 1: clicks_color = "#a855f7"
-                else: clicks_color = "#555"
+                note = (lk.get("note") or "").replace("<", "&lt;")
+                stats_link = stats_by_id.get(lid, {})
+                clicks_7d = stats_link.get("clicks", 0)
+                clicks_today = stats_link.get("today", 0)
+                bots = stats_link.get("bots", 0)
+                # CTR = humans / (humans + bots) - approx
+                total_with_bots = clicks_7d + bots
+                ctr = (clicks_7d / total_with_bots * 100) if total_with_bots else 0
+                # Color clicks
+                if clicks_today >= 10: today_color = "#22c55e"
+                elif clicks_today >= 1: today_color = "#3b82f6"
+                else: today_color = "#555"
+                # Color trend
+                if clicks_7d >= 50: trend_color = "#22c55e"
+                elif clicks_7d >= 10: trend_color = "#3b82f6"
+                elif clicks_7d >= 1: trend_color = "#a855f7"
+                else: trend_color = "#666"
                 disabled_style = "opacity:.5" if not enabled else ""
-                type_color = "#3b82f6" if ltype == "d_l" else "#a855f7"
-                type_label = "DIRECT" if ltype == "d_l" else "BIO"
+                # Avatar = initial du folder colore + bordure violet
+                avatar_letter = (selected_folder.get("name", "?") or "?")[:1].upper()
+                spark = _make_sparkline(stats_link.get("daily", []), color=trend_color)
+                note_display = note if note else "<span style='color:#444'>+ Add notes</span>"
                 list_html += (
-                    f"<div style='display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;margin-bottom:6px;{disabled_style}'>"
-                    f"<span style='font-size:9px;color:#fff;background:{type_color};padding:2px 6px;border-radius:4px;font-weight:800;letter-spacing:.5px'>{type_label}</span>"
-                    f"<div style='flex:1;min-width:0'>"
-                    f"<div style='color:#fff;font-weight:600;font-size:13px;font-family:monospace'>/{u}</div>"
-                    f"<div style='color:#888;font-size:11px;margin-top:2px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{url}</div>"
+                    f"<div style='display:grid;grid-template-columns:1fr 120px 90px 70px 70px 40px;gap:14px;align-items:center;padding:14px 18px;border-bottom:1px solid #1a1a1a;{disabled_style}'>"
+                    # Title col : avatar + name + url
+                    f"<div style='display:flex;align-items:center;gap:11px;min-width:0'>"
+                    f"<div style='width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0;border:1.5px solid #a855f7'>{avatar_letter}</div>"
+                    f"<div style='min-width:0;flex:1'>"
+                    f"<div style='color:#fff;font-weight:700;font-size:14px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{u}</div>"
+                    f"<div style='color:#666;font-size:11px;margin-top:1px;font-family:monospace;text-overflow:ellipsis;overflow:hidden;white-space:nowrap'>{url}</div>"
                     f"</div>"
-                    f"<div style='display:flex;flex-direction:column;align-items:center;min-width:64px'>"
-                    f"<div style='font-size:20px;font-weight:800;color:{clicks_color}'>{clicks}</div>"
-                    f"<div style='font-size:9px;color:#666;letter-spacing:.5px'>CLICKS 7J</div>"
                     f"</div>"
-                    f"<button type='button' onclick=\"lsDuplicate('{lid}', this)\" style='background:transparent;border:1px solid #2a3a5a;color:#3b82f6;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Dupliquer dans le meme dossier'>⎘</button>"
-                    f"<button type='button' onclick=\"lsDelete('{lid}', this)\" style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer'>🗑</button>"
+                    # Notes (cliquable inline edit)
+                    f"<div onclick=\"lsEditNote('{lid}', this)\" style='font-size:12px;color:#888;cursor:pointer;text-overflow:ellipsis;overflow:hidden;white-space:nowrap' title='Cliquer pour modifier'>{note_display}</div>"
+                    # Sparkline trend
+                    f"<div style='display:flex;justify-content:center'>{spark}</div>"
+                    # Today
+                    f"<div style='text-align:center'>"
+                    f"<div style='font-size:18px;font-weight:800;color:{today_color}'>{clicks_today}</div>"
+                    f"</div>"
+                    # CTR
+                    f"<div style='text-align:right;color:#aaa;font-size:13px;font-weight:600'>{ctr:.1f}%</div>"
+                    # Actions menu (3 dots)
+                    f"<div style='text-align:right;position:relative'>"
+                    f"<button type='button' onclick=\"lsMenu('{lid}', this)\" style='background:transparent;border:0;color:#888;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px' title='Actions'>⋮</button>"
+                    f"</div>"
                     f"</div>"
                 )
             list_html += "</div>"
@@ -8584,6 +8628,47 @@ def _render_linkscale_html() -> str:
         f"<script>window.__lsFolders = {folders_json};</script>"
         + """
 <script>
+async function lsEditNote(id, el){
+  const cur = (el.textContent || '').replace(/^\\+ Add notes$/, '').trim();
+  const v = prompt('Note pour ce link (vide pour effacer) :', cur);
+  if(v === null) return;
+  try {
+    const fd = new FormData(); fd.set('link_id', id); fd.set('note', v);
+    const r = await fetch('/linkscale/update_note', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      if(typeof showToast==='function') showToast('✓ Note enregistree', 'success', 2000);
+      setTimeout(()=>location.reload(), 400);
+    } else if(typeof showToast==='function') showToast('❌ ' + (j.error||'?'), 'error');
+  } catch(e){}
+}
+function lsMenu(id, btn){
+  // Popup contextuel actions (Dupliquer / Toggle / Delete)
+  // Remove old menu si present
+  document.querySelectorAll('.ls-action-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'ls-action-menu';
+  const rect = btn.getBoundingClientRect();
+  menu.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:' + (rect.left - 130) + 'px;background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:6px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:160px';
+  menu.innerHTML =
+    '<button type="button" onclick="lsDuplicate(\\'' + id + '\\', this); document.querySelectorAll(\\'.ls-action-menu\\').forEach(m=>m.remove())" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:0;color:#fff;cursor:pointer;padding:8px 10px;border-radius:6px;font-size:13px;text-align:left">' +
+      '<span style="color:#3b82f6">⎘</span> Dupliquer' +
+    '</button>' +
+    '<button type="button" onclick="lsDelete(\\'' + id + '\\', this); document.querySelectorAll(\\'.ls-action-menu\\').forEach(m=>m.remove())" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:0;color:#ef4444;cursor:pointer;padding:8px 10px;border-radius:6px;font-size:13px;text-align:left">' +
+      '<span>🗑</span> Supprimer' +
+    '</button>';
+  document.body.appendChild(menu);
+  // Fermer au click ailleurs
+  setTimeout(() => {
+    const closeHandler = (e) => {
+      if(!menu.contains(e.target)){
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    document.addEventListener('click', closeHandler);
+  }, 100);
+}
 async function lsDuplicate(id, btn){
   btn.disabled = true; btn.textContent = '...';
   try {
@@ -15980,6 +16065,22 @@ def create_app():
         if not link_id:
             return jsonify({"ok": False, "error": "link_id manquant"})
         return jsonify(linkscale.enable_link(link_id) if enable else linkscale.disable_link(link_id))
+
+    @app.route("/linkscale/update_note", methods=["POST"])
+    def linkscale_update_note():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import linkscale
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        link_id = (request.form.get("link_id") or "").strip()
+        note = (request.form.get("note") or "").strip()
+        if not link_id:
+            return jsonify({"ok": False, "error": "link_id manquant"})
+        return jsonify(linkscale.update_link(link_id, {"note": note}))
 
     @app.route("/linkscale/delete", methods=["POST"])
     def linkscale_delete():

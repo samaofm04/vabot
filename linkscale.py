@@ -467,14 +467,12 @@ def get_all_links_in_folder(folder_name: str) -> List[Dict[str, Any]]:
 
 
 def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any]:
-    """Retourne {ok, links: [{id, u, url, clicks}]} pour un folder donne.
+    """Retourne {ok, links: [{id, u, url, clicks, today, daily, bots}]}.
 
-    L API expose les links d un folder via /folders/{id}/stats avec
-    include_clicks=true et traffic_data_type=links. Sur 1 a 7 jours
-    typiquement (sinon memory limit serveur).
-
-    Note : les links inactifs (0 clicks) ne sont PAS renvoyes par cet
-    endpoint. Donc on n a que les "active" links du folder.
+    Inclut le breakdown par jour pour pouvoir afficher des sparklines.
+    daily = [{date, clicks}] ordonne du plus ancien au plus recent.
+    today = clicks du jour J (date == today_str).
+    clicks = total sur la periode.
     """
     if not folder_id:
         return {"ok": False, "links": []}
@@ -491,7 +489,9 @@ def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any
     traffic = stats.get("trafficByLinks") or stats.get("traffic_by_links") or []
     if not isinstance(traffic, list):
         return {"ok": True, "links": []}
-    # Aggrege par link _id (sum des clicks sur la periode)
+    # Build daily series par link
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
     by_id: Dict[str, Dict[str, Any]] = {}
     for t in traffic:
         if not isinstance(t, dict):
@@ -507,11 +507,23 @@ def get_folder_links_with_clicks(folder_id: str, days: int = 7) -> Dict[str, Any
                 "host": t.get("host") or "",
                 "note": t.get("note") or "",
                 "clicks": 0,
+                "today": 0,
                 "bots": 0,
+                "daily": {},  # {date_str: clicks}
             }
-        by_id[lid]["clicks"] += int(t.get("clicks") or 0)
+        clicks = int(t.get("clicks") or 0)
+        by_id[lid]["clicks"] += clicks
         by_id[lid]["bots"] += int(t.get("bots") or 0)
-    # Tri par clicks descendant
+        # Date format de l API : "2026-05-31 00:00:00"
+        date_raw = (t.get("date") or "")[:10]
+        if date_raw:
+            by_id[lid]["daily"][date_raw] = by_id[lid]["daily"].get(date_raw, 0) + clicks
+            if date_raw == today_str:
+                by_id[lid]["today"] += clicks
+    # Convertit daily dict -> liste ordonnee
+    for lid, data in by_id.items():
+        d = data.pop("daily", {})
+        data["daily"] = [{"date": k, "clicks": d[k]} for k in sorted(d.keys())]
     out = sorted(by_id.values(), key=lambda x: -x["clicks"])
     return {"ok": True, "links": out}
 
