@@ -10895,12 +10895,6 @@ def _render_mypulslive_html() -> str:
     except Exception:
         captions_default = ""
         captions_count = 0
-    # Si l user a deja saisi des captions persos pour le 1er creator -> on les utilise
-    # Sinon -> on prend DEFAULT_CAPTIONS
-    first_captions_or_default = first_captions if first_captions else captions_default
-    if first_captions:
-        captions_count = first_cap_count
-    first_count_for_badge = first_media_count if first_media_count else 0
 
     today = _dt.date.today()
     week_later = today + _dt.timedelta(days=6)
@@ -10925,6 +10919,12 @@ def _render_mypulslive_html() -> str:
     first_captions = "\n".join(first_captions_list)
     first_media_count = len([x for x in first_media_pool.split("\n") if x.strip()])
     first_cap_count = len(first_captions_list)
+
+    # Si l user a deja saisi des captions persos pour le 1er creator -> on les utilise
+    # Sinon -> on prend DEFAULT_CAPTIONS
+    first_captions_or_default = first_captions if first_captions else captions_default
+    if first_captions:
+        captions_count = first_cap_count
 
     # Couleur deterministe par createur (HSL, hue depend du nom)
     import hashlib as _hash
