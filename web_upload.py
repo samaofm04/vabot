@@ -4809,7 +4809,7 @@ function vaLinksGenerate(){
   // Determine le folder actif (la pill selectionnee)
   var folder = _vlmActiveModel;
   if(folder === '__all__'){
-    if(typeof showToast === 'function') showToast('Sélectionne d\'abord un dossier (clique une pill)', 'error');
+    if(typeof showToast === 'function') showToast("Selectionne d'abord un dossier (clique une pill)", 'error');
     return;
   }
   // Demande le prefix au user (default = nom du folder)
