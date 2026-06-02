@@ -435,7 +435,7 @@ def _save_chatters(data: dict):
 
 
 def get_chatter_meta(name: str) -> dict:
-    """Retourne {commission_pct, crypto_file, crypto_type, crypto_network, crypto_address}."""
+    """Retourne {commission_pct, crypto_file, crypto_type, crypto_network, crypto_address, paid_periods}."""
     data = _load_chatters()
     key = (name or "").strip().lower()
     meta = data.get(key, {})
@@ -445,7 +445,38 @@ def get_chatter_meta(name: str) -> dict:
         "crypto_type": meta.get("crypto_type", ""),  # USDC | ETH | SOL | TRX
         "crypto_network": meta.get("crypto_network", ""),  # ERC20 | TRC20 | SPL | etc.
         "crypto_address": meta.get("crypto_address", ""),
+        # Periodes ou ce chatteur a deja ete paye (liste de strings "YYYY-MM-DD_YYYY-MM-DD")
+        "paid_periods": list(meta.get("paid_periods") or []),
     }
+
+
+def is_chatter_paid(name: str, period_id: str) -> bool:
+    """True si le chatteur a ete marque payé pour cette période (period_id = 'start_end')."""
+    if not period_id:
+        return False
+    meta = get_chatter_meta(name)
+    return period_id in meta.get("paid_periods", [])
+
+
+def set_chatter_paid(name: str, period_id: str, paid: bool) -> bool:
+    """Marque/demarque un chatteur paye pour une periode donnee.
+    period_id format : 'YYYY-MM-DD_YYYY-MM-DD' (start_end)."""
+    if not name or not period_id:
+        return False
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if key not in data:
+        data[key] = {}
+    periods = list(data[key].get("paid_periods") or [])
+    if paid:
+        if period_id not in periods:
+            periods.append(period_id)
+    else:
+        periods = [p for p in periods if p != period_id]
+    data[key]["paid_periods"] = periods
+    data[key]["original_name"] = name
+    _save_chatters(data)
+    return True
 
 
 # Mapping réseau (asset) -> liste de blockchains supportées

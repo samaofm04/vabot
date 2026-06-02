@@ -7528,6 +7528,14 @@ body.light .mp-loading-overlay{background:rgba(249,250,251,.9)}
 .mypuls-tab-active{color:#3b82f6;border-bottom-color:#3b82f6}
 .mypuls-table{width:100%;border-collapse:collapse;font-size:12px}
 .mypuls-table th{background:#1a1a1a;color:#888;padding:8px 10px;text-align:left;border-bottom:1px solid #2a2a2a;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.mp-paid-toggle{display:inline-flex;align-items:center;cursor:pointer;position:relative;width:22px;height:22px}
+.mp-paid-cb{position:absolute;opacity:0;width:0;height:0}
+.mp-paid-cb-mark{display:block;width:20px;height:20px;border:1.5px solid #444;border-radius:5px;background:transparent;transition:all .15s;position:relative}
+.mp-paid-toggle:hover .mp-paid-cb-mark{border-color:#22c55e}
+.mp-paid-cb:checked + .mp-paid-cb-mark{background:#22c55e;border-color:#22c55e}
+.mp-paid-cb:checked + .mp-paid-cb-mark::after{content:'';position:absolute;left:6px;top:2px;width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.mp-chatter-row.mp-paid{opacity:.45}
+.mp-chatter-row.mp-paid td:not(:last-child){text-decoration:line-through;text-decoration-color:rgba(34,197,94,.5)}
 .mypuls-table td{padding:8px 10px;border-bottom:1px solid #1a1a1a;color:#fff;vertical-align:middle}
 .mypuls-table tr:hover td{background:rgba(59,130,246,.04)}
 .mypuls-bar{position:relative;background:#1a1a1a;height:6px;border-radius:3px;overflow:hidden;margin-top:4px}
@@ -7973,10 +7981,18 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<td class='mp-cell-pay' style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
             f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
+            f"<td style='text-align:center'>"
+            f"<label class='mp-paid-toggle' title='Marquer paye pour cette periode'>"
+            f"<input type='checkbox' class='mp-paid-cb' data-name='{name_esc}' "
+            f"{'checked' if (f'{start_str}_{end_str}' in meta.get('paid_periods', [])) else ''} "
+            f"onchange='mpTogglePaid(this)'>"
+            f"<span class='mp-paid-cb-mark'></span>"
+            f"</label>"
+            f"</td>"
             f"</tr>"
             + edit_inline
         )
-    chatters_empty = "<tr><td colspan='9' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
+    chatters_empty = "<tr><td colspan='10' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
     chatters_body = "".join(chatters_rows) or chatters_empty
 
     # Total à payer (somme des "à payer" sur les 30 affichés)
@@ -8041,11 +8057,13 @@ body.light .mypuls-bar{background:#e5e7eb}
         ensure_ascii=False,
     )
 
+    # Period_id pour le tracking "paye" : YYYY-MM-DD_YYYY-MM-DD
+    _period_id = f"{start_str}_{end_str}"
     chatters_table = (
         "<div id='mp-tab-chatters' style='display:block'>"
         + payout_summary +
         "<table class='mypuls-table'>"
-        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer ($)</th><th>Crypto</th><th>Présence</th></tr></thead>"
+        "<thead><tr><th>Chatteur</th><th>CA Total</th><th>PPV</th><th>Tips</th><th>Conv.</th><th>%</th><th>À payer ($)</th><th>Crypto</th><th>Présence</th><th title='Payer pour cette période'>Payé</th></tr></thead>"
         f"<tbody>{chatters_body}</tbody>"
         "</table>"
         f"<script>window.__mpCryptoData = {crypto_data_json};</script>"
@@ -8053,6 +8071,7 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<script>window.__mpTransactions = {transactions_js};</script>"
         f"<script>window.__mpChattersBase = {chatters_base_js};</script>"
         f"<script>window.__mpEurToUsd = {eur_to_usd};</script>"
+        f"<script>window.__mpPeriodId = '{_period_id}';</script>"
         "</div>"
     )
 
@@ -8294,8 +8313,49 @@ function mpEnlargeImg(src){
   ov.onclick = function(){ document.body.removeChild(ov); };
   document.body.appendChild(ov);
 }
+function mpTogglePaid(cb){
+  var name = cb.getAttribute('data-name') || '';
+  var period = window.__mpPeriodId || '';
+  var paid = cb.checked;
+  // Update visual immediatement
+  var row = cb.closest('tr');
+  if(row){
+    row.classList.toggle('mp-paid', paid);
+  }
+  if(!name || !period) return;
+  var fd = new FormData();
+  fd.append('name', name);
+  fd.append('period_id', period);
+  fd.append('paid', paid ? '1' : '0');
+  fetch('/mypuls/chatter/toggle_paid', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        // Rollback en cas d'echec
+        cb.checked = !paid;
+        if(row) row.classList.toggle('mp-paid', !paid);
+        if(typeof showToast === 'function') showToast('Erreur: ' + (d && d.error || '?'), 'error');
+      } else {
+        if(typeof showToast === 'function'){
+          showToast(paid ? '✓ ' + name + ' marqué payé' : name + ' demarqué', 'success');
+        }
+      }
+    })
+    .catch(function(err){
+      cb.checked = !paid;
+      if(row) row.classList.toggle('mp-paid', !paid);
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+}
 // Init des dropdowns réseaux pour chaque row au load
 document.addEventListener('DOMContentLoaded', function(){
+  // Init visual des rows deja marquees payees
+  document.querySelectorAll('.mp-paid-cb').forEach(function(cb){
+    if(cb.checked){
+      var row = cb.closest('tr');
+      if(row) row.classList.add('mp-paid');
+    }
+  });
   document.querySelectorAll('.mp-edit-network').forEach(function(sel){
     var rowIdx = sel.getAttribute('data-row');
     var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
@@ -16301,6 +16361,24 @@ def create_app():
                 for tx in kept[:5]
             ],
         })
+
+    @app.route("/mypuls/chatter/toggle_paid", methods=["POST"])
+    def mypuls_chatter_toggle_paid():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        name = (request.form.get("name") or "").strip()
+        period_id = (request.form.get("period_id") or "").strip()
+        paid = (request.form.get("paid") or "0") == "1"
+        if not name or not period_id:
+            return jsonify({"ok": False, "error": "name + period_id requis"})
+        ok = mypuls.set_chatter_paid(name, period_id, paid)
+        return jsonify({"ok": ok, "name": name, "period_id": period_id, "paid": paid})
 
     @app.route("/mypuls/refresh_rate", methods=["POST"])
     def mypuls_refresh_rate():
