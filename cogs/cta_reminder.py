@@ -355,64 +355,76 @@ class AccountTrackingView(discord.ui.View):
                     "❌ Ce suivi est reserve a la personne taggee.", ephemeral=True
                 )
                 return
+            # Compte les inactifs DEJA reportes AVANT ce click (pour determiner
+            # le delai stagger : 24h pour le 1er inactif, 72h pour 2e, 7j pour 3e)
+            state_before = _load_tracking_state()
+            today = _today_key()
+            accounts_before = state_before.get(today, {}).get(
+                str(interaction.user.id), {}
+            ).get("accounts", {})
+            prev_inactifs = sum(1 for v in accounts_before.values() if v == "inactif")
+            # Save le status
             tracking_set_account_status(str(interaction.user.id), account_idx, status)
-            # Update les boutons : disable la ligne du compte cliqué + add ✓
-            # Reconstruire la view actuelle en disable les 2 boutons de cette row
+            # Disable la row du compte cliqué + mark le bouton choisi avec ✓
             for item in self.children:
                 if isinstance(item, discord.ui.Button) and item.row == account_idx - 1:
                     item.disabled = True
-                    # Highlight celui clique
                     if item.custom_id == f"track_c{account_idx}_{status}":
-                        # Garde son style mais mark le label
                         item.label = item.label + " ✓"
-            # Recupere le state pour summary
-            state = _load_tracking_state()
-            today = _today_key()
-            accounts = state.get(today, {}).get(str(interaction.user.id), {}).get("accounts", {})
-            done_count = len(accounts)
-            try:
-                # Si tous les 3 comptes sont reportes -> message complete + plan d'action
-                if done_count >= NB_COMPTES:
-                    actifs = sum(1 for v in accounts.values() if v == "actif")
-                    inactifs = sum(1 for v in accounts.values() if v == "inactif")
-                    if inactifs == 0:
-                        summary = (
-                            f"\n\n✅ **Suivi terminé !** Tous tes {NB_COMPTES} comptes sont **actifs** 🟢\n"
-                            f"📊 Bilan : {actifs} actif(s)\n"
-                            f"Continue ton bon travail ! 💪"
-                        )
-                    elif inactifs == 1:
-                        summary = (
-                            f"\n\n⚠️ **Suivi terminé** — 1 compte inactif détecté 🔴\n"
-                            f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)\n\n"
-                            f"📋 **Plan d'action — dans 24h** :\n"
-                            f"• Crée un **nouveau mail**\n"
-                            f"• Crée un **nouveau compte Instagram**\n"
-                            f"• Reprends le **warmup** depuis le début"
-                        )
-                    elif inactifs == 2:
-                        summary = (
-                            f"\n\n⚠️ **Suivi terminé** — 2 comptes inactifs détectés 🔴🔴\n"
-                            f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)\n\n"
-                            f"📋 **Plan d'action staggered** :\n"
-                            f"• **Dans 24h** : crée 1 compte (mail + Instagram + warmup)\n"
-                            f"• **Dans 72h** : crée le 2ème compte (mail + Instagram + warmup)"
-                        )
-                    else:  # 3+
-                        summary = (
-                            f"\n\n🚨 **Suivi terminé** — TOUS tes comptes sont inactifs 🔴🔴🔴\n"
-                            f"📊 Bilan : 0 actif · {inactifs} inactifs\n\n"
-                            f"📋 **Plan d'action staggered** (jamais tout d'un coup) :\n"
-                            f"• **Dans 24h** : crée le **1er compte** (mail + Instagram + warmup)\n"
-                            f"• **Dans 72h** : crée le **2ème compte**\n"
-                            f"• **Dans 7 jours** : crée le **3ème compte**"
-                        )
-                    await interaction.response.edit_message(
-                        content=interaction.message.content + summary,
-                        view=self,
+            # Followup message specifique a CE compte
+            if status == "actif":
+                followup = (
+                    f"✅ <@{interaction.user.id}> **Compte {account_idx} : Actif** 🟢\n"
+                    f"Continue ton bon travail sur ce compte 💪"
+                )
+            else:
+                # Inactif -> determine le delai selon position dans la liste
+                # prev_inactifs = combien d'inactifs etaient deja reportes avant
+                inactif_order = prev_inactifs + 1  # 1, 2, ou 3
+                if inactif_order == 1:
+                    delai = "24h"
+                    emoji_alerte = "⚠️"
+                elif inactif_order == 2:
+                    delai = "72h"
+                    emoji_alerte = "⚠️"
+                else:  # 3e inactif
+                    delai = "7 jours"
+                    emoji_alerte = "🚨"
+                followup = (
+                    f"{emoji_alerte} <@{interaction.user.id}> **Compte {account_idx} : Inactif** 🔴\n"
+                    f"📋 **Plan d'action — dans {delai}** :\n"
+                    f"• Crée un **nouveau mail**\n"
+                    f"• Crée un **nouveau compte Instagram**\n"
+                    f"• Reprends le **warmup** depuis le début"
+                )
+                if inactif_order > 1:
+                    followup += (
+                        f"\n\n💡 *Tu attends {delai} apres le compte precedent "
+                        f"pour eviter le red flag Instagram (jamais creer plusieurs "
+                        f"comptes d'un coup).*"
                     )
-                else:
-                    await interaction.response.edit_message(view=self)
+            try:
+                # Update le message original (boutons disabled)
+                await interaction.response.edit_message(view=self)
+                # Envoie le followup dans le channel
+                await interaction.followup.send(content=followup)
+                # Si tous les 3 sont termines, envoie un mini summary final
+                state_after = _load_tracking_state()
+                accounts_after = state_after.get(today, {}).get(
+                    str(interaction.user.id), {}
+                ).get("accounts", {})
+                if len(accounts_after) >= NB_COMPTES:
+                    actifs = sum(1 for v in accounts_after.values() if v == "actif")
+                    inactifs = sum(1 for v in accounts_after.values() if v == "inactif")
+                    if inactifs == 0:
+                        final = f"✅ <@{interaction.user.id}> **Suivi terminé** — Tous tes comptes sont actifs 🎉"
+                    else:
+                        final = (
+                            f"📊 <@{interaction.user.id}> **Suivi terminé** — "
+                            f"{actifs} actif(s) · {inactifs} inactif(s)\n"
+                            f"Respecte bien le **planning staggered** ci-dessus pour la création des nouveaux comptes."
+                        )
+                    await interaction.followup.send(content=final)
             except Exception as e:
                 log.warning(f"[tracking] update fail : {e}")
         return callback
