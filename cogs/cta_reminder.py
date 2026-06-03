@@ -315,6 +315,19 @@ def tracking_set_account_status(uid: str, account_idx: int, status: str):
     _save_tracking_state(state)
 
 
+def tracking_reset_today(uid: str):
+    """Reset les accounts du user pour aujourd'hui (mais garde sent=True
+    pour pas re-envoyer le message du cron)."""
+    state = _load_tracking_state()
+    today = _today_key()
+    if today not in state:
+        state[today] = {}
+    if str(uid) not in state[today]:
+        state[today][str(uid)] = {}
+    state[today][str(uid)]["accounts"] = {}
+    _save_tracking_state(state)
+
+
 def tracking_get_account_status(uid: str, account_idx: int) -> str | None:
     state = _load_tracking_state()
     today = _today_key()
@@ -542,6 +555,10 @@ class CTAReminderCog(commands.Cog):
         if interaction.user.id != app.owner.id:
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
+        # IMPORTANT : reset les accounts du user pour aujourd'hui afin que
+        # le test parte sur un etat propre (sinon les clicks precedents
+        # restent en state et firent le message d'action des le 1er click)
+        tracking_reset_today(str(interaction.user.id))
         msg = (
             f"📊 <@{interaction.user.id}> **[TEST] Suivi de tes comptes**\n"
             f"\nPour chacun de tes **{NB_COMPTES} comptes**, indique le statut :\n"
