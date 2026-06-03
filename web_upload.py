@@ -935,8 +935,17 @@ window.igHoverStop = function(media){
   try{ v.pause(); }catch(e){}
   v.style.opacity = '0';
 };
-// Lit la video inline avec controles (au lieu d'ouvrir Instagram)
+// Lit la video inline en utilisant le player embed officiel Instagram.
+// Marche TOUJOURS (pas de rate-limit, pas de CORS), c'est l'iframe d'IG.
 window.igPlayInline = function(media){
+  if(!media) return;
+  var card = media.closest('.reel-card');
+  if(!card) return;
+  // STRATEGIE PRINCIPALE : embed Instagram iframe (toujours fiable)
+  igEmbedInCard(card);
+  return;
+};
+window.igPlayInlineNative = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
@@ -1030,6 +1039,38 @@ window.igPlayInline = function(media){
     // on devrait avoir un user gesture. Show controls et laisse user play.
     v.setAttribute('controls', 'controls');
   });
+};
+// Bascule vers l'embed officiel Instagram dans la card (toujours marche)
+window.igEmbedInCard = function(card){
+  if(!card) return;
+  var media = card.querySelector('.reel-media');
+  if(!media) return;
+  var url = card.getAttribute('data-url') || '';
+  if(!url) return;
+  // Cherche le shortcode dans l'URL
+  var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  if(!m) return;
+  var shortcode = m[1];
+  // Vire les overlays existants
+  var oldErr = media.querySelector('.reel-error-overlay'); if(oldErr) oldErr.remove();
+  var oldLoad = media.querySelector('.reel-loading'); if(oldLoad) oldLoad.remove();
+  var oldEmbed = media.querySelector('.reel-embed-wrap'); if(oldEmbed) oldEmbed.remove();
+  var img = media.querySelector('.reel-thumb'); if(img) img.style.display = 'none';
+  var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
+  var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
+  // Cree iframe Instagram embed
+  var wrap = document.createElement('div');
+  wrap.className = 'reel-embed-wrap';
+  wrap.style.cssText = 'position:absolute;inset:0;background:#000;z-index:6;overflow:hidden';
+  var iframe = document.createElement('iframe');
+  iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/captioned/';
+  iframe.style.cssText = 'width:100%;height:100%;border:0;background:#000';
+  iframe.setAttribute('allow', 'autoplay; encrypted-media');
+  iframe.setAttribute('allowfullscreen', '');
+  iframe.setAttribute('scrolling', 'no');
+  wrap.appendChild(iframe);
+  media.appendChild(wrap);
+  media.classList.add('reel-embedded');
 };
 window.igShowCardError = function(card, title, detail){
   if(!card) return;
