@@ -355,15 +355,7 @@ class AccountTrackingView(discord.ui.View):
                     "❌ Ce suivi est reserve a la personne taggee.", ephemeral=True
                 )
                 return
-            # Compte les inactifs DEJA reportes AVANT ce click (pour determiner
-            # le delai stagger : 24h pour le 1er inactif, 72h pour 2e, 7j pour 3e)
-            state_before = _load_tracking_state()
-            today = _today_key()
-            accounts_before = state_before.get(today, {}).get(
-                str(interaction.user.id), {}
-            ).get("accounts", {})
-            prev_inactifs = sum(1 for v in accounts_before.values() if v == "inactif")
-            # Save le status
+            # Save le status (avec ordre de click pour le staggering)
             tracking_set_account_status(str(interaction.user.id), account_idx, status)
             # Disable la row du compte cliqué + mark le bouton choisi avec ✓
             for item in self.children:
@@ -371,60 +363,60 @@ class AccountTrackingView(discord.ui.View):
                     item.disabled = True
                     if item.custom_id == f"track_c{account_idx}_{status}":
                         item.label = item.label + " ✓"
-            # Followup message specifique a CE compte
-            if status == "actif":
-                followup = (
-                    f"✅ <@{interaction.user.id}> **Compte {account_idx} : Actif** 🟢\n"
-                    f"Continue ton bon travail sur ce compte 💪"
-                )
-            else:
-                # Inactif -> determine le delai selon position dans la liste
-                # prev_inactifs = combien d'inactifs etaient deja reportes avant
-                inactif_order = prev_inactifs + 1  # 1, 2, ou 3
-                if inactif_order == 1:
-                    delai = "24h"
-                    emoji_alerte = "⚠️"
-                elif inactif_order == 2:
-                    delai = "72h"
-                    emoji_alerte = "⚠️"
-                else:  # 3e inactif
-                    delai = "7 jours"
-                    emoji_alerte = "🚨"
-                followup = (
-                    f"{emoji_alerte} <@{interaction.user.id}> **Compte {account_idx} : Inactif** 🔴\n"
-                    f"📋 **Plan d'action — dans {delai}** :\n"
-                    f"• Crée un **nouveau mail**\n"
-                    f"• Crée un **nouveau compte Instagram**\n"
-                    f"• Reprends le **warmup** depuis le début"
-                )
-                if inactif_order > 1:
-                    followup += (
-                        f"\n\n💡 *Tu attends {delai} apres le compte precedent "
-                        f"pour eviter le red flag Instagram (jamais creer plusieurs "
-                        f"comptes d'un coup).*"
-                    )
+            # Recupere l'etat pour savoir si tous les 3 sont reportes
+            state = _load_tracking_state()
+            today = _today_key()
+            user_data = state.get(today, {}).get(str(interaction.user.id), {})
+            accounts = user_data.get("accounts", {})
+            done_count = len(accounts)
             try:
-                # Update le message original (boutons disabled)
-                await interaction.response.edit_message(view=self)
-                # Envoie le followup dans le channel
-                await interaction.followup.send(content=followup)
-                # Si tous les 3 sont termines, envoie un mini summary final
-                state_after = _load_tracking_state()
-                accounts_after = state_after.get(today, {}).get(
-                    str(interaction.user.id), {}
-                ).get("accounts", {})
-                if len(accounts_after) >= NB_COMPTES:
-                    actifs = sum(1 for v in accounts_after.values() if v == "actif")
-                    inactifs = sum(1 for v in accounts_after.values() if v == "inactif")
-                    if inactifs == 0:
-                        final = f"✅ <@{interaction.user.id}> **Suivi terminé** — Tous tes comptes sont actifs 🎉"
-                    else:
-                        final = (
-                            f"📊 <@{interaction.user.id}> **Suivi terminé** — "
-                            f"{actifs} actif(s) · {inactifs} inactif(s)\n"
-                            f"Respecte bien le **planning staggered** ci-dessus pour la création des nouveaux comptes."
+                # Pas encore tous reportes : juste update l'edit (silencieux)
+                if done_count < NB_COMPTES:
+                    await interaction.response.edit_message(view=self)
+                    return
+                # Les 3 sont reportes -> message d'action complet
+                actifs_ids = [aid for aid, st in accounts.items() if st == "actif"]
+                inactifs_ids = [aid for aid, st in accounts.items() if st == "inactif"]
+                # Tri par numero de compte pour ordre logique
+                inactifs_ids.sort(key=lambda x: int(x))
+                # Staggering : 24h pour le 1er inactif, 72h pour 2e, 7j pour 3e
+                delais = ["24h", "72h", "7 jours"]
+                actifs_list = "Aucun" if not actifs_ids else ", ".join(
+                    f"Compte {aid}" for aid in sorted(actifs_ids, key=lambda x: int(x))
+                )
+                # Construit le message
+                parts = [
+                    f"📊 <@{interaction.user.id}> **Suivi terminé !**",
+                    f"",
+                    f"🟢 **Actifs** : {actifs_list}",
+                    f"🔴 **Inactifs** : "
+                    + ("Aucun" if not inactifs_ids else ", ".join(f"Compte {aid}" for aid in inactifs_ids)),
+                ]
+                if not inactifs_ids:
+                    parts.append("")
+                    parts.append("✅ Tout est bon, continue ton bon travail ! 🎉")
+                else:
+                    parts.append("")
+                    parts.append("📋 **Plan d'action staggered** (jamais créer plusieurs comptes d'un coup = red flag Instagram) :")
+                    parts.append("")
+                    for i, aid in enumerate(inactifs_ids):
+                        delai = delais[i] if i < len(delais) else "+1 semaine"
+                        emoji_alerte = "🚨" if i >= 2 else "⚠️"
+                        parts.append(
+                            f"{emoji_alerte} **Compte {aid}** — dans **{delai}** :"
                         )
-                    await interaction.followup.send(content=final)
+                        parts.append(
+                            f"   • Crée un nouveau mail + nouveau compte Instagram"
+                        )
+                        parts.append(
+                            f"   • Reprends le warmup depuis le début"
+                        )
+                        if i < len(inactifs_ids) - 1:
+                            parts.append("")
+                msg = "\n".join(parts)
+                # Update le message original (boutons disabled) + envoie le plan
+                await interaction.response.edit_message(view=self)
+                await interaction.followup.send(content=msg)
             except Exception as e:
                 log.warning(f"[tracking] update fail : {e}")
         return callback
