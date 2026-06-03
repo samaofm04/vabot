@@ -48,6 +48,7 @@ TASK_CONFIG = {
         "label": "Reel",
         "btn_label": "✅ J'ai posté mon reel",
         "btn_custom_id": "reel_done_button",
+        "limit_note": "📌 **1 reel max par jour**",
         "messages": {
             "first": "**Reel du jour !**\nC'est l'heure de poster ton reel sur ton compte.\nFais-le maintenant et click le bouton vert pour ne plus avoir de rappel aujourd'hui.",
             "remind": "**Rappel : Reel toujours pas posté**\nPense à poster ton reel du jour. Click le bouton quand c'est fait.",
@@ -60,6 +61,7 @@ TASK_CONFIG = {
         "label": "Story",
         "btn_label": "✅ J'ai posté ma story",
         "btn_custom_id": "story_done_button",
+        "limit_note": "📌 **3 stories max par jour**",
         "messages": {
             "first": "**Story du jour !**\nC'est l'heure de poster une story classique sur ton compte.\nFais-le maintenant et click le bouton vert.",
             "remind": "**Rappel : Story toujours pas postée**\nPense à poster une story classique. Click le bouton quand c'est fait.",
@@ -72,6 +74,7 @@ TASK_CONFIG = {
         "label": "Story CTA",
         "btn_label": "✅ J'ai posté ma story CTA",
         "btn_custom_id": "cta_done_button",
+        "limit_note": "📌 **1 story CTA max le soir**",
         "messages": {
             "first": "**Story CTA du jour !**\nC'est l'heure de poster ta story CTA sur ton compte.\nFais-le maintenant et click le bouton vert pour ne plus avoir de rappel aujourd'hui.",
             "remind": "**Rappel : Story CTA toujours pas postée**\nPense à poster ta story CTA. Click le bouton quand c'est fait.",
@@ -306,9 +309,9 @@ class CTAReminderCog(commands.Cog):
                             continue
                     body = cfg["messages"][msg_key]
                     full_msg = f"{cfg['emoji']} <@{uid}> {body}"
-                    # Ajoute le prerequisite warning seulement au 1er rappel
-                    # du jour pour ce type
+                    # 1er rappel du jour pour ce type : ajout limite + prerequisites
                     if not was_any_sent_today(uid_str, task_type):
+                        full_msg += f"\n\n{cfg['limit_note']}"
                         full_msg += PREREQUISITES_NOTE
                     view = TaskDoneView(task_type=task_type, target_user_id=uid)
                     await channel.send(content=full_msg, view=view)
@@ -340,7 +343,10 @@ class CTAReminderCog(commands.Cog):
         cfg = TASK_CONFIG.get(task_type, TASK_CONFIG["cta"])
         view = TaskDoneView(task_type=task_type, target_user_id=interaction.user.id)
         body = cfg["messages"]["first"]
-        full_msg = f"{cfg['emoji']} <@{interaction.user.id}> **[TEST]** {body}{PREREQUISITES_NOTE}"
+        full_msg = (
+            f"{cfg['emoji']} <@{interaction.user.id}> **[TEST]** {body}"
+            f"\n\n{cfg['limit_note']}{PREREQUISITES_NOTE}"
+        )
         await interaction.response.send_message(content=full_msg, view=view)
 
 
