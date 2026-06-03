@@ -974,15 +974,18 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
-  // STRATEGIE : src = /insta/proxy_video?url=<post_url>
-  // Le backend re-fetch l'URL CDN IG (avec cache 50min) puis streame la video
-  // au browser. Contourne CORS + Referer + expiration silencieuse.
-  if(!url){
+  // STRATEGIE : passe video_url cache (vurl) ET permalink (url) au proxy.
+  // Le backend tente d'abord vurl direct (pas d'instaloader = rapide + pas
+  // de rate-limit). Si vurl expire -> fallback instaloader via url.
+  if(!url && !videoUrl){
     if(typeof showToast === 'function') showToast('Pas d URL pour ce reel', 'error');
     igStopInline(media);
     return;
   }
-  var proxyUrl = '/insta/proxy_video?url=' + encodeURIComponent(url);
+  var proxyParams = [];
+  if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
+  if(url) proxyParams.push('url=' + encodeURIComponent(url));
+  var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
   // Spinner pendant le chargement
   var loader = media.querySelector('.reel-loading');
   if(!loader){
@@ -18670,70 +18673,92 @@ def create_app():
     @app.route("/insta/proxy_video", methods=["GET"])
     def insta_proxy_video():
         """Proxy la video Instagram via le backend (contourne les blocages CORS
-        et Referer du CDN Instagram). Le frontend utilise ce path comme src
-        d'un <video>. Stream en chunks pour pas saturer la memoire.
+        et Referer du CDN Instagram).
 
-        Query : ?url=<post_permalink>
+        Query :
+        - ?vurl=<video_url> : URL CDN IG direct (rapide, pas d'instaloader)
+        - ?url=<post_permalink> : refresh via instaloader (fallback si vurl
+          expire ou absent)
+
+        Stream en chunks pour pas saturer la memoire.
         """
         if not is_auth():
             return ("unauth", 401)
         from flask import Response, stream_with_context
         import requests as _rq
         import time as _t
-        try:
-            import veille_telegram
-        except Exception as e:
-            return (f"module indispo: {e}", 500)
         post_url = (request.args.get("url") or "").strip()
-        if not post_url:
-            return ("url manquante", 400)
-        # Cache memoire video_url (50 min)
+        direct_vurl = (request.args.get("vurl") or "").strip()
+        if not post_url and not direct_vurl:
+            return ("url ou vurl requise", 400)
+        ig_headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Referer": "https://www.instagram.com/",
+        }
+        # Cache memoire des resolutions instaloader (50 min)
         if not hasattr(insta_proxy_video, "_cache"):
             insta_proxy_video._cache = {}
         cache = insta_proxy_video._cache
         now = _t.time()
         CACHE_TTL = 50 * 60
-        cached = cache.get(post_url)
-        if cached and (now - cached["ts"]) < CACHE_TTL:
-            video_url = cached["video_url"]
-        else:
+        def try_stream(video_url):
+            """Tente de stream depuis video_url. Retourne Response ou None si echec."""
             try:
+                upstream = _rq.get(video_url, headers=ig_headers, stream=True, timeout=30)
+            except Exception:
+                return None
+            if upstream.status_code != 200:
+                upstream.close()
+                return None
+            content_type = upstream.headers.get("Content-Type", "video/mp4")
+            content_length = upstream.headers.get("Content-Length")
+            def generate():
+                try:
+                    for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                        if chunk:
+                            yield chunk
+                finally:
+                    upstream.close()
+            resp = Response(stream_with_context(generate()), mimetype=content_type)
+            if content_length:
+                resp.headers["Content-Length"] = content_length
+            resp.headers["Cache-Control"] = "private, max-age=300"
+            return resp
+        # ETAPE 1 : essaie direct_vurl si fourni (rapide, pas d'instaloader)
+        if direct_vurl:
+            res = try_stream(direct_vurl)
+            if res is not None:
+                return res
+            # Sinon (URL expiree) -> tombe sur instaloader si on a le permalink
+        # ETAPE 2 : essaie cache instaloader
+        if post_url:
+            cached = cache.get(post_url)
+            if cached and (now - cached["ts"]) < CACHE_TTL:
+                res = try_stream(cached["video_url"])
+                if res is not None:
+                    return res
+                cache.pop(post_url, None)
+            # ETAPE 3 : appelle instaloader (peut rate-limit)
+            try:
+                import veille_telegram
                 fresh = veille_telegram.refresh_post_data(post_url)
             except Exception as e:
                 return (f"refresh error: {e}", 500)
             video_url = (fresh.get("video_url") or "").strip()
             if not video_url:
                 debug = fresh.get("_debug", "?")
+                # Si rate-limit, message clair pour l'user
+                if "401" in debug or "Please wait" in debug:
+                    return ("Instagram rate-limit actif. Attendre ~30 min avant de retry. "
+                            "Le bot a trop scrape recemment.", 429)
                 return (f"video_url introuvable: {debug}", 404)
             cache[post_url] = {"ts": now, "video_url": video_url}
-        # Fetch + stream
-        try:
-            ig_headers = {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                "Referer": "https://www.instagram.com/",
-            }
-            upstream = _rq.get(video_url, headers=ig_headers, stream=True, timeout=30)
-        except Exception as e:
-            return (f"upstream error: {e}", 502)
-        if upstream.status_code != 200:
-            # Cache mort -> retire et signale
-            cache.pop(post_url, None)
-            return (f"upstream status {upstream.status_code}", 502)
-        content_type = upstream.headers.get("Content-Type", "video/mp4")
-        content_length = upstream.headers.get("Content-Length")
-        def generate():
-            try:
-                for chunk in upstream.iter_content(chunk_size=64 * 1024):
-                    if chunk:
-                        yield chunk
-            finally:
-                upstream.close()
-        resp = Response(stream_with_context(generate()), mimetype=content_type)
-        if content_length:
-            resp.headers["Content-Length"] = content_length
-        resp.headers["Cache-Control"] = "private, max-age=300"
-        return resp
+            res = try_stream(video_url)
+            if res is not None:
+                return res
+            return ("URL fresh recue mais CDN refuse le stream", 502)
+        return ("aucune URL utilisable", 404)
 
     @app.route("/insta/refresh_video_url", methods=["POST"])
     def insta_refresh_video_url():
