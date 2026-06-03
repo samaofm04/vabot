@@ -336,6 +336,25 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         video_url = vv[0].get("url")
                     if not video_url:
                         video_url = media.get("video_url")
+                    # CAS CAROUSEL : le video peut etre dans carousel_media[N]
+                    if not video_url:
+                        carousel = media.get("carousel_media") or []
+                        if isinstance(carousel, list):
+                            for item in carousel:
+                                if not isinstance(item, dict):
+                                    continue
+                                ivv = item.get("video_versions") or []
+                                if ivv:
+                                    video_url = ivv[0].get("url")
+                                    if video_url:
+                                        break
+                                iv_url = item.get("video_url")
+                                if iv_url:
+                                    video_url = iv_url
+                                    break
+                    # Re-evalue is_video si on a trouve une video dans carousel
+                    if video_url and not is_video:
+                        is_video = True
                     taken_at = media.get("taken_at") or 0
                     pk = media.get("pk") or (media.get("id", "").split("_")[0] if media.get("id") else "")
                     if not taken_at and pk:
