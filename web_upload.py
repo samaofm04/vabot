@@ -1009,20 +1009,19 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    // Fetch le proxy pour avoir le vrai message d'erreur (en console)
-    fetch(proxyUrl).then(function(r){ return r.text().then(function(b){ return {s:r.status, b:b}; }); })
-      .then(function(res){ console.log('[igPlayInline] proxy:', res); });
+    console.log('[igPlayInline] native failed, fallback to embed iframe');
+    // Fallback automatique : embed iframe IG (toujours marche, video play directement)
     igStopInline(media);
-    igShowCardError(card, 'Lecture impossible', 'URL CDN Instagram expirée. Click pour ouvrir sur Instagram.');
+    igEmbedInCard(card);
   }, {once:true});
   v.src = proxyUrl;
   var fallbackTimer = setTimeout(function(){
     if(!v.readyState || v.readyState < 3){
-      console.log('[igPlayInline] native player timeout');
+      console.log('[igPlayInline] native timeout, fallback to embed iframe');
       igStopInline(media);
-      igShowCardError(card, 'Lecture impossible', 'Délai dépassé. Click pour ouvrir sur Instagram.');
+      igEmbedInCard(card);
     }
-  }, 6000);
+  }, 4000);
   v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
   v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
   var p = v.play();
@@ -1051,19 +1050,19 @@ window.igEmbedInCard = function(card){
   var img = media.querySelector('.reel-thumb'); if(img) img.style.display = 'none';
   var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
   var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
-  // Wrap : crop top/bottom de l'iframe pour ne garder que la video.
-  // bottom:50px laisse de la place pour le bouton chevron + username + trending.
+  // Wrap : crop ULTRA AGRESSIF top + bottom de l'iframe.
+  // bottom:80px laisse de la place pour caption + sound + chevron + trending.
   var wrap = document.createElement('div');
   wrap.className = 'reel-embed-wrap';
-  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:50px;'
+  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:80px;'
     + 'background:#000;z-index:1;overflow:hidden';
   var iframe = document.createElement('iframe');
   iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/';
-  // Crop AGRESSIF : iframe 2x la hauteur du wrap, decale -75px en haut.
-  // Header IG (62px) est cache au top, footer (>150px) est rejete bien
-  // en dessous et croppe par overflow:hidden du wrap.
-  iframe.style.cssText = 'position:absolute;left:0;top:-75px;width:100%;'
-    + 'height:200%;border:0;background:#000';
+  // CROP MAX : iframe 3x la hauteur du wrap, decale -85px en haut.
+  // Header IG entierement off-screen, footer rejete 2x hauteur en bas et
+  // entierement croppe par overflow:hidden.
+  iframe.style.cssText = 'position:absolute;left:0;top:-85px;width:100%;'
+    + 'height:300%;border:0;background:#000';
   iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
   iframe.setAttribute('allowfullscreen', '');
   iframe.setAttribute('scrolling', 'no');
