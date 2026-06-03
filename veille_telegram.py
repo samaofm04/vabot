@@ -203,11 +203,13 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
     Retourne {video_url, caption}. Tous les champs vides si tout echoue.
     """
     import re as _re
-    out: Dict[str, str] = {"video_url": "", "caption": ""}
+    out: Dict[str, str] = {"video_url": "", "caption": "", "_debug": ""}
     if not post_url:
+        out["_debug"] = "url_vide"
         return out
     m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url)
     if not m:
+        out["_debug"] = "url_sans_shortcode"
         return out
     shortcode = m.group(1)
     # 1) instaloader (le plus complet si auth dispo)
@@ -216,16 +218,27 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
         auth_ok = True
         if hasattr(insta_scraper, "is_auth_configured"):
             auth_ok = bool(insta_scraper.is_auth_configured())
-        if auth_ok:
+        if not auth_ok:
+            out["_debug"] = "cookies_instagram_pas_configures"
+        else:
             loader = insta_scraper._make_loader()
-            if loader is not None:
+            if loader is None:
+                out["_debug"] = "loader_creation_echec"
+            else:
                 import instaloader
-                post = instaloader.Post.from_shortcode(loader.context, shortcode)
-                if post.is_video:
-                    out["video_url"] = post.video_url or ""
-                out["caption"] = (post.caption or "")[:1000]
-    except Exception:
-        pass
+                try:
+                    post = instaloader.Post.from_shortcode(loader.context, shortcode)
+                    if post.is_video:
+                        out["video_url"] = post.video_url or ""
+                        if not out["video_url"]:
+                            out["_debug"] = "post_video_mais_url_vide"
+                    else:
+                        out["_debug"] = "pas_une_video"
+                    out["caption"] = (post.caption or "")[:1000]
+                except Exception as ee:
+                    out["_debug"] = f"instaloader_error: {type(ee).__name__}: {str(ee)[:200]}"
+    except Exception as e:
+        out["_debug"] = f"top_error: {type(e).__name__}: {str(e)[:200]}"
     # 2) Fallback no-auth pour le caption uniquement
     if not out["caption"]:
         out["caption"] = _scrape_og_caption(post_url)

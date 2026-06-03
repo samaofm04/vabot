@@ -1047,7 +1047,19 @@ window.igRefreshVideoUrl = function(card, videoEl, postUrl){
         });
       } else {
         if(loader.parentNode) loader.remove();
-        if(typeof showToast === 'function') showToast('Video expirée et impossible de la rafraîchir', 'error');
+        // Stop le mode "playing" pour faire revenir l'overlay play
+        var media = card.querySelector('.reel-media');
+        if(media){
+          media.classList.remove('reel-playing');
+          var overlay = media.querySelector('.reel-play-overlay');
+          if(overlay) overlay.style.opacity = '';
+          if(videoEl){
+            videoEl.removeAttribute('controls');
+            videoEl.style.opacity = '0';
+          }
+        }
+        var detail = (d && d.debug) ? d.debug : (d && d.error || 'inconnu');
+        if(typeof showToast === 'function') showToast('Refresh impossible (' + detail + ')', 'error');
       }
     })
     .catch(function(err){
@@ -18631,7 +18643,12 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"refresh: {e}"})
         if not fresh.get("video_url"):
-            return jsonify({"ok": False, "error": "video_url introuvable (pas un reel video ?)"})
+            debug_info = fresh.get("_debug") or "raison inconnue"
+            return jsonify({
+                "ok": False,
+                "error": f"video_url introuvable ({debug_info})",
+                "debug": debug_info,
+            })
         # Save cache
         cache[url] = {
             "ts": now,
