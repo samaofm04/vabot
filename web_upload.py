@@ -6781,10 +6781,12 @@ def _render_insta_trends_grid_html() -> str:
     for owner in avg_views_by_owner:
         if counts_by_owner[owner] > 0:
             avg_views_by_owner[owner] = avg_views_by_owner[owner] / counts_by_owner[owner]
-    # Trier par views décroissant par défaut
+    # Trier par views décroissant par défaut. On rend top 300 pour avoir
+    # assez d'inventory cote frontend quand les filtres de periode (24h/7j/30j)
+    # eliminent les anciens viraux.
     reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
     cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
-    for r in reels[:60]:
+    for r in reels[:300]:
         thumb = r.get("thumbnail_url") or ""
         owner = r.get("_owner", "?")
         owner_pic = r.get("_owner_pp") or ""
