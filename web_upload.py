@@ -19146,10 +19146,16 @@ def create_app():
                 if reel.get("shortcode") == shortcode:
                     video_url = (reel.get("video_url") or "").strip()
                     if not video_url:
-                        # Diagnostic detaille : montre les keys disponibles
-                        keys = list(reel.keys())[:20]
-                        is_v = reel.get("is_video")
-                        return (f"reel trouve MAIS pas de video_url. is_video={is_v}, keys={keys}", 404)
+                        # Tente endpoint RapidAPI single-post comme dernier recours
+                        try:
+                            from insta_scraper import _scrape_via_rapidapi_single_post
+                            single = _scrape_via_rapidapi_single_post(shortcode)
+                            if single and single.get("video_url"):
+                                video_url = single["video_url"]
+                        except Exception:
+                            pass
+                    if not video_url:
+                        return ("Ce reel n'a pas de video accessible (peut-etre supprime, prive ou restreint). Cliquer 'Voir sur Instagram' pour verifier.", 404)
                     cache[post_url] = {"ts": now, "video_url": video_url}
                     res = try_stream(video_url)
                     if res is not None:

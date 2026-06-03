@@ -179,6 +179,79 @@ def _make_loader() -> Optional["instaloader.Instaloader"]:
     return L
 
 
+def _scrape_via_rapidapi_single_post(shortcode: str) -> dict:
+    """Fetch un POST UNIQUE via RapidAPI (endpoint specific shortcode).
+    Tente plusieurs noms d'endpoints car Stable API les a changes plusieurs fois.
+
+    Retourne {video_url, shortcode} ou {} si tout echoue.
+    """
+    import requests
+    auth = load_auth()
+    api_key = auth.get("rapidapi_key", "").strip()
+    if not api_key:
+        return {}
+    host = auth.get("rapidapi_host", "instagram-scraper-stable-api.p.rapidapi.com").strip()
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": host,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    base = f"https://{host}"
+    # Endpoints possibles (essai dans l'ordre)
+    endpoints = [
+        "/ig_get_post_info_v2.php",
+        "/ig_get_post_info.php",
+        "/get_ig_post_info.php",
+        "/get_ig_media_info.php",
+        "/get_ig_media_info_v2.php",
+        "/ig_get_media_info.php",
+    ]
+    candidates = []
+    for ep in endpoints:
+        try:
+            r = requests.post(
+                f"{base}{ep}",
+                headers=headers,
+                data={"shortcode": shortcode, "code_or_id_or_url": shortcode},
+                timeout=15,
+            )
+            if r.status_code != 200:
+                continue
+            try:
+                body = r.json()
+            except Exception:
+                continue
+            # Cherche video_url dans le body avec _extract_video_url
+            def walk(node, depth=0):
+                if depth > 6 or not isinstance(node, (dict, list)):
+                    return
+                if isinstance(node, dict):
+                    # Direct keys
+                    for k in ("video_url", "playback_url", "playable_url",
+                              "playable_url_quality_hd"):
+                        v = node.get(k)
+                        if isinstance(v, str) and v.startswith("http"):
+                            candidates.append(v)
+                    vv = node.get("video_versions") or []
+                    if isinstance(vv, list):
+                        for x in vv:
+                            if isinstance(x, dict):
+                                u = x.get("url") or x.get("src")
+                                if isinstance(u, str) and u.startswith("http"):
+                                    candidates.append(u)
+                    for sub in node.values():
+                        walk(sub, depth + 1)
+                elif isinstance(node, list):
+                    for it in node:
+                        walk(it, depth + 1)
+            walk(body)
+            if candidates:
+                return {"video_url": candidates[0], "shortcode": shortcode}
+        except Exception:
+            continue
+    return {}
+
+
 def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     """Scrape via RapidAPI : Instagram Scraper Stable API.
 
