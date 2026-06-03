@@ -1218,7 +1218,7 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
       igShowCardErrorClean(card);
     });
 };
-// Overlay erreur CLEAN : juste un bouton "Voir sur Instagram"
+// Overlay erreur : bouton "Voir sur IG" + diagnostic en bas
 window.igShowCardErrorClean = function(card){
   if(!card) return;
   var media = card.querySelector('.reel-media');
@@ -1228,20 +1228,34 @@ window.igShowCardErrorClean = function(card){
     if(el) el.remove();
   });
   var url = card.getAttribute('data-url') || '';
+  var videoUrl = card.getAttribute('data-video-url') || '';
+  var owner = card.getAttribute('data-owner') || '';
   var ov = document.createElement('div');
   ov.className = 'reel-error-overlay';
   ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
   ov.innerHTML = ''
-    + '<div style="font-size:36px;margin-bottom:8px">📺</div>'
-    + '<div style="font-weight:700;font-size:13px;margin-bottom:14px">Vidéo expirée</div>'
+    + '<div style="font-size:32px;margin-bottom:6px">📺</div>'
+    + '<div style="font-weight:700;font-size:12px;margin-bottom:10px">Vidéo expirée</div>'
     + '<a href="' + url + '" target="_blank" rel="noopener" '
-    +    'style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
-    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3)">'
-    +    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
+    +    'style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
+    +    'padding:10px 18px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none">'
+    +    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
     +    'Voir sur Instagram'
-    + '</a>';
+    + '</a>'
+    + '<div class="reel-err-diag" style="position:absolute;bottom:8px;left:8px;right:8px;font-size:9px;color:#888;font-family:monospace;line-height:1.3;word-break:break-word;max-height:60px;overflow:auto"></div>';
   ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
   media.appendChild(ov);
+  // Fetch le proxy pour montrer la raison precise
+  var p = [];
+  if(videoUrl) p.push('vurl=' + encodeURIComponent(videoUrl));
+  if(url) p.push('url=' + encodeURIComponent(url));
+  if(owner) p.push('owner=' + encodeURIComponent(owner));
+  fetch('/insta/proxy_video?' + p.join('&'))
+    .then(function(r){ return r.text().then(function(b){ return r.status + ': ' + b; }); })
+    .then(function(msg){
+      var d = ov.querySelector('.reel-err-diag');
+      if(d) d.textContent = msg.substring(0, 300);
+    }).catch(function(){});
 };
 window.igStopInline = function(media){
   if(!media) return;
@@ -19011,21 +19025,22 @@ def create_app():
                                 cache[post_url] = {"ts": now, "video_url": video_url}
                                 return res
                         break
-            # 3b : fresh scrape RapidAPI
-            result = scrape_profile(owner, limit=100)
+            # 3b : fresh scrape RapidAPI - limit 500 pour couvrir les vieux reels
+            result = scrape_profile(owner, limit=500)
             if "error" in result:
                 return (f"RapidAPI: {result['error'][:200]}", 502)
+            nb_reels = len(result.get("reels", []))
             for reel in result.get("reels", []):
                 if reel.get("shortcode") == shortcode:
                     video_url = (reel.get("video_url") or "").strip()
                     if not video_url:
-                        return ("Reel sans video_url (peut-etre une image)", 404)
+                        return ("Reel sans video_url (probable image carousel)", 404)
                     cache[post_url] = {"ts": now, "video_url": video_url}
                     res = try_stream(video_url)
                     if res is not None:
                         return res
                     return ("URL RapidAPI mais CDN refuse stream", 502)
-            return (f"@{owner} : reel {shortcode} introuvable (au-dela des 100 derniers)", 404)
+            return (f"@{owner} : reel {shortcode} introuvable parmi {nb_reels} reels scrapes", 404)
         except Exception as e:
             return (f"RapidAPI error: {type(e).__name__}: {str(e)[:200]}", 500)
 
