@@ -1054,8 +1054,16 @@ window.igShowCardError = function(card, title, detail){
     + '<div style="font-size:10px;color:#888;max-width:240px;line-height:1.4">'
     +    (detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').substring(0, 200)
     + '</div>'
-    + '<button onclick="this.closest(\'.reel-error-overlay\').remove();event.stopPropagation()" '
+    + '<button data-close-err="1" '
     +    'style="margin-top:12px;background:transparent;border:1px solid #444;color:#888;padding:5px 12px;border-radius:5px;font-size:10px;cursor:pointer">Fermer</button>';
+  // Bind close handler proprement
+  var closeBtn = ov.querySelector('[data-close-err]');
+  if(closeBtn){
+    closeBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      ov.remove();
+    });
+  }
   media.appendChild(ov);
 };
 window.igStopInline = function(media){
