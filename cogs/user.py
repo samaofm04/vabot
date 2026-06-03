@@ -61,13 +61,20 @@ _LETTERS_BLOCKS = ["xx", "yy", "zz", "qq", "mm", "ll", "bb"]
 _RANDOM_DOUBLE_LETTERS = ["ee", "oo", "ii", "aa", "uu"]
 
 
-def generate_username_candidates(base: str, count: int = 20) -> list:
-    """Genere des variations de pseudos a partir d'une base + diminutifs.
-    Tous lettres uniquement (pas de chiffres, points, tirets)."""
+def generate_username_candidates(base: str, count: int = 40) -> list:
+    """Genere des pseudos style 'name_xxxx' / 'name_xx' avec 3-4 lettres
+    random (consonnes souvent). Format Instagram credible.
+
+    Exemples : julia_vdlnt, anna_vnbs, amelia_xqks, mel_brtn, lia_zqp
+    """
     base = base.lower().strip()
     base = "".join(c for c in base if c.isalpha())
     if not base:
         return []
+    # Consonnes (pour eviter "mama", "papa" - favoriser look random credible)
+    consonants = "bcdfghjklmnpqrstvwxz"
+    vowels = "aeiouy"
+    all_letters = "abcdefghijklmnopqrstuvwxyz"
     seen = set()
     out = []
     def add(u):
@@ -75,29 +82,23 @@ def generate_username_candidates(base: str, count: int = 20) -> list:
         if u and 4 <= len(u) <= 30 and u not in seen and u.replace("_", "").isalpha():
             seen.add(u)
             out.append(u)
-    # Bases a considerer : nom complet + diminutifs (ame, mel, lia pour amelia)
+    # Bases a considerer : nom complet + diminutifs
     bases = [base] + _get_diminutives(base)
-    bases = list(dict.fromkeys(bases))  # dedupe ordered
-    # Variations pour chaque base
-    for b in bases:
-        add(b)  # juste la base/diminutif
-        # Suffixes
-        for s in _SUFFIXES:
-            add(b + s)
-            add(b + "_" + s)
-        # Prefixes
-        for p in _PREFIXES:
-            add(p + b)
-            add(p + "_" + b)
-        # Doublages lettres
-        for db in _RANDOM_DOUBLE_LETTERS:
-            add(b + db)
-        for lb in _LETTERS_BLOCKS:
-            add(b + lb)
-        # Combos prefix+base+suffix (limite pour pas exploser)
-        for p in _PREFIXES[:6]:
-            for s in _SUFFIXES[:6]:
-                add(p + b + s)
+    bases = list(dict.fromkeys(bases))
+    # Genere format principal : name + (_)?+ 3-4 lettres random
+    # On fait beaucoup d'iterations pour avoir count candidats dispo apres check
+    for _ in range(count * 4):
+        b = random.choice(bases)
+        sep = random.choice(["_", "_", ""])  # 2/3 chance d'underscore
+        n_letters = random.choice([3, 3, 4, 4])  # 3 ou 4 lettres
+        # Mix consonnes + parfois 1 voyelle pour rendre plus naturel
+        letters_pool = random.choice([
+            consonants,           # 100% consonnes = look "code"
+            consonants + vowels,  # mix = plus prononcable
+            all_letters,          # tout
+        ])
+        rand_part = "".join(random.choice(letters_pool) for _ in range(n_letters))
+        add(b + sep + rand_part)
     random.shuffle(out)
     return out[:count]
 
