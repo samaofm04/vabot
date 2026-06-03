@@ -984,9 +984,11 @@ window.igPlayInline = function(media){
     igStopInline(media);
     return;
   }
+  var owner = card.getAttribute('data-owner') || '';
   var proxyParams = [];
   if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
   if(url) proxyParams.push('url=' + encodeURIComponent(url));
+  if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
   var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
   // Spinner pendant le chargement
   var loader = media.querySelector('.reel-loading');
@@ -18769,9 +18771,10 @@ def create_app():
         et Referer du CDN Instagram).
 
         Query :
-        - ?vurl=<video_url> : URL CDN IG direct (rapide, pas d'instaloader)
-        - ?url=<post_permalink> : refresh via instaloader (fallback si vurl
-          expire ou absent)
+        - ?vurl=<video_url> : URL CDN IG direct (rapide, pas d'API)
+        - ?url=<post_permalink> : permalink pour fallback refresh
+        - ?owner=<username> : pour refresh via RapidAPI (preferred, pas de
+          rate-limit comme instaloader)
 
         Stream en chunks pour pas saturer la memoire.
         """
@@ -18780,8 +18783,10 @@ def create_app():
         from flask import Response, stream_with_context
         import requests as _rq
         import time as _t
+        import re as _re
         post_url = (request.args.get("url") or "").strip()
         direct_vurl = (request.args.get("vurl") or "").strip()
+        owner = (request.args.get("owner") or "").strip()
         if not post_url and not direct_vurl:
             return ("url ou vurl requise", 400)
         ig_headers = {
@@ -18824,7 +18829,7 @@ def create_app():
             if res is not None:
                 return res
             # Sinon (URL expiree) -> tombe sur instaloader si on a le permalink
-        # ETAPE 2 : essaie cache instaloader
+        # ETAPE 2 : cache des resolutions precedentes
         if post_url:
             cached = cache.get(post_url)
             if cached and (now - cached["ts"]) < CACHE_TTL:
@@ -18832,7 +18837,35 @@ def create_app():
                 if res is not None:
                     return res
                 cache.pop(post_url, None)
-            # ETAPE 3 : appelle instaloader (peut rate-limit)
+        # ETAPE 3 : RapidAPI - re-scrape le profil owner pour avoir un fresh
+        # video_url (pas de rate-limit comme instaloader)
+        m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url or '')
+        shortcode = m.group(1) if m else ''
+        if owner and shortcode:
+            try:
+                from insta_scraper import scrape_profile
+                # scrape_profile utilise RapidAPI en PRIORITE -> fresh URLs
+                result = scrape_profile(owner, limit=50)
+                if "error" not in result:
+                    # Cherche le shortcode dans les reels scrapes
+                    for reel in result.get("reels", []):
+                        if reel.get("shortcode") == shortcode:
+                            video_url = (reel.get("video_url") or "").strip()
+                            if video_url:
+                                if post_url:
+                                    cache[post_url] = {"ts": now, "video_url": video_url}
+                                res = try_stream(video_url)
+                                if res is not None:
+                                    return res
+                                return ("URL fresh RapidAPI mais CDN refuse stream", 502)
+                            return ("Reel sans video_url (peut-etre image ?)", 404)
+                    return (f"shortcode {shortcode} introuvable dans les 50 derniers reels de @{owner}", 404)
+                else:
+                    return (f"RapidAPI scrape failed: {result['error'][:200]}", 502)
+            except Exception as e:
+                return (f"rapidapi error: {type(e).__name__}: {str(e)[:200]}", 500)
+        # ETAPE 4 : Dernier recours - instaloader (rate-limited souvent)
+        if post_url:
             try:
                 import veille_telegram
                 fresh = veille_telegram.refresh_post_data(post_url)
@@ -18841,16 +18874,14 @@ def create_app():
             video_url = (fresh.get("video_url") or "").strip()
             if not video_url:
                 debug = fresh.get("_debug", "?")
-                # Si rate-limit, message clair pour l'user
                 if "401" in debug or "Please wait" in debug:
-                    return ("Instagram rate-limit actif. Attendre ~30 min avant de retry. "
-                            "Le bot a trop scrape recemment.", 429)
+                    return ("Instagram rate-limit. Configure RapidAPI dans Settings ou attends 30 min.", 429)
                 return (f"video_url introuvable: {debug}", 404)
             cache[post_url] = {"ts": now, "video_url": video_url}
             res = try_stream(video_url)
             if res is not None:
                 return res
-            return ("URL fresh recue mais CDN refuse le stream", 502)
+            return ("URL fresh instaloader mais CDN refuse stream", 502)
         return ("aucune URL utilisable", 404)
 
     @app.route("/insta/refresh_video_url", methods=["POST"])
