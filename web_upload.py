@@ -1051,20 +1051,18 @@ window.igEmbedInCard = function(card){
   var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
   var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
   // Wrap : crop top/bottom de l'iframe pour ne garder que la video.
-  // bottom:50px laisse de la place pour le bouton chevron + username + trending
-  // qui restent au z-index superieur visibles meme avec l'embed actif.
+  // bottom:50px laisse de la place pour le bouton chevron + username + trending.
   var wrap = document.createElement('div');
   wrap.className = 'reel-embed-wrap';
   wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:50px;'
     + 'background:#000;z-index:1;overflow:hidden';
   var iframe = document.createElement('iframe');
   iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/';
-  // Offsets pour cacher header + footer IG :
-  // top: -68px decale le header en haut
-  // height: calc(100% + 250px) ajoute de la hauteur pour que le video occupe
-  //   tout le viewport visible, footer (~180px) tombe en dessous (hidden)
-  iframe.style.cssText = 'position:absolute;left:0;top:-68px;width:100%;'
-    + 'height:calc(100% + 250px);border:0;background:#000';
+  // Crop AGRESSIF : iframe 2x la hauteur du wrap, decale -75px en haut.
+  // Header IG (62px) est cache au top, footer (>150px) est rejete bien
+  // en dessous et croppe par overflow:hidden du wrap.
+  iframe.style.cssText = 'position:absolute;left:0;top:-75px;width:100%;'
+    + 'height:200%;border:0;background:#000';
   iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
   iframe.setAttribute('allowfullscreen', '');
   iframe.setAttribute('scrolling', 'no');
