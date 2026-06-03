@@ -15999,6 +15999,77 @@ def _render_upload_inner(msg=None, error=None):
 INSTA_VIDEOS_DIR = Path("data/insta/videos")
 
 
+def _scrape_ig_page_for_video(shortcode: str) -> str:
+    """Scrape directement les pages /p/SHORTCODE/ et /p/SHORTCODE/embed/ pour
+    extraire le video_url. Essai avec plusieurs User-Agents et regex.
+
+    Retourne le premier URL trouve ou "" si aucun.
+    """
+    if not shortcode:
+        return ""
+    import requests as _rq
+    import re as _re
+    urls_to_try = [
+        f"https://www.instagram.com/p/{shortcode}/embed/captioned/",
+        f"https://www.instagram.com/p/{shortcode}/embed/",
+        f"https://www.instagram.com/reel/{shortcode}/embed/",
+        f"https://www.instagram.com/p/{shortcode}/",
+        f"https://www.instagram.com/reel/{shortcode}/",
+    ]
+    user_agents = [
+        # bot facebook : IG renvoie une page riche en metadata
+        "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        # Twitterbot : meme effet sur certains sites
+        "Mozilla/5.0 (compatible; Twitterbot/1.0)",
+        # mobile Safari
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        # desktop Chrome
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+    patterns = [
+        r'"video_url"\s*:\s*"([^"]+)"',
+        r'"playable_url"\s*:\s*"([^"]+)"',
+        r'"playable_url_quality_hd"\s*:\s*"([^"]+)"',
+        r'"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"([^"]+)"',
+        r'<meta\s+property="og:video"\s+content="([^"]+)"',
+        r'<meta\s+property="og:video:secure_url"\s+content="([^"]+)"',
+        r'<meta\s+name="twitter:player:stream"\s+content="([^"]+)"',
+        r'src=\"(https://[^\"]*\.mp4[^\"]*)\"',
+        r'"contentUrl"\s*:\s*"([^"]+\.mp4[^"]*)"',
+    ]
+    for url in urls_to_try:
+        for ua in user_agents:
+            try:
+                r = _rq.get(
+                    url,
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "en-US,en;q=0.9",
+                    },
+                    timeout=10,
+                )
+                if r.status_code != 200:
+                    continue
+                html = r.text
+                for pat in patterns:
+                    m = _re.search(pat, html)
+                    if m:
+                        u = m.group(1)
+                        try:
+                            u = u.encode().decode("unicode_escape")
+                        except Exception:
+                            pass
+                        u = u.replace("&amp;", "&").replace("\\/", "/")
+                        if u.startswith("http") and ".mp4" in u or "video" in u.lower():
+                            return u
+            except Exception:
+                continue
+    return ""
+
+
 def _download_reel_video(shortcode: str, video_url: str) -> bool:
     """Download le fichier mp4 d'un reel sur disque.
     data/insta/videos/<shortcode>.mp4
@@ -19146,7 +19217,7 @@ def create_app():
                 if reel.get("shortcode") == shortcode:
                     video_url = (reel.get("video_url") or "").strip()
                     if not video_url:
-                        # Tente endpoint RapidAPI single-post comme dernier recours
+                        # Tente endpoint RapidAPI single-post
                         try:
                             from insta_scraper import _scrape_via_rapidapi_single_post
                             single = _scrape_via_rapidapi_single_post(shortcode)
@@ -19155,7 +19226,10 @@ def create_app():
                         except Exception:
                             pass
                     if not video_url:
-                        return ("Ce reel n'a pas de video accessible (peut-etre supprime, prive ou restreint). Cliquer 'Voir sur Instagram' pour verifier.", 404)
+                        # Scrape la page Instagram directement (/p/ et /embed/)
+                        video_url = _scrape_ig_page_for_video(shortcode)
+                    if not video_url:
+                        return ("Reel public mais URL video introuvable apres RapidAPI + scraping page. Bug API.", 404)
                     cache[post_url] = {"ts": now, "video_url": video_url}
                     res = try_stream(video_url)
                     if res is not None:
