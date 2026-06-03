@@ -1,17 +1,25 @@
-"""cta_reminder.py - Rappels Story CTA quotidiens (20h/21h/22h).
+"""cta_reminder.py - Rappels quotidiens : Reel, Story, Story CTA.
 
-A 20h heure Paris : le bot envoie dans le channel de chaque VA un message
-"C'est l'heure de poster ta story CTA du jour" avec un gros bouton vert.
-- Si le VA clique le bouton vert -> marque "done" pour aujourd'hui -> plus
-  de rappel les heures suivantes
-- Sinon a 21h et 22h : nouveau rappel
+3 types de taches avec des horaires propres :
+- REEL  : 16h 17h 18h 19h 20h 21h (1 reel par jour)
+- STORY : 10h 15h 19h              (1 story classique par jour)
+- CTA   : 20h 21h 22h               (1 story CTA par jour)
+
+Pour chaque VA dans users.json, le bot envoie un rappel a chaque heure
+prevue UNIQUEMENT si la tache n'a pas deja ete marquee "done" pour
+aujourd'hui. Click sur le bouton vert -> done -> plus de rappel.
+
+Prerequisites : les rappels ne sont actifs QUE si l'user a complete le
+warm de son compte Instagram + compte au jour 6+.
 
 Storage : data/cta_reminder_state.json
-Format :
 {
   "2026-06-04": {
-    "user_id_1": {"done": true, "h20_sent": true, "h21_sent": false, "h22_sent": false, "channel_id": ...},
-    ...
+    "user_id_1": {
+      "reel": {"done": false, "h16_sent": true, ...},
+      "story": {"done": true, "h10_sent": true, ...},
+      "cta": {"done": false, "h20_sent": true, ...}
+    }
   }
 }
 """
@@ -32,7 +40,51 @@ DATA_DIR = Path("data")
 USERS_FILE = DATA_DIR / "users.json"
 STATE_FILE = DATA_DIR / "cta_reminder_state.json"
 
-REMINDER_HOURS = [20, 21, 22]  # Heures Paris des rappels
+# Config par type de tache
+TASK_CONFIG = {
+    "reel": {
+        "hours": [16, 17, 18, 19, 20, 21],
+        "emoji": "🎬",
+        "label": "Reel",
+        "btn_label": "✅ J'ai posté mon reel",
+        "btn_custom_id": "reel_done_button",
+        "messages": {
+            "first": "**Reel du jour !**\nC'est l'heure de poster ton reel sur ton compte.\nFais-le maintenant et click le bouton vert pour ne plus avoir de rappel aujourd'hui.",
+            "remind": "**Rappel : Reel toujours pas posté**\nPense à poster ton reel du jour. Click le bouton quand c'est fait.",
+            "last": "**DERNIER RAPPEL — Reel**\nC'est ton dernier rappel pour aujourd'hui. Poste ton reel et click le bouton.",
+        },
+    },
+    "story": {
+        "hours": [10, 15, 19],
+        "emoji": "📷",
+        "label": "Story",
+        "btn_label": "✅ J'ai posté ma story",
+        "btn_custom_id": "story_done_button",
+        "messages": {
+            "first": "**Story du jour !**\nC'est l'heure de poster une story classique sur ton compte.\nFais-le maintenant et click le bouton vert.",
+            "remind": "**Rappel : Story toujours pas postée**\nPense à poster une story classique. Click le bouton quand c'est fait.",
+            "last": "**DERNIER RAPPEL — Story**\nC'est ton dernier rappel pour la story aujourd'hui.",
+        },
+    },
+    "cta": {
+        "hours": [20, 21, 22],
+        "emoji": "📸",
+        "label": "Story CTA",
+        "btn_label": "✅ J'ai posté ma story CTA",
+        "btn_custom_id": "cta_done_button",
+        "messages": {
+            "first": "**Story CTA du jour !**\nC'est l'heure de poster ta story CTA sur ton compte.\nFais-le maintenant et click le bouton vert pour ne plus avoir de rappel aujourd'hui.",
+            "remind": "**Rappel : Story CTA toujours pas postée**\nPense à poster ta story CTA. Click le bouton quand c'est fait.",
+            "last": "**DERNIER RAPPEL — Story CTA**\nC'est ton dernier rappel pour aujourd'hui. Poste ta story CTA et click le bouton.",
+        },
+    },
+}
+
+# Note prerequisites (envoye dans le 1er rappel de chaque type chaque jour)
+PREREQUISITES_NOTE = (
+    "\n\n⚠️ **Important** : Ne fais ces tâches que si ton compte Instagram "
+    "**est warmé** et **à jour 6+**. Si pas encore prêt, ignore ces rappels."
+)
 
 
 def _load_users() -> dict:
@@ -61,14 +113,11 @@ def _save_state(state: dict):
 
 
 def _paris_now() -> datetime:
-    """Datetime actuel a Paris (gere DST automatiquement)."""
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Europe/Paris"))
     except Exception:
-        # Fallback : UTC+2 ete, UTC+1 hiver - approx
         from datetime import timezone as _tz, timedelta as _td
-        # Approximation : UTC + 2 d'avril a octobre
         utc_now = datetime.now(timezone.utc)
         if 4 <= utc_now.month <= 10:
             return utc_now.astimezone(_tz(_td(hours=2)))
@@ -79,55 +128,56 @@ def _today_key() -> str:
     return _paris_now().date().isoformat()
 
 
-def _get_user_channel_id(uid: str) -> int | None:
-    """Retourne le channel_id Discord d'un user."""
-    users = _load_users()
-    data = users.get(str(uid))
-    if isinstance(data, dict):
-        cid = data.get("channel_id")
-        if cid:
-            return int(cid)
-    return None
-
-
-def mark_done(user_id: str) -> bool:
-    """Marque l'user comme ayant fait sa CTA aujourd'hui."""
-    state = _load_state()
-    today = _today_key()
+def _ensure_user_state(state: dict, today: str, uid: str, task_type: str):
     if today not in state:
         state[today] = {}
-    if str(user_id) not in state[today]:
-        state[today][str(user_id)] = {}
-    state[today][str(user_id)]["done"] = True
+    if uid not in state[today]:
+        state[today][uid] = {}
+    if task_type not in state[today][uid]:
+        state[today][uid][task_type] = {}
+
+
+def mark_done(user_id: str, task_type: str) -> bool:
+    state = _load_state()
+    today = _today_key()
+    _ensure_user_state(state, today, str(user_id), task_type)
+    state[today][str(user_id)][task_type]["done"] = True
     _save_state(state)
     return True
 
 
-def is_done_today(user_id: str) -> bool:
+def is_done_today(user_id: str, task_type: str) -> bool:
     state = _load_state()
     today = _today_key()
-    return state.get(today, {}).get(str(user_id), {}).get("done", False)
+    return state.get(today, {}).get(str(user_id), {}).get(task_type, {}).get("done", False)
 
 
-def mark_sent(user_id: str, hour: int):
+def mark_sent(user_id: str, task_type: str, hour: int):
     state = _load_state()
     today = _today_key()
-    if today not in state:
-        state[today] = {}
-    if str(user_id) not in state[today]:
-        state[today][str(user_id)] = {}
-    state[today][str(user_id)][f"h{hour}_sent"] = True
+    _ensure_user_state(state, today, str(user_id), task_type)
+    state[today][str(user_id)][task_type][f"h{hour}_sent"] = True
     _save_state(state)
 
 
-def was_sent_today(user_id: str, hour: int) -> bool:
+def was_sent_today(user_id: str, task_type: str, hour: int) -> bool:
     state = _load_state()
     today = _today_key()
-    return state.get(today, {}).get(str(user_id), {}).get(f"h{hour}_sent", False)
+    return state.get(today, {}).get(str(user_id), {}).get(task_type, {}).get(f"h{hour}_sent", False)
+
+
+def was_any_sent_today(user_id: str, task_type: str) -> bool:
+    """True si au moins un rappel a deja ete envoye pour cette tache aujourd'hui."""
+    state = _load_state()
+    today = _today_key()
+    tdata = state.get(today, {}).get(str(user_id), {}).get(task_type, {})
+    for k in tdata:
+        if k.startswith("h") and k.endswith("_sent") and tdata[k]:
+            return True
+    return False
 
 
 def cleanup_old_state(days_to_keep: int = 7):
-    """Garde uniquement les N derniers jours."""
     state = _load_state()
     today_key = _today_key()
     today = datetime.fromisoformat(today_key).date()
@@ -139,49 +189,68 @@ def cleanup_old_state(days_to_keep: int = 7):
         _save_state(cleaned)
 
 
-class CTADoneView(discord.ui.View):
-    """View persistante avec un bouton vert 'J'ai poste ma story CTA'."""
-    def __init__(self, target_user_id: int):
-        super().__init__(timeout=None)
-        # custom_id pour persister entre redemarrages
-        self.target_user_id = target_user_id
+class TaskDoneView(discord.ui.View):
+    """View generique avec un bouton 'J'ai fait la tache'.
+    custom_id encode le task_type pour pouvoir gerer plusieurs types
+    avec la meme classe View persistante."""
 
-    @discord.ui.button(
-        label="✅ J'ai posté ma story CTA",
-        style=discord.ButtonStyle.success,
-        custom_id="cta_done_button",
-    )
-    async def done_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Securite : seul le user cible peut cliquer
+    def __init__(self, task_type: str = "cta", target_user_id: int = 0):
+        super().__init__(timeout=None)
+        self.task_type = task_type
+        self.target_user_id = target_user_id
+        # Cree le bouton dynamiquement selon le task_type
+        cfg = TASK_CONFIG.get(task_type, TASK_CONFIG["cta"])
+        btn = discord.ui.Button(
+            label=cfg["btn_label"],
+            style=discord.ButtonStyle.success,
+            custom_id=cfg["btn_custom_id"],
+        )
+        btn.callback = self._on_click
+        self.add_item(btn)
+
+    async def _on_click(self, interaction: discord.Interaction):
+        # Trouve le task_type depuis le custom_id
+        cid = interaction.data.get("custom_id", "")
+        task_type = "cta"
+        for tt, cfg in TASK_CONFIG.items():
+            if cfg["btn_custom_id"] == cid:
+                task_type = tt
+                break
+        # Si view a un target restreint, verifie. Sinon n'importe qui peut click
+        # (cas restart du bot : on accepte le clicker).
         if self.target_user_id and interaction.user.id != self.target_user_id:
-            # Permet tout de meme aux admins de cliquer pour eux
-            # Verifier si c est leur channel
             await interaction.response.send_message(
                 "❌ Ce bouton est reserve a la personne taggee.", ephemeral=True
             )
             return
-        mark_done(str(interaction.user.id))
-        # Update le message original : bouton disabled + texte de confirmation
-        button.disabled = True
-        button.label = "✅ Marqué fait !"
+        mark_done(str(interaction.user.id), task_type)
+        # Update le message original
+        label = TASK_CONFIG.get(task_type, {}).get("label", "Tâche")
+        new_view = discord.ui.View(timeout=None)
+        done_btn = discord.ui.Button(
+            label=f"✅ {label} marquée faite !",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+        new_view.add_item(done_btn)
         try:
             await interaction.response.edit_message(
                 content=(
-                    "✅ **Story CTA marquée comme postée !**\n"
+                    f"✅ **{label} marquée comme postée !**\n"
                     "Plus de rappel pour aujourd'hui. À demain ! 👋"
                 ),
-                view=self,
+                view=new_view,
             )
         except Exception:
-            # Fallback : repond en followup
-            await interaction.followup.send(
-                "✅ Marque fait. Plus de rappel aujourd'hui.", ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    f"✅ {label} marquée. Plus de rappel aujourd'hui.", ephemeral=True
+                )
+            except Exception:
+                pass
 
 
 class CTAReminderCog(commands.Cog):
-    """Rappels Story CTA quotidiens a 20h / 21h / 22h Paris."""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.check_loop.start()
@@ -190,74 +259,63 @@ class CTAReminderCog(commands.Cog):
         self.check_loop.cancel()
 
     async def cog_load(self):
-        # Enregistre la view persistante au demarrage
-        # On utilise target_user_id=0 pour le bot - le check du user se fait
-        # via le "interaction.user.id" qui sera le clicker
-        self.bot.add_view(CTADoneView(target_user_id=0))
+        # Enregistre les 3 views persistantes (une par task_type)
+        for tt in TASK_CONFIG:
+            self.bot.add_view(TaskDoneView(task_type=tt, target_user_id=0))
 
     @tasks.loop(minutes=1)
     async def check_loop(self):
-        """Verifie chaque minute si on est a 20h/21h/22h Paris."""
         now = _paris_now()
         hour = now.hour
         minute = now.minute
-        # Fire dans les 5 premieres minutes de l'heure (au cas ou le bot
-        # demarre en retard)
-        if hour not in REMINDER_HOURS:
-            return
         if minute >= 5:
-            return
-        # Pour chaque user dans users.json, send si pas done + pas deja sent
+            return  # Fire seulement dans les 5 premieres minutes de l'heure
+        # Pour chaque type, check si on doit fire pour cette heure
         users = _load_users()
-        for uid_str, udata in users.items():
-            if not isinstance(udata, dict):
+        for task_type, cfg in TASK_CONFIG.items():
+            if hour not in cfg["hours"]:
                 continue
-            channel_id = udata.get("channel_id")
-            if not channel_id:
-                continue
-            try:
-                uid = int(uid_str)
-            except Exception:
-                continue
-            # Skip si deja fait aujourd'hui
-            if is_done_today(uid_str):
-                continue
-            # Skip si rappel deja envoye pour cette heure aujourd'hui
-            if was_sent_today(uid_str, hour):
-                continue
-            # Envoie le rappel
-            try:
-                channel = self.bot.get_channel(int(channel_id))
-                if channel is None:
-                    try:
-                        channel = await self.bot.fetch_channel(int(channel_id))
-                    except Exception:
-                        continue
-                # Texte selon l'heure (escalade)
-                if hour == 20:
-                    msg = (
-                        f"📸 <@{uid}> **Story CTA du jour !**\n"
-                        "C'est l'heure de poster ta story CTA sur ton compte.\n"
-                        "Fais-le maintenant et clique le bouton vert pour ne plus "
-                        "avoir de rappel aujourd'hui."
-                    )
-                elif hour == 21:
-                    msg = (
-                        f"⏰ <@{uid}> **Rappel : Story CTA toujours pas postée**\n"
-                        "Pense à poster ta story CTA. Click le bouton quand c'est fait."
-                    )
-                else:  # 22h
-                    msg = (
-                        f"⚠️ <@{uid}> **DERNIER RAPPEL — Story CTA**\n"
-                        "C'est ton dernier rappel pour aujourd'hui. Poste ta story "
-                        "CTA et click le bouton."
-                    )
-                view = CTADoneView(target_user_id=uid)
-                await channel.send(content=msg, view=view)
-                mark_sent(uid_str, hour)
-            except Exception as e:
-                log.warning(f"[cta_reminder] Send fail pour {uid_str}: {e}")
-        # Cleanup une fois par jour (a 22h05 environ)
+            # Determine "first/remind/last"
+            hours_sorted = sorted(cfg["hours"])
+            if hour == hours_sorted[0]:
+                msg_key = "first"
+            elif hour == hours_sorted[-1]:
+                msg_key = "last"
+            else:
+                msg_key = "remind"
+            for uid_str, udata in users.items():
+                if not isinstance(udata, dict):
+                    continue
+                channel_id = udata.get("channel_id")
+                if not channel_id:
+                    continue
+                try:
+                    uid = int(uid_str)
+                except Exception:
+                    continue
+                if is_done_today(uid_str, task_type):
+                    continue
+                if was_sent_today(uid_str, task_type, hour):
+                    continue
+                try:
+                    channel = self.bot.get_channel(int(channel_id))
+                    if channel is None:
+                        try:
+                            channel = await self.bot.fetch_channel(int(channel_id))
+                        except Exception:
+                            continue
+                    body = cfg["messages"][msg_key]
+                    full_msg = f"{cfg['emoji']} <@{uid}> {body}"
+                    # Ajoute le prerequisite warning seulement au 1er rappel
+                    # du jour pour ce type
+                    if not was_any_sent_today(uid_str, task_type):
+                        full_msg += PREREQUISITES_NOTE
+                    view = TaskDoneView(task_type=task_type, target_user_id=uid)
+                    await channel.send(content=full_msg, view=view)
+                    mark_sent(uid_str, task_type, hour)
+                except Exception as e:
+                    log.warning(f"[cta_reminder] Send fail {task_type} pour {uid_str}: {e}")
+        # Cleanup une fois par jour vers 22h05
         if hour == 22 and minute >= 4:
             cleanup_old_state()
 
@@ -265,25 +323,25 @@ class CTAReminderCog(commands.Cog):
     async def before_check(self):
         await self.bot.wait_until_ready()
 
-    # Commande manuelle pour tester
     @app_commands.command(
-        name="cta_test", description="[OWNER] Envoie un rappel CTA de test maintenant"
+        name="cta_test", description="[OWNER] Envoie un rappel test (reel/story/cta)"
     )
-    async def cta_test(self, interaction: discord.Interaction):
-        # Owner only
+    @app_commands.describe(task_type="Type de tache a tester")
+    @app_commands.choices(task_type=[
+        app_commands.Choice(name="Reel", value="reel"),
+        app_commands.Choice(name="Story", value="story"),
+        app_commands.Choice(name="Story CTA", value="cta"),
+    ])
+    async def cta_test(self, interaction: discord.Interaction, task_type: str = "cta"):
         app = await self.bot.application_info()
         if interaction.user.id != app.owner.id:
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
-        view = CTADoneView(target_user_id=interaction.user.id)
-        await interaction.response.send_message(
-            content=(
-                f"📸 <@{interaction.user.id}> **[TEST] Story CTA du jour !**\n"
-                "C'est l'heure de poster ta story CTA sur ton compte.\n"
-                "Fais-le maintenant et click le bouton vert."
-            ),
-            view=view,
-        )
+        cfg = TASK_CONFIG.get(task_type, TASK_CONFIG["cta"])
+        view = TaskDoneView(task_type=task_type, target_user_id=interaction.user.id)
+        body = cfg["messages"]["first"]
+        full_msg = f"{cfg['emoji']} <@{interaction.user.id}> **[TEST]** {body}{PREREQUISITES_NOTE}"
+        await interaction.response.send_message(content=full_msg, view=view)
 
 
 async def setup(bot: commands.Bot):
