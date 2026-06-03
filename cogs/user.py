@@ -187,6 +187,100 @@ def random_name_for(identity):
     return unescape_newlines(random.choice(items)) if items else None
 
 
+# === DISPLAY NAME GENERATOR (Instagram-style) ===
+
+# Noms de famille FR / international qui passent bien sur IG
+_LAST_NAMES = [
+    "Martin", "Bernard", "Dubois", "Durand", "Robert", "Petit", "Richard",
+    "Moreau", "Laurent", "Lefebvre", "Roux", "Fournier", "Mercier", "Bonnet",
+    "Lambert", "Rousseau", "Vincent", "Muller", "Lefevre", "Garnier", "Faure",
+    "Andre", "Mercier", "Blanc", "Henry", "Roussel", "Garcia", "David", "Bertrand",
+    "Charpentier", "Renard", "Marchand", "Carpentier", "Vidal", "Caron", "Hubert",
+    "Aubert", "Rey", "Lemoine", "Riviere", "Fontaine", "Olivier", "Lopez",
+    "Gauthier", "Lacroix", "Gerard", "Renaud", "Dumont", "Roger", "Schmitt",
+    "Colin", "Mathieu", "Roy", "Picard", "Roche", "Boyer", "Aubry", "Dupuis",
+    "Lemoine", "Brun", "Adam", "Joly", "Roussel", "Carre", "Camus", "Renard",
+    # International qui marche bien sur IG
+    "Rose", "Stone", "Wilde", "Storm", "Lane", "Reed", "Knox", "Wood",
+    "Cole", "Quinn", "Ray", "Page", "Lee", "May", "Belle", "Fox",
+]
+_NAME_EMOJIS = [
+    "🌹", "🤍", "💕", "✨", "🌸", "🦋", "🌟", "💫", "🌺", "🍒",
+    "💋", "🔥", "❤️", "🌷", "💞", "👼", "🌙", "💎", "🦄", "🐝",
+    "",  # Vide aussi pour avoir des noms sans emoji parfois
+    "", "", "",
+]
+_SEPARATORS = [" ", " | ", " • ", " · ", " "]
+
+
+def _capitalize_smart(s: str) -> str:
+    """amelia -> Amélia (avec accent si pertinent)."""
+    s = s.strip().lower()
+    if not s:
+        return ""
+    # Petit accent automatique sur prenoms FR courants
+    accents_map = {
+        "amelia": "Amélia", "celia": "Célia", "emelia": "Émelia",
+        "agathe": "Agathe", "agnes": "Agnès", "anais": "Anaïs",
+        "andrea": "Andréa", "charlene": "Charlène", "chloe": "Chloé",
+        "clemence": "Clémence", "elea": "Éléa", "eleonore": "Éléonore",
+        "elise": "Élise", "eloise": "Éloïse", "elodie": "Élodie",
+        "emilie": "Émilie", "ines": "Inès", "lea": "Léa",
+        "noemie": "Noémie", "phebe": "Phébé", "renee": "Renée",
+        "salome": "Salomé", "valerie": "Valérie", "zoe": "Zoé",
+    }
+    if s in accents_map:
+        return accents_map[s]
+    return s[0].upper() + s[1:]
+
+
+def generate_display_names(base: str, count: int = 5) -> list:
+    """Genere `count` display names varies a partir d'une base (prenom identite).
+    Mix de formats : 'Prenom Nom', 'Prenom 🌹', 'Prenom | Nom', 'Prenom Nom 💕', etc.
+    """
+    first = _capitalize_smart(base)
+    if not first:
+        return []
+    out = set()
+    attempts = 0
+    while len(out) < count and attempts < 50:
+        attempts += 1
+        # Choisit le pattern
+        pattern = random.choice([
+            "first_only",       # Amélia
+            "first_emoji",      # Amélia 🌹
+            "first_last",       # Amélia Martin
+            "first_last_emoji", # Amélia Rose 💕
+            "first_sep_last",   # Amélia | Rose
+            "first_double_emoji",  # Amélia 🌹✨
+        ])
+        if pattern == "first_only":
+            name = first
+        elif pattern == "first_emoji":
+            emoji = random.choice([e for e in _NAME_EMOJIS if e])
+            name = f"{first} {emoji}"
+        elif pattern == "first_last":
+            last = random.choice(_LAST_NAMES)
+            name = f"{first} {last}"
+        elif pattern == "first_last_emoji":
+            last = random.choice(_LAST_NAMES)
+            emoji = random.choice(_NAME_EMOJIS)
+            name = f"{first} {last}" + (f" {emoji}" if emoji else "")
+        elif pattern == "first_sep_last":
+            last = random.choice(_LAST_NAMES)
+            sep = random.choice(_SEPARATORS)
+            name = f"{first}{sep}{last}"
+        elif pattern == "first_double_emoji":
+            e1 = random.choice([e for e in _NAME_EMOJIS if e])
+            e2 = random.choice([e for e in _NAME_EMOJIS if e])
+            if e1 != e2:
+                name = f"{first} {e1}{e2}"
+            else:
+                name = f"{first} {e1}"
+        out.add(name.strip())
+    return list(out)[:count]
+
+
 SHARED_BIOS_FILE = DATA_DIR / "bios.txt"
 
 
@@ -412,7 +506,7 @@ class UserCog(commands.Cog):
         lines.append("⚠️ Les pseudos sont checkés en temps réel — ils peuvent être pris à tout moment, prends rapidement.")
         await interaction.followup.send("\n".join(lines))
 
-    @app_commands.command(name="name", description="Donne un prénom (display Instagram) aléatoire de ton identité")
+    @app_commands.command(name="name", description="Donne 5 noms (display Instagram) variés avec nom de famille")
     async def name(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -420,14 +514,24 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True
             )
             return
-        n = random_name_for(identity)
-        if not n:
-            await interaction.response.send_message(
-                f"Aucun prénom pour ton identité `{identity}`. Demande à un admin (`/addnames`).",
-                ephemeral=True,
-            )
+        # Genere 5 noms varies via le generateur
+        names = generate_display_names(identity, count=5)
+        if not names:
+            # Fallback ancien systeme
+            n = random_name_for(identity)
+            if n:
+                await interaction.response.send_message(n)
+            else:
+                await interaction.response.send_message(
+                    f"Aucun nom pour ton identité `{identity}`.", ephemeral=True,
+                )
             return
-        await interaction.response.send_message(n)
+        lines = [f"✨ **5 noms pour `{identity}` :**", ""]
+        for n in names:
+            lines.append(f"• `{n}`")
+        lines.append("")
+        lines.append("👉 Copie celui qui te plait pour le display name Instagram.")
+        await interaction.response.send_message("\n".join(lines))
 
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
