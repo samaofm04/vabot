@@ -976,21 +976,13 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
-  // STRATEGIE : passe video_url cache (vurl) ET permalink (url) au proxy.
-  // Le backend tente d'abord vurl direct (pas d'instaloader = rapide + pas
-  // de rate-limit). Si vurl expire -> fallback instaloader via url.
-  if(!url && !videoUrl){
-    if(typeof showToast === 'function') showToast('Pas d URL pour ce reel', 'error');
+  // STRATEGIE BASIQUE : <video src=video_url> direct, sans proxy/backend.
+  // Si l'URL est encore fresh (recent scrape) ca joue, sinon overlay clean.
+  if(!videoUrl){
     igStopInline(media);
+    igShowCardErrorClean(card);
     return;
   }
-  var owner = card.getAttribute('data-owner') || '';
-  var proxyParams = [];
-  if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
-  if(url) proxyParams.push('url=' + encodeURIComponent(url));
-  if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
-  var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
-  // Spinner pendant le chargement
   var loader = media.querySelector('.reel-loading');
   if(!loader){
     loader = document.createElement('div');
@@ -1011,24 +1003,20 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] video error, auto-rescrape...');
-    // AUTO-RESCRAPE : on lance le scrape du proprietaire en bg, puis retry play.
-    igAutoRescrapeAndRetry(card, media, v, proxyUrl);
+    igStopInline(media);
+    igShowCardErrorClean(card);
   }, {once:true});
-  v.src = proxyUrl;
-  // Timeout 12s : si toujours pas charge, auto-rescrape
-  var fallbackTimer = setTimeout(function(){
-    if(!v.readyState || v.readyState < 3){
-      console.log('[igPlayInline] native timeout 12s, auto-rescrape');
-      igAutoRescrapeAndRetry(card, media, v, proxyUrl);
-    }
-  }, 12000);
-  v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
-  v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
+  v.src = videoUrl;
   var p = v.play();
-  if(p && p.catch) p.catch(function(){
-    v.setAttribute('controls', 'controls');
-  });
+  if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
+  // Timeout 6s pour considerer comme echec
+  setTimeout(function(){
+    if(!v.readyState || v.readyState < 3){
+      clearLoader();
+      igStopInline(media);
+      igShowCardErrorClean(card);
+    }
+  }, 6000);
 };
 // Bascule vers l'embed officiel Instagram dans la card (toujours marche).
 // L'iframe est CROPPEE en CSS : on cache le header IG (username + Voir le
@@ -1200,8 +1188,7 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
       igShowCardErrorClean(card);
     });
 };
-// Overlay erreur CLEAN : pas d'iframe IG, juste bouton "Ouvrir sur Instagram"
-// + fetch direct le proxy pour avoir le VRAI message d'erreur du backend
+// Overlay erreur CLEAN : juste un bouton "Voir sur Instagram"
 window.igShowCardErrorClean = function(card){
   if(!card) return;
   var media = card.querySelector('.reel-media');
@@ -1211,8 +1198,6 @@ window.igShowCardErrorClean = function(card){
     if(el) el.remove();
   });
   var url = card.getAttribute('data-url') || '';
-  var videoUrl = card.getAttribute('data-video-url') || '';
-  var owner = card.getAttribute('data-owner') || '';
   var ov = document.createElement('div');
   ov.className = 'reel-error-overlay';
   ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
@@ -1221,30 +1206,12 @@ window.igShowCardErrorClean = function(card){
     + '<div style="font-weight:700;font-size:13px;margin-bottom:14px">Vidéo expirée</div>'
     + '<a href="' + url + '" target="_blank" rel="noopener" '
     +    'style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
-    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3);margin-bottom:12px">'
+    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3)">'
     +    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
     +    'Voir sur Instagram'
-    + '</a>'
-    + '<div class="reel-error-detail" style="font-size:9px;color:#666;max-width:240px;line-height:1.4;font-family:monospace;word-break:break-word">Diagnostic en cours…</div>';
+    + '</a>';
   ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
   media.appendChild(ov);
-  // Fetch le proxy pour avoir le vrai message d'erreur
-  var proxyParams = [];
-  if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
-  if(url) proxyParams.push('url=' + encodeURIComponent(url));
-  if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
-  var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
-  fetch(proxyUrl).then(function(r){
-    return r.text().then(function(b){ return {status: r.status, body: b}; });
-  }).then(function(res){
-    var detail = ov.querySelector('.reel-error-detail');
-    if(detail){
-      detail.textContent = 'HTTP ' + res.status + ' : ' + (res.body || '').substring(0, 200);
-    }
-  }).catch(function(err){
-    var detail = ov.querySelector('.reel-error-detail');
-    if(detail) detail.textContent = 'Network err: ' + err;
-  });
 };
 window.igStopInline = function(media){
   if(!media) return;
@@ -7065,11 +7032,10 @@ def _render_insta_trends_grid_html() -> str:
         # Video preview au hover
         video_html = ""
         if is_video and video_url:
-            # preload='none' = browser ne charge RIEN tant que l'user clique pas
-            # play. Evite de spam IG CDN avec 100+ requetes au load de la page.
-            # src est mis dynamiquement dans igPlayInline via le proxy.
+            # src direct + preload='none' : le browser ne charge RIEN tant que
+            # l'user clique pas. igPlayInline set v.src et appelle v.play().
             video_html = (
-                f"<video class='reel-video' muted loop playsinline preload='none' "
+                f"<video class='reel-video' src='{video_url}' muted loop playsinline preload='none' "
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
         cards.append(f"""
