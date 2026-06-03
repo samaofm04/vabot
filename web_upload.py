@@ -11799,25 +11799,44 @@ async function sendSelectedVeille(){
 function veillePlayToggle(btn){
   const media = btn.closest('.veille-media');
   if(!media) return;
+  // Si video deja en place -> toggle pause/play
   let video = media.querySelector('video.veille-video');
-  const thumb = media.querySelector('.veille-thumb');
   if(video){
-    // Toggle play/pause
     if(video.paused){
-      video.play();
+      video.play().catch(function(){});
       btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M6 4h4v16H6zm8 0h4v16h-4z'/></svg>";
+      btn.style.opacity = '0';
+      setTimeout(function(){ btn.style.opacity = '1'; }, 1000);
     } else {
       video.pause();
       btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M8 5v14l11-7z'/></svg>";
+      btn.style.opacity = '1';
     }
     return;
   }
-  // Crée le <video> et le démarre
-  const vsrc = btn.dataset.video;
-  if(!vsrc) return;
+  // Pause tous les autres reels en lecture (Veille + Trends)
+  document.querySelectorAll('video.veille-video, video.reel-video').forEach(function(v){
+    try{ v.pause(); }catch(e){}
+  });
+  // Construit l'URL proxy avec vurl + url + owner pour fallback RapidAPI
+  const card = btn.closest('.veille-card');
+  const thumb = media.querySelector('.veille-thumb');
+  const vurl = btn.dataset.video || '';
+  const igUrl = card ? (card.querySelector('a[href*="instagram.com"]') ? card.querySelector('a[href*="instagram.com"]').href : '') : '';
+  // Owner depuis le @ visible dans la card
+  let owner = '';
+  if(card){
+    const ownerEl = card.querySelector('.veille-overlay div[style*="font-weight:700"]');
+    if(ownerEl) owner = (ownerEl.textContent || '').replace(/^@/, '').trim();
+  }
+  // Try direct URL first, proxy en fallback
+  const params = [];
+  if(vurl) params.push('vurl=' + encodeURIComponent(vurl));
+  if(igUrl) params.push('url=' + encodeURIComponent(igUrl));
+  if(owner) params.push('owner=' + encodeURIComponent(owner));
+  const proxyUrl = '/insta/proxy_video?' + params.join('&');
   video = document.createElement('video');
   video.className = 'veille-video';
-  video.src = vsrc;
   video.loop = true;
   video.playsInline = true;
   video.muted = false;
@@ -11825,12 +11844,45 @@ function veillePlayToggle(btn){
   video.style.cssText = 'width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;z-index:1';
   if(thumb) thumb.style.display = 'none';
   media.insertBefore(video, btn);
-  video.play().catch(e => {
-    // Autoplay sans son peut nécessiter muted
-    video.muted = true;
-    video.play();
+  // Spinner pendant load
+  btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="14 14" style="animation:plSpin 1s linear infinite"/></svg>';
+  let fallbackTimer = setTimeout(function(){
+    if(!video.readyState || video.readyState < 1){
+      // URL directe a fail -> try proxy
+      video.src = proxyUrl;
+      video.play().catch(function(){ video.muted = true; video.play(); });
+    }
+  }, 4000);
+  video.addEventListener('playing', function(){
+    clearTimeout(fallbackTimer);
+    btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M6 4h4v16H6zm8 0h4v16h-4z'/></svg>";
+    setTimeout(function(){ btn.style.opacity = '0'; }, 800);
+  }, {once:true});
+  video.addEventListener('error', function(){
+    clearTimeout(fallbackTimer);
+    // Si on n'a pas deja tente le proxy, on tente
+    if(video.src !== proxyUrl){
+      video.src = proxyUrl;
+      video.play().catch(function(){ video.muted = true; video.play(); });
+    } else {
+      btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#f87171'><path d='M12 2l-10 18h20L12 2zm0 7v4m0 2v.01' stroke='#fff' stroke-width='2'/></svg>";
+    }
+  }, {once:true});
+  // Click sur la video = toggle pause/play (TikTok style)
+  video.addEventListener('click', function(){
+    if(video.paused){
+      video.play().catch(function(){});
+      btn.style.opacity = '0';
+    } else {
+      video.pause();
+      btn.style.opacity = '1';
+    }
   });
-  btn.innerHTML = "<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M6 4h4v16H6zm8 0h4v16h-4z'/></svg>";
+  video.src = vurl || proxyUrl;
+  video.play().catch(function(){
+    video.muted = true;
+    video.play().catch(function(){});
+  });
   // Click sur la vidéo elle-même = toggle play/pause aussi
   video.addEventListener('click', function(e){
     e.stopPropagation();
