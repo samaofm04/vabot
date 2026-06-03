@@ -2436,9 +2436,9 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       Bio Links
     </button>
-    <button class="item" id="tab-linkscale" onclick="showTab('public','linkscale','Linkscale','Gere tes liens Linkscale depuis le site')">
+    <button class="item" id="tab-gms" onclick="showTab('public','gms','GetMySocial','Gere tes liens GetMySocial depuis le site')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      Linkscale
+      GetMySocial
     </button>
   </div>
 </div>
@@ -4006,15 +4006,22 @@ body.light .vac-card-name{color:#111}
 
 def _render_va_list_html() -> str:
     try:
-        # Priorite Linkscale (nouveau), fallback GMS si rien
+        # Priorite GMS (par defaut), fallback Linkscale si GMS pas configure
         try:
-            import linkscale
-            if linkscale.is_configured():
-                clicks_widget = _render_linkscale_clicks_widget()
-            else:
+            import gms
+            if gms.is_configured():
                 clicks_widget = _render_gms_clicks_widget()
+            else:
+                try:
+                    import linkscale
+                    if linkscale.is_configured():
+                        clicks_widget = _render_linkscale_clicks_widget()
+                    else:
+                        clicks_widget = _render_gms_clicks_widget()
+                except Exception:
+                    clicks_widget = _render_gms_clicks_widget()
         except Exception:
-            clicks_widget = _render_gms_clicks_widget()
+            clicks_widget = ""
     except Exception:
         clicks_widget = ""
     try:
@@ -5194,61 +5201,60 @@ function vaPaySave(){
 </script>
 """
 
-    # ====== Modal d'attribution de liens (priorite Linkscale, fallback GMS) ======
+    # ====== Modal d'attribution de liens (priorite GMS, fallback Linkscale) ======
     all_va_links = _load_va_links()
     import json as _json_va
     va_links_json = _json_va.dumps(all_va_links, ensure_ascii=False)
 
     # Construire la liste de tous les liens disponibles, groupes par modele
     all_links_info = []
-    link_source = "?"  # "linkscale" ou "gms"
+    link_source = "?"  # "gms" ou "linkscale"
 
-    # 1. Essayer Linkscale en priorite
+    # 1. Essayer GMS en priorite
     try:
-        import linkscale
-        if linkscale.is_configured():
-            link_source = "linkscale"
-            tpl_map = linkscale.get_template_to_folder_map()  # {cs_template: folder_name}
-            all_links = linkscale.list_all_links_full()
-            for link in all_links:
-                cs = link.get("cs_template", "")
-                model = tpl_map.get(cs, "(sans dossier)")
-                # URL : pour bio link c est /shortcode, pour direct c est .url
-                u = link.get("u", "")
-                domain = link.get("domain") or "monsecret.vip"
-                ltype = link.get("t", "?")
-                url = link.get("url") if ltype == "d_l" else f"https://{domain}/{u}"
-                all_links_info.append({
-                    "id": link.get("_id"),
-                    "shortcode": u,
-                    "name": link.get("n") or u,
-                    "model": model,
-                    "url": url or "(landing)",
-                    "status": "active" if link.get("enabled", True) else "disabled",
-                })
-            all_links_info.sort(key=lambda l: (l["model"], l["name"].lower()))
+        import gms
+        if gms.is_configured():
+            link_source = "gms"
+            res_all = gms.list_all_links()
+            if res_all.get("ok"):
+                for link in res_all["links"]:
+                    model = gms.categorize_link(link)
+                    all_links_info.append({
+                        "id": link.get("id"),
+                        "shortcode": link.get("shortcode", ""),
+                        "name": link.get("display_name") or "—",
+                        "model": model,
+                        "url": link.get("url") or "(landing)",
+                        "status": link.get("status", "active"),
+                    })
+            all_links_info.sort(key=lambda l: (l["model"], l["name"]))
     except Exception:
         pass
 
-    # 2. Fallback GMS si pas de links Linkscale
+    # 2. Fallback Linkscale si pas de links GMS
     if not all_links_info:
         try:
-            import gms
-            if gms.is_configured():
-                link_source = "gms"
-                res_all = gms.list_all_links()
-                if res_all.get("ok"):
-                    for link in res_all["links"]:
-                        model = gms.categorize_link(link)
-                        all_links_info.append({
-                            "id": link.get("id"),
-                            "shortcode": link.get("shortcode", ""),
-                            "name": link.get("display_name") or "—",
-                            "model": model,
-                            "url": link.get("url") or "(landing)",
-                            "status": link.get("status", "active"),
-                        })
-                all_links_info.sort(key=lambda l: (l["model"], l["name"]))
+            import linkscale
+            if linkscale.is_configured():
+                link_source = "linkscale"
+                tpl_map = linkscale.get_template_to_folder_map()
+                all_links = linkscale.list_all_links_full()
+                for link in all_links:
+                    cs = link.get("cs_template", "")
+                    model = tpl_map.get(cs, "(sans dossier)")
+                    u = link.get("u", "")
+                    domain = link.get("domain") or "monsecret.vip"
+                    ltype = link.get("t", "?")
+                    url = link.get("url") if ltype == "d_l" else f"https://{domain}/{u}"
+                    all_links_info.append({
+                        "id": link.get("_id"),
+                        "shortcode": u,
+                        "name": link.get("n") or u,
+                        "model": model,
+                        "url": url or "(landing)",
+                        "status": "active" if link.get("enabled", True) else "disabled",
+                    })
+                all_links_info.sort(key=lambda l: (l["model"], l["name"].lower()))
         except Exception:
             pass
 
