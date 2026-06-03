@@ -1909,7 +1909,6 @@ window.igAutoFetchCaption = function(card){
   var capDiv = card.querySelector('.reel-caption-area');
   if(!capDiv) return;
   var existing = (capDiv.textContent || '').trim();
-  // Skip si caption deja presente et pas "Pas de caption"
   if(existing && existing.indexOf('Pas de caption') < 0) return;
   var url = card.getAttribute('data-url') || '';
   if(!url) return;
@@ -1919,9 +1918,7 @@ window.igAutoFetchCaption = function(card){
     .then(function(d){
       if(d && d.ok && d.caption){
         capDiv.textContent = d.caption;
-        // Update aussi data-caption pour eviter re-fetch
         card.setAttribute('data-caption', d.caption);
-        // Si le panel expand est ouvert, recalcule sa hauteur
         var panel = card.querySelector('.reel-expand');
         if(panel && panel.classList.contains('open')){
           var inner = panel.querySelector('.reel-expand-inner');
@@ -1930,6 +1927,31 @@ window.igAutoFetchCaption = function(card){
       }
     }).catch(function(){});
 };
+// Auto-fetch toutes les captions visibles au load + scroll (IntersectionObserver lazy)
+window.igSetupCaptionObserver = function(){
+  if(window.__igCaptionObserver) return;
+  if(!window.IntersectionObserver) return;
+  window.__igCaptionObserver = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        igAutoFetchCaption(e.target);
+        window.__igCaptionObserver.unobserve(e.target);
+      }
+    });
+  }, {rootMargin: '200px'});
+  document.querySelectorAll('.reel-card').forEach(function(card){
+    var capDiv = card.querySelector('.reel-caption-area');
+    if(capDiv){
+      var txt = (capDiv.textContent || '').trim();
+      if(!txt || txt.indexOf('Pas de caption') >= 0){
+        window.__igCaptionObserver.observe(card);
+      }
+    }
+  });
+};
+document.addEventListener('DOMContentLoaded', function(){
+  setTimeout(igSetupCaptionObserver, 500);
+});
 // Toggle Veille : add si pas dedans, remove si deja dedans
 window.addToVeille = async function(btn, payload){
   if(!payload || !payload.url) return;
@@ -7266,10 +7288,10 @@ def _render_insta_trends_grid_html() -> str:
        onclick='igPlayInline(this)'>
     <img src="{thumb}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html}
-    <!-- Play overlay (visible quand pas en lecture) -->
-    <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;transition:opacity .2s">
-      <div style="width:64px;height:64px;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.2)">
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="#fff" style="margin-left:3px"><polygon points="5 3 19 12 5 21"/></svg>
+    <!-- Play overlay (visible quand pas en lecture / paused) -->
+    <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
+      <div style="width:80px;height:80px;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid rgba(255,255,255,.4);box-shadow:0 8px 32px rgba(0,0,0,.5)">
+        <svg viewBox="0 0 24 24" width="36" height="36" fill="#fff" style="margin-left:4px"><polygon points="5 3 19 12 5 21"/></svg>
       </div>
     </div>
     <!-- Top: time ago left, actions right -->
