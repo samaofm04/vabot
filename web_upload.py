@@ -1012,7 +1012,6 @@ window.igPlayInline = function(media){
     if(url) proxyParams.push('url=' + encodeURIComponent(url));
     if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
     var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
-    // Re-attach un nouveau error handler pour le proxy (echec final si proxy KO)
     var proxyErr = function(){
       clearLoader();
       igStopInline(media);
@@ -1022,29 +1021,31 @@ window.igPlayInline = function(media){
     v.src = proxyUrl;
     var p2 = v.play();
     if(p2 && p2.catch) p2.catch(function(){ v.setAttribute('controls', 'controls'); });
-    // Timeout 15s sur le proxy (peut prendre du temps si RapidAPI scrape)
+    // Timeout 30s sur le proxy (page scraping IG peut prendre 10-15s)
+    // NB : si la video a commence a charger (readyState >= 1), on ne coupe pas
     setTimeout(function(){
-      if(!v.readyState || v.readyState < 3){
+      // readyState : 0=HAVE_NOTHING, 1=HAVE_METADATA, 2=HAVE_CURRENT_DATA, 3=HAVE_FUTURE_DATA
+      // Si on a au moins METADATA (=1), la video charge -> on attend
+      if(!v.readyState || v.readyState < 1){
         v.removeEventListener('error', proxyErr);
         clearLoader();
         igStopInline(media);
         igShowCardErrorClean(card);
       }
-    }, 15000);
+    }, 30000);
   }
   v.addEventListener('error', tryProxy, {once:true});
   if(videoUrl){
     v.src = videoUrl;
     var p = v.play();
     if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-    // Timeout 4s sur URL directe : si rien charge, bascule proxy
+    // Timeout 5s sur URL directe : si rien charge, bascule proxy
     setTimeout(function(){
-      if(!v.readyState || v.readyState < 3){
+      if(!v.readyState || v.readyState < 1){
         tryProxy();
       }
-    }, 4000);
+    }, 5000);
   } else {
-    // Pas de cached URL -> direct proxy
     tryProxy();
   }
 };
@@ -16055,15 +16056,25 @@ def _scrape_ig_page_for_video(shortcode: str) -> str:
                     continue
                 html = r.text
                 for pat in patterns:
-                    m = _re.search(pat, html)
-                    if m:
+                    # Plusieurs matches possibles, on prend le PREMIER mp4 valide
+                    for m in _re.finditer(pat, html):
                         u = m.group(1)
                         try:
                             u = u.encode().decode("unicode_escape")
                         except Exception:
                             pass
                         u = u.replace("&amp;", "&").replace("\\/", "/")
-                        if u.startswith("http") and ".mp4" in u or "video" in u.lower():
+                        if not u.startswith("http"):
+                            continue
+                        u_low = u.lower()
+                        # Reject manifests (HLS/DASH) - le browser <video> peut pas
+                        if ".m3u8" in u_low or ".mpd" in u_low:
+                            continue
+                        # Reject thumbnails / images
+                        if any(ext in u_low for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                            continue
+                        # Accept seulement mp4 / video CDN paths
+                        if ".mp4" in u_low or "fcdn.net/v/" in u_low or "cdninstagram.com/v/" in u_low:
                             return u
             except Exception:
                 continue
