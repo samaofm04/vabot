@@ -1863,6 +1863,45 @@ window.updateVeilleBadge = function(total){
     badge.style.display = 'none';
   }
 };
+// Telecharge la video via le proxy (qui passe par RapidAPI + cache disque)
+window.igDownloadVideo = function(btn, url, owner){
+  if(!url) return;
+  // Shortcode pour le nom de fichier
+  var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  var shortcode = m ? m[1] : 'reel';
+  var filename = (owner || 'video') + '_' + shortcode + '.mp4';
+  // Construit l'URL proxy
+  var proxyParams = ['url=' + encodeURIComponent(url)];
+  if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
+  var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
+  // Spinner
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  if(typeof showToast === 'function') showToast('⬇ Téléchargement…', 'info');
+  // Fetch puis trigger download via blob
+  fetch(proxyUrl).then(function(r){
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return r.blob();
+  }).then(function(blob){
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 100);
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    if(typeof showToast === 'function') showToast('✅ ' + filename, 'success');
+  }).catch(function(err){
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    if(typeof showToast === 'function') showToast('❌ Erreur: ' + err, 'error');
+  });
+};
 // Fetch automatique de la caption Instagram pour une card
 window.igAutoFetchCaption = function(card){
   if(!card) return;
@@ -7241,6 +7280,9 @@ def _render_insta_trends_grid_html() -> str:
       </a>
       <button onclick='addToVeille(this, {{"url":"{url}","video_url":"{video_url}","thumb":"{thumb}","owner":"{owner}","owner_pp":"{owner_pic}","caption":"{caption}","views":{d_views},"likes":{d_likes},"comments":{d_comments}}})' title="Ajouter à la Veille" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
       <button onclick='igCopyLink("{url}")' title="Partager (copier le lien)" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
