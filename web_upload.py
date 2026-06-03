@@ -935,17 +935,10 @@ window.igHoverStop = function(media){
   try{ v.pause(); }catch(e){}
   v.style.opacity = '0';
 };
-// Lit la video inline en utilisant le player embed officiel Instagram.
-// Marche TOUJOURS (pas de rate-limit, pas de CORS), c'est l'iframe d'IG.
+// Lit la video inline avec player natif <video> via proxy backend.
+// Si echec (URL CDN morte ou IG bloque) -> fallback automatique vers
+// l'embed IG officiel (iframe) qui marche toujours.
 window.igPlayInline = function(media){
-  if(!media) return;
-  var card = media.closest('.reel-card');
-  if(!card) return;
-  // STRATEGIE PRINCIPALE : embed Instagram iframe (toujours fiable)
-  igEmbedInCard(card);
-  return;
-};
-window.igPlayInlineNative = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
@@ -1016,27 +1009,23 @@ window.igPlayInlineNative = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] video error event, fetching proxy for body...', proxyUrl);
-    // Fetch direct pour recuperer le vrai message d'erreur du backend
-    fetch(proxyUrl).then(function(r){
-      console.log('[igPlayInline] proxy returned status', r.status);
-      return r.text().then(function(body){ return {status: r.status, body: body}; });
-    }).then(function(res){
-      console.log('[igPlayInline] proxy:', res);
-      var msg = res.body || ('HTTP ' + res.status + ' sans body');
-      // Affiche l'erreur EN GROS dans la card (plus de toast loupe)
-      igShowCardError(card, 'HTTP ' + res.status, msg);
-    }).catch(function(err){
-      console.error('[igPlayInline] fetch error:', err);
-      igShowCardError(card, 'Network error', String(err));
-    });
+    console.log('[igPlayInline] video proxy failed, fallback to IG embed iframe');
+    // Fallback automatique : embed iframe IG officiel (marche toujours)
     igStopInline(media);
+    igEmbedInCard(card);
   }, {once:true});
   v.src = proxyUrl;
+  var fallbackTimer = setTimeout(function(){
+    if(!v.readyState || v.readyState < 3){
+      console.log('[igPlayInline] native player timeout, fallback to embed');
+      igStopInline(media);
+      igEmbedInCard(card);
+    }
+  }, 4000);
+  v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
+  v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
   var p = v.play();
   if(p && p.catch) p.catch(function(){
-    // Le navigateur peut bloquer l'autoplay - mais l'user a cliqué donc
-    // on devrait avoir un user gesture. Show controls et laisse user play.
     v.setAttribute('controls', 'controls');
   });
 };
