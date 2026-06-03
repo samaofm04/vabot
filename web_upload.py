@@ -1201,16 +1201,18 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     });
 };
 // Overlay erreur CLEAN : pas d'iframe IG, juste bouton "Ouvrir sur Instagram"
+// + fetch direct le proxy pour avoir le VRAI message d'erreur du backend
 window.igShowCardErrorClean = function(card){
   if(!card) return;
   var media = card.querySelector('.reel-media');
   if(!media) return;
-  // Vire anciens overlays
   ['reel-error-overlay','reel-loading','reel-embed-wrap'].forEach(function(cls){
     var el = media.querySelector('.' + cls);
     if(el) el.remove();
   });
   var url = card.getAttribute('data-url') || '';
+  var videoUrl = card.getAttribute('data-video-url') || '';
+  var owner = card.getAttribute('data-owner') || '';
   var ov = document.createElement('div');
   ov.className = 'reel-error-overlay';
   ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
@@ -1219,14 +1221,30 @@ window.igShowCardErrorClean = function(card){
     + '<div style="font-weight:700;font-size:13px;margin-bottom:14px">Vidéo expirée</div>'
     + '<a href="' + url + '" target="_blank" rel="noopener" '
     +    'style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
-    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3)">'
+    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3);margin-bottom:12px">'
     +    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
     +    'Voir sur Instagram'
-    + '</a>';
-  ov.addEventListener('click', function(e){
-    if(e.target === ov) ov.remove();
-  });
+    + '</a>'
+    + '<div class="reel-error-detail" style="font-size:9px;color:#666;max-width:240px;line-height:1.4;font-family:monospace;word-break:break-word">Diagnostic en cours…</div>';
+  ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
   media.appendChild(ov);
+  // Fetch le proxy pour avoir le vrai message d'erreur
+  var proxyParams = [];
+  if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
+  if(url) proxyParams.push('url=' + encodeURIComponent(url));
+  if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
+  var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
+  fetch(proxyUrl).then(function(r){
+    return r.text().then(function(b){ return {status: r.status, body: b}; });
+  }).then(function(res){
+    var detail = ov.querySelector('.reel-error-detail');
+    if(detail){
+      detail.textContent = 'HTTP ' + res.status + ' : ' + (res.body || '').substring(0, 200);
+    }
+  }).catch(function(err){
+    var detail = ov.querySelector('.reel-error-detail');
+    if(detail) detail.textContent = 'Network err: ' + err;
+  });
 };
 window.igStopInline = function(media){
   if(!media) return;
