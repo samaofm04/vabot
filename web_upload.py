@@ -1008,15 +1008,15 @@ window.igPlayInline = function(media){
     // Fetch direct pour recuperer le vrai message d'erreur du backend
     fetch(proxyUrl).then(function(r){
       console.log('[igPlayInline] proxy returned status', r.status);
-      if(r.ok) return null;
-      return r.text();
-    }).then(function(body){
-      console.log('[igPlayInline] proxy body:', body);
-      var msg = body ? (body.length > 250 ? body.substring(0, 250) + '…' : body) : 'video error sans body';
-      if(typeof showToast === 'function') showToast('Proxy : ' + msg, 'error');
+      return r.text().then(function(body){ return {status: r.status, body: body}; });
+    }).then(function(res){
+      console.log('[igPlayInline] proxy:', res);
+      var msg = res.body || ('HTTP ' + res.status + ' sans body');
+      // Affiche l'erreur EN GROS dans la card (plus de toast loupe)
+      igShowCardError(card, 'HTTP ' + res.status, msg);
     }).catch(function(err){
       console.error('[igPlayInline] fetch error:', err);
-      if(typeof showToast === 'function') showToast('Network err — ouvre sur Instagram', 'error');
+      igShowCardError(card, 'Network error', String(err));
     });
     igStopInline(media);
   }, {once:true});
@@ -1027,6 +1027,23 @@ window.igPlayInline = function(media){
     // on devrait avoir un user gesture. Show controls et laisse user play.
     v.setAttribute('controls', 'controls');
   });
+};
+window.igShowCardError = function(card, title, detail){
+  if(!card) return;
+  var media = card.querySelector('.reel-media');
+  if(!media) return;
+  var old = media.querySelector('.reel-error-overlay');
+  if(old) old.remove();
+  var ov = document.createElement('div');
+  ov.className = 'reel-error-overlay';
+  ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center;cursor:pointer';
+  ov.innerHTML = ''
+    + '<div style="font-size:28px;margin-bottom:8px">⚠️</div>'
+    + '<div style="font-weight:700;font-size:14px;color:#fca5a5;margin-bottom:8px">' + (title || 'Erreur') + '</div>'
+    + '<div style="font-size:11px;color:#fff;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:6px;max-width:100%;word-break:break-word;line-height:1.4;max-height:120px;overflow:auto">' + (detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>'
+    + '<div style="margin-top:10px;font-size:10px;color:#aaa">Click pour fermer</div>';
+  ov.onclick = function(e){ e.stopPropagation(); ov.remove(); };
+  media.appendChild(ov);
 };
 window.igStopInline = function(media){
   if(!media) return;
