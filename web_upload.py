@@ -1140,11 +1140,22 @@ window.igShowCardError = function(card, title, detail){
 window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
   var owner = card.getAttribute('data-owner') || '';
   if(!owner){
+    // Pas d'owner = on bascule direct sur l'iframe embed (toujours marche)
     igStopInline(media);
-    igShowCardError(card, 'Lecture impossible', 'Pas de propriétaire identifié pour ce reel.');
+    igEmbedInCard(card);
     return;
   }
-  // Affiche un loader avec message "Refresh auto en cours..."
+  // Marker pour eviter boucle : si deja rescrape, bascule sur iframe embed
+  if(card.getAttribute('data-rescraped') === '1'){
+    var oldL = media.querySelector('.reel-loading');
+    if(oldL) oldL.remove();
+    console.log('[igAutoRescrape] already retried, falling back to IG embed iframe');
+    igStopInline(media);
+    igEmbedInCard(card);
+    return;
+  }
+  card.setAttribute('data-rescraped', '1');
+  // Loader explicite
   var oldLoader = media.querySelector('.reel-loading');
   if(oldLoader) oldLoader.remove();
   var loader = document.createElement('div');
@@ -1155,44 +1166,50 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     + '<div style="font-size:11px;font-weight:600">🔄 Refresh @' + owner + '...</div>'
     + '<div style="font-size:10px;color:#aaa;margin-top:4px">via RapidAPI</div>';
   media.appendChild(loader);
-  // Marker pour eviter boucle infinie : si on a deja rescrape, on declare echec
-  if(card.getAttribute('data-rescraped') === '1'){
-    igStopInline(media);
-    if(loader.parentNode) loader.remove();
-    igShowCardError(card, 'Refresh raté', 'Le rescrape n a pas pu récupérer une URL valide. Ouvre sur Instagram.');
-    return;
-  }
-  card.setAttribute('data-rescraped', '1');
   var fd = new FormData();
   fd.append('username', owner);
   fetch('/insta/scrape', {method:'POST', body:fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok){
+        // Scrape echoue -> bascule iframe embed (toujours marche)
         if(loader.parentNode) loader.remove();
+        console.log('[igAutoRescrape] scrape failed, fallback to embed');
         igStopInline(media);
-        igShowCardError(card, 'Scrape échoué', (d && d.error) || 'erreur inconnue');
+        igEmbedInCard(card);
         return;
       }
       // Wait 3s pour que le scrape se finisse, puis retry play
       setTimeout(function(){
         if(loader.parentNode) loader.remove();
-        // Retry : appelle a nouveau le proxy avec le NEW vurl recupere via une fetch /insta/status
-        // Ou plus simple : recharge la page pour re-render avec fresh data
-        // Plus user-friendly : ne reload pas, re-trigger igPlayInline qui va re-fetch
-        // via le proxy. Le proxy a maintenant le fresh URL en cache memoire.
-        v.removeAttribute('controls');
-        v.style.opacity = '0';
-        // Force un nouveau src (avec cache-bust) pour re-trigger le load
+        // Re-attach un error handler pour catch echec round 2 (si proxy refusait
+        // encore meme apres rescrape -> bascule embed iframe)
+        var retryErrHandler = function(){
+          console.log('[igAutoRescrape] retry play failed, fallback to embed');
+          igStopInline(media);
+          igEmbedInCard(card);
+        };
+        v.addEventListener('error', retryErrHandler, {once:true});
+        // Cache-bust pour force le reload du proxy
         v.src = proxyUrl + '&_retry=' + Date.now();
         var p = v.play();
         if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
+        // Timeout 8s : si retry stall, bascule embed
+        setTimeout(function(){
+          if(!v.readyState || v.readyState < 3){
+            v.removeEventListener('error', retryErrHandler);
+            console.log('[igAutoRescrape] retry timeout 8s, fallback to embed');
+            igStopInline(media);
+            igEmbedInCard(card);
+          }
+        }, 8000);
       }, 3000);
     })
     .catch(function(err){
       if(loader.parentNode) loader.remove();
+      console.log('[igAutoRescrape] network err, fallback to embed:', err);
       igStopInline(media);
-      igShowCardError(card, 'Network error', String(err));
+      igEmbedInCard(card);
     });
 };
 window.igStopInline = function(media){
@@ -18857,10 +18874,15 @@ def create_app():
         cache = insta_proxy_video._cache
         now = _t.time()
         CACHE_TTL = 50 * 60
-        def try_stream(video_url):
-            """Tente de stream depuis video_url. Retourne Response ou None si echec."""
+        def try_stream(video_url, fast=False):
+            """Tente de stream depuis video_url. Retourne Response ou None si echec.
+            fast=True : timeout 4s pour la HEAD initiale (detection URL morte rapide).
+            """
             try:
-                upstream = _rq.get(video_url, headers=ig_headers, stream=True, timeout=30)
+                upstream = _rq.get(
+                    video_url, headers=ig_headers, stream=True,
+                    timeout=(4 if fast else 30),
+                )
             except Exception:
                 return None
             if upstream.status_code != 200:
