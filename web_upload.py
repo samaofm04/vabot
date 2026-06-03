@@ -15996,14 +15996,51 @@ def _render_upload_inner(msg=None, error=None):
     )
 
 
-def _start_auto_scrape_daemon():
-    """Background daemon : scrape toutes les watchlist Instagram toutes les 3h.
-    Cela garde les video_url fresh (IG CDN URL TTL = 2-6h, on scrape avant
-    expiration). User n'a rien a faire, il visite Trends -> tous les reels
-    sont jouables.
+INSTA_VIDEOS_DIR = Path("data/insta/videos")
 
-    Lance un seul thread daemon au demarrage de l'app. Ne pas re-lancer si
-    deja actif (idempotent).
+
+def _download_reel_video(shortcode: str, video_url: str) -> bool:
+    """Download le fichier mp4 d'un reel sur disque.
+    data/insta/videos/<shortcode>.mp4
+    Retourne True si OK. Skip si fichier existe deja."""
+    if not shortcode or not video_url:
+        return False
+    try:
+        INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+        target = INSTA_VIDEOS_DIR / f"{shortcode}.mp4"
+        if target.exists() and target.stat().st_size > 1024:
+            return True  # deja telecharge
+        import requests as _rq
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Referer": "https://www.instagram.com/",
+        }
+        r = _rq.get(video_url, headers=headers, stream=True, timeout=30)
+        if r.status_code != 200:
+            r.close()
+            return False
+        with target.open("wb") as f:
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    f.write(chunk)
+        r.close()
+        return target.exists() and target.stat().st_size > 1024
+    except Exception:
+        try:
+            if target.exists():
+                target.unlink()
+        except Exception:
+            pass
+        return False
+
+
+def _start_auto_scrape_daemon():
+    """Background daemon : scrape toutes les watchlist Instagram toutes les 3h
+    + telecharge les fichiers mp4 sur disque.
+
+    Une fois telecharge, un reel reste lisible POUR TOUJOURS (plus de
+    "Vidéo expirée" possible). User clique -> served depuis le disque.
     """
     import threading
     import time as _t
@@ -16012,39 +16049,50 @@ def _start_auto_scrape_daemon():
     _start_auto_scrape_daemon._started = True
 
     SCRAPE_INTERVAL_SEC = 3 * 60 * 60  # 3 heures
-    DELAY_BETWEEN_PROFILES = 8  # 8s entre chaque pour eviter rate-limit
+    DELAY_BETWEEN_PROFILES = 8  # 8s entre comptes
+    DOWNLOAD_TOP_N = 30  # top N reels par profil a telecharger (par views)
 
     def loop():
-        # Wait 60s au demarrage pour laisser le bot s'initialiser
-        _t.sleep(60)
+        _t.sleep(60)  # wait bot init
         while True:
             try:
                 from insta_scraper import load_watchlist, scrape_profile
                 wl = load_watchlist() or []
                 if wl:
-                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes...")
+                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL...")
                     ok = 0
                     fail = 0
+                    total_dl = 0
                     for u in wl:
                         try:
                             r = scrape_profile(u, limit=100)
                             if "error" not in r:
                                 ok += 1
+                                # Telecharge les TOP N reels par views
+                                reels = r.get("reels", [])
+                                reels_to_dl = sorted(
+                                    [rr for rr in reels if rr.get("is_video")
+                                     and rr.get("video_url") and rr.get("shortcode")],
+                                    key=lambda x: x.get("views", 0) or 0,
+                                    reverse=True
+                                )[:DOWNLOAD_TOP_N]
+                                for rr in reels_to_dl:
+                                    if _download_reel_video(rr["shortcode"], rr["video_url"]):
+                                        total_dl += 1
                             else:
                                 fail += 1
                         except Exception as e:
                             log.warning(f"[insta-bg-scrape] {u}: {e}")
                             fail += 1
                         _t.sleep(DELAY_BETWEEN_PROFILES)
-                    log.info(f"[insta-bg-scrape] termine: {ok} OK / {fail} fail")
+                    log.info(f"[insta-bg-scrape] termine: {ok} OK / {fail} fail / {total_dl} videos DL")
             except Exception as e:
                 log.error(f"[insta-bg-scrape] cycle err: {e}")
-            # Sleep 3h avant le prochain cycle
             _t.sleep(SCRAPE_INTERVAL_SEC)
 
     t = threading.Thread(target=loop, daemon=True, name="insta-bg-scrape")
     t.start()
-    log.info("[insta-bg-scrape] daemon demarre (cycle toutes les 3h)")
+    log.info("[insta-bg-scrape] daemon demarre (cycle 3h + DL top 30/compte)")
 
 
 def create_app():
@@ -18993,10 +19041,25 @@ def create_app():
                 resp.headers["Content-Length"] = content_length
             resp.headers["Cache-Control"] = "private, max-age=300"
             return resp
+        # Extraction shortcode pour cache disque
+        m_sc = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url or '')
+        sc = m_sc.group(1) if m_sc else ''
+        # ETAPE 0 : fichier disque (telecharge par le daemon ou DL on-demand)
+        if sc:
+            from pathlib import Path as _P
+            disk_file = _P("data/insta/videos") / f"{sc}.mp4"
+            if disk_file.exists() and disk_file.stat().st_size > 1024:
+                from flask import send_file
+                return send_file(str(disk_file), mimetype="video/mp4", conditional=True)
         # ETAPE 1 : essaie URL directe (cas reel fresh)
         if direct_vurl:
             res = try_stream(direct_vurl)
             if res is not None:
+                # Sauvegarde sur disque pour future plays instantanes
+                if sc:
+                    import threading as _th
+                    _th.Thread(target=_download_reel_video,
+                               args=(sc, direct_vurl), daemon=True).start()
                 return res
         # ETAPE 2 : cache memoire des fresh URLs scrapees precedemment
         if post_url:
@@ -19004,6 +19067,10 @@ def create_app():
             if cached and (now - cached["ts"]) < CACHE_TTL:
                 res = try_stream(cached["video_url"])
                 if res is not None:
+                    if sc:
+                        import threading as _th
+                        _th.Thread(target=_download_reel_video,
+                                   args=(sc, cached["video_url"]), daemon=True).start()
                     return res
                 cache.pop(post_url, None)
         # ETAPE 3 : RapidAPI UNIQUEMENT - pas d'instaloader, pas de cookies IG.
@@ -19038,6 +19105,11 @@ def create_app():
                     cache[post_url] = {"ts": now, "video_url": video_url}
                     res = try_stream(video_url)
                     if res is not None:
+                        # DL sur disque en background -> future plays instantanes
+                        if shortcode:
+                            import threading as _th
+                            _th.Thread(target=_download_reel_video,
+                                       args=(shortcode, video_url), daemon=True).start()
                         return res
                     return ("URL RapidAPI mais CDN refuse stream", 502)
             return (f"@{owner} : reel {shortcode} introuvable parmi {nb_reels} reels scrapes", 404)
