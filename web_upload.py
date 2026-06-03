@@ -942,6 +942,27 @@ window.igPlayInline = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
+  // Si cette video est DEJA en lecture -> toggle pause/play
+  if(media.classList.contains('reel-playing')){
+    var existingV = media.querySelector('.reel-video');
+    if(existingV && existingV.src){
+      if(existingV.paused){
+        existingV.play().catch(function(){});
+      } else {
+        existingV.pause();
+      }
+      return;
+    }
+  }
+  // Pause tous les autres reels en cours de lecture
+  document.querySelectorAll('.reel-media.reel-playing').forEach(function(otherMedia){
+    if(otherMedia === media) return;
+    var ov = otherMedia.querySelector('.reel-video');
+    if(ov){
+      try{ ov.pause(); }catch(e){}
+    }
+    igStopInline(otherMedia);
+  });
   // Pause tous les autres reels en cours
   document.querySelectorAll('.reel-card.reel-playing').forEach(function(c){
     if(c !== card) igStopInline(c.querySelector('.reel-media'));
