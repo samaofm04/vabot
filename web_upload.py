@@ -1115,8 +1115,10 @@ window.igShowCardError = function(card, title, detail){
         .then(function(r){ return r.json(); })
         .then(function(d){
           if(d && d.ok){
-            rescrapeBtn.textContent = '✓ Scrape lancé - recharge la page dans ~10s';
-            if(typeof showToast === 'function') showToast('Rescrape @' + u + ' en cours...', 'success');
+            rescrapeBtn.textContent = '✓ Scrape OK - reload dans 8s...';
+            if(typeof showToast === 'function') showToast('Rescrape @' + u + ' en cours, reload auto...', 'success');
+            // Auto-reload pour afficher la card avec fresh video_url
+            setTimeout(function(){ window.location.reload(); }, 8000);
           } else {
             rescrapeBtn.textContent = '✗ ' + (d && d.error || 'Erreur');
             rescrapeBtn.disabled = false;
@@ -6953,8 +6955,11 @@ def _render_insta_trends_grid_html() -> str:
         # Video preview au hover
         video_html = ""
         if is_video and video_url:
+            # preload='none' = browser ne charge RIEN tant que l'user clique pas
+            # play. Evite de spam IG CDN avec 100+ requetes au load de la page.
+            # src est mis dynamiquement dans igPlayInline via le proxy.
             video_html = (
-                f"<video class='reel-video' src='{video_url}' muted loop playsinline preload='metadata' "
+                f"<video class='reel-video' muted loop playsinline preload='none' "
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
             )
         cards.append(f"""
