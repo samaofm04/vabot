@@ -1863,6 +1863,50 @@ window.updateVeilleBadge = function(total){
     badge.style.display = 'none';
   }
 };
+// Click sur la caption -> copie le texte (avec fallback HTTP)
+window.igCopyCaption = function(el){
+  if(!el) return;
+  var txt = (el.textContent || '').trim();
+  if(!txt || txt.indexOf('Pas de caption') >= 0 || txt.indexOf('Chargement') >= 0) return;
+  // Copy
+  var copied = false;
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(txt).then(function(){
+      copied = true;
+      if(typeof showToast === 'function') showToast('📝 Légende copiée', 'success');
+    }).catch(function(){
+      // Fallback
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      try{ document.execCommand('copy'); copied = true; }catch(e){}
+      document.body.removeChild(ta);
+      if(typeof showToast === 'function'){
+        showToast(copied ? '📝 Légende copiée' : '❌ Copy bloqué', copied ? 'success' : 'error');
+      }
+    });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try{ document.execCommand('copy'); copied = true; }catch(e){}
+    document.body.removeChild(ta);
+    if(typeof showToast === 'function'){
+      showToast(copied ? '📝 Légende copiée' : '❌ Copy bloqué', copied ? 'success' : 'error');
+    }
+  }
+  // Flash visuel
+  var origBg = el.style.background;
+  el.style.background = 'rgba(34,197,94,.2)';
+  el.style.borderRadius = '4px';
+  setTimeout(function(){
+    el.style.background = origBg;
+  }, 400);
+};
 // Telecharge la video via le proxy (qui passe par RapidAPI + cache disque)
 window.igDownloadVideo = function(btn, url, owner){
   if(!url) return;
@@ -7326,7 +7370,7 @@ def _render_insta_trends_grid_html() -> str:
       <!-- Description panel : OUVERT PAR DEFAUT (caption + sound toujours visibles) -->
       <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:6px">
-          <div class="reel-caption-area" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9)">{caption_html}</div>
+          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html}</div>
           <div style="display:flex;align-items:center;gap:5px;color:#bbb;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,.9)">
             <span style="color:#3b82f6">🎵</span>
             <span style="color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Original audio</span>
@@ -19348,18 +19392,22 @@ def create_app():
                             except Exception:
                                 pass
                             cap = _unescape(cap)
-                            # Format og:description "USER on Instagram: 'caption text'"
-                            quote_match = _re.search(r'[":] [\"“]([^"”]+)[\"”]', cap)
-                            if quote_match and (" on Instagram" in cap or "Instagram:" in cap):
+                            # NETTOYAGE des prefixes typiques d'og:description IG :
+                            # "1,234 likes, 56 comments - username on May 28, 2026: 'CAPTION'"
+                            # "1,234 likes, 56 comments - username le 28 mai 2026: 'CAPTION'"
+                            # Format avec quotes : on extrait le contenu entre quotes
+                            quote_match = _re.search(r'[:][\s\"“]+([^"”]+?)["”]\s*\.?\s*$', cap)
+                            if quote_match:
                                 cap = quote_match.group(1)
-                            # Format alternatif sans guillemets : "USER on Instagram: caption"
-                            elif " on Instagram:" in cap:
-                                cap = cap.split(" on Instagram:", 1)[1].strip().strip('"“”')
-                            cap = cap.strip()
+                            elif ":" in cap and ("likes" in cap.lower() or "comments" in cap.lower()
+                                                  or "on Instagram" in cap):
+                                # Prend tout ce qui est apres le DERNIER ":" (la caption)
+                                cap = cap.rsplit(":", 1)[1].strip()
+                                cap = cap.strip('"“”').strip()
+                            cap = cap.strip().strip('.')
                             # Skip si c'est juste le titre/username sans contenu utile
-                            if cap and len(cap) > 5 and "Instagram" not in cap[:30]:
+                            if cap and len(cap) > 5 and not cap.startswith("Instagram"):
                                 return jsonify({"ok": True, "caption": cap[:1000]})
-                            # Si match trouve mais semble pollue, on garde le 1er match propre vu
                 except Exception:
                     continue
         return jsonify({"ok": False, "error": "caption introuvable", "tried": tried[:10]})
