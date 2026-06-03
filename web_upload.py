@@ -1051,21 +1051,20 @@ window.igEmbedInCard = function(card){
   var img = media.querySelector('.reel-thumb'); if(img) img.style.display = 'none';
   var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
   var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
-  // Wrap : crop ULTRA AGRESSIF.
-  // bottom:200px laisse beaucoup de marge pour cacher TOUT le footer IG
-  // (footer = ~200px : "Voir plus sur Instagram" + likes + commentaire input).
-  // Le bot rendra son propre panel par dessus aux z-index 10.
+  // Wrap : crop top/bottom de l'iframe pour ne garder que la zone video.
+  // bottom:80px laisse de la place pour le bot panel (caption + sound +
+  // chevron au z-index 10).
   var wrap = document.createElement('div');
   wrap.className = 'reel-embed-wrap';
-  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:200px;'
+  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:80px;'
     + 'background:#000;z-index:1;overflow:hidden';
   var iframe = document.createElement('iframe');
   iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/';
-  // iframe top -85 = header IG off-screen. height 200% = couvre tout
-  // l'IG content. overflow hidden au wrap clip a wrap_height = 333 - 200 = 133px.
-  // Mais on a aspect-ratio 9:16 sur card -> wrap suit, donc taille variable.
-  iframe.style.cssText = 'position:absolute;left:0;top:-85px;width:100%;'
-    + 'height:200%;border:0;background:#000';
+  // top:-62px = decale le header IG (avatar + Voir le profil) off-screen.
+  // height:calc(100% + 200px) = etend iframe pour que footer IG sorte du
+  // wrap (et soit cropped par overflow:hidden).
+  iframe.style.cssText = 'position:absolute;left:0;top:-62px;width:100%;'
+    + 'height:calc(100% + 200px);border:0;background:#000';
   iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
   iframe.setAttribute('allowfullscreen', '');
   iframe.setAttribute('scrolling', 'no');
@@ -1143,16 +1142,15 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
   var owner = card.getAttribute('data-owner') || '';
   if(!owner){
     igStopInline(media);
-    igShowCardErrorClean(card);
+    igEmbedInCard(card);
     return;
   }
-  // Marker pour eviter boucle : si deja rescrape -> overlay clean (PAS d'iframe)
   if(card.getAttribute('data-rescraped') === '1'){
     var oldL = media.querySelector('.reel-loading');
     if(oldL) oldL.remove();
-    console.log('[igAutoRescrape] already retried');
+    console.log('[igAutoRescrape] already retried, embed fallback (auto-play)');
     igStopInline(media);
-    igShowCardErrorClean(card);
+    igEmbedInCard(card);
     return;
   }
   card.setAttribute('data-rescraped', '1');
@@ -1174,40 +1172,33 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     .then(function(d){
       if(!d || !d.ok){
         if(loader.parentNode) loader.remove();
-        console.log('[igAutoRescrape] scrape failed');
         igStopInline(media);
-        igShowCardErrorClean(card);
+        igEmbedInCard(card);
         return;
       }
-      // Wait 3s pour que le scrape se finisse, puis retry play
       setTimeout(function(){
         if(loader.parentNode) loader.remove();
         var retryErrHandler = function(){
-          console.log('[igAutoRescrape] retry play failed');
           igStopInline(media);
-          igShowCardErrorClean(card);
+          igEmbedInCard(card);
         };
         v.addEventListener('error', retryErrHandler, {once:true});
-        // Cache-bust pour force le reload du proxy
         v.src = proxyUrl + '&_retry=' + Date.now();
         var p = v.play();
         if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-        // Timeout 10s : si retry stall, clean error
         setTimeout(function(){
           if(!v.readyState || v.readyState < 3){
             v.removeEventListener('error', retryErrHandler);
-            console.log('[igAutoRescrape] retry timeout 10s');
             igStopInline(media);
-            igShowCardErrorClean(card);
+            igEmbedInCard(card);
           }
         }, 10000);
       }, 3000);
     })
     .catch(function(err){
       if(loader.parentNode) loader.remove();
-      console.log('[igAutoRescrape] network err:', err);
       igStopInline(media);
-      igShowCardErrorClean(card);
+      igEmbedInCard(card);
     });
 };
 // Overlay erreur CLEAN : pas d'iframe IG, juste bouton "Ouvrir sur Instagram"
