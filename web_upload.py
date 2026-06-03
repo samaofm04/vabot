@@ -974,55 +974,10 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
-  // Si pas de video_url -> refresh direct
-  if(!videoUrl){
-    igRefreshVideoUrl(card, v, url);
-    return;
-  }
-  // Sinon on tente d'abord avec l'URL cache
-  if(v.src !== videoUrl) v.src = videoUrl;
-  // Ajoute aussi un loader visible des le 1er essai (au cas ou ca stall)
-  var initLoader = media.querySelector('.reel-loading');
-  if(!initLoader){
-    initLoader = document.createElement('div');
-    initLoader.className = 'reel-loading';
-    initLoader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none';
-    initLoader.innerHTML = '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite"></div>';
-    media.appendChild(initLoader);
-  }
-  // Reveal sur loadeddata/playing -> remove loader
-  function clearInitLoader(){
-    var l = media.querySelector('.reel-loading');
-    if(l) l.remove();
-  }
-  v.addEventListener('loadeddata', clearInitLoader, {once:true});
-  v.addEventListener('playing', clearInitLoader, {once:true});
-  var attempted = false;
-  function triggerRefresh(){
-    if(attempted) return;
-    attempted = true;
-    clearInitLoader();
-    igRefreshVideoUrl(card, v, url);
-  }
-  function tryPlay(){
-    var p = v.play();
-    if(p && p.catch){
-      p.catch(function(err){
-        triggerRefresh();
-      });
-    }
-  }
-  v.addEventListener('error', triggerRefresh, {once:true});
-  v.addEventListener('stalled', triggerRefresh, {once:true});
-  // Timeout de detection : si apres 4s le video n'a toujours pas
-  // HAVE_FUTURE_DATA (3), c'est que l'URL est dead silencieusement -> refresh
-  setTimeout(function(){
-    if(attempted) return;
-    if(!v.readyState || v.readyState < 3){
-      triggerRefresh();
-    }
-  }, 4000);
-  tryPlay();
+  // STRATEGIE : toujours passer par /insta/refresh_video_url.
+  // Le cache serveur 50min rend les re-clicks instantanes, et evite tous les
+  // problemes d'URL silencieusement expirees qui stallaient le player.
+  igRefreshVideoUrl(card, v, url);
 };
 window.igStopInline = function(media){
   if(!media) return;
@@ -1527,6 +1482,23 @@ function showTab(group,name,title,subtitle){
       window.history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
     }
   }catch(e){}
+  // Auto-refresh Instagram Trends : lance un scrape de tous les comptes en bg
+  // a chaque arrivee sur la page (max 1x toutes les 5 min pour pas spammer)
+  if(name === 'igtrends'){
+    try{
+      var last = parseInt(sessionStorage.getItem('ig_trends_last_autoscrape') || '0');
+      if(Date.now() - last > 5 * 60 * 1000){
+        sessionStorage.setItem('ig_trends_last_autoscrape', Date.now().toString());
+        fetch('/insta/scrape_all', {method:'POST'})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if(d && d.ok){
+              if(typeof showToast === 'function') showToast('🔄 Mise a jour auto : ' + (d.count||'?') + ' comptes (en bg, refresh dans ~1 min)', 'info');
+            }
+          }).catch(function(){});
+      }
+    }catch(e){}
+  }
 }
 
 // === Add to Veille (bookmark) ===
