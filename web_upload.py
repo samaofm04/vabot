@@ -1004,7 +1004,16 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    if(typeof showToast === 'function') showToast('Lecture impossible — ouvre sur Instagram', 'error');
+    // Fetch direct pour recuperer le vrai message d'erreur du backend
+    fetch(proxyUrl).then(function(r){
+      if(r.ok) return null; // bizarre, video error mais HTTP OK
+      return r.text();
+    }).then(function(body){
+      var msg = body ? (body.length > 250 ? body.substring(0, 250) + '…' : body) : 'erreur inconnue';
+      if(typeof showToast === 'function') showToast('Proxy : ' + msg, 'error');
+    }).catch(function(){
+      if(typeof showToast === 'function') showToast('Lecture impossible (network) — ouvre sur Instagram', 'error');
+    });
     igStopInline(media);
   }, {once:true});
   v.src = proxyUrl;
