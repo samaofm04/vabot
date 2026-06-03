@@ -19003,6 +19003,32 @@ def create_app():
             "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
         })
 
+    @app.route("/insta/debug_rapidapi", methods=["GET"])
+    def insta_debug_rapidapi():
+        """Affiche la reponse RapidAPI brute pour debug d'un reel donne.
+        Query : ?owner=username&shortcode=SHORTCODE
+        Renvoie le reel matched avec TOUTES les keys/values en JSON."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        owner = (request.args.get("owner") or "").strip()
+        shortcode = (request.args.get("shortcode") or "").strip()
+        if not (owner and shortcode):
+            return jsonify({"ok": False, "error": "owner + shortcode requis"})
+        try:
+            from insta_scraper import scrape_profile
+            result = scrape_profile(owner, limit=500)
+            if "error" in result:
+                return jsonify({"ok": False, "error": result["error"]})
+            for reel in result.get("reels", []):
+                if reel.get("shortcode") == shortcode:
+                    return jsonify({"ok": True, "reel": reel,
+                                    "nb_reels_total": len(result.get("reels", []))})
+            return jsonify({"ok": False, "error": f"shortcode pas trouve parmi {len(result.get('reels', []))}"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
     @app.route("/insta/proxy_video", methods=["GET"])
     def insta_proxy_video():
         """Proxy SIMPLE : utilise UNIQUEMENT RapidAPI pour recup le video_url
@@ -19120,11 +19146,13 @@ def create_app():
                 if reel.get("shortcode") == shortcode:
                     video_url = (reel.get("video_url") or "").strip()
                     if not video_url:
-                        return ("Reel sans video_url (probable image carousel)", 404)
+                        # Diagnostic detaille : montre les keys disponibles
+                        keys = list(reel.keys())[:20]
+                        is_v = reel.get("is_video")
+                        return (f"reel trouve MAIS pas de video_url. is_video={is_v}, keys={keys}", 404)
                     cache[post_url] = {"ts": now, "video_url": video_url}
                     res = try_stream(video_url)
                     if res is not None:
-                        # DL sur disque en background -> future plays instantanes
                         if shortcode:
                             import threading as _th
                             _th.Thread(target=_download_reel_video,
