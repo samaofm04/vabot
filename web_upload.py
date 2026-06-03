@@ -942,17 +942,12 @@ window.igPlayInline = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
-  // Si cette video est DEJA en lecture -> toggle pause/play
+  // Si cette video est DEJA en lecture, on laisse les controles natifs
+  // HTML5 gerer le pause/play (l'user a clique sur le video element qui a
+  // ses propres controls). Notre logique de toggle creait un conflit qui
+  // re-bascule l'etat aussitot.
   if(media.classList.contains('reel-playing')){
-    var existingV = media.querySelector('.reel-video');
-    if(existingV && existingV.src){
-      if(existingV.paused){
-        existingV.play().catch(function(){});
-      } else {
-        existingV.pause();
-      }
-      return;
-    }
+    return; // native controls handle
   }
   // Pause tous les autres reels en cours de lecture
   document.querySelectorAll('.reel-media.reel-playing').forEach(function(otherMedia){
