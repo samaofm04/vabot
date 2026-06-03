@@ -1548,18 +1548,18 @@ function showTab(group,name,title,subtitle){
       window.history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
     }
   }catch(e){}
-  // Auto-refresh Instagram Trends : lance un scrape de tous les comptes en bg
-  // a chaque arrivee sur la page (max 1x toutes les 5 min pour pas spammer)
+  // Auto-refresh Instagram Trends : 1x par heure max (sinon IG rate-limit)
+  // Persiste en localStorage (pas session) pour debounce entre sessions browser.
   if(name === 'igtrends'){
     try{
-      var last = parseInt(sessionStorage.getItem('ig_trends_last_autoscrape') || '0');
-      if(Date.now() - last > 5 * 60 * 1000){
-        sessionStorage.setItem('ig_trends_last_autoscrape', Date.now().toString());
+      var last = parseInt(localStorage.getItem('ig_trends_last_autoscrape') || '0');
+      if(Date.now() - last > 60 * 60 * 1000){
+        localStorage.setItem('ig_trends_last_autoscrape', Date.now().toString());
         fetch('/insta/scrape_all', {method:'POST'})
           .then(function(r){ return r.json(); })
           .then(function(d){
             if(d && d.ok){
-              if(typeof showToast === 'function') showToast('🔄 Mise a jour auto : ' + (d.count||'?') + ' comptes (en bg, refresh dans ~1 min)', 'info');
+              if(typeof showToast === 'function') showToast('🔄 Maj auto : ' + (d.count||'?') + ' comptes (~8s chacun, ' + Math.ceil((d.count||1)*8/60) + ' min)', 'info');
             }
           }).catch(function(){});
       }
@@ -18902,12 +18902,17 @@ def create_app():
         if not wl:
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
+        import time as _t
         def _bg_scrape_all():
-            for u in wl:
+            for i, u in enumerate(wl):
                 try:
                     scrape_profile(u, limit=50)
                 except Exception:
                     pass
+                # Delay 8s entre chaque pour eviter le rate-limit Instagram
+                # (sans delay -> "Please wait a few minutes" 401 apres ~5 comptes)
+                if i < len(wl) - 1:
+                    _t.sleep(8)
         threading.Thread(target=_bg_scrape_all, daemon=True).start()
         return jsonify({
             "ok": True, "count": len(wl), "scrape_started": True,
