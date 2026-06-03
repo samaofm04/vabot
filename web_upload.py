@@ -965,6 +965,8 @@ window.igPlayInline = function(media){
     }
     igStopInline(otherMedia);
   });
+  // Auto-fetch caption IG si manquante (parallele au load video)
+  igAutoFetchCaption(card);
   // Pause tous les autres reels en cours
   document.querySelectorAll('.reel-card.reel-playing').forEach(function(c){
     if(c !== card) igStopInline(c.querySelector('.reel-media'));
@@ -1860,6 +1862,34 @@ window.updateVeilleBadge = function(total){
   } else {
     badge.style.display = 'none';
   }
+};
+// Fetch automatique de la caption Instagram pour une card
+window.igAutoFetchCaption = function(card){
+  if(!card) return;
+  if(card.getAttribute('data-caption-fetched')) return;
+  var capDiv = card.querySelector('.reel-caption-area');
+  if(!capDiv) return;
+  var existing = (capDiv.textContent || '').trim();
+  // Skip si caption deja presente et pas "Pas de caption"
+  if(existing && existing.indexOf('Pas de caption') < 0) return;
+  var url = card.getAttribute('data-url') || '';
+  if(!url) return;
+  card.setAttribute('data-caption-fetched', '1');
+  fetch('/insta/fetch_caption?url=' + encodeURIComponent(url))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok && d.caption){
+        capDiv.textContent = d.caption;
+        // Update aussi data-caption pour eviter re-fetch
+        card.setAttribute('data-caption', d.caption);
+        // Si le panel expand est ouvert, recalcule sa hauteur
+        var panel = card.querySelector('.reel-expand');
+        if(panel && panel.classList.contains('open')){
+          var inner = panel.querySelector('.reel-expand-inner');
+          if(inner) panel.style.maxHeight = inner.scrollHeight + 'px';
+        }
+      }
+    }).catch(function(){});
 };
 // Toggle Veille : add si pas dedans, remove si deja dedans
 window.addToVeille = async function(btn, payload){
