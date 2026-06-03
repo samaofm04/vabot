@@ -62,11 +62,10 @@ _RANDOM_DOUBLE_LETTERS = ["ee", "oo", "ii", "aa", "uu"]
 
 
 def generate_username_candidates(base: str, count: int = 20) -> list:
-    """Genere des variations de pseudos a partir d'une base (ex: 'amelia').
-    Tous lettres uniquement (pas de chiffres, points, tirets) selon la regle
-    du bot. Retourne une liste de candidats deduplique."""
+    """Genere des variations de pseudos a partir d'une base + diminutifs.
+    Tous lettres uniquement (pas de chiffres, points, tirets)."""
     base = base.lower().strip()
-    base = "".join(c for c in base if c.isalpha())  # vire chiffres/points
+    base = "".join(c for c in base if c.isalpha())
     if not base:
         return []
     seen = set()
@@ -74,26 +73,31 @@ def generate_username_candidates(base: str, count: int = 20) -> list:
     def add(u):
         u = u.lower()
         if u and 4 <= len(u) <= 30 and u not in seen and u.replace("_", "").isalpha():
-            # Allow underscores mais pas chiffres
             seen.add(u)
             out.append(u)
-    # Variations directes
-    add(base)  # juste la base
-    for s in _SUFFIXES:
-        add(base + s)
-        add(base + "_" + s)
-    for p in _PREFIXES:
-        add(p + base)
-        add(p + "_" + base)
-    for db in _RANDOM_DOUBLE_LETTERS:
-        add(base + db)
-    for lb in _LETTERS_BLOCKS:
-        add(base + lb)
-    # Combinaisons : prefix + base + suffix
-    for p in _PREFIXES[:8]:
-        for s in _SUFFIXES[:8]:
-            add(p + base + s)
-    # Random shuffle pour varier l'ordre
+    # Bases a considerer : nom complet + diminutifs (ame, mel, lia pour amelia)
+    bases = [base] + _get_diminutives(base)
+    bases = list(dict.fromkeys(bases))  # dedupe ordered
+    # Variations pour chaque base
+    for b in bases:
+        add(b)  # juste la base/diminutif
+        # Suffixes
+        for s in _SUFFIXES:
+            add(b + s)
+            add(b + "_" + s)
+        # Prefixes
+        for p in _PREFIXES:
+            add(p + b)
+            add(p + "_" + b)
+        # Doublages lettres
+        for db in _RANDOM_DOUBLE_LETTERS:
+            add(b + db)
+        for lb in _LETTERS_BLOCKS:
+            add(b + lb)
+        # Combos prefix+base+suffix (limite pour pas exploser)
+        for p in _PREFIXES[:6]:
+            for s in _SUFFIXES[:6]:
+                add(p + b + s)
     random.shuffle(out)
     return out[:count]
 
@@ -234,49 +238,82 @@ def _capitalize_smart(s: str) -> str:
     return s[0].upper() + s[1:]
 
 
-def generate_display_names(base: str, count: int = 5) -> list:
-    """Genere `count` display names varies a partir d'une base (prenom identite).
-    Mix de formats : 'Prenom Nom', 'Prenom 🌹', 'Prenom | Nom', 'Prenom Nom 💕', etc.
+def _get_diminutives(base: str) -> list:
+    """Genere des diminutifs auto a partir d'un prenom.
+    Ex: amelia -> ['ame', 'meli', 'lia', 'mel', 'amy']
+        julia  -> ['jul', 'juju', 'lia', 'jule']
+        sophia -> ['soph', 'sophie', 'sofy', 'phia']
     """
+    base = base.lower().strip()
+    if len(base) < 3:
+        return []
+    out = set()
+    # 1. 3 premieres lettres
+    out.add(base[:3])
+    # 2. 4 premieres lettres
+    if len(base) >= 4:
+        out.add(base[:4])
+    # 3. 3 dernieres lettres
+    out.add(base[-3:])
+    # 4. lettres milieu (chars 1-4)
+    if len(base) >= 5:
+        out.add(base[1:4])
+    # 5. forme avec doublage premiere syllabe (juju, mimi, lolo, etc.)
+    if len(base) >= 2:
+        out.add(base[:2] + base[:2])
+    # 6. diminutifs FR communs hardcoded pour certains prenoms
+    known_dim = {
+        "amelia": ["ame", "mel", "lia", "amy", "melie"],
+        "julia": ["jul", "juju", "lia", "jules"],
+        "sophia": ["soph", "sofy", "phia", "sophie"],
+        "emma": ["em", "emmy", "emmi"],
+        "lola": ["lo", "lolo"],
+        "sarah": ["sara", "sass", "sasa"],
+        "jessy": ["jess", "jessi"],
+        "chloe": ["clo", "chlo", "chloe"],
+        "lea": ["leya", "leaa"],
+        "ines": ["ine", "nes"],
+        "manon": ["mano", "manou"],
+        "lucie": ["lulu", "luce", "lucy"],
+        "camille": ["cam", "cami", "milie"],
+        "marie": ["mary", "mariee"],
+    }
+    if base in known_dim:
+        out.update(known_dim[base])
+    # Filter : 2-7 chars, alpha only
+    return [d for d in out if 2 <= len(d) <= 7 and d.isalpha()]
+
+
+def generate_display_names(base: str, count: int = 5) -> list:
+    """Genere `count` display names varies. Focus sur 'Prenom Nom' avec
+    diminutifs + parfois emojis discrets."""
     first = _capitalize_smart(base)
     if not first:
         return []
+    # Cree aussi des variants avec diminutifs (Amy Rose, Mel Stone, etc.)
+    diminutives = _get_diminutives(base)
+    first_variants = [first] + [_capitalize_smart(d) for d in diminutives]
     out = set()
     attempts = 0
-    while len(out) < count and attempts < 50:
+    while len(out) < count and attempts < 60:
         attempts += 1
-        # Choisit le pattern
-        pattern = random.choice([
-            "first_only",       # Amélia
-            "first_emoji",      # Amélia 🌹
-            "first_last",       # Amélia Martin
-            "first_last_emoji", # Amélia Rose 💕
-            "first_sep_last",   # Amélia | Rose
-            "first_double_emoji",  # Amélia 🌹✨
-        ])
-        if pattern == "first_only":
-            name = first
-        elif pattern == "first_emoji":
-            emoji = random.choice([e for e in _NAME_EMOJIS if e])
-            name = f"{first} {emoji}"
-        elif pattern == "first_last":
-            last = random.choice(_LAST_NAMES)
-            name = f"{first} {last}"
+        # Choisit le prenom (de base ou diminutif)
+        fv = random.choice(first_variants)
+        last = random.choice(_LAST_NAMES)
+        # Patterns (focus sur Prenom Nom)
+        pattern = random.choices(
+            ["first_last", "first_last", "first_last",  # 3x pour favoriser ce format
+             "first_last_emoji", "first_only_emoji"],
+            weights=[3, 3, 3, 1, 0.5],
+        )[0]
+        if pattern == "first_last":
+            name = f"{fv} {last}"
         elif pattern == "first_last_emoji":
-            last = random.choice(_LAST_NAMES)
-            emoji = random.choice(_NAME_EMOJIS)
-            name = f"{first} {last}" + (f" {emoji}" if emoji else "")
-        elif pattern == "first_sep_last":
-            last = random.choice(_LAST_NAMES)
-            sep = random.choice(_SEPARATORS)
-            name = f"{first}{sep}{last}"
-        elif pattern == "first_double_emoji":
-            e1 = random.choice([e for e in _NAME_EMOJIS if e])
-            e2 = random.choice([e for e in _NAME_EMOJIS if e])
-            if e1 != e2:
-                name = f"{first} {e1}{e2}"
-            else:
-                name = f"{first} {e1}"
+            emoji = random.choice([e for e in _NAME_EMOJIS if e])
+            name = f"{fv} {last} {emoji}"
+        else:  # first_only_emoji
+            emoji = random.choice([e for e in _NAME_EMOJIS if e])
+            name = f"{fv} {emoji}"
         out.add(name.strip())
     return list(out)[:count]
 
