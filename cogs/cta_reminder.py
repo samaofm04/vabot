@@ -371,14 +371,42 @@ class AccountTrackingView(discord.ui.View):
             accounts = state.get(today, {}).get(str(interaction.user.id), {}).get("accounts", {})
             done_count = len(accounts)
             try:
-                # Si tous les 3 comptes sont reportes -> message complete
+                # Si tous les 3 comptes sont reportes -> message complete + plan d'action
                 if done_count >= NB_COMPTES:
                     actifs = sum(1 for v in accounts.values() if v == "actif")
                     inactifs = sum(1 for v in accounts.values() if v == "inactif")
-                    summary = (
-                        f"\n\n✅ **Suivi terminé !** Merci.\n"
-                        f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)"
-                    )
+                    if inactifs == 0:
+                        summary = (
+                            f"\n\n✅ **Suivi terminé !** Tous tes {NB_COMPTES} comptes sont **actifs** 🟢\n"
+                            f"📊 Bilan : {actifs} actif(s)\n"
+                            f"Continue ton bon travail ! 💪"
+                        )
+                    elif inactifs == 1:
+                        summary = (
+                            f"\n\n⚠️ **Suivi terminé** — 1 compte inactif détecté 🔴\n"
+                            f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)\n\n"
+                            f"📋 **Plan d'action — dans 24h** :\n"
+                            f"• Crée un **nouveau mail**\n"
+                            f"• Crée un **nouveau compte Instagram**\n"
+                            f"• Reprends le **warmup** depuis le début"
+                        )
+                    elif inactifs == 2:
+                        summary = (
+                            f"\n\n⚠️ **Suivi terminé** — 2 comptes inactifs détectés 🔴🔴\n"
+                            f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)\n\n"
+                            f"📋 **Plan d'action staggered** :\n"
+                            f"• **Dans 24h** : crée 1 compte (mail + Instagram + warmup)\n"
+                            f"• **Dans 72h** : crée le 2ème compte (mail + Instagram + warmup)"
+                        )
+                    else:  # 3+
+                        summary = (
+                            f"\n\n🚨 **Suivi terminé** — TOUS tes comptes sont inactifs 🔴🔴🔴\n"
+                            f"📊 Bilan : 0 actif · {inactifs} inactifs\n\n"
+                            f"📋 **Plan d'action staggered** (jamais tout d'un coup) :\n"
+                            f"• **Dans 24h** : crée le **1er compte** (mail + Instagram + warmup)\n"
+                            f"• **Dans 72h** : crée le **2ème compte**\n"
+                            f"• **Dans 7 jours** : crée le **3ème compte**"
+                        )
                     await interaction.response.edit_message(
                         content=interaction.message.content + summary,
                         view=self,
