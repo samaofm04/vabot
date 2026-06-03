@@ -1029,32 +1029,43 @@ window.igPlayInline = function(media){
     v.setAttribute('controls', 'controls');
   });
 };
-// Bascule vers l'embed officiel Instagram dans la card (toujours marche)
+// Bascule vers l'embed officiel Instagram dans la card (toujours marche).
+// L'iframe est CROPPEE en CSS : on cache le header IG (username + Voir le
+// profil + Audio d'origine ~70px) et le footer (likes + Voir plus +
+// description ~190px) pour ne montrer QUE la zone video.
 window.igEmbedInCard = function(card){
   if(!card) return;
   var media = card.querySelector('.reel-media');
   if(!media) return;
   var url = card.getAttribute('data-url') || '';
   if(!url) return;
-  // Cherche le shortcode dans l'URL
   var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
   if(!m) return;
   var shortcode = m[1];
-  // Vire les overlays existants
-  var oldErr = media.querySelector('.reel-error-overlay'); if(oldErr) oldErr.remove();
-  var oldLoad = media.querySelector('.reel-loading'); if(oldLoad) oldLoad.remove();
-  var oldEmbed = media.querySelector('.reel-embed-wrap'); if(oldEmbed) oldEmbed.remove();
+  // Vire overlays existants
+  ['reel-error-overlay','reel-loading','reel-embed-wrap'].forEach(function(cls){
+    var el = media.querySelector('.' + cls);
+    if(el) el.remove();
+  });
   var img = media.querySelector('.reel-thumb'); if(img) img.style.display = 'none';
   var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
   var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
-  // Cree iframe Instagram embed
+  // Wrap : crop top/bottom de l'iframe pour ne garder que la video.
+  // bottom:50px laisse de la place pour le bouton chevron + username + trending
+  // qui restent au z-index superieur visibles meme avec l'embed actif.
   var wrap = document.createElement('div');
   wrap.className = 'reel-embed-wrap';
-  wrap.style.cssText = 'position:absolute;inset:0;background:#000;z-index:6;overflow:hidden';
+  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:50px;'
+    + 'background:#000;z-index:1;overflow:hidden';
   var iframe = document.createElement('iframe');
-  iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/captioned/';
-  iframe.style.cssText = 'width:100%;height:100%;border:0;background:#000';
-  iframe.setAttribute('allow', 'autoplay; encrypted-media');
+  iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/';
+  // Offsets pour cacher header + footer IG :
+  // top: -68px decale le header en haut
+  // height: calc(100% + 250px) ajoute de la hauteur pour que le video occupe
+  //   tout le viewport visible, footer (~180px) tombe en dessous (hidden)
+  iframe.style.cssText = 'position:absolute;left:0;top:-68px;width:100%;'
+    + 'height:calc(100% + 250px);border:0;background:#000';
+  iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
   iframe.setAttribute('allowfullscreen', '');
   iframe.setAttribute('scrolling', 'no');
   wrap.appendChild(iframe);
