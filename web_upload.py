@@ -936,8 +936,8 @@ window.igHoverStop = function(media){
   v.style.opacity = '0';
 };
 // Lit la video inline avec player natif <video> via proxy backend.
-// Si echec (URL CDN morte ou IG bloque) -> fallback automatique vers
-// l'embed IG officiel (iframe) qui marche toujours.
+// Si echec -> overlay erreur avec bouton "Ouvrir sur Instagram".
+// PAS d'embed iframe IG (chrome IG = pas voulu par user).
 window.igPlayInline = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
@@ -1009,19 +1009,20 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] video proxy failed, fallback to IG embed iframe');
-    // Fallback automatique : embed iframe IG officiel (marche toujours)
+    // Fetch le proxy pour avoir le vrai message d'erreur (en console)
+    fetch(proxyUrl).then(function(r){ return r.text().then(function(b){ return {s:r.status, b:b}; }); })
+      .then(function(res){ console.log('[igPlayInline] proxy:', res); });
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardError(card, 'Lecture impossible', 'URL CDN Instagram expirée. Click pour ouvrir sur Instagram.');
   }, {once:true});
   v.src = proxyUrl;
   var fallbackTimer = setTimeout(function(){
     if(!v.readyState || v.readyState < 3){
-      console.log('[igPlayInline] native player timeout, fallback to embed');
+      console.log('[igPlayInline] native player timeout');
       igStopInline(media);
-      igEmbedInCard(card);
+      igShowCardError(card, 'Lecture impossible', 'Délai dépassé. Click pour ouvrir sur Instagram.');
     }
-  }, 4000);
+  }, 6000);
   v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
   v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
   var p = v.play();
@@ -6972,15 +6973,14 @@ def _render_insta_trends_grid_html() -> str:
     <!-- Bottom stack DANS la card : expand au-dessus, trending + username en bas (toujours visibles) -->
     <!-- z-index:10 = au-dessus de l'iframe embed (z-1) pour rester cliquable + visible -->
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
-      <!-- Expand panel : slide UP depuis le bas, caption COMPLETE + sound -->
-      <!-- Background opaque pour rester lisible meme avec iframe embed actif derriere -->
-      <div class="reel-expand" style="max-height:0;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45;background:rgba(0,0,0,.92);border-radius:8px">
-        <div class="reel-expand-inner" style="padding:10px 12px 8px">
-          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:140px;overflow-y:auto;margin-bottom:8px;font-weight:500;font-size:12.5px">{caption_html}</div>
-          <div style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:11.5px">
-            <span style="color:#3b82f6">🎵</span><span style="color:#aaa">Sound:</span>
-            <span style="color:#fff;font-weight:600">Original audio</span>
-            <span style="margin-left:auto;color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
+      <!-- Description panel : OUVERT PAR DEFAUT (caption + sound toujours visibles) -->
+      <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
+        <div class="reel-expand-inner" style="padding-bottom:6px">
+          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9)">{caption_html}</div>
+          <div style="display:flex;align-items:center;gap:5px;color:#bbb;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,.9)">
+            <span style="color:#3b82f6">🎵</span>
+            <span style="color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Original audio</span>
+            <span style="color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
           </div>
         </div>
       </div>
