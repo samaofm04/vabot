@@ -11564,8 +11564,46 @@ def _render_veille_feed_html() -> str:
     else:
         bulk_bar = ""
 
-    sections = [bulk_bar]
-    for day in sorted(by_day.keys(), reverse=True):
+    # Liste des dates disponibles pour le selecteur
+    all_days_sorted = sorted(by_day.keys(), reverse=True)
+    date_options = []
+    for d_iso in all_days_sorted:
+        try:
+            d = _dt_v.date.fromisoformat(d_iso)
+            today = _dt_v.date.today()
+            short = f"{d.day:02d}/{d.month:02d}"
+            if d == today:
+                lbl = f"{short} — Aujourd'hui"
+            elif d == today - _dt_v.timedelta(days=1):
+                lbl = f"{short} — Hier"
+            else:
+                lbl = f"{short}/{d.year}"
+            cnt = len(by_day[d_iso])
+            date_options.append((d_iso, f"{lbl} ({cnt} reels)"))
+        except Exception:
+            date_options.append((d_iso, d_iso))
+    # Date picker / quick-select au-dessus
+    if date_options:
+        opts_html = "".join(
+            f"<option value='{d_iso}'>{lbl}</option>"
+            for d_iso, lbl in date_options
+        )
+        date_picker_html = (
+            "<div style='display:flex;align-items:center;gap:12px;padding:14px 18px;margin-bottom:18px;background:#101010;border:1px solid #2a2a2a;border-radius:12px;flex-wrap:wrap'>"
+            "<div style='color:#aaa;font-size:13px;font-weight:600'>🔎 Aller à / Sélectionner :</div>"
+            "<select id='veille-date-picker' onchange='veilleJumpToDate(this.value)' "
+            "style='background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-width:240px'>"
+            f"<option value=''>— Choisir une date —</option>{opts_html}"
+            "</select>"
+            "<button onclick=\"var v=document.getElementById('veille-date-picker').value;if(v)selectDayVeille(v)\" "
+            "style='background:#3b82f6;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700'>"
+            "☑ Sélectionner tous les reels de cette date</button>"
+            "</div>"
+        )
+    else:
+        date_picker_html = ""
+    sections = [bulk_bar, date_picker_html]
+    for day in all_days_sorted:
         reels = by_day[day]
         # Format date : "03/06" (DD/MM) + Aujourd'hui/Hier comme tooltip
         try:
@@ -11590,11 +11628,11 @@ def _render_veille_feed_html() -> str:
             f"<div><h3 style='margin:0;font-size:17px;color:#fff;letter-spacing:-.01em'>{day_label}</h3>"
             f"<div style='font-size:12px;color:#666;margin-top:2px'>{len(reels)} reels · {unsent_count} non envoyés</div></div>"
         )
-        if unsent_count > 0 and tg_configured:
+        if unsent_count > 0:
             section_html += (
                 f"<button onclick=\"selectDayVeille('{day}')\" "
                 f"style='background:transparent;color:#3b82f6;border:1px solid #3b82f6;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>"
-                f"☑ Sélectionner ce jour ({unsent_count})</button>"
+                f"☑ Tout sélectionner du {day_label.split('—')[0].replace('📅', '').strip()} ({unsent_count})</button>"
             )
         section_html += "</div>"
 
@@ -11769,6 +11807,24 @@ function veilleSelectAll(cb){
 function selectDayVeille(day){
   document.querySelectorAll('.veille-cb[data-day="' + day + '"]').forEach(c => { c.checked = true; });
   veilleOnSelect();
+  // Scroll vers la 1ere card de ce jour pour visualiser
+  var firstCb = document.querySelector('.veille-cb[data-day="' + day + '"]');
+  if(firstCb){
+    var card = firstCb.closest('.veille-card');
+    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+}
+function veilleJumpToDate(day){
+  if(!day) return;
+  var firstCb = document.querySelector('.veille-cb[data-day="' + day + '"]');
+  if(firstCb){
+    var card = firstCb.closest('.veille-card');
+    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+    return;
+  }
+  // Fallback : trouve via la card (peut etre sent, sans checkbox)
+  var card = document.querySelector('.veille-card[data-day="' + day + '"]');
+  if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
 }
 async function sendSelectedVeille(){
   const cbs = document.querySelectorAll('.veille-cb:checked');
