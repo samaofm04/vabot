@@ -18922,11 +18922,23 @@ def create_app():
         shortcode = m.group(1) if m else ''
         if owner and shortcode:
             try:
-                from insta_scraper import scrape_profile
-                # scrape_profile utilise RapidAPI en PRIORITE -> fresh URLs
-                result = scrape_profile(owner, limit=50)
+                from insta_scraper import scrape_profile, get_cached
+                # ETAPE 3a : check le cache disque rapidement
+                cached_data = get_cached(owner)
+                if cached_data:
+                    for reel in cached_data.get("reels", []):
+                        if reel.get("shortcode") == shortcode:
+                            video_url = (reel.get("video_url") or "").strip()
+                            if video_url:
+                                res = try_stream(video_url)
+                                if res is not None:
+                                    if post_url:
+                                        cache[post_url] = {"ts": now, "video_url": video_url}
+                                    return res
+                            break  # trouve le reel mais URL morte -> rescrape
+                # ETAPE 3b : fresh scrape RapidAPI avec limit gonfle a 100
+                result = scrape_profile(owner, limit=100)
                 if "error" not in result:
-                    # Cherche le shortcode dans les reels scrapes
                     for reel in result.get("reels", []):
                         if reel.get("shortcode") == shortcode:
                             video_url = (reel.get("video_url") or "").strip()
@@ -18938,7 +18950,7 @@ def create_app():
                                     return res
                                 return ("URL fresh RapidAPI mais CDN refuse stream", 502)
                             return ("Reel sans video_url (peut-etre image ?)", 404)
-                    return (f"shortcode {shortcode} introuvable dans les 50 derniers reels de @{owner}", 404)
+                    return (f"shortcode {shortcode} introuvable dans les 100 derniers reels de @{owner}", 404)
                 else:
                     return (f"RapidAPI scrape failed: {result['error'][:200]}", 502)
             except Exception as e:
