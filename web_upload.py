@@ -981,23 +981,47 @@ window.igPlayInline = function(media){
   }
   // Sinon on tente d'abord avec l'URL cache
   if(v.src !== videoUrl) v.src = videoUrl;
+  // Ajoute aussi un loader visible des le 1er essai (au cas ou ca stall)
+  var initLoader = media.querySelector('.reel-loading');
+  if(!initLoader){
+    initLoader = document.createElement('div');
+    initLoader.className = 'reel-loading';
+    initLoader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none';
+    initLoader.innerHTML = '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite"></div>';
+    media.appendChild(initLoader);
+  }
+  // Reveal sur loadeddata/playing -> remove loader
+  function clearInitLoader(){
+    var l = media.querySelector('.reel-loading');
+    if(l) l.remove();
+  }
+  v.addEventListener('loadeddata', clearInitLoader, {once:true});
+  v.addEventListener('playing', clearInitLoader, {once:true});
   var attempted = false;
+  function triggerRefresh(){
+    if(attempted) return;
+    attempted = true;
+    clearInitLoader();
+    igRefreshVideoUrl(card, v, url);
+  }
   function tryPlay(){
     var p = v.play();
     if(p && p.catch){
       p.catch(function(err){
-        if(attempted) return;
-        attempted = true;
-        igRefreshVideoUrl(card, v, url);
+        triggerRefresh();
       });
     }
   }
-  function onError(){
+  v.addEventListener('error', triggerRefresh, {once:true});
+  v.addEventListener('stalled', triggerRefresh, {once:true});
+  // Timeout de detection : si apres 4s le video n'a toujours pas
+  // HAVE_FUTURE_DATA (3), c'est que l'URL est dead silencieusement -> refresh
+  setTimeout(function(){
     if(attempted) return;
-    attempted = true;
-    igRefreshVideoUrl(card, v, url);
-  }
-  v.addEventListener('error', onError, {once:true});
+    if(!v.readyState || v.readyState < 3){
+      triggerRefresh();
+    }
+  }, 4000);
   tryPlay();
 };
 window.igStopInline = function(media){
