@@ -1,9 +1,14 @@
-"""cta_reminder.py - Rappels quotidiens : Reel, Story, Story CTA.
+"""cta_reminder.py - Rappels quotidiens + suivi comptes hebdomadaire.
 
-3 types de taches avec des horaires propres :
+3 types de taches journalieres :
 - REEL  : 16h 17h 18h 19h 20h 21h (1 reel par jour)
 - STORY : 10h 15h 19h              (1 story classique par jour)
 - CTA   : 20h 21h 22h               (1 story CTA par jour)
+
+Suivi comptes hebdomadaire (Lundi/Mercredi/Dimanche a 12h) :
+- 1 message par VA avec 3 lignes (1 par compte)
+- Chaque ligne a 2 boutons : 🟢 Actif / 🔴 Inactif
+- Une fois clique : ligne disabled + status sauvegarde
 
 Pour chaque VA dans users.json, le bot envoie un rappel a chaque heure
 prevue UNIQUEMENT si la tache n'a pas deja ete marquee "done" pour
@@ -39,6 +44,12 @@ log = logging.getLogger("vabot.cta_reminder")
 DATA_DIR = Path("data")
 USERS_FILE = DATA_DIR / "users.json"
 STATE_FILE = DATA_DIR / "cta_reminder_state.json"
+TRACKING_STATE_FILE = DATA_DIR / "account_tracking_state.json"
+
+# Suivi comptes : Lundi=0, Mercredi=2, Dimanche=6 - heure 12h
+TRACKING_DAYS = [0, 2, 6]
+TRACKING_HOUR = 12
+NB_COMPTES = 3  # 3 comptes par VA
 
 # Config par type de tache
 TASK_CONFIG = {
@@ -253,6 +264,132 @@ class TaskDoneView(discord.ui.View):
                 pass
 
 
+# =============================================================
+# SUIVI COMPTES INSTAGRAM (Lundi/Mercredi/Dimanche)
+# =============================================================
+
+def _load_tracking_state() -> dict:
+    if not TRACKING_STATE_FILE.exists():
+        return {}
+    try:
+        return json.loads(TRACKING_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_tracking_state(state: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TRACKING_STATE_FILE.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def tracking_was_sent_today(uid: str) -> bool:
+    state = _load_tracking_state()
+    today = _today_key()
+    return state.get(today, {}).get(str(uid), {}).get("sent", False)
+
+
+def tracking_mark_sent(uid: str):
+    state = _load_tracking_state()
+    today = _today_key()
+    if today not in state:
+        state[today] = {}
+    if str(uid) not in state[today]:
+        state[today][str(uid)] = {"accounts": {}}
+    state[today][str(uid)]["sent"] = True
+    _save_tracking_state(state)
+
+
+def tracking_set_account_status(uid: str, account_idx: int, status: str):
+    """status = 'actif' ou 'inactif'."""
+    state = _load_tracking_state()
+    today = _today_key()
+    if today not in state:
+        state[today] = {}
+    if str(uid) not in state[today]:
+        state[today][str(uid)] = {"accounts": {}}
+    if "accounts" not in state[today][str(uid)]:
+        state[today][str(uid)]["accounts"] = {}
+    state[today][str(uid)]["accounts"][str(account_idx)] = status
+    _save_tracking_state(state)
+
+
+def tracking_get_account_status(uid: str, account_idx: int) -> str | None:
+    state = _load_tracking_state()
+    today = _today_key()
+    return state.get(today, {}).get(str(uid), {}).get("accounts", {}).get(str(account_idx))
+
+
+class AccountTrackingView(discord.ui.View):
+    """View avec 3 lignes de 2 boutons (🟢/🔴) pour chaque compte."""
+
+    def __init__(self, target_user_id: int = 0):
+        super().__init__(timeout=None)
+        self.target_user_id = target_user_id
+        # Cree 6 boutons : 3 comptes x 2 statuts
+        for i in range(1, NB_COMPTES + 1):
+            # Bouton vert
+            btn_green = discord.ui.Button(
+                label=f"Compte {i} 🟢 Actif",
+                style=discord.ButtonStyle.success,
+                custom_id=f"track_c{i}_actif",
+                row=i - 1,  # ligne i-1
+            )
+            btn_green.callback = self._make_callback(i, "actif")
+            self.add_item(btn_green)
+            # Bouton rouge
+            btn_red = discord.ui.Button(
+                label=f"Compte {i} 🔴 Inactif",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"track_c{i}_inactif",
+                row=i - 1,
+            )
+            btn_red.callback = self._make_callback(i, "inactif")
+            self.add_item(btn_red)
+
+    def _make_callback(self, account_idx: int, status: str):
+        async def callback(interaction: discord.Interaction):
+            if self.target_user_id and interaction.user.id != self.target_user_id:
+                await interaction.response.send_message(
+                    "❌ Ce suivi est reserve a la personne taggee.", ephemeral=True
+                )
+                return
+            tracking_set_account_status(str(interaction.user.id), account_idx, status)
+            # Update les boutons : disable la ligne du compte cliqué + add ✓
+            # Reconstruire la view actuelle en disable les 2 boutons de cette row
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.row == account_idx - 1:
+                    item.disabled = True
+                    # Highlight celui clique
+                    if item.custom_id == f"track_c{account_idx}_{status}":
+                        # Garde son style mais mark le label
+                        item.label = item.label + " ✓"
+            # Recupere le state pour summary
+            state = _load_tracking_state()
+            today = _today_key()
+            accounts = state.get(today, {}).get(str(interaction.user.id), {}).get("accounts", {})
+            done_count = len(accounts)
+            try:
+                # Si tous les 3 comptes sont reportes -> message complete
+                if done_count >= NB_COMPTES:
+                    actifs = sum(1 for v in accounts.values() if v == "actif")
+                    inactifs = sum(1 for v in accounts.values() if v == "inactif")
+                    summary = (
+                        f"\n\n✅ **Suivi terminé !** Merci.\n"
+                        f"📊 Bilan : {actifs} actif(s) · {inactifs} inactif(s)"
+                    )
+                    await interaction.response.edit_message(
+                        content=interaction.message.content + summary,
+                        view=self,
+                    )
+                else:
+                    await interaction.response.edit_message(view=self)
+            except Exception as e:
+                log.warning(f"[tracking] update fail : {e}")
+        return callback
+
+
 class CTAReminderCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -265,6 +402,8 @@ class CTAReminderCog(commands.Cog):
         # Enregistre les 3 views persistantes (une par task_type)
         for tt in TASK_CONFIG:
             self.bot.add_view(TaskDoneView(task_type=tt, target_user_id=0))
+        # View pour le suivi comptes
+        self.bot.add_view(AccountTrackingView(target_user_id=0))
 
     @tasks.loop(minutes=1)
     async def check_loop(self):
@@ -318,6 +457,43 @@ class CTAReminderCog(commands.Cog):
                     mark_sent(uid_str, task_type, hour)
                 except Exception as e:
                     log.warning(f"[cta_reminder] Send fail {task_type} pour {uid_str}: {e}")
+        # Suivi comptes Lundi/Mercredi/Dimanche a 12h
+        weekday = now.weekday()  # 0=Lundi, 6=Dimanche
+        if weekday in TRACKING_DAYS and hour == TRACKING_HOUR:
+            day_label_fr = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi",
+                            "Samedi", "Dimanche"][weekday]
+            date_str = now.strftime("%d/%m/%Y")
+            for uid_str, udata in users.items():
+                if not isinstance(udata, dict):
+                    continue
+                channel_id = udata.get("channel_id")
+                if not channel_id:
+                    continue
+                try:
+                    uid = int(uid_str)
+                except Exception:
+                    continue
+                if tracking_was_sent_today(uid_str):
+                    continue
+                try:
+                    channel = self.bot.get_channel(int(channel_id))
+                    if channel is None:
+                        try:
+                            channel = await self.bot.fetch_channel(int(channel_id))
+                        except Exception:
+                            continue
+                    msg = (
+                        f"📊 <@{uid}> **Suivi de tes comptes — {day_label_fr} {date_str}**\n"
+                        f"\nPour chacun de tes **{NB_COMPTES} comptes**, "
+                        f"indique le statut en cliquant :\n"
+                        f"🟢 **Actif** si le compte fonctionne et tu y travailles\n"
+                        f"🔴 **Inactif** si le compte est ban, restreint, ou tu n'y travailles plus"
+                    )
+                    view = AccountTrackingView(target_user_id=uid)
+                    await channel.send(content=msg, view=view)
+                    tracking_mark_sent(uid_str)
+                except Exception as e:
+                    log.warning(f"[tracking] Send fail pour {uid_str}: {e}")
         # Cleanup une fois par jour vers 22h05
         if hour == 22 and minute >= 4:
             cleanup_old_state()
@@ -325,6 +501,23 @@ class CTAReminderCog(commands.Cog):
     @check_loop.before_loop
     async def before_check(self):
         await self.bot.wait_until_ready()
+
+    @app_commands.command(
+        name="tracking_test", description="[OWNER] Envoie le message de suivi comptes"
+    )
+    async def tracking_test(self, interaction: discord.Interaction):
+        app = await self.bot.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        msg = (
+            f"📊 <@{interaction.user.id}> **[TEST] Suivi de tes comptes**\n"
+            f"\nPour chacun de tes **{NB_COMPTES} comptes**, indique le statut :\n"
+            f"🟢 **Actif** = compte fonctionnel\n"
+            f"🔴 **Inactif** = compte ban / restreint / abandonne"
+        )
+        view = AccountTrackingView(target_user_id=interaction.user.id)
+        await interaction.response.send_message(content=msg, view=view)
 
     @app_commands.command(
         name="cta_test", description="[OWNER] Envoie un rappel test (reel/story/cta)"
