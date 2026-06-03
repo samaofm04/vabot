@@ -19284,8 +19284,10 @@ def create_app():
     @app.route("/insta/fetch_caption", methods=["GET"])
     def insta_fetch_caption():
         """Fetch la caption d'un reel IG depuis sa page publique.
+        Tente plusieurs URLs + UAs + patterns. Plus thorough.
+
         Query : ?url=<permalink>
-        Renvoie {ok, caption}."""
+        Renvoie {ok, caption} ou {ok:False, error, debug}."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -19300,50 +19302,67 @@ def create_app():
         if not m:
             return jsonify({"ok": False, "error": "shortcode introuvable dans url"})
         shortcode = m.group(1)
-        # Essai plusieurs UAs - facebookbot est le plus rich en metadata
+        # Combine plusieurs URLs + UAs
+        urls = [
+            f"https://www.instagram.com/p/{shortcode}/",
+            f"https://www.instagram.com/reel/{shortcode}/",
+            f"https://www.instagram.com/p/{shortcode}/embed/captioned/",
+            f"https://www.instagram.com/p/{shortcode}/embed/",
+        ]
         uas = [
             "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
             "Mozilla/5.0 (compatible; Twitterbot/1.0)",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-            "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         ]
-        for ua in uas:
-            try:
-                r = _rq.get(
-                    f"https://www.instagram.com/p/{shortcode}/embed/",
-                    headers={"User-Agent": ua},
-                    timeout=8,
-                )
-                if r.status_code != 200:
+        patterns = [
+            r'<meta\s+property="og:description"\s+content="([^"]+)"',
+            r'<meta\s+name="description"\s+content="([^"]+)"',
+            r'<meta\s+property="og:title"\s+content="([^"]+)"',
+            r'<meta\s+name="twitter:description"\s+content="([^"]+)"',
+            r'"caption"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"',
+            r'"caption"\s*:\s*"([^"]*?)"',
+            r'"accessibility_caption"\s*:\s*"([^"]+)"',
+            r'"edge_media_to_caption"\s*:\s*\{\s*"edges"\s*:\s*\[\s*\{\s*"node"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"',
+            r'<title>([^<]+)</title>',
+        ]
+        tried = []
+        for url_try in urls:
+            for ua in uas:
+                try:
+                    r = _rq.get(url_try, headers={
+                        "User-Agent": ua,
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+                    }, timeout=8)
+                    tried.append(f"{url_try.split('/')[-2]}/{ua[:20]}={r.status_code}")
+                    if r.status_code != 200:
+                        continue
+                    html = r.text
+                    for pat in patterns:
+                        mm = _re.search(pat, html)
+                        if mm:
+                            cap = mm.group(1)
+                            try:
+                                cap = cap.encode().decode("unicode_escape")
+                            except Exception:
+                                pass
+                            cap = _unescape(cap)
+                            # Format og:description "USER on Instagram: 'caption text'"
+                            quote_match = _re.search(r'[":] [\"“]([^"”]+)[\"”]', cap)
+                            if quote_match and (" on Instagram" in cap or "Instagram:" in cap):
+                                cap = quote_match.group(1)
+                            # Format alternatif sans guillemets : "USER on Instagram: caption"
+                            elif " on Instagram:" in cap:
+                                cap = cap.split(" on Instagram:", 1)[1].strip().strip('"“”')
+                            cap = cap.strip()
+                            # Skip si c'est juste le titre/username sans contenu utile
+                            if cap and len(cap) > 5 and "Instagram" not in cap[:30]:
+                                return jsonify({"ok": True, "caption": cap[:1000]})
+                            # Si match trouve mais semble pollue, on garde le 1er match propre vu
+                except Exception:
                     continue
-                html = r.text
-                # Patterns pour extraire la caption
-                patterns = [
-                    r'<meta\s+property="og:description"\s+content="([^"]+)"',
-                    r'<meta\s+name="description"\s+content="([^"]+)"',
-                    r'"caption"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"',
-                    r'"caption"\s*:\s*"([^"]+)"',
-                    r'"accessibility_caption"\s*:\s*"([^"]+)"',
-                ]
-                for pat in patterns:
-                    mm = _re.search(pat, html)
-                    if mm:
-                        cap = mm.group(1)
-                        try:
-                            cap = cap.encode().decode("unicode_escape")
-                        except Exception:
-                            pass
-                        cap = _unescape(cap)
-                        # og:description format: "USER on Instagram: \"caption text\""
-                        og_match = _re.search(r'"([^"]+)"$', cap)
-                        if og_match and " on Instagram:" in cap:
-                            cap = og_match.group(1)
-                        cap = cap.strip()
-                        if cap and len(cap) > 3:
-                            return jsonify({"ok": True, "caption": cap[:800]})
-            except Exception:
-                continue
-        return jsonify({"ok": False, "error": "caption introuvable"})
+        return jsonify({"ok": False, "error": "caption introuvable", "tried": tried[:10]})
 
     @app.route("/insta/debug_rapidapi", methods=["GET"])
     def insta_debug_rapidapi():
