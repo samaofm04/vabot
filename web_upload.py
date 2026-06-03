@@ -11599,75 +11599,108 @@ def _render_veille_feed_html() -> str:
             )
         section_html += "</div>"
 
-        # Grille des reels
-        section_html += "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px'>"
+        # Grille des reels - MEME structure que Trends pour UX identique
+        section_html += "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px'>"
         for r in reels:
             sent = r.get("sent_to_telegram", False)
+            video_url = (r.get("video_url") or "").replace('"', '&quot;')
+            thumb = (r.get("thumb") or "").replace('"', '&quot;')
+            url = (r.get("url") or "").replace('"', '&quot;')
+            owner = (r.get("owner") or "").replace('"', '&quot;')
+            caption = (r.get("caption") or "").replace('"', '&quot;').replace("'", "&#39;")
+            d_views = int(r.get("views", 0) or 0)
+            d_likes = int(r.get("likes", 0) or 0)
+            d_comments = int(r.get("comments", 0) or 0)
+            rid = r.get("id", "")
+            # Caption pour panel expand
+            if r.get("caption"):
+                cap_for_panel = r["caption"].replace("<", "&lt;").replace(">", "&gt;")
+                caption_html_v = _format_caption_html(cap_for_panel)
+            else:
+                cap_for_panel = ""
+                caption_html_v = (
+                    '<span style="color:#888;font-style:italic">Pas de caption Instagram pour ce reel'
+                    '<br><a href="' + r["url"] + '" target="_blank" '
+                    'style="color:#3b82f6;text-decoration:underline;font-size:11.5px;font-style:normal">'
+                    'Voir sur Instagram &rarr;</a></span>'
+                )
+            caption_short = cap_for_panel[:120] + ("…" if len(cap_for_panel) > 120 else "")
+            # Avatar owner
+            owner_pic = r.get("owner_pp") or ""
+            avatar_v = ""
+            if owner_pic:
+                avatar_v = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+            # Ribbon sent
             ribbon = ""
             if sent:
-                ribbon = ("<div style='position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
-                          "padding:3px 8px;border-radius:6px;z-index:3;letter-spacing:.3px'>✓ ENVOYÉ</div>")
-
-            # Selecteur rond Inflow-style (top-left)
+                ribbon = ("<div style='position:absolute;top:10px;left:10px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
+                          "padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'>✓ ENVOYÉ</div>")
+            # Checkbox bulk selection
             cb_html = ""
             if not sent:
                 cb_html = (
-                    f"<label class='vl-pick' onclick='event.stopPropagation()' style='position:absolute;top:10px;left:10px;z-index:5'>"
-                    f"<input type='checkbox' class='veille-cb' data-rid='{r['id']}' data-day='{day}' onchange='veilleOnSelect()'>"
+                    f"<label class='vl-pick' onclick='event.stopPropagation()' style='position:absolute;top:10px;left:10px;z-index:6'>"
+                    f"<input type='checkbox' class='veille-cb' data-rid='{rid}' data-day='{day}' onchange='veilleOnSelect()'>"
                     f"<span class='vl-pick-circle'>"
                     f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
-                    f"</span>"
-                    f"</label>"
+                    f"</span></label>"
                 )
+            # Video element (reutilise meme structure que Trends)
+            video_html_v = (
+                f"<video class='reel-video' muted loop playsinline preload='none' "
+                f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
+            ) if video_url else ""
 
-            video_url_safe = (r.get("video_url") or "").replace('"', '&quot;')
-            thumb_safe = (r.get("thumb") or "").replace('"', '&quot;')
-            # Bouton play TOUJOURS visible (meme sans video_url cache, le proxy
-            # backend trouvera la video via RapidAPI/page scraping)
-            play_btn_html = (
-                f"<div class='veille-play-btn' onclick=\"event.stopPropagation();veillePlayToggle(this)\" "
-                f"data-video=\"{video_url_safe}\" data-thumb=\"{thumb_safe}\" "
-                f"style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
-                f"width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,.7);"
-                f"display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4;"
-                f"backdrop-filter:blur(10px);border:3px solid rgba(255,255,255,.4);"
-                f"box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .2s'>"
-                f"<svg width='36' height='36' viewBox='0 0 24 24' fill='#fff' style='margin-left:4px'><polygon points='5 3 19 12 5 21'/></svg>"
-                f"</div>"
-            )
-
-            section_html += (
-                f"<div class='veille-card' data-rid='{r['id']}' data-day='{day}' data-sent='{1 if sent else 0}' style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
-                f"<div class='veille-media' style='position:relative;width:100%;aspect-ratio:9/16;background:#000;overflow:hidden'>"
-                f"{cb_html}"
-                f"{ribbon}"
-                f"<img class='veille-thumb' src='{r.get('thumb', '')}' loading='lazy' style='width:100%;height:100%;object-fit:cover'>"
-                f"{play_btn_html}"
-                f"<div class='veille-overlay' style='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.92) 30%,rgba(0,0,0,.55) 60%,transparent);padding:10px;color:#fff;font-size:11px;z-index:3'>"
-                + (
-                    f"<div class='veille-caption' onclick='event.stopPropagation();igCopyCaption(this)' "
-                    f"title='Cliquer pour copier' "
-                    f"style='font-size:11px;color:#fff;line-height:1.3;margin-bottom:6px;max-height:38px;overflow:hidden;cursor:pointer;text-shadow:0 1px 3px rgba(0,0,0,.9)'>"
-                    f"{(r.get('caption') or '')[:140]}{'…' if len(r.get('caption') or '') > 140 else ''}"
-                    f"</div>"
-                    if r.get('caption') else ''
-                )
-                + f"<div style='display:flex;align-items:center;justify-content:space-between;gap:8px'>"
-                f"<div style='font-weight:700;font-size:11.5px'>@{r.get('owner', '?')}</div>"
-                f"<div style='display:flex;gap:8px;color:#ddd;font-size:10.5px'>"
-                f"<span>▶ {_format_count(r.get('views', 0))}</span>"
-                f"<span>♥ {_format_count(r.get('likes', 0))}</span>"
-                f"<span>💬 {_format_count(r.get('comments', 0))}</span>"
-                f"</div></div>"
-                f"</div></div>"
-                f"<div style='padding:8px 10px;display:flex;gap:6px;justify-content:space-between;border-top:1px solid #1a1a1a;background:#0a0a0a'>"
-                f"<a href='{r['url']}' target='_blank' rel='noopener' "
-                f"style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;text-decoration:none' title='Ouvrir sur Instagram'>↗ IG</a>"
-                f"<button onclick=\"removeVeilleReel('{r['id']}', this)\" "
-                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px' title='Retirer de la veille'>🗑 Retirer</button>"
-                f"</div>"
-                f"</div>"
-            )
+            # Card avec MEME structure que Trends (reel-card class) pour reutiliser tout le JS
+            section_html += f"""
+<div class="reel-card veille-card cloud-card" data-rid="{rid}" data-day="{day}" data-sent="{1 if sent else 0}"
+     data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}"
+     data-caption="{caption}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}"
+     style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+  <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
+       onclick='igPlayInline(this)'>
+    {cb_html}
+    {ribbon}
+    <img src="{r.get('thumb', '')}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
+    {video_html_v}
+    <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
+      <div style="width:80px;height:80px;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid rgba(255,255,255,.4);box-shadow:0 8px 32px rgba(0,0,0,.5)">
+        <svg viewBox="0 0 24 24" width="36" height="36" fill="#fff" style="margin-left:4px"><polygon points="5 3 19 12 5 21"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:5" onclick="event.stopPropagation()">
+      <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+      <button onclick='igCopyLink("{url}")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
+      <button onclick="removeVeilleReel('{rid}', this)" title="Retirer de la Veille" style="width:28px;height:28px;background:rgba(220,38,38,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </button>
+    </div>
+    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:1;pointer-events:none">
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(d_views)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(d_likes)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(d_comments)}</div>
+    </div>
+    <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
+      <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
+        <div class="reel-expand-inner" style="padding-bottom:6px">
+          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html_v}</div>
+        </div>
+      </div>
+      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s">
+        {avatar_v}<span style="flex:1">@{r.get('owner', '?')}</span>
+        <span style="font-size:10px;color:#9ca3af;font-weight:500">📝 voir +</span>
+        <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .25s ease"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+    </div>
+  </div>
+</div>"""
         section_html += "</div></div>"
         sections.append(section_html)
 
