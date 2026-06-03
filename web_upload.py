@@ -6217,7 +6217,7 @@ def _render_insta_accounts_html() -> str:
     except Exception as e:
         return f"<p style='color:#f99'>Module insta_scraper indisponible : {e}</p>"
     rows = [
-        "<form id='insta-add-form' onsubmit='return igAddAccount(event)' style='display:flex;gap:8px;margin-bottom:16px'>"
+        "<form id='insta-add-form' onsubmit='return igAddAccount(event)' data-no-loader='1' style='display:flex;gap:8px;margin-bottom:16px'>"
         "<input type='text' name='username' id='insta-add-input' placeholder='@username ou URL profil' required "
         "style='flex:1;padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px'>"
         "<button type='submit' id='insta-add-btn' style='padding:10px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
@@ -6295,6 +6295,9 @@ def _render_insta_accounts_html() -> str:
 <script>
 function igAddAccount(e){
   e.preventDefault();
+  e.stopPropagation();
+  // Defensive : cache le page-loader au cas ou un handler global l'aurait active
+  if(typeof hidePageLoader === 'function') hidePageLoader();
   var inp = document.getElementById('insta-add-input');
   var btn = document.getElementById('insta-add-btn');
   var u = (inp.value || '').trim();
