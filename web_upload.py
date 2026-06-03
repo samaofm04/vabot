@@ -11622,19 +11622,19 @@ def _render_veille_feed_html() -> str:
 
             video_url_safe = (r.get("video_url") or "").replace('"', '&quot;')
             thumb_safe = (r.get("thumb") or "").replace('"', '&quot;')
-            # Bouton play (lecteur inline) - swap thumb <-> video au click
-            play_btn_html = ""
-            if video_url_safe:
-                play_btn_html = (
-                    f"<div class='veille-play-btn' onclick=\"event.stopPropagation();veillePlayToggle(this)\" "
-                    f"data-video=\"{video_url_safe}\" data-thumb=\"{thumb_safe}\" "
-                    f"style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
-                    f"width:50px;height:50px;border-radius:50%;background:rgba(0,0,0,.65);"
-                    f"display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4;"
-                    f"backdrop-filter:blur(4px);border:1.5px solid rgba(255,255,255,.4)'>"
-                    f"<svg width='22' height='22' viewBox='0 0 24 24' fill='#fff'><path d='M8 5v14l11-7z'/></svg>"
-                    f"</div>"
-                )
+            # Bouton play TOUJOURS visible (meme sans video_url cache, le proxy
+            # backend trouvera la video via RapidAPI/page scraping)
+            play_btn_html = (
+                f"<div class='veille-play-btn' onclick=\"event.stopPropagation();veillePlayToggle(this)\" "
+                f"data-video=\"{video_url_safe}\" data-thumb=\"{thumb_safe}\" "
+                f"style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+                f"width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,.7);"
+                f"display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4;"
+                f"backdrop-filter:blur(10px);border:3px solid rgba(255,255,255,.4);"
+                f"box-shadow:0 8px 32px rgba(0,0,0,.5);transition:all .2s'>"
+                f"<svg width='36' height='36' viewBox='0 0 24 24' fill='#fff' style='margin-left:4px'><polygon points='5 3 19 12 5 21'/></svg>"
+                f"</div>"
+            )
 
             section_html += (
                 f"<div class='veille-card' data-rid='{r['id']}' data-day='{day}' data-sent='{1 if sent else 0}' style='background:#0f0f0f;border:1px solid #232323;border-radius:12px;overflow:hidden;display:flex;flex-direction:column'>"
