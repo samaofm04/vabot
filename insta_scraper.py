@@ -330,29 +330,48 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                         thumb = candidates[0].get("url", "")
                     if not thumb:
                         thumb = media.get("thumbnail_url") or media.get("display_url") or ""
-                    video_url = None
-                    vv = media.get("video_versions", [])
-                    if vv:
-                        video_url = vv[0].get("url")
-                    if not video_url:
-                        video_url = media.get("video_url")
-                    # CAS CAROUSEL : le video peut etre dans carousel_media[N]
-                    if not video_url:
-                        carousel = media.get("carousel_media") or []
-                        if isinstance(carousel, list):
-                            for item in carousel:
-                                if not isinstance(item, dict):
-                                    continue
-                                ivv = item.get("video_versions") or []
-                                if ivv:
-                                    video_url = ivv[0].get("url")
-                                    if video_url:
-                                        break
-                                iv_url = item.get("video_url")
-                                if iv_url:
-                                    video_url = iv_url
-                                    break
-                    # Re-evalue is_video si on a trouve une video dans carousel
+                    # Extraction ULTRA-thorough du video_url.
+                    # Couvre toutes les structures connues de RapidAPI / IG API.
+                    def _extract_video_url(node):
+                        """Recursif : cherche video_url dans node + sous-noeuds."""
+                        if not isinstance(node, dict):
+                            return None
+                        # Direct keys
+                        for k in ("video_url", "playback_url", "playable_url",
+                                  "playable_url_quality_hd", "video_dash_manifest"):
+                            v = node.get(k)
+                            if isinstance(v, str) and v.startswith("http"):
+                                return v
+                        # video_versions list
+                        vv = node.get("video_versions") or []
+                        if isinstance(vv, list):
+                            for v in vv:
+                                if isinstance(v, dict):
+                                    u = v.get("url") or v.get("src")
+                                    if isinstance(u, str) and u.startswith("http"):
+                                        return u
+                        # Carousels / nested items - essaie tous les noms possibles
+                        for child_key in ("carousel_media", "child_items",
+                                          "carousel_media_attachments",
+                                          "carousel", "media_attachments",
+                                          "children", "items"):
+                            children = node.get(child_key)
+                            if not isinstance(children, list):
+                                continue
+                            for item in children:
+                                u = _extract_video_url(item)
+                                if u:
+                                    return u
+                        # Edge cases : .video, .clips_metadata
+                        for nested in ("video", "clips_metadata", "media"):
+                            sub = node.get(nested)
+                            if isinstance(sub, dict):
+                                u = _extract_video_url(sub)
+                                if u:
+                                    return u
+                        return None
+                    video_url = _extract_video_url(media)
+                    # Re-evalue is_video si on a trouve une video
                     if video_url and not is_video:
                         is_video = True
                     taken_at = media.get("taken_at") or 0
