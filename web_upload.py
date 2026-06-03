@@ -16050,7 +16050,22 @@ def _start_auto_scrape_daemon():
 
     SCRAPE_INTERVAL_SEC = 3 * 60 * 60  # 3 heures
     DELAY_BETWEEN_PROFILES = 8  # 8s entre comptes
-    DOWNLOAD_TOP_N = 30  # top N reels par profil a telecharger (par views)
+    MAX_AGE_SEC = 31 * 24 * 60 * 60  # 1 mois - on DL tous les reels < 1 mois
+
+    def cleanup_old_videos():
+        """Supprime les .mp4 plus vieux que 1 mois (par mtime du fichier)."""
+        if not INSTA_VIDEOS_DIR.exists():
+            return 0
+        cutoff = _t.time() - MAX_AGE_SEC
+        removed = 0
+        for f in INSTA_VIDEOS_DIR.glob("*.mp4"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    removed += 1
+            except Exception:
+                pass
+        return removed
 
     def loop():
         _t.sleep(60)  # wait bot init
@@ -16059,24 +16074,27 @@ def _start_auto_scrape_daemon():
                 from insta_scraper import load_watchlist, scrape_profile
                 wl = load_watchlist() or []
                 if wl:
-                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL...")
+                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL <1 mois...")
                     ok = 0
                     fail = 0
                     total_dl = 0
+                    cutoff_taken = _t.time() - MAX_AGE_SEC
                     for u in wl:
                         try:
-                            r = scrape_profile(u, limit=100)
+                            r = scrape_profile(u, limit=500)  # plus large pour couvrir 1 mois
                             if "error" not in r:
                                 ok += 1
-                                # Telecharge les TOP N reels par views
+                                # DL tous les reels video < 1 mois
                                 reels = r.get("reels", [])
-                                reels_to_dl = sorted(
-                                    [rr for rr in reels if rr.get("is_video")
-                                     and rr.get("video_url") and rr.get("shortcode")],
-                                    key=lambda x: x.get("views", 0) or 0,
-                                    reverse=True
-                                )[:DOWNLOAD_TOP_N]
-                                for rr in reels_to_dl:
+                                for rr in reels:
+                                    if not (rr.get("is_video")
+                                            and rr.get("video_url")
+                                            and rr.get("shortcode")):
+                                        continue
+                                    ta = rr.get("taken_at") or 0
+                                    # taken_at=0 = on ne sait pas, on DL quand meme
+                                    if ta and ta < cutoff_taken:
+                                        continue
                                     if _download_reel_video(rr["shortcode"], rr["video_url"]):
                                         total_dl += 1
                             else:
@@ -16085,7 +16103,8 @@ def _start_auto_scrape_daemon():
                             log.warning(f"[insta-bg-scrape] {u}: {e}")
                             fail += 1
                         _t.sleep(DELAY_BETWEEN_PROFILES)
-                    log.info(f"[insta-bg-scrape] termine: {ok} OK / {fail} fail / {total_dl} videos DL")
+                    cleaned = cleanup_old_videos()
+                    log.info(f"[insta-bg-scrape] OK: {ok} fail: {fail} DL: {total_dl} cleanup: -{cleaned} files")
             except Exception as e:
                 log.error(f"[insta-bg-scrape] cycle err: {e}")
             _t.sleep(SCRAPE_INTERVAL_SEC)
@@ -19012,7 +19031,7 @@ def create_app():
             insta_proxy_video._cache = {}
         cache = insta_proxy_video._cache
         now = _t.time()
-        CACHE_TTL = 50 * 60
+        CACHE_TTL = 7 * 24 * 60 * 60  # 1 semaine
         def try_stream(video_url, fast=False):
             """Tente de stream depuis video_url. Retourne Response ou None si echec.
             fast=True : timeout 4s pour la HEAD initiale (detection URL morte rapide).
