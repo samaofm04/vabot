@@ -205,7 +205,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 LOGIN_HTML = """
 <!DOCTYPE html>
-<html lang="fr"><head><title>VA Bot — Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="fr"><head><title>Youlab — Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
@@ -297,8 +297,13 @@ input::placeholder{color:#9ca3af}
   <div class="left">
     <div class="card">
       <div class="logo">
-        <div class="logo-mark">VA</div>
-        <span>VA Bot</span>
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 4 L12 13 L19 4"/>
+            <path d="M12 13 L12 20"/>
+          </svg>
+        </div>
+        <span>Youlab</span>
       </div>
       <h1>Connexion</h1>
       <p class="subtitle">Content de te revoir</p>
@@ -370,7 +375,7 @@ input::placeholder{color:#9ca3af}
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
-<html><head><title>VA Bot Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -2302,7 +2307,7 @@ document.addEventListener('keydown', function(e){
 
 </div><!-- /form-igtrends -->
 
-<!-- HOME (clic sur "VA Bot") -->
+<!-- HOME -->
 <div class="form-section" id="form-home">
 {home_dashboard_html}
 </div>
@@ -8840,7 +8845,7 @@ body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:10
     {f'<div class="bio">{bio_text}</div>' if bio_text else ''}
   </div>
   <div class="links">{links_html}</div>
-  <div class="footer">Powered by VA Bot</div>
+  <div class="footer">Powered by Youlab</div>
 </div>
 </body>
 </html>"""
@@ -15233,7 +15238,7 @@ def _render_upload(msg=None, error=None):
         err_safe = (str(e) or type(e).__name__).replace("<", "&lt;").replace(">", "&gt;")
         tb_safe = tb_text.replace("<", "&lt;").replace(">", "&gt;")
         return f"""<!DOCTYPE html>
-<html><head><title>VA Bot — Erreur</title>
+<html><head><title>Youlab — Erreur</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}}
