@@ -6985,8 +6985,9 @@ def _render_insta_trends_grid_html() -> str:
         </div>
       </div>
       {trending_html}
-      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Voir caption, son, durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:6px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
+      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Cliquer : voir caption + sound + durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.2)'" onmouseout="this.style.background='rgba(255,255,255,.1)'">
         {avatar}<span style="flex:1">@{owner}</span>
+        <span style="font-size:10px;color:#9ca3af;font-weight:500">📝 voir +</span>
         <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .25s ease"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
     </div>
