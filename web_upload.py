@@ -1235,14 +1235,14 @@ window.igShowCardErrorClean = function(card){
   ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
   ov.innerHTML = ''
     + '<div style="font-size:32px;margin-bottom:6px">📺</div>'
-    + '<div style="font-weight:700;font-size:12px;margin-bottom:10px">Vidéo expirée</div>'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:10px">Vidéo expirée</div>'
     + '<a href="' + url + '" target="_blank" rel="noopener" '
     +    'style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
-    +    'padding:10px 18px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none">'
+    +    'padding:10px 18px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none;margin-bottom:10px">'
     +    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
     +    'Voir sur Instagram'
     + '</a>'
-    + '<div class="reel-err-diag" style="position:absolute;bottom:8px;left:8px;right:8px;font-size:9px;color:#888;font-family:monospace;line-height:1.3;word-break:break-word;max-height:60px;overflow:auto"></div>';
+    + '<div class="reel-err-diag" style="font-size:11px;color:#fbbf24;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:6px;max-width:280px;line-height:1.4;word-break:break-word;max-height:120px;overflow:auto;text-align:left">⏳ Vérification...</div>';
   ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
   media.appendChild(ov);
   // Fetch le proxy pour montrer la raison precise
