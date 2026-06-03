@@ -1011,9 +1011,19 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] native failed');
-    igStopInline(media);
-    igShowCardError(card, 'Lecture impossible', 'URL CDN expirée. Click Rescrape pour rafraîchir.');
+    console.log('[igPlayInline] video.error event, fetching proxy URL for real error...', proxyUrl);
+    // Fetch direct le proxy pour avoir la VRAIE erreur HTTP renvoyee
+    fetch(proxyUrl).then(function(r){
+      return r.text().then(function(body){ return {status: r.status, body: body}; });
+    }).then(function(res){
+      console.log('[igPlayInline] proxy returned:', res);
+      igStopInline(media);
+      igShowCardError(card, 'HTTP ' + res.status, res.body || 'erreur sans body');
+    }).catch(function(err){
+      console.error('[igPlayInline] fetch error:', err);
+      igStopInline(media);
+      igShowCardError(card, 'Network error', String(err));
+    });
   }, {once:true});
   v.src = proxyUrl;
   // Timeout 10s : laisse vraiment le temps au natif de charger avant
