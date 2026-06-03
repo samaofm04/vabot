@@ -18959,42 +18959,66 @@ def create_app():
                 return (f"rapidapi error: {type(e).__name__}: {str(e)[:200]}", 500)
         # ETAPE 3.5 : scraping de la page embed IG (cherche video_url dans HTML)
         # La page /p/SHORTCODE/embed/ est PUBLIQUE (pas de rate-limit comme l'API).
-        # On parse l'HTML pour extraire video_url ou video_versions.
         if post_url and shortcode:
             try:
+                # On essaie 2 User-Agents - le bot UA renvoie souvent une page plus
+                # simple avec le video_url en clair
+                uas = [
+                    # UA mobile = HTML simplifie + video_url direct souvent
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram",
+                    # UA desktop normal
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                    # UA bot - facebookexternalhit fait que IG renvoie un OG-rich page
+                    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+                ]
                 embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
-                embed_headers = {
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                  "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                                  "Version/17.0 Safari/605.1.15",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
-                }
-                er = _rq.get(embed_url, headers=embed_headers, timeout=8)
-                if er.status_code == 200:
-                    html = er.text
-                    # Cherche video_url dans plusieurs formats possibles
-                    candidates = []
-                    # Format 1 : "video_url":"https://..."
-                    for m_match in _re.finditer(r'"video_url"\s*:\s*"([^"]+)"', html):
-                        u = m_match.group(1).encode().decode("unicode_escape")
-                        candidates.append(u)
-                    # Format 2 : "video_versions":[{"url":"..."}]
-                    for m_match in _re.finditer(r'"video_versions"\s*:\s*\[\s*\{\s*"[^"]*"\s*:\s*[^,]+,\s*"url"\s*:\s*"([^"]+)"', html):
-                        u = m_match.group(1).encode().decode("unicode_escape")
-                        candidates.append(u)
-                    # Format 3 : src="https://...mp4" sur la page
-                    for m_match in _re.finditer(r'src=\"(https://[^\"]+\.mp4[^\"]*)\"', html):
-                        candidates.append(m_match.group(1))
-                    # Dedupe + tente chacun
-                    seen = set()
-                    for vu in candidates:
-                        if vu in seen:
+                candidates = []
+                for ua in uas:
+                    try:
+                        er = _rq.get(
+                            embed_url,
+                            headers={"User-Agent": ua, "Accept": "text/html,*/*"},
+                            timeout=8,
+                        )
+                        if er.status_code != 200:
                             continue
-                        seen.add(vu)
-                        res = try_stream(vu)
-                        if res is not None:
-                            cache[post_url] = {"ts": now, "video_url": vu}
-                            return res
+                        html = er.text
+                        # Multi-patterns pour extraire le video_url
+                        patterns = [
+                            r'"video_url"\s*:\s*"([^"]+)"',
+                            r'"playable_url"\s*:\s*"([^"]+)"',
+                            r'"playable_url_quality_hd"\s*:\s*"([^"]+)"',
+                            r'"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"([^"]+)"',
+                            r'"video_dash_manifest"\s*:\s*"([^"]+)"',
+                            r'<meta\s+property="og:video"\s+content="([^"]+)"',
+                            r'<meta\s+property="og:video:secure_url"\s+content="([^"]+)"',
+                            r'src=\"(https://[^\"]+\.mp4[^\"]*)\"',
+                            r'data-video-src="([^"]+)"',
+                        ]
+                        for pat in patterns:
+                            for m_match in _re.finditer(pat, html):
+                                u = m_match.group(1)
+                                # Decode unicode escapes (Python escapes JSON)
+                                try:
+                                    u = u.encode().decode("unicode_escape")
+                                except Exception:
+                                    pass
+                                # Decode HTML entities
+                                u = u.replace("&amp;", "&").replace("\\/", "/")
+                                if u.startswith("http") and u not in candidates:
+                                    candidates.append(u)
+                        if candidates:
+                            break  # un UA a marche, on s arrete
+                    except Exception:
+                        continue
+                # Tente chaque candidat
+                for vu in candidates:
+                    res = try_stream(vu)
+                    if res is not None:
+                        cache[post_url] = {"ts": now, "video_url": vu}
+                        return res
             except Exception as e:
                 pass
         # ETAPE 4 : Dernier recours - instaloader (rate-limited souvent)
