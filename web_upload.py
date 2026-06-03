@@ -974,10 +974,46 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
-  // STRATEGIE : toujours passer par /insta/refresh_video_url.
-  // Le cache serveur 50min rend les re-clicks instantanes, et evite tous les
-  // problemes d'URL silencieusement expirees qui stallaient le player.
-  igRefreshVideoUrl(card, v, url);
+  // STRATEGIE : src = /insta/proxy_video?url=<post_url>
+  // Le backend re-fetch l'URL CDN IG (avec cache 50min) puis streame la video
+  // au browser. Contourne CORS + Referer + expiration silencieuse.
+  if(!url){
+    if(typeof showToast === 'function') showToast('Pas d URL pour ce reel', 'error');
+    igStopInline(media);
+    return;
+  }
+  var proxyUrl = '/insta/proxy_video?url=' + encodeURIComponent(url);
+  // Spinner pendant le chargement
+  var loader = media.querySelector('.reel-loading');
+  if(!loader){
+    loader = document.createElement('div');
+    loader.className = 'reel-loading';
+    loader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none';
+    loader.innerHTML = '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite"></div>';
+    media.appendChild(loader);
+  }
+  function clearLoader(){
+    var l = media.querySelector('.reel-loading');
+    if(l) l.remove();
+  }
+  function onReady(){
+    clearLoader();
+    v.style.opacity = '1';
+  }
+  v.addEventListener('loadeddata', onReady, {once:true});
+  v.addEventListener('playing', onReady, {once:true});
+  v.addEventListener('error', function(){
+    clearLoader();
+    if(typeof showToast === 'function') showToast('Lecture impossible — ouvre sur Instagram', 'error');
+    igStopInline(media);
+  }, {once:true});
+  v.src = proxyUrl;
+  var p = v.play();
+  if(p && p.catch) p.catch(function(){
+    // Le navigateur peut bloquer l'autoplay - mais l'user a cliqué donc
+    // on devrait avoir un user gesture. Show controls et laisse user play.
+    v.setAttribute('controls', 'controls');
+  });
 };
 window.igStopInline = function(media){
   if(!media) return;
@@ -18594,6 +18630,74 @@ def create_app():
             "scrape_started": True,
             "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
         })
+
+    @app.route("/insta/proxy_video", methods=["GET"])
+    def insta_proxy_video():
+        """Proxy la video Instagram via le backend (contourne les blocages CORS
+        et Referer du CDN Instagram). Le frontend utilise ce path comme src
+        d'un <video>. Stream en chunks pour pas saturer la memoire.
+
+        Query : ?url=<post_permalink>
+        """
+        if not is_auth():
+            return ("unauth", 401)
+        from flask import Response, stream_with_context
+        import requests as _rq
+        import time as _t
+        try:
+            import veille_telegram
+        except Exception as e:
+            return (f"module indispo: {e}", 500)
+        post_url = (request.args.get("url") or "").strip()
+        if not post_url:
+            return ("url manquante", 400)
+        # Cache memoire video_url (50 min)
+        if not hasattr(insta_proxy_video, "_cache"):
+            insta_proxy_video._cache = {}
+        cache = insta_proxy_video._cache
+        now = _t.time()
+        CACHE_TTL = 50 * 60
+        cached = cache.get(post_url)
+        if cached and (now - cached["ts"]) < CACHE_TTL:
+            video_url = cached["video_url"]
+        else:
+            try:
+                fresh = veille_telegram.refresh_post_data(post_url)
+            except Exception as e:
+                return (f"refresh error: {e}", 500)
+            video_url = (fresh.get("video_url") or "").strip()
+            if not video_url:
+                debug = fresh.get("_debug", "?")
+                return (f"video_url introuvable: {debug}", 404)
+            cache[post_url] = {"ts": now, "video_url": video_url}
+        # Fetch + stream
+        try:
+            ig_headers = {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Referer": "https://www.instagram.com/",
+            }
+            upstream = _rq.get(video_url, headers=ig_headers, stream=True, timeout=30)
+        except Exception as e:
+            return (f"upstream error: {e}", 502)
+        if upstream.status_code != 200:
+            # Cache mort -> retire et signale
+            cache.pop(post_url, None)
+            return (f"upstream status {upstream.status_code}", 502)
+        content_type = upstream.headers.get("Content-Type", "video/mp4")
+        content_length = upstream.headers.get("Content-Length")
+        def generate():
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream.close()
+        resp = Response(stream_with_context(generate()), mimetype=content_type)
+        if content_length:
+            resp.headers["Content-Length"] = content_length
+        resp.headers["Cache-Control"] = "private, max-age=300"
+        return resp
 
     @app.route("/insta/refresh_video_url", methods=["POST"])
     def insta_refresh_video_url():
