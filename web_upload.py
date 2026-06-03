@@ -1142,18 +1142,17 @@ window.igShowCardError = function(card, title, detail){
 window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
   var owner = card.getAttribute('data-owner') || '';
   if(!owner){
-    // Pas d'owner = on bascule direct sur l'iframe embed (toujours marche)
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardErrorClean(card);
     return;
   }
-  // Marker pour eviter boucle : si deja rescrape, bascule sur iframe embed
+  // Marker pour eviter boucle : si deja rescrape -> overlay clean (PAS d'iframe)
   if(card.getAttribute('data-rescraped') === '1'){
     var oldL = media.querySelector('.reel-loading');
     if(oldL) oldL.remove();
-    console.log('[igAutoRescrape] already retried, falling back to IG embed iframe');
+    console.log('[igAutoRescrape] already retried');
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardErrorClean(card);
     return;
   }
   card.setAttribute('data-rescraped', '1');
@@ -1174,45 +1173,70 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok){
-        // Scrape echoue -> bascule iframe embed (toujours marche)
         if(loader.parentNode) loader.remove();
-        console.log('[igAutoRescrape] scrape failed, fallback to embed');
+        console.log('[igAutoRescrape] scrape failed');
         igStopInline(media);
-        igEmbedInCard(card);
+        igShowCardErrorClean(card);
         return;
       }
       // Wait 3s pour que le scrape se finisse, puis retry play
       setTimeout(function(){
         if(loader.parentNode) loader.remove();
-        // Re-attach un error handler pour catch echec round 2 (si proxy refusait
-        // encore meme apres rescrape -> bascule embed iframe)
         var retryErrHandler = function(){
-          console.log('[igAutoRescrape] retry play failed, fallback to embed');
+          console.log('[igAutoRescrape] retry play failed');
           igStopInline(media);
-          igEmbedInCard(card);
+          igShowCardErrorClean(card);
         };
         v.addEventListener('error', retryErrHandler, {once:true});
         // Cache-bust pour force le reload du proxy
         v.src = proxyUrl + '&_retry=' + Date.now();
         var p = v.play();
         if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-        // Timeout 8s : si retry stall, bascule embed
+        // Timeout 10s : si retry stall, clean error
         setTimeout(function(){
           if(!v.readyState || v.readyState < 3){
             v.removeEventListener('error', retryErrHandler);
-            console.log('[igAutoRescrape] retry timeout 8s, fallback to embed');
+            console.log('[igAutoRescrape] retry timeout 10s');
             igStopInline(media);
-            igEmbedInCard(card);
+            igShowCardErrorClean(card);
           }
-        }, 8000);
+        }, 10000);
       }, 3000);
     })
     .catch(function(err){
       if(loader.parentNode) loader.remove();
-      console.log('[igAutoRescrape] network err, fallback to embed:', err);
+      console.log('[igAutoRescrape] network err:', err);
       igStopInline(media);
-      igEmbedInCard(card);
+      igShowCardErrorClean(card);
     });
+};
+// Overlay erreur CLEAN : pas d'iframe IG, juste bouton "Ouvrir sur Instagram"
+window.igShowCardErrorClean = function(card){
+  if(!card) return;
+  var media = card.querySelector('.reel-media');
+  if(!media) return;
+  // Vire anciens overlays
+  ['reel-error-overlay','reel-loading','reel-embed-wrap'].forEach(function(cls){
+    var el = media.querySelector('.' + cls);
+    if(el) el.remove();
+  });
+  var url = card.getAttribute('data-url') || '';
+  var ov = document.createElement('div');
+  ov.className = 'reel-error-overlay';
+  ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
+  ov.innerHTML = ''
+    + '<div style="font-size:36px;margin-bottom:8px">📺</div>'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:14px">Vidéo expirée</div>'
+    + '<a href="' + url + '" target="_blank" rel="noopener" '
+    +    'style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
+    +    'padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(253,29,29,.3)">'
+    +    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
+    +    'Voir sur Instagram'
+    + '</a>';
+  ov.addEventListener('click', function(e){
+    if(e.target === ov) ov.remove();
+  });
+  media.appendChild(ov);
 };
 window.igStopInline = function(media){
   if(!media) return;
