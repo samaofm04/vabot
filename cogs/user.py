@@ -99,39 +99,61 @@ def generate_username_candidates(base: str, count: int = 20) -> list:
 
 
 async def check_instagram_username_available(username: str) -> bool:
-    """Check si un username Instagram est dispo. Marche par HTTP GET sur
-    instagram.com/username/. 404 = dispo, 200 = pris.
+    """Check si un username Instagram est dispo via RapidAPI Instagram Scraper.
+    Plus fiable que le HTTP direct (IG redirect login pour les non-authentifies).
+
+    Retourne True si dispo (= profile pas trouve), False si pris.
     """
     if not username:
         return False
     import aiohttp
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                      "Version/17.0 Safari/605.1.15",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-    }
     try:
+        from insta_scraper import load_auth
+        auth = load_auth()
+        api_key = (auth.get("rapidapi_key") or "").strip()
+        host = (auth.get("rapidapi_host") or "instagram-scraper-stable-api.p.rapidapi.com").strip()
+        if not api_key:
+            return False  # Pas de cle = on peut pas check, on retourne False (safe)
+        headers = {
+            "x-rapidapi-key": api_key,
+            "x-rapidapi-host": host,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://www.instagram.com/{username}/",
-                headers=headers, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=8),
+            async with session.post(
+                f"https://{host}/ig_get_fb_profile_v3.php",
+                headers=headers,
+                data=f"username_or_url={username}",
+                timeout=aiohttp.ClientTimeout(total=8),
             ) as r:
-                # 404 = available, 200 = exists, 301/302 = login redirect (probably exists)
                 if r.status == 404:
                     return True
-                if r.status == 200:
-                    text = await r.text()
-                    # Page profile -> contient "@username" dans le HTML
-                    # Page "not found" -> contient "Cette page n'est pas disponible"
-                    if ("Désolé, cette page n" in text or
-                        "Sorry, this page is" in text or
-                        '"is_private":true' in text and f'"username":"{username}"' not in text):
-                        return True
+                if r.status != 200:
                     return False
-                # Autre status (rate-limit etc) -> on considere comme indispo pour pas faire de faux positifs
-                return False
+                try:
+                    body = await r.json(content_type=None)
+                except Exception:
+                    return False
+                if not isinstance(body, dict):
+                    # body non-dict suggere reponse vide / erreur
+                    return True
+                # Unwrap "data"/"user"
+                user = body
+                if "user" in body and isinstance(body["user"], dict):
+                    user = body["user"]
+                elif "data" in body and isinstance(body["data"], dict):
+                    user = body["data"]
+                if not isinstance(user, dict):
+                    return True
+                # Un profil valide a soit username, pk, ou id, ou follower_count
+                has_id = bool(user.get("username") or user.get("pk") or user.get("id"))
+                # Si erreur explicite, dispo
+                err = (user.get("error") or user.get("message") or "")
+                if err and ("not found" in str(err).lower() or "introuvable" in str(err).lower()):
+                    return True
+                if not has_id:
+                    return True  # rien dans la reponse = pas trouve = dispo
+                return False  # has_id = profil existe = pris
     except Exception:
         return False
 
