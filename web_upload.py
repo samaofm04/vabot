@@ -11582,22 +11582,18 @@ def _render_veille_feed_html() -> str:
             date_options.append((d_iso, f"{lbl} ({cnt} reels)"))
         except Exception:
             date_options.append((d_iso, d_iso))
-    # Date picker / quick-select au-dessus
+    # Date picker compact : juste un dropdown pour jump
     if date_options:
         opts_html = "".join(
             f"<option value='{d_iso}'>{lbl}</option>"
             for d_iso, lbl in date_options
         )
         date_picker_html = (
-            "<div style='display:flex;align-items:center;gap:12px;padding:14px 18px;margin-bottom:18px;background:#101010;border:1px solid #2a2a2a;border-radius:12px;flex-wrap:wrap'>"
-            "<div style='color:#aaa;font-size:13px;font-weight:600'>🔎 Aller à / Sélectionner :</div>"
+            "<div style='display:inline-flex;align-items:center;gap:8px;margin-bottom:14px'>"
             "<select id='veille-date-picker' onchange='veilleJumpToDate(this.value)' "
-            "style='background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-width:240px'>"
-            f"<option value=''>— Choisir une date —</option>{opts_html}"
+            "style='background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:500'>"
+            f"<option value=''>📅 Aller à une date…</option>{opts_html}"
             "</select>"
-            "<button onclick=\"var v=document.getElementById('veille-date-picker').value;if(v)selectDayVeille(v)\" "
-            "style='background:#3b82f6;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700'>"
-            "☑ Sélectionner tous les reels de cette date</button>"
             "</div>"
         )
     else:
@@ -11631,8 +11627,12 @@ def _render_veille_feed_html() -> str:
         if unsent_count > 0:
             section_html += (
                 f"<button onclick=\"selectDayVeille('{day}')\" "
-                f"style='background:transparent;color:#3b82f6;border:1px solid #3b82f6;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>"
-                f"☑ Tout sélectionner du {day_label.split('—')[0].replace('📅', '').strip()} ({unsent_count})</button>"
+                f"title='Tout sélectionner ce jour' "
+                f"style='display:inline-flex;align-items:center;gap:6px;background:rgba(59,130,246,.1);color:#3b82f6;border:1px solid rgba(59,130,246,.3);padding:6px 12px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s' "
+                f"onmouseover=\"this.style.background='rgba(59,130,246,.2)'\" "
+                f"onmouseout=\"this.style.background='rgba(59,130,246,.1)'\">"
+                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='9 11 12 14 22 4'/><path d='M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'/></svg>"
+                f"Tout cocher ({unsent_count})</button>"
             )
         section_html += "</div>"
 
