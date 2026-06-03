@@ -6264,7 +6264,7 @@ def _render_insta_accounts_html() -> str:
                     f"display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
                 )
             rows.append(
-                f"<div class='cloud-card' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px'>"
+                f"<div class='cloud-card' data-insta-user='{u}' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;position:relative'>"
                 f"<div style='display:flex;align-items:center;gap:12px'>"
                 f"{avatar_html}"
                 f"<div style='flex:1;min-width:0'>"
@@ -6273,10 +6273,10 @@ def _render_insta_accounts_html() -> str:
                 f"</div>"
                 f"</div>"
                 f"<div style='display:flex;gap:14px;font-size:12px;color:#aaa;border-top:1px solid #2a2a2a;padding-top:10px'>"
-                f"<div><b style='color:#fff'>{it['followers']:,}</b> followers</div>"
-                f"<div><b style='color:#fff'>{it['nb_reels']}</b> reels</div>"
+                f"<div class='ig-followers'><b style='color:#fff'>{it['followers']:,}</b> followers</div>"
+                f"<div class='ig-reels-count'><b style='color:#fff'>{it['nb_reels']}</b> reels</div>"
                 f"</div>"
-                f"<div style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
+                f"<div class='ig-scraped-at' style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
                 f"<div style='display:flex;gap:6px;margin-top:auto'>"
                 f"<button type='button' data-username='{u}' onclick='igScrapeOne(this)' style='flex:1;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
                 f"<button type='button' data-username='{u}' onclick='igRemoveOne(this)' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ?\">×</button>"
@@ -6293,10 +6293,96 @@ def _render_insta_accounts_html() -> str:
     # JS handler async pour tous les boutons - non-bloquant, toast feedback
     rows.append("""
 <script>
+// Etat global : usernames en cours de scrape -> { startedAt: ms }
+window.__igScraping = window.__igScraping || {};
+function igStartPolling(){
+  if(window.__igPollTimer) return;
+  window.__igPollTimer = setInterval(igPollStatus, 3000);
+  // 1er poll immediat
+  setTimeout(igPollStatus, 1500);
+}
+function igStopPolling(){
+  if(window.__igPollTimer){
+    clearInterval(window.__igPollTimer);
+    window.__igPollTimer = null;
+  }
+}
+function igPollStatus(){
+  fetch('/insta/status').then(function(r){return r.json();}).then(function(d){
+    if(!d || !d.ok || !d.items) return;
+    var stillPending = 0;
+    d.items.forEach(function(it){
+      var pending = window.__igScraping[it.username];
+      if(!pending) return;
+      // Considere comme fini si scraped_at > startedAt - 5s (marge)
+      if(it.scraped_at * 1000 >= pending.startedAt - 5000 && it.scraped_at > 0){
+        // Scrape termine -> update la card
+        igUpdateCard(it);
+        delete window.__igScraping[it.username];
+      } else {
+        stillPending++;
+      }
+    });
+    if(stillPending === 0){
+      igStopPolling();
+    }
+  }).catch(function(){});
+}
+function igUpdateCard(it){
+  var u = it.username;
+  // Cherche la card par data-insta-user
+  var card = document.querySelector('.cloud-card[data-insta-user="' + u.replace(/"/g, '') + '"]');
+  if(!card) return;
+  card.classList.remove('ig-scraping');
+  // Recharge la page pour afficher la nouvelle card avec toutes les infos
+  // (impossible de rebuild proprement le HTML cote JS sans dupliquer 50 lignes)
+  // -> on update au minimum les compteurs + on remove le spinner
+  var spinner = card.querySelector('.ig-card-spinner');
+  if(spinner) spinner.remove();
+  var followersEl = card.querySelector('.ig-followers');
+  if(followersEl) followersEl.innerHTML = '<b style="color:#fff">' + (it.followers || 0).toLocaleString() + '</b> followers';
+  var reelsEl = card.querySelector('.ig-reels-count');
+  if(reelsEl) reelsEl.innerHTML = '<b style="color:#fff">' + (it.nb_reels || 0) + '</b> reels';
+  var scrapedEl = card.querySelector('.ig-scraped-at');
+  if(scrapedEl){
+    var dt = new Date(it.scraped_at * 1000);
+    var pad = function(n){return n < 10 ? '0'+n : n;};
+    scrapedEl.textContent = 'Dernier scrape : ' + pad(dt.getDate()) + '/' + pad(dt.getMonth()+1) + ' ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes());
+  }
+  if(typeof showToast === 'function') showToast('✓ @' + u + ' scrape (' + it.nb_reels + ' reels)', 'success');
+}
+function igAddPlaceholderCard(u){
+  // Trouve le grid de cards
+  var grid = document.querySelector('#form-igaccounts [style*="grid-template-columns"]');
+  if(!grid){
+    // Aucun grid existant (watchlist vide) -> reload pour init la grille
+    setTimeout(function(){ window.location.reload(); }, 800);
+    return;
+  }
+  var card = document.createElement('div');
+  card.className = 'cloud-card ig-scraping';
+  card.setAttribute('data-insta-user', u);
+  card.style.cssText = 'background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;position:relative';
+  card.innerHTML = ''
+    + '<div class="ig-card-spinner" style="position:absolute;top:10px;right:10px;width:18px;height:18px;border:2px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite"></div>'
+    + '<div style="display:flex;align-items:center;gap:12px">'
+    +   '<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px">' + u.charAt(0).toUpperCase() + '</div>'
+    +   '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px;color:#fff">@' + u + '</div>'
+    +   '<div style="font-size:11px;color:#3b82f6">⏳ Scrape en cours…</div></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:14px;font-size:12px;color:#aaa;border-top:1px solid #2a2a2a;padding-top:10px">'
+    +   '<div class="ig-followers"><b style="color:#fff">…</b> followers</div>'
+    +   '<div class="ig-reels-count"><b style="color:#fff">…</b> reels</div>'
+    + '</div>'
+    + '<div class="ig-scraped-at" style="font-size:11px;color:#666">En cours de chargement</div>'
+    + '<div style="display:flex;gap:6px;margin-top:auto">'
+    +   '<button type="button" disabled style="flex:1;padding:8px;background:#3b82f6;opacity:.5;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600">⏳ ...</button>'
+    + '</div>';
+  grid.insertBefore(card, grid.firstChild);
+}
 function igAddAccount(e){
   e.preventDefault();
   e.stopPropagation();
-  // Defensive : cache le page-loader au cas ou un handler global l'aurait active
   if(typeof hidePageLoader === 'function') hidePageLoader();
   var inp = document.getElementById('insta-add-input');
   var btn = document.getElementById('insta-add-btn');
@@ -6316,6 +6402,13 @@ function igAddAccount(e){
         if(typeof showToast === 'function') showToast(d.message || ('@' + (d.username||u) + ' ajoute'), 'success');
         inp.value = '';
         inp.focus();
+        var cleanU = d.username || u.replace(/^@/, '').replace(/.*\//, '').trim();
+        // Track le scrape pour le polling
+        if(d.scrape_started){
+          window.__igScraping[cleanU] = {startedAt: Date.now()};
+          igAddPlaceholderCard(cleanU);
+          igStartPolling();
+        }
       } else {
         if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
       }
@@ -6326,6 +6419,16 @@ function igAddAccount(e){
       if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
     });
   return false;
+}
+function igAddSpinnerToCard(u){
+  var card = document.querySelector('.cloud-card[data-insta-user="' + u + '"]');
+  if(!card) return;
+  if(card.querySelector('.ig-card-spinner')) return;
+  card.classList.add('ig-scraping');
+  var sp = document.createElement('div');
+  sp.className = 'ig-card-spinner';
+  sp.style.cssText = 'position:absolute;top:10px;right:10px;width:18px;height:18px;border:2px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite';
+  card.appendChild(sp);
 }
 function igScrapeOne(btn){
   var u = btn.getAttribute('data-username') || '';
@@ -6342,6 +6445,10 @@ function igScrapeOne(btn){
       btn.innerHTML = orig;
       if(d && d.ok){
         if(typeof showToast === 'function') showToast(d.message || ('@' + u + ' scrape en bg'), 'success');
+        // Spinner + polling pour update auto quand fini
+        window.__igScraping[u] = {startedAt: Date.now()};
+        igAddSpinnerToCard(u);
+        igStartPolling();
       } else {
         if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
       }
@@ -6388,6 +6495,16 @@ function igScrapeAll(btn){
       btn.textContent = orig;
       if(d && d.ok){
         if(typeof showToast === 'function') showToast(d.message || 'Scrape global lance', 'success');
+        // Spinner + polling sur toutes les cards existantes
+        var now = Date.now();
+        document.querySelectorAll('.cloud-card[data-insta-user]').forEach(function(card){
+          var u = card.getAttribute('data-insta-user');
+          if(u){
+            window.__igScraping[u] = {startedAt: now};
+            igAddSpinnerToCard(u);
+          }
+        });
+        igStartPolling();
       } else {
         if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
       }
@@ -18340,6 +18457,19 @@ def create_app():
             "scrape_started": True,
             "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
         })
+
+    @app.route("/insta/status", methods=["GET"])
+    def insta_status():
+        """Renvoie la watchlist enrichie en JSON pour polling frontend."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            from insta_scraper import watchlist_status
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        return jsonify({"ok": True, "items": watchlist_status()})
 
     @app.route("/insta/remove_account", methods=["POST"])
     def insta_remove_account():
