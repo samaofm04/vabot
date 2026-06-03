@@ -952,7 +952,7 @@ window.igPlayInline = function(media){
     v = document.createElement('video');
     v.className = 'reel-video';
     v.setAttribute('playsinline', '');
-    v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s';
+    v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s;background:transparent';
     media.appendChild(v);
   }
   media.classList.add('reel-playing');
@@ -962,8 +962,18 @@ window.igPlayInline = function(media){
   // Set controls + audio
   v.setAttribute('controls', 'controls');
   v.muted = false;
-  v.style.opacity = '1';
+  // IMPORTANT : garde la thumbnail visible AU FOND tant que la video n'a pas la 1ere frame
+  // (le <video> est par dessus avec opacity 0, on switch sur loadeddata)
+  v.style.opacity = '0';
   v.style.zIndex = '2';
+  var revealedVideo = false;
+  function reveal(){
+    if(revealedVideo) return;
+    revealedVideo = true;
+    v.style.opacity = '1';
+  }
+  v.addEventListener('loadeddata', reveal, {once:true});
+  v.addEventListener('playing', reveal, {once:true});
   // Si pas de video_url -> refresh direct
   if(!videoUrl){
     igRefreshVideoUrl(card, v, url);
@@ -1006,27 +1016,37 @@ window.igStopInline = function(media){
 };
 window.igRefreshVideoUrl = function(card, videoEl, postUrl){
   if(!postUrl) return;
-  // Affiche un mini spinner
   var media = card.querySelector('.reel-media');
+  // Spinner discret + backdrop semi-transparent pour qu'on voie la thumb derriere
   var loader = document.createElement('div');
   loader.className = 'reel-loading';
-  loader.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border:3px solid rgba(255,255,255,.15);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite;z-index:5';
+  loader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none';
+  loader.innerHTML = '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite"></div>';
   media.appendChild(loader);
   var fd = new FormData();
   fd.append('url', postUrl);
   fetch('/insta/refresh_video_url', {method:'POST', body:fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(loader.parentNode) loader.remove();
       if(d && d.ok && d.video_url){
-        // Update le src + data attribute + retry play
         card.setAttribute('data-video-url', d.video_url);
+        // Quand la nouvelle video est prete -> reveal + remove loader
+        var onReady = function(){
+          if(loader.parentNode) loader.remove();
+          videoEl.style.opacity = '1';
+          videoEl.removeEventListener('loadeddata', onReady);
+          videoEl.removeEventListener('playing', onReady);
+        };
+        videoEl.addEventListener('loadeddata', onReady);
+        videoEl.addEventListener('playing', onReady);
         videoEl.src = d.video_url;
         var p = videoEl.play();
         if(p && p.catch) p.catch(function(){
+          if(loader.parentNode) loader.remove();
           if(typeof showToast === 'function') showToast('Lecture impossible — ouvre sur Instagram', 'error');
         });
       } else {
+        if(loader.parentNode) loader.remove();
         if(typeof showToast === 'function') showToast('Video expirée et impossible de la rafraîchir', 'error');
       }
     })
@@ -18571,11 +18591,15 @@ def create_app():
     def insta_refresh_video_url():
         """Re-fetch un video_url frais pour un reel donne (les URLs IG expirent).
         Body : url (permalink du reel/post)
-        Returns : {ok, video_url, caption?}"""
+        Returns : {ok, video_url, caption?}
+
+        Cache memoire 50 min (les URLs CDN IG durent qq heures, on prend marge).
+        """
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
+        import time as _t
         try:
             import veille_telegram
         except Exception as e:
@@ -18583,16 +18607,42 @@ def create_app():
         url = (request.form.get("url") or "").strip()
         if not url:
             return jsonify({"ok": False, "error": "url manquante"})
+        # Cache hit ?
+        if not hasattr(insta_refresh_video_url, "_cache"):
+            insta_refresh_video_url._cache = {}
+        cache = insta_refresh_video_url._cache
+        now = _t.time()
+        CACHE_TTL = 50 * 60  # 50 minutes
+        # Purge stale entries (lazy)
+        if len(cache) > 200:
+            for k in list(cache.keys()):
+                if now - cache[k]["ts"] > CACHE_TTL:
+                    del cache[k]
+        cached = cache.get(url)
+        if cached and (now - cached["ts"]) < CACHE_TTL:
+            return jsonify({
+                "ok": True,
+                "video_url": cached["video_url"],
+                "caption": cached.get("caption", ""),
+                "cached": True,
+            })
         try:
             fresh = veille_telegram.refresh_post_data(url)
         except Exception as e:
             return jsonify({"ok": False, "error": f"refresh: {e}"})
         if not fresh.get("video_url"):
             return jsonify({"ok": False, "error": "video_url introuvable (pas un reel video ?)"})
+        # Save cache
+        cache[url] = {
+            "ts": now,
+            "video_url": fresh["video_url"],
+            "caption": fresh.get("caption", ""),
+        }
         return jsonify({
             "ok": True,
             "video_url": fresh["video_url"],
             "caption": fresh.get("caption", ""),
+            "cached": False,
         })
 
     @app.route("/insta/status", methods=["GET"])
