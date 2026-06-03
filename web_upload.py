@@ -1051,19 +1051,21 @@ window.igEmbedInCard = function(card){
   var img = media.querySelector('.reel-thumb'); if(img) img.style.display = 'none';
   var v = media.querySelector('.reel-video'); if(v) v.style.opacity = '0';
   var ovPlay = media.querySelector('.reel-play-overlay'); if(ovPlay) ovPlay.style.opacity = '0';
-  // Wrap : crop ULTRA AGRESSIF top + bottom de l'iframe.
-  // bottom:80px laisse de la place pour caption + sound + chevron + trending.
+  // Wrap : crop ULTRA AGRESSIF.
+  // bottom:200px laisse beaucoup de marge pour cacher TOUT le footer IG
+  // (footer = ~200px : "Voir plus sur Instagram" + likes + commentaire input).
+  // Le bot rendra son propre panel par dessus aux z-index 10.
   var wrap = document.createElement('div');
   wrap.className = 'reel-embed-wrap';
-  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:80px;'
+  wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:200px;'
     + 'background:#000;z-index:1;overflow:hidden';
   var iframe = document.createElement('iframe');
   iframe.src = 'https://www.instagram.com/p/' + shortcode + '/embed/';
-  // CROP MAX : iframe 3x la hauteur du wrap, decale -85px en haut.
-  // Header IG entierement off-screen, footer rejete 2x hauteur en bas et
-  // entierement croppe par overflow:hidden.
+  // iframe top -85 = header IG off-screen. height 200% = couvre tout
+  // l'IG content. overflow hidden au wrap clip a wrap_height = 333 - 200 = 133px.
+  // Mais on a aspect-ratio 9:16 sur card -> wrap suit, donc taille variable.
   iframe.style.cssText = 'position:absolute;left:0;top:-85px;width:100%;'
-    + 'height:300%;border:0;background:#000';
+    + 'height:200%;border:0;background:#000';
   iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
   iframe.setAttribute('allowfullscreen', '');
   iframe.setAttribute('scrolling', 'no');
@@ -18955,6 +18957,46 @@ def create_app():
                     return (f"RapidAPI scrape failed: {result['error'][:200]}", 502)
             except Exception as e:
                 return (f"rapidapi error: {type(e).__name__}: {str(e)[:200]}", 500)
+        # ETAPE 3.5 : scraping de la page embed IG (cherche video_url dans HTML)
+        # La page /p/SHORTCODE/embed/ est PUBLIQUE (pas de rate-limit comme l'API).
+        # On parse l'HTML pour extraire video_url ou video_versions.
+        if post_url and shortcode:
+            try:
+                embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
+                embed_headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                                  "Version/17.0 Safari/605.1.15",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+                }
+                er = _rq.get(embed_url, headers=embed_headers, timeout=8)
+                if er.status_code == 200:
+                    html = er.text
+                    # Cherche video_url dans plusieurs formats possibles
+                    candidates = []
+                    # Format 1 : "video_url":"https://..."
+                    for m_match in _re.finditer(r'"video_url"\s*:\s*"([^"]+)"', html):
+                        u = m_match.group(1).encode().decode("unicode_escape")
+                        candidates.append(u)
+                    # Format 2 : "video_versions":[{"url":"..."}]
+                    for m_match in _re.finditer(r'"video_versions"\s*:\s*\[\s*\{\s*"[^"]*"\s*:\s*[^,]+,\s*"url"\s*:\s*"([^"]+)"', html):
+                        u = m_match.group(1).encode().decode("unicode_escape")
+                        candidates.append(u)
+                    # Format 3 : src="https://...mp4" sur la page
+                    for m_match in _re.finditer(r'src=\"(https://[^\"]+\.mp4[^\"]*)\"', html):
+                        candidates.append(m_match.group(1))
+                    # Dedupe + tente chacun
+                    seen = set()
+                    for vu in candidates:
+                        if vu in seen:
+                            continue
+                        seen.add(vu)
+                        res = try_stream(vu)
+                        if res is not None:
+                            cache[post_url] = {"ts": now, "video_url": vu}
+                            return res
+            except Exception as e:
+                pass
         # ETAPE 4 : Dernier recours - instaloader (rate-limited souvent)
         if post_url:
             try:
