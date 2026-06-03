@@ -1011,30 +1011,18 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] video.error event, fetching proxy URL for real error...', proxyUrl);
-    // Fetch direct le proxy pour avoir la VRAIE erreur HTTP renvoyee
-    fetch(proxyUrl).then(function(r){
-      return r.text().then(function(body){ return {status: r.status, body: body}; });
-    }).then(function(res){
-      console.log('[igPlayInline] proxy returned:', res);
-      igStopInline(media);
-      igShowCardError(card, 'HTTP ' + res.status, res.body || 'erreur sans body');
-    }).catch(function(err){
-      console.error('[igPlayInline] fetch error:', err);
-      igStopInline(media);
-      igShowCardError(card, 'Network error', String(err));
-    });
+    console.log('[igPlayInline] video error, auto-rescrape...');
+    // AUTO-RESCRAPE : on lance le scrape du proprietaire en bg, puis retry play.
+    igAutoRescrapeAndRetry(card, media, v, proxyUrl);
   }, {once:true});
   v.src = proxyUrl;
-  // Timeout 10s : laisse vraiment le temps au natif de charger avant
-  // de declarer echec. User prefere voir le spinner natif que l'embed iframe.
+  // Timeout 12s : si toujours pas charge, auto-rescrape
   var fallbackTimer = setTimeout(function(){
     if(!v.readyState || v.readyState < 3){
-      console.log('[igPlayInline] native timeout 10s');
-      igStopInline(media);
-      igShowCardError(card, 'Délai dépassé', 'Click Rescrape pour rafraîchir l URL.');
+      console.log('[igPlayInline] native timeout 12s, auto-rescrape');
+      igAutoRescrapeAndRetry(card, media, v, proxyUrl);
     }
-  }, 10000);
+  }, 12000);
   v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
   v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
   var p = v.play();
@@ -1147,6 +1135,65 @@ window.igShowCardError = function(card, title, detail){
     el.addEventListener('click', function(e){ e.stopPropagation(); });
   });
   media.appendChild(ov);
+};
+// Auto-rescrape transparent : POST /insta/scrape sur owner, attend, retry play
+window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
+  var owner = card.getAttribute('data-owner') || '';
+  if(!owner){
+    igStopInline(media);
+    igShowCardError(card, 'Lecture impossible', 'Pas de propriétaire identifié pour ce reel.');
+    return;
+  }
+  // Affiche un loader avec message "Refresh auto en cours..."
+  var oldLoader = media.querySelector('.reel-loading');
+  if(oldLoader) oldLoader.remove();
+  var loader = document.createElement('div');
+  loader.className = 'reel-loading';
+  loader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:7;pointer-events:none;color:#fff;text-align:center;padding:16px';
+  loader.innerHTML = ''
+    + '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite;margin-bottom:10px"></div>'
+    + '<div style="font-size:11px;font-weight:600">🔄 Refresh @' + owner + '...</div>'
+    + '<div style="font-size:10px;color:#aaa;margin-top:4px">via RapidAPI</div>';
+  media.appendChild(loader);
+  // Marker pour eviter boucle infinie : si on a deja rescrape, on declare echec
+  if(card.getAttribute('data-rescraped') === '1'){
+    igStopInline(media);
+    if(loader.parentNode) loader.remove();
+    igShowCardError(card, 'Refresh raté', 'Le rescrape n a pas pu récupérer une URL valide. Ouvre sur Instagram.');
+    return;
+  }
+  card.setAttribute('data-rescraped', '1');
+  var fd = new FormData();
+  fd.append('username', owner);
+  fetch('/insta/scrape', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        if(loader.parentNode) loader.remove();
+        igStopInline(media);
+        igShowCardError(card, 'Scrape échoué', (d && d.error) || 'erreur inconnue');
+        return;
+      }
+      // Wait 3s pour que le scrape se finisse, puis retry play
+      setTimeout(function(){
+        if(loader.parentNode) loader.remove();
+        // Retry : appelle a nouveau le proxy avec le NEW vurl recupere via une fetch /insta/status
+        // Ou plus simple : recharge la page pour re-render avec fresh data
+        // Plus user-friendly : ne reload pas, re-trigger igPlayInline qui va re-fetch
+        // via le proxy. Le proxy a maintenant le fresh URL en cache memoire.
+        v.removeAttribute('controls');
+        v.style.opacity = '0';
+        // Force un nouveau src (avec cache-bust) pour re-trigger le load
+        v.src = proxyUrl + '&_retry=' + Date.now();
+        var p = v.play();
+        if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
+      }, 3000);
+    })
+    .catch(function(err){
+      if(loader.parentNode) loader.remove();
+      igStopInline(media);
+      igShowCardError(card, 'Network error', String(err));
+    });
 };
 window.igStopInline = function(media){
   if(!media) return;
