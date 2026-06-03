@@ -44,6 +44,122 @@ def random_username_for(identity):
     return unescape_newlines(random.choice(items)) if items else None
 
 
+# === USERNAME GENERATOR + INSTAGRAM AVAILABILITY CHECK ===
+
+# Sufixes / prefixes utilises par les VAs pour creer des pseudos qui ont du sens
+_PREFIXES = [
+    "sweet", "baby", "miss", "lil", "kiss", "cute", "iam", "the",
+    "queen", "princess", "honey", "tiny", "bb", "babe",
+]
+_SUFFIXES = [
+    "xx", "xo", "xoxo", "cuty", "cute", "babe", "honey",
+    "love", "angel", "doll", "vibes", "muse", "girl",
+    "bunny", "rose", "lover", "kiss", "fr", "official",
+    "ofc",
+]
+_LETTERS_BLOCKS = ["xx", "yy", "zz", "qq", "mm", "ll", "bb"]
+_RANDOM_DOUBLE_LETTERS = ["ee", "oo", "ii", "aa", "uu"]
+
+
+def generate_username_candidates(base: str, count: int = 20) -> list:
+    """Genere des variations de pseudos a partir d'une base (ex: 'amelia').
+    Tous lettres uniquement (pas de chiffres, points, tirets) selon la regle
+    du bot. Retourne une liste de candidats deduplique."""
+    base = base.lower().strip()
+    base = "".join(c for c in base if c.isalpha())  # vire chiffres/points
+    if not base:
+        return []
+    seen = set()
+    out = []
+    def add(u):
+        u = u.lower()
+        if u and 4 <= len(u) <= 30 and u not in seen and u.replace("_", "").isalpha():
+            # Allow underscores mais pas chiffres
+            seen.add(u)
+            out.append(u)
+    # Variations directes
+    add(base)  # juste la base
+    for s in _SUFFIXES:
+        add(base + s)
+        add(base + "_" + s)
+    for p in _PREFIXES:
+        add(p + base)
+        add(p + "_" + base)
+    for db in _RANDOM_DOUBLE_LETTERS:
+        add(base + db)
+    for lb in _LETTERS_BLOCKS:
+        add(base + lb)
+    # Combinaisons : prefix + base + suffix
+    for p in _PREFIXES[:8]:
+        for s in _SUFFIXES[:8]:
+            add(p + base + s)
+    # Random shuffle pour varier l'ordre
+    random.shuffle(out)
+    return out[:count]
+
+
+async def check_instagram_username_available(username: str) -> bool:
+    """Check si un username Instagram est dispo. Marche par HTTP GET sur
+    instagram.com/username/. 404 = dispo, 200 = pris.
+    """
+    if not username:
+        return False
+    import aiohttp
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                      "Version/17.0 Safari/605.1.15",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://www.instagram.com/{username}/",
+                headers=headers, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=8),
+            ) as r:
+                # 404 = available, 200 = exists, 301/302 = login redirect (probably exists)
+                if r.status == 404:
+                    return True
+                if r.status == 200:
+                    text = await r.text()
+                    # Page profile -> contient "@username" dans le HTML
+                    # Page "not found" -> contient "Cette page n'est pas disponible"
+                    if ("Désolé, cette page n" in text or
+                        "Sorry, this page is" in text or
+                        '"is_private":true' in text and f'"username":"{username}"' not in text):
+                        return True
+                    return False
+                # Autre status (rate-limit etc) -> on considere comme indispo pour pas faire de faux positifs
+                return False
+    except Exception:
+        return False
+
+
+async def find_available_usernames(base: str, max_check: int = 30, want: int = 5) -> list:
+    """Genere des candidats et check leur dispo Instagram en parallele.
+    Retourne les premiers `want` qui sont dispo."""
+    candidates = generate_username_candidates(base, count=max_check)
+    if not candidates:
+        return []
+    # Check en parallele (8 en simultane max pour eviter rate-limit)
+    semaphore = asyncio.Semaphore(8)
+    available = []
+    async def check_one(u):
+        async with semaphore:
+            if len(available) >= want:
+                return
+            ok = await check_instagram_username_available(u)
+            if ok:
+                available.append(u)
+    tasks = [asyncio.create_task(check_one(c)) for c in candidates]
+    # Attend jusqu'a ce qu'on en ait assez OU qu'on ait tout teste
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED, timeout=20)
+    for t in pending:
+        t.cancel()
+    return available[:want]
+
+
 def random_name_for(identity):
     items = read_lines(IDENTITIES_DIR / identity / "names.txt")
     return unescape_newlines(random.choice(items)) if items else None
@@ -232,7 +348,7 @@ class UserCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="username", description="Donne un username Instagram aléatoire de ton identité")
+    @app_commands.command(name="username", description="Génère des pseudos Instagram VRAIMENT dispo basés sur ton identité")
     async def username(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -241,18 +357,38 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        u = random_username_for(identity)
-        if not u:
-            await interaction.response.send_message(
-                f"Aucun username pour ton identité `{identity}`. Demande à un admin (`/addusernames`).",
-                ephemeral=True,
+        # Defer car on va check ~20 URLs Instagram = quelques secondes
+        await interaction.response.defer()
+        try:
+            available = await find_available_usernames(identity, max_check=30, want=5)
+        except Exception as e:
+            await interaction.followup.send(
+                f"⚠️ Erreur lors du check Instagram : {e}\n"
+                "Fallback sur la liste pré-définie :"
+            )
+            u = random_username_for(identity)
+            if u:
+                await interaction.followup.send(u)
+            return
+        if not available:
+            # Tous pris -> fallback sur la liste manuelle
+            u = random_username_for(identity)
+            await interaction.followup.send(
+                f"😬 Tous les pseudos auto-générés sont déjà pris pour `{identity}`. "
+                + (f"Essaie celui-ci :\n`{u}`" if u else "Demande à un admin (`/addusernames`).")
             )
             return
-        await interaction.response.send_message(
-            "⚠️ Si l'username n'est pas disponible sur Instagram, **ajoute 1 ou 2 lettres** pour en trouver un libre.\n"
-            "❌ Pas de chiffres, pas de points, pas de tirets — **juste des lettres**."
-        )
-        await interaction.followup.send(u)
+        # Affichage des dispo
+        lines = [
+            f"✅ **{len(available)} pseudo(s) dispo sur Instagram** pour `{identity}` :",
+            "",
+        ]
+        for u in available:
+            lines.append(f"• `{u}`")
+        lines.append("")
+        lines.append("👉 Copie celui que tu veux et inscris-le sur Instagram.")
+        lines.append("⚠️ Les pseudos sont checkés en temps réel — ils peuvent être pris à tout moment, prends rapidement.")
+        await interaction.followup.send("\n".join(lines))
 
     @app_commands.command(name="name", description="Donne un prénom (display Instagram) aléatoire de ton identité")
     async def name(self, interaction: discord.Interaction):
