@@ -7119,19 +7119,12 @@ def _render_insta_trends_grid_html() -> str:
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
-      <a href="{video_url or url}" target="_blank" download title="Télécharger" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      </a>
-      <button onclick='addToVeille(this, {{"url":"{url}","video_url":"{video_url}","thumb":"{thumb}","owner":"{owner}","owner_pp":"{owner_pic}","caption":"{caption}","views":{d_views},"likes":{d_likes},"comments":{d_comments}}})' title="Ajouter à la Veille" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-      </button>
-      <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+      <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager (copier le lien)" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
       <button onclick='openLightbox("{video_url or thumb}", {"true" if is_video else "false"}, "@{owner}")' title="Plein écran" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       </button>
-      <button onclick='debugReel("{url}")' title="Debug : voir les donnees brutes scrappees" style="width:28px;height:28px;background:rgba(168,85,247,.7);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;font-size:14px">🐛</button>
     </div>
     <!-- Bottom: caption overlay + stats right -->
     <div style="position:absolute;bottom:50px;left:10px;right:80px;color:#fff;font-size:12px;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.9);max-height:60px;overflow:hidden;z-index:1;pointer-events:none">{caption_short}</div>
