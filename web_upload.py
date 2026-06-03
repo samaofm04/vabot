@@ -1142,15 +1142,14 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
   var owner = card.getAttribute('data-owner') || '';
   if(!owner){
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardErrorClean(card);
     return;
   }
   if(card.getAttribute('data-rescraped') === '1'){
     var oldL = media.querySelector('.reel-loading');
     if(oldL) oldL.remove();
-    console.log('[igAutoRescrape] already retried, embed fallback (auto-play)');
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardErrorClean(card);
     return;
   }
   card.setAttribute('data-rescraped', '1');
@@ -1173,14 +1172,14 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
       if(!d || !d.ok){
         if(loader.parentNode) loader.remove();
         igStopInline(media);
-        igEmbedInCard(card);
+        igShowCardErrorClean(card);
         return;
       }
       setTimeout(function(){
         if(loader.parentNode) loader.remove();
         var retryErrHandler = function(){
           igStopInline(media);
-          igEmbedInCard(card);
+          igShowCardErrorClean(card);
         };
         v.addEventListener('error', retryErrHandler, {once:true});
         v.src = proxyUrl + '&_retry=' + Date.now();
@@ -1190,7 +1189,7 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
           if(!v.readyState || v.readyState < 3){
             v.removeEventListener('error', retryErrHandler);
             igStopInline(media);
-            igEmbedInCard(card);
+            igShowCardErrorClean(card);
           }
         }, 10000);
       }, 3000);
@@ -1198,7 +1197,7 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     .catch(function(err){
       if(loader.parentNode) loader.remove();
       igStopInline(media);
-      igEmbedInCard(card);
+      igShowCardErrorClean(card);
     });
 };
 // Overlay erreur CLEAN : pas d'iframe IG, juste bouton "Ouvrir sur Instagram"
