@@ -1009,19 +1009,20 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
-    console.log('[igPlayInline] native failed, fallback to embed iframe');
-    // Fallback automatique : embed iframe IG (toujours marche, video play directement)
+    console.log('[igPlayInline] native failed');
     igStopInline(media);
-    igEmbedInCard(card);
+    igShowCardError(card, 'Lecture impossible', 'URL CDN expirée. Click Rescrape pour rafraîchir.');
   }, {once:true});
   v.src = proxyUrl;
+  // Timeout 10s : laisse vraiment le temps au natif de charger avant
+  // de declarer echec. User prefere voir le spinner natif que l'embed iframe.
   var fallbackTimer = setTimeout(function(){
     if(!v.readyState || v.readyState < 3){
-      console.log('[igPlayInline] native timeout, fallback to embed iframe');
+      console.log('[igPlayInline] native timeout 10s');
       igStopInline(media);
-      igEmbedInCard(card);
+      igShowCardError(card, 'Délai dépassé', 'Click Rescrape pour rafraîchir l URL.');
     }
-  }, 4000);
+  }, 10000);
   v.addEventListener('playing', function(){ clearTimeout(fallbackTimer); }, {once:true});
   v.addEventListener('loadeddata', function(){ clearTimeout(fallbackTimer); }, {once:true});
   var p = v.play();
