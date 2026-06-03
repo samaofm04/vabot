@@ -944,13 +944,16 @@ window.igPlayInline = function(media){
   document.querySelectorAll('.reel-card.reel-playing').forEach(function(c){
     if(c !== card) igStopInline(c.querySelector('.reel-media'));
   });
-  var v = media.querySelector('.reel-video');
   var url = card.getAttribute('data-url') || '';
   var videoUrl = card.getAttribute('data-video-url') || '';
-  if(!v || !videoUrl){
-    // Pas de video (ex: image post) -> ouvre IG en fallback
-    if(url) window.open(url, '_blank');
-    return;
+  // Cree l'element <video> s'il n'existe pas (cas reels d'ancien scrape sans video_url cache)
+  var v = media.querySelector('.reel-video');
+  if(!v){
+    v = document.createElement('video');
+    v.className = 'reel-video';
+    v.setAttribute('playsinline', '');
+    v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s';
+    media.appendChild(v);
   }
   media.classList.add('reel-playing');
   // Hide play overlay
@@ -961,7 +964,13 @@ window.igPlayInline = function(media){
   v.muted = false;
   v.style.opacity = '1';
   v.style.zIndex = '2';
-  // Tentative de lecture - si erreur (URL expiree), refresh
+  // Si pas de video_url -> refresh direct
+  if(!videoUrl){
+    igRefreshVideoUrl(card, v, url);
+    return;
+  }
+  // Sinon on tente d'abord avec l'URL cache
+  if(v.src !== videoUrl) v.src = videoUrl;
   var attempted = false;
   function tryPlay(){
     var p = v.play();
@@ -969,7 +978,6 @@ window.igPlayInline = function(media){
       p.catch(function(err){
         if(attempted) return;
         attempted = true;
-        // Refresh URL via instaloader
         igRefreshVideoUrl(card, v, url);
       });
     }
