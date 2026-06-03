@@ -918,6 +918,8 @@ window.debugReel = async function(url){
 // === Reel hover play + expand panel ===
 window.igHoverPlay = function(media){
   if(!media) return;
+  // Skip si deja en lecture inline
+  if(media.classList.contains('reel-playing')) return;
   var v = media.querySelector('.reel-video');
   if(!v) return;
   try{ v.muted = true; v.currentTime = 0; }catch(e){}
@@ -927,10 +929,103 @@ window.igHoverPlay = function(media){
 };
 window.igHoverStop = function(media){
   if(!media) return;
+  if(media.classList.contains('reel-playing')) return;
   var v = media.querySelector('.reel-video');
   if(!v) return;
   try{ v.pause(); }catch(e){}
   v.style.opacity = '0';
+};
+// Lit la video inline avec controles (au lieu d'ouvrir Instagram)
+window.igPlayInline = function(media){
+  if(!media) return;
+  var card = media.closest('.reel-card');
+  if(!card) return;
+  // Pause tous les autres reels en cours
+  document.querySelectorAll('.reel-card.reel-playing').forEach(function(c){
+    if(c !== card) igStopInline(c.querySelector('.reel-media'));
+  });
+  var v = media.querySelector('.reel-video');
+  var url = card.getAttribute('data-url') || '';
+  var videoUrl = card.getAttribute('data-video-url') || '';
+  if(!v || !videoUrl){
+    // Pas de video (ex: image post) -> ouvre IG en fallback
+    if(url) window.open(url, '_blank');
+    return;
+  }
+  media.classList.add('reel-playing');
+  // Hide play overlay
+  var overlay = media.querySelector('.reel-play-overlay');
+  if(overlay) overlay.style.opacity = '0';
+  // Set controls + audio
+  v.setAttribute('controls', 'controls');
+  v.muted = false;
+  v.style.opacity = '1';
+  v.style.zIndex = '2';
+  // Tentative de lecture - si erreur (URL expiree), refresh
+  var attempted = false;
+  function tryPlay(){
+    var p = v.play();
+    if(p && p.catch){
+      p.catch(function(err){
+        if(attempted) return;
+        attempted = true;
+        // Refresh URL via instaloader
+        igRefreshVideoUrl(card, v, url);
+      });
+    }
+  }
+  function onError(){
+    if(attempted) return;
+    attempted = true;
+    igRefreshVideoUrl(card, v, url);
+  }
+  v.addEventListener('error', onError, {once:true});
+  tryPlay();
+};
+window.igStopInline = function(media){
+  if(!media) return;
+  var v = media.querySelector('.reel-video');
+  if(v){
+    try{ v.pause(); }catch(e){}
+    v.removeAttribute('controls');
+    v.muted = true;
+    v.style.opacity = '0';
+    v.style.zIndex = '';
+  }
+  media.classList.remove('reel-playing');
+  var overlay = media.querySelector('.reel-play-overlay');
+  if(overlay) overlay.style.opacity = '';
+};
+window.igRefreshVideoUrl = function(card, videoEl, postUrl){
+  if(!postUrl) return;
+  // Affiche un mini spinner
+  var media = card.querySelector('.reel-media');
+  var loader = document.createElement('div');
+  loader.className = 'reel-loading';
+  loader.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border:3px solid rgba(255,255,255,.15);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite;z-index:5';
+  media.appendChild(loader);
+  var fd = new FormData();
+  fd.append('url', postUrl);
+  fetch('/insta/refresh_video_url', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(loader.parentNode) loader.remove();
+      if(d && d.ok && d.video_url){
+        // Update le src + data attribute + retry play
+        card.setAttribute('data-video-url', d.video_url);
+        videoEl.src = d.video_url;
+        var p = videoEl.play();
+        if(p && p.catch) p.catch(function(){
+          if(typeof showToast === 'function') showToast('Lecture impossible — ouvre sur Instagram', 'error');
+        });
+      } else {
+        if(typeof showToast === 'function') showToast('Video expirée et impossible de la rafraîchir', 'error');
+      }
+    })
+    .catch(function(err){
+      if(loader.parentNode) loader.remove();
+      if(typeof showToast === 'function') showToast('Erreur refresh: ' + err, 'error');
+    });
 };
 window.toggleReelExpand = function(card){
   if(!card) return;
@@ -6670,15 +6765,21 @@ def _render_insta_trends_grid_html() -> str:
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='igHoverPlay(this)'
        onmouseleave='igHoverStop(this)'
-       onclick='window.open("{url}","_blank")'>
-    <img src="{thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">
+       onclick='igPlayInline(this)'>
+    <img src="{thumb}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html}
+    <!-- Play overlay (visible quand pas en lecture) -->
+    <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;transition:opacity .2s">
+      <div style="width:64px;height:64px;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.2)">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="#fff" style="margin-left:3px"><polygon points="5 3 19 12 5 21"/></svg>
+      </div>
+    </div>
     <!-- Top: time ago left, actions right -->
     <div style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);color:#fff;font-size:11px;font-weight:600;padding:5px 10px;border-radius:14px;z-index:2">{time_ago}</div>
-    <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:2" onclick="event.stopPropagation()">
-      <button onclick='this.querySelector("svg").style.color = (this.querySelector("svg").style.color === "rgb(255, 71, 87)" ? "#fff" : "#ff4757")' title="Mute" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-      </button>
+    <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:3" onclick="event.stopPropagation()">
+      <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;text-decoration:none">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
       <a href="{video_url or url}" target="_blank" download title="Télécharger" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </a>
@@ -18456,6 +18557,34 @@ def create_app():
             "username": clean,
             "scrape_started": True,
             "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
+        })
+
+    @app.route("/insta/refresh_video_url", methods=["POST"])
+    def insta_refresh_video_url():
+        """Re-fetch un video_url frais pour un reel donne (les URLs IG expirent).
+        Body : url (permalink du reel/post)
+        Returns : {ok, video_url, caption?}"""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import veille_telegram
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        url = (request.form.get("url") or "").strip()
+        if not url:
+            return jsonify({"ok": False, "error": "url manquante"})
+        try:
+            fresh = veille_telegram.refresh_post_data(url)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"refresh: {e}"})
+        if not fresh.get("video_url"):
+            return jsonify({"ok": False, "error": "video_url introuvable (pas un reel video ?)"})
+        return jsonify({
+            "ok": True,
+            "video_url": fresh["video_url"],
+            "caption": fresh.get("caption", ""),
         })
 
     @app.route("/insta/status", methods=["GET"])
