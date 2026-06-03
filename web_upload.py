@@ -976,13 +976,14 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
-  // STRATEGIE BASIQUE : <video src=video_url> direct, sans proxy/backend.
-  // Si l'URL est encore fresh (recent scrape) ca joue, sinon overlay clean.
-  if(!videoUrl){
+  // STRATEGIE : tente URL directe, si echec -> proxy transparent (RapidAPI + scraping).
+  // User voit juste un spinner unique, jamais d'overlay d'erreur intermediaire.
+  if(!url && !videoUrl){
     igStopInline(media);
     igShowCardErrorClean(card);
     return;
   }
+  var owner = card.getAttribute('data-owner') || '';
   var loader = media.querySelector('.reel-loading');
   if(!loader){
     loader = document.createElement('div');
@@ -1001,22 +1002,51 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', onReady, {once:true});
   v.addEventListener('playing', onReady, {once:true});
-  v.addEventListener('error', function(){
-    clearLoader();
-    igStopInline(media);
-    igShowCardErrorClean(card);
-  }, {once:true});
-  v.src = videoUrl;
-  var p = v.play();
-  if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-  // Timeout 6s pour considerer comme echec
-  setTimeout(function(){
-    if(!v.readyState || v.readyState < 3){
+  // Tentative 1 : URL directe (rapide si fresh)
+  var triedProxy = false;
+  function tryProxy(){
+    if(triedProxy) return;
+    triedProxy = true;
+    var proxyParams = [];
+    if(videoUrl) proxyParams.push('vurl=' + encodeURIComponent(videoUrl));
+    if(url) proxyParams.push('url=' + encodeURIComponent(url));
+    if(owner) proxyParams.push('owner=' + encodeURIComponent(owner));
+    var proxyUrl = '/insta/proxy_video?' + proxyParams.join('&');
+    // Re-attach un nouveau error handler pour le proxy (echec final si proxy KO)
+    var proxyErr = function(){
       clearLoader();
       igStopInline(media);
       igShowCardErrorClean(card);
-    }
-  }, 6000);
+    };
+    v.addEventListener('error', proxyErr, {once:true});
+    v.src = proxyUrl;
+    var p2 = v.play();
+    if(p2 && p2.catch) p2.catch(function(){ v.setAttribute('controls', 'controls'); });
+    // Timeout 15s sur le proxy (peut prendre du temps si RapidAPI scrape)
+    setTimeout(function(){
+      if(!v.readyState || v.readyState < 3){
+        v.removeEventListener('error', proxyErr);
+        clearLoader();
+        igStopInline(media);
+        igShowCardErrorClean(card);
+      }
+    }, 15000);
+  }
+  v.addEventListener('error', tryProxy, {once:true});
+  if(videoUrl){
+    v.src = videoUrl;
+    var p = v.play();
+    if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
+    // Timeout 4s sur URL directe : si rien charge, bascule proxy
+    setTimeout(function(){
+      if(!v.readyState || v.readyState < 3){
+        tryProxy();
+      }
+    }, 4000);
+  } else {
+    // Pas de cached URL -> direct proxy
+    tryProxy();
+  }
 };
 // Bascule vers l'embed officiel Instagram dans la card (toujours marche).
 // L'iframe est CROPPEE en CSS : on cache le header IG (username + Voir le
