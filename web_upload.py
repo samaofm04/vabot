@@ -15952,10 +15952,63 @@ def _render_upload_inner(msg=None, error=None):
     )
 
 
+def _start_auto_scrape_daemon():
+    """Background daemon : scrape toutes les watchlist Instagram toutes les 3h.
+    Cela garde les video_url fresh (IG CDN URL TTL = 2-6h, on scrape avant
+    expiration). User n'a rien a faire, il visite Trends -> tous les reels
+    sont jouables.
+
+    Lance un seul thread daemon au demarrage de l'app. Ne pas re-lancer si
+    deja actif (idempotent).
+    """
+    import threading
+    import time as _t
+    if getattr(_start_auto_scrape_daemon, "_started", False):
+        return
+    _start_auto_scrape_daemon._started = True
+
+    SCRAPE_INTERVAL_SEC = 3 * 60 * 60  # 3 heures
+    DELAY_BETWEEN_PROFILES = 8  # 8s entre chaque pour eviter rate-limit
+
+    def loop():
+        # Wait 60s au demarrage pour laisser le bot s'initialiser
+        _t.sleep(60)
+        while True:
+            try:
+                from insta_scraper import load_watchlist, scrape_profile
+                wl = load_watchlist() or []
+                if wl:
+                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes...")
+                    ok = 0
+                    fail = 0
+                    for u in wl:
+                        try:
+                            r = scrape_profile(u, limit=100)
+                            if "error" not in r:
+                                ok += 1
+                            else:
+                                fail += 1
+                        except Exception as e:
+                            log.warning(f"[insta-bg-scrape] {u}: {e}")
+                            fail += 1
+                        _t.sleep(DELAY_BETWEEN_PROFILES)
+                    log.info(f"[insta-bg-scrape] termine: {ok} OK / {fail} fail")
+            except Exception as e:
+                log.error(f"[insta-bg-scrape] cycle err: {e}")
+            # Sleep 3h avant le prochain cycle
+            _t.sleep(SCRAPE_INTERVAL_SEC)
+
+    t = threading.Thread(target=loop, daemon=True, name="insta-bg-scrape")
+    t.start()
+    log.info("[insta-bg-scrape] daemon demarre (cycle toutes les 3h)")
+
+
 def create_app():
     from flask import Flask, request, session, redirect, make_response
     app = Flask(__name__)
     app.secret_key = os.environ.get("WEB_SECRET", os.urandom(24).hex())
+    # Demarre l'auto-scrape Instagram en background
+    _start_auto_scrape_daemon()
 
     def is_auth():
         return session.get("auth") is True
