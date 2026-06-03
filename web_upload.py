@@ -1378,7 +1378,32 @@ window.toggleReelExpand = function(card){
     panel.style.borderTopWidth = '1px';
     if(inner) panel.style.maxHeight = inner.scrollHeight + 'px';
     if(chev) chev.style.transform = 'rotate(180deg)';
-    // Charge la duree
+    // Auto-fetch caption si manquante
+    var capDiv = panel.querySelector('.reel-caption-area');
+    if(capDiv && !card.getAttribute('data-caption-fetched')){
+      var existing = (capDiv.textContent || '').trim();
+      if(!existing || existing.indexOf('Pas de caption') >= 0){
+        var url = card.getAttribute('data-url') || '';
+        if(url){
+          card.setAttribute('data-caption-fetched', '1');
+          capDiv.innerHTML = '<span style="color:#888;font-style:italic">⏳ Chargement caption…</span>';
+          fetch('/insta/fetch_caption?url=' + encodeURIComponent(url))
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+              if(d && d.ok && d.caption){
+                capDiv.textContent = d.caption;
+                // Re-calcule hauteur panel
+                if(inner) panel.style.maxHeight = inner.scrollHeight + 'px';
+              } else {
+                capDiv.innerHTML = '<span style="color:#888;font-style:italic">Pas de caption Instagram pour ce reel</span>';
+              }
+            })
+            .catch(function(){
+              capDiv.innerHTML = '<span style="color:#888;font-style:italic">Pas de caption Instagram pour ce reel</span>';
+            });
+        }
+      }
+    }
     var v = card.querySelector('.reel-video');
     var label = panel.querySelector('.reel-dur-label');
     if(v && label){
@@ -1836,41 +1861,88 @@ window.updateVeilleBadge = function(total){
     badge.style.display = 'none';
   }
 };
+// Toggle Veille : add si pas dedans, remove si deja dedans
 window.addToVeille = async function(btn, payload){
   if(!payload || !payload.url) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '⏳';
+  // Verifier si la card est deja en Veille (via data attribute)
+  const existingId = btn.getAttribute('data-veille-id') || '';
   try {
-    const r = await fetch('/veille/add', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload),
-      credentials:'same-origin'
-    });
-    const j = await r.json();
-    if(j.ok){
-      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e" stroke="#22c55e" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
-      btn.style.background = 'rgba(34,197,94,.3)';
-      if(typeof showToast === 'function') showToast('🔖 Ajouté à la Veille', 'success');
-      btn.disabled = false;
-      // Refresh la section Veille en background + update badge
-      if(typeof j.veille_total === 'number') window.updateVeilleBadge(j.veille_total);
-      window.refreshVeilleSection();
-    } else if(j.error === 'already_exists'){
-      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#3b82f6" stroke="#3b82f6" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
-      btn.style.background = 'rgba(59,130,246,.3)';
-      if(typeof showToast === 'function') showToast('🔖 Déjà dans la Veille', 'success');
-      btn.disabled = false;
+    if(existingId){
+      // Etait dans la Veille -> remove
+      const fd = new FormData(); fd.append('reel_id', existingId);
+      const r = await fetch('/veille/remove', {method:'POST', body:fd, credentials:'same-origin'});
+      const j = await r.json();
+      if(j.ok){
+        btn.removeAttribute('data-veille-id');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+        btn.style.background = 'rgba(0,0,0,.6)';
+        if(typeof showToast === 'function') showToast('🔖 Retiré de la Veille', 'success');
+        window.refreshVeilleSection && window.refreshVeilleSection();
+      } else {
+        btn.innerHTML = orig;
+        if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur remove'), 'error');
+      }
     } else {
-      btn.innerHTML = orig;
-      btn.disabled = false;
-      if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur'), 'error');
+      // Pas dans la Veille -> add
+      const r = await fetch('/veille/add', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+        credentials:'same-origin'
+      });
+      const j = await r.json();
+      if(j.ok || j.error === 'already_exists'){
+        const rid = (j.reel && j.reel.id) || j.reel_id;
+        if(rid) btn.setAttribute('data-veille-id', rid);
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e" stroke="#22c55e" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+        btn.style.background = 'rgba(34,197,94,.3)';
+        const msg = j.ok ? '🔖 Ajouté à la Veille' : '🔖 Déjà dans la Veille';
+        if(typeof showToast === 'function') showToast(msg, 'success');
+        if(typeof j.veille_total === 'number') window.updateVeilleBadge && window.updateVeilleBadge(j.veille_total);
+        window.refreshVeilleSection && window.refreshVeilleSection();
+      } else {
+        btn.innerHTML = orig;
+        if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur'), 'error');
+      }
     }
   } catch(e){
     btn.innerHTML = orig;
-    btn.disabled = false;
     if(typeof showToast === 'function') showToast('❌ Erreur réseau', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+};
+// Copy link avec fallback pour HTTP (sans HTTPS, navigator.clipboard est bloque)
+window.igCopyLink = function(url){
+  if(!url) return;
+  // Try moderne d'abord
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(url).then(function(){
+      if(typeof showToast === 'function') showToast('🔗 Lien copié', 'success');
+    }).catch(function(){
+      igFallbackCopy(url);
+    });
+  } else {
+    igFallbackCopy(url);
+  }
+};
+window.igFallbackCopy = function(text){
+  // Fallback execCommand (marche sur HTTP)
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  var ok = false;
+  try{ ok = document.execCommand('copy'); }catch(e){}
+  document.body.removeChild(ta);
+  if(typeof showToast === 'function'){
+    if(ok) showToast('🔗 Lien copié', 'success');
+    else showToast('❌ Copy bloqué - copie manuelle: ' + text.substring(0, 60), 'error');
   }
 };
 
@@ -7140,7 +7212,7 @@ def _render_insta_trends_grid_html() -> str:
       <button onclick='addToVeille(this, {{"url":"{url}","video_url":"{video_url}","thumb":"{thumb}","owner":"{owner}","owner_pp":"{owner_pic}","caption":"{caption}","views":{d_views},"likes":{d_likes},"comments":{d_comments}}})' title="Ajouter à la Veille" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
       </button>
-      <button onclick='navigator.clipboard.writeText("{url}");showToast("Lien copié","success")' title="Partager (copier le lien)" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+      <button onclick='igCopyLink("{url}")' title="Partager (copier le lien)" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
       <button onclick='openLightbox("{video_url or thumb}", {"true" if is_video else "false"}, "@{owner}")' title="Plein écran" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
@@ -7160,7 +7232,7 @@ def _render_insta_trends_grid_html() -> str:
       <!-- Description panel : OUVERT PAR DEFAUT (caption + sound toujours visibles) -->
       <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:6px">
-          <div style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9)">{caption_html}</div>
+          <div class="reel-caption-area" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9)">{caption_html}</div>
           <div style="display:flex;align-items:center;gap:5px;color:#bbb;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,.9)">
             <span style="color:#3b82f6">🎵</span>
             <span style="color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Original audio</span>
@@ -19114,6 +19186,70 @@ def create_app():
             "scrape_started": True,
             "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
         })
+
+    @app.route("/insta/fetch_caption", methods=["GET"])
+    def insta_fetch_caption():
+        """Fetch la caption d'un reel IG depuis sa page publique.
+        Query : ?url=<permalink>
+        Renvoie {ok, caption}."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import requests as _rq
+        import re as _re
+        from html import unescape as _unescape
+        url = (request.args.get("url") or "").strip()
+        if not url:
+            return jsonify({"ok": False, "error": "url manquant"})
+        m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url)
+        if not m:
+            return jsonify({"ok": False, "error": "shortcode introuvable dans url"})
+        shortcode = m.group(1)
+        # Essai plusieurs UAs - facebookbot est le plus rich en metadata
+        uas = [
+            "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+            "Mozilla/5.0 (compatible; Twitterbot/1.0)",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        ]
+        for ua in uas:
+            try:
+                r = _rq.get(
+                    f"https://www.instagram.com/p/{shortcode}/embed/",
+                    headers={"User-Agent": ua},
+                    timeout=8,
+                )
+                if r.status_code != 200:
+                    continue
+                html = r.text
+                # Patterns pour extraire la caption
+                patterns = [
+                    r'<meta\s+property="og:description"\s+content="([^"]+)"',
+                    r'<meta\s+name="description"\s+content="([^"]+)"',
+                    r'"caption"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"',
+                    r'"caption"\s*:\s*"([^"]+)"',
+                    r'"accessibility_caption"\s*:\s*"([^"]+)"',
+                ]
+                for pat in patterns:
+                    mm = _re.search(pat, html)
+                    if mm:
+                        cap = mm.group(1)
+                        try:
+                            cap = cap.encode().decode("unicode_escape")
+                        except Exception:
+                            pass
+                        cap = _unescape(cap)
+                        # og:description format: "USER on Instagram: \"caption text\""
+                        og_match = _re.search(r'"([^"]+)"$', cap)
+                        if og_match and " on Instagram:" in cap:
+                            cap = og_match.group(1)
+                        cap = cap.strip()
+                        if cap and len(cap) > 3:
+                            return jsonify({"ok": True, "caption": cap[:800]})
+            except Exception:
+                continue
+        return jsonify({"ok": False, "error": "caption introuvable"})
 
     @app.route("/insta/debug_rapidapi", methods=["GET"])
     def insta_debug_rapidapi():
