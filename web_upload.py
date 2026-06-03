@@ -18924,16 +18924,10 @@ def create_app():
 
     @app.route("/insta/proxy_video", methods=["GET"])
     def insta_proxy_video():
-        """Proxy la video Instagram via le backend (contourne les blocages CORS
-        et Referer du CDN Instagram).
+        """Proxy SIMPLE : utilise UNIQUEMENT RapidAPI pour recup le video_url
+        (pas d'instaloader/cookies). Stream le contenu CDN IG vers le browser.
 
-        Query :
-        - ?vurl=<video_url> : URL CDN IG direct (rapide, pas d'API)
-        - ?url=<post_permalink> : permalink pour fallback refresh
-        - ?owner=<username> : pour refresh via RapidAPI (preferred, pas de
-          rate-limit comme instaloader)
-
-        Stream en chunks pour pas saturer la memoire.
+        Query : ?url=<permalink>&owner=<username>
         """
         if not is_auth():
             return ("unauth", 401)
@@ -18985,13 +18979,12 @@ def create_app():
                 resp.headers["Content-Length"] = content_length
             resp.headers["Cache-Control"] = "private, max-age=300"
             return resp
-        # ETAPE 1 : essaie direct_vurl si fourni (rapide, pas d'instaloader)
+        # ETAPE 1 : essaie URL directe (cas reel fresh)
         if direct_vurl:
             res = try_stream(direct_vurl)
             if res is not None:
                 return res
-            # Sinon (URL expiree) -> tombe sur instaloader si on a le permalink
-        # ETAPE 2 : cache des resolutions precedentes
+        # ETAPE 2 : cache memoire des fresh URLs scrapees precedemment
         if post_url:
             cached = cache.get(post_url)
             if cached and (now - cached["ts"]) < CACHE_TTL:
@@ -18999,128 +18992,42 @@ def create_app():
                 if res is not None:
                     return res
                 cache.pop(post_url, None)
-        # ETAPE 3 : RapidAPI - re-scrape le profil owner pour avoir un fresh
-        # video_url (pas de rate-limit comme instaloader)
+        # ETAPE 3 : RapidAPI UNIQUEMENT - pas d'instaloader, pas de cookies IG.
         m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url or '')
         shortcode = m.group(1) if m else ''
-        if owner and shortcode:
-            try:
-                from insta_scraper import scrape_profile, get_cached
-                # ETAPE 3a : check le cache disque rapidement
-                cached_data = get_cached(owner)
-                if cached_data:
-                    for reel in cached_data.get("reels", []):
-                        if reel.get("shortcode") == shortcode:
-                            video_url = (reel.get("video_url") or "").strip()
-                            if video_url:
-                                res = try_stream(video_url)
-                                if res is not None:
-                                    if post_url:
-                                        cache[post_url] = {"ts": now, "video_url": video_url}
-                                    return res
-                            break  # trouve le reel mais URL morte -> rescrape
-                # ETAPE 3b : fresh scrape RapidAPI avec limit gonfle a 100
-                result = scrape_profile(owner, limit=100)
-                if "error" not in result:
-                    for reel in result.get("reels", []):
-                        if reel.get("shortcode") == shortcode:
-                            video_url = (reel.get("video_url") or "").strip()
-                            if video_url:
-                                if post_url:
-                                    cache[post_url] = {"ts": now, "video_url": video_url}
-                                res = try_stream(video_url)
-                                if res is not None:
-                                    return res
-                                return ("URL fresh RapidAPI mais CDN refuse stream", 502)
-                            return ("Reel sans video_url (peut-etre image ?)", 404)
-                    return (f"shortcode {shortcode} introuvable dans les 100 derniers reels de @{owner}", 404)
-                else:
-                    return (f"RapidAPI scrape failed: {result['error'][:200]}", 502)
-            except Exception as e:
-                return (f"rapidapi error: {type(e).__name__}: {str(e)[:200]}", 500)
-        # ETAPE 3.5 : scraping de la page embed IG (cherche video_url dans HTML)
-        # La page /p/SHORTCODE/embed/ est PUBLIQUE (pas de rate-limit comme l'API).
-        if post_url and shortcode:
-            try:
-                # On essaie 2 User-Agents - le bot UA renvoie souvent une page plus
-                # simple avec le video_url en clair
-                uas = [
-                    # UA mobile = HTML simplifie + video_url direct souvent
-                    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram",
-                    # UA desktop normal
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-                    # UA bot - facebookexternalhit fait que IG renvoie un OG-rich page
-                    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-                ]
-                embed_url = f"https://www.instagram.com/p/{shortcode}/embed/"
-                candidates = []
-                for ua in uas:
-                    try:
-                        er = _rq.get(
-                            embed_url,
-                            headers={"User-Agent": ua, "Accept": "text/html,*/*"},
-                            timeout=8,
-                        )
-                        if er.status_code != 200:
-                            continue
-                        html = er.text
-                        # Multi-patterns pour extraire le video_url
-                        patterns = [
-                            r'"video_url"\s*:\s*"([^"]+)"',
-                            r'"playable_url"\s*:\s*"([^"]+)"',
-                            r'"playable_url_quality_hd"\s*:\s*"([^"]+)"',
-                            r'"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"([^"]+)"',
-                            r'"video_dash_manifest"\s*:\s*"([^"]+)"',
-                            r'<meta\s+property="og:video"\s+content="([^"]+)"',
-                            r'<meta\s+property="og:video:secure_url"\s+content="([^"]+)"',
-                            r'src=\"(https://[^\"]+\.mp4[^\"]*)\"',
-                            r'data-video-src="([^"]+)"',
-                        ]
-                        for pat in patterns:
-                            for m_match in _re.finditer(pat, html):
-                                u = m_match.group(1)
-                                # Decode unicode escapes (Python escapes JSON)
-                                try:
-                                    u = u.encode().decode("unicode_escape")
-                                except Exception:
-                                    pass
-                                # Decode HTML entities
-                                u = u.replace("&amp;", "&").replace("\\/", "/")
-                                if u.startswith("http") and u not in candidates:
-                                    candidates.append(u)
-                        if candidates:
-                            break  # un UA a marche, on s arrete
-                    except Exception:
-                        continue
-                # Tente chaque candidat
-                for vu in candidates:
-                    res = try_stream(vu)
+        if not (owner and shortcode):
+            return ("owner + shortcode requis pour refresh RapidAPI", 400)
+        try:
+            from insta_scraper import scrape_profile, get_cached
+            # 3a : check cache disque (peut deja avoir un fresh URL)
+            cached_data = get_cached(owner)
+            if cached_data:
+                for reel in cached_data.get("reels", []):
+                    if reel.get("shortcode") == shortcode:
+                        video_url = (reel.get("video_url") or "").strip()
+                        if video_url:
+                            res = try_stream(video_url)
+                            if res is not None:
+                                cache[post_url] = {"ts": now, "video_url": video_url}
+                                return res
+                        break
+            # 3b : fresh scrape RapidAPI
+            result = scrape_profile(owner, limit=100)
+            if "error" in result:
+                return (f"RapidAPI: {result['error'][:200]}", 502)
+            for reel in result.get("reels", []):
+                if reel.get("shortcode") == shortcode:
+                    video_url = (reel.get("video_url") or "").strip()
+                    if not video_url:
+                        return ("Reel sans video_url (peut-etre une image)", 404)
+                    cache[post_url] = {"ts": now, "video_url": video_url}
+                    res = try_stream(video_url)
                     if res is not None:
-                        cache[post_url] = {"ts": now, "video_url": vu}
                         return res
-            except Exception as e:
-                pass
-        # ETAPE 4 : Dernier recours - instaloader (rate-limited souvent)
-        if post_url:
-            try:
-                import veille_telegram
-                fresh = veille_telegram.refresh_post_data(post_url)
-            except Exception as e:
-                return (f"refresh error: {e}", 500)
-            video_url = (fresh.get("video_url") or "").strip()
-            if not video_url:
-                debug = fresh.get("_debug", "?")
-                if "401" in debug or "Please wait" in debug:
-                    return ("Instagram rate-limit. Configure RapidAPI dans Settings ou attends 30 min.", 429)
-                return (f"video_url introuvable: {debug}", 404)
-            cache[post_url] = {"ts": now, "video_url": video_url}
-            res = try_stream(video_url)
-            if res is not None:
-                return res
-            return ("URL fresh instaloader mais CDN refuse stream", 502)
-        return ("aucune URL utilisable", 404)
+                    return ("URL RapidAPI mais CDN refuse stream", 502)
+            return (f"@{owner} : reel {shortcode} introuvable (au-dela des 100 derniers)", 404)
+        except Exception as e:
+            return (f"RapidAPI error: {type(e).__name__}: {str(e)[:200]}", 500)
 
     @app.route("/insta/refresh_video_url", methods=["POST"])
     def insta_refresh_video_url():
