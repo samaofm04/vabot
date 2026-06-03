@@ -1004,15 +1004,19 @@ window.igPlayInline = function(media){
   v.addEventListener('playing', onReady, {once:true});
   v.addEventListener('error', function(){
     clearLoader();
+    console.log('[igPlayInline] video error event, fetching proxy for body...', proxyUrl);
     // Fetch direct pour recuperer le vrai message d'erreur du backend
     fetch(proxyUrl).then(function(r){
-      if(r.ok) return null; // bizarre, video error mais HTTP OK
+      console.log('[igPlayInline] proxy returned status', r.status);
+      if(r.ok) return null;
       return r.text();
     }).then(function(body){
-      var msg = body ? (body.length > 250 ? body.substring(0, 250) + '…' : body) : 'erreur inconnue';
+      console.log('[igPlayInline] proxy body:', body);
+      var msg = body ? (body.length > 250 ? body.substring(0, 250) + '…' : body) : 'video error sans body';
       if(typeof showToast === 'function') showToast('Proxy : ' + msg, 'error');
-    }).catch(function(){
-      if(typeof showToast === 'function') showToast('Lecture impossible (network) — ouvre sur Instagram', 'error');
+    }).catch(function(err){
+      console.error('[igPlayInline] fetch error:', err);
+      if(typeof showToast === 'function') showToast('Network err — ouvre sur Instagram', 'error');
     });
     igStopInline(media);
   }, {once:true});
@@ -6781,12 +6785,16 @@ def _render_insta_trends_grid_html() -> str:
     for owner in avg_views_by_owner:
         if counts_by_owner[owner] > 0:
             avg_views_by_owner[owner] = avg_views_by_owner[owner] / counts_by_owner[owner]
-    # Trier par views décroissant par défaut. On rend top 300 pour avoir
-    # assez d'inventory cote frontend quand les filtres de periode (24h/7j/30j)
-    # eliminent les anciens viraux.
+    # On filtre d'abord par date (30 derniers jours = la plus grande periode UI)
+    # pour eviter de rendre des centaines de vieux viraux. Puis on tri par views.
+    # Cap a 1000 pour la performance (3000 DOM elements pour 1 reel ferait
+    # ramer un peu).
+    import time as _time
+    cutoff_30d = _time.time() - 30 * 86400
+    reels = [r for r in reels if (r.get("taken_at") or 0) >= cutoff_30d or not r.get("taken_at")]
     reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
     cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
-    for r in reels[:300]:
+    for r in reels[:1000]:
         thumb = r.get("thumbnail_url") or ""
         owner = r.get("_owner", "?")
         owner_pic = r.get("_owner_pp") or ""
