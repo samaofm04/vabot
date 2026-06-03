@@ -6217,10 +6217,10 @@ def _render_insta_accounts_html() -> str:
     except Exception as e:
         return f"<p style='color:#f99'>Module insta_scraper indisponible : {e}</p>"
     rows = [
-        "<form method='POST' action='/insta/add_account' style='display:flex;gap:8px;margin-bottom:16px'>"
-        "<input type='text' name='username' placeholder='@username ou URL profil' required "
+        "<form id='insta-add-form' onsubmit='return igAddAccount(event)' style='display:flex;gap:8px;margin-bottom:16px'>"
+        "<input type='text' name='username' id='insta-add-input' placeholder='@username ou URL profil' required "
         "style='flex:1;padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px'>"
-        "<button type='submit' style='padding:10px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
+        "<button type='submit' id='insta-add-btn' style='padding:10px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600'>+ Ajouter</button>"
         "</form>"
     ]
     if not is_auth_configured():
@@ -6278,24 +6278,125 @@ def _render_insta_accounts_html() -> str:
                 f"</div>"
                 f"<div style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
                 f"<div style='display:flex;gap:6px;margin-top:auto'>"
-                f"<form method='POST' action='/insta/scrape' style='flex:1;margin:0'>"
-                f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' style='width:100%;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
-                f"</form>"
-                f"<form method='POST' action='/insta/remove_account' style='margin:0'>"
-                f"<input type='hidden' name='username' value='{u}'>"
-                f"<button type='submit' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ? Le cache sera conservé.\">×</button>"
-                f"</form>"
+                f"<button type='button' data-username='{u}' onclick='igScrapeOne(this)' style='flex:1;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
+                f"<button type='button' data-username='{u}' onclick='igRemoveOne(this)' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ?\">×</button>"
                 f"</div>"
                 f"</div>"
             )
         rows.append("</div>")
         rows.append(
-            f"<form method='POST' action='/insta/scrape_all' style='margin-top:18px'>"
-            f"<button type='submit' style='padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600' "
-            f"data-confirm=\"Scraper tous les comptes de la watchlist ? Compte ~10 secondes par compte.\" data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
-            f"</form>"
+            "<button type='button' onclick='igScrapeAll(this)' "
+            "style='padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:18px' "
+            "data-confirm=\"Scraper tous les comptes de la watchlist ? ~10s par compte (en arriere-plan).\" "
+            "data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
         )
+    # JS handler async pour tous les boutons - non-bloquant, toast feedback
+    rows.append("""
+<script>
+function igAddAccount(e){
+  e.preventDefault();
+  var inp = document.getElementById('insta-add-input');
+  var btn = document.getElementById('insta-add-btn');
+  var u = (inp.value || '').trim();
+  if(!u) return false;
+  btn.disabled = true;
+  var origLbl = btn.textContent;
+  btn.textContent = '...';
+  var fd = new FormData();
+  fd.append('username', u);
+  fetch('/insta/add_account', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false;
+      btn.textContent = origLbl;
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast(d.message || ('@' + (d.username||u) + ' ajoute'), 'success');
+        inp.value = '';
+        inp.focus();
+      } else {
+        if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
+      }
+    })
+    .catch(function(err){
+      btn.disabled = false;
+      btn.textContent = origLbl;
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+  return false;
+}
+function igScrapeOne(btn){
+  var u = btn.getAttribute('data-username') || '';
+  if(!u) return;
+  btn.disabled = true;
+  var orig = btn.innerHTML;
+  btn.innerHTML = '⏳ ...';
+  var fd = new FormData();
+  fd.append('username', u);
+  fetch('/insta/scrape', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast(d.message || ('@' + u + ' scrape en bg'), 'success');
+      } else {
+        if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
+      }
+    })
+    .catch(function(err){
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+}
+function igRemoveOne(btn){
+  var u = btn.getAttribute('data-username') || '';
+  if(!u) return;
+  if(!confirm('Retirer @' + u + ' de la watchlist ?')) return;
+  var card = btn.closest('.cloud-card');
+  if(card) card.style.opacity = '.4';
+  var fd = new FormData();
+  fd.append('username', u);
+  fetch('/insta/remove_account', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('@' + u + ' retire', 'success');
+        if(card) card.remove();
+      } else {
+        if(card) card.style.opacity = '1';
+        if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
+      }
+    })
+    .catch(function(err){
+      if(card) card.style.opacity = '1';
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+}
+function igScrapeAll(btn){
+  if(!confirm('Scraper tous les comptes ? ~10s par compte (en arriere-plan)')) return;
+  btn.disabled = true;
+  var orig = btn.textContent;
+  btn.textContent = '⏳ ...';
+  fetch('/insta/scrape_all', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false;
+      btn.textContent = orig;
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast(d.message || 'Scrape global lance', 'success');
+      } else {
+        if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
+      }
+    })
+    .catch(function(err){
+      btn.disabled = false;
+      btn.textContent = orig;
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
+    });
+}
+</script>
+""")
     return "".join(rows)
 
 
@@ -6366,11 +6467,9 @@ def _render_insta_trends_grid_html() -> str:
             "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:40px 20px;text-align:center'>"
             f"<h3 style='margin:0 0 8px;color:#fff'>📥 {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
             "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
-            "<form method='POST' action='/insta/scrape_all' style='margin:0'>"
-            "<button type='submit' style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0' "
-            "data-confirm='Scraper tous les comptes ? Compte ~10 sec par compte.'>"
-            "🔄 Scraper tous mes comptes maintenant</button>"
-            "</form></div>"
+            "<button type='button' onclick=\"if(!confirm('Scraper tous les comptes ? Compte ~10 sec par compte (en arriere-plan).')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='⏳ ...'; fetch('/insta/scrape_all',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}).catch(e=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');});\" "
+            "style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0'>"
+            "🔄 Scraper tous mes comptes maintenant</button></div>"
         )
     if not reels:
         return ""
@@ -6505,10 +6604,9 @@ def _render_insta_trends_grid_html() -> str:
     cards.append("</div>")
     cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
                  f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
-                 f"<form method='POST' action='/insta/scrape_all' style='margin:0'>"
-                 f"<button type='submit' style='padding:8px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
-                 f"data-confirm='Rafraîchir tous les comptes ?'>"
-                 f"🔄 Rafraîchir</button></form></div>")
+                 f"<button type='button' onclick=\"if(!confirm('Rafraichir tous les comptes ? (en arriere-plan)')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='⏳ ...'; fetch('/insta/scrape_all',{{method:'POST'}}).then(r=>r.json()).then(d=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}}).catch(e=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');}});\" "
+                 f"style='padding:8px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0'>"
+                 f"🔄 Rafraîchir</button></div>")
     return "".join(cards)
 
 
@@ -18203,47 +18301,58 @@ def create_app():
     @app.route("/insta/add_account", methods=["POST"])
     def insta_add_account():
         if not is_auth():
-            return redirect("/")
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
         try:
-            from insta_scraper import add_to_watchlist, scrape_profile, is_auth_configured
+            from insta_scraper import add_to_watchlist, scrape_profile, is_auth_configured, _clean_username
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
         u = (request.form.get("username") or "").strip()
         if not u:
-            return _error("❌ username vide")
+            return jsonify({"ok": False, "error": "username vide"})
         added = add_to_watchlist(u)
-        # Si pas de cookies, juste ajouter sans scrape
-        if not is_auth_configured():
-            if added:
-                return _success(f"✅ <b>@{u}</b> ajouté à la watchlist. "
-                    f"⚠️ Configure tes cookies dans <b>Settings → Cookies Instagram</b> pour pouvoir scraper.",)
-            return _error(f"⚠️ @{u} déjà dans la watchlist")
-        # Cookies OK -> scrape automatique
-        from insta_scraper import _clean_username
         clean = _clean_username(u)
-        result = scrape_profile(clean, limit=50)
-        if "error" in result:
-            if added:
-                return _error(f"✅ <b>@{clean}</b> ajouté, mais le scrape a échoué : {result['error']}",
-                    error=True,)
-            return _error(f"❌ Scrape @{clean} : {result['error']}")
-        n = len(result.get("reels", []))
-        action = "ajouté + scrapé" if added else "déjà en watchlist, re-scrapé"
-        return _success(f"✅ <b>@{clean}</b> {action} ({n} reels). Va voir <b>Instagram → Trends</b>.")
+        if not is_auth_configured():
+            return jsonify({
+                "ok": True,
+                "added": added,
+                "username": clean,
+                "scrape_started": False,
+                "message": f"@{clean} ajouté" + ("" if added else " (déjà present)") +
+                           " — configure tes cookies Instagram pour scraper",
+            })
+        # Cookies OK -> scrape en background (non-bloquant)
+        import threading
+        def _bg_scrape():
+            try:
+                scrape_profile(clean, limit=50)
+            except Exception:
+                pass
+        threading.Thread(target=_bg_scrape, daemon=True).start()
+        return jsonify({
+            "ok": True,
+            "added": added,
+            "username": clean,
+            "scrape_started": True,
+            "message": f"@{clean} {'ajouté' if added else 'déjà présent'} — scrape en arrière-plan…",
+        })
 
     @app.route("/insta/remove_account", methods=["POST"])
     def insta_remove_account():
         if not is_auth():
-            return redirect("/")
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
         try:
             from insta_scraper import remove_from_watchlist
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
         u = (request.form.get("username") or "").strip()
         ok = remove_from_watchlist(u)
         if ok:
-            return _success(f"✅ <b>@{u}</b> retiré")
-        return _error(f"⚠️ @{u} introuvable")
+            return jsonify({"ok": True, "username": u, "message": f"@{u} retiré"})
+        return jsonify({"ok": False, "error": f"@{u} introuvable"})
 
     @app.route("/insta/reset_rapidapi_host", methods=["POST"])
     def insta_reset_host():
@@ -18284,42 +18393,53 @@ def create_app():
     @app.route("/insta/scrape", methods=["POST"])
     def insta_scrape():
         if not is_auth():
-            return redirect("/")
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
         try:
             from insta_scraper import scrape_profile
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
         u = (request.form.get("username") or "").strip()
-        result = scrape_profile(u, limit=50)
-        if "error" in result:
-            return _error(f"❌ Scrape @{u} : {result['error']}")
-        n = len(result.get("reels", []))
-        return _success(f"✅ <b>@{u}</b> scrapé : {n} post(s) récupéré(s)")
+        if not u:
+            return jsonify({"ok": False, "error": "username vide"})
+        import threading
+        def _bg_scrape():
+            try:
+                scrape_profile(u, limit=50)
+            except Exception:
+                pass
+        threading.Thread(target=_bg_scrape, daemon=True).start()
+        return jsonify({
+            "ok": True, "username": u, "scrape_started": True,
+            "message": f"Scrape @{u} lancé en arrière-plan…",
+        })
 
     @app.route("/insta/scrape_all", methods=["POST"])
     def insta_scrape_all():
         if not is_auth():
-            return redirect("/")
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
         try:
             from insta_scraper import load_watchlist, scrape_profile
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
         wl = load_watchlist()
         if not wl:
-            return _error("⚠️ Watchlist vide")
-        ok_count = 0
-        errors = []
-        for u in wl:
-            result = scrape_profile(u, limit=50)
-            if "error" in result:
-                errors.append(f"@{u}: {result['error']}")
-            else:
-                ok_count += 1
-        msg = f"✅ {ok_count}/{len(wl)} compte(s) scrapé(s)"
-        if errors:
-            msg += " — erreurs : " + " | ".join(errors[:3])
-        if bool(errors) and ok_count == 0:
-            return _error(msg)
+            return jsonify({"ok": False, "error": "watchlist vide"})
+        import threading
+        def _bg_scrape_all():
+            for u in wl:
+                try:
+                    scrape_profile(u, limit=50)
+                except Exception:
+                    pass
+        threading.Thread(target=_bg_scrape_all, daemon=True).start()
+        return jsonify({
+            "ok": True, "count": len(wl), "scrape_started": True,
+            "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
+        })
         return _success(msg)
 
     @app.route("/settings/admin_token", methods=["POST"])
