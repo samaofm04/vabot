@@ -11541,10 +11541,8 @@ def _render_veille_feed_html() -> str:
         "</div>"
     )
 
-    # Render par jour
+    # Render par jour - format DD/MM
     import datetime as _dt_v
-    fr_months = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
-                 "juill.", "août", "sept.", "oct.", "nov.", "déc."]
 
     # Bandeau d'actions globales : selection + bulk send
     if s['unsent_count'] > 0:
@@ -11569,16 +11567,17 @@ def _render_veille_feed_html() -> str:
     sections = [bulk_bar]
     for day in sorted(by_day.keys(), reverse=True):
         reels = by_day[day]
-        # Format date
+        # Format date : "03/06" (DD/MM) + Aujourd'hui/Hier comme tooltip
         try:
             d = _dt_v.date.fromisoformat(day)
             today = _dt_v.date.today()
+            short = f"{d.day:02d}/{d.month:02d}"
             if d == today:
-                day_label = "Aujourd'hui"
+                day_label = f"📅 {short} — Aujourd'hui"
             elif d == today - _dt_v.timedelta(days=1):
-                day_label = "Hier"
+                day_label = f"📅 {short} — Hier"
             else:
-                day_label = f"{d.day} {fr_months[d.month - 1]} {d.year}"
+                day_label = f"📅 {short}/{d.year}"
         except Exception:
             day_label = day
 
@@ -11588,7 +11587,7 @@ def _render_veille_feed_html() -> str:
         section_html = (
             "<div style='margin-bottom:30px'>"
             "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #2a2a2a'>"
-            f"<div><h3 style='margin:0;font-size:17px;color:#fff;letter-spacing:-.01em'>📅 {day_label}</h3>"
+            f"<div><h3 style='margin:0;font-size:17px;color:#fff;letter-spacing:-.01em'>{day_label}</h3>"
             f"<div style='font-size:12px;color:#666;margin-top:2px'>{len(reels)} reels · {unsent_count} non envoyés</div></div>"
         )
         if unsent_count > 0 and tg_configured:
