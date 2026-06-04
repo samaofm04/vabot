@@ -3741,10 +3741,13 @@ def _normalize_insta_handle(raw: str) -> str:
 
 
 def _set_insta_3_for_va(user_id, accounts: list):
-    """accounts = liste de dicts {handle, email, password, totp_seed} (jusqu'a 3).
+    """accounts = liste de dicts {handle, email, password, totp_seed}.
+    Limite : 3 pour les VAs Discord, illimitee pour les VAs manuels (manual_*).
     On accepte aussi des strings pour compat avec l'ancien /insta Discord."""
     data = _load_va_insta_3()
     key = str(user_id)
+    is_manual = key.startswith("manual_")
+    max_n = 99 if is_manual else 3
     clean = []
     seen_handles = set()
     for it in (accounts or []):
@@ -3759,7 +3762,6 @@ def _set_insta_3_for_va(user_id, accounts: list):
                 continue
             if h:
                 seen_handles.add(h)
-            # Ignore les entrées totalement vides
             if not h and not (it.get("email") or it.get("password") or it.get("totp_seed")):
                 continue
             clean.append({
@@ -3768,7 +3770,7 @@ def _set_insta_3_for_va(user_id, accounts: list):
                 "password": it.get("password") or "",
                 "totp_seed": (it.get("totp_seed") or "").strip().replace(" ", ""),
             })
-        if len(clean) >= 3:
+        if len(clean) >= max_n:
             break
     if clean:
         data[key] = clean
@@ -4472,6 +4474,14 @@ def _render_va_list_html() -> str:
         "style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;"
         "border-radius:8px;font-size:13px;width:100%;font-family:inherit'>"
         "</div>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px'>"
+        "📋 Comptes Insta à attribuer (optionnel) — <b style='color:#a855f7'>1 @handle par ligne</b></label>"
+        "<textarea id='va-manual-bulk' rows='6' placeholder='@compte1&#10;@compte2&#10;@compte3&#10;…' "
+        "style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;"
+        "border-radius:8px;font-size:12px;width:100%;font-family:monospace;resize:vertical'></textarea>"
+        "<div style='font-size:10px;color:#666;margin-top:4px'>Aucune limite (les VAs manuels peuvent gérer 50+ comptes). Tu pourras ajouter mots de passe / 2FA depuis 🔐 ensuite.</div>"
+        "</div>"
         "<div style='display:flex;gap:10px;justify-content:flex-end'>"
         "<button onclick='vaAddManualClose()' style='background:transparent;border:1px solid #2a2a2a;"
         "color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>"
@@ -4493,13 +4503,17 @@ def _render_va_list_html() -> str:
         "function vaAddManualSubmit(){"
         "  var ident=document.getElementById('va-manual-identity').value;"
         "  var name=document.getElementById('va-manual-name').value.trim();"
+        "  var bulk=document.getElementById('va-manual-bulk').value.trim();"
         "  if(!ident||!name){if(typeof showToast==='function')showToast('Identité + nom requis','error');return;}"
         "  var fd=new FormData();fd.append('identity',ident);fd.append('display_name',name);"
+        "  fd.append('bulk_handles',bulk);"
         "  fetch('/va/add_manual',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
         "    if(d&&d.ok){"
-        "      if(typeof showToast==='function')showToast('✓ '+name+' créé sous @'+ident,'success',2500);"
+        "      var msg='✓ '+name+' créé sous @'+ident;"
+        "      if(d.n_accounts)msg+=' avec '+d.n_accounts+' compte'+(d.n_accounts>1?'s':'');"
+        "      if(typeof showToast==='function')showToast(msg,'success',2500);"
         "      vaAddManualClose();"
-        "      setTimeout(function(){window.location.reload();},700);"
+        "      setTimeout(function(){window.location.reload();},800);"
         "    } else {"
         "      if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');"
         "    }"
@@ -5349,13 +5363,18 @@ body.light .va-id{color:#9ca3af}
                 f"</div>"
                 + f"</div>"
             )
-            # Détail 3 comptes IG : 3 lignes horizontales (pp + handle + stats)
+            # Détail comptes IG : 1 ligne par compte (3 pour Discord, N pour manuels)
             if _ig3_count:
-                # Pré-charge le cache pour ne pas re-scrape inutilement (mais
-                # n'attend PAS le scrape — si pas en cache on affiche "—")
                 stats_cache = _load_insta_3_stats_cache()
                 mini_rows = []
-                for a in (_ig3 + [{}] * 3)[:3]:
+                # VA manuel : on affiche TOUS les comptes (pas de slot vide).
+                # VA Discord : on garde 3 slots fixes (vide si pas rempli).
+                is_manual_va = str(uid).startswith("manual_")
+                if is_manual_va:
+                    iter_accounts = [a for a in _ig3 if (a or {}).get("handle")]
+                else:
+                    iter_accounts = (_ig3 + [{}] * 3)[:3]
+                for a in iter_accounts:
                     h = (a or {}).get("handle") or ""
                     if not h:
                         mini_rows.append(
@@ -21884,20 +21903,36 @@ def create_app():
             "added_at": int(_t.time()),
         }
         _save_users(users)
-        # Si des handles IG sont fournis, on les attribue
-        handles = [request.form.get(f"handle_{i}", "") for i in (0, 1, 2)]
-        if any(h.strip() for h in handles):
-            accounts = []
-            for i, h in enumerate(handles):
-                if h.strip():
+        # Bulk handles : textarea avec 1 par ligne (ou separes par virgule)
+        bulk_raw = request.form.get("bulk_handles", "")
+        accounts = []
+        seen = set()
+        for line in bulk_raw.replace(",", "\n").splitlines():
+            h_norm = _normalize_insta_handle(line.strip())
+            if h_norm and h_norm not in seen:
+                seen.add(h_norm)
+                accounts.append({
+                    "handle": h_norm,
+                    "email": "",
+                    "password": "",
+                    "totp_seed": "",
+                })
+        # Slots indexes (handle_0..N) avec creds en option pour les 3 premiers
+        for i in range(20):
+            h_form = request.form.get(f"handle_{i}", "")
+            if h_form.strip():
+                h_norm = _normalize_insta_handle(h_form)
+                if h_norm and h_norm not in seen:
+                    seen.add(h_norm)
                     accounts.append({
-                        "handle": h,
+                        "handle": h_norm,
                         "email": "",
                         "password": request.form.get(f"password_{i}", ""),
                         "totp_seed": request.form.get(f"totp_seed_{i}", ""),
                     })
+        if accounts:
             _set_insta_3_for_va(uid, accounts)
-        return jsonify({"ok": True, "uid": uid, "user": users[uid]})
+        return jsonify({"ok": True, "uid": uid, "user": users[uid], "n_accounts": len(accounts)})
 
     @app.route("/va/set_insta_3", methods=["POST"])
     def va_set_insta_3():
