@@ -219,42 +219,47 @@ def list_all_links(max_pages: int = 50) -> Dict[str, Any]:
 
 
 def categorize_link(link: dict) -> str:
-    """Détecte la catégorie (= modèle) d'un lien à partir du display_name et de l'URL.
+    """Détecte la catégorie (= modèle) d'un lien.
 
-    Stratégie :
-    1. Nettoyer le display_name (retirer "(Copy)", "VA " préfixe, espaces)
-    2. Si ça matche un nom de modèle connu, c'est gagné
-    3. Sinon on prend le premier mot du nom nettoyé
-    4. Fallback : extraire le username du path OnlyFans/MYM (ex. ameliawdifference → Amelia)
+    Stratégie (par ordre de priorité) :
+    1. SHORTCODE contient un nom d'identité connue (`xxxxamelia`, `jessyXXX`, …)
+       — c'est le signal le plus fiable pour les dupes VA N qui sinon
+       seraient catégorisés comme "VA N" littéral.
+    2. Display_name nettoyé matche un nom connu.
+    3. URL OnlyFans : déduire l'identité du path.
+    4. Fallback : "VA N" si display_name est juste "VA <chiffre>", sinon
+       premier mot du display_name.
     """
     import re as _re
     name = (link.get("display_name") or "").strip()
     url = link.get("url") or ""
+    shortcode = (link.get("shortcode") or "").lower()
 
-    # Nettoyer le name : enlever (Copy) répétés, VA en préfixe, normaliser
+    KNOWN = ["Amelia", "Lola", "Julia", "Sarah", "Emma", "Khloe", "Jessy",
+             "Boo7", "Mirabelle", "Enzo", "Dem boss"]
+
+    # 1) Shortcode : signal le plus fiable pour les dupes nommés "VA N"
+    for k in KNOWN:
+        if k.lower() in shortcode:
+            return k
+
+    # 2) Display_name nettoyé
     clean = _re.sub(r"\s*\(Copy\)\s*", " ", name, flags=_re.IGNORECASE).strip()
-    # Si commence par "VA " et qu'il y a quelque chose après, garder ce qui suit
     m = _re.match(r"^VA\s+(.+)$", clean, _re.IGNORECASE)
     if m:
         rest = m.group(1).strip()
-        # Si c'est juste un nombre (ex. "VA 10"), c'est la catégorie "Jessy" (cas spécifique de ton compte)
-        # On le laisse tel quel sinon
         if rest.isdigit() or _re.match(r"^\d+$", rest):
-            # Regarder l'URL pour déduire le modèle
             if "jessyewdiference" in url.lower():
                 return "Jessy"
             return f"VA {rest}"
         clean = rest
 
-    # Modèles connus en priorité (substring case-insensitive)
-    KNOWN = ["Amelia", "Lola", "Julia", "Sarah", "Emma", "Khloe", "Jessy",
-             "Boo7", "Mirabelle", "Enzo", "Dem boss"]
     lower = clean.lower()
     for k in KNOWN:
         if k.lower() in lower:
             return k
 
-    # Sinon : fallback URL (extraire username du path)
+    # 3) URL OnlyFans
     if url:
         m2 = _re.search(r"onlyfans\.com/([a-z0-9_]+)", url, _re.IGNORECASE)
         if m2:
@@ -263,7 +268,7 @@ def categorize_link(link: dict) -> str:
                 if k.lower() in user:
                     return k
 
-    # Sinon : premier mot du clean
+    # 4) Premier mot du display_name
     if clean:
         first = clean.split()[0]
         if len(first) >= 2:

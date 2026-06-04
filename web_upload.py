@@ -5679,12 +5679,20 @@ function vaLinksSave(){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){
-        if(typeof showToast === 'function') showToast('Liens mis à jour', 'success');
-        // Reload pour rafraîchir le mini-stat
-        setTimeout(function(){ window.location.reload(); }, 300);
+        if(typeof showToast === 'function') showToast('✓ ' + selected.length + ' lien(s) attribué(s)', 'success');
+        // Mise a jour in-memory pour rester coherent sans full-reload
+        try {
+          window.__vaLinksData = window.__vaLinksData || {};
+          window.__vaLinksData[_vlmCurrentUid] = selected;
+        } catch(e){}
+        // Ferme le modal seulement (pas de reload qui ramene au Dashboard blanc)
+        document.getElementById('va-links-modal').classList.remove('show');
       } else {
         if(typeof showToast === 'function') showToast('Erreur : ' + (d.error || '?'), 'error');
       }
+    })
+    .catch(function(err){
+      if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
     });
 }
 </script>
