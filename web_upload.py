@@ -3900,7 +3900,10 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     cache = _load_insta_3_stats_cache()
     now_ts = int(_t.time())
     cached = cache.get(h)
-    if cached and not force and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL:
+    # On n'utilise le cache que si on a un succes (pas d'erreur) ET dans le TTL
+    if (cached and not force
+            and not cached.get("error")
+            and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL):
         return cached
     # 1) Public IG d abord
     res = _scrape_via_ig_public(h)
@@ -5547,7 +5550,7 @@ function vaIg3TrkAgo(iso){
     return 'il y a ' + Math.floor(h / 24) + 'j';
   } catch(e) { return '—'; }
 }
-/* Click sur une ligne IG row pour charger / refresh les stats */
+/* Click sur une ligne IG row pour charger / refresh les stats (force re-scrape) */
 document.addEventListener('click', function(e){
   var row = e.target.closest && e.target.closest('.va-ig3-row');
   if(!row || row.classList.contains('va-ig3-row-empty')) return;
@@ -5555,7 +5558,9 @@ document.addEventListener('click', function(e){
   var detail = row.closest('.va-ig3-detail');
   if(!detail) return;
   var uid = detail.getAttribute('data-vaid-detail');
-  vaIg3MiniLoad(uid, detail, false);
+  // Force=true : un click = re-scrape explicite, on bypass le cache 1h
+  // (sinon les vieilles erreurs RapidAPI restent affichees longtemps)
+  vaIg3MiniLoad(uid, detail, true);
 });
 function vaIg3MiniLoad(uid, detail, force){
   var rows = detail.querySelectorAll('.va-ig3-row');
