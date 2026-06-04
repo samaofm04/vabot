@@ -3767,6 +3767,59 @@ def _get_insta_3_for_va(user_id) -> list:
     return _load_va_insta_3().get(str(user_id), [])
 
 
+# ============ Comptes Insta externes (non lies a un VA Discord) ============
+# Pour les VAs / personnes qui gerent bcp de comptes IG sans etre dans Discord.
+# Storage : data/external_insta_accounts.json = list[{handle, password, totp_seed, added_at}]
+EXT_INSTA_FILE = DATA_DIR / "external_insta_accounts.json"
+
+
+def _load_external_insta() -> list:
+    if not EXT_INSTA_FILE.exists():
+        return []
+    try:
+        d = json.loads(EXT_INSTA_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, list) else []
+    except Exception:
+        return []
+
+
+def _save_external_insta(items: list):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    EXT_INSTA_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _add_external_insta(handle: str, password: str = "", totp_seed: str = "") -> dict:
+    """Ajoute un compte. Retourne {ok, added/skipped, item}."""
+    import time as _t
+    h = _normalize_insta_handle(handle or "")
+    if not h:
+        return {"ok": False, "error": "handle invalide"}
+    items = _load_external_insta()
+    if any(it.get("handle") == h for it in items):
+        return {"ok": False, "skipped": True, "error": "deja present"}
+    item = {
+        "handle": h,
+        "password": (password or "").strip(),
+        "totp_seed": (totp_seed or "").strip().replace(" ", ""),
+        "added_at": int(_t.time()),
+    }
+    items.append(item)
+    _save_external_insta(items)
+    return {"ok": True, "added": True, "item": item}
+
+
+def _remove_external_insta(handle: str) -> bool:
+    h = _normalize_insta_handle(handle or "")
+    if not h:
+        return False
+    items = _load_external_insta()
+    new_items = [it for it in items if it.get("handle") != h]
+    if len(new_items) == len(items):
+        return False
+    _save_external_insta(new_items)
+    return True
+
+
 # ============ Stats Insta 3 (RapidAPI + cache 1h) ============
 
 VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
@@ -12018,7 +12071,134 @@ async function glDeleteWatcher(id, btn){
 </script>
 """
 
-    return header_html + upcoming_block + schedules_block + watchers_block + history_block + js
+    # ====== Section Comptes externes (Insta) ======
+    ext_accounts = _load_external_insta()
+    ext_stats_cache = _load_insta_3_stats_cache()
+    ext_rows_html = []
+    for it in ext_accounts:
+        h = it.get("handle") or ""
+        s = ext_stats_cache.get(h) or {}
+        pp = s.get("profile_pic_url") or ""
+        has_stats = bool(s) and not s.get("error")
+        def _fmt(n):
+            try:
+                n = int(n)
+            except Exception:
+                return "—"
+            if n >= 1_000_000:
+                return f"{n/1_000_000:.1f}M"
+            if n >= 1000:
+                return f"{n/1000:.1f}k"
+            return str(n)
+        foll = _fmt(s.get("followers")) if has_stats else "—"
+        d_v = _fmt(s.get("daily")) if has_stats else "—"
+        w_v = _fmt(s.get("weekly")) if has_stats else "—"
+        bw_v = _fmt(s.get("biweekly")) if has_stats else "—"
+        last_lbl = "—"
+        last_date = ""
+        if has_stats and s.get("last_reel_at"):
+            try:
+                import datetime as _dt_e
+                d_post = _dt_e.datetime.fromisoformat(s["last_reel_at"].replace("Z", "+00:00"))
+                if d_post.tzinfo is None:
+                    d_post = d_post.replace(tzinfo=_dt_e.timezone.utc)
+                age = _dt_e.datetime.now(_dt_e.timezone.utc) - d_post
+                h_age = int(age.total_seconds() / 3600)
+                if h_age < 1:
+                    last_lbl = "à l'instant"
+                elif h_age < 24:
+                    last_lbl = f"il y a {h_age}h"
+                else:
+                    last_lbl = f"il y a {h_age // 24}j"
+                last_date = d_post.strftime("%d/%m %Hh%M")
+            except Exception:
+                pass
+        pp_html = (
+            f"<img src='{pp}' class='va-ig3-row-pp' loading='lazy' referrerpolicy='no-referrer' onerror=\"this.style.display='none'\">"
+            if pp else
+            f"<div class='va-ig3-row-pp' style='display:flex;align-items:center;justify-content:center;color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+        )
+        err_html = (
+            f"<div class='va-ig3-row-err'>⚠️ {s['error'][:50]}</div>"
+            if s.get("error") else ""
+        )
+        ext_rows_html.append(
+            f"<div class='va-ig3-row' data-ext-handle='{h}'>"
+            f"{pp_html}"
+            f"<div class='va-ig3-row-name'>"
+            f"<div class='va-ig3-row-handle'>@{h}</div>"
+            f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
+            f"</div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
+            f"<div class='va-ig3-row-last'>"
+            f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
+            f"<div class='va-ig3-row-last-val'>{last_lbl}</div>"
+            f"<div class='va-ig3-row-last-date'>{last_date}</div>"
+            f"</div>"
+            f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+            f"<button onclick='extRemove(\"{h}\")' style='background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px' title='Retirer'>×</button>"
+            f"{err_html}"
+            f"</div>"
+        )
+    ext_section = (
+        f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
+        f"<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px'>"
+        f"<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
+        f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
+        f"</h3>"
+        f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Comptes Insta gérés hors Discord (un VA externe peut en avoir 50+). Stats auto.</p>"
+        f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
+        f"</div>"
+        f"<div class='va-ig3-detail' data-vaid-detail='__external__' style='border-top:0;padding-top:0;margin-top:0'>"
+        + ("".join(ext_rows_html) if ext_rows_html else "<p style='color:#666;text-align:center;padding:20px 0;font-size:13px'>Aucun compte externe. Click 📋 Bulk upload pour en ajouter.</p>")
+        + f"</div>"
+        f"</div>"
+    )
+
+    # Modal bulk upload
+    ext_modal_html = (
+        "<div id='ext-bulk-modal' onclick='extCloseBulkModal(event)' style='display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px'>"
+        "<div onclick='event.stopPropagation()' style='background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:520px;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.6)'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center'>"
+        "<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>📋 Bulk upload</h3>"
+        "<button onclick='extCloseBulkModal()' style='background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1'>×</button>"
+        "</div>"
+        "<p style='margin:0;color:#888;font-size:12px'>Colle ta liste de @handles Instagram, <b>1 par ligne</b> (ou separes par virgule). Les @ et espaces sont auto-nettoyes. Les doublons sont skippes.</p>"
+        "<textarea id='ext-bulk-input' rows='10' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px;font-family:monospace' "
+        "placeholder='@user1\\n@user2\\n@user3\\n…'></textarea>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end'>"
+        "<button onclick='extCloseBulkModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>Annuler</button>"
+        "<button onclick='extDoBulkAdd()' style='background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>Ajouter</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        "<script>"
+        "function extOpenBulkModal(){document.getElementById('ext-bulk-modal').style.display='flex';document.getElementById('ext-bulk-input').value='';document.getElementById('ext-bulk-input').focus();}"
+        "function extCloseBulkModal(e){if(e&&e.target&&e.target.id!=='ext-bulk-modal'&&e.target!==this)return;document.getElementById('ext-bulk-modal').style.display='none';}"
+        "function extDoBulkAdd(){"
+        "  var raw=document.getElementById('ext-bulk-input').value.trim();"
+        "  if(!raw){if(typeof showToast==='function')showToast('Liste vide','error');return;}"
+        "  var fd=new FormData();fd.append('handles',raw);"
+        "  fetch('/external/add',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
+        "    if(d&&d.ok){var msg='✓ '+(d.added||[]).length+' ajoute';if((d.skipped||[]).length)msg+=', '+d.skipped.length+' deja present';if((d.errors||[]).length)msg+=', '+d.errors.length+' erreur';"
+        "    if(typeof showToast==='function')showToast(msg,'success',3000);setTimeout(function(){window.location.reload();},800);}"
+        "    else{if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');}"
+        "  }).catch(function(err){if(typeof showToast==='function')showToast('Erreur : '+err,'error');});"
+        "}"
+        "function extRemove(h){"
+        "  if(!confirm('Retirer @'+h+' de la liste ?'))return;"
+        "  var fd=new FormData();fd.append('handle',h);"
+        "  fetch('/external/remove',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
+        "    if(d&&d.ok){if(typeof showToast==='function')showToast('✓ '+h+' retire','success');setTimeout(function(){window.location.reload();},500);}"
+        "  });"
+        "}"
+        "</script>"
+    )
+
+    return header_html + upcoming_block + schedules_block + watchers_block + history_block + ext_section + ext_modal_html + js
 
 
 def _render_textpool_html() -> str:
@@ -21445,6 +21625,69 @@ def create_app():
         if not uid:
             return jsonify({"ok": False, "error": "user_id manquant"}), 400
         return jsonify({"ok": True, "accounts": _get_insta_3_for_va(uid)})
+
+    @app.route("/external/list", methods=["GET"])
+    def external_list():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify({"ok": True, "items": _load_external_insta()})
+
+    @app.route("/external/add", methods=["POST"])
+    def external_add():
+        """Body : handles (raw text, 1 par ligne). Crée tous d'un coup."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        raw = request.form.get("handles") or ""
+        added = []
+        skipped = []
+        errors = []
+        for line in raw.replace(",", "\n").splitlines():
+            h = line.strip()
+            if not h:
+                continue
+            res = _add_external_insta(h)
+            if res.get("ok"):
+                added.append(res["item"]["handle"])
+            elif res.get("skipped"):
+                skipped.append(h)
+            else:
+                errors.append({"handle": h, "error": res.get("error", "?")})
+        return jsonify({"ok": True, "added": added, "skipped": skipped, "errors": errors})
+
+    @app.route("/external/add_one", methods=["POST"])
+    def external_add_one():
+        """Ajoute un compte avec ses creds (handle/password/totp)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        res = _add_external_insta(
+            request.form.get("handle", ""),
+            request.form.get("password", ""),
+            request.form.get("totp_seed", ""),
+        )
+        return jsonify(res)
+
+    @app.route("/external/remove", methods=["POST"])
+    def external_remove():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        h = request.form.get("handle", "")
+        return jsonify({"ok": _remove_external_insta(h)})
+
+    @app.route("/external/stats", methods=["GET"])
+    def external_stats():
+        """Stats pour 1 handle (force=1 pour bypass cache)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        h = (request.args.get("handle") or "").strip()
+        force = (request.args.get("force") or "").strip() == "1"
+        if not h:
+            return jsonify({"ok": False, "error": "handle requis"})
+        return jsonify({"ok": True, "handle": h, "stats": _compute_insta_3_stats(h, force=force)})
 
     @app.route("/va/insta_3_stats", methods=["GET"])
     def va_insta_3_stats():
