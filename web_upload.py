@@ -5435,18 +5435,29 @@ function vaLinksToggle(el, e){
   }
   el.classList.toggle('checked');
 }
+function vaLinksTemplateKey(folder){
+  var src = (window.__linkSource === 'gms') ? 'gms' : 'lks';
+  return 'vabot_' + src + '_template_' + (folder||'').toLowerCase();
+}
 function vaLinksGetTemplate(folder){
   try{
-    var saved = localStorage.getItem('vabot_lks_template_' + (folder||'').toLowerCase());
-    return saved || '';
+    var saved = localStorage.getItem(vaLinksTemplateKey(folder));
+    if(!saved) return '';
+    // Sanity check : pour GMS un id valide commence par 'lnk_'.
+    // Si on a un id legacy Linkscale (24-hex sans prefix), on l'ignore.
+    if(window.__linkSource === 'gms' && saved.indexOf('lnk_') !== 0){
+      localStorage.removeItem(vaLinksTemplateKey(folder));
+      return '';
+    }
+    return saved;
   }catch(e){ return ''; }
 }
 function vaLinksSetTemplate(folder, linkId){
   try{
     if(linkId){
-      localStorage.setItem('vabot_lks_template_' + folder.toLowerCase(), linkId);
+      localStorage.setItem(vaLinksTemplateKey(folder), linkId);
     } else {
-      localStorage.removeItem('vabot_lks_template_' + folder.toLowerCase());
+      localStorage.removeItem(vaLinksTemplateKey(folder));
     }
   }catch(e){}
 }
@@ -17583,6 +17594,11 @@ def create_app():
         va_number = (request.form.get("va_number") or "").strip()
         if not folder_name:
             return jsonify({"ok": False, "error": "folder_name requis"})
+        # Si le template_id ne ressemble pas a un id GMS (lnk_*), on l'ignore
+        # — c'est typiquement un id legacy Linkscale (Mongo hex) reste en
+        # localStorage. Le fallback ci-dessous trouvera un template dans le folder.
+        if template_id and not template_id.startswith("lnk_"):
+            template_id = ""
         if not prefix:
             prefix = folder_name.lower()
         prefix = "".join(c for c in prefix if c.isalnum() or c == "_").lower()
