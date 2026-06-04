@@ -6049,16 +6049,18 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 .va-ig3-preview{grid-column:1 / -1;display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a}
-.ext-nav-grid{display:grid;grid-template-columns:200px 220px 1fr;gap:12px;min-height:400px}
-.ext-nav-col{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
-.ext-nav-col-wide{min-width:0}
-.ext-nav-col-head{padding:10px 14px;font-size:11px;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid #2a2a2a;background:rgba(168,85,247,.05)}
-.ext-nav-col-body{padding:10px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1}
-.ext-nav-item:hover{border-color:#ec4899 !important;transform:translateX(2px)}
-.ext-nav-item.active{background:rgba(168,85,247,.12) !important;border-color:#a855f7 !important}
-body.light .ext-nav-col{background:#fff;border-color:#e5e7eb}
-body.light .ext-nav-item{background:#f9fafb !important;border-color:#e5e7eb !important}
-@media(max-width:900px){.ext-nav-grid{grid-template-columns:1fr;min-height:auto}}
+/* Layout sidebar+detail comme page VAs */
+.ext-sb-layout{display:grid;grid-template-columns:280px 1fr;gap:14px;min-height:500px}
+.ext-sb-sidebar{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
+.ext-sb-list{flex:1;overflow-y:auto}
+.ext-sb-detail{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;padding:14px;min-width:0;overflow-y:auto;display:flex;flex-direction:column}
+.ext-sb-va-item:hover{background:rgba(168,85,247,.06)}
+.ext-sb-va-item.active{background:rgba(168,85,247,.15)}
+.ext-sb-section.collapsed .ext-sb-section-body{display:none !important}
+.ext-sb-section.collapsed .ext-sb-chevron{transform:rotate(-90deg)}
+body.light .ext-sb-sidebar,body.light .ext-sb-detail{background:#fff;border-color:#e5e7eb}
+body.light #ext-sb-search,body.light #ext-sb-filter-model{background:#f9fafb;border-color:#e5e7eb;color:#111}
+@media(max-width:900px){.ext-sb-layout{grid-template-columns:1fr;min-height:auto}}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
 .ext-mini-select:focus,.ext-mini-input:focus{border-color:#ec4899;outline:none}
@@ -12445,6 +12447,60 @@ async function glDeleteWatcher(id, btn){
     # Note : ext_rows_html contient les rows ET les headers de groupe. On va
     # juste afficher tout par default puis filter en JS.
 
+    # === Sidebar comme la page VAs : search + filter modele + sections expandable ===
+    # Construit les VA items par modele (va_name → liste de comptes)
+    by_model_va_sb = {}  # {model: {va_name: [items]}}
+    for it in ext_accounts:
+        m = (it.get("model") or "").strip() or "(sans modèle)"
+        v = (it.get("va_name") or "").strip() or "(sans VA)"
+        by_model_va_sb.setdefault(m, {}).setdefault(v, []).append(it)
+
+    # Sections sidebar : 1 par modele, expandable
+    sidebar_sections = []
+    sb_model_order = list(GEELARK_MODELS) + sorted([m for m in by_model_va_sb if m not in GEELARK_MODELS])
+    for m in sb_model_order:
+        vas_in_model = by_model_va_sb.get(m, {})
+        if not vas_in_model:
+            continue
+        n_vas = len(vas_in_model)
+        is_known = m in GEELARK_MODELS
+        head_color = "#ec4899" if is_known else "#666"
+        va_rows = []
+        for v, accs in sorted(vas_in_model.items()):
+            search_blob = (v + " " + " ".join(a.get("handle", "") for a in accs)).lower()
+            va_rows.append(
+                f"<div class='ext-sb-va-item' data-extsb-va='{v}' data-extsb-model='{m}' "
+                f"data-extsb-search='{search_blob}' onclick='extSbSelectVa(this)' "
+                f"style='display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:all .12s'>"
+                f"<div style='width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);"
+                f"display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:11px;flex-shrink:0'>"
+                f"{v[:1].upper()}</div>"
+                f"<div style='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"
+                f"<div style='font-weight:700;font-size:13px;color:#fff'>{v}</div>"
+                f"<div style='font-size:10px;color:#888'>{len(accs)} compte{'s' if len(accs) > 1 else ''}</div>"
+                f"</div>"
+                f"</div>"
+            )
+        sidebar_sections.append(
+            f"<div class='ext-sb-section' data-extsb-section-model='{m}' style='margin-bottom:10px'>"
+            f"<div class='ext-sb-section-head' onclick='extSbToggleSection(this)' "
+            f"style='display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(168,85,247,.05);"
+            f"border-left:3px solid {head_color};border-radius:6px;cursor:pointer;user-select:none'>"
+            f"<span style='font-weight:800;font-size:12px;color:{head_color};letter-spacing:.04em'>{m}</span>"
+            f"<span style='font-size:10px;background:rgba(168,85,247,.15);color:#a855f7;padding:1px 7px;border-radius:5px;font-weight:700;margin-left:auto'>{n_vas} VA{'s' if n_vas > 1 else ''}</span>"
+            f"<span class='ext-sb-chevron' style='color:#888;font-size:10px;transition:transform .15s'>▼</span>"
+            f"</div>"
+            f"<div class='ext-sb-section-body' style='display:flex;flex-direction:column;gap:4px;padding:6px 0 0'>"
+            + "".join(va_rows)
+            + f"</div>"
+            f"</div>"
+        )
+
+    # Options du filter modele
+    sb_filter_opts = "<option value=''>Tous les modèles</option>" + "".join(
+        f"<option value='{m}'>{m}</option>" for m in sb_model_order if m in by_model_va_sb
+    )
+
     ext_section = (
         datalist_html
         + f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
@@ -12452,35 +12508,39 @@ async function glDeleteWatcher(id, btn){
         f"<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
         f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
         f"</h3>"
-        f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Click un modèle, puis un VA, pour voir ses comptes.</p>"
+        f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Click un VA dans la sidebar pour voir ses comptes Insta.</p>"
         f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
         f"</div>"
-        # === 3 colonnes : Models | VAs | Comptes ===
-        f"<div class='ext-nav-grid'>"
-        # Colonne 1 : Models
-        f"<div class='ext-nav-col'>"
-        f"<div class='ext-nav-col-head'>1. Modèle</div>"
-        f"<div class='ext-nav-col-body' id='ext-nav-models'>"
-        + ("".join(model_cards) if model_cards else "<p style='color:#666;text-align:center;padding:14px;font-size:12px'>Aucun</p>")
+        # === Layout sidebar + detail (comme page VAs) ===
+        f"<div class='ext-sb-layout'>"
+        # Sidebar
+        f"<div class='ext-sb-sidebar'>"
+        f"<div style='display:flex;flex-direction:column;gap:8px;margin-bottom:12px'>"
+        f"<div style='position:relative'>"
+        f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2' "
+        f"style='position:absolute;left:10px;top:50%;transform:translateY(-50%)'>"
+        f"<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        f"<input type='text' id='ext-sb-search' placeholder='Rechercher…' oninput='extSbFilter()' "
+        f"style='background:#0a0c10;border:1px solid #2a2a2a;color:#fff;padding:8px 12px 8px 32px;"
+        f"border-radius:8px;font-size:12px;width:100%;font-family:inherit'>"
+        f"</div>"
+        f"<select id='ext-sb-filter-model' onchange='extSbFilter()' "
+        f"style='background:#0a0c10;border:1px solid #2a2a2a;color:#aaa;padding:8px 12px;"
+        f"border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer'>"
+        + sb_filter_opts
+        + f"</select>"
+        f"</div>"
+        f"<div class='ext-sb-list'>"
+        + ("".join(sidebar_sections) if sidebar_sections else "<p style='color:#666;text-align:center;padding:20px 0;font-size:12px'>Aucun compte externe.<br>Click 📋 Bulk upload.</p>")
         + f"</div>"
         f"</div>"
-        # Colonne 2 : VAs
-        f"<div class='ext-nav-col'>"
-        f"<div class='ext-nav-col-head'>2. VA</div>"
-        f"<div class='ext-nav-col-body' id='ext-nav-vas'>"
-        f"<p id='ext-nav-vas-empty' style='color:#666;text-align:center;padding:14px;font-size:12px'>← Sélectionne un modèle</p>"
-        + "".join(va_nav_items)
-        + f"</div>"
-        f"</div>"
-        # Colonne 3 : Comptes (filtre via JS data-model + data-va)
-        f"<div class='ext-nav-col ext-nav-col-wide'>"
-        f"<div class='ext-nav-col-head'>3. Comptes Insta</div>"
-        f"<div class='ext-nav-col-body' id='ext-nav-accounts'>"
-        f"<p id='ext-nav-accounts-empty' style='color:#666;text-align:center;padding:14px;font-size:12px'>← Sélectionne un VA</p>"
+        # Detail panel a droite
+        f"<div class='ext-sb-detail'>"
+        f"<p id='ext-sb-detail-empty' style='color:#666;text-align:center;padding:60px 20px;font-size:13px'>"
+        f"← Sélectionne un VA dans la sidebar pour voir ses comptes Insta</p>"
         f"<div class='va-ig3-detail' data-vaid-detail='__external__' style='border-top:0;padding-top:0;margin-top:0;display:none'>"
         + ("".join(ext_rows_html) if ext_rows_html else "")
         + f"</div>"
-        f"</div>"
         f"</div>"
         f"</div>"
         f"</div>"
@@ -12534,35 +12594,36 @@ async function glDeleteWatcher(id, btn){
         "    } else {if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');}"
         "  });"
         "}"
-        "function extNavSelectModel(el){"
-        "  document.querySelectorAll('#ext-nav-models .ext-nav-item').forEach(function(it){it.classList.remove('active');});"
+        "function extSbToggleSection(headEl){var sec=headEl.closest('.ext-sb-section');if(sec)sec.classList.toggle('collapsed');}"
+        "function extSbSelectVa(el){"
+        "  document.querySelectorAll('.ext-sb-va-item').forEach(function(it){it.classList.remove('active');});"
         "  el.classList.add('active');"
-        "  var m=el.getAttribute('data-nav-model');"
-        "  // Filtre les VAs : seules celles du modele s affichent"
-        "  var anyVa=false;"
-        "  document.querySelectorAll('#ext-nav-vas .ext-nav-va-item').forEach(function(it){"
-        "    if(it.getAttribute('data-nav-model-of-va')===m){it.style.display='flex';anyVa=true;}"
-        "    else{it.style.display='none';it.classList.remove('active');}"
-        "  });"
-        "  document.getElementById('ext-nav-vas-empty').style.display=anyVa?'none':'block';"
-        "  if(!anyVa)document.getElementById('ext-nav-vas-empty').textContent='Aucun VA pour '+m;"
-        "  else document.getElementById('ext-nav-vas-empty').textContent='← Sélectionne un VA';"
-        "  // Reset la colonne 3"
-        "  document.getElementById('ext-nav-accounts-empty').style.display='block';"
-        "  document.querySelector('#ext-nav-accounts .va-ig3-detail').style.display='none';"
-        "}"
-        "function extNavSelectVa(el){"
-        "  document.querySelectorAll('#ext-nav-vas .ext-nav-item').forEach(function(it){it.classList.remove('active');});"
-        "  el.classList.add('active');"
-        "  var m=el.getAttribute('data-nav-model-of-va');"
-        "  var v=el.getAttribute('data-nav-va');"
-        "  // Affiche le panneau comptes et filtre les rows"
-        "  document.getElementById('ext-nav-accounts-empty').style.display='none';"
-        "  var detail=document.querySelector('#ext-nav-accounts .va-ig3-detail');"
+        "  var m=el.getAttribute('data-extsb-model');var v=el.getAttribute('data-extsb-va');"
+        "  document.getElementById('ext-sb-detail-empty').style.display='none';"
+        "  var detail=document.querySelector('.ext-sb-detail .va-ig3-detail');"
         "  detail.style.display='flex';"
         "  detail.querySelectorAll('.va-ig3-row,.ext-group-head').forEach(function(r){"
         "    var rm=r.getAttribute('data-ext-model');var rv=r.getAttribute('data-ext-va');"
         "    r.style.display=(rm===m&&rv===v)?(r.classList.contains('va-ig3-row')?'grid':'flex'):'none';"
+        "  });"
+        "  // Auto-load les stats si pas encore charge"
+        "  if(typeof extAutoLoadAll==='function'){setTimeout(extAutoLoadAll,100);}"
+        "}"
+        "function extSbFilter(){"
+        "  var q=(document.getElementById('ext-sb-search').value||'').toLowerCase().trim();"
+        "  var mFilter=document.getElementById('ext-sb-filter-model').value;"
+        "  document.querySelectorAll('.ext-sb-section').forEach(function(sec){"
+        "    var secModel=sec.getAttribute('data-extsb-section-model');"
+        "    if(mFilter && secModel!==mFilter){sec.style.display='none';return;}"
+        "    sec.style.display='block';"
+        "    var anyVisible=false;"
+        "    sec.querySelectorAll('.ext-sb-va-item').forEach(function(it){"
+        "      var blob=it.getAttribute('data-extsb-search')||'';"
+        "      var ok=!q || blob.indexOf(q)!==-1;"
+        "      it.style.display=ok?'flex':'none';"
+        "      if(ok)anyVisible=true;"
+        "    });"
+        "    sec.style.display=anyVisible?'block':'none';"
         "  });"
         "}"
         "function extOpenBulkModal(){document.getElementById('ext-bulk-modal').style.display='flex';document.getElementById('ext-bulk-input').value='';document.getElementById('ext-bulk-input').focus();}"
