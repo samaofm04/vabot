@@ -644,14 +644,41 @@ def assign_link_to_group(link_id: str, group_id: str,
                           team_id: Optional[str] = None) -> Dict[str, Any]:
     """Place un lien dans un groupe dashboard.
 
-    Stratégie : v3 PATCH d'abord (officiel, juste l'API key) → fallback API
-    privée avec cookie session si v3 échoue. Le fallback gère l'ordering
-    (after_link_id) que le v3 n'expose pas.
+    Stratégie selon le type de lien :
+    - LANDING : API privée uniquement (v3 PATCH wipe les buttons côté serveur
+                même si on ne les envoie pas — bug connu de l'API v3).
+    - DIRECTLINK : v3 PATCH d'abord, fallback API privée.
 
     team_id : workspace owner du groupe (requis pour groupes dans un team).
     """
     if not group_id or len(group_id) < 20:
         return {"ok": False, "error": f"group_id invalide : {group_id!r}"}
+    # Détecte le type. Si on n'a pas link_obj, on fetch pour savoir.
+    link_type = None
+    if link_obj:
+        link_type = link_obj.get("type")
+    if not link_type:
+        api_key = get_api_key()
+        if api_key:
+            try:
+                lid_f = link_id if link_id.startswith("lnk_") else f"lnk_{link_id}"
+                r = requests.get(f"{PUBLIC_REST_BASE}/links/{lid_f}",
+                                 headers={"Authorization": f"Bearer {api_key}"}, timeout=15)
+                if r.status_code == 200:
+                    link_obj = r.json()
+                    link_type = link_obj.get("type")
+            except Exception:
+                pass
+    link_type = link_type or "directlink"
+
+    if link_type == "landing":
+        # Landing : v3 PATCH wipe les buttons. On va direct sur l'API privée.
+        fb = _assign_via_private(link_id, group_id, after_link_id=after_link_id)
+        if fb.get("ok"):
+            return fb
+        return {"ok": False, "error": f"landing prive echoue : {fb.get('error')}"}
+
+    # Directlink : v3 PATCH d'abord
     res = _assign_via_v3(link_id, group_id, link_obj=link_obj, team_id=team_id)
     if res.get("ok"):
         return res
