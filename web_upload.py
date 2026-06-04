@@ -6049,6 +6049,16 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 .va-ig3-preview{grid-column:1 / -1;display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a}
+.ext-nav-grid{display:grid;grid-template-columns:200px 220px 1fr;gap:12px;min-height:400px}
+.ext-nav-col{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.ext-nav-col-wide{min-width:0}
+.ext-nav-col-head{padding:10px 14px;font-size:11px;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid #2a2a2a;background:rgba(168,85,247,.05)}
+.ext-nav-col-body{padding:10px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1}
+.ext-nav-item:hover{border-color:#ec4899 !important;transform:translateX(2px)}
+.ext-nav-item.active{background:rgba(168,85,247,.12) !important;border-color:#a855f7 !important}
+body.light .ext-nav-col{background:#fff;border-color:#e5e7eb}
+body.light .ext-nav-item{background:#f9fafb !important;border-color:#e5e7eb !important}
+@media(max-width:900px){.ext-nav-grid{grid-template-columns:1fr;min-height:auto}}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
 .ext-mini-select:focus,.ext-mini-input:focus{border-color:#ec4899;outline:none}
@@ -12284,7 +12294,8 @@ async function glDeleteWatcher(id, btn){
         is_known = model in GEELARK_MODELS
         head_color = "#ec4899" if is_known else "#666"
         ext_rows_html.append(
-            f"<div class='ext-group-head' style='display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding:6px 12px;background:rgba(168,85,247,.06);border-left:3px solid {head_color};border-radius:6px'>"
+            f"<div class='ext-group-head' data-ext-model='{model}' data-ext-va='{va_name}' "
+            f"style='display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding:6px 12px;background:rgba(168,85,247,.06);border-left:3px solid {head_color};border-radius:6px'>"
             f"<span style='font-weight:800;font-size:12px;color:{head_color}'>{model}</span>"
             f"<span style='color:#888;font-size:11px'>·</span>"
             f"<span style='font-weight:700;font-size:12px;color:#aaa'>{va_name}</span>"
@@ -12356,8 +12367,11 @@ async function glDeleteWatcher(id, btn){
                 f"list='ext-va-suggestions'>"
                 f"</div>"
             )
+            # data-attrs sur la row pour le filter de la nav 3 cols
+            _data_m = (it.get("model") or "").strip() or "(sans modèle)"
+            _data_v = (it.get("va_name") or "").strip() or "(sans VA)"
             ext_rows_html.append(
-                f"<div class='va-ig3-row' data-ext-handle='{h}'>"
+                f"<div class='va-ig3-row' data-ext-handle='{h}' data-ext-model='{_data_m}' data-ext-va='{_data_v}'>"
                 f"{pp_html}"
                 f"<div class='va-ig3-row-name'>"
                 f"<div class='va-ig3-row-handle'>@{h}</div>"
@@ -12385,6 +12399,52 @@ async function glDeleteWatcher(id, btn){
         + "".join(f"<option value='{nm}'>" for nm in va_names_seen)
         + "</datalist>"
     )
+    # === Navigation 3 colonnes : Model → VA → Comptes ===
+    # Construit les compteurs par modele et par (modele, va_name)
+    by_model = {}
+    by_model_va = {}
+    for it in ext_accounts:
+        m = (it.get("model") or "").strip() or "(sans modèle)"
+        v = (it.get("va_name") or "").strip() or "(sans VA)"
+        by_model[m] = by_model.get(m, 0) + 1
+        by_model_va.setdefault(m, {}).setdefault(v, []).append(it)
+
+    # Colonne 1 : Models (Amelia / Emma / Lola + autres + sans)
+    model_cards = []
+    all_models_show = list(GEELARK_MODELS) + sorted([m for m in by_model.keys() if m not in GEELARK_MODELS])
+    for m in all_models_show:
+        cnt = by_model.get(m, 0)
+        active_class = ""  # initial pas d active
+        is_known = m in GEELARK_MODELS
+        col = "#ec4899" if is_known else "#666"
+        model_cards.append(
+            f"<div class='ext-nav-item' data-nav-model='{m}' onclick='extNavSelectModel(this)' "
+            f"style='display:flex;justify-content:space-between;align-items:center;padding:10px 14px;"
+            f"background:#0f1116;border:1px solid #2a2a2a;border-radius:8px;cursor:pointer;transition:all .12s'>"
+            f"<span style='font-weight:700;font-size:13px;color:{col}'>{m}</span>"
+            f"<span style='font-size:10px;background:rgba(168,85,247,.15);color:#a855f7;padding:2px 8px;border-radius:5px;font-weight:700'>{cnt}</span>"
+            f"</div>"
+        )
+
+    # Toutes les VA rows pre-rendered (chacune avec data-attrs pour filter)
+    va_nav_items = []
+    for m in by_model_va:
+        for v, accs in by_model_va[m].items():
+            va_nav_items.append(
+                f"<div class='ext-nav-item ext-nav-va-item' data-nav-va='{v}' data-nav-model-of-va='{m}' "
+                f"onclick='extNavSelectVa(this)' style='display:none;justify-content:space-between;"
+                f"align-items:center;padding:10px 14px;background:#0f1116;border:1px solid #2a2a2a;"
+                f"border-radius:8px;cursor:pointer;transition:all .12s'>"
+                f"<span style='font-weight:700;font-size:13px;color:#aaa'>{v}</span>"
+                f"<span style='font-size:10px;background:rgba(34,197,94,.15);color:#22c55e;padding:2px 8px;border-radius:5px;font-weight:700'>{len(accs)}</span>"
+                f"</div>"
+            )
+
+    # Pour la colonne 3, on garde le HTML deja construit dans ext_rows_html
+    # mais on ajoute data-attrs pour le filter
+    # Note : ext_rows_html contient les rows ET les headers de groupe. On va
+    # juste afficher tout par default puis filter en JS.
+
     ext_section = (
         datalist_html
         + f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
@@ -12392,12 +12452,37 @@ async function glDeleteWatcher(id, btn){
         f"<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
         f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
         f"</h3>"
-        f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Comptes Insta gérés hors Discord (un VA externe peut en avoir 50+). Stats auto.</p>"
+        f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Click un modèle, puis un VA, pour voir ses comptes.</p>"
         f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
         f"</div>"
-        f"<div class='va-ig3-detail' data-vaid-detail='__external__' style='border-top:0;padding-top:0;margin-top:0'>"
-        + ("".join(ext_rows_html) if ext_rows_html else "<p style='color:#666;text-align:center;padding:20px 0;font-size:13px'>Aucun compte externe. Click 📋 Bulk upload pour en ajouter.</p>")
+        # === 3 colonnes : Models | VAs | Comptes ===
+        f"<div class='ext-nav-grid'>"
+        # Colonne 1 : Models
+        f"<div class='ext-nav-col'>"
+        f"<div class='ext-nav-col-head'>1. Modèle</div>"
+        f"<div class='ext-nav-col-body' id='ext-nav-models'>"
+        + ("".join(model_cards) if model_cards else "<p style='color:#666;text-align:center;padding:14px;font-size:12px'>Aucun</p>")
         + f"</div>"
+        f"</div>"
+        # Colonne 2 : VAs
+        f"<div class='ext-nav-col'>"
+        f"<div class='ext-nav-col-head'>2. VA</div>"
+        f"<div class='ext-nav-col-body' id='ext-nav-vas'>"
+        f"<p id='ext-nav-vas-empty' style='color:#666;text-align:center;padding:14px;font-size:12px'>← Sélectionne un modèle</p>"
+        + "".join(va_nav_items)
+        + f"</div>"
+        f"</div>"
+        # Colonne 3 : Comptes (filtre via JS data-model + data-va)
+        f"<div class='ext-nav-col ext-nav-col-wide'>"
+        f"<div class='ext-nav-col-head'>3. Comptes Insta</div>"
+        f"<div class='ext-nav-col-body' id='ext-nav-accounts'>"
+        f"<p id='ext-nav-accounts-empty' style='color:#666;text-align:center;padding:14px;font-size:12px'>← Sélectionne un VA</p>"
+        f"<div class='va-ig3-detail' data-vaid-detail='__external__' style='border-top:0;padding-top:0;margin-top:0;display:none'>"
+        + ("".join(ext_rows_html) if ext_rows_html else "")
+        + f"</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
         f"</div>"
     )
 
@@ -12447,6 +12532,37 @@ async function glDeleteWatcher(id, btn){
         "      var m=modelSel?modelSel.value:'',v=vaInp?vaInp.value.trim():'';"
         "      if(m && v){setTimeout(function(){window.location.reload();},900);}"
         "    } else {if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');}"
+        "  });"
+        "}"
+        "function extNavSelectModel(el){"
+        "  document.querySelectorAll('#ext-nav-models .ext-nav-item').forEach(function(it){it.classList.remove('active');});"
+        "  el.classList.add('active');"
+        "  var m=el.getAttribute('data-nav-model');"
+        "  // Filtre les VAs : seules celles du modele s affichent"
+        "  var anyVa=false;"
+        "  document.querySelectorAll('#ext-nav-vas .ext-nav-va-item').forEach(function(it){"
+        "    if(it.getAttribute('data-nav-model-of-va')===m){it.style.display='flex';anyVa=true;}"
+        "    else{it.style.display='none';it.classList.remove('active');}"
+        "  });"
+        "  document.getElementById('ext-nav-vas-empty').style.display=anyVa?'none':'block';"
+        "  if(!anyVa)document.getElementById('ext-nav-vas-empty').textContent='Aucun VA pour '+m;"
+        "  else document.getElementById('ext-nav-vas-empty').textContent='← Sélectionne un VA';"
+        "  // Reset la colonne 3"
+        "  document.getElementById('ext-nav-accounts-empty').style.display='block';"
+        "  document.querySelector('#ext-nav-accounts .va-ig3-detail').style.display='none';"
+        "}"
+        "function extNavSelectVa(el){"
+        "  document.querySelectorAll('#ext-nav-vas .ext-nav-item').forEach(function(it){it.classList.remove('active');});"
+        "  el.classList.add('active');"
+        "  var m=el.getAttribute('data-nav-model-of-va');"
+        "  var v=el.getAttribute('data-nav-va');"
+        "  // Affiche le panneau comptes et filtre les rows"
+        "  document.getElementById('ext-nav-accounts-empty').style.display='none';"
+        "  var detail=document.querySelector('#ext-nav-accounts .va-ig3-detail');"
+        "  detail.style.display='flex';"
+        "  detail.querySelectorAll('.va-ig3-row,.ext-group-head').forEach(function(r){"
+        "    var rm=r.getAttribute('data-ext-model');var rv=r.getAttribute('data-ext-va');"
+        "    r.style.display=(rm===m&&rv===v)?(r.classList.contains('va-ig3-row')?'grid':'flex'):'none';"
         "  });"
         "}"
         "function extOpenBulkModal(){document.getElementById('ext-bulk-modal').style.display='flex';document.getElementById('ext-bulk-input').value='';document.getElementById('ext-bulk-input').focus();}"
