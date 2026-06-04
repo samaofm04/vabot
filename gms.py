@@ -754,6 +754,56 @@ def next_va_number_in_group(team_id: Optional[str], folder_or_group: str) -> int
     return max_n + 1
 
 
+# ============ Compteur VA atomique (evite la race condition entre 2 Generate) ============
+
+_VA_COUNTERS_FILE = DATA_DIR / "gms_va_counters.json"
+
+
+def _load_counters() -> Dict[str, int]:
+    if not _VA_COUNTERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_VA_COUNTERS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_counters(d: Dict[str, int]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _VA_COUNTERS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def claim_next_va_number(team_id: Optional[str], folder: str) -> int:
+    """Réserve atomiquement le prochain VA n pour (team, folder).
+
+    Premier appel : initialise depuis le max API. Appels suivants : lit le
+    counter et incremente. Evite la race condition entre plusieurs Generate
+    rapprochés (sinon ils tomberaient tous sur VA 1).
+    """
+    counters = _load_counters()
+    tid = (team_id or "").strip()
+    if tid and not tid.startswith("tm_"):
+        tid = "tm_" + tid
+    key = f"{tid}:{(folder or '').lower()}"
+    if key not in counters:
+        counters[key] = next_va_number_in_group(team_id, folder)
+    n = counters[key]
+    counters[key] = n + 1
+    _save_counters(counters)
+    return n
+
+
+def reset_va_counter(team_id: Optional[str], folder: str):
+    """Force la prochaine claim à re-scanner via l'API (apres delete manuel)."""
+    counters = _load_counters()
+    tid = (team_id or "").strip()
+    if tid and not tid.startswith("tm_"):
+        tid = "tm_" + tid
+    key = f"{tid}:{(folder or '').lower()}"
+    counters.pop(key, None)
+    _save_counters(counters)
+
+
 def list_links_team(team_id: str) -> Dict[str, Any]:
     """List_all_links scopé à un team via API publique v3."""
     api_key = get_api_key()

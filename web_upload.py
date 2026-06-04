@@ -5272,6 +5272,16 @@ function vaPaySave(){
         gms_templates_dict = {}
     gms_templates_json = _json_va.dumps(gms_templates_dict, ensure_ascii=False)
 
+    # Map uid -> username pour afficher "deja attribue a @X" sur les liens
+    # qui sont sur un autre VA que celui qu'on edite.
+    _va_usernames_map = {}
+    try:
+        for _uid_k in (all_va_links or {}).keys():
+            _va_usernames_map[str(_uid_k)] = _resolve_username(_uid_k) or str(_uid_k)
+    except Exception:
+        pass
+    va_usernames_json = _json_va.dumps(_va_usernames_map, ensure_ascii=False)
+
     modal_html = (
         "<div id='va-links-modal' onclick='vaLinksClose(event)'>"
         "<div class='vlm-box' onclick='event.stopPropagation()'>"
@@ -5292,7 +5302,7 @@ function vaPaySave(){
         "</div>"
         "</div>"
         "</div>"
-        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};window.__linkSource='{link_source}';window.__gmsTemplates={gms_templates_json};</script>"
+        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};window.__linkSource='{link_source}';window.__gmsTemplates={gms_templates_json};window.__vaUsernames={va_usernames_json};</script>"
     )
 
     css_modal = """
@@ -5344,6 +5354,7 @@ function vaPaySave(){
 .vlm-row-star:hover{border-color:#fbbf24;color:#fbbf24}
 .vlm-row-star.active{border-color:#fbbf24;color:#fbbf24;background:rgba(251,191,36,.08)}
 .vlm-star-badge{font-size:11px;margin-left:4px}
+.vlm-assigned-badge{display:inline-block;font-size:10px;font-weight:700;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 7px;border-radius:5px;margin-left:8px;white-space:nowrap}
 .vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
 .vlm-save:hover{background:#9333ea}
 body.light .vlm-box{background:#fff;border-color:#e5e7eb}
@@ -5408,15 +5419,29 @@ function vaLinksRender(){
     if(_vlmActiveModel !== '__all__' && m !== _vlmActiveModel) return;
     (groupedByModel[m] = groupedByModel[m] || []).push(l);
   });
+  // Helper: trouve les autres VAs qui ont deja ce lien (hors VA courant)
+  function findOthersWithLink(linkId){
+    var data = window.__vaLinksData || {};
+    var names = window.__vaUsernames || {};
+    var others = [];
+    Object.keys(data).forEach(function(uid){
+      if(uid === String(_vlmCurrentUid)) return;
+      var lids = data[uid] || [];
+      if(lids.indexOf(linkId) !== -1) others.push(names[uid] || uid);
+    });
+    return others;
+  }
   Object.keys(groupedByModel).sort().forEach(function(model){
     html += '<div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:14px 8px 6px">' + model + '</div>';
     groupedByModel[model].forEach(function(l){
       var checked = current.indexOf(l.id) !== -1;
       var isStar = vaLinksGetTemplate(l.model) === l.id;
+      var others = findOthersWithLink(l.id);
+      var assignedBadge = others.length ? '<span class="vlm-assigned-badge" title="Deja attribue a : ' + others.join(', ') + '">⚠️ déjà chez ' + (others.length === 1 ? '@' + others[0] : others.length + ' VA') + '</span>' : '';
       html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this, event)">'
         + '<div class="vlm-cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
         + '<div class="vlm-info">'
-        + '<div class="vlm-name">' + l.name + (isStar ? ' <span class="vlm-star-badge" title="Template du dossier">⭐</span>' : '') + '</div>'
+        + '<div class="vlm-name">' + l.name + (isStar ? ' <span class="vlm-star-badge" title="Template du dossier">⭐</span>' : '') + assignedBadge + '</div>'
         + '<div class="vlm-meta">/' + l.shortcode + '</div>'
         + '</div>'
         + '<button type="button" class="vlm-row-star ' + (isStar ? 'active' : '') + '" data-star-id="' + l.id + '" data-star-folder="' + l.model.replace(/"/g, '&quot;') + '" title="Definir comme template du dossier (Generer dupliquera celui-ci)" onclick="vaLinksToggleTemplate(event, this)">' + (isStar ? '⭐' : '☆') + '</button>'
@@ -17519,10 +17544,10 @@ def create_app():
         except Exception:
             pass
 
-        # Auto VA n+1 par groupe (cap a l'identité du template)
-        folder_name = ident.capitalize()  # 'amelia' -> 'Amelia'
+        # Auto VA n+1 par groupe — atomique (compteur persiste)
+        folder_name = ident.capitalize()
         try:
-            n = gms.next_va_number_in_group(team_id, folder_name)
+            n = gms.claim_next_va_number(team_id, folder_name)
         except Exception:
             n = 1
         new_name = f"VA {n}"
@@ -17719,10 +17744,10 @@ def create_app():
             except Exception as e:
                 return jsonify({"ok": False, "error": f"resolution template: {e}"})
 
-        # Determine le VA number (auto-increment si vide)
+        # Determine le VA number (auto-increment atomique si vide)
         if not va_number:
             try:
-                n = gms.next_va_number_in_group(team_id or None, folder_name)
+                n = gms.claim_next_va_number(team_id or None, folder_name)
                 va_number = str(n)
             except Exception:
                 va_number = "1"
