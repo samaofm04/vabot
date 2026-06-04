@@ -5019,12 +5019,8 @@ body.light .va-id{color:#9ca3af}
             f"<div class='ig3-slot' data-ig3-slot='{i}'>"
             f"<div class='ig3-slot-head'>Compte {i+1}</div>"
             f"<div class='ig3-field'>"
-            f"<label>Handle</label>"
+            f"<label>Username</label>"
             f"<input type='text' data-ig3-field='handle_{i}' placeholder='@username' autocomplete='off'>"
-            f"</div>"
-            f"<div class='ig3-field'>"
-            f"<label>Email</label>"
-            f"<input type='text' data-ig3-field='email_{i}' placeholder='email@…' autocomplete='off'>"
             f"</div>"
             f"<div class='ig3-field ig3-pw-wrap'>"
             f"<label>Mot de passe</label>"
@@ -5135,7 +5131,6 @@ function vaIg3Open(uid, username){
     var slot = document.querySelector('[data-ig3-slot="' + i + '"]');
     if(!slot) continue;
     var fH = slot.querySelector('[data-ig3-field="handle_' + i + '"]'); if(fH) fH.value = acc.handle || '';
-    var fE = slot.querySelector('[data-ig3-field="email_' + i + '"]'); if(fE) fE.value = acc.email || '';
     var fP = slot.querySelector('[data-ig3-field="password_' + i + '"]'); if(fP){ fP.value = acc.password || ''; fP.type = 'password'; }
     var fT = slot.querySelector('[data-ig3-field="totp_seed_' + i + '"]'); if(fT) fT.value = acc.totp_seed || '';
   }
@@ -5156,7 +5151,7 @@ function vaIg3Save(){
   for(var i=0; i<3; i++){
     var slot = document.querySelector('[data-ig3-slot="' + i + '"]');
     if(!slot) continue;
-    ['handle','email','password','totp_seed'].forEach(function(f){
+    ['handle','password','totp_seed'].forEach(function(f){
       var inp = slot.querySelector('[data-ig3-field="' + f + '_' + i + '"]');
       fd.append(f + '_' + i, inp ? inp.value : '');
     });
