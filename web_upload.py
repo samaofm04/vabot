@@ -79,9 +79,23 @@ def _resolve_username(user_id) -> str:
     """Retourne le username Discord depuis l'ID, ou l'ID si pas trouvé.
 
     Essaie d'abord le cache global, puis tous les members des guildes.
+    Pour les VAs manuels (uid 'manual_*'), retourne le display_name stocke.
     """
+    uid_str = str(user_id)
+    # VA manuel : on lit le display_name dans users.json
+    if uid_str.startswith("manual_"):
+        try:
+            users = json.loads(USERS_FILE.read_text(encoding="utf-8")) if USERS_FILE.exists() else {}
+            entry = users.get(uid_str)
+            if isinstance(entry, dict):
+                nm = entry.get("display_name") or entry.get("username") or ""
+                if nm:
+                    return nm
+        except Exception:
+            pass
+        return uid_str
     if _BOT_REF is None:
-        return str(user_id)
+        return uid_str
     try:
         uid_int = int(user_id)
     except Exception:
@@ -4414,13 +4428,92 @@ def _render_va_list_html() -> str:
             clicks_widget = ""
     except Exception:
         clicks_widget = ""
+    # Bouton "+ Ajouter VA manuel" pour creer un VA non-Discord
+    add_manual_btn = (
+        "<div style='display:flex;justify-content:flex-end;margin:8px 0 14px'>"
+        "<button type='button' onclick='vaAddManualOpen()' "
+        "style='background:#a855f7;color:#fff;border:0;padding:9px 16px;border-radius:9px;"
+        "cursor:pointer;font-size:12px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.3)'>"
+        "+ Ajouter VA manuel</button>"
+        "</div>"
+    )
+    # Modal pour creer un VA manuel
+    identities = _list_identities()
+    identity_opts = "".join(
+        f"<option value='{i.lower()}'>@{i.lower()}</option>" for i in sorted(identities)
+    )
+    add_manual_modal = (
+        "<div id='va-add-manual-modal' onclick='vaAddManualClose(event)' "
+        "style='display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);"
+        "z-index:9999;align-items:center;justify-content:center;padding:30px'>"
+        "<div onclick='event.stopPropagation()' style='background:#0f1116;border:1px solid #2a2a2a;"
+        "border-radius:14px;width:100%;max-width:460px;padding:22px;display:flex;flex-direction:column;"
+        "gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.6)'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center'>"
+        "<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
+        "<span style='color:#a855f7'>+ </span>VA manuel (non-Discord)</h3>"
+        "<button onclick='vaAddManualClose()' style='background:transparent;border:0;color:#888;"
+        "font-size:22px;cursor:pointer;padding:0 6px;line-height:1'>×</button>"
+        "</div>"
+        "<p style='margin:0;color:#888;font-size:12px'>Crée un VA qui n'est pas sur Discord. "
+        "Tu pourras ensuite lui attribuer 3 comptes Insta via 🔐 et voir leurs stats comme un VA Discord.</p>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px'>"
+        "Identité (Amelia / Emma / Lola / etc.)</label>"
+        "<select id='va-manual-identity' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;"
+        "padding:9px 12px;border-radius:8px;font-size:13px;width:100%;font-family:inherit;cursor:pointer'>"
+        + identity_opts +
+        "</select>"
+        "</div>"
+        "<div>"
+        "<label style='font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px'>"
+        "Nom affiché (ex : Sarah K.)</label>"
+        "<input type='text' id='va-manual-name' placeholder='Nom du VA' "
+        "style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;"
+        "border-radius:8px;font-size:13px;width:100%;font-family:inherit'>"
+        "</div>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end'>"
+        "<button onclick='vaAddManualClose()' style='background:transparent;border:1px solid #2a2a2a;"
+        "color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>"
+        "Annuler</button>"
+        "<button onclick='vaAddManualSubmit()' style='background:#a855f7;color:#fff;border:0;"
+        "padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>Créer</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        "<script>"
+        "function vaAddManualOpen(){"
+        "  document.getElementById('va-add-manual-modal').style.display='flex';"
+        "  setTimeout(function(){document.getElementById('va-manual-name').focus();},80);"
+        "}"
+        "function vaAddManualClose(e){"
+        "  if(e&&e.target&&e.target.id!=='va-add-manual-modal'&&e.target!==this)return;"
+        "  document.getElementById('va-add-manual-modal').style.display='none';"
+        "}"
+        "function vaAddManualSubmit(){"
+        "  var ident=document.getElementById('va-manual-identity').value;"
+        "  var name=document.getElementById('va-manual-name').value.trim();"
+        "  if(!ident||!name){if(typeof showToast==='function')showToast('Identité + nom requis','error');return;}"
+        "  var fd=new FormData();fd.append('identity',ident);fd.append('display_name',name);"
+        "  fetch('/va/add_manual',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
+        "    if(d&&d.ok){"
+        "      if(typeof showToast==='function')showToast('✓ '+name+' créé sous @'+ident,'success',2500);"
+        "      vaAddManualClose();"
+        "      setTimeout(function(){window.location.reload();},700);"
+        "    } else {"
+        "      if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');"
+        "    }"
+        "  });"
+        "}"
+        "</script>"
+    )
     try:
-        return clicks_widget + _render_va_list_html_inner()
+        return clicks_widget + add_manual_btn + _render_va_list_html_inner() + add_manual_modal
     except Exception as e:
-        return clicks_widget + (
+        return clicks_widget + add_manual_btn + (
             f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
             f"border-radius:10px;color:#ef4444;font-size:13px'>❌ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
-        )
+        ) + add_manual_modal
 
 
 def _render_linkscale_clicks_widget() -> str:
@@ -21766,6 +21859,45 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
+
+    @app.route("/va/add_manual", methods=["POST"])
+    def va_add_manual():
+        """Cree un VA manuel (non-Discord). Body : identity, display_name, [handle_0..2]."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip().lower()
+        display_name = (request.form.get("display_name") or "").strip()
+        if not identity or not display_name:
+            return jsonify({"ok": False, "error": "identity + display_name requis"}), 400
+        if identity not in _list_identities():
+            return jsonify({"ok": False, "error": f"identite '{identity}' introuvable"}), 400
+        import secrets as _secrets, time as _t
+        uid = "manual_" + _secrets.token_hex(4)
+        users = _load_users()
+        users[uid] = {
+            "identity": identity,
+            "manual": True,
+            "display_name": display_name,
+            "channel_id": None,
+            "auto_post": False,
+            "added_at": int(_t.time()),
+        }
+        _save_users(users)
+        # Si des handles IG sont fournis, on les attribue
+        handles = [request.form.get(f"handle_{i}", "") for i in (0, 1, 2)]
+        if any(h.strip() for h in handles):
+            accounts = []
+            for i, h in enumerate(handles):
+                if h.strip():
+                    accounts.append({
+                        "handle": h,
+                        "email": "",
+                        "password": request.form.get(f"password_{i}", ""),
+                        "totp_seed": request.form.get(f"totp_seed_{i}", ""),
+                    })
+            _set_insta_3_for_va(uid, accounts)
+        return jsonify({"ok": True, "uid": uid, "user": users[uid]})
 
     @app.route("/va/set_insta_3", methods=["POST"])
     def va_set_insta_3():
