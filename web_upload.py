@@ -17469,23 +17469,34 @@ def create_app():
         new_shortcode = (request.form.get("new_shortcode") or "").strip()
         if not link_id:
             return jsonify({"ok": False, "error": "link_id manquant"})
-        # Si pas de shortcode fourni : 4 lettres random + identity deduite du lien source
+        # Toujours résoudre le lien source pour la catégorisation (et le shortcode si vide)
+        src = None
+        try:
+            res_list = gms.list_all_links()
+            if res_list.get("ok"):
+                for l in res_list["links"]:
+                    if l.get("id") == link_id:
+                        src = l
+                        break
+        except Exception:
+            pass
+        src_model = gms.categorize_link(src or {}) if src else ""
         if not new_shortcode:
-            try:
-                res_list = gms.list_all_links()
-                src = None
-                if res_list.get("ok"):
-                    for l in res_list["links"]:
-                        if l.get("id") == link_id:
-                            src = l
-                            break
-                model = gms.categorize_link(src or {}) if src else ""
-                ident = (model or "").lower().replace(" ", "")
-                rnd = "".join(random.choices(string.ascii_lowercase, k=4))
-                new_shortcode = rnd + (ident or "link")
-            except Exception:
-                new_shortcode = "".join(random.choices(string.ascii_lowercase, k=8))
-        return jsonify(gms.duplicate_link(link_id, new_shortcode))
+            ident = (src_model or "").lower().replace(" ", "")
+            rnd = "".join(random.choices(string.ascii_lowercase, k=4))
+            new_shortcode = rnd + (ident or "link")
+        dup_res = gms.duplicate_link(link_id, new_shortcode)
+        # Auto-assign au meme groupe que le source (mapping folder -> group_id)
+        try:
+            if dup_res.get("ok"):
+                new_id = (dup_res.get("link") or {}).get("id")
+                gid = gms.get_group_id_for_folder(src_model) if src_model else None
+                if new_id and gid:
+                    grp_res = gms.assign_link_to_group(new_id, gid, after_link_id=link_id)
+                    dup_res["group_assign"] = grp_res
+        except Exception as e:
+            dup_res["group_assign"] = {"ok": False, "error": f"exc: {e}"}
+        return jsonify(dup_res)
 
     @app.route("/gms/generate_in_folder", methods=["POST"])
     def gms_generate_in_folder():
@@ -17548,7 +17559,67 @@ def create_app():
         new_shortcode = random_part + prefix
         # Display name lisible : reprend le pattern de quick_generate
         new_name = f"@{folder_name} — {new_shortcode}"
-        return jsonify(gms.duplicate_link(template_id, new_shortcode, new_name, new_url=""))
+        dup_res = gms.duplicate_link(template_id, new_shortcode, new_name, new_url="")
+        # Auto-assign au groupe du folder (mapping persiste)
+        try:
+            if dup_res.get("ok"):
+                new_id = (dup_res.get("link") or {}).get("id")
+                gid = gms.get_group_id_for_folder(folder_name)
+                if new_id and gid:
+                    grp_res = gms.assign_link_to_group(new_id, gid, after_link_id=template_id)
+                    dup_res["group_assign"] = grp_res
+        except Exception as e:
+            dup_res["group_assign"] = {"ok": False, "error": f"exc: {e}"}
+        return jsonify(dup_res)
+
+    @app.route("/gms/set_session_cookie", methods=["POST"])
+    def gms_set_session_cookie():
+        """Paste le cookie de session GMS (depuis DevTools du navigateur) pour
+        que le bot puisse parler à l'API privée (assignation aux groupes)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import gms
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        cookie = (request.form.get("cookie") or "").strip()
+        if not cookie or len(cookie) < 50:
+            return jsonify({"ok": False, "error": "cookie trop court ou vide"})
+        gms.save_session_cookie(cookie)
+        return jsonify({"ok": True, "len": len(cookie)})
+
+    @app.route("/gms/set_group_mapping", methods=["POST"])
+    def gms_set_group_mapping():
+        """Définit/écrase le group_id (24-hex) pour un folder identité.
+        Body : folder (ex 'Jessye'), group_id ('' pour supprimer)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import gms
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        folder = (request.form.get("folder") or "").strip()
+        gid = (request.form.get("group_id") or "").strip()
+        if not folder:
+            return jsonify({"ok": False, "error": "folder requis"})
+        gms.set_group_for_folder(folder, gid)
+        return jsonify({"ok": True, "mapping": gms.load_groups_mapping()})
+
+    @app.route("/gms/list_group_mapping", methods=["GET"])
+    def gms_list_group_mapping():
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import gms
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        return jsonify({"ok": True, "mapping": gms.load_groups_mapping()})
 
     @app.route("/gms/create", methods=["POST"])
     def gms_create():

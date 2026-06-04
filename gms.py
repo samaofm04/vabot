@@ -444,3 +444,118 @@ def enable_link(link_id: str) -> Dict[str, Any]:
 
 def disable_link(link_id: str) -> Dict[str, Any]:
     return _call_tool("disable_link", {"link_id": link_id})
+
+
+# ============ Groupes dashboard (API privée getmysocial.com/api) ============
+# L'API MCP publique n'expose pas la création/listage des groupes du dashboard.
+# On utilise l'API privée que le frontend GetMySocial appelle directement, avec
+# le cookie de session récupéré par l'utilisateur depuis son navigateur.
+#
+# Endpoint : PATCH https://getmysocial.com/api/links/{linkIdSansPrefix}/group
+# Body     : {"groupId": "<24hex>", "beforeLinkId": null, "afterLinkId": null}
+# Auth     : Cookie de session GMS (à pasted via /gms/set_session_cookie).
+
+_GROUPS_FILE = DATA_DIR / "gms_groups.json"
+PRIVATE_API_BASE = "https://getmysocial.com/api"
+
+# Groupes connus (identité minuscule -> group_id 24-hex). Pré-rempli depuis le
+# HAR capturé. L'utilisateur peut écraser/ajouter via /gms/set_group_mapping.
+_DEFAULT_GROUPS = {
+    "jessye": "6a1998353b5d0de542f7974d",
+    "lola": "6a1ea42fd882dd2173b8a492",
+    "tempalte us jessy": "6a1d5640d925609fedf92c14",
+    "enzo ads": "69fd62631a577cba4face0a4",
+}
+
+
+def load_groups_mapping() -> Dict[str, str]:
+    """Mapping {folder_lowercase: group_id_24hex}."""
+    if not _GROUPS_FILE.exists():
+        return dict(_DEFAULT_GROUPS)
+    try:
+        on_disk = json.loads(_GROUPS_FILE.read_text(encoding="utf-8"))
+        merged = dict(_DEFAULT_GROUPS)
+        merged.update(on_disk)
+        return merged
+    except Exception:
+        return dict(_DEFAULT_GROUPS)
+
+
+def save_groups_mapping(mapping: Dict[str, str]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _GROUPS_FILE.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def set_group_for_folder(folder: str, group_id: str):
+    m = load_groups_mapping()
+    key = (folder or "").strip().lower()
+    if not key:
+        return
+    if group_id and group_id.strip():
+        m[key] = group_id.strip()
+    else:
+        m.pop(key, None)
+    save_groups_mapping(m)
+
+
+def get_group_id_for_folder(folder: str) -> Optional[str]:
+    return load_groups_mapping().get((folder or "").strip().lower())
+
+
+def save_session_cookie(cookie: str):
+    cfg = load_config()
+    cfg["session_cookie"] = (cookie or "").strip()
+    save_config(cfg)
+
+
+def get_session_cookie() -> str:
+    return load_config().get("session_cookie", "")
+
+
+def assign_link_to_group(link_id: str, group_id: str,
+                          after_link_id: Optional[str] = None) -> Dict[str, Any]:
+    """Place un lien dans un groupe dashboard via PATCH API privée.
+
+    link_id      : avec ou sans prefix lnk_ (on strip)
+    group_id     : 24-hex (sans prefix)
+    after_link_id: optionnel, lnk_id du link après lequel insérer (sinon haut)
+
+    Retry simple sur 409 'Rank conflict'.
+    """
+    cookie = get_session_cookie()
+    if not cookie:
+        return {"ok": False, "error": "session cookie GMS absent — paste-le via /gms/set_session_cookie"}
+    if not group_id or len(group_id) < 20:
+        return {"ok": False, "error": f"group_id invalide : {group_id!r}"}
+    lid = (link_id or "").strip()
+    if lid.startswith("lnk_"):
+        lid = lid[4:]
+    after = after_link_id
+    if after and after.startswith("lnk_"):
+        after = after[4:]
+    headers = {
+        "Cookie": cookie,
+        "Content-Type": "application/json",
+        "Origin": "https://getmysocial.com",
+        "Referer": "https://getmysocial.com/dashboard",
+        "Accept": "*/*",
+        "User-Agent": "Mozilla/5.0 (compatible; vabot/1.0)",
+    }
+    url = f"{PRIVATE_API_BASE}/links/{lid}/group"
+    body = {"groupId": group_id, "beforeLinkId": None, "afterLinkId": after}
+    last_err = ""
+    for attempt in range(4):
+        try:
+            r = requests.patch(url, headers=headers, json=body, timeout=20)
+        except Exception as e:
+            return {"ok": False, "error": f"reseau: {e}"}
+        if r.status_code == 200:
+            return {"ok": True}
+        if r.status_code == 401 or r.status_code == 403:
+            return {"ok": False, "error": "cookie session expire — repaste-le via /gms/set_session_cookie"}
+        if r.status_code == 409:
+            last_err = "Rank conflict"
+            time.sleep(0.5 * (attempt + 1))
+            continue
+        return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    return {"ok": False, "error": f"409 persistant apres retries: {last_err}"}
