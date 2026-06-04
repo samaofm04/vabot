@@ -3819,6 +3819,13 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     daily = weekly = biweekly = 0
     last_post_at = None
     last_reel_at = None
+    # Meta profile
+    profile = res.get("profile") or {}
+    if not profile and "followers" in res:
+        profile = res
+    profile_pic = profile.get("profile_pic_url") or ""
+    followers = int(profile.get("followers") or 0)
+    posts_count = int(profile.get("posts_count") or 0)
     reels = res.get("reels") or res.get("posts") or []
     for p in reels:
         try:
@@ -3853,6 +3860,9 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "last_post_at": last_post_at.isoformat() if last_post_at else None,
         "last_reel_at": last_reel_at.isoformat() if last_reel_at else None,
         "scraped_at": now_ts,
+        "profile_pic_url": profile_pic,
+        "followers": followers,
+        "posts_count": posts_count,
     }
     cache[h] = out
     _save_insta_3_stats_cache(cache)
@@ -5048,39 +5058,89 @@ body.light .va-id{color:#9ca3af}
                 f"</div>"
                 + f"</div>"
             )
-            # Détail 3 comptes IG : 3 mini-boxes en dessous (chargés lazy)
+            # Détail 3 comptes IG : 3 lignes horizontales (pp + handle + stats)
             if _ig3_count:
-                mini_boxes = []
+                # Pré-charge le cache pour ne pas re-scrape inutilement (mais
+                # n'attend PAS le scrape — si pas en cache on affiche "—")
+                stats_cache = _load_insta_3_stats_cache()
+                mini_rows = []
                 for a in (_ig3 + [{}] * 3)[:3]:
                     h = (a or {}).get("handle") or ""
-                    if h:
-                        mini_boxes.append(
-                            f"<div class='va-ig3-mini' data-handle='{h}'>"
-                            f"<div class='va-ig3-mini-head'>"
-                            f"<span class='va-ig3-mini-handle'>@{h}</span>"
-                            f"<a href='https://instagram.com/{h}' target='_blank' "
-                            f"class='va-ig3-mini-open' onclick='event.stopPropagation()'>→</a>"
-                            f"</div>"
-                            f"<div class='va-ig3-mini-stats'>"
-                            f"<div><div class='va-ig3-mini-val'>—</div><div class='va-ig3-mini-lab'>Jour</div></div>"
-                            f"<div><div class='va-ig3-mini-val'>—</div><div class='va-ig3-mini-lab'>Sem</div></div>"
-                            f"<div><div class='va-ig3-mini-val'>—</div><div class='va-ig3-mini-lab'>2 sem</div></div>"
-                            f"</div>"
-                            f"<div class='va-ig3-mini-foot'>Click pour charger</div>"
+                    if not h:
+                        mini_rows.append(
+                            f"<div class='va-ig3-row va-ig3-row-empty'>"
+                            f"<div class='va-ig3-row-pp' style='background:#222'></div>"
+                            f"<div class='va-ig3-row-name'><div class='va-ig3-row-handle' style='color:#555'>— vide —</div></div>"
                             f"</div>"
                         )
-                    else:
-                        mini_boxes.append(
-                            f"<div class='va-ig3-mini va-ig3-mini-empty'>"
-                            f"<div class='va-ig3-mini-head'><span class='va-ig3-mini-handle' style='color:#555'>— vide —</span></div>"
-                            f"</div>"
-                        )
+                        continue
+                    s = stats_cache.get(h) or {}
+                    pp = s.get("profile_pic_url") or ""
+                    pp_html = (
+                        f"<img src='{pp}' class='va-ig3-row-pp' loading='lazy' referrerpolicy='no-referrer' onerror=\"this.style.display='none'\">"
+                        if pp else
+                        f"<div class='va-ig3-row-pp' style='display:flex;align-items:center;justify-content:center;color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+                    )
+                    has_stats = bool(s) and not s.get("error")
+                    def _fmt(n):
+                        try:
+                            n = int(n)
+                        except Exception:
+                            return "—"
+                        if n >= 1_000_000:
+                            return f"{n/1_000_000:.1f}M"
+                        if n >= 1000:
+                            return f"{n/1000:.1f}k"
+                        return str(n)
+                    foll = _fmt(s.get("followers")) if has_stats else "—"
+                    d_v = _fmt(s.get("daily")) if has_stats else "—"
+                    w_v = _fmt(s.get("weekly")) if has_stats else "—"
+                    bw_v = _fmt(s.get("biweekly")) if has_stats else "—"
+                    # Dernier reel age
+                    last_reel_lbl = "—"
+                    if has_stats and s.get("last_reel_at"):
+                        try:
+                            import datetime as _dt_lr
+                            d_post = _dt_lr.datetime.fromisoformat(s["last_reel_at"].replace("Z","+00:00"))
+                            if d_post.tzinfo is None:
+                                d_post = d_post.replace(tzinfo=_dt_lr.timezone.utc)
+                            age = _dt_lr.datetime.now(_dt_lr.timezone.utc) - d_post
+                            h_age = int(age.total_seconds() / 3600)
+                            if h_age < 1:
+                                last_reel_lbl = "à l'instant"
+                            elif h_age < 24:
+                                last_reel_lbl = f"il y a {h_age}h"
+                            else:
+                                last_reel_lbl = f"il y a {h_age // 24}j"
+                        except Exception:
+                            pass
+                    err_html = ""
+                    if s.get("error"):
+                        err_html = f"<div class='va-ig3-row-err'>⚠️ {s['error'][:40]}</div>"
+                    mini_rows.append(
+                        f"<div class='va-ig3-row' data-handle='{h}'>"
+                        f"{pp_html}"
+                        f"<div class='va-ig3-row-name'>"
+                        f"<div class='va-ig3-row-handle'>@{h}</div>"
+                        f"<div class='va-ig3-row-platform'>Instagram</div>"
+                        f"</div>"
+                        f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+                        f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
+                        f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
+                        f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
+                        f"<div class='va-ig3-row-last'>"
+                        f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
+                        f"<div class='va-ig3-row-last-val'>{last_reel_lbl}</div>"
+                        f"</div>"
+                        f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+                        f"{err_html}"
+                        f"</div>"
+                    )
                 detail_row = (
                     f"<div class='va-ig3-detail' data-vaid-detail='{uid}'>"
-                    + "".join(mini_boxes)
+                    + "".join(mini_rows)
                     + "</div>"
                 )
-                # Remplace le dernier </div> par le bloc detail puis </div>
                 cards[-1] = cards[-1][:-len("</div>")] + detail_row + "</div>"
 
         sections.append(
@@ -5370,51 +5430,81 @@ function vaIg3TrkAgo(iso){
     return 'il y a ' + Math.floor(h / 24) + 'j';
   } catch(e) { return '—'; }
 }
-/* Click sur une mini-box pour charger / refresh les stats */
+/* Click sur une ligne IG row pour charger / refresh les stats */
 document.addEventListener('click', function(e){
-  var mini = e.target.closest && e.target.closest('.va-ig3-mini');
-  if(!mini || mini.classList.contains('va-ig3-mini-empty')) return;
-  if(e.target.classList && e.target.classList.contains('va-ig3-mini-open')) return;
-  var detail = mini.closest('.va-ig3-detail');
+  var row = e.target.closest && e.target.closest('.va-ig3-row');
+  if(!row || row.classList.contains('va-ig3-row-empty')) return;
+  if(e.target.classList && e.target.classList.contains('va-ig3-row-open')) return;
+  var detail = row.closest('.va-ig3-detail');
   if(!detail) return;
   var uid = detail.getAttribute('data-vaid-detail');
   vaIg3MiniLoad(uid, detail, false);
 });
 function vaIg3MiniLoad(uid, detail, force){
-  var foots = detail.querySelectorAll('.va-ig3-mini-foot');
-  foots.forEach(function(f){ f.textContent = '…'; });
+  var rows = detail.querySelectorAll('.va-ig3-row');
+  rows.forEach(function(r){
+    if(r.classList.contains('va-ig3-row-empty')) return;
+    var last = r.querySelector('.va-ig3-row-last-val');
+    if(last) last.textContent = '…';
+  });
   var url = '/va/insta_3_stats?user_id=' + encodeURIComponent(uid) + (force ? '&force=1' : '');
   fetch(url).then(function(r){ return r.json(); }).then(function(d){
     if(!d || !d.ok){
-      foots.forEach(function(f){ f.textContent = 'Erreur'; });
+      rows.forEach(function(r){
+        if(r.classList.contains('va-ig3-row-empty')) return;
+        var last = r.querySelector('.va-ig3-row-last-val');
+        if(last) last.textContent = 'Erreur';
+      });
       return;
     }
-    var minis = detail.querySelectorAll('.va-ig3-mini');
+    function fmt(n){ try { n = +n; } catch(e){ return '—'; } if(!n) return '0'; if(n>=1000000) return (n/1000000).toFixed(1)+'M'; if(n>=1000) return (n/1000).toFixed(1)+'k'; return String(n); }
+    function ago(iso){ if(!iso) return '—'; try { var diff = Date.now() - new Date(iso).getTime(); var h = Math.floor(diff/3600000); if(h<1) return 'à l\\'instant'; if(h<24) return 'il y a '+h+'h'; return 'il y a '+Math.floor(h/24)+'j'; } catch(e){ return '—'; } }
     (d.results || []).forEach(function(r, i){
-      var m = minis[i];
-      if(!m || m.classList.contains('va-ig3-mini-empty')) return;
+      var row = rows[i];
+      if(!row || row.classList.contains('va-ig3-row-empty')) return;
       var s = (r && r.stats) || {};
-      var vals = m.querySelectorAll('.va-ig3-mini-val');
-      var foot = m.querySelector('.va-ig3-mini-foot');
-      function fmt(n){ if(n>=1000000) return (n/1000000).toFixed(1)+'M'; if(n>=1000) return (n/1000).toFixed(1)+'k'; return String(n||0); }
+      var nums = row.querySelectorAll('.va-ig3-row-num');
+      var last = row.querySelector('.va-ig3-row-last-val');
+      // Strip any old error block
+      var oldErr = row.querySelector('.va-ig3-row-err');
+      if(oldErr) oldErr.remove();
       if(s.error){
-        if(vals[0]) vals[0].textContent = '—';
-        if(vals[1]) vals[1].textContent = '—';
-        if(vals[2]) vals[2].textContent = '—';
-        if(foot){ foot.textContent = '⚠️ ' + (s.error||'').slice(0,30); foot.style.color = '#ef4444'; }
+        if(nums[0]) nums[0].textContent = '—';
+        if(nums[1]) nums[1].textContent = '—';
+        if(nums[2]) nums[2].textContent = '—';
+        if(nums[3]) nums[3].textContent = '—';
+        if(last) last.textContent = '—';
+        var errEl = document.createElement('div');
+        errEl.className = 'va-ig3-row-err';
+        errEl.textContent = '⚠️ ' + (s.error || '').slice(0,60);
+        row.appendChild(errEl);
         return;
       }
-      if(vals[0]) vals[0].textContent = fmt(s.daily||0);
-      if(vals[1]) vals[1].textContent = fmt(s.weekly||0);
-      if(vals[2]) vals[2].textContent = fmt(s.biweekly||0);
-      if(foot){
-        function ago(iso){ if(!iso) return '—'; try { var diff = Date.now() - new Date(iso).getTime(); var h = Math.floor(diff/3600000); if(h<1) return 'maintenant'; if(h<24) return 'il y a '+h+'h'; return 'il y a '+Math.floor(h/24)+'j'; } catch(e){ return '—'; } }
-        foot.textContent = 'Reel: ' + ago(s.last_reel_at);
-        foot.style.color = '#666';
+      // Met a jour la pp si on en a maintenant
+      if(s.profile_pic_url){
+        var pp = row.querySelector('.va-ig3-row-pp');
+        if(pp && pp.tagName === 'IMG'){
+          pp.src = s.profile_pic_url;
+        } else if(pp){
+          var newPp = document.createElement('img');
+          newPp.src = s.profile_pic_url;
+          newPp.className = 'va-ig3-row-pp';
+          newPp.referrerPolicy = 'no-referrer';
+          pp.replaceWith(newPp);
+        }
       }
+      if(nums[0]) nums[0].textContent = fmt(s.followers||0);
+      if(nums[1]) nums[1].textContent = fmt(s.daily||0);
+      if(nums[2]) nums[2].textContent = fmt(s.weekly||0);
+      if(nums[3]) nums[3].textContent = fmt(s.biweekly||0);
+      if(last) last.textContent = ago(s.last_reel_at);
     });
   }).catch(function(err){
-    foots.forEach(function(f){ f.textContent = 'Erreur réseau'; });
+    rows.forEach(function(r){
+      if(r.classList.contains('va-ig3-row-empty')) return;
+      var last = r.querySelector('.va-ig3-row-last-val');
+      if(last) last.textContent = 'Erreur';
+    });
   });
 }
 function vaIg3TrkLoad(force){
@@ -5467,24 +5557,29 @@ function vaIg3TrkLoad(force){
 .ig3-trk-lab{font-size:9px;color:#888;font-weight:600;text-transform:uppercase;margin-top:3px}
 .ig3-trk-refresh{background:transparent;border:0;color:#888;font-size:14px;cursor:pointer;padding:0 8px;line-height:1}
 .ig3-trk-refresh:hover{color:#22c55e}
-/* Rangee detail 3 comptes IG sous chaque carte VA */
-.va-ig3-detail{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a}
-.va-ig3-mini{background:#0f1116;border:1px solid #2a2a2a;border-radius:8px;padding:8px 10px;cursor:pointer;transition:all .12s}
-.va-ig3-mini:hover{border-color:#22c55e40}
-.va-ig3-mini.va-ig3-mini-empty{opacity:.4;cursor:default}
-.va-ig3-mini.va-ig3-mini-empty:hover{border-color:#2a2a2a}
-.va-ig3-mini-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.va-ig3-mini-handle{font-weight:700;font-size:11px;color:#ec4899}
-.va-ig3-mini-open{color:#666;text-decoration:none;font-size:14px;font-weight:600}
-.va-ig3-mini-open:hover{color:#ec4899}
-.va-ig3-mini-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
-.va-ig3-mini-stats > div{text-align:center;background:#16181f;border-radius:5px;padding:4px 2px}
-.va-ig3-mini-val{font-size:13px;font-weight:800;color:#22c55e;line-height:1}
-.va-ig3-mini-lab{font-size:8px;color:#888;font-weight:600;text-transform:uppercase;margin-top:2px}
-.va-ig3-mini-foot{font-size:9px;color:#666;margin-top:5px;text-align:center}
+/* Rangee detail 3 comptes IG sous chaque carte VA — lignes horizontales */
+.va-ig3-detail{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a}
+.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
+.va-ig3-row:hover{border-color:#ec489940}
+.va-ig3-row-empty{opacity:.4;cursor:default;grid-template-columns:36px 1fr}
+.va-ig3-row-empty:hover{border-color:#2a2a2a}
+.va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
+.va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
+.va-ig3-row-metric{text-align:center;min-width:55px}
+.va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
+.va-ig3-row-num.va-ig3-green{color:#22c55e}
+.va-ig3-row-lab{font-size:9px;color:#888;font-weight:600;margin-top:2px;text-transform:lowercase}
+.va-ig3-row-last{text-align:right;min-width:80px}
+.va-ig3-row-last-lab{font-size:9px;color:#666;text-transform:uppercase;font-weight:600}
+.va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
+.va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 body.light .va-ig3-detail{border-top-color:#e5e7eb}
-body.light .va-ig3-mini{background:#fff;border-color:#e5e7eb}
-body.light .va-ig3-mini-stats > div{background:#f9fafb}
+body.light .va-ig3-row{background:#fff;border-color:#e5e7eb}
+body.light .va-ig3-row-num{color:#111}
 .dummy-end{}
 </style>
 <script>
