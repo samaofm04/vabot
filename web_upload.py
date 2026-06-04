@@ -4681,7 +4681,7 @@ body.light .va-id{color:#9ca3af}
 
             _ident_safe = (identity or "").replace(chr(39), chr(92)+chr(39))
             links_btn_html = (
-                f"<button type='button' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}', '{_ident_safe}')\" "
+                f"<button type='button' data-vaba-uid='{uid}' onclick=\"vaLinksOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}', '{_ident_safe}')\" "
                 f"class='va-links-btn' title=\"{tooltip}\">"
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>"
                 f"<span class='va-links-btn-label'>{btn_label}</span>"
@@ -5705,12 +5705,31 @@ function vaLinksSave(){
     .then(function(d){
       if(d && d.ok){
         if(typeof showToast === 'function') showToast('✓ ' + selected.length + ' lien(s) attribué(s)', 'success');
-        // Mise a jour in-memory pour rester coherent sans full-reload
         try {
           window.__vaLinksData = window.__vaLinksData || {};
           window.__vaLinksData[_vlmCurrentUid] = selected;
         } catch(e){}
-        // Ferme le modal seulement (pas de reload qui ramene au Dashboard blanc)
+        // Met a jour le badge du bouton "Liens" du VA (sans full reload)
+        try {
+          var btn = document.querySelector('.va-links-btn[data-vaba-uid="' + _vlmCurrentUid + '"]');
+          if(btn){
+            var labelEl = btn.querySelector('.va-links-btn-label');
+            if(!selected.length){
+              if(labelEl) labelEl.textContent = 'Aucun';
+              btn.title = 'Aucun lien assigné. Clic pour attribuer.';
+            } else {
+              var allLinks = window.__gmsAllLinks || [];
+              var first = null;
+              for(var i=0; i<allLinks.length; i++){
+                if(allLinks[i].id === selected[0]){ first = allLinks[i]; break; }
+              }
+              var sc = first ? (first.shortcode || '?') : '?';
+              var lab = (selected.length === 1) ? ('/' + sc) : ('/' + sc + ' +' + (selected.length - 1));
+              if(labelEl) labelEl.textContent = lab;
+              btn.title = selected.length + ' lien(s) assigné(s)';
+            }
+          }
+        } catch(e){}
         document.getElementById('va-links-modal').classList.remove('show');
       } else {
         if(typeof showToast === 'function') showToast('Erreur : ' + (d.error || '?'), 'error');
