@@ -3767,6 +3767,98 @@ def _get_insta_3_for_va(user_id) -> list:
     return _load_va_insta_3().get(str(user_id), [])
 
 
+# ============ Stats Insta 3 (RapidAPI + cache 1h) ============
+
+VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
+_INSTA_3_STATS_TTL = 3600  # 1h
+
+
+def _load_insta_3_stats_cache() -> dict:
+    if not VA_INSTA_3_STATS_FILE.exists():
+        return {}
+    try:
+        return json.loads(VA_INSTA_3_STATS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_insta_3_stats_cache(d: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    VA_INSTA_3_STATS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
+    """Pour un handle IG, retourne {daily, weekly, biweekly, last_post_at, last_reel_at}.
+
+    Daily = vues reels postés < 24h
+    Weekly = < 7j, Biweekly = < 14j
+    Cache 1h. Si force=True on bypass le cache.
+    """
+    import time as _t
+    h = (handle or "").strip().lstrip("@").lower()
+    if not h:
+        return {"error": "handle vide"}
+    cache = _load_insta_3_stats_cache()
+    now_ts = int(_t.time())
+    cached = cache.get(h)
+    if cached and not force and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL:
+        return cached
+    try:
+        import insta_scraper as _ig_s
+        res = _ig_s.scrape_profile(h, limit=50)
+    except Exception as e:
+        return {"error": f"scraper indispo : {e}", "scraped_at": now_ts}
+    if "error" in res:
+        out = {"error": res["error"], "scraped_at": now_ts}
+        cache[h] = out
+        _save_insta_3_stats_cache(cache)
+        return out
+
+    import datetime as _dt_s
+    now_dt = _dt_s.datetime.now(_dt_s.timezone.utc)
+    daily = weekly = biweekly = 0
+    last_post_at = None
+    last_reel_at = None
+    reels = res.get("reels") or res.get("posts") or []
+    for p in reels:
+        try:
+            d_raw = p.get("date") or p.get("taken_at") or p.get("created_at")
+            if isinstance(d_raw, (int, float)):
+                p_dt = _dt_s.datetime.fromtimestamp(d_raw, tz=_dt_s.timezone.utc)
+            else:
+                s = str(d_raw or "").replace("Z", "+00:00")
+                p_dt = _dt_s.datetime.fromisoformat(s)
+                if p_dt.tzinfo is None:
+                    p_dt = p_dt.replace(tzinfo=_dt_s.timezone.utc)
+        except Exception:
+            continue
+        age_h = (now_dt - p_dt).total_seconds() / 3600.0
+        is_video = bool(p.get("is_video") or p.get("views"))
+        views = int(p.get("views") or 0)
+        if not last_post_at or p_dt > last_post_at:
+            last_post_at = p_dt
+        if is_video and (not last_reel_at or p_dt > last_reel_at):
+            last_reel_at = p_dt
+        if is_video and views > 0:
+            if age_h <= 24:
+                daily += views
+            if age_h <= 24 * 7:
+                weekly += views
+            if age_h <= 24 * 14:
+                biweekly += views
+    out = {
+        "daily": daily,
+        "weekly": weekly,
+        "biweekly": biweekly,
+        "last_post_at": last_post_at.isoformat() if last_post_at else None,
+        "last_reel_at": last_reel_at.isoformat() if last_reel_at else None,
+        "scraped_at": now_ts,
+    }
+    cache[h] = out
+    _save_insta_3_stats_cache(cache)
+    return out
+
+
 def _load_va_links() -> dict:
     """Retourne {user_id_str: [link_id_1, link_id_2, ...]}."""
     if not VA_LINKS_FILE.exists():
@@ -4924,6 +5016,17 @@ body.light .va-id{color:#9ca3af}
                 f"</button>"
             )
 
+            # Bouton "Tracking IG" (stats par compte : daily/semaine/2 semaines)
+            _trk_color = "#22c55e" if _ig3_count else "#444"
+            ig3_trk_btn = (
+                f"<button type='button' onclick=\"vaIg3TrkOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"class='va-ig3-btn' style='border-color:{_trk_color}40;color:{_trk_color}' "
+                f"title='Suivi vues reels par compte'>"
+                f"<span>📊</span>"
+                f"<span class='va-ig3-label'>Tracking</span>"
+                f"</button>"
+            )
+
             search_blob = (username + " " + uid + " " + identity).lower()
             cards.append(
                 f"<div class='va-card' data-va-uid='{uid}' data-va-search='{search_blob}' data-va-identity='{identity}'>"
@@ -4936,6 +5039,7 @@ body.light .va-id{color:#9ca3af}
                 f"<div class='va-actions'>"
                 f"{ig_btn}"
                 f"{ig3_btn}"
+                f"{ig3_trk_btn}"
                 f"{links_btn_html}"
                 f"{pay_btn}"
                 f"{mini_clicks_html}"
@@ -5053,6 +5157,23 @@ body.light .va-id{color:#9ca3af}
         "</div>"
         "</div>"
         + f"<script>window.__vaInsta3Data={insta_3_data_json};</script>"
+    )
+
+    ig3_trk_modal_html = (
+        "<div id='va-ig3-trk-modal' onclick='vaIg3TrkClose(event)'>"
+        "<div class='ig3-box' onclick='event.stopPropagation()'>"
+        "<div class='ig3-head'>"
+        "<span style='font-size:18px'>📊</span>"
+        "<div style='flex:1'>Tracking Instagram</div>"
+        "<div id='ig3-trk-subtitle'></div>"
+        "<button onclick='vaIg3TrkRefresh()' class='ig3-trk-refresh' title='Forcer un re-scrape (bypass cache)'>🔄</button>"
+        "<button onclick='vaIg3TrkClose()' class='ig3-close'>×</button>"
+        "</div>"
+        "<div class='ig3-body' id='ig3-trk-body'>"
+        "<p style='color:#888;text-align:center;padding:30px 0'>Chargement…</p>"
+        "</div>"
+        "</div>"
+        "</div>"
     )
 
     insta_css_js = """
@@ -5181,8 +5302,90 @@ function vaIg3Save(){
       if(typeof showToast === 'function') showToast('Erreur : ' + err, 'error');
     });
 }
+
+/* === IG3 Tracking Modal === */
+var _ig3TrkCurrentUid = null;
+function vaIg3TrkOpen(uid, username){
+  _ig3TrkCurrentUid = uid;
+  document.getElementById('ig3-trk-subtitle').textContent = '@' + username;
+  document.getElementById('ig3-trk-body').innerHTML = '<p style="color:#888;text-align:center;padding:30px 0">Chargement…</p>';
+  document.getElementById('va-ig3-trk-modal').classList.add('show');
+  vaIg3TrkLoad(false);
+}
+function vaIg3TrkClose(e){
+  if(e && e.target && e.target.id !== 'va-ig3-trk-modal' && e.target !== this) return;
+  document.getElementById('va-ig3-trk-modal').classList.remove('show');
+}
+function vaIg3TrkRefresh(){
+  document.getElementById('ig3-trk-body').innerHTML = '<p style="color:#888;text-align:center;padding:30px 0">Re-scrape en cours… (peut prendre 10-30s)</p>';
+  vaIg3TrkLoad(true);
+}
+function vaIg3TrkFmt(n){
+  if(n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if(n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n || 0);
+}
+function vaIg3TrkAgo(iso){
+  if(!iso) return '—';
+  try {
+    var t = new Date(iso).getTime();
+    var diff = Date.now() - t;
+    var h = Math.floor(diff / 3600000);
+    if(h < 1) return 'à l\\'instant';
+    if(h < 24) return 'il y a ' + h + 'h';
+    return 'il y a ' + Math.floor(h / 24) + 'j';
+  } catch(e) { return '—'; }
+}
+function vaIg3TrkLoad(force){
+  var url = '/va/insta_3_stats?user_id=' + encodeURIComponent(_ig3TrkCurrentUid) + (force ? '&force=1' : '');
+  fetch(url)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        document.getElementById('ig3-trk-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px 0">Erreur : ' + ((d && d.error) || '?') + '</p>';
+        return;
+      }
+      var html = '';
+      (d.results || []).forEach(function(r, i){
+        if(!r.handle){
+          html += '<div class="ig3-slot" style="opacity:.5"><div class="ig3-slot-head">Compte ' + (i+1) + '</div><p style="color:#666;margin:0;font-size:11px">— vide —</p></div>';
+          return;
+        }
+        var s = r.stats || {};
+        if(s.error){
+          html += '<div class="ig3-slot"><div class="ig3-slot-head">@' + r.handle + '</div>'
+            + '<p style="color:#ef4444;margin:6px 0 0;font-size:11px">⚠️ ' + s.error + '</p></div>';
+          return;
+        }
+        html += '<div class="ig3-slot">'
+          + '<div class="ig3-slot-head" style="display:flex;justify-content:space-between;align-items:center">'
+          + '<span>@' + r.handle + '</span>'
+          + '<a href="https://instagram.com/' + r.handle + '" target="_blank" style="color:#ec4899;text-decoration:none;font-size:10px;font-weight:600">→ ouvrir</a>'
+          + '</div>'
+          + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">'
+          + '<div class="ig3-trk-stat"><div class="ig3-trk-val">' + vaIg3TrkFmt(s.daily||0) + '</div><div class="ig3-trk-lab">Daily</div></div>'
+          + '<div class="ig3-trk-stat"><div class="ig3-trk-val">' + vaIg3TrkFmt(s.weekly||0) + '</div><div class="ig3-trk-lab">Semaine</div></div>'
+          + '<div class="ig3-trk-stat"><div class="ig3-trk-val">' + vaIg3TrkFmt(s.biweekly||0) + '</div><div class="ig3-trk-lab">2 sem.</div></div>'
+          + '</div>'
+          + '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:#888">'
+          + '<span>Dernier reel : ' + vaIg3TrkAgo(s.last_reel_at) + '</span>'
+          + '<span>Dernier post : ' + vaIg3TrkAgo(s.last_post_at) + '</span>'
+          + '</div>'
+          + '</div>';
+      });
+      document.getElementById('ig3-trk-body').innerHTML = html || '<p style="color:#888;text-align:center;padding:30px 0">Aucun compte configuré.</p>';
+    })
+    .catch(function(err){
+      document.getElementById('ig3-trk-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px 0">Erreur : ' + err + '</p>';
+    });
+}
 </script>
 <style>
+.ig3-trk-stat{background:#0f1116;border:1px solid #2a2a2a;border-radius:7px;padding:8px 6px;text-align:center}
+.ig3-trk-val{font-size:15px;font-weight:800;color:#22c55e;line-height:1}
+.ig3-trk-lab{font-size:9px;color:#888;font-weight:600;text-transform:uppercase;margin-top:3px}
+.ig3-trk-refresh{background:transparent;border:0;color:#888;font-size:14px;cursor:pointer;padding:0 8px;line-height:1}
+.ig3-trk-refresh:hover{color:#22c55e}
 .dummy-end{}
 </style>
 <script>
@@ -6110,7 +6313,7 @@ document.addEventListener('DOMContentLoaded', function(){
         + vault_sidebar
         + "<div class='va-vault-detail'>" + detail_content + "</div>"
         + "</div>"
-        + modal_html + pay_modal_html + insta_modal_html + ig3_modal_html
+        + modal_html + pay_modal_html + insta_modal_html + ig3_modal_html + ig3_trk_modal_html
         + vault_search_js
     )
 
@@ -20749,6 +20952,28 @@ def create_app():
         if not uid:
             return jsonify({"ok": False, "error": "user_id manquant"}), 400
         return jsonify({"ok": True, "accounts": _get_insta_3_for_va(uid)})
+
+    @app.route("/va/insta_3_stats", methods=["GET"])
+    def va_insta_3_stats():
+        """Retourne pour chaque handle d un VA : daily/weekly/biweekly views.
+        Cache 1h. ?force=1 pour bypass."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.args.get("user_id") or "").strip()
+        force = (request.args.get("force") or "").strip() == "1"
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        accounts = _get_insta_3_for_va(uid)
+        out = []
+        for acc in accounts:
+            h = (acc or {}).get("handle") or ""
+            if not h:
+                out.append({"handle": "", "stats": None})
+                continue
+            stats = _compute_insta_3_stats(h, force=force)
+            out.append({"handle": h, "stats": stats})
+        return jsonify({"ok": True, "results": out})
 
     @app.route("/va/set_links", methods=["POST"])
     def va_set_links():
