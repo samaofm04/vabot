@@ -10393,20 +10393,37 @@ def _render_gms_html() -> str:
         # Section : templates par modèle + boutons Génération rapide
         templates = gms.load_templates()
         identities = _list_identities()
-        # Réutiliser le même `source_options` plus bas via fonction helper
-        def _build_source_select(selected=""):
+
+        # Charge UNIQUEMENT les liens du workspace "marche francais" pour le
+        # dropdown templates — c'est là que vivent les templates par identité.
+        MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
+        try:
+            mf_res = gms.list_links_team(MARCHE_FRANCAIS_TID)
+            mf_links = mf_res.get("links", []) if mf_res.get("ok") else []
+        except Exception:
+            mf_links = []
+
+        def _links_for_identity(ident: str):
+            """Filtre les liens marche francais pour une identité (matche shortcode/name)."""
+            il = ident.lower()
+            out = []
+            for l in mf_links:
+                sc = (l.get("shortcode") or "").lower()
+                nm = (l.get("display_name") or "").lower()
+                if il in sc or il in nm:
+                    out.append(l)
+            return sorted(out, key=lambda x: (x.get("display_name") or "").lower())
+
+        def _build_filtered_select(ident: str, selected: str = ""):
             html = []
-            for model in sorted(links_by_model.keys()):
-                html.append(f"<optgroup label='{model}'>")
-                for l in sorted(links_by_model[model], key=lambda x: (x.get("display_name") or "").lower()):
-                    lid = l.get("id", "")
-                    sc = l.get("shortcode", "")
-                    nm = l.get("display_name") or "—"
-                    lbl = f"/{sc} — {nm}"[:80]
-                    sel = " selected" if lid == selected else ""
-                    html.append(f"<option value='{lid}'{sel}>{lbl}</option>")
-                html.append("</optgroup>")
-            return "".join(html) if html else "<option value=''>Aucun lien</option>"
+            for l in _links_for_identity(ident):
+                lid = l.get("id", "")
+                sc = l.get("shortcode", "")
+                nm = l.get("display_name") or "—"
+                lbl = f"/{sc} — {nm}"[:80]
+                sel = " selected" if lid == selected else ""
+                html.append(f"<option value='{lid}'{sel}>{lbl}</option>")
+            return "".join(html) if html else "<option value='' disabled>Aucun template dispo dans marche francais</option>"
 
         from collections import defaultdict as _dd_t
         links_by_model_t = _dd_t(list)
@@ -10418,7 +10435,7 @@ def _render_gms_html() -> str:
         template_rows = []
         for ident in sorted(identities):
             cur_tpl = templates.get(ident.lower(), "")
-            tpl_select = _build_source_select(cur_tpl)
+            tpl_select = _build_filtered_select(ident, cur_tpl)
             avatar = _identity_avatar_url(ident)
             avatar_html = (
                 f"<img src='{avatar}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0'>"
@@ -17410,19 +17427,53 @@ def create_app():
         if not tpl_id:
             return _error(f"❌ Aucun template défini pour <code>@{ident}</code>. Configure-le d'abord ↑")
 
-        # Génère shortcode = <random 4 lettres> + identity
-        new_shortcode = gms.generate_random_prefix(4) + ident
-        # Display name lisible
-        new_name = f"@{ident} — {new_shortcode}"
-        # Pas de nouvelle URL : on garde celle du template
-        res = gms.duplicate_link(tpl_id, new_shortcode, new_name, new_url="")
-        if not res.get("ok"):
-            return _error(f"❌ {res.get('error', 'Génération échouée')}")
-        link = res.get("link") or {}
+        # Detecte le team (workspace) du template — auto-detect via liste des
+        # links du team marche francais (par default si le template y est)
+        MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
+        team_id = None
+        try:
+            mf_res = gms.list_links_team(MARCHE_FRANCAIS_TID)
+            if mf_res.get("ok") and any(l.get("id") == tpl_id for l in mf_res["links"]):
+                team_id = MARCHE_FRANCAIS_TID
+        except Exception:
+            pass
+
+        # Auto VA n+1 par groupe (cap a l'identité du template)
+        folder_name = ident.capitalize()  # 'amelia' -> 'Amelia'
+        try:
+            n = gms.next_va_number_in_group(team_id, folder_name)
+        except Exception:
+            n = 1
+        new_name = f"VA {n}"
+
+        # Shortcode : 4 random + ident (retry si conflit shortcode_taken)
+        last_err = ""
+        for attempt in range(5):
+            new_shortcode = gms.generate_random_prefix(4) + ident
+            dup_res = gms.duplicate_link(tpl_id, new_shortcode, new_name, team_id=team_id)
+            if dup_res.get("ok"):
+                break
+            last_err = str(dup_res.get("error", ""))
+            if "shortcode_taken" not in last_err.lower():
+                break
+        if not dup_res.get("ok"):
+            return _error(f"❌ {last_err or 'Génération échouée'}")
+
+        # Auto-assign au groupe de l'identité dans le bon workspace
+        gid = gms.get_group_id_for_folder(folder_name, team_id=team_id)
+        grp_info = ""
+        if gid:
+            ar = gms.assign_link_to_group(
+                dup_res["link"]["id"], gid,
+                link_obj=dup_res["link"],
+                team_id=team_id,
+                after_link_id=tpl_id,
+            )
+            grp_info = " → groupe " + folder_name if ar.get("ok") else f" (group assign fail: {ar.get('error','')[:60]})"
+        link = dup_res.get("link") or {}
         url_dest = link.get("url") or "(landing page)"
         return _success(
-            f"✅ Nouveau lien généré : <code>/{new_shortcode}</code> "
-            f"(clone de <code>{tpl_id[:18]}…</code>) → {url_dest}"
+            f"✅ <b>VA {n}</b> /<code>{new_shortcode}</code> créé{grp_info} → {url_dest}"
         )
 
     @app.route("/gms/duplicate", methods=["POST"])
@@ -17500,9 +17551,16 @@ def create_app():
 
     @app.route("/gms/generate_in_folder", methods=["POST"])
     def gms_generate_in_folder():
-        """Genere un nouveau lien dans un folder GMS — mirror de /linkscale/generate.
-        Body : folder_name (requis), prefix (optionnel, sinon folder_name),
-        template_link_id (optionnel, sinon 1er lien actif du folder)."""
+        """Genere un nouveau lien dans un folder GMS.
+
+        Body :
+        - folder_name : 'Amelia', 'Lola', 'Jessye', etc. (requis)
+        - team_id     : 'tm_xxx' ou '' (Personal) — workspace owner du groupe
+                        (auto-detecte si template fourni)
+        - template_link_id : lnk_xxx (optionnel)
+        - prefix      : optionnel, sinon folder_name minuscule
+        - va_number   : optionnel, sinon auto-increment (max VA n + 1) dans le groupe
+        """
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -17513,8 +17571,10 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         folder_name = (request.form.get("folder_name") or "").strip()
+        team_id = (request.form.get("team_id") or "").strip()
         prefix = (request.form.get("prefix") or "").strip()
         template_id = (request.form.get("template_link_id") or "").strip()
+        va_number = (request.form.get("va_number") or "").strip()
         if not folder_name:
             return jsonify({"ok": False, "error": "folder_name requis"})
         if not prefix:
@@ -17522,8 +17582,24 @@ def create_app():
         prefix = "".join(c for c in prefix if c.isalnum() or c == "_").lower()
         if not prefix:
             return jsonify({"ok": False, "error": "prefix invalide apres nettoyage"})
-        # Si pas de template_id explicite, on essaie d'abord les templates sauvegardes
-        # par modele (gms_templates.json), puis on prend le 1er lien actif du folder
+
+        # Resolution du team : si template_id est donne et team_id absent,
+        # on detecte automatiquement le team du template
+        if template_id and not team_id:
+            try:
+                # Cherche dans tous les teams pour determiner le contexte
+                teams_res = gms._call_tool("list_teams", {})
+                if teams_res.get("ok"):
+                    teams = (teams_res["data"] or {}).get("data") or []
+                    for t in teams:
+                        tres = gms.list_links_team(t["id"])
+                        if tres.get("ok") and any(l.get("id") == template_id for l in tres["links"]):
+                            team_id = t["id"]
+                            break
+            except Exception:
+                pass
+
+        # Fallback template : prefer saved template, sinon 1er du folder
         if not template_id:
             try:
                 tpls = gms.load_templates()
@@ -17534,17 +17610,18 @@ def create_app():
                 pass
         if not template_id:
             try:
-                res_list = gms.list_all_links()
+                if team_id:
+                    res_list = gms.list_links_team(team_id)
+                else:
+                    res_list = gms.list_all_links()
                 if not res_list.get("ok"):
                     return jsonify({"ok": False, "error": "list_links a echoue"})
                 target = folder_name.lower()
-                # 1ere passe : lien actif du folder
                 for link in res_list["links"]:
                     model = gms.categorize_link(link)
                     if model.lower() == target and (link.get("status") or "active") == "active":
                         template_id = link.get("id")
                         break
-                # 2eme passe : n'importe quel lien du folder
                 if not template_id:
                     for link in res_list["links"]:
                         model = gms.categorize_link(link)
@@ -17555,21 +17632,50 @@ def create_app():
                     return jsonify({"ok": False, "error": f"aucun lien template trouve dans '{folder_name}'"})
             except Exception as e:
                 return jsonify({"ok": False, "error": f"resolution template: {e}"})
-        random_part = "".join(random.choices(string.ascii_lowercase, k=4))
-        new_shortcode = random_part + prefix
-        # Display name lisible : reprend le pattern de quick_generate
-        new_name = f"@{folder_name} — {new_shortcode}"
-        dup_res = gms.duplicate_link(template_id, new_shortcode, new_name, new_url="")
-        # Auto-assign au groupe du folder (mapping persiste)
-        try:
+
+        # Determine le VA number (auto-increment si vide)
+        if not va_number:
+            try:
+                n = gms.next_va_number_in_group(team_id or None, folder_name)
+                va_number = str(n)
+            except Exception:
+                va_number = "1"
+        new_name = f"VA {va_number}"
+
+        # Shortcode : 4 lettres + prefix (xxxxamelia, xxxxjulia, etc.)
+        # Retry sur conflit jusqu'a 5 fois
+        gid = gms.get_group_id_for_folder(folder_name, team_id=team_id or None)
+        dup_res = None
+        for attempt in range(5):
+            random_part = "".join(random.choices(string.ascii_lowercase, k=4))
+            new_shortcode = random_part + prefix
+            dup_res = gms.duplicate_link(template_id, new_shortcode, new_name, team_id=team_id or None)
             if dup_res.get("ok"):
-                new_id = (dup_res.get("link") or {}).get("id")
-                gid = gms.get_group_id_for_folder(folder_name)
-                if new_id and gid:
-                    grp_res = gms.assign_link_to_group(new_id, gid, after_link_id=template_id)
-                    dup_res["group_assign"] = grp_res
+                break
+            err = str(dup_res.get("error", ""))
+            if "shortcode_taken" in err.lower():
+                continue
+            break
+        if not dup_res or not dup_res.get("ok"):
+            return jsonify(dup_res or {"ok": False, "error": "duplication echouee"})
+
+        # Auto-assign au groupe (mapping persiste, scope team)
+        try:
+            new_id = (dup_res.get("link") or {}).get("id")
+            if new_id and gid:
+                grp_res = gms.assign_link_to_group(
+                    new_id, gid,
+                    after_link_id=template_id,
+                    link_obj=dup_res.get("link"),
+                    team_id=team_id or None,
+                )
+                dup_res["group_assign"] = grp_res
+            else:
+                dup_res["group_assign"] = {"ok": False, "error": f"pas de group_id pour '{folder_name}' (team={team_id})"}
         except Exception as e:
             dup_res["group_assign"] = {"ok": False, "error": f"exc: {e}"}
+        dup_res["va_number"] = va_number
+        dup_res["shortcode"] = new_shortcode
         return jsonify(dup_res)
 
     @app.route("/gms/set_session_cookie", methods=["POST"])

@@ -376,12 +376,16 @@ def generate_random_prefix(length: int = 4) -> str:
 
 
 def duplicate_link(source_link_id: str, new_shortcode: str,
-                    new_display_name: str = "", new_url: str = "") -> Dict[str, Any]:
+                    new_display_name: str = "", new_url: str = "",
+                    team_id: Optional[str] = None) -> Dict[str, Any]:
     """Duplique un lien existant — copie TOUTE la config (boutons, pixels, design,
     bot protection, etc.) avec un nouveau shortcode + display_name.
 
     Optionnel : new_url pour changer l'URL de destination (directlink uniquement).
     Pour ça on appelle update_link après le duplicate.
+
+    team_id : optionnel — si fourni, le duplicate est créé dans ce team
+              (workspace). Sans ça, le duplicate va dans le workspace owner.
 
     Retourne {ok, link, error}.
     """
@@ -393,6 +397,8 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
         "shortcode": sc,
         "display_name": (new_display_name or sc).strip()[:60],
     }
+    if team_id:
+        args["team_id"] = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
     res = _call_tool("duplicate_link", args)
     if not res.get("ok"):
         return res
@@ -458,24 +464,36 @@ def disable_link(link_id: str) -> Dict[str, Any]:
 _GROUPS_FILE = DATA_DIR / "gms_groups.json"
 PRIVATE_API_BASE = "https://getmysocial.com/api"
 
-# Groupes connus (identité minuscule -> group_id 24-hex). Pré-rempli depuis le
-# HAR capturé. L'utilisateur peut écraser/ajouter via /gms/set_group_mapping.
+# Groupes connus, indexes par "<team_id_or_empty>:<folder_lowercase>".
+# Empty team_id = workspace Personal/default. Avec prefix tm_ = workspace team.
+# Pre-rempli depuis HAR + decouverte API (Personal + marche francais).
 _DEFAULT_GROUPS = {
-    "jessye": "6a1998353b5d0de542f7974d",
-    "lola": "6a1ea42fd882dd2173b8a492",
-    "tempalte us jessy": "6a1d5640d925609fedf92c14",
-    "enzo ads": "69fd62631a577cba4face0a4",
+    # Personal workspace
+    ":jessye": "6a1998353b5d0de542f7974d",
+    ":lola": "6a1ea42fd882dd2173b8a492",
+    ":tempalte us jessy": "6a1d5640d925609fedf92c14",
+    ":enzo ads": "69fd62631a577cba4face0a4",
+    # marche francais workspace (tm_6a1ea410d882dd2173b8a315)
+    "tm_6a1ea410d882dd2173b8a315:lola": "6a1eab3bece5b8bb28394e75",
+    "tm_6a1ea410d882dd2173b8a315:emma": "6a1eab57ece5b8bb2839506a",
+    "tm_6a1ea410d882dd2173b8a315:amelia": "6a1eab40bc03b4376dd14e5e",
+    "tm_6a1ea410d882dd2173b8a315:julia": "6a1eab43bc03b4376dd14f28",
 }
 
 
 def load_groups_mapping() -> Dict[str, str]:
-    """Mapping {folder_lowercase: group_id_24hex}."""
+    """Mapping {f'{team_id_or_empty}:{folder_lower}': group_id_24hex}."""
     if not _GROUPS_FILE.exists():
         return dict(_DEFAULT_GROUPS)
     try:
         on_disk = json.loads(_GROUPS_FILE.read_text(encoding="utf-8"))
         merged = dict(_DEFAULT_GROUPS)
-        merged.update(on_disk)
+        # Migration : ancien format sans prefix ":" était considéré Personal
+        for k, v in on_disk.items():
+            if ":" not in k:
+                merged[f":{k.lower()}"] = v
+            else:
+                merged[k] = v
         return merged
     except Exception:
         return dict(_DEFAULT_GROUPS)
@@ -486,11 +504,15 @@ def save_groups_mapping(mapping: Dict[str, str]):
     _GROUPS_FILE.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def set_group_for_folder(folder: str, group_id: str):
+def set_group_for_folder(folder: str, group_id: str, team_id: Optional[str] = None):
     m = load_groups_mapping()
-    key = (folder or "").strip().lower()
-    if not key:
+    folder_key = (folder or "").strip().lower()
+    if not folder_key:
         return
+    tid = (team_id or "").strip()
+    if tid and not tid.startswith("tm_"):
+        tid = "tm_" + tid
+    key = f"{tid}:{folder_key}"
     if group_id and group_id.strip():
         m[key] = group_id.strip()
     else:
@@ -498,8 +520,16 @@ def set_group_for_folder(folder: str, group_id: str):
     save_groups_mapping(m)
 
 
-def get_group_id_for_folder(folder: str) -> Optional[str]:
-    return load_groups_mapping().get((folder or "").strip().lower())
+def get_group_id_for_folder(folder: str, team_id: Optional[str] = None) -> Optional[str]:
+    m = load_groups_mapping()
+    folder_key = (folder or "").strip().lower()
+    if not folder_key:
+        return None
+    tid = (team_id or "").strip()
+    if tid and not tid.startswith("tm_"):
+        tid = "tm_" + tid
+    # Lookup team-scoped first, fallback sur Personal
+    return m.get(f"{tid}:{folder_key}") or (m.get(f":{folder_key}") if tid else None) or m.get(f":{folder_key}")
 
 
 def save_session_cookie(cookie: str):
@@ -512,21 +542,69 @@ def get_session_cookie() -> str:
     return load_config().get("session_cookie", "")
 
 
-def assign_link_to_group(link_id: str, group_id: str,
-                          after_link_id: Optional[str] = None) -> Dict[str, Any]:
-    """Place un lien dans un groupe dashboard via PATCH API privée.
+PUBLIC_REST_BASE = "https://api.getmysocial.com/v3"
 
-    link_id      : avec ou sans prefix lnk_ (on strip)
-    group_id     : 24-hex (sans prefix)
-    after_link_id: optionnel, lnk_id du link après lequel insérer (sinon haut)
 
-    Retry simple sur 409 'Rank conflict'.
+def _assign_via_v3(link_id: str, group_id: str, link_obj: Optional[dict] = None,
+                    team_id: Optional[str] = None) -> Dict[str, Any]:
+    """PATCH officiel v3 /links/{id} avec group_id. Pas de cookie, juste l'API key.
+
+    team_id requis pour les groupes qui vivent dans un workspace team (sinon
+    le validator rejette avec group_not_found). Format team_id : 24-hex SANS
+    prefix tm_ (l'API privée veut sans prefix sur ce param).
     """
+    api_key = get_api_key()
+    if not api_key:
+        return {"ok": False, "error": "API key GMS absente"}
+    lid = (link_id or "").strip()
+    if not lid.startswith("lnk_"):
+        lid = "lnk_" + lid
+    if not link_obj:
+        try:
+            r = requests.get(
+                f"{PUBLIC_REST_BASE}/links/{lid}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                link_obj = r.json()
+        except Exception:
+            pass
+    if not link_obj:
+        return {"ok": False, "error": "impossible de fetch le link pour le PATCH v3"}
+    link_type = link_obj.get("type") or "directlink"
+    body = {
+        "group_id": group_id,
+        "display_name": link_obj.get("display_name") or lid,
+        "typeLink": "directlink" if link_type == "directlink" else "landing",
+    }
+    # Pour les directlinks il faut envoyer url (requis par validator).
+    # Pour les landing, on omet url pour ne pas écraser la config.
+    if link_type == "directlink":
+        body["url"] = link_obj.get("url") or ""
+    if team_id:
+        # Strip le prefix tm_ si présent (l'API v3 le veut sans)
+        body["team_id"] = team_id[3:] if team_id.startswith("tm_") else team_id
+    try:
+        r = requests.patch(
+            f"{PUBLIC_REST_BASE}/links/{lid}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=body,
+            timeout=20,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"reseau v3: {e}"}
+    if r.status_code == 200:
+        return {"ok": True, "via": "v3"}
+    return {"ok": False, "error": f"v3 HTTP {r.status_code}: {r.text[:200]}"}
+
+
+def _assign_via_private(link_id: str, group_id: str,
+                          after_link_id: Optional[str] = None) -> Dict[str, Any]:
+    """Fallback via API privée dashboard (cookie session requis)."""
     cookie = get_session_cookie()
     if not cookie:
-        return {"ok": False, "error": "session cookie GMS absent — paste-le via /gms/set_session_cookie"}
-    if not group_id or len(group_id) < 20:
-        return {"ok": False, "error": f"group_id invalide : {group_id!r}"}
+        return {"ok": False, "error": "session cookie GMS absent"}
     lid = (link_id or "").strip()
     if lid.startswith("lnk_"):
         lid = lid[4:]
@@ -541,21 +619,130 @@ def assign_link_to_group(link_id: str, group_id: str,
         "Accept": "*/*",
         "User-Agent": "Mozilla/5.0 (compatible; vabot/1.0)",
     }
-    url = f"{PRIVATE_API_BASE}/links/{lid}/group"
     body = {"groupId": group_id, "beforeLinkId": None, "afterLinkId": after}
     last_err = ""
     for attempt in range(4):
         try:
-            r = requests.patch(url, headers=headers, json=body, timeout=20)
+            r = requests.patch(f"{PRIVATE_API_BASE}/links/{lid}/group", headers=headers, json=body, timeout=20)
         except Exception as e:
-            return {"ok": False, "error": f"reseau: {e}"}
+            return {"ok": False, "error": f"reseau prive: {e}"}
         if r.status_code == 200:
-            return {"ok": True}
-        if r.status_code == 401 or r.status_code == 403:
-            return {"ok": False, "error": "cookie session expire — repaste-le via /gms/set_session_cookie"}
+            return {"ok": True, "via": "private"}
+        if r.status_code in (401, 403):
+            return {"ok": False, "error": "cookie session expire"}
         if r.status_code == 409:
             last_err = "Rank conflict"
             time.sleep(0.5 * (attempt + 1))
             continue
-        return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
-    return {"ok": False, "error": f"409 persistant apres retries: {last_err}"}
+        return {"ok": False, "error": f"prive HTTP {r.status_code}: {r.text[:200]}"}
+    return {"ok": False, "error": f"409 persistant: {last_err}"}
+
+
+def assign_link_to_group(link_id: str, group_id: str,
+                          after_link_id: Optional[str] = None,
+                          link_obj: Optional[dict] = None,
+                          team_id: Optional[str] = None) -> Dict[str, Any]:
+    """Place un lien dans un groupe dashboard.
+
+    Stratégie : v3 PATCH d'abord (officiel, juste l'API key) → fallback API
+    privée avec cookie session si v3 échoue. Le fallback gère l'ordering
+    (after_link_id) que le v3 n'expose pas.
+
+    team_id : workspace owner du groupe (requis pour groupes dans un team).
+    """
+    if not group_id or len(group_id) < 20:
+        return {"ok": False, "error": f"group_id invalide : {group_id!r}"}
+    res = _assign_via_v3(link_id, group_id, link_obj=link_obj, team_id=team_id)
+    if res.get("ok"):
+        return res
+    fb = _assign_via_private(link_id, group_id, after_link_id=after_link_id)
+    if fb.get("ok"):
+        return fb
+    return {"ok": False, "error": f"v3 echoue ({res.get('error')}) + prive echoue ({fb.get('error')})"}
+
+
+# ============ Helpers haut-niveau ============
+
+def list_team_groups(team_id: str) -> Dict[str, Any]:
+    """Liste les groupes d'un workspace team via l'API privée dashboard.
+
+    Utilise le hack `?as=team&teamId=<24hex>` découvert empiriquement —
+    `/api/links/board` n'expose normalement que les groupes du context user.
+    """
+    cookie = get_session_cookie()
+    if not cookie:
+        return {"ok": False, "error": "session cookie absent"}
+    tid = team_id[3:] if team_id.startswith("tm_") else team_id
+    try:
+        r = requests.get(
+            f"{PRIVATE_API_BASE}/links/board?as=team&teamId={tid}",
+            headers={"Cookie": cookie}, timeout=15,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"reseau: {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code}"}
+    try:
+        d = r.json()
+    except Exception:
+        return {"ok": False, "error": "JSON invalide"}
+    return {"ok": True, "groups": d.get("groups") or []}
+
+
+def next_va_number_in_group(team_id: Optional[str], folder_or_group: str) -> int:
+    """Calcule le prochain numéro VA disponible dans un groupe.
+
+    On scan tous les links du workspace, filtre par catégorie/groupe, et
+    cherche le max VA n existant + 1.
+    """
+    import re as _re
+    tid = team_id or ""
+    try:
+        if tid:
+            tid_p = tid if tid.startswith("tm_") else f"tm_{tid}"
+            res = list_links_team(tid_p)
+        else:
+            res = list_all_links()
+    except Exception:
+        return 1
+    if not res.get("ok"):
+        return 1
+    target = (folder_or_group or "").lower()
+    max_n = 0
+    for l in res.get("links", []):
+        model = categorize_link(l).lower()
+        if model != target:
+            continue
+        name = l.get("display_name") or ""
+        m = _re.match(r"^VA\s+(\d+)", name, _re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            if n > max_n:
+                max_n = n
+    return max_n + 1
+
+
+def list_links_team(team_id: str) -> Dict[str, Any]:
+    """List_all_links scopé à un team via API publique v3."""
+    api_key = get_api_key()
+    if not api_key:
+        return {"ok": False, "error": "API key absente"}
+    tid = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
+    all_links: List[dict] = []
+    cursor: Optional[str] = None
+    for _ in range(50):
+        url = f"{PUBLIC_REST_BASE}/links?team_id={tid}&limit=100"
+        if cursor:
+            url += f"&cursor={cursor}"
+        try:
+            r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
+        except Exception as e:
+            return {"ok": False, "error": f"reseau: {e}"}
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        d = r.json()
+        all_links.extend(d.get("data") or [])
+        if not d.get("has_more"):
+            break
+        cursor = d.get("next_cursor")
+    return {"ok": True, "links": all_links}
