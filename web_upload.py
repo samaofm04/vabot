@@ -3973,6 +3973,27 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                 weekly += views
             if age_h <= 24 * 14:
                 biweekly += views
+    # Top 4 reels (par date desc) pour la preview strip
+    def _ts(p):
+        try:
+            d = p.get("date") or p.get("taken_at")
+            if isinstance(d, (int, float)):
+                return int(d)
+            s = str(d or "").replace("Z", "+00:00")
+            return int(_dt_s.datetime.fromisoformat(s).timestamp())
+        except Exception:
+            return 0
+    sorted_reels = sorted(reels, key=_ts, reverse=True)
+    preview = []
+    for p in sorted_reels[:4]:
+        thumb = p.get("thumbnail_url") or p.get("display_url") or ""
+        sc = p.get("shortcode") or ""
+        preview.append({
+            "shortcode": sc,
+            "thumbnail_url": thumb,
+            "views": int(p.get("views") or 0),
+            "is_video": bool(p.get("is_video")),
+        })
     out = {
         "daily": daily,
         "weekly": weekly,
@@ -3983,6 +4004,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "profile_pic_url": profile_pic,
         "followers": followers,
         "posts_count": posts_count,
+        "preview": preview,
     }
     cache[h] = out
     _save_insta_3_stats_cache(cache)
@@ -5216,8 +5238,9 @@ body.light .va-id{color:#9ca3af}
                     d_v = _fmt(s.get("daily")) if has_stats else "—"
                     w_v = _fmt(s.get("weekly")) if has_stats else "—"
                     bw_v = _fmt(s.get("biweekly")) if has_stats else "—"
-                    # Dernier reel age
+                    # Dernier reel age + date complete
                     last_reel_lbl = "—"
+                    last_reel_date = ""
                     if has_stats and s.get("last_reel_at"):
                         try:
                             import datetime as _dt_lr
@@ -5232,8 +5255,29 @@ body.light .va-id{color:#9ca3af}
                                 last_reel_lbl = f"il y a {h_age}h"
                             else:
                                 last_reel_lbl = f"il y a {h_age // 24}j"
+                            last_reel_date = d_post.strftime("%d/%m %Hh%M")
                         except Exception:
                             pass
+                    # Preview strip : 4 mini-thumbs des derniers reels
+                    preview_html = ""
+                    if has_stats and s.get("preview"):
+                        thumbs = []
+                        for p in (s.get("preview") or [])[:4]:
+                            th = p.get("thumbnail_url") or ""
+                            sc_p = p.get("shortcode") or ""
+                            if th and sc_p:
+                                thumbs.append(
+                                    f"<a href='https://instagram.com/p/{sc_p}/' target='_blank' "
+                                    f"class='va-ig3-thumb' onclick='event.stopPropagation()' "
+                                    f"title='Voir le reel'>"
+                                    f"<img src='{th}' referrerpolicy='no-referrer' "
+                                    f"onerror=\"this.style.display='none'\">"
+                                    f"</a>"
+                                )
+                        if thumbs:
+                            preview_html = (
+                                f"<div class='va-ig3-preview'>" + "".join(thumbs) + "</div>"
+                            )
                     err_html = ""
                     if s.get("error"):
                         err_html = f"<div class='va-ig3-row-err'>⚠️ {s['error'][:40]}</div>"
@@ -5251,8 +5295,10 @@ body.light .va-id{color:#9ca3af}
                         f"<div class='va-ig3-row-last'>"
                         f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
                         f"<div class='va-ig3-row-last-val'>{last_reel_lbl}</div>"
+                        f"<div class='va-ig3-row-last-date'>{last_reel_date}</div>"
                         f"</div>"
                         f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+                        f"{preview_html}"
                         f"{err_html}"
                         f"</div>"
                     )
@@ -5559,9 +5605,37 @@ document.addEventListener('click', function(e){
   if(!detail) return;
   var uid = detail.getAttribute('data-vaid-detail');
   // Force=true : un click = re-scrape explicite, on bypass le cache 1h
-  // (sinon les vieilles erreurs RapidAPI restent affichees longtemps)
   vaIg3MiniLoad(uid, detail, true);
 });
+
+/* Auto-load des stats au render (cache 1h cote serveur, donc rapide en repeat) */
+function vaIg3AutoLoadAll(){
+  var details = document.querySelectorAll('.va-ig3-detail[data-vaid-detail]');
+  details.forEach(function(detail, i){
+    // Stagger 250ms entre chaque VA pour pas hammer le serveur
+    setTimeout(function(){
+      // Skip si l observer aperçoit que les chiffres sont deja remplis (pre-rendered cache hit)
+      var firstNum = detail.querySelector('.va-ig3-row-num');
+      if(firstNum && firstNum.textContent.trim() !== '—'){
+        return;  // deja des stats, pas besoin de re-fetch
+      }
+      var uid = detail.getAttribute('data-vaid-detail');
+      vaIg3MiniLoad(uid, detail, false);
+    }, i * 250);
+  });
+}
+// Lance apres un court delai pour laisser la page se stabiliser
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(vaIg3AutoLoadAll, 300); });
+} else {
+  setTimeout(vaIg3AutoLoadAll, 300);
+}
+// Re-trigger quand on switche vers le tab VAs (les cartes apparaissent ce moment-la)
+document.addEventListener('click', function(e){
+  if(e.target && e.target.matches && e.target.matches('[onclick*="switchTab"]')){
+    setTimeout(vaIg3AutoLoadAll, 400);
+  }
+}, true);
 function vaIg3MiniLoad(uid, detail, force){
   var rows = detail.querySelectorAll('.va-ig3-row');
   rows.forEach(function(r){
@@ -5620,6 +5694,45 @@ function vaIg3MiniLoad(uid, detail, force){
       if(nums[2]) nums[2].textContent = fmt(s.weekly||0);
       if(nums[3]) nums[3].textContent = fmt(s.biweekly||0);
       if(last) last.textContent = ago(s.last_reel_at);
+      // Date complete du dernier reel
+      var lastDate = row.querySelector('.va-ig3-row-last-date');
+      if(lastDate){
+        if(s.last_reel_at){
+          try {
+            var d = new Date(s.last_reel_at);
+            var dd = String(d.getDate()).padStart(2,'0');
+            var mm = String(d.getMonth()+1).padStart(2,'0');
+            var hh = String(d.getHours()).padStart(2,'0');
+            var mi = String(d.getMinutes()).padStart(2,'0');
+            lastDate.textContent = dd + '/' + mm + ' ' + hh + 'h' + mi;
+          } catch(e){ lastDate.textContent = ''; }
+        } else {
+          lastDate.textContent = '';
+        }
+      }
+      // Preview strip : ajoute / remplace les thumbs
+      var oldPreview = row.querySelector('.va-ig3-preview');
+      if(oldPreview) oldPreview.remove();
+      if(s.preview && s.preview.length){
+        var preview = document.createElement('div');
+        preview.className = 'va-ig3-preview';
+        s.preview.slice(0,4).forEach(function(p){
+          if(!p.thumbnail_url || !p.shortcode) return;
+          var a = document.createElement('a');
+          a.href = 'https://instagram.com/p/' + p.shortcode + '/';
+          a.target = '_blank';
+          a.className = 'va-ig3-thumb';
+          a.title = 'Voir le reel';
+          a.onclick = function(ev){ ev.stopPropagation(); };
+          var img = document.createElement('img');
+          img.src = p.thumbnail_url;
+          img.referrerPolicy = 'no-referrer';
+          img.onerror = function(){ this.style.display='none'; };
+          a.appendChild(img);
+          preview.appendChild(a);
+        });
+        row.appendChild(preview);
+      }
     });
   }).catch(function(err){
     rows.forEach(function(r){
@@ -5698,7 +5811,14 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
 .va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
 .va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
+.va-ig3-preview{grid-column:1 / -1;display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a}
+.va-ig3-thumb{width:48px;height:48px;border-radius:6px;overflow:hidden;background:#16181f;display:block;flex-shrink:0;transition:transform .12s}
+.va-ig3-thumb:hover{transform:scale(1.08)}
+.va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+body.light .va-ig3-preview{border-top-color:#e5e7eb}
+body.light .va-ig3-thumb{background:#f9fafb}
 body.light .va-ig3-detail{border-top-color:#e5e7eb}
 body.light .va-ig3-row{background:#fff;border-color:#e5e7eb}
 body.light .va-ig3-row-num{color:#111}
