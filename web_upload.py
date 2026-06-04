@@ -12489,6 +12489,15 @@ async function glDeleteWatcher(id, btn){
             f"display:flex;align-items:center;justify-content:center;color:#888;"
             f"font-weight:700;font-size:12px;flex-shrink:0'>?</div>"
         )
+        # Bouton "+ Ajouter VA" en bas de chaque section
+        add_va_btn = (
+            f"<button type='button' onclick=\"extOpenBulkModalFor('{m}')\" "
+            f"style='display:flex;align-items:center;gap:6px;padding:8px 12px;background:transparent;"
+            f"border:1px dashed rgba(168,85,247,.4);color:#a855f7;border-radius:7px;cursor:pointer;"
+            f"font-size:11px;font-weight:600;font-family:inherit;margin-top:6px;transition:all .12s'>"
+            f"<span style='font-size:13px'>+</span> Ajouter un VA"
+            f"</button>"
+        )
         sidebar_sections.append(
             f"<div class='ext-sb-section' data-extsb-section-model='{m}' style='margin-bottom:10px'>"
             f"<div class='ext-sb-section-head' onclick='extSbToggleSection(this)' "
@@ -12501,6 +12510,8 @@ async function glDeleteWatcher(id, btn){
             f"</div>"
             f"<div class='ext-sb-section-body' style='display:flex;flex-direction:column;gap:4px;padding:6px 0 0'>"
             + "".join(va_rows)
+            + (f"<div style='color:#666;font-size:11px;padding:8px 0;text-align:center;font-style:italic'>Aucun VA encore</div>" if not va_rows else "")
+            + add_va_btn
             + f"</div>"
             f"</div>"
         )
@@ -12604,6 +12615,14 @@ async function glDeleteWatcher(id, btn){
         "  });"
         "}"
         "function extSbToggleSection(headEl){var sec=headEl.closest('.ext-sb-section');if(sec)sec.classList.toggle('collapsed');}"
+        "function extOpenBulkModalFor(model){"
+        "  document.getElementById('ext-bulk-modal').style.display='flex';"
+        "  document.getElementById('ext-bulk-input').value='';"
+        "  var vaInp=document.getElementById('ext-bulk-vaname');if(vaInp)vaInp.value='';"
+        "  var mSel=document.getElementById('ext-bulk-model');"
+        "  if(mSel){for(var i=0;i<mSel.options.length;i++){if(mSel.options[i].value===model){mSel.selectedIndex=i;break;}}}"
+        "  setTimeout(function(){if(vaInp)vaInp.focus();},80);"
+        "}"
         "function extSbSelectVa(el){"
         "  document.querySelectorAll('.ext-sb-va-item').forEach(function(it){it.classList.remove('active');});"
         "  el.classList.add('active');"
