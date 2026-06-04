@@ -3787,12 +3787,111 @@ def _save_insta_3_stats_cache(d: dict):
     VA_INSTA_3_STATS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
-    """Pour un handle IG, retourne {daily, weekly, biweekly, last_post_at, last_reel_at}.
+def _verify_ig_profile_exists(handle: str) -> bool:
+    """Probe sur instagram.com pour verifier qu'un compte existe.
 
-    Daily = vues reels postés < 24h
-    Weekly = < 7j, Biweekly = < 14j
-    Cache 1h. Si force=True on bypass le cache.
+    Instagram redirige tout vers le SPA donc on doit parser le HTML pour
+    distinguer une vraie page de profil d'un 404.
+    """
+    try:
+        import requests
+        r = requests.get(
+            f"https://www.instagram.com/{handle}/",
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            allow_redirects=True,
+        )
+    except Exception:
+        return False
+    if r.status_code != 200:
+        return False
+    txt = r.text or ""
+    # Marqueurs explicites de page introuvable
+    not_found_markers = [
+        "Page Not Found",
+        "Sorry, this page isn",  # "Sorry, this page isn't available"
+        "Désolé, cette page n",
+        '"is_private":true,"username":"' + handle.lower() + '"',  # private mais existe
+    ]
+    if any(m in txt for m in not_found_markers[:3]):
+        return False
+    # Marqueur positif : og:title contient le username
+    if f'@{handle.lower()}' in txt.lower() or f'"username":"{handle.lower()}"' in txt.lower():
+        return True
+    # Par defaut on suppose qu'il existe si pas de marqueur de 404
+    return True
+
+
+def _scrape_via_ig_public(handle: str) -> dict:
+    """Scrape un profil via l'endpoint public web_profile_info (free, no-auth).
+
+    Retourne {profile: {...}, reels: [...]} au format compatible
+    avec ce que scrape_profile renvoie.
+    """
+    try:
+        import requests
+        r = requests.get(
+            f"https://www.instagram.com/api/v1/users/web_profile_info/?username={handle}",
+            headers={
+                "X-IG-App-ID": "936619743392459",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=15,
+        )
+    except Exception as e:
+        return {"error": f"reseau IG public: {e}"}
+    if r.status_code == 404:
+        return {"error": f"@{handle} n'existe pas sur Instagram."}
+    if r.status_code == 429:
+        return {"error": "Instagram rate-limit (429). Réessaie dans qq minutes."}
+    if r.status_code != 200:
+        return {"error": f"Instagram HTTP {r.status_code}"}
+    try:
+        d = r.json()
+    except Exception:
+        return {"error": "Reponse non-JSON"}
+    user = (d.get("data") or {}).get("user") or {}
+    if not user:
+        return {"error": "Compte introuvable ou rate-limited"}
+    profile = {
+        "username": user.get("username") or handle,
+        "full_name": user.get("full_name") or "",
+        "followers": (user.get("edge_followed_by") or {}).get("count", 0),
+        "following": (user.get("edge_follow") or {}).get("count", 0),
+        "posts_count": (user.get("edge_owner_to_timeline_media") or {}).get("count", 0),
+        "profile_pic_url": user.get("profile_pic_url_hd") or user.get("profile_pic_url") or "",
+        "biography": (user.get("biography") or "")[:300],
+        "is_private": user.get("is_private", False),
+        "is_verified": user.get("is_verified", False),
+    }
+    reels = []
+    for edge in (user.get("edge_owner_to_timeline_media") or {}).get("edges", []):
+        n = edge.get("node") or {}
+        is_video = bool(n.get("is_video"))
+        reels.append({
+            "shortcode": n.get("shortcode") or "",
+            "is_video": is_video,
+            "views": n.get("video_view_count") or n.get("video_play_count") or 0,
+            "likes": (n.get("edge_liked_by") or {}).get("count", 0),
+            "comments": (n.get("edge_media_to_comment") or {}).get("count", 0),
+            "taken_at": n.get("taken_at_timestamp"),
+            "thumbnail_url": n.get("thumbnail_src") or n.get("display_url"),
+            "url": f"https://www.instagram.com/p/{n.get('shortcode')}/" if n.get("shortcode") else "",
+        })
+    return {"profile": profile, "reels": reels}
+
+
+def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
+    """Pour un handle IG, retourne {daily, weekly, biweekly, followers, profile_pic_url, ...}.
+
+    Strategy : Instagram public web_profile_info en premier (gratuit, fiable
+    pour tous les comptes meme petits/recents). Si echec → fallback RapidAPI
+    via insta_scraper. Cache 1h.
     """
     import time as _t
     h = (handle or "").strip().lstrip("@").lower()
@@ -3803,13 +3902,31 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     cached = cache.get(h)
     if cached and not force and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL:
         return cached
-    try:
-        import insta_scraper as _ig_s
-        res = _ig_s.scrape_profile(h, limit=50)
-    except Exception as e:
-        return {"error": f"scraper indispo : {e}", "scraped_at": now_ts}
+    # 1) Public IG d abord
+    res = _scrape_via_ig_public(h)
+    # 2) Fallback RapidAPI si l API publique echoue
     if "error" in res:
-        out = {"error": res["error"], "scraped_at": now_ts}
+        try:
+            import insta_scraper as _ig_s
+            res2 = _ig_s.scrape_profile(h, limit=50)
+            if "error" not in res2:
+                res = res2
+            else:
+                # On garde le plus parlant des 2 messages
+                res = {"error": f"IG public: {res['error']} | RapidAPI: {res2['error']}"}
+        except Exception:
+            pass
+    if "error" in res:
+        err_msg = res["error"]
+        # Si RapidAPI dit "invalid username", on tente une verif HTTP directe
+        # pour distinguer "handle inexistant" vs "compte trop neuf/petit non-indexe"
+        if "invalid" in err_msg.lower() or "missing username" in err_msg.lower():
+            exists = _verify_ig_profile_exists(h)
+            if exists:
+                err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit). Attends quelques jours."
+            else:
+                err_msg = f"@{h} n'existe pas sur Instagram — vérifie l'orthographe."
+        out = {"error": err_msg, "scraped_at": now_ts}
         cache[h] = out
         _save_insta_3_stats_cache(cache)
         return out
