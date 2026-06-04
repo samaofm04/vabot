@@ -5260,6 +5260,15 @@ function vaPaySave(){
 
     links_json = _json_va.dumps(all_links_info, ensure_ascii=False)
 
+    # Charge les templates server-side (gms_templates.json) pour que le modal
+    # connaisse les choix deja faits via "Templates par modele" / dropdown
+    try:
+        import gms as _gms_for_tpl
+        gms_templates_dict = _gms_for_tpl.load_templates() if _gms_for_tpl.is_configured() else {}
+    except Exception:
+        gms_templates_dict = {}
+    gms_templates_json = _json_va.dumps(gms_templates_dict, ensure_ascii=False)
+
     modal_html = (
         "<div id='va-links-modal' onclick='vaLinksClose(event)'>"
         "<div class='vlm-box' onclick='event.stopPropagation()'>"
@@ -5280,7 +5289,7 @@ function vaPaySave(){
         "</div>"
         "</div>"
         "</div>"
-        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};window.__linkSource='{link_source}';</script>"
+        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};window.__linkSource='{link_source}';window.__gmsTemplates={gms_templates_json};</script>"
     )
 
     css_modal = """
@@ -5442,14 +5451,20 @@ function vaLinksTemplateKey(folder){
 function vaLinksGetTemplate(folder){
   try{
     var saved = localStorage.getItem(vaLinksTemplateKey(folder));
-    if(!saved) return '';
     // Sanity check : pour GMS un id valide commence par 'lnk_'.
     // Si on a un id legacy Linkscale (24-hex sans prefix), on l'ignore.
-    if(window.__linkSource === 'gms' && saved.indexOf('lnk_') !== 0){
+    if(saved && window.__linkSource === 'gms' && saved.indexOf('lnk_') !== 0){
       localStorage.removeItem(vaLinksTemplateKey(folder));
-      return '';
+      saved = '';
     }
-    return saved;
+    if(saved) return saved;
+    // Fallback : templates server-side (Templates par modele / dropdown)
+    // Cle = identite minuscule, valeur = link_id
+    if(window.__linkSource === 'gms' && window.__gmsTemplates){
+      var srv = window.__gmsTemplates[(folder||'').toLowerCase()] || '';
+      if(srv && srv.indexOf('lnk_') === 0) return srv;
+    }
+    return '';
   }catch(e){ return ''; }
 }
 function vaLinksSetTemplate(folder, linkId){
@@ -5458,6 +5473,18 @@ function vaLinksSetTemplate(folder, linkId){
       localStorage.setItem(vaLinksTemplateKey(folder), linkId);
     } else {
       localStorage.removeItem(vaLinksTemplateKey(folder));
+    }
+    // Sync server-side (gms_templates.json) pour le dropdown "Templates par
+    // modele" reflete la meme valeur. Fire-and-forget.
+    if(window.__linkSource === 'gms'){
+      var fd = new FormData();
+      fd.append('identity', (folder||'').toLowerCase());
+      fd.append('link_id', linkId || '');
+      fetch('/gms/set_template', {method:'POST', body:fd}).then(function(){
+        if(!window.__gmsTemplates) window.__gmsTemplates = {};
+        if(linkId) window.__gmsTemplates[folder.toLowerCase()] = linkId;
+        else delete window.__gmsTemplates[folder.toLowerCase()];
+      }).catch(function(){});
     }
   }catch(e){}
 }
