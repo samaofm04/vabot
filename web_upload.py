@@ -5210,12 +5210,15 @@ function vaPaySave(){
     all_links_info = []
     link_source = "?"  # "gms" ou "linkscale"
 
-    # 1. Essayer GMS en priorite
+    # 1. Essayer GMS en priorite — uniquement workspace marche francais
+    # (les VAs travaillent avec les templates de cette team, pas les liens
+    # legacy Personal qui polluaient la liste).
     try:
         import gms
         if gms.is_configured():
             link_source = "gms"
-            res_all = gms.list_all_links()
+            MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
+            res_all = gms.list_links_team(MARCHE_FRANCAIS_TID)
             if res_all.get("ok"):
                 for link in res_all["links"]:
                     model = gms.categorize_link(link)
