@@ -12447,6 +12447,42 @@ async function glDeleteWatcher(id, btn){
     # Note : ext_rows_html contient les rows ET les headers de groupe. On va
     # juste afficher tout par default puis filter en JS.
 
+    # CSS inline pour la sidebar et les rows IG (sinon casse car le bundle
+    # principal est sur la page VAs, pas Geelark).
+    ext_inline_css = """
+<style>
+.ext-sb-layout{display:grid;grid-template-columns:280px 1fr;gap:14px;min-height:500px}
+.ext-sb-sidebar{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
+.ext-sb-list{flex:1;overflow-y:auto}
+.ext-sb-detail{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;padding:14px;min-width:0;overflow-y:auto;display:flex;flex-direction:column}
+.ext-sb-va-item:hover{background:rgba(168,85,247,.06)}
+.ext-sb-va-item.active{background:rgba(168,85,247,.15)}
+.ext-sb-section.collapsed .ext-sb-section-body{display:none !important}
+.ext-sb-section.collapsed .ext-sb-chevron{transform:rotate(-90deg)}
+.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
+.va-ig3-row:hover{border-color:#ec489940}
+.va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
+.va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
+.va-ig3-row-metric{text-align:center;min-width:55px}
+.va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
+.va-ig3-row-num.va-ig3-green{color:#22c55e}
+.va-ig3-row-lab{font-size:9px;color:#888;font-weight:600;margin-top:2px;text-transform:lowercase}
+.va-ig3-row-last{text-align:right;min-width:80px}
+.va-ig3-row-last-lab{font-size:9px;color:#666;text-transform:uppercase;font-weight:600}
+.va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
+.va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
+.va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
+.va-ig3-detail{display:flex;flex-direction:column;gap:8px}
+.ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
+.ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
+.ext-mini-input{min-width:140px}
+@media(max-width:900px){.ext-sb-layout{grid-template-columns:1fr;min-height:auto}}
+</style>
+"""
     # === Sidebar comme la page VAs : search + filter modele + sections expandable ===
     # Construit les VA items par modele (va_name → liste de comptes)
     by_model_va_sb = {}  # {model: {va_name: [items]}}
@@ -12751,7 +12787,7 @@ async function glDeleteWatcher(id, btn){
         "</script>"
     )
 
-    return header_html + upcoming_block + schedules_block + watchers_block + history_block + ext_section + ext_modal_html + js
+    return header_html + upcoming_block + schedules_block + watchers_block + history_block + ext_inline_css + ext_section + ext_modal_html + js
 
 
 def _render_textpool_html() -> str:
