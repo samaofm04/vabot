@@ -5280,7 +5280,7 @@ function vaPaySave(){
         "</div>"
         "</div>"
         "</div>"
-        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};</script>"
+        + f"<script>window.__vaLinksData={va_links_json};window.__gmsAllLinks={links_json};window.__linkSource='{link_source}';</script>"
     )
 
     css_modal = """
@@ -5467,6 +5467,12 @@ function vaLinksFilter(q){
     el.style.display = (!q || s.indexOf(q) !== -1) ? '' : 'none';
   });
 }
+function vaLinksDupEndpoint(){
+  return (window.__linkSource === 'gms') ? '/gms/duplicate_one' : '/linkscale/duplicate';
+}
+function vaLinksGenEndpoint(){
+  return (window.__linkSource === 'gms') ? '/gms/generate_in_folder' : '/linkscale/generate';
+}
 function vaLinksDuplicateOne(e, btn){
   if(e){ e.stopPropagation(); e.preventDefault(); }
   var linkId = btn ? btn.getAttribute('data-dup-id') : '';
@@ -5474,7 +5480,7 @@ function vaLinksDuplicateOne(e, btn){
   if(typeof showToast === 'function') showToast('Duplication en cours…', 'info');
   var fd = new FormData();
   fd.append('link_id', linkId);
-  fetch('/linkscale/duplicate', {method:'POST', body:fd})
+  fetch(vaLinksDupEndpoint(), {method:'POST', body:fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){
@@ -5510,7 +5516,7 @@ function vaLinksDuplicateSelected(){
     var id = ids.shift();
     var fd = new FormData();
     fd.append('link_id', id);
-    fetch('/linkscale/duplicate', {method:'POST', body:fd})
+    fetch(vaLinksDupEndpoint(), {method:'POST', body:fd})
       .then(function(r){ return r.json(); })
       .then(function(d){ if(d && d.ok) done++; else fail++; next(); })
       .catch(function(){ fail++; next(); });
@@ -5569,7 +5575,7 @@ function vaLinksGenerate(){
   // Si l'utilisateur a defini un template (⭐), l'envoyer pour dupliquer celui-ci
   var templateId = vaLinksGetTemplate(folder);
   if(templateId) fd.append('template_link_id', templateId);
-  fetch('/linkscale/generate', {method:'POST', body:fd})
+  fetch(vaLinksGenEndpoint(), {method:'POST', body:fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){
@@ -17444,6 +17450,105 @@ def create_app():
             url_part = f" → {url}" if url else " (URL conservée du template)"
             return _success(f"✅ Lien <code>/{short}</code> dupliqué depuis le template{url_part}")
         return _error(f"❌ {res.get('error', 'Duplication échouée')}")
+
+    @app.route("/gms/duplicate_one", methods=["POST"])
+    def gms_duplicate_one():
+        """JSON endpoint pour dupliquer 1 lien GMS — mirror de /linkscale/duplicate.
+        Body : link_id (requis), new_shortcode (optionnel, sinon random).
+        Le duplicate preserve le dossier (catégorie déduite par categorize_link)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import random, string
+        try:
+            import gms
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        link_id = (request.form.get("link_id") or "").strip()
+        new_shortcode = (request.form.get("new_shortcode") or "").strip()
+        if not link_id:
+            return jsonify({"ok": False, "error": "link_id manquant"})
+        # Si pas de shortcode fourni : 4 lettres random + identity deduite du lien source
+        if not new_shortcode:
+            try:
+                res_list = gms.list_all_links()
+                src = None
+                if res_list.get("ok"):
+                    for l in res_list["links"]:
+                        if l.get("id") == link_id:
+                            src = l
+                            break
+                model = gms.categorize_link(src or {}) if src else ""
+                ident = (model or "").lower().replace(" ", "")
+                rnd = "".join(random.choices(string.ascii_lowercase, k=4))
+                new_shortcode = rnd + (ident or "link")
+            except Exception:
+                new_shortcode = "".join(random.choices(string.ascii_lowercase, k=8))
+        return jsonify(gms.duplicate_link(link_id, new_shortcode))
+
+    @app.route("/gms/generate_in_folder", methods=["POST"])
+    def gms_generate_in_folder():
+        """Genere un nouveau lien dans un folder GMS — mirror de /linkscale/generate.
+        Body : folder_name (requis), prefix (optionnel, sinon folder_name),
+        template_link_id (optionnel, sinon 1er lien actif du folder)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        import random, string
+        try:
+            import gms
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        folder_name = (request.form.get("folder_name") or "").strip()
+        prefix = (request.form.get("prefix") or "").strip()
+        template_id = (request.form.get("template_link_id") or "").strip()
+        if not folder_name:
+            return jsonify({"ok": False, "error": "folder_name requis"})
+        if not prefix:
+            prefix = folder_name.lower()
+        prefix = "".join(c for c in prefix if c.isalnum() or c == "_").lower()
+        if not prefix:
+            return jsonify({"ok": False, "error": "prefix invalide apres nettoyage"})
+        # Si pas de template_id explicite, on essaie d'abord les templates sauvegardes
+        # par modele (gms_templates.json), puis on prend le 1er lien actif du folder
+        if not template_id:
+            try:
+                tpls = gms.load_templates()
+                tpl_for_folder = tpls.get(folder_name.lower())
+                if tpl_for_folder:
+                    template_id = tpl_for_folder
+            except Exception:
+                pass
+        if not template_id:
+            try:
+                res_list = gms.list_all_links()
+                if not res_list.get("ok"):
+                    return jsonify({"ok": False, "error": "list_links a echoue"})
+                target = folder_name.lower()
+                # 1ere passe : lien actif du folder
+                for link in res_list["links"]:
+                    model = gms.categorize_link(link)
+                    if model.lower() == target and (link.get("status") or "active") == "active":
+                        template_id = link.get("id")
+                        break
+                # 2eme passe : n'importe quel lien du folder
+                if not template_id:
+                    for link in res_list["links"]:
+                        model = gms.categorize_link(link)
+                        if model.lower() == target:
+                            template_id = link.get("id")
+                            break
+                if not template_id:
+                    return jsonify({"ok": False, "error": f"aucun lien template trouve dans '{folder_name}'"})
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"resolution template: {e}"})
+        random_part = "".join(random.choices(string.ascii_lowercase, k=4))
+        new_shortcode = random_part + prefix
+        # Display name lisible : reprend le pattern de quick_generate
+        new_name = f"@{folder_name} — {new_shortcode}"
+        return jsonify(gms.duplicate_link(template_id, new_shortcode, new_name, new_url=""))
 
     @app.route("/gms/create", methods=["POST"])
     def gms_create():
