@@ -3675,6 +3675,59 @@ def _update_va_insta_stats(user_id, handle: str, followers: int = 0,
 
 # ============ VA -> GMS links mapping ============
 VA_LINKS_FILE = DATA_DIR / "va_links.json"
+VA_INSTA_3_FILE = DATA_DIR / "va_insta_accounts.json"
+
+
+def _load_va_insta_3() -> dict:
+    """Retourne {user_id_str: ['handle1', 'handle2', 'handle3']}.
+    Max 3 handles par VA. Normalisé (lowercase, sans @, sans espace).
+    Distinct du systeme _get_va_insta (1 handle principal pour la sante)."""
+    if not VA_INSTA_3_FILE.exists():
+        return {}
+    try:
+        return json.loads(VA_INSTA_3_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_va_insta_3(data: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    VA_INSTA_3_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _normalize_insta_handle(raw: str) -> str:
+    """'@AmEliaXY ' -> 'ameliaxy'. Renvoie '' si non-valide."""
+    if not raw:
+        return ""
+    h = raw.strip().lstrip("@").strip()
+    import re as _re_h
+    h = _re_h.sub(r"[^a-zA-Z0-9_.]", "", h).lower()
+    if not h or len(h) > 30:
+        return ""
+    return h
+
+
+def _set_insta_3_for_va(user_id, handles: list):
+    data = _load_va_insta_3()
+    key = str(user_id)
+    clean = []
+    seen = set()
+    for h in (handles or []):
+        n = _normalize_insta_handle(h or "")
+        if n and n not in seen:
+            seen.add(n)
+            clean.append(n)
+        if len(clean) >= 3:
+            break
+    if clean:
+        data[key] = clean
+    else:
+        data.pop(key, None)
+    _save_va_insta_3(data)
+
+
+def _get_insta_3_for_va(user_id) -> list:
+    return _load_va_insta_3().get(str(user_id), [])
 
 
 def _load_va_links() -> dict:
@@ -20458,6 +20511,34 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
+
+    @app.route("/va/set_insta", methods=["POST"])
+    def va_set_insta():
+        """Stocke les 3 handles Instagram d'un VA.
+        Body : user_id (str), handles[] (jusqu'a 3, format @x ou x)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.form.get("user_id") or "").strip()
+        handles = request.form.getlist("handles")
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        try:
+            _set_insta_3_for_va(uid, handles)
+            saved = _get_insta_3_for_va(uid)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True, "handles": saved})
+
+    @app.route("/va/get_insta_3", methods=["GET"])
+    def va_get_insta_3():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        uid = (request.args.get("user_id") or "").strip()
+        if not uid:
+            return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        return jsonify({"ok": True, "handles": _get_insta_3_for_va(uid)})
 
     @app.route("/va/set_links", methods=["POST"])
     def va_set_links():

@@ -571,6 +571,62 @@ class UserCog(commands.Cog):
         lines.append("👉 Copie celui qui te plait pour le display name Instagram.")
         await interaction.response.send_message("\n".join(lines))
 
+    @app_commands.command(name="insta", description="Enregistre tes 3 comptes Instagram (handles séparés par espace)")
+    @app_commands.describe(
+        handle1="@handle du 1er compte Insta",
+        handle2="@handle du 2e compte Insta (optionnel)",
+        handle3="@handle du 3e compte Insta (optionnel)",
+    )
+    async def insta(
+        self,
+        interaction: discord.Interaction,
+        handle1: str,
+        handle2: str = "",
+        handle3: str = "",
+    ):
+        import re as _re_ig, json as _json_ig
+        uid = str(interaction.user.id)
+
+        def _norm(raw):
+            if not raw:
+                return ""
+            h = raw.strip().lstrip("@").strip()
+            h = _re_ig.sub(r"[^a-zA-Z0-9_.]", "", h).lower()
+            return h if (h and len(h) <= 30) else ""
+
+        handles = []
+        seen = set()
+        for raw in (handle1, handle2, handle3):
+            n = _norm(raw)
+            if n and n not in seen:
+                seen.add(n)
+                handles.append(n)
+        if not handles:
+            await interaction.response.send_message(
+                "❌ Aucun handle valide. Format attendu : `@username` (lettres/chiffres/_./).",
+                ephemeral=True,
+            )
+            return
+
+        VA_INSTA_FILE_C = DATA_DIR / "va_insta_accounts.json"
+        try:
+            existing = _json_ig.loads(VA_INSTA_FILE_C.read_text(encoding="utf-8")) if VA_INSTA_FILE_C.exists() else {}
+        except Exception:
+            existing = {}
+        existing[uid] = handles
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            VA_INSTA_FILE_C.write_text(_json_ig.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erreur de sauvegarde : {e}", ephemeral=True)
+            return
+
+        lines = [f"• @{h}" for h in handles]
+        await interaction.response.send_message(
+            "✅ Comptes Instagram enregistrés :\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
     async def bio(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
