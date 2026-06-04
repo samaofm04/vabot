@@ -5623,8 +5623,34 @@ function vaLinksGenerate(){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){
-        if(typeof showToast === 'function') showToast('Lien généré ✓ Recharge…', 'success');
-        setTimeout(function(){ window.location.reload(); }, 700);
+        // Ajoute le nouveau lien a la liste in-memory pour eviter un full reload
+        // (qui faisait passer transitoirement par le Dashboard blanc).
+        try {
+          var lk = d.link || {};
+          if(lk.id){
+            window.__gmsAllLinks = window.__gmsAllLinks || [];
+            window.__gmsAllLinks.push({
+              id: lk.id,
+              shortcode: lk.shortcode || '',
+              name: lk.display_name || d.va_number ? ('VA ' + d.va_number) : '',
+              model: folder,
+              url: lk.url || '(landing)',
+              status: lk.status || 'active'
+            });
+          }
+        } catch(e){}
+        // Auto-check le nouveau lien pour qu'il soit pre-assigne au VA courant
+        try {
+          if(d.link && d.link.id){
+            var cur = (window.__vaLinksData || {})[_vlmCurrentUid] || [];
+            if(cur.indexOf(d.link.id) === -1) cur.push(d.link.id);
+            window.__vaLinksData[_vlmCurrentUid] = cur;
+          }
+        } catch(e){}
+        // Re-render la liste in-place
+        vaLinksRender();
+        var msg = '✓ Lien généré : VA ' + (d.va_number || '?');
+        if(typeof showToast === 'function') showToast(msg, 'success');
       } else {
         if(typeof showToast === 'function') showToast('Erreur: ' + (d && d.error || '?'), 'error');
       }
