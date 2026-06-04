@@ -14714,7 +14714,8 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <div class='mpl-slots' id='mpl-post-slots'></div>
       <div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>
         <button type='button' onclick='addPostSlot()' style='flex:1;background:transparent;border:1px dashed #2e6f4e;color:#22c55e;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter un creneau post</button>
-        <button type='button' onclick='resetPostSlotsToDefault()' title='Reset aux 14 horaires par defaut' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600'>↻ Reset 14 horaires</button>
+        <button type='button' onclick='saveAsMyDefaultPostSlots()' title='Sauvegarde la configuration actuelle comme defaut perso (utilise par Reset)' style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600' id='mpl-save-default-btn'>🔒 Lock comme defaut</button>
+        <button type='button' onclick='resetPostSlotsToDefault()' title='Reset au defaut (perso si sauvegarde, sinon 14 horaires)' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600' id='mpl-reset-btn'>↻ Reset au defaut</button>
       </div>
     </div>
   </div>
@@ -15052,19 +15053,74 @@ const DEFAULT_14_POST_SLOTS = [
   {{time:'20:00', visibility:'public'}},  {{time:'21:00', visibility:'private'}},
   {{time:'22:00', visibility:'public'}},  {{time:'23:00', visibility:'private'}},
 ];
+const POST_SLOTS_DEFAULT_KEY = 'vabot_post_slots_user_default';
+function getUserDefaultPostSlots(){{
+  try {{
+    const raw = localStorage.getItem(POST_SLOTS_DEFAULT_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(Array.isArray(parsed) && parsed.length > 0) return parsed;
+  }} catch(e){{}}
+  return null;
+}}
+function saveAsMyDefaultPostSlots(){{
+  if(!postSlots || !postSlots.length){{
+    if(typeof showToast === 'function') showToast('Pas de creneaux a sauvegarder', 'error');
+    return;
+  }}
+  mplConfirmAction({{
+    icon: '🔒',
+    title: 'Lock ' + postSlots.length + ' creneaux comme defaut ?',
+    subtitle: 'Reset utilisera cette config (au lieu des 14 horaires hardcoded) tant que tu ne re-lock pas une autre liste.',
+    confirmLabel: 'Lock',
+    danger: false,
+    onConfirm: () => {{
+      try {{
+        const copy = postSlots.map(s => ({{time: s.time, visibility: s.visibility}}));
+        localStorage.setItem(POST_SLOTS_DEFAULT_KEY, JSON.stringify(copy));
+        updateResetBtnLabel();
+        if(typeof showToast === 'function') showToast('🔒 ' + copy.length + ' creneaux sauvegardes comme defaut', 'success', 2500);
+      }} catch(e){{
+        if(typeof showToast === 'function') showToast('Erreur sauvegarde : ' + e, 'error');
+      }}
+    }}
+  }});
+}}
+function clearMyDefaultPostSlots(){{
+  try {{ localStorage.removeItem(POST_SLOTS_DEFAULT_KEY); }} catch(e){{}}
+  updateResetBtnLabel();
+  if(typeof showToast === 'function') showToast('Defaut perso efface — Reset utilise les 14 horaires hardcoded', 'info', 2500);
+}}
+function updateResetBtnLabel(){{
+  const btn = document.getElementById('mpl-reset-btn');
+  if(!btn) return;
+  const userDef = getUserDefaultPostSlots();
+  if(userDef){{
+    btn.textContent = '↻ Reset au defaut (' + userDef.length + ' lock)';
+    btn.title = 'Reset aux ' + userDef.length + ' creneaux que tu as locke. Shift+click pour effacer ton defaut.';
+    btn.onclick = function(e){{ if(e.shiftKey){{ clearMyDefaultPostSlots(); }} else {{ resetPostSlotsToDefault(); }} }};
+  }} else {{
+    btn.textContent = '↻ Reset 14 horaires';
+    btn.title = 'Reset aux 14 horaires hardcoded (aucun defaut perso lock)';
+    btn.onclick = function(){{ resetPostSlotsToDefault(); }};
+  }}
+}}
 function resetPostSlotsToDefault(){{
+  const userDef = getUserDefaultPostSlots();
+  const source = userDef ? userDef : DEFAULT_14_POST_SLOTS;
+  const sourceLabel = userDef ? ('ton defaut perso (' + source.length + ' creneaux)') : '14 horaires hardcoded';
   mplConfirmAction({{
     icon: '↻',
-    title: 'Reset aux 14 horaires par defaut ?',
-    subtitle: 'La liste actuelle de ' + postSlots.length + ' creneaux sera remplacee par les 14 horaires standards (01h, 02h, 08hx2, 13h, 15hx2, 16h, 18-23h).',
+    title: 'Reset au defaut ?',
+    subtitle: 'La liste actuelle de ' + postSlots.length + ' creneaux sera remplacee par ' + sourceLabel + '.',
     confirmLabel: 'Reset',
     danger: false,
     onConfirm: () => {{
       postSlots.length = 0;
-      DEFAULT_14_POST_SLOTS.forEach(s => postSlots.push({{time:s.time, visibility:s.visibility}}));
-      document.getElementById('mpl-posts-count').value = 14;
+      source.forEach(s => postSlots.push({{time:s.time, visibility:s.visibility}}));
+      document.getElementById('mpl-posts-count').value = source.length;
       renderPostSlots();
-      if(typeof showToast === 'function') showToast('✓ 14 horaires par defaut appliques', 'success', 2500);
+      if(typeof showToast === 'function') showToast('✓ Reset applique (' + source.length + ' creneaux)', 'success', 2500);
     }}
   }});
 }}
@@ -16350,6 +16406,7 @@ document.getElementById('mpl-posts-count').value = postSlots.length;
 document.getElementById('mpl-stories-count').value = storySlots.length;
 renderPostSlots();
 renderStorySlots();
+if(typeof updateResetBtnLabel === 'function') updateResetBtnLabel();
 switchTab('post');
 updatePostAction();
 updateMediaCount();
