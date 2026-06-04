@@ -5937,6 +5937,12 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 .va-ig3-preview{grid-column:1 / -1;display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a}
+.ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
+.ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
+.ext-mini-select:focus,.ext-mini-input:focus{border-color:#ec4899;outline:none}
+.ext-mini-select{cursor:pointer}
+.ext-mini-input{min-width:140px}
+body.light .ext-mini-select,body.light .ext-mini-input{background:#fff;border-color:#e5e7eb;color:#111}
 .va-ig3-thumb{width:48px;height:48px;border-radius:6px;overflow:hidden;background:#16181f;display:block;flex-shrink:0;transition:transform .12s}
 .va-ig3-thumb:hover{transform:scale(1.08)}
 .va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
@@ -12220,6 +12226,24 @@ async function glDeleteWatcher(id, btn){
                 f"<div class='va-ig3-row-err'>⚠️ {s['error'][:50]}</div>"
                 if s.get("error") else ""
             )
+            # Mini-footer pour assigner modele + VA name (auto-save on change)
+            cur_model = (it.get("model") or "").strip()
+            cur_va = (it.get("va_name") or "").strip()
+            model_opts = "".join([
+                f"<option value='{m}'{' selected' if m == cur_model else ''}>{m}</option>"
+                for m in GEELARK_MODELS
+            ])
+            assign_footer = (
+                f"<div class='ext-assign-row' onclick='event.stopPropagation()'>"
+                f"<span style='font-size:9px;color:#666;font-weight:600;text-transform:uppercase'>Assigner</span>"
+                f"<select class='ext-mini-select' data-ext-field='model' data-ext-h='{h}' onchange='extAssign(this)'>"
+                f"<option value=''>— modèle —</option>{model_opts}"
+                f"</select>"
+                f"<input type='text' class='ext-mini-input' data-ext-field='va_name' data-ext-h='{h}' "
+                f"value='{cur_va}' placeholder='nom du VA' onchange='extAssign(this)' "
+                f"list='ext-va-suggestions'>"
+                f"</div>"
+            )
             ext_rows_html.append(
                 f"<div class='va-ig3-row' data-ext-handle='{h}'>"
                 f"{pp_html}"
@@ -12238,11 +12262,20 @@ async function glDeleteWatcher(id, btn){
                 f"</div>"
                 f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
                 f"<button onclick='extRemove(\"{h}\")' style='background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px' title='Retirer'>×</button>"
+                f"{assign_footer}"
                 f"{err_html}"
                 f"</div>"
             )
+    # Datalist des VA names deja utilises pour auto-complete
+    va_names_seen = sorted({(it.get("va_name") or "").strip() for it in ext_accounts if (it.get("va_name") or "").strip()})
+    datalist_html = (
+        "<datalist id='ext-va-suggestions'>"
+        + "".join(f"<option value='{nm}'>" for nm in va_names_seen)
+        + "</datalist>"
+    )
     ext_section = (
-        f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
+        datalist_html
+        + f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
         f"<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px'>"
         f"<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
         f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
@@ -12282,6 +12315,28 @@ async function glDeleteWatcher(id, btn){
         "</div>"
         "</div>"
         "<script>"
+        "function extAssign(el){"
+        "  var h=el.getAttribute('data-ext-h');var field=el.getAttribute('data-ext-field');"
+        "  if(!h||!field)return;"
+        "  // Recupere la row + l autre champ (pour envoyer les 2 ensemble)"
+        "  var row=el.closest('.va-ig3-row');"
+        "  if(!row)return;"
+        "  var modelSel=row.querySelector('select[data-ext-field=\"model\"]');"
+        "  var vaInp=row.querySelector('input[data-ext-field=\"va_name\"]');"
+        "  var fd=new FormData();"
+        "  fd.append('handle',h);"
+        "  fd.append('model',modelSel?modelSel.value:'');"
+        "  fd.append('va_name',vaInp?vaInp.value.trim():'');"
+        "  fetch('/external/update',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
+        "    if(d&&d.ok){"
+        "      el.style.borderColor='#22c55e';setTimeout(function(){el.style.borderColor='';},800);"
+        "      if(typeof showToast==='function')showToast('✓ '+h+' assigne','success',1200);"
+        "      // Si le model ET le va sont remplis, reload pour re-grouper"
+        "      var m=modelSel?modelSel.value:'',v=vaInp?vaInp.value.trim():'';"
+        "      if(m && v){setTimeout(function(){window.location.reload();},900);}"
+        "    } else {if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');}"
+        "  });"
+        "}"
         "function extOpenBulkModal(){document.getElementById('ext-bulk-modal').style.display='flex';document.getElementById('ext-bulk-input').value='';document.getElementById('ext-bulk-input').focus();}"
         "function extCloseBulkModal(e){if(e&&e.target&&e.target.id!=='ext-bulk-modal'&&e.target!==this)return;document.getElementById('ext-bulk-modal').style.display='none';}"
         "function extRenderRow(h){"
