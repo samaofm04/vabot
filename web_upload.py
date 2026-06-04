@@ -12460,7 +12460,9 @@ async function glDeleteWatcher(id, btn){
     sb_model_order = list(GEELARK_MODELS) + sorted([m for m in by_model_va_sb if m not in GEELARK_MODELS])
     for m in sb_model_order:
         vas_in_model = by_model_va_sb.get(m, {})
-        if not vas_in_model:
+        # On affiche TOUJOURS les modeles connus (Amelia/Emma/Lola) meme vides
+        # pour que la pp soit visible et qu'on puisse y bulk-uploader.
+        if not vas_in_model and m not in GEELARK_MODELS:
             continue
         n_vas = len(vas_in_model)
         is_known = m in GEELARK_MODELS
@@ -12481,12 +12483,19 @@ async function glDeleteWatcher(id, btn){
                 f"</div>"
                 f"</div>"
             )
+        # Avatar de l'identite (pp comme MyPulse) — fallback initiale si pas d'avatar
+        ident_avatar_html = _identity_avatar_html(m, size=26) if is_known else (
+            f"<div style='width:26px;height:26px;border-radius:50%;background:#2a2a2a;"
+            f"display:flex;align-items:center;justify-content:center;color:#888;"
+            f"font-weight:700;font-size:12px;flex-shrink:0'>?</div>"
+        )
         sidebar_sections.append(
             f"<div class='ext-sb-section' data-extsb-section-model='{m}' style='margin-bottom:10px'>"
             f"<div class='ext-sb-section-head' onclick='extSbToggleSection(this)' "
             f"style='display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(168,85,247,.05);"
             f"border-left:3px solid {head_color};border-radius:6px;cursor:pointer;user-select:none'>"
-            f"<span style='font-weight:800;font-size:12px;color:{head_color};letter-spacing:.04em'>{m}</span>"
+            f"{ident_avatar_html}"
+            f"<span style='font-weight:800;font-size:13px;color:{head_color};letter-spacing:.02em'>{m}</span>"
             f"<span style='font-size:10px;background:rgba(168,85,247,.15);color:#a855f7;padding:1px 7px;border-radius:5px;font-weight:700;margin-left:auto'>{n_vas} VA{'s' if n_vas > 1 else ''}</span>"
             f"<span class='ext-sb-chevron' style='color:#888;font-size:10px;transition:transform .15s'>▼</span>"
             f"</div>"
