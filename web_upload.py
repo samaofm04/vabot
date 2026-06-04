@@ -20512,9 +20512,9 @@ def create_app():
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
 
-    @app.route("/va/set_insta", methods=["POST"])
-    def va_set_insta():
-        """Stocke les 3 handles Instagram d'un VA.
+    @app.route("/va/set_insta_3", methods=["POST"])
+    def va_set_insta_3():
+        """Stocke les 3 handles Instagram d'un VA (systeme distinct du single-handle).
         Body : user_id (str), handles[] (jusqu'a 3, format @x ou x)."""
         from flask import jsonify
         if not is_auth():
