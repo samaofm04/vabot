@@ -3679,15 +3679,34 @@ VA_INSTA_3_FILE = DATA_DIR / "va_insta_accounts.json"
 
 
 def _load_va_insta_3() -> dict:
-    """Retourne {user_id_str: ['handle1', 'handle2', 'handle3']}.
-    Max 3 handles par VA. Normalisé (lowercase, sans @, sans espace).
-    Distinct du systeme _get_va_insta (1 handle principal pour la sante)."""
+    """Retourne {user_id_str: [{handle, email, password, totp_seed}, ...]}.
+
+    Max 3 comptes par VA. Schema riche pour stocker les credentials.
+    Migration auto : les anciennes entrees au format string ['h1','h2'] sont
+    converties en [{handle:'h1',...}, ...] a la lecture.
+    """
     if not VA_INSTA_3_FILE.exists():
         return {}
     try:
-        return json.loads(VA_INSTA_3_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(VA_INSTA_3_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    # Migration : list[str] -> list[dict]
+    out = {}
+    for uid, lst in (raw or {}).items():
+        clean = []
+        for it in (lst or []):
+            if isinstance(it, str):
+                clean.append({"handle": it, "email": "", "password": "", "totp_seed": ""})
+            elif isinstance(it, dict):
+                clean.append({
+                    "handle": (it.get("handle") or "").strip(),
+                    "email": (it.get("email") or "").strip(),
+                    "password": it.get("password") or "",
+                    "totp_seed": (it.get("totp_seed") or "").strip(),
+                })
+        out[str(uid)] = clean[:3]
+    return out
 
 
 def _save_va_insta_3(data: dict):
@@ -3707,16 +3726,34 @@ def _normalize_insta_handle(raw: str) -> str:
     return h
 
 
-def _set_insta_3_for_va(user_id, handles: list):
+def _set_insta_3_for_va(user_id, accounts: list):
+    """accounts = liste de dicts {handle, email, password, totp_seed} (jusqu'a 3).
+    On accepte aussi des strings pour compat avec l'ancien /insta Discord."""
     data = _load_va_insta_3()
     key = str(user_id)
     clean = []
-    seen = set()
-    for h in (handles or []):
-        n = _normalize_insta_handle(h or "")
-        if n and n not in seen:
-            seen.add(n)
-            clean.append(n)
+    seen_handles = set()
+    for it in (accounts or []):
+        if isinstance(it, str):
+            h = _normalize_insta_handle(it)
+            if h and h not in seen_handles:
+                seen_handles.add(h)
+                clean.append({"handle": h, "email": "", "password": "", "totp_seed": ""})
+        elif isinstance(it, dict):
+            h = _normalize_insta_handle(it.get("handle") or "")
+            if h and h in seen_handles:
+                continue
+            if h:
+                seen_handles.add(h)
+            # Ignore les entrées totalement vides
+            if not h and not (it.get("email") or it.get("password") or it.get("totp_seed")):
+                continue
+            clean.append({
+                "handle": h,
+                "email": (it.get("email") or "").strip(),
+                "password": it.get("password") or "",
+                "totp_seed": (it.get("totp_seed") or "").strip().replace(" ", ""),
+            })
         if len(clean) >= 3:
             break
     if clean:
@@ -4874,6 +4911,19 @@ body.light .va-id{color:#9ca3af}
                 + "</button>"
             )
 
+            # Bouton "Comptes IG" (3 comptes + credentials)
+            _ig3 = _get_insta_3_for_va(uid)
+            _ig3_count = len([a for a in _ig3 if a.get("handle")])
+            _ig3_color = "#ec4899" if _ig3_count else "#444"
+            ig3_btn = (
+                f"<button type='button' onclick=\"vaIg3Open('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
+                f"class='va-ig3-btn' style='border-color:{_ig3_color}40;color:{_ig3_color}' "
+                f"title='Comptes Instagram (3 max) + credentials'>"
+                f"<span>🔐</span>"
+                f"<span class='va-ig3-label'>{_ig3_count}/3</span>"
+                f"</button>"
+            )
+
             search_blob = (username + " " + uid + " " + identity).lower()
             cards.append(
                 f"<div class='va-card' data-va-uid='{uid}' data-va-search='{search_blob}' data-va-identity='{identity}'>"
@@ -4885,6 +4935,7 @@ body.light .va-id{color:#9ca3af}
                 f"{pink_badge}"
                 f"<div class='va-actions'>"
                 f"{ig_btn}"
+                f"{ig3_btn}"
                 f"{links_btn_html}"
                 f"{pay_btn}"
                 f"{mini_clicks_html}"
@@ -4959,6 +5010,55 @@ body.light .va-id{color:#9ca3af}
         + f"<script>window.__vaInstaData={insta_data_json};</script>"
     )
 
+    # ====== Modal Comptes IG (3 comptes + credentials) ======
+    all_va_insta_3 = _load_va_insta_3()
+    insta_3_data_json = _json_ig.dumps(all_va_insta_3, ensure_ascii=False)
+
+    def _ig3_slot(i: int) -> str:
+        return (
+            f"<div class='ig3-slot' data-ig3-slot='{i}'>"
+            f"<div class='ig3-slot-head'>Compte {i+1}</div>"
+            f"<div class='ig3-field'>"
+            f"<label>Handle</label>"
+            f"<input type='text' data-ig3-field='handle_{i}' placeholder='@username' autocomplete='off'>"
+            f"</div>"
+            f"<div class='ig3-field'>"
+            f"<label>Email</label>"
+            f"<input type='text' data-ig3-field='email_{i}' placeholder='email@…' autocomplete='off'>"
+            f"</div>"
+            f"<div class='ig3-field ig3-pw-wrap'>"
+            f"<label>Mot de passe</label>"
+            f"<input type='password' data-ig3-field='password_{i}' placeholder='••••••••' autocomplete='off'>"
+            f"<button type='button' class='ig3-eye' onclick='vaIg3TogglePw(this)' title='Afficher/masquer'>👁</button>"
+            f"</div>"
+            f"<div class='ig3-field'>"
+            f"<label>Clé 2FA (TOTP)</label>"
+            f"<input type='text' data-ig3-field='totp_seed_{i}' placeholder='ABCD EFGH IJKL MNOP' autocomplete='off' spellcheck='false'>"
+            f"</div>"
+            f"</div>"
+        )
+
+    ig3_modal_html = (
+        "<div id='va-ig3-modal' onclick='vaIg3Close(event)'>"
+        "<div class='ig3-box' onclick='event.stopPropagation()'>"
+        "<div class='ig3-head'>"
+        "<span style='font-size:18px'>🔐</span>"
+        "<div style='flex:1'>Comptes Instagram</div>"
+        "<div id='ig3-subtitle'></div>"
+        "<button onclick='vaIg3Close()' class='ig3-close'>×</button>"
+        "</div>"
+        "<div class='ig3-body'>"
+        + _ig3_slot(0) + _ig3_slot(1) + _ig3_slot(2) +
+        "</div>"
+        "<div class='ig3-foot'>"
+        "<button onclick='vaIg3Close()' class='ig3-cancel'>Annuler</button>"
+        "<button onclick='vaIg3Save()' class='ig3-save'>Enregistrer</button>"
+        "</div>"
+        "</div>"
+        "</div>"
+        + f"<script>window.__vaInsta3Data={insta_3_data_json};</script>"
+    )
+
     insta_css_js = """
 <style>
 #va-ig-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
@@ -4994,6 +5094,101 @@ body.light .vim-box{background:#fff;border-color:#e5e7eb}
 body.light .vim-head,body.light .vim-foot{border-color:#e5e7eb}
 body.light .vim-body input{background:#fff;border-color:#e5e7eb;color:#111}
 body.light .vim-stat{background:#f9fafb;border-color:#e5e7eb}
+/* IG3 Modal */
+.va-ig3-btn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid #2a2a2a;padding:6px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;transition:all .12s}
+.va-ig3-btn:hover{background:rgba(236,72,153,.08)}
+.va-ig3-label{font-size:10px;opacity:.85}
+#va-ig3-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
+#va-ig3-modal.show{display:flex}
+.ig3-box{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:520px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.ig3-head{padding:16px 22px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+#ig3-subtitle{font-size:11px;color:#888;font-weight:400}
+.ig3-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
+.ig3-close:hover{color:#fff}
+.ig3-body{padding:14px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.ig3-slot{background:#16181f;border:1px solid #2a2a2a;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.ig3-slot-head{font-size:11px;font-weight:700;color:#ec4899;text-transform:uppercase;letter-spacing:.06em}
+.ig3-field{display:flex;flex-direction:column;gap:4px;position:relative}
+.ig3-field label{font-size:10px;color:#888;font-weight:600}
+.ig3-field input{background:#0f1116;border:1px solid #2a2a2a;color:#fff;padding:8px 11px;border-radius:7px;font-size:12px;font-family:inherit}
+.ig3-field input:focus{border-color:#ec4899;outline:none}
+.ig3-pw-wrap input{padding-right:36px}
+.ig3-eye{position:absolute;right:6px;top:20px;background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:4px 8px}
+.ig3-eye:hover{color:#ec4899}
+.ig3-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
+.ig3-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.ig3-save{background:#ec4899;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.ig3-save:hover{background:#db2777}
+body.light .ig3-box{background:#fff;border-color:#e5e7eb}
+body.light .ig3-slot{background:#f9fafb;border-color:#e5e7eb}
+body.light .ig3-field input{background:#fff;border-color:#e5e7eb;color:#111}
+</style>
+<script>
+/* === IG3 Modal === */
+var _ig3CurrentUid = null;
+function vaIg3Open(uid, username){
+  _ig3CurrentUid = uid;
+  document.getElementById('ig3-subtitle').textContent = '@' + username;
+  var data = (window.__vaInsta3Data || {})[uid] || [];
+  for(var i=0; i<3; i++){
+    var acc = data[i] || {};
+    var slot = document.querySelector('[data-ig3-slot="' + i + '"]');
+    if(!slot) continue;
+    var fH = slot.querySelector('[data-ig3-field="handle_' + i + '"]'); if(fH) fH.value = acc.handle || '';
+    var fE = slot.querySelector('[data-ig3-field="email_' + i + '"]'); if(fE) fE.value = acc.email || '';
+    var fP = slot.querySelector('[data-ig3-field="password_' + i + '"]'); if(fP){ fP.value = acc.password || ''; fP.type = 'password'; }
+    var fT = slot.querySelector('[data-ig3-field="totp_seed_' + i + '"]'); if(fT) fT.value = acc.totp_seed || '';
+  }
+  document.getElementById('va-ig3-modal').classList.add('show');
+}
+function vaIg3Close(e){
+  if(e && e.target && e.target.id !== 'va-ig3-modal' && e.target !== this) return;
+  document.getElementById('va-ig3-modal').classList.remove('show');
+}
+function vaIg3TogglePw(btn){
+  var inp = btn.parentElement.querySelector('input');
+  if(!inp) return;
+  inp.type = (inp.type === 'password') ? 'text' : 'password';
+}
+function vaIg3Save(){
+  var fd = new FormData();
+  fd.append('user_id', _ig3CurrentUid);
+  for(var i=0; i<3; i++){
+    var slot = document.querySelector('[data-ig3-slot="' + i + '"]');
+    if(!slot) continue;
+    ['handle','email','password','totp_seed'].forEach(function(f){
+      var inp = slot.querySelector('[data-ig3-field="' + f + '_' + i + '"]');
+      fd.append(f + '_' + i, inp ? inp.value : '');
+    });
+  }
+  fetch('/va/set_insta_3', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('✓ Comptes Instagram enregistrés', 'success');
+        try {
+          window.__vaInsta3Data = window.__vaInsta3Data || {};
+          window.__vaInsta3Data[_ig3CurrentUid] = d.accounts || [];
+          // Met a jour le compteur du badge
+          var btn = document.querySelector('.va-ig3-btn[onclick^="vaIg3Open(\\''+_ig3CurrentUid+'\\'"]');
+          if(btn){
+            var n = (d.accounts || []).filter(function(a){ return a && a.handle; }).length;
+            var lbl = btn.querySelector('.va-ig3-label');
+            if(lbl) lbl.textContent = n + '/3';
+          }
+        } catch(e){}
+        document.getElementById('va-ig3-modal').classList.remove('show');
+      } else {
+        if(typeof showToast === 'function') showToast('Erreur : ' + (d && d.error || '?'), 'error');
+      }
+    })
+    .catch(function(err){
+      if(typeof showToast === 'function') showToast('Erreur : ' + err, 'error');
+    });
+}
+</script>
+<style>
+.dummy-end{}
 </style>
 <script>
 var _vimCurrentUid = null;
@@ -5920,7 +6115,7 @@ document.addEventListener('DOMContentLoaded', function(){
         + vault_sidebar
         + "<div class='va-vault-detail'>" + detail_content + "</div>"
         + "</div>"
-        + modal_html + pay_modal_html + insta_modal_html
+        + modal_html + pay_modal_html + insta_modal_html + ig3_modal_html
         + vault_search_js
     )
 
@@ -20514,21 +20709,41 @@ def create_app():
 
     @app.route("/va/set_insta_3", methods=["POST"])
     def va_set_insta_3():
-        """Stocke les 3 handles Instagram d'un VA (systeme distinct du single-handle).
-        Body : user_id (str), handles[] (jusqu'a 3, format @x ou x)."""
+        """Stocke les 3 comptes Instagram d'un VA avec credentials.
+
+        Body (3 slots, suffixe 0/1/2) :
+        - user_id
+        - handle_0, email_0, password_0, totp_seed_0
+        - handle_1, email_1, password_1, totp_seed_1
+        - handle_2, email_2, password_2, totp_seed_2
+
+        Compat : accepte aussi handles[] (legacy /insta Discord, handle-only).
+        """
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         uid = (request.form.get("user_id") or "").strip()
-        handles = request.form.getlist("handles")
         if not uid:
             return jsonify({"ok": False, "error": "user_id manquant"}), 400
+        # Mode legacy si handles[] est fourni (Discord)
+        legacy_handles = request.form.getlist("handles")
+        if legacy_handles:
+            accounts = legacy_handles
+        else:
+            accounts = []
+            for i in (0, 1, 2):
+                accounts.append({
+                    "handle": request.form.get(f"handle_{i}", ""),
+                    "email": request.form.get(f"email_{i}", ""),
+                    "password": request.form.get(f"password_{i}", ""),
+                    "totp_seed": request.form.get(f"totp_seed_{i}", ""),
+                })
         try:
-            _set_insta_3_for_va(uid, handles)
+            _set_insta_3_for_va(uid, accounts)
             saved = _get_insta_3_for_va(uid)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
-        return jsonify({"ok": True, "handles": saved})
+        return jsonify({"ok": True, "accounts": saved})
 
     @app.route("/va/get_insta_3", methods=["GET"])
     def va_get_insta_3():
@@ -20538,7 +20753,7 @@ def create_app():
         uid = (request.args.get("user_id") or "").strip()
         if not uid:
             return jsonify({"ok": False, "error": "user_id manquant"}), 400
-        return jsonify({"ok": True, "handles": _get_insta_3_for_va(uid)})
+        return jsonify({"ok": True, "accounts": _get_insta_3_for_va(uid)})
 
     @app.route("/va/set_links", methods=["POST"])
     def va_set_links():
