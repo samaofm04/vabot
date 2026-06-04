@@ -3788,7 +3788,8 @@ def _save_external_insta(items: list):
     EXT_INSTA_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _add_external_insta(handle: str, password: str = "", totp_seed: str = "") -> dict:
+def _add_external_insta(handle: str, password: str = "", totp_seed: str = "",
+                         va_name: str = "", model: str = "") -> dict:
     """Ajoute un compte. Retourne {ok, added/skipped, item}."""
     import time as _t
     h = _normalize_insta_handle(handle or "")
@@ -3801,6 +3802,8 @@ def _add_external_insta(handle: str, password: str = "", totp_seed: str = "") ->
         "handle": h,
         "password": (password or "").strip(),
         "totp_seed": (totp_seed or "").strip().replace(" ", ""),
+        "va_name": (va_name or "").strip(),
+        "model": (model or "").strip().title(),  # 'amelia' -> 'Amelia'
         "added_at": int(_t.time()),
     }
     items.append(item)
@@ -5677,16 +5680,83 @@ function vaIg3AutoLoadAll(){
     }, i * 250);
   });
 }
+// Auto-load des stats pour les comptes EXTERNES (section GeeLark)
+function extAutoLoadOne(row, force){
+  var h = row.getAttribute('data-ext-handle');
+  if(!h) return;
+  var nums = row.querySelectorAll('.va-ig3-row-num');
+  // Skip si deja rempli (cache hit cote serveur)
+  if(nums[0] && nums[0].textContent.trim() !== '—' && !force) return;
+  var url = '/external/stats?handle=' + encodeURIComponent(h) + (force ? '&force=1' : '');
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !d.ok) return;
+    var s = d.stats || {};
+    function fmt(n){ try { n = +n; } catch(e){ return '—'; } if(!n) return '0'; if(n>=1000000) return (n/1000000).toFixed(1)+'M'; if(n>=1000) return (n/1000).toFixed(1)+'k'; return String(n); }
+    function ago(iso){ if(!iso) return '—'; try { var diff = Date.now() - new Date(iso).getTime(); var h = Math.floor(diff/3600000); if(h<1) return 'à l\\'instant'; if(h<24) return 'il y a '+h+'h'; return 'il y a '+Math.floor(h/24)+'j'; } catch(e){ return '—'; } }
+    var oldErr = row.querySelector('.va-ig3-row-err');
+    if(oldErr) oldErr.remove();
+    if(s.error){
+      var errEl = document.createElement('div');
+      errEl.className = 'va-ig3-row-err';
+      errEl.textContent = '⚠️ ' + (s.error||'').slice(0,80);
+      row.appendChild(errEl);
+      return;
+    }
+    if(s.profile_pic_url){
+      var pp = row.querySelector('.va-ig3-row-pp');
+      if(pp && pp.tagName === 'IMG'){ pp.src = s.profile_pic_url; }
+      else if(pp){ var newPp = document.createElement('img'); newPp.src = s.profile_pic_url; newPp.className = 'va-ig3-row-pp'; newPp.referrerPolicy = 'no-referrer'; pp.replaceWith(newPp); }
+    }
+    if(nums[0]) nums[0].textContent = fmt(s.followers||0);
+    if(nums[1]) nums[1].textContent = fmt(s.daily||0);
+    if(nums[2]) nums[2].textContent = fmt(s.weekly||0);
+    if(nums[3]) nums[3].textContent = fmt(s.biweekly||0);
+    var last = row.querySelector('.va-ig3-row-last-val');
+    if(last) last.textContent = ago(s.last_reel_at);
+    var lastDate = row.querySelector('.va-ig3-row-last-date');
+    if(lastDate && s.last_reel_at){
+      try { var dt = new Date(s.last_reel_at); var dd = String(dt.getDate()).padStart(2,'0'); var mm = String(dt.getMonth()+1).padStart(2,'0'); var hh = String(dt.getHours()).padStart(2,'0'); var mi = String(dt.getMinutes()).padStart(2,'0'); lastDate.textContent = dd+'/'+mm+' '+hh+'h'+mi; } catch(e){}
+    }
+    // Preview strip
+    var oldPv = row.querySelector('.va-ig3-preview');
+    if(oldPv) oldPv.remove();
+    if(s.preview && s.preview.length){
+      var pv = document.createElement('div');
+      pv.className = 'va-ig3-preview';
+      s.preview.slice(0,4).forEach(function(p){
+        if(!p.thumbnail_url || !p.shortcode) return;
+        var a = document.createElement('a'); a.href = 'https://instagram.com/p/' + p.shortcode + '/'; a.target = '_blank'; a.className = 'va-ig3-thumb'; a.onclick = function(ev){ ev.stopPropagation(); };
+        var img = document.createElement('img'); img.src = p.thumbnail_url; img.referrerPolicy = 'no-referrer'; img.onerror = function(){ this.style.display='none'; };
+        a.appendChild(img); pv.appendChild(a);
+      });
+      row.appendChild(pv);
+    }
+  });
+}
+function extAutoLoadAll(){
+  var rows = document.querySelectorAll('.va-ig3-row[data-ext-handle]');
+  rows.forEach(function(row, i){ setTimeout(function(){ extAutoLoadOne(row, false); }, i * 250); });
+}
+// Click sur une row external = force re-scrape
+document.addEventListener('click', function(e){
+  var row = e.target.closest && e.target.closest('.va-ig3-row[data-ext-handle]');
+  if(!row) return;
+  if(e.target.closest('a') || e.target.closest('button')) return;
+  extAutoLoadOne(row, true);
+});
+
 // Lance apres un court delai pour laisser la page se stabiliser
 if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', function(){ setTimeout(vaIg3AutoLoadAll, 300); });
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 300);
+  });
 } else {
-  setTimeout(vaIg3AutoLoadAll, 300);
+  setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 300);
 }
-// Re-trigger quand on switche vers le tab VAs (les cartes apparaissent ce moment-la)
+// Re-trigger quand on switche vers le tab VAs ou GeeLark
 document.addEventListener('click', function(e){
   if(e.target && e.target.matches && e.target.matches('[onclick*="switchTab"]')){
-    setTimeout(vaIg3AutoLoadAll, 400);
+    setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 400);
   }
 }, true);
 function vaIg3MiniLoad(uid, detail, force){
@@ -12074,75 +12144,103 @@ async function glDeleteWatcher(id, btn){
     # ====== Section Comptes externes (Insta) ======
     ext_accounts = _load_external_insta()
     ext_stats_cache = _load_insta_3_stats_cache()
+    # Modeles connus sur GeeLark (le user dit : amelia, emma, lola)
+    GEELARK_MODELS = ["Amelia", "Emma", "Lola"]
+    # Trie : par modele, puis va_name, puis handle
+    def _sort_key(it):
+        m = (it.get("model") or "").strip()
+        try:
+            mi = GEELARK_MODELS.index(m)
+        except ValueError:
+            mi = 999  # non-classes en dernier
+        return (mi, (it.get("va_name") or "zzz").lower(), it.get("handle", ""))
+    ext_accounts_sorted = sorted(ext_accounts, key=_sort_key)
+    # Groupe par (model, va_name)
+    from itertools import groupby as _gb
+    groups = []
+    for (model, va_name), grp in _gb(ext_accounts_sorted, key=lambda x: ((x.get("model") or "").strip() or "(sans modele)", (x.get("va_name") or "").strip() or "(sans VA)")):
+        groups.append((model, va_name, list(grp)))
     ext_rows_html = []
-    for it in ext_accounts:
-        h = it.get("handle") or ""
-        s = ext_stats_cache.get(h) or {}
-        pp = s.get("profile_pic_url") or ""
-        has_stats = bool(s) and not s.get("error")
-        def _fmt(n):
-            try:
-                n = int(n)
-            except Exception:
-                return "—"
-            if n >= 1_000_000:
-                return f"{n/1_000_000:.1f}M"
-            if n >= 1000:
-                return f"{n/1000:.1f}k"
-            return str(n)
-        foll = _fmt(s.get("followers")) if has_stats else "—"
-        d_v = _fmt(s.get("daily")) if has_stats else "—"
-        w_v = _fmt(s.get("weekly")) if has_stats else "—"
-        bw_v = _fmt(s.get("biweekly")) if has_stats else "—"
-        last_lbl = "—"
-        last_date = ""
-        if has_stats and s.get("last_reel_at"):
-            try:
-                import datetime as _dt_e
-                d_post = _dt_e.datetime.fromisoformat(s["last_reel_at"].replace("Z", "+00:00"))
-                if d_post.tzinfo is None:
-                    d_post = d_post.replace(tzinfo=_dt_e.timezone.utc)
-                age = _dt_e.datetime.now(_dt_e.timezone.utc) - d_post
-                h_age = int(age.total_seconds() / 3600)
-                if h_age < 1:
-                    last_lbl = "à l'instant"
-                elif h_age < 24:
-                    last_lbl = f"il y a {h_age}h"
-                else:
-                    last_lbl = f"il y a {h_age // 24}j"
-                last_date = d_post.strftime("%d/%m %Hh%M")
-            except Exception:
-                pass
-        pp_html = (
-            f"<img src='{pp}' class='va-ig3-row-pp' loading='lazy' referrerpolicy='no-referrer' onerror=\"this.style.display='none'\">"
-            if pp else
-            f"<div class='va-ig3-row-pp' style='display:flex;align-items:center;justify-content:center;color:#ec4899;font-weight:700;font-size:14px'>@</div>"
-        )
-        err_html = (
-            f"<div class='va-ig3-row-err'>⚠️ {s['error'][:50]}</div>"
-            if s.get("error") else ""
-        )
+    for model, va_name, items_in_grp in groups:
+        # Section header par groupe
+        is_known = model in GEELARK_MODELS
+        head_color = "#ec4899" if is_known else "#666"
         ext_rows_html.append(
-            f"<div class='va-ig3-row' data-ext-handle='{h}'>"
-            f"{pp_html}"
-            f"<div class='va-ig3-row-name'>"
-            f"<div class='va-ig3-row-handle'>@{h}</div>"
-            f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
-            f"</div>"
-            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
-            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
-            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
-            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
-            f"<div class='va-ig3-row-last'>"
-            f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
-            f"<div class='va-ig3-row-last-val'>{last_lbl}</div>"
-            f"<div class='va-ig3-row-last-date'>{last_date}</div>"
-            f"</div>"
-            f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
-            f"<button onclick='extRemove(\"{h}\")' style='background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px' title='Retirer'>×</button>"
-            f"{err_html}"
+            f"<div class='ext-group-head' style='display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding:6px 12px;background:rgba(168,85,247,.06);border-left:3px solid {head_color};border-radius:6px'>"
+            f"<span style='font-weight:800;font-size:12px;color:{head_color}'>{model}</span>"
+            f"<span style='color:#888;font-size:11px'>·</span>"
+            f"<span style='font-weight:700;font-size:12px;color:#aaa'>{va_name}</span>"
+            f"<span style='color:#666;font-size:10px;margin-left:auto'>{len(items_in_grp)} compte{'s' if len(items_in_grp) > 1 else ''}</span>"
             f"</div>"
         )
+        for it in items_in_grp:
+            h = it.get("handle") or ""
+            s = ext_stats_cache.get(h) or {}
+            pp = s.get("profile_pic_url") or ""
+            has_stats = bool(s) and not s.get("error")
+            def _fmt(n):
+                try:
+                    n = int(n)
+                except Exception:
+                    return "—"
+                if n >= 1_000_000:
+                    return f"{n/1_000_000:.1f}M"
+                if n >= 1000:
+                    return f"{n/1000:.1f}k"
+                return str(n)
+            foll = _fmt(s.get("followers")) if has_stats else "—"
+            d_v = _fmt(s.get("daily")) if has_stats else "—"
+            w_v = _fmt(s.get("weekly")) if has_stats else "—"
+            bw_v = _fmt(s.get("biweekly")) if has_stats else "—"
+            last_lbl = "—"
+            last_date = ""
+            if has_stats and s.get("last_reel_at"):
+                try:
+                    import datetime as _dt_e
+                    d_post = _dt_e.datetime.fromisoformat(s["last_reel_at"].replace("Z", "+00:00"))
+                    if d_post.tzinfo is None:
+                        d_post = d_post.replace(tzinfo=_dt_e.timezone.utc)
+                    age = _dt_e.datetime.now(_dt_e.timezone.utc) - d_post
+                    h_age = int(age.total_seconds() / 3600)
+                    if h_age < 1:
+                        last_lbl = "à l'instant"
+                    elif h_age < 24:
+                        last_lbl = f"il y a {h_age}h"
+                    else:
+                        last_lbl = f"il y a {h_age // 24}j"
+                    last_date = d_post.strftime("%d/%m %Hh%M")
+                except Exception:
+                    pass
+            pp_html = (
+                f"<img src='{pp}' class='va-ig3-row-pp' loading='lazy' referrerpolicy='no-referrer' onerror=\"this.style.display='none'\">"
+                if pp else
+                f"<div class='va-ig3-row-pp' style='display:flex;align-items:center;justify-content:center;color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+            )
+            err_html = (
+                f"<div class='va-ig3-row-err'>⚠️ {s['error'][:50]}</div>"
+                if s.get("error") else ""
+            )
+            ext_rows_html.append(
+                f"<div class='va-ig3-row' data-ext-handle='{h}'>"
+                f"{pp_html}"
+                f"<div class='va-ig3-row-name'>"
+                f"<div class='va-ig3-row-handle'>@{h}</div>"
+                f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
+                f"</div>"
+                f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+                f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
+                f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
+                f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
+                f"<div class='va-ig3-row-last'>"
+                f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
+                f"<div class='va-ig3-row-last-val'>{last_lbl}</div>"
+                f"<div class='va-ig3-row-last-date'>{last_date}</div>"
+                f"</div>"
+                f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+                f"<button onclick='extRemove(\"{h}\")' style='background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px' title='Retirer'>×</button>"
+                f"{err_html}"
+                f"</div>"
+            )
     ext_section = (
         f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
         f"<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px'>"
@@ -12167,7 +12265,15 @@ async function glDeleteWatcher(id, btn){
         "<button onclick='extCloseBulkModal()' style='background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1'>×</button>"
         "</div>"
         "<p style='margin:0;color:#888;font-size:12px'>Colle ta liste de @handles Instagram, <b>1 par ligne</b> (ou separes par virgule). Les @ et espaces sont auto-nettoyes. Les doublons sont skippes.</p>"
-        "<textarea id='ext-bulk-input' rows='10' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px;font-family:monospace' "
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>"
+        "<div><label style='font-size:10px;color:#888;font-weight:600;display:block;margin-bottom:4px'>Nom du VA</label>"
+        "<input type='text' id='ext-bulk-vaname' placeholder='ex: Sarah K.' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:8px 11px;border-radius:7px;font-size:12px;width:100%;font-family:inherit'></div>"
+        "<div><label style='font-size:10px;color:#888;font-weight:600;display:block;margin-bottom:4px'>Modèle</label>"
+        "<select id='ext-bulk-model' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:8px 11px;border-radius:7px;font-size:12px;width:100%;font-family:inherit;cursor:pointer'>"
+        "<option value=''>—</option><option value='Amelia'>Amelia</option><option value='Emma'>Emma</option><option value='Lola'>Lola</option>"
+        "</select></div>"
+        "</div>"
+        "<textarea id='ext-bulk-input' rows='8' style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px;font-family:monospace' "
         "placeholder='@user1\\n@user2\\n@user3\\n…'></textarea>"
         "<div style='display:flex;gap:10px;justify-content:flex-end'>"
         "<button onclick='extCloseBulkModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>Annuler</button>"
@@ -12193,8 +12299,10 @@ async function glDeleteWatcher(id, btn){
         "}"
         "function extDoBulkAdd(){"
         "  var raw=document.getElementById('ext-bulk-input').value.trim();"
+        "  var vaName=document.getElementById('ext-bulk-vaname').value.trim();"
+        "  var model=document.getElementById('ext-bulk-model').value.trim();"
         "  if(!raw){if(typeof showToast==='function')showToast('Liste vide','error');return;}"
-        "  var fd=new FormData();fd.append('handles',raw);"
+        "  var fd=new FormData();fd.append('handles',raw);fd.append('va_name',vaName);fd.append('model',model);"
         "  fetch('/external/add',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
         "    if(d&&d.ok){"
         "      var added=d.added||[];"
@@ -12202,11 +12310,9 @@ async function glDeleteWatcher(id, btn){
         "      if((d.skipped||[]).length)msg+=', '+d.skipped.length+' deja present';"
         "      if((d.errors||[]).length)msg+=', '+d.errors.length+' erreur';"
         "      if(typeof showToast==='function')showToast(msg,'success',3000);"
-        "      var container=document.querySelector('.va-ig3-detail[data-vaid-detail=\"__external__\"]');"
-        "      var placeholder=container?container.querySelector('p'):null;"
-        "      if(placeholder)placeholder.remove();"
-        "      if(container){added.forEach(function(h){container.insertAdjacentHTML('beforeend',extRenderRow(h));});}"
         "      extCloseBulkModal();"
+        "      // Reload pour voir le grouping ; on est deja sur GeeLark donc location preserve"
+        "      setTimeout(function(){window.location.reload();},500);"
         "    } else {"
         "      if(typeof showToast==='function')showToast('Erreur : '+((d&&d.error)||'?'),'error');"
         "    }"
@@ -21663,11 +21769,14 @@ def create_app():
 
     @app.route("/external/add", methods=["POST"])
     def external_add():
-        """Body : handles (raw text, 1 par ligne). Crée tous d'un coup."""
+        """Body : handles (raw text, 1 par ligne) + va_name + model.
+        Crée tous d'un coup avec le meme va_name/model."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         raw = request.form.get("handles") or ""
+        va_name = request.form.get("va_name", "")
+        model = request.form.get("model", "")
         added = []
         skipped = []
         errors = []
@@ -21675,7 +21784,7 @@ def create_app():
             h = line.strip()
             if not h:
                 continue
-            res = _add_external_insta(h)
+            res = _add_external_insta(h, va_name=va_name, model=model)
             if res.get("ok"):
                 added.append(res["item"]["handle"])
             elif res.get("skipped"):
@@ -21683,6 +21792,24 @@ def create_app():
             else:
                 errors.append({"handle": h, "error": res.get("error", "?")})
         return jsonify({"ok": True, "added": added, "skipped": skipped, "errors": errors})
+
+    @app.route("/external/update", methods=["POST"])
+    def external_update():
+        """Update va_name + model d'un compte existant."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        h = _normalize_insta_handle(request.form.get("handle", ""))
+        if not h:
+            return jsonify({"ok": False, "error": "handle invalide"})
+        items = _load_external_insta()
+        for it in items:
+            if it.get("handle") == h:
+                it["va_name"] = (request.form.get("va_name", "") or "").strip()
+                it["model"] = (request.form.get("model", "") or "").strip().title()
+                _save_external_insta(items)
+                return jsonify({"ok": True, "item": it})
+        return jsonify({"ok": False, "error": "compte introuvable"})
 
     @app.route("/external/add_one", methods=["POST"])
     def external_add_one():
