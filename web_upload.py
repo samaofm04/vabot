@@ -5356,14 +5356,20 @@ function vaLinksOpen(uid, username, identity){
     var m = (l.model || '(sans dossier)');
     counts[m] = (counts[m] || 0) + 1;
   });
-  var models = Object.keys(counts).sort(function(a,b){ return a.localeCompare(b); });
-  // Auto-select : si l identite du VA matche un folder, on filtre dessus
+  // FILTRE : ne garder que les models qui matchent l'identite du VA
+  // (sinon on voit tous les modeles, polluant l'interface).
+  var allModels = Object.keys(counts).sort(function(a,b){ return a.localeCompare(b); });
   var matchModel = null;
-  models.forEach(function(m){
+  allModels.forEach(function(m){
     if(m.toLowerCase() === _vlmCurrentIdent) matchModel = m;
   });
+  var models = matchModel ? [matchModel] : allModels;
   _vlmActiveModel = matchModel || '__all__';
-  var pillsHtml = '<button type="button" class="vlm-pill ' + (_vlmActiveModel === '__all__' ? 'active' : '') + '" data-pill-model="__all__" onclick="vaLinksSetModel(this)">Tous <span class="vlm-pill-count">' + allLinks.length + '</span></button>';
+  // Si on a un match, on cache le pill "Tous" — l'utilisateur veut juste son identite
+  var pillsHtml = '';
+  if(!matchModel){
+    pillsHtml += '<button type="button" class="vlm-pill ' + (_vlmActiveModel === '__all__' ? 'active' : '') + '" data-pill-model="__all__" onclick="vaLinksSetModel(this)">Tous <span class="vlm-pill-count">' + allLinks.length + '</span></button>';
+  }
   models.forEach(function(m){
     var active = (m === _vlmActiveModel) ? 'active' : '';
     var safeAttr = m.replace(/"/g, '&quot;');
