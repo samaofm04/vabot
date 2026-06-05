@@ -89,16 +89,21 @@ def list_sfs() -> List[Dict]:
 
 
 def add_sfs(identity: str, partner: str, date_iso: str, time_str: str,
-            platform: str = "OF", status: str = "scheduled", notes: str = ""):
+            platform: str = "OF", status: str = "scheduled", notes: str = "",
+            receiver_identity: str = ""):
     """Ajoute une entrée SFS planifiée.
 
-    status: 'scheduled' (confirmé) ou 'to_program' (à programmer)
+    identity         : modèle qui ENVOIE (celle qui poste sur OF/MyM)
+    partner          : @ du partenaire externe (compte tiers)
+    receiver_identity: modèle qui RECEVRA le SFS (la promo). Si vide,
+                       par defaut = identity (auto-SFS = la modele s envoie a elle-meme)
     """
     items = _load(SFS_FILE)
     new_id = int(time.time() * 1000)
     items.append({
         "id": new_id,
         "identity": identity.lower().strip(),
+        "receiver_identity": (receiver_identity or identity).lower().strip(),
         "partner": partner.strip().replace("@", ""),
         "date": date_iso,
         "time": time_str,
@@ -111,6 +116,58 @@ def add_sfs(identity: str, partner: str, date_iso: str, time_str: str,
     items.sort(key=lambda x: (x.get("date", ""), x.get("time", "")))
     _save(SFS_FILE, items)
     return new_id
+
+
+def sfs_weekly_received(target_per_week: int = 3) -> Dict:
+    """Calcule pour chaque modele combien de SFS elle a RECU cette semaine
+    (lundi -> dimanche actuel) et retourne celles en danger (< target).
+
+    Retourne :
+    {
+      'week_start': '2026-06-01', 'week_end': '2026-06-07', 'target': 3,
+      'by_receiver': {'amelia': 2, 'emma': 4, 'lola': 0},
+      'in_danger': [{'identity': 'amelia', 'received': 2, 'missing': 1},
+                    {'identity': 'lola', 'received': 0, 'missing': 3}]
+    }
+    """
+    import datetime as _dt
+    today = _dt.date.today()
+    monday = today - _dt.timedelta(days=today.weekday())  # lundi
+    sunday = monday + _dt.timedelta(days=6)
+    week_start_iso = monday.isoformat()
+    week_end_iso = sunday.isoformat()
+    items = list_sfs()
+    by_receiver = {}
+    for it in items:
+        d = it.get("date", "")
+        if not (week_start_iso <= d <= week_end_iso):
+            continue
+        rcv = (it.get("receiver_identity") or it.get("identity") or "").lower().strip()
+        if not rcv:
+            continue
+        by_receiver[rcv] = by_receiver.get(rcv, 0) + 1
+    # Liste des identites connues pour completer celles a 0
+    try:
+        identities = list((load_identity_platforms() or {}).keys())
+    except Exception:
+        identities = list(by_receiver.keys())
+    in_danger = []
+    for ident in identities:
+        n = by_receiver.get(ident, 0)
+        if n < target_per_week:
+            in_danger.append({
+                "identity": ident,
+                "received": n,
+                "missing": target_per_week - n,
+            })
+    in_danger.sort(key=lambda x: x["missing"], reverse=True)
+    return {
+        "week_start": week_start_iso,
+        "week_end": week_end_iso,
+        "target": target_per_week,
+        "by_receiver": by_receiver,
+        "in_danger": in_danger,
+    }
 
 
 def remove_sfs(item_id: int) -> bool:

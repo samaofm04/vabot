@@ -9099,7 +9099,7 @@ def _render_identity_avatars_section() -> str:
 
 def _render_sfs_html() -> str:
     try:
-        from business import list_sfs, sfs_stats, load_identity_platforms, identities_for_platform, PLATFORMS
+        from business import list_sfs, sfs_stats, load_identity_platforms, identities_for_platform, PLATFORMS, sfs_weekly_received
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
     import datetime, calendar as cal
@@ -9111,6 +9111,11 @@ def _render_sfs_html() -> str:
     platforms_map = load_identity_platforms()
     platform_idents = {p: identities_for_platform(p) for p in PLATFORMS}
     platform_idents_json = _json.dumps(platform_idents)
+    # Liste de toutes les identites cross-plateforme (pour le dropdown receveur)
+    _all_idents_set = set()
+    for _p, _il in platform_idents.items():
+        _all_idents_set.update(_il)
+    all_identities_json = _json.dumps(sorted(_all_idents_set))
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -9186,6 +9191,46 @@ def _render_sfs_html() -> str:
     sfs_by_date_json = _json.dumps(sfs_by_date_simple)
 
     rows = []
+    # Alerte "semaine en danger" : modeles qui n ont pas atteint 3 SFS recus cette semaine
+    try:
+        wkly = sfs_weekly_received(target_per_week=3)
+        in_danger = wkly.get("in_danger") or []
+        if in_danger:
+            danger_cards = []
+            for d in in_danger:
+                ident = d["identity"]
+                recv = d["received"]
+                miss = d["missing"]
+                pp = _identity_avatar_html(ident, size=28)
+                color = "#ef4444" if recv == 0 else "#f59e0b"
+                danger_cards.append(
+                    f"<div style='display:flex;align-items:center;gap:10px;background:rgba(239,68,68,.06);"
+                    f"border:1px solid {color}40;border-radius:8px;padding:8px 14px'>"
+                    f"{pp}"
+                    f"<div style='flex:1'>"
+                    f"<div style='font-weight:700;font-size:13px;color:{color}'>@{ident}</div>"
+                    f"<div style='font-size:11px;color:#888'>{recv}/{wkly['target']} SFS reçus · <b style='color:{color}'>−{miss}</b> manquant{'s' if miss > 1 else ''}</div>"
+                    f"</div>"
+                    f"</div>"
+                )
+            rows.append(
+                "<div style='background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.3);"
+                "border-radius:12px;padding:14px 18px;margin-bottom:16px'>"
+                f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
+                f"<span style='font-size:18px'>⚠️</span>"
+                f"<div style='flex:1'>"
+                f"<div style='font-weight:800;font-size:14px;color:#ef4444'>Alerte — Semaine en danger</div>"
+                f"<div style='font-size:11px;color:#888'>Semaine du <b>{wkly['week_start']}</b> au <b>{wkly['week_end']}</b> · objectif <b>{wkly['target']}</b> SFS reçus/modèle</div>"
+                f"</div>"
+                f"<div style='font-size:24px;font-weight:800;color:#ef4444'>{len(in_danger)}</div>"
+                f"</div>"
+                f"<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px'>"
+                + "".join(danger_cards)
+                + "</div>"
+                "</div>"
+            )
+    except Exception:
+        pass
     # Stats
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
@@ -9366,6 +9411,7 @@ def _render_sfs_html() -> str:
 <script>
 window.__sfsData = {sfs_by_date_json};
 window.__platformIdents = {platform_idents_json};
+window.__allIdentities = {all_identities_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
@@ -9516,9 +9562,19 @@ function openSfsModal(date){{
   // Populer le select des identités selon la plateforme
   var idents = window.__platformIdents[platform] || [];
   var select = document.getElementById('sfs-modal-identity');
-  select.innerHTML = idents.length
+  var optsHtml = idents.length
     ? idents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
     : '<option value="">(aucune identité sur ' + platform + ')</option>';
+  select.innerHTML = optsHtml;
+  // Le dropdown "qui recoit" : on liste TOUTES les identites (cross-plateforme)
+  // pour permettre par ex Emma sur OF qui poste pour Amelia (autre identite).
+  var allIdents = window.__allIdentities || idents;
+  var receiver = document.getElementById('sfs-modal-receiver');
+  if(receiver){{
+    receiver.innerHTML = allIdents.length
+      ? allIdents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
+      : '<option value="">(aucune identité)</option>';
+  }}
   // Afficher les SFS existants ce jour pour cette plateforme
   var existing = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform; }});
   var existingHtml = '';
@@ -9574,7 +9630,7 @@ window.addEventListener('DOMContentLoaded', function(){{
       <input type='hidden' name='platform' id='sfs-modal-platform' value='OF'>
       <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
         <div>
-          <label>Identité (sur <span id='sfs-modal-platform-display'>OF</span>)</label>
+          <label>Identité (qui ENVOIE sur <span id='sfs-modal-platform-display'>OF</span>)</label>
           <select name='identity' id='sfs-modal-identity' required></select>
         </div>
         <div>
@@ -9582,7 +9638,11 @@ window.addEventListener('DOMContentLoaded', function(){{
           <input type='time' name='time' value='19:00' required>
         </div>
         <div>
-          <label>Partenaire @</label>
+          <label>Modèle qui REÇOIT 🎯</label>
+          <select name='receiver_identity' id='sfs-modal-receiver' required></select>
+        </div>
+        <div>
+          <label>Partenaire @ (externe)</label>
           <input type='text' name='partner' placeholder='partner_username' required>
         </div>
         <div>
@@ -9592,6 +9652,7 @@ window.addEventListener('DOMContentLoaded', function(){{
             <option value='to_program'>⚙ To program</option>
           </select>
         </div>
+        <div></div>
       </div>
       <label>Notes (optionnel)</label>
       <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
@@ -19446,6 +19507,7 @@ def create_app():
         except Exception as e:
             return _error(f"Module indispo: {e}")
         identity = (request.form.get("identity") or "").strip()
+        receiver_identity = (request.form.get("receiver_identity") or identity).strip()
         partner = (request.form.get("partner") or "").strip()
         date = (request.form.get("date") or "").strip()
         time_s = (request.form.get("time") or "").strip()
@@ -19454,8 +19516,9 @@ def create_app():
         notes = (request.form.get("notes") or "").strip()
         if not identity or not partner or not date or not time_s:
             return _error("❌ Champs requis manquants")
-        add_sfs(identity, partner, date, time_s, platform, status, notes)
-        return _success(f"✅ SFS ajouté : <b>{identity}</b> ({platform}) avec <b>@{partner}</b> le {date} à {time_s}")
+        add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
+        recv_lbl = f" → 🎯 <b>{receiver_identity}</b>" if receiver_identity != identity else ""
+        return _success(f"✅ SFS ajouté : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
 
     @app.route("/business/identity_platforms", methods=["POST"])
     def business_identity_platforms():
