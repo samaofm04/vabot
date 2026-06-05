@@ -3918,7 +3918,7 @@ def _scrape_via_ig_public(handle: str) -> dict:
     except Exception as e:
         return {"error": f"reseau IG public: {e}"}
     if r.status_code == 404:
-        return {"error": f"@{handle} n'existe pas sur Instagram."}
+        return {"error": f"🚫 Compte banni ou supprimé (@{handle})", "banned": True}
     if r.status_code == 429:
         return {"error": "Instagram rate-limit (429). Réessaie dans qq minutes."}
     if r.status_code != 200:
@@ -3929,7 +3929,7 @@ def _scrape_via_ig_public(handle: str) -> dict:
         return {"error": "Reponse non-JSON"}
     user = (d.get("data") or {}).get("user") or {}
     if not user:
-        return {"error": "Compte introuvable ou rate-limited"}
+        return {"error": f"🚫 Compte banni ou introuvable (@{handle})", "banned": True}
     profile = {
         "username": user.get("username") or handle,
         "full_name": user.get("full_name") or "",
@@ -3993,15 +3993,17 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             pass
     if "error" in res:
         err_msg = res["error"]
+        is_banned = bool(res.get("banned"))
         # Si RapidAPI dit "invalid username", on tente une verif HTTP directe
         # pour distinguer "handle inexistant" vs "compte trop neuf/petit non-indexe"
-        if "invalid" in err_msg.lower() or "missing username" in err_msg.lower():
+        if not is_banned and ("invalid" in err_msg.lower() or "missing username" in err_msg.lower()):
             exists = _verify_ig_profile_exists(h)
             if exists:
-                err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit). Attends quelques jours."
+                err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit)."
             else:
-                err_msg = f"@{h} n'existe pas sur Instagram — vérifie l'orthographe."
-        out = {"error": err_msg, "scraped_at": now_ts}
+                err_msg = f"🚫 Compte banni ou supprimé (@{h})"
+                is_banned = True
+        out = {"error": err_msg, "banned": is_banned, "scraped_at": now_ts}
         cache[h] = out
         _save_insta_3_stats_cache(cache)
         return out
@@ -5821,10 +5823,26 @@ function extAutoLoadOne(row, force){
     function ago(iso){ if(!iso) return '—'; try { var diff = Date.now() - new Date(iso).getTime(); var h = Math.floor(diff/3600000); if(h<1) return 'à l\\'instant'; if(h<24) return 'il y a '+h+'h'; return 'il y a '+Math.floor(h/24)+'j'; } catch(e){ return '—'; } }
     var oldErr = row.querySelector('.va-ig3-row-err');
     if(oldErr) oldErr.remove();
+    // Toggle banned state
+    var oldBadge = row.querySelector('.va-ig3-ban-badge');
+    if(oldBadge) oldBadge.remove();
+    if(s.banned){
+      row.classList.add('va-ig3-row-banned');
+      var handleEl = row.querySelector('.va-ig3-row-handle');
+      if(handleEl){
+        var b = document.createElement('span');
+        b.className = 'va-ig3-ban-badge';
+        b.textContent = 'BANNI';
+        b.title = 'Compte banni ou supprimé sur Instagram';
+        handleEl.appendChild(b);
+      }
+    } else {
+      row.classList.remove('va-ig3-row-banned');
+    }
     if(s.error){
       var errEl = document.createElement('div');
       errEl.className = 'va-ig3-row-err';
-      errEl.textContent = '⚠️ ' + (s.error||'').slice(0,80);
+      errEl.textContent = (s.error||'').slice(0,90);
       row.appendChild(errEl);
       return;
     }
@@ -5914,9 +5932,16 @@ function vaIg3MiniLoad(uid, detail, force){
       var s = (r && r.stats) || {};
       var nums = row.querySelectorAll('.va-ig3-row-num');
       var last = row.querySelector('.va-ig3-row-last-val');
-      // Strip any old error block
+      // Strip any old error block + ban badge
       var oldErr = row.querySelector('.va-ig3-row-err');
       if(oldErr) oldErr.remove();
+      var oldBn = row.querySelector('.va-ig3-ban-badge');
+      if(oldBn) oldBn.remove();
+      if(s.banned){
+        row.classList.add('va-ig3-row-banned');
+        var hd = row.querySelector('.va-ig3-row-handle');
+        if(hd){var bb=document.createElement('span');bb.className='va-ig3-ban-badge';bb.textContent='BANNI';bb.title='Compte banni';hd.appendChild(bb);}
+      } else {row.classList.remove('va-ig3-row-banned');}
       if(s.error){
         if(nums[0]) nums[0].textContent = '—';
         if(nums[1]) nums[1].textContent = '—';
@@ -5925,7 +5950,7 @@ function vaIg3MiniLoad(uid, detail, force){
         if(last) last.textContent = '—';
         var errEl = document.createElement('div');
         errEl.className = 'va-ig3-row-err';
-        errEl.textContent = '⚠️ ' + (s.error || '').slice(0,60);
+        errEl.textContent = (s.error || '').slice(0,90);
         row.appendChild(errEl);
         return;
       }
@@ -12371,8 +12396,13 @@ async function glDeleteWatcher(id, btn){
                 f"<div class='va-ig3-row-pp' style='display:flex;align-items:center;justify-content:center;color:#ec4899;font-weight:700;font-size:14px'>@</div>"
             )
             err_html = (
-                f"<div class='va-ig3-row-err'>⚠️ {s['error'][:50]}</div>"
+                f"<div class='va-ig3-row-err'>{s['error'][:80]}</div>"
                 if s.get("error") else ""
+            )
+            banned_class = " va-ig3-row-banned" if s.get("banned") else ""
+            ban_badge = (
+                "<span class='va-ig3-ban-badge' title='Compte banni ou supprimé sur Instagram'>BANNI</span>"
+                if s.get("banned") else ""
             )
             # Mini-footer pour assigner modele + VA name (auto-save on change)
             cur_model = (it.get("model") or "").strip()
@@ -12396,10 +12426,10 @@ async function glDeleteWatcher(id, btn){
             _data_m = (it.get("model") or "").strip() or "(sans modèle)"
             _data_v = (it.get("va_name") or "").strip() or "(sans VA)"
             ext_rows_html.append(
-                f"<div class='va-ig3-row' data-ext-handle='{h}' data-ext-model='{_data_m}' data-ext-va='{_data_v}'>"
+                f"<div class='va-ig3-row{banned_class}' data-ext-handle='{h}' data-ext-model='{_data_m}' data-ext-va='{_data_v}'>"
                 f"{pp_html}"
                 f"<div class='va-ig3-row-name'>"
-                f"<div class='va-ig3-row-handle'>@{h}</div>"
+                f"<div class='va-ig3-row-handle'>@{h}{ban_badge}</div>"
                 f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
                 f"</div>"
                 f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
@@ -12500,7 +12530,11 @@ async function glDeleteWatcher(id, btn){
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
 .va-ig3-row-open:hover{color:#ec4899}
-.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
+.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:11px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
+.va-ig3-row-banned{background:rgba(239,68,68,.06) !important;border-color:rgba(239,68,68,.3) !important}
+.va-ig3-row-banned .va-ig3-row-handle{color:#ef4444;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.4)}
+.va-ig3-row-banned .va-ig3-row-pp{filter:grayscale(.9) opacity(.7)}
+.va-ig3-ban-badge{display:inline-block;margin-left:8px;background:#ef4444;color:#fff;font-size:9px;font-weight:800;letter-spacing:.08em;padding:2px 7px;border-radius:5px;vertical-align:middle}
 .va-ig3-detail{display:flex;flex-direction:column;gap:8px}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
