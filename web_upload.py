@@ -3801,25 +3801,33 @@ def _all_tracked_handles() -> set:
 
 
 def _run_daily_insta_refresh():
-    """Re-scrape tous les comptes Insta tracked et stocke dans le cache."""
+    """Re-scrape tous les comptes Insta tracked en parallel (8 workers)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     import time as _t_dr
     handles = sorted(_all_tracked_handles())
-    print(f"[daily-insta] starting refresh for {len(handles)} handles", flush=True)
+    print(f"[daily-insta] starting parallel refresh for {len(handles)} handles", flush=True)
+    t0 = _t_dr.time()
     ok = banned = err = 0
-    for h in handles:
+    def _scrape_one(h):
         try:
-            res = _compute_insta_3_stats(h, force=True)
-            if res.get("banned"):
+            return h, _compute_insta_3_stats(h, force=True), None
+        except Exception as e:
+            return h, None, e
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(_scrape_one, h) for h in handles]
+        for fut in as_completed(futures):
+            h, res, exc = fut.result()
+            if exc is not None:
+                err += 1
+                print(f"[daily-insta] {h} exception: {exc}", flush=True)
+            elif res.get("banned"):
                 banned += 1
             elif res.get("error"):
                 err += 1
             else:
                 ok += 1
-        except Exception as e:
-            err += 1
-            print(f"[daily-insta] {h} exception: {e}", flush=True)
-        _t_dr.sleep(1.5)  # stagger pour eviter rate-limit IG
-    print(f"[daily-insta] done — ok={ok} banned={banned} err={err}", flush=True)
+    dt_s = _t_dr.time() - t0
+    print(f"[daily-insta] done in {dt_s:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
 
 
 def _daily_insta_loop():
@@ -5953,8 +5961,74 @@ function extAutoLoadOne(row, force){
   });
 }
 function extAutoLoadAll(){
-  var rows = document.querySelectorAll('.va-ig3-row[data-ext-handle]');
-  rows.forEach(function(row, i){ setTimeout(function(){ extAutoLoadOne(row, false); }, i * 250); });
+  // Batch fast : 1 seul appel /external/stats_batch pour TOUS les handles
+  // visibles (au lieu de 25 requetes paralleles cote client).
+  var rows = Array.from(document.querySelectorAll('.va-ig3-row[data-ext-handle]'));
+  // Skip rows deja remplies (cache server-side hit)
+  var todo = rows.filter(function(r){
+    var n = r.querySelector('.va-ig3-row-num');
+    return !n || n.textContent.trim() === '—';
+  });
+  if(!todo.length) return;
+  var handles = todo.map(function(r){return r.getAttribute('data-ext-handle');});
+  // Chunke par 50 pour respecter la limite du batch endpoint
+  function chunk(arr,n){var out=[];for(var i=0;i<arr.length;i+=n)out.push(arr.slice(i,i+n));return out;}
+  chunk(handles, 50).forEach(function(group){
+    var fd = new FormData();
+    fd.append('handles', group.join(','));
+    fetch('/external/stats_batch', {method:'POST', body:fd})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok) return;
+        (d.results || []).forEach(function(item){
+          var row = document.querySelector('.va-ig3-row[data-ext-handle="' + item.handle + '"]');
+          if(row) extRenderStats(row, item.stats || {});
+        });
+      });
+  });
+}
+// Render stats sur une row a partir d un object stats (extrait de extAutoLoadOne)
+function extRenderStats(row, s){
+  function fmt(n){try{n=+n;}catch(e){return '—';}if(!n)return '0';if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n);}
+  function ago(iso){if(!iso)return '—';try{var diff=Date.now()-new Date(iso).getTime();var h=Math.floor(diff/3600000);if(h<1)return 'à l\\'instant';if(h<24)return 'il y a '+h+'h';return 'il y a '+Math.floor(h/24)+'j';}catch(e){return '—';}}
+  function _fmtVm(n){if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n||0);}
+  var nums = row.querySelectorAll('.va-ig3-row-num');
+  var last = row.querySelector('.va-ig3-row-last-val');
+  var oldErr = row.querySelector('.va-ig3-row-err'); if(oldErr) oldErr.remove();
+  var oldBn = row.querySelector('.va-ig3-ban-badge'); if(oldBn) oldBn.remove();
+  if(s.banned){
+    row.classList.add('va-ig3-row-banned');
+    var hd = row.querySelector('.va-ig3-row-handle');
+    if(hd){var bb=document.createElement('span');bb.className='va-ig3-ban-badge';bb.textContent='BANNI';bb.title='Compte banni';hd.appendChild(bb);}
+  } else {row.classList.remove('va-ig3-row-banned');}
+  if(s.error){
+    if(nums[0]) nums[0].textContent='—'; if(nums[1]) nums[1].textContent='—'; if(nums[2]) nums[2].textContent='—'; if(nums[3]) nums[3].textContent='—';
+    if(last) last.textContent='—';
+    var e=document.createElement('div'); e.className='va-ig3-row-err'; e.textContent=(s.error||'').slice(0,90); row.appendChild(e);
+    return;
+  }
+  if(s.profile_pic_url){var pp=row.querySelector('.va-ig3-row-pp');if(pp&&pp.tagName==='IMG'){pp.src=s.profile_pic_url;}else if(pp){var np=document.createElement('img');np.src=s.profile_pic_url;np.className='va-ig3-row-pp';np.referrerPolicy='no-referrer';pp.replaceWith(np);}}
+  if(nums[0]) nums[0].textContent=fmt(s.followers||0);
+  if(nums[1]) nums[1].textContent=fmt(s.daily||0);
+  if(nums[2]) nums[2].textContent=fmt(s.weekly||0);
+  if(nums[3]) nums[3].textContent=fmt(s.biweekly||0);
+  if(last) last.textContent=ago(s.last_reel_at);
+  var lastDate = row.querySelector('.va-ig3-row-last-date');
+  if(lastDate && s.last_reel_at){try{var dt=new Date(s.last_reel_at);var dd=String(dt.getDate()).padStart(2,'0');var mm=String(dt.getMonth()+1).padStart(2,'0');var hh=String(dt.getHours()).padStart(2,'0');var mi=String(dt.getMinutes()).padStart(2,'0');lastDate.textContent=dd+'/'+mm+' '+hh+'h'+mi;}catch(e){}}
+  var oldPv = row.querySelector('.va-ig3-preview'); if(oldPv) oldPv.remove();
+  if(s.preview && s.preview.length){
+    var pv = document.createElement('div'); pv.className='va-ig3-preview';
+    s.preview.slice(0,6).forEach(function(p){
+      if(!p.thumbnail_url || !p.shortcode) return;
+      var a=document.createElement('a');a.href='https://instagram.com/p/'+p.shortcode+'/';a.target='_blank';a.className='va-ig3-thumb';a.onclick=function(ev){ev.stopPropagation();};
+      var img=document.createElement('img');img.src=p.thumbnail_url;img.referrerPolicy='no-referrer';img.onerror=function(){this.style.display='none';};
+      a.appendChild(img);
+      if(p.is_video){var pl=document.createElement('span');pl.className='va-ig3-thumb-play';pl.textContent='▶';a.appendChild(pl);}
+      if(p.views){var vw=document.createElement('span');vw.className='va-ig3-thumb-views';vw.textContent=_fmtVm(p.views);a.appendChild(vw);}
+      pv.appendChild(a);
+    });
+    row.appendChild(pv);
+  }
 }
 // Click sur une row external = force re-scrape
 document.addEventListener('click', function(e){
@@ -22565,6 +22639,31 @@ def create_app():
         if not h:
             return jsonify({"ok": False, "error": "handle requis"})
         return jsonify({"ok": True, "handle": h, "stats": _compute_insta_3_stats(h, force=force)})
+
+    @app.route("/external/stats_batch", methods=["POST"])
+    def external_stats_batch():
+        """Stats pour N handles en parallel (jusqu'a 50 par batch).
+        Body : handles=h1,h2,h3,... + force=1 (optionnel)."""
+        from flask import jsonify
+        from concurrent.futures import ThreadPoolExecutor
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        raw = request.form.get("handles") or request.args.get("handles") or ""
+        force = (request.form.get("force") or request.args.get("force") or "").strip() == "1"
+        handles = [x.strip() for x in raw.split(",") if x.strip()][:50]
+        if not handles:
+            return jsonify({"ok": True, "results": []})
+        # Parallel scrape avec 8 workers
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            future_map = {ex.submit(_compute_insta_3_stats, h, force): h for h in handles}
+            for fut in future_map:
+                h = future_map[fut]
+                try:
+                    results[h] = fut.result(timeout=30)
+                except Exception as e:
+                    results[h] = {"error": f"timeout: {e}"}
+        return jsonify({"ok": True, "results": [{"handle": h, "stats": results.get(h, {})} for h in handles]})
 
     @app.route("/va/insta_3_stats", methods=["GET"])
     def va_insta_3_stats():
