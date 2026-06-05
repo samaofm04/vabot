@@ -3979,8 +3979,9 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         return cached
     # 1) Public IG d abord
     res = _scrape_via_ig_public(h)
-    # 2) Fallback RapidAPI si l API publique echoue
-    if "error" in res:
+    # 2) Fallback RapidAPI si l API publique echoue (sauf si banned : pas la
+    #    peine de re-tenter, le compte n existe pas)
+    if "error" in res and not res.get("banned"):
         try:
             import insta_scraper as _ig_s
             res2 = _ig_s.scrape_profile(h, limit=50)
