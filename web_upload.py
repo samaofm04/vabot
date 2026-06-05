@@ -12415,13 +12415,47 @@ async function glDeleteWatcher(id, btn){
         # Section header par groupe
         is_known = model in GEELARK_MODELS
         head_color = "#ec4899" if is_known else "#666"
+        # Recap : actifs / bannis / postes 24h sur le groupe
+        import datetime as _dt_hh
+        n_total = len(items_in_grp)
+        n_banned = 0
+        n_active = 0
+        n_posted_24h = 0
+        n_unscraped = 0
+        now_dt_hh = _dt_hh.datetime.now(_dt_hh.timezone.utc)
+        for it_hh in items_in_grp:
+            h_hh = (it_hh.get("handle") or "").strip()
+            s_hh = ext_stats_cache.get(h_hh) or {}
+            if not s_hh:
+                n_unscraped += 1
+                continue
+            if s_hh.get("banned"):
+                n_banned += 1
+            elif "followers" in s_hh and not s_hh.get("error"):
+                n_active += 1
+            if s_hh.get("last_post_at"):
+                try:
+                    d_post = _dt_hh.datetime.fromisoformat(s_hh["last_post_at"].replace("Z", "+00:00"))
+                    if d_post.tzinfo is None:
+                        d_post = d_post.replace(tzinfo=_dt_hh.timezone.utc)
+                    if (now_dt_hh - d_post).total_seconds() < 86400:
+                        n_posted_24h += 1
+                except Exception:
+                    pass
+        recap_badges = (
+            (f"<span style='font-size:10px;background:rgba(34,197,94,.15);color:#22c55e;padding:2px 7px;border-radius:5px;font-weight:700'>{n_active} actif{'s' if n_active > 1 else ''}</span>" if n_active else "")
+            + (f"<span style='font-size:10px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 7px;border-radius:5px;font-weight:700'>{n_banned} banni{'s' if n_banned > 1 else ''}</span>" if n_banned else "")
+            + (f"<span style='font-size:10px;background:rgba(59,130,246,.15);color:#3b82f6;padding:2px 7px;border-radius:5px;font-weight:700'>{n_posted_24h} 24h ⚡</span>" if n_posted_24h else "")
+            + (f"<span style='font-size:10px;background:rgba(160,160,160,.12);color:#888;padding:2px 7px;border-radius:5px;font-weight:700'>{n_unscraped} —</span>" if n_unscraped else "")
+        )
         ext_rows_html.append(
             f"<div class='ext-group-head' data-ext-model='{model}' data-ext-va='{va_name}' "
-            f"style='display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding:6px 12px;background:rgba(168,85,247,.06);border-left:3px solid {head_color};border-radius:6px'>"
+            f"style='display:flex;align-items:center;gap:8px;margin:14px 0 8px;padding:8px 12px;background:rgba(168,85,247,.06);border-left:3px solid {head_color};border-radius:6px;flex-wrap:wrap'>"
             f"<span style='font-weight:800;font-size:12px;color:{head_color}'>{model}</span>"
             f"<span style='color:#888;font-size:11px'>·</span>"
             f"<span style='font-weight:700;font-size:12px;color:#aaa'>{va_name}</span>"
-            f"<span style='color:#666;font-size:10px;margin-left:auto'>{len(items_in_grp)} compte{'s' if len(items_in_grp) > 1 else ''}</span>"
+            f"<span style='color:#666;font-size:10px'>{n_total} compte{'s' if n_total > 1 else ''}</span>"
+            f"<div style='display:flex;gap:5px;margin-left:auto;align-items:center;flex-wrap:wrap'>{recap_badges}</div>"
             f"</div>"
         )
         for it in items_in_grp:
