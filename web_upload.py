@@ -3813,7 +3813,7 @@ def _run_daily_insta_refresh():
             return h, _compute_insta_3_stats(h, force=True), None
         except Exception as e:
             return h, None, e
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         futures = [ex.submit(_scrape_one, h) for h in handles]
         for fut in as_completed(futures):
             h, res, exc = fut.result()
@@ -3831,9 +3831,17 @@ def _run_daily_insta_refresh():
 
 
 def _daily_insta_loop():
-    """Thread daemon : dort jusqu'a minuit puis declenche le refresh."""
+    """Thread daemon : refresh initial au boot + refresh quotidien a 00:00:30."""
     import time as _t_dl
     import datetime as _dt_dl
+    # Refresh initial au demarrage : seulement les handles dont le cache est
+    # plus vieux que 24h (ou jamais scrape). Evite de re-scrape inutilement.
+    try:
+        _t_dl.sleep(30)  # attend que le bot soit stabilise (Discord ready, etc.)
+        _run_daily_insta_refresh_smart()
+    except Exception as e:
+        print(f"[daily-insta] initial refresh crash: {e}", flush=True)
+    # Boucle quotidienne a 00:00:30
     while True:
         try:
             now = _dt_dl.datetime.now()
@@ -3846,6 +3854,45 @@ def _daily_insta_loop():
         except Exception as e:
             print(f"[daily-insta-loop] crash: {e}", flush=True)
             _t_dl.sleep(300)
+
+
+def _run_daily_insta_refresh_smart():
+    """Comme _run_daily_insta_refresh mais skip les handles dont le cache est
+    encore frais (< 24h). Evite de hammerer Instagram au boot si le bot
+    redemarre souvent."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time as _t_dr
+    cache = _load_insta_3_stats_cache()
+    now_ts = int(_t_dr.time())
+    all_h = sorted(_all_tracked_handles())
+    # Filtre : seulement ceux dont le cache est manquant ou plus vieux que 24h
+    todo = [h for h in all_h if (
+        h not in cache or (now_ts - int(cache.get(h, {}).get("scraped_at", 0))) >= _INSTA_3_STATS_TTL
+    )]
+    skipped = len(all_h) - len(todo)
+    print(f"[daily-insta-smart] {len(todo)} a refresh ({skipped} deja frais)", flush=True)
+    if not todo:
+        return
+    t0 = _t_dr.time()
+    ok = banned = err = 0
+    def _scrape_one(h):
+        try:
+            return h, _compute_insta_3_stats(h, force=True), None
+        except Exception as e:
+            return h, None, e
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [ex.submit(_scrape_one, h) for h in todo]
+        for fut in as_completed(futures):
+            h, res, exc = fut.result()
+            if exc is not None:
+                err += 1
+            elif res.get("banned"):
+                banned += 1
+            elif res.get("error"):
+                err += 1
+            else:
+                ok += 1
+    print(f"[daily-insta-smart] done in {_t_dr.time()-t0:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
 
 
 _DAILY_THREAD_STARTED = False
@@ -3920,7 +3967,7 @@ def _remove_external_insta(handle: str) -> bool:
 # ============ Stats Insta 3 (RapidAPI + cache 1h) ============
 
 VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
-_INSTA_3_STATS_TTL = 3600  # 1h
+_INSTA_3_STATS_TTL = 24 * 3600  # 24h (refresh quotidien automatique a 00:00)
 
 
 def _load_insta_3_stats_cache() -> dict:
@@ -22653,9 +22700,9 @@ def create_app():
         handles = [x.strip() for x in raw.split(",") if x.strip()][:50]
         if not handles:
             return jsonify({"ok": True, "results": []})
-        # Parallel scrape avec 8 workers
+        # Parallel scrape avec 4 workers (evite le rate-limit IG 429)
         results = {}
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=4) as ex:
             future_map = {ex.submit(_compute_insta_3_stats, h, force): h for h in handles}
             for fut in future_map:
                 h = future_map[fut]
