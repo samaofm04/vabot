@@ -4057,7 +4057,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             return 0
     sorted_reels = sorted(reels, key=_ts, reverse=True)
     preview = []
-    for p in sorted_reels[:4]:
+    for p in sorted_reels[:6]:  # 6 posts pour une grille 3x2 façon profil IG
         thumb = p.get("thumbnail_url") or p.get("display_url") or ""
         sc = p.get("shortcode") or ""
         preview.append({
@@ -5426,20 +5426,34 @@ body.light .va-id{color:#9ca3af}
                             last_reel_date = d_post.strftime("%d/%m %Hh%M")
                         except Exception:
                             pass
-                    # Preview strip : 4 mini-thumbs des derniers reels
+                    # Preview grille 3x2 : 6 mini-thumbs style profil IG
                     preview_html = ""
                     if has_stats and s.get("preview"):
                         thumbs = []
-                        for p in (s.get("preview") or [])[:4]:
+                        for p in (s.get("preview") or [])[:6]:
                             th = p.get("thumbnail_url") or ""
                             sc_p = p.get("shortcode") or ""
+                            vues = int(p.get("views") or 0)
+                            is_vid = bool(p.get("is_video"))
                             if th and sc_p:
+                                def _fmt_v(n):
+                                    if n >= 1_000_000:
+                                        return f"{n/1_000_000:.1f}M"
+                                    if n >= 1000:
+                                        return f"{n/1000:.1f}k"
+                                    return str(n)
+                                play_icon = "<span class='va-ig3-thumb-play'>▶</span>" if is_vid else ""
+                                views_overlay = (
+                                    f"<span class='va-ig3-thumb-views'>{_fmt_v(vues)}</span>"
+                                    if vues > 0 else ""
+                                )
                                 thumbs.append(
                                     f"<a href='https://instagram.com/p/{sc_p}/' target='_blank' "
                                     f"class='va-ig3-thumb' onclick='event.stopPropagation()' "
                                     f"title='Voir le reel'>"
                                     f"<img src='{th}' referrerpolicy='no-referrer' "
                                     f"onerror=\"this.style.display='none'\">"
+                                    f"{play_icon}{views_overlay}"
                                     f"</a>"
                                 )
                         if thumbs:
@@ -5829,17 +5843,21 @@ function extAutoLoadOne(row, force){
     if(lastDate && s.last_reel_at){
       try { var dt = new Date(s.last_reel_at); var dd = String(dt.getDate()).padStart(2,'0'); var mm = String(dt.getMonth()+1).padStart(2,'0'); var hh = String(dt.getHours()).padStart(2,'0'); var mi = String(dt.getMinutes()).padStart(2,'0'); lastDate.textContent = dd+'/'+mm+' '+hh+'h'+mi; } catch(e){}
     }
-    // Preview strip
+    // Preview grille 3x2 style profil IG
+    function _fmtV(n){if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n||0);}
     var oldPv = row.querySelector('.va-ig3-preview');
     if(oldPv) oldPv.remove();
     if(s.preview && s.preview.length){
       var pv = document.createElement('div');
       pv.className = 'va-ig3-preview';
-      s.preview.slice(0,4).forEach(function(p){
+      s.preview.slice(0,6).forEach(function(p){
         if(!p.thumbnail_url || !p.shortcode) return;
         var a = document.createElement('a'); a.href = 'https://instagram.com/p/' + p.shortcode + '/'; a.target = '_blank'; a.className = 'va-ig3-thumb'; a.onclick = function(ev){ ev.stopPropagation(); };
         var img = document.createElement('img'); img.src = p.thumbnail_url; img.referrerPolicy = 'no-referrer'; img.onerror = function(){ this.style.display='none'; };
-        a.appendChild(img); pv.appendChild(a);
+        a.appendChild(img);
+        if(p.is_video){var play=document.createElement('span');play.className='va-ig3-thumb-play';play.textContent='▶';a.appendChild(play);}
+        if(p.views){var vs=document.createElement('span');vs.className='va-ig3-thumb-views';vs.textContent=_fmtV(p.views);a.appendChild(vs);}
+        pv.appendChild(a);
       });
       row.appendChild(pv);
     }
@@ -5949,9 +5967,10 @@ function vaIg3MiniLoad(uid, detail, force){
       var oldPreview = row.querySelector('.va-ig3-preview');
       if(oldPreview) oldPreview.remove();
       if(s.preview && s.preview.length){
+        function _fmtVm(n){if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n||0);}
         var preview = document.createElement('div');
         preview.className = 'va-ig3-preview';
-        s.preview.slice(0,4).forEach(function(p){
+        s.preview.slice(0,6).forEach(function(p){
           if(!p.thumbnail_url || !p.shortcode) return;
           var a = document.createElement('a');
           a.href = 'https://instagram.com/p/' + p.shortcode + '/';
@@ -5964,6 +5983,8 @@ function vaIg3MiniLoad(uid, detail, force){
           img.referrerPolicy = 'no-referrer';
           img.onerror = function(){ this.style.display='none'; };
           a.appendChild(img);
+          if(p.is_video){var pl=document.createElement('span');pl.className='va-ig3-thumb-play';pl.textContent='▶';a.appendChild(pl);}
+          if(p.views){var vw=document.createElement('span');vw.className='va-ig3-thumb-views';vw.textContent=_fmtVm(p.views);a.appendChild(vw);}
           preview.appendChild(a);
         });
         row.appendChild(preview);
@@ -6048,7 +6069,7 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-open:hover{color:#ec4899}
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
-.va-ig3-preview{grid-column:1 / -1;display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a}
+.va-ig3-preview{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a;max-width:340px}
 /* Layout sidebar+detail comme page VAs */
 .ext-sb-layout{display:grid;grid-template-columns:280px 1fr;gap:14px;min-height:500px}
 .ext-sb-sidebar{background:#0a0c10;border:1px solid #2a2a2a;border-radius:10px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
@@ -6067,7 +6088,9 @@ body.light #ext-sb-search,body.light #ext-sb-filter-model{background:#f9fafb;bor
 .ext-mini-select{cursor:pointer}
 .ext-mini-input{min-width:140px}
 body.light .ext-mini-select,body.light .ext-mini-input{background:#fff;border-color:#e5e7eb;color:#111}
-.va-ig3-thumb{width:48px;height:48px;border-radius:6px;overflow:hidden;background:#16181f;display:block;flex-shrink:0;transition:transform .12s}
+.va-ig3-thumb{aspect-ratio:1;border-radius:4px;overflow:hidden;background:#16181f;display:block;position:relative;transition:transform .12s;cursor:pointer}
+.va-ig3-thumb-play{position:absolute;top:4px;right:4px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
+.va-ig3-thumb-views{position:absolute;bottom:0;left:0;right:0;padding:8px 6px 4px;color:#fff;font-size:10px;font-weight:700;background:linear-gradient(to top,rgba(0,0,0,.7),transparent);text-align:center;pointer-events:none}
 .va-ig3-thumb:hover{transform:scale(1.08)}
 .va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 body.light .va-ig3-preview{border-top-color:#e5e7eb}
@@ -12482,6 +12505,12 @@ async function glDeleteWatcher(id, btn){
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
 .ext-mini-input{min-width:140px}
+.va-ig3-preview{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a;max-width:340px}
+.va-ig3-thumb{aspect-ratio:1;border-radius:4px;overflow:hidden;background:#16181f;display:block;position:relative;transition:transform .12s;cursor:pointer}
+.va-ig3-thumb:hover{transform:scale(1.04);z-index:2}
+.va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.va-ig3-thumb-play{position:absolute;top:4px;right:4px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
+.va-ig3-thumb-views{position:absolute;bottom:0;left:0;right:0;padding:8px 6px 4px;color:#fff;font-size:10px;font-weight:700;background:linear-gradient(to top,rgba(0,0,0,.7),transparent);text-align:center;pointer-events:none}
 @media(max-width:900px){.ext-sb-layout{grid-template-columns:1fr;min-height:auto}}
 </style>
 """
