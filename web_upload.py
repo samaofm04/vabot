@@ -6161,20 +6161,10 @@ document.addEventListener('click', function(e){
   extAutoLoadOne(row, true);
 });
 
-// Lance apres un court delai pour laisser la page se stabiliser
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 300);
-  });
-} else {
-  setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 300);
-}
-// Re-trigger quand on switche vers le tab VAs ou GeeLark
-document.addEventListener('click', function(e){
-  if(e.target && e.target.matches && e.target.matches('[onclick*="switchTab"]')){
-    setTimeout(function(){ vaIg3AutoLoadAll(); extAutoLoadAll(); }, 400);
-  }
-}, true);
+// Auto-load DESACTIVE au page-load : le cache server-side rend deja tout.
+// Le refresh quotidien 00:00 + le bouton 🔄 manuel suffisent. Plus de
+// requetes au render -> ouverture instantanee meme avec 150 comptes.
+// Le click sur une row force toujours un re-scrape individuel si besoin.
 function vaIg3MiniLoad(uid, detail, force){
   var rows = detail.querySelectorAll('.va-ig3-row');
   rows.forEach(function(r){
@@ -13065,9 +13055,26 @@ async function glDeleteWatcher(id, btn){
         "      if(s.ok!==undefined)msg+=' · '+s.ok+'✓ '+(s.banned||0)+'🚫 ('+s.duration_s+'s)';"
         "      if(el)el.textContent=msg;"
         "      if(btn){btn.disabled=false;btn.style.opacity='';btn.style.cursor='pointer';}"
-        "      /* Rescrape les rows visibles avec la nouvelle data */"
-        "      if(typeof extAutoLoadAll==='function')setTimeout(extAutoLoadAll,500);"
+        "      /* Refresh forced de toutes les rows visibles (cache server est now fresh) */"
+        "      setTimeout(function(){extForceRefreshVisible();},500);"
         "    }"
+        "  });"
+        "}"
+        "function extForceRefreshVisible(){"
+        "  /* Recupere TOUTES les rows visibles (display!=='none') et fetch le batch */"
+        "  var rows=Array.from(document.querySelectorAll('.va-ig3-row[data-ext-handle]')).filter(function(r){return r.offsetParent!==null;});"
+        "  if(!rows.length)return;"
+        "  var handles=rows.map(function(r){return r.getAttribute('data-ext-handle');});"
+        "  function chunk(a,n){var o=[];for(var i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));return o;}"
+        "  chunk(handles,50).forEach(function(g){"
+        "    var fd=new FormData();fd.append('handles',g.join(','));"
+        "    fetch('/external/stats_batch',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){"
+        "      if(!d||!d.ok)return;"
+        "      (d.results||[]).forEach(function(item){"
+        "        var row=document.querySelector('.va-ig3-row[data-ext-handle=\"'+item.handle+'\"]');"
+        "        if(row&&typeof extRenderStats==='function')extRenderStats(row,item.stats||{});"
+        "      });"
+        "    });"
         "  });"
         "}"
         "function extOpenBulkModalFor(model){"
@@ -13102,8 +13109,7 @@ async function glDeleteWatcher(id, btn){
         "    var rm=r.getAttribute('data-ext-model');var rv=r.getAttribute('data-ext-va');"
         "    r.style.display=(rm===m&&rv===v)?(r.classList.contains('va-ig3-row')?'grid':'flex'):'none';"
         "  });"
-        "        /* Auto-load les stats si pas encore charge */"
-        "  if(typeof extAutoLoadAll==='function'){setTimeout(extAutoLoadAll,100);}"
+        "        /* Auto-load DESACTIVE : le cache server-side rend deja tout */"
         "}"
         "function extSbFilter(){"
         "  var q=(document.getElementById('ext-sb-search').value||'').toLowerCase().trim();"
