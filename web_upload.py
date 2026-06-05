@@ -1837,7 +1837,6 @@ function showTab(group,name,title,subtitle){
     }
   }catch(e){}
   // Auto-refresh Instagram Trends : 1x par heure max (sinon IG rate-limit)
-  // Persiste en localStorage (pas session) pour debounce entre sessions browser.
   if(name === 'igtrends'){
     try{
       var last = parseInt(localStorage.getItem('ig_trends_last_autoscrape') || '0');
@@ -1847,13 +1846,68 @@ function showTab(group,name,title,subtitle){
           .then(function(r){ return r.json(); })
           .then(function(d){
             if(d && d.ok){
-              if(typeof showToast === 'function') showToast('🔄 Maj auto : ' + (d.count||'?') + ' comptes (~8s chacun, ' + Math.ceil((d.count||1)*8/60) + ' min)', 'info');
+              showGameLoader(d.count || 1);
             }
           }).catch(function(){});
       }
     }catch(e){}
   }
 }
+
+// ===== Loading bar style jeu video (8-bit progress) =====
+function showGameLoader(totalCount){
+  // Cleanup ancien si present
+  var old = document.getElementById('game-loader');
+  if(old) old.remove();
+  var loader = document.createElement('div');
+  loader.id = 'game-loader';
+  loader.style.cssText = 'position:fixed;top:18px;right:18px;background:#0a0c10;border:2px solid #3b82f6;border-radius:10px;padding:12px 18px;z-index:99998;box-shadow:0 8px 28px rgba(59,130,246,.35);font-family:monospace;min-width:240px;animation:gameLoaderIn .2s ease';
+  loader.innerHTML =
+    '<div style="font-size:11px;color:#3b82f6;font-weight:700;letter-spacing:.12em;margin-bottom:6px;text-transform:uppercase">Loading…</div>'
+    + '<div id="game-loader-bar" style="background:#16181f;border:1px solid #2a2a2a;border-radius:3px;padding:3px;display:flex;gap:2px;height:18px;overflow:hidden">'
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#888"><span id="game-loader-count">0/' + totalCount + '</span><span id="game-loader-pct">0%</span></div>';
+  document.body.appendChild(loader);
+  // 20 cellules (style 8-bit)
+  var bar = document.getElementById('game-loader-bar');
+  for(var i=0;i<20;i++){
+    var c = document.createElement('div');
+    c.style.cssText = 'flex:1;background:#1a1d24;border-radius:1px;transition:background .15s';
+    bar.appendChild(c);
+  }
+  // Anime progression : on simule au debut puis on syncronise au polling /insta/scrape_status
+  window.__gameLoaderTotal = totalCount;
+  window.__gameLoaderTimer = setInterval(function(){
+    fetch('/insta/scrape_status').then(function(r){return r.json();}).then(function(d){
+      if(!d) return;
+      var done = (d.done !== undefined) ? d.done : 0;
+      var total = (d.total !== undefined) ? d.total : window.__gameLoaderTotal;
+      var pct = total ? Math.min(100, Math.round(done/total*100)) : 0;
+      var cells = bar.children;
+      var filled = Math.floor(pct/5);
+      for(var j=0;j<cells.length;j++){
+        cells[j].style.background = (j < filled) ? '#3b82f6' : (j === filled ? '#1e40af' : '#1a1d24');
+      }
+      document.getElementById('game-loader-count').textContent = done + '/' + total;
+      document.getElementById('game-loader-pct').textContent = pct + '%';
+      if(pct >= 100 || d.status === 'idle'){
+        clearInterval(window.__gameLoaderTimer);
+        // Anime full + fade-out
+        for(var k=0;k<cells.length;k++) cells[k].style.background = '#22c55e';
+        document.getElementById('game-loader-pct').textContent = '✓ DONE';
+        document.getElementById('game-loader-pct').style.color = '#22c55e';
+        setTimeout(function(){ loader.style.transition='opacity .4s'; loader.style.opacity='0'; setTimeout(function(){loader.remove();},420); }, 1500);
+      }
+    }).catch(function(){});
+  }, 1500);
+}
+// Animation keyframes
+(function(){
+  if(document.getElementById('game-loader-kf')) return;
+  var s = document.createElement('style'); s.id='game-loader-kf';
+  s.textContent = '@keyframes gameLoaderIn{from{opacity:0;transform:translateY(-10px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}';
+  document.head.appendChild(s);
+})();
 
 // === Add to Veille (bookmark) ===
 // Helper : refresh la section Veille AJAX (sans reloader la page entiere)
@@ -22479,6 +22533,15 @@ def create_app():
             "message": f"Scrape @{u} lancé en arrière-plan…",
         })
 
+    @app.route("/insta/scrape_status", methods=["GET"])
+    def insta_scrape_status():
+        """Etat du scrape watchlist en cours (pour la game-loader UI)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"status": "unauth", "done": 0, "total": 0})
+        st = getattr(insta_scrape_status, "_state", None) or {"status": "idle", "done": 0, "total": 0}
+        return jsonify(st)
+
     @app.route("/insta/scrape_all", methods=["POST"])
     def insta_scrape_all():
         if not is_auth():
@@ -22494,22 +22557,27 @@ def create_app():
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
         import time as _t
+        # State partage entre le thread bg et l endpoint status
+        insta_scrape_status._state = {
+            "status": "in_progress", "done": 0, "total": len(wl),
+            "started_at": int(_t.time()),
+        }
         def _bg_scrape_all():
             for i, u in enumerate(wl):
                 try:
                     scrape_profile(u, limit=50)
                 except Exception:
                     pass
-                # Delay 8s entre chaque pour eviter le rate-limit Instagram
-                # (sans delay -> "Please wait a few minutes" 401 apres ~5 comptes)
+                insta_scrape_status._state["done"] = i + 1
                 if i < len(wl) - 1:
                     _t.sleep(8)
+            insta_scrape_status._state["status"] = "idle"
+            insta_scrape_status._state["finished_at"] = int(_t.time())
         threading.Thread(target=_bg_scrape_all, daemon=True).start()
         return jsonify({
             "ok": True, "count": len(wl), "scrape_started": True,
             "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
         })
-        return _success(msg)
 
     @app.route("/settings/admin_token", methods=["POST"])
     def settings_admin_token():
