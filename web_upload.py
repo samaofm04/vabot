@@ -3783,6 +3783,76 @@ def _get_insta_3_for_va(user_id) -> list:
     return _load_va_insta_3().get(str(user_id), [])
 
 
+# ============ Refresh quotidien automatique des stats Insta (00:00) ============
+
+def _all_tracked_handles() -> set:
+    """Tous les handles Insta tracked dans le bot (VAs + externals)."""
+    handles = set()
+    for accs in _load_va_insta_3().values():
+        for a in accs:
+            h = (a.get("handle") or "").strip()
+            if h:
+                handles.add(h)
+    for it in _load_external_insta():
+        h = (it.get("handle") or "").strip()
+        if h:
+            handles.add(h)
+    return handles
+
+
+def _run_daily_insta_refresh():
+    """Re-scrape tous les comptes Insta tracked et stocke dans le cache."""
+    import time as _t_dr
+    handles = sorted(_all_tracked_handles())
+    print(f"[daily-insta] starting refresh for {len(handles)} handles", flush=True)
+    ok = banned = err = 0
+    for h in handles:
+        try:
+            res = _compute_insta_3_stats(h, force=True)
+            if res.get("banned"):
+                banned += 1
+            elif res.get("error"):
+                err += 1
+            else:
+                ok += 1
+        except Exception as e:
+            err += 1
+            print(f"[daily-insta] {h} exception: {e}", flush=True)
+        _t_dr.sleep(1.5)  # stagger pour eviter rate-limit IG
+    print(f"[daily-insta] done — ok={ok} banned={banned} err={err}", flush=True)
+
+
+def _daily_insta_loop():
+    """Thread daemon : dort jusqu'a minuit puis declenche le refresh."""
+    import time as _t_dl
+    import datetime as _dt_dl
+    while True:
+        try:
+            now = _dt_dl.datetime.now()
+            tomorrow = (now + _dt_dl.timedelta(days=1)).replace(
+                hour=0, minute=0, second=30, microsecond=0
+            )
+            wait_s = (tomorrow - now).total_seconds()
+            _t_dl.sleep(max(60, wait_s))
+            _run_daily_insta_refresh()
+        except Exception as e:
+            print(f"[daily-insta-loop] crash: {e}", flush=True)
+            _t_dl.sleep(300)
+
+
+_DAILY_THREAD_STARTED = False
+
+def _start_daily_insta_thread():
+    global _DAILY_THREAD_STARTED
+    if _DAILY_THREAD_STARTED:
+        return
+    _DAILY_THREAD_STARTED = True
+    import threading as _th
+    t = _th.Thread(target=_daily_insta_loop, daemon=True, name="daily-insta-refresh")
+    t.start()
+    print("[daily-insta] thread started — runs every 00:00:30", flush=True)
+
+
 # ============ Comptes Insta externes (non lies a un VA Discord) ============
 # Pour les VAs / personnes qui gerent bcp de comptes IG sans etre dans Discord.
 # Storage : data/external_insta_accounts.json = list[{handle, password, totp_seed, added_at}]
@@ -5470,7 +5540,7 @@ body.light .va-id{color:#9ca3af}
                         f"<div class='va-ig3-row' data-handle='{h}'>"
                         f"{pp_html}"
                         f"<div class='va-ig3-row-name'>"
-                        f"<div class='va-ig3-row-handle'>@{h}</div>"
+                        f"<a href='https://instagram.com/{h}/' target='_blank' rel='noopener noreferrer' class='va-ig3-row-handle' onclick='event.stopPropagation()' title='Ouvrir @{h} sur Instagram'>@{h}</a>"
                         f"<div class='va-ig3-row-platform'>Instagram</div>"
                         f"</div>"
                         f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
@@ -6082,7 +6152,8 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-empty:hover{border-color:#2a2a2a}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
-.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
+.va-ig3-row-handle:hover{text-decoration:underline}
 .va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
 .va-ig3-row-metric{text-align:center;min-width:55px}
 .va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
@@ -12430,7 +12501,9 @@ async function glDeleteWatcher(id, btn){
                 f"<div class='va-ig3-row{banned_class}' data-ext-handle='{h}' data-ext-model='{_data_m}' data-ext-va='{_data_v}'>"
                 f"{pp_html}"
                 f"<div class='va-ig3-row-name'>"
-                f"<div class='va-ig3-row-handle'>@{h}{ban_badge}</div>"
+                f"<a href='https://instagram.com/{h}/' target='_blank' rel='noopener noreferrer' "
+                f"class='va-ig3-row-handle' onclick='event.stopPropagation()' "
+                f"title='Ouvrir @{h} sur Instagram'>@{h}{ban_badge}</a>"
                 f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
                 f"</div>"
                 f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
@@ -12519,7 +12592,8 @@ async function glDeleteWatcher(id, btn){
 .va-ig3-rm-btn:hover{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
-.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
+.va-ig3-row-handle:hover{text-decoration:underline}
 .va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
 .va-ig3-row-metric{text-align:center;min-width:55px}
 .va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
@@ -22559,4 +22633,9 @@ def run_web_app():
 def start_in_thread():
     thread = threading.Thread(target=run_web_app, daemon=True, name="WebUploadServer")
     thread.start()
+    # Lance aussi le refresh quotidien des stats Insta a 00:00
+    try:
+        _start_daily_insta_thread()
+    except Exception as e:
+        print(f"[start_in_thread] daily insta refresh failed to start: {e}", flush=True)
     return thread
