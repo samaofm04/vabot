@@ -12389,7 +12389,7 @@ async function glDeleteWatcher(id, btn){
                 f"<div class='va-ig3-row-last-date'>{last_date}</div>"
                 f"</div>"
                 f"<a href='https://instagram.com/{h}' target='_blank' class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
-                f"<button onclick='extRemove(\"{h}\")' style='background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px' title='Retirer'>×</button>"
+                f"<button onclick='extRemove(\"{h}\")' class='va-ig3-rm-btn' title='Supprimer ce compte'>×</button>"
                 f"{assign_footer}"
                 f"{err_html}"
                 f"</div>"
@@ -12459,8 +12459,10 @@ async function glDeleteWatcher(id, btn){
 .ext-sb-va-item.active{background:rgba(168,85,247,.15)}
 .ext-sb-section.collapsed .ext-sb-section-body{display:none !important}
 .ext-sb-section.collapsed .ext-sb-chevron{transform:rotate(-90deg)}
-.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
+.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
 .va-ig3-row:hover{border-color:#ec489940}
+.va-ig3-rm-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;font-weight:700;transition:all .12s;padding:0}
+.va-ig3-rm-btn:hover{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
 .va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
@@ -12719,7 +12721,7 @@ async function glDeleteWatcher(id, btn){
         "    +'<div class=\"va-ig3-row-metric\"><div class=\"va-ig3-row-num va-ig3-green\">—</div><div class=\"va-ig3-row-lab\">vues 2 sem</div></div>'"
         "    +'<div class=\"va-ig3-row-last\"><div class=\"va-ig3-row-last-lab\">Dernier reel</div><div class=\"va-ig3-row-last-val\">—</div><div class=\"va-ig3-row-last-date\"></div></div>'"
         "    +'<a href=\"https://instagram.com/'+h+'\" target=\"_blank\" class=\"va-ig3-row-open\" onclick=\"event.stopPropagation()\">→</a>'"
-        "    +'<button onclick=\"extRemove(\\''+h+'\\')\" style=\"background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:0 4px\" title=\"Retirer\">×</button>'"
+        "    +'<button onclick=\"extRemove(\\''+h+'\\')\" class=\"va-ig3-rm-btn\" title=\"Supprimer ce compte\">×</button>'"
         "  +'</div>';"
         "}"
         "function extDoBulkAdd(){"
