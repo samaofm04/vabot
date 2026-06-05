@@ -3784,6 +3784,38 @@ def _get_insta_3_for_va(user_id) -> list:
 
 
 # ============ Refresh quotidien automatique des stats Insta (00:00) ============
+# Architecture :
+# - Etat persistant dans data/insta_refresh_state.json : {last_run_at, status,
+#   in_progress_since, last_summary, error}
+# - Lock (threading.Lock) pour eviter 2 refreshes simultanes
+# - Boot smart-refresh + boucle daily 00:00:30
+# - UI : badge "MAJ il y a Xh" + bouton 🔄 Forcer refresh
+
+INSTA_REFRESH_STATE_FILE = DATA_DIR / "insta_refresh_state.json"
+import threading as _threading_mod
+_REFRESH_LOCK = _threading_mod.Lock()
+
+
+def _load_refresh_state() -> dict:
+    if not INSTA_REFRESH_STATE_FILE.exists():
+        return {}
+    try:
+        return json.loads(INSTA_REFRESH_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_refresh_state(state: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    INSTA_REFRESH_STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _set_refresh_status(**kw):
+    """Update partiel du state (merge)."""
+    s = _load_refresh_state()
+    s.update(kw)
+    _save_refresh_state(s)
+
 
 def _all_tracked_handles() -> set:
     """Tous les handles Insta tracked dans le bot (VAs + externals)."""
@@ -3800,34 +3832,71 @@ def _all_tracked_handles() -> set:
     return handles
 
 
-def _run_daily_insta_refresh():
-    """Re-scrape tous les comptes Insta tracked en parallel (8 workers)."""
+def _do_refresh(handles: list, label: str = "manual") -> dict:
+    """Core refresh : lock + parallel scrape + state persistence.
+
+    Retourne {ok, banned, err, duration_s, total}.
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time as _t_dr
+    if not _REFRESH_LOCK.acquire(blocking=False):
+        return {"error": "Un refresh est deja en cours", "ok": 0, "banned": 0, "err": 0}
+    try:
+        t0 = _t_dr.time()
+        total = len(handles)
+        _set_refresh_status(
+            status="in_progress",
+            in_progress_since=int(t0),
+            in_progress_label=label,
+            in_progress_total=total,
+        )
+        print(f"[insta-refresh:{label}] starting parallel for {total} handles", flush=True)
+        ok = banned = err = 0
+        def _scrape_one(h):
+            try:
+                return h, _compute_insta_3_stats(h, force=True), None
+            except Exception as e:
+                return h, None, e
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = [ex.submit(_scrape_one, h) for h in handles]
+            for fut in as_completed(futures):
+                h, res, exc = fut.result()
+                if exc is not None:
+                    err += 1
+                elif res.get("banned"):
+                    banned += 1
+                elif res.get("error"):
+                    err += 1
+                else:
+                    ok += 1
+        dt_s = _t_dr.time() - t0
+        summary = {
+            "ok": ok, "banned": banned, "err": err,
+            "duration_s": round(dt_s, 1), "total": total, "label": label,
+            "finished_at": int(_t_dr.time()),
+        }
+        _set_refresh_status(
+            status="idle",
+            in_progress_since=None,
+            in_progress_label=None,
+            in_progress_total=None,
+            last_run_at=int(_t_dr.time()),
+            last_summary=summary,
+            error=None,
+        )
+        print(f"[insta-refresh:{label}] done in {dt_s:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
+        return summary
+    except Exception as e:
+        _set_refresh_status(status="idle", in_progress_since=None, error=str(e))
+        raise
+    finally:
+        _REFRESH_LOCK.release()
+
+
+def _run_daily_insta_refresh():
+    """Re-scrape TOUS les comptes Insta tracked (force, ignore le cache)."""
     handles = sorted(_all_tracked_handles())
-    print(f"[daily-insta] starting parallel refresh for {len(handles)} handles", flush=True)
-    t0 = _t_dr.time()
-    ok = banned = err = 0
-    def _scrape_one(h):
-        try:
-            return h, _compute_insta_3_stats(h, force=True), None
-        except Exception as e:
-            return h, None, e
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [ex.submit(_scrape_one, h) for h in handles]
-        for fut in as_completed(futures):
-            h, res, exc = fut.result()
-            if exc is not None:
-                err += 1
-                print(f"[daily-insta] {h} exception: {exc}", flush=True)
-            elif res.get("banned"):
-                banned += 1
-            elif res.get("error"):
-                err += 1
-            else:
-                ok += 1
-    dt_s = _t_dr.time() - t0
-    print(f"[daily-insta] done in {dt_s:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
+    return _do_refresh(handles, label="daily")
 
 
 def _daily_insta_loop():
@@ -3857,42 +3926,22 @@ def _daily_insta_loop():
 
 
 def _run_daily_insta_refresh_smart():
-    """Comme _run_daily_insta_refresh mais skip les handles dont le cache est
-    encore frais (< 24h). Evite de hammerer Instagram au boot si le bot
-    redemarre souvent."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """Skip les handles dont le cache est encore frais (< 24h).
+    Utilise au boot pour pre-warmer sans hammerer IG en cas de redemarrage."""
     import time as _t_dr
     cache = _load_insta_3_stats_cache()
     now_ts = int(_t_dr.time())
     all_h = sorted(_all_tracked_handles())
-    # Filtre : seulement ceux dont le cache est manquant ou plus vieux que 24h
     todo = [h for h in all_h if (
         h not in cache or (now_ts - int(cache.get(h, {}).get("scraped_at", 0))) >= _INSTA_3_STATS_TTL
     )]
     skipped = len(all_h) - len(todo)
-    print(f"[daily-insta-smart] {len(todo)} a refresh ({skipped} deja frais)", flush=True)
+    print(f"[insta-refresh:boot] {len(todo)} stale, {skipped} frais", flush=True)
     if not todo:
-        return
-    t0 = _t_dr.time()
-    ok = banned = err = 0
-    def _scrape_one(h):
-        try:
-            return h, _compute_insta_3_stats(h, force=True), None
-        except Exception as e:
-            return h, None, e
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [ex.submit(_scrape_one, h) for h in todo]
-        for fut in as_completed(futures):
-            h, res, exc = fut.result()
-            if exc is not None:
-                err += 1
-            elif res.get("banned"):
-                banned += 1
-            elif res.get("error"):
-                err += 1
-            else:
-                ok += 1
-    print(f"[daily-insta-smart] done in {_t_dr.time()-t0:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
+        # Pas de refresh necessaire : mais on enregistre quand meme un state idle
+        _set_refresh_status(status="idle", last_check_at=now_ts)
+        return {"ok": 0, "banned": 0, "err": 0, "duration_s": 0, "total": 0, "label": "boot-noop"}
+    return _do_refresh(todo, label="boot-smart")
 
 
 _DAILY_THREAD_STARTED = False
@@ -3906,6 +3955,33 @@ def _start_daily_insta_thread():
     t = _th.Thread(target=_daily_insta_loop, daemon=True, name="daily-insta-refresh")
     t.start()
     print("[daily-insta] thread started — runs every 00:00:30", flush=True)
+
+
+def _render_refresh_status_text(st: dict) -> str:
+    """Texte court à afficher dans le widget refresh."""
+    import time as _t_r, datetime as _dt_r
+    if st.get("status") == "in_progress":
+        since = int(st.get("in_progress_since") or 0)
+        elapsed = int(_t_r.time()) - since if since else 0
+        total = st.get("in_progress_total") or 0
+        return f"⏳ Refresh en cours ({elapsed}s / {total} comptes)"
+    last = int(st.get("last_run_at") or 0)
+    if not last:
+        return "⏸ Jamais refresh"
+    age = int(_t_r.time()) - last
+    if age < 60:
+        ago = "à l'instant"
+    elif age < 3600:
+        ago = f"il y a {age // 60} min"
+    elif age < 86400:
+        ago = f"il y a {age // 3600}h"
+    else:
+        ago = f"il y a {age // 86400}j"
+    summary = st.get("last_summary") or {}
+    extra = ""
+    if summary:
+        extra = f" · {summary.get('ok',0)}✓ {summary.get('banned',0)}🚫"
+    return f"✓ MAJ {ago}{extra}"
 
 
 # ============ Comptes Insta externes (non lies a un VA Discord) ============
@@ -12860,7 +12936,15 @@ async function glDeleteWatcher(id, btn){
         f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
         f"</h3>"
         f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Click un VA dans la sidebar pour voir ses comptes Insta.</p>"
-        f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
+        # Widget refresh : dernier MAJ + bouton 🔄
+        + (lambda st: (
+            f"<div id='insta-refresh-widget' style='display:flex;align-items:center;gap:8px;background:rgba(34,197,94,.08);padding:6px 12px;border-radius:8px;border:1px solid rgba(34,197,94,.2)'>"
+            f"<span id='insta-refresh-status' style='font-size:11px;color:#22c55e;font-weight:700'>{_render_refresh_status_text(st)}</span>"
+            f"<button type='button' onclick='instaRefreshNow()' id='insta-refresh-btn' title='Forcer un refresh complet maintenant' "
+            f"style='background:transparent;border:1px solid rgba(34,197,94,.4);color:#22c55e;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;transition:all .12s'>🔄</button>"
+            f"</div>"
+        ))(_load_refresh_state())
+        + f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
         f"</div>"
         # === Layout sidebar + detail (comme page VAs) ===
         f"<div class='ext-sb-layout'>"
@@ -12950,6 +13034,42 @@ async function glDeleteWatcher(id, btn){
         "  });"
         "}"
         "function extSbToggleSection(headEl){var sec=headEl.closest('.ext-sb-section');if(sec)sec.classList.toggle('collapsed');}"
+        "function instaRefreshNow(){"
+        "  var btn=document.getElementById('insta-refresh-btn');var st=document.getElementById('insta-refresh-status');"
+        "  if(btn){btn.disabled=true;btn.style.opacity='.5';btn.style.cursor='not-allowed';}"
+        "  if(st)st.textContent='⏳ Lancement…';"
+        "  fetch('/insta/refresh_now',{method:'POST'}).then(function(r){return r.json();}).then(function(d){"
+        "    if(d&&d.ok){"
+        "      if(typeof showToast==='function')showToast('🔄 Refresh lance ('+d.handles+' comptes)','success',2500);"
+        "      instaRefreshPoll();"
+        "    } else {"
+        "      if(typeof showToast==='function')showToast('Erreur: '+((d&&d.error)||'?'),'error');"
+        "      if(btn){btn.disabled=false;btn.style.opacity='';btn.style.cursor='pointer';}"
+        "    }"
+        "  });"
+        "}"
+        "var _instaPollTimer=null;"
+        "function instaRefreshPoll(){"
+        "  if(_instaPollTimer)clearTimeout(_instaPollTimer);"
+        "  fetch('/insta/refresh_status').then(function(r){return r.json();}).then(function(d){"
+        "    if(!d||!d.ok)return;"
+        "    var st=d.state||{};var el=document.getElementById('insta-refresh-status');var btn=document.getElementById('insta-refresh-btn');"
+        "    if(st.status==='in_progress'){"
+        "      var elapsed=Math.floor(Date.now()/1000)-(st.in_progress_since||0);"
+        "      if(el)el.textContent='⏳ Refresh en cours ('+elapsed+'s / '+(st.in_progress_total||0)+' comptes)';"
+        "      if(btn){btn.disabled=true;btn.style.opacity='.5';}"
+        "      _instaPollTimer=setTimeout(instaRefreshPoll,2000);"
+        "    } else {"
+        "      var s=st.last_summary||{};"
+        "      var msg='✓ MAJ a l\\'instant';"
+        "      if(s.ok!==undefined)msg+=' · '+s.ok+'✓ '+(s.banned||0)+'🚫 ('+s.duration_s+'s)';"
+        "      if(el)el.textContent=msg;"
+        "      if(btn){btn.disabled=false;btn.style.opacity='';btn.style.cursor='pointer';}"
+        "      /* Rescrape les rows visibles avec la nouvelle data */"
+        "      if(typeof extAutoLoadAll==='function')setTimeout(extAutoLoadAll,500);"
+        "    }"
+        "  });"
+        "}"
         "function extOpenBulkModalFor(model){"
         "  console.log('[ext] extOpenBulkModalFor called with model=',model);"
         "  var modal=document.getElementById('ext-bulk-modal');"
@@ -22686,6 +22806,38 @@ def create_app():
         if not h:
             return jsonify({"ok": False, "error": "handle requis"})
         return jsonify({"ok": True, "handle": h, "stats": _compute_insta_3_stats(h, force=force)})
+
+    @app.route("/insta/refresh_status", methods=["GET"])
+    def insta_refresh_status():
+        """Lit le state du refresh (last_run_at, in_progress, last_summary)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        st = _load_refresh_state()
+        st["tracked_handles_count"] = len(_all_tracked_handles())
+        return jsonify({"ok": True, "state": st})
+
+    @app.route("/insta/refresh_now", methods=["POST"])
+    def insta_refresh_now():
+        """Trigger un refresh complet en arriere-plan.
+        Retourne immediatement, le refresh tourne en thread."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        # Si lock deja pris, on refuse
+        st = _load_refresh_state()
+        if st.get("status") == "in_progress":
+            return jsonify({"ok": False, "error": "Un refresh est deja en cours", "state": st})
+        # Lance en thread background
+        import threading as _th2
+        def _bg():
+            try:
+                _run_daily_insta_refresh()
+            except Exception as e:
+                print(f"[insta-refresh:manual] crash: {e}", flush=True)
+        t = _th2.Thread(target=_bg, daemon=True, name="insta-refresh-manual")
+        t.start()
+        return jsonify({"ok": True, "started": True, "handles": len(_all_tracked_handles())})
 
     @app.route("/external/stats_batch", methods=["POST"])
     def external_stats_batch():
