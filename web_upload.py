@@ -834,60 +834,17 @@ document.addEventListener('submit', function(e){
     });
   }
 }, true);
-// === PAGE LOADER GLOBAL ===
-var _pageLoaderTimeout = null;
-function showPageLoader(){
-  var pl = document.getElementById('page-loader');
-  if(pl) pl.classList.add('show');
-  // Safety : auto-hide après 20s si la navigation se bloque
-  if(_pageLoaderTimeout) clearTimeout(_pageLoaderTimeout);
-  _pageLoaderTimeout = setTimeout(hidePageLoader, 20000);
-}
+// === PAGE LOADER DESACTIVE (user trouve ca penible pendant la nav) ===
+// On garde les fonctions en no-op pour ne rien casser ailleurs.
+function showPageLoader(){}
 function hidePageLoader(){
   var pl = document.getElementById('page-loader');
   if(pl) pl.classList.remove('show');
-  if(_pageLoaderTimeout){ clearTimeout(_pageLoaderTimeout); _pageLoaderTimeout = null; }
 }
-// Cacher au load de la page (si visible depuis navigation précédente)
+// Au cas ou il y aurait une instance bloquee : on le cache au load systematiquement.
 window.addEventListener('pageshow', hidePageLoader);
 window.addEventListener('load', hidePageLoader);
-// Escape clavier = cacher le loader (filet de sécurité)
-document.addEventListener('keydown', function(e){
-  if(e.key === 'Escape'){ hidePageLoader(); }
-});
-// Clic sur le loader lui-même = le cacher
-document.addEventListener('click', function(e){
-  var pl = document.getElementById('page-loader');
-  if(pl && pl.classList.contains('show') && (e.target === pl || pl.contains(e.target))){
-    hidePageLoader();
-  }
-}, true);
-// Afficher pendant la navigation (clic sur lien interne, submit form)
-document.addEventListener('click', function(e){
-  var a = e.target.closest('a[href]');
-  if(!a) return;
-  // Skip si data-no-loader (genre tabs internes, nav rapide)
-  if(a.dataset.noLoader || a.closest('[data-no-loader]')) return;
-  var href = a.getAttribute('href') || '';
-  if(!href || href.startsWith('#') || href.startsWith('javascript:') || a.target === '_blank') return;
-  if(e.ctrlKey || e.metaKey || e.shiftKey) return;
-  try{
-    var url = new URL(href, window.location.origin);
-    if(url.origin !== window.location.origin) return;
-  }catch(_){}
-  showPageLoader();
-}, true);
-document.addEventListener('submit', function(e){
-  var form = e.target;
-  if(!form || form.dataset.noLoader) return;
-  // Ignorer les forms qui submit-en-ajax (ex: change handlers)
-  if(form.action && form.action.indexOf('javascript:') === 0) return;
-  // Skip si le form a un bouton avec data-confirm — ces forms passent par un modal
-  // de confirmation, le loader doit attendre que l'user confirme (sinon il s'affiche
-  // pendant le modal et reste bloqué si l'user annule).
-  if(form.querySelector && form.querySelector('[data-confirm]') && !form.dataset.confirmed) return;
-  setTimeout(showPageLoader, 150);
-}, true);
+document.addEventListener('DOMContentLoaded', hidePageLoader);
 
 // === FLASH MESSAGE depuis serveur → TOAST ===
 window.addEventListener('DOMContentLoaded', function(){
