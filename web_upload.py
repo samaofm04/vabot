@@ -18704,11 +18704,12 @@ def _render_role_settings_html() -> str:
     role_defs = _load_role_definitions()
     # Rôles par défaut
     default_roles = [
-        ("owner", "Owner", "Toutes permissions", "#3b82f6"),
-        ("admin", "Admin", "Accès complet (toutes pages, gestion VAs)", "#3b82f6"),
-        ("creator", "Creator", "Upload + Cloud + visualisation revenus de son identité", "#10b981"),
-        ("chatter", "Chatter", "Voir revenus + SFS + planning, pas d'upload", "#fbbf24"),
-        ("va", "VA", "Lecture seule + accès à son propre contenu", "#a855f7"),
+        ("owner",   "Owner",   "Toutes permissions, sans restriction",                                                     "#3b82f6"),
+        ("admin",   "Admin",   "Accès complet à toutes les pages + gestion des utilisateurs / VAs / paiements",            "#3b82f6"),
+        ("va",      "VA",      "Upload contenu, planning posts/stories, gestion des comptes Insta assignés à son identité", "#a855f7"),
+        ("chatter", "Chatter", "Vue revenus + planning SFS + historique conversations. Pas d'upload, pas de gestion VAs",  "#fbbf24"),
+        ("creator", "Creator", "Modèle (OF/MyM) — vue de ses propres revenus, dashboard perso, validation contenu",         "#10b981"),
+        ("sfs",     "SFS Manager", "Création / édition / validation des SFS uniquement (calendrier SFS + preuves AVANT/APRÈS)", "#ec4899"),
     ]
     # Construire la liste finale en mergeant avec les overrides custom
     roles_info = []
