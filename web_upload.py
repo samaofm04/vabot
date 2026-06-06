@@ -2604,43 +2604,62 @@ function _convertText(txt, rate){
     return '$' + formatted;
   });
 }
+window.__curObserver = null;
+window.__curRuns = 0;
 function applyCurrency(){
   _styleCurBtns();
   if(getCurrency() !== 'USD') return;
   var rate = window.__eurUsdRate;
   if(!rate || rate <= 0) return;
-  /* TreeWalker sur tout le body, skip script/style/textarea/input */
-  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode: function(n){
-      var p = n.parentNode;
-      if(!p) return NodeFilter.FILTER_REJECT;
-      var tag = (p.tagName || '').toLowerCase();
-      if(tag === 'script' || tag === 'style' || tag === 'textarea' || tag === 'input' || tag === 'option') return NodeFilter.FILTER_REJECT;
-      if(p.closest && p.closest('[data-no-currency]')) return NodeFilter.FILTER_REJECT;
-      if(n.nodeValue && n.nodeValue.indexOf('€') !== -1) return NodeFilter.FILTER_ACCEPT;
-      return NodeFilter.FILTER_REJECT;
+  /* IMPORTANT : on deconnecte l observer pendant qu on modifie le texte,
+     sinon nos propres modifications redeclenchent l observer -> boucle
+     infinie -> crash "Out of Memory". */
+  if(window.__curObserver){ try{ window.__curObserver.disconnect(); }catch(e){} }
+  try {
+    /* TreeWalker sur tout le body, skip script/style/textarea/input */
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n){
+        var p = n.parentNode;
+        if(!p) return NodeFilter.FILTER_REJECT;
+        var tag = (p.tagName || '').toLowerCase();
+        if(tag === 'script' || tag === 'style' || tag === 'textarea' || tag === 'input' || tag === 'option') return NodeFilter.FILTER_REJECT;
+        if(p.closest && p.closest('[data-no-currency]')) return NodeFilter.FILTER_REJECT;
+        if(n.nodeValue && n.nodeValue.indexOf('€') !== -1) return NodeFilter.FILTER_ACCEPT;
+        return NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = []; var n;
+    while((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function(node){
+      var converted = _convertText(node.nodeValue, rate);
+      if(converted !== node.nodeValue) node.nodeValue = converted;  /* skip si rien ne change */
+    });
+  } finally {
+    /* Reconnecte SANS characterData (on n observe que l ajout de nouveaux
+       elements, pas nos propres edits de texte) */
+    if(window.__curObserver && getCurrency() === 'USD'){
+      try{ window.__curObserver.observe(document.body, {childList:true, subtree:true}); }catch(e){}
     }
-  });
-  var nodes = []; var n;
-  while((n = walker.nextNode())) nodes.push(n);
-  nodes.forEach(function(node){
-    node.nodeValue = _convertText(node.nodeValue, rate);
-  });
+  }
 }
-/* Run au load + apres mutations (MyPuls update ses stats en JS, etc.) */
+/* Run au load. Observer optionnel (USD only) pour le contenu charge en async,
+   avec debounce + cap de securite anti-boucle. */
 document.addEventListener('DOMContentLoaded', function(){
   applyCurrency();
-  /* Re-applique apres les updates JS via MutationObserver throttle */
-  var pending = false;
-  var obs = new MutationObserver(function(){
-    if(pending) return;
-    pending = true;
-    requestAnimationFrame(function(){
-      pending = false;
+  if(getCurrency() !== 'USD') return;  /* en EUR : aucun observer, zero overhead */
+  var t = null;
+  window.__curObserver = new MutationObserver(function(){
+    if(t) return;
+    /* cap de securite : jamais plus de 100 passes (backstop anti-boucle) */
+    if(window.__curRuns > 100){ try{ window.__curObserver.disconnect(); }catch(e){} return; }
+    t = setTimeout(function(){
+      t = null;
+      window.__curRuns++;
       applyCurrency();
-    });
+    }, 600);
   });
-  obs.observe(document.body, {childList:true, subtree:true, characterData:true});
+  /* childList + subtree UNIQUEMENT (pas characterData -> pas de feedback loop) */
+  try{ window.__curObserver.observe(document.body, {childList:true, subtree:true}); }catch(e){}
 });
 </script>
 <h1 id="page-title">Dashboard</h1>
