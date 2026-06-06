@@ -18822,7 +18822,6 @@ def _render_employees_table_html() -> str:
         role_color = role_colors.get(role_key, "#aaa")
         role_name = role_names.get(role_key, role_key.title())
         is_active = u.get("active", True)
-        email = (u.get("email") or "").strip()
         agency = (u.get("agency") or "").strip()
         # Assigned creators -> stocke en data-attr pour le filtre "By Creator"
         assigned = u.get("assigned_creators") or []
@@ -18836,8 +18835,9 @@ def _render_employees_table_html() -> str:
         _status_attr = "active" if is_active else "inactive"
         # Echappe les ' pour les onclick
         uname_js = uname.replace("'", "\\'")
-        email_js = email.replace("'", "\\'")
         agency_js = agency.replace("'", "\\'")
+        # Sous-titre : agence si dispo, sinon vide
+        subtitle = f"<div style='font-size:11px;color:#888;margin-top:2px'>{agency}</div>" if agency else ""
         table.append(
             f"<tr class='emp-row' data-emp-name='{uname.lower()}' data-emp-role='{role_key}' data-emp-status='{_status_attr}' data-emp-creators='{assigned_csv}' style='border-top:1px solid #232323'>"
             f"<td style='padding:14px 16px;width:36px'>"
@@ -18845,16 +18845,14 @@ def _render_employees_table_html() -> str:
             f"<td style='padding:14px 16px'>"
             f"<div style='display:flex;align-items:center;gap:10px'>"
             f"<div style='width:30px;height:30px;border-radius:50%;background:hsl({ah},60%,45%);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;flex-shrink:0'>{avatar_letter}</div>"
-            f"<div><div style='font-weight:600;color:#fff'>{uname}</div>"
-            + (f"<div style='font-size:11px;color:#888;margin-top:2px'>{email}</div>" if email else "")
-            + f"</div></div></td>"
+            f"<div><div style='font-weight:600;color:#fff'>{uname}</div>{subtitle}</div></div></td>"
             f"<td style='padding:14px 16px'><b style='color:{role_color}'>{role_name}</b></td>"
             f"<td style='padding:14px 16px;text-align:center'>"
             f"<span style='display:inline-flex;align-items:center;gap:6px;color:{status_color};font-weight:600;font-size:12px'>"
             f"<span style='width:6px;height:6px;border-radius:50%;background:{status_color}'></span>{status_label}"
             f"</span></td>"
             f"<td style='padding:14px 16px;text-align:right;white-space:nowrap'>"
-            f"<a onclick=\"openEditEmployee('{uname_js}','{email_js}','{agency_js}','{role_key}',{str(is_active).lower()})\" "
+            f"<a onclick=\"openEditEmployee('{uname_js}','{agency_js}','{role_key}',{str(is_active).lower()})\" "
             f"style='color:#3b82f6;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none'>Edit</a>"
             f"</td></tr>"
         )
@@ -18871,12 +18869,10 @@ def _render_employees_table_html() -> str:
     <h3 id='emp-modal-title' style='margin-top:0'>Edit employee</h3>
     <form id='emp-modal-form' method='POST'>
       <input type='hidden' name='original_username' id='emp-modal-orig'>
-      <label><span style='color:#ef4444'>*</span>Employee name</label>
+      <label><span style='color:#ef4444'>*</span>Username (used to login)</label>
       <input type='text' name='username' id='emp-modal-name' required>
-      <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Email</label>
-      <input type='email' name='email' id='emp-modal-email' placeholder='employee@example.com'>
-      <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Group</label>
-      <input type='text' name='agency' id='emp-modal-agency' placeholder='Agency name' value=''>
+      <label style='margin-top:10px'>Group</label>
+      <input type='text' name='agency' id='emp-modal-agency' placeholder='Agency name'>
       <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Role</label>
       <select name='role' id='emp-modal-role' required>{role_opts}</select>
       <div id='emp-modal-pwd-wrap' style='display:none'>
@@ -18928,7 +18924,6 @@ function openAddEmployee(){
   document.getElementById('emp-modal-orig').value = '';
   document.getElementById('emp-modal-name').value = '';
   document.getElementById('emp-modal-name').readOnly = false;
-  document.getElementById('emp-modal-email').value = '';
   document.getElementById('emp-modal-agency').value = '';
   document.getElementById('emp-modal-role').value = '';
   document.getElementById('emp-modal-pwd-wrap').style.display = 'block';
@@ -18936,13 +18931,12 @@ function openAddEmployee(){
   document.getElementById('emp-modal-pwd').value = '';
   document.getElementById('emp-modal').classList.add('show');
 }
-function openEditEmployee(name, email, agency, role, isActive){
+function openEditEmployee(name, agency, role, isActive){
   document.getElementById('emp-modal-title').textContent = 'Edit employee';
   document.getElementById('emp-modal-form').action = '/settings/role/edit_user';
   document.getElementById('emp-modal-orig').value = name;
   document.getElementById('emp-modal-name').value = name;
   document.getElementById('emp-modal-name').readOnly = true;  /* nom de login non modifiable */
-  document.getElementById('emp-modal-email').value = email || '';
   document.getElementById('emp-modal-agency').value = agency || '';
   document.getElementById('emp-modal-role').value = role || '';
   document.getElementById('emp-modal-pwd-wrap').style.display = 'none';
@@ -22658,7 +22652,6 @@ def create_app():
         username = (request.form.get("username") or "").strip()
         role = (request.form.get("role") or "").strip().lower()
         password = (request.form.get("password") or "").strip()
-        email = (request.form.get("email") or "").strip()
         agency = (request.form.get("agency") or "").strip()
         if not username or not role or len(password) < 6:
             return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)")
@@ -22672,7 +22665,6 @@ def create_app():
         users.append({
             "username": username,
             "role": role,
-            "email": email,
             "agency": agency,
             "password_hash": hashed,
             "active": True,
@@ -22684,7 +22676,6 @@ def create_app():
         web_users[username] = {
             "password_hash": hashed,
             "role": role,
-            "email": email,
             "agency": agency,
             "created_at": int(time.time()),
         }
@@ -22720,7 +22711,6 @@ def create_app():
         # original_username : on identifie sur l ancien nom (le nom est readonly dans le modal)
         orig = (request.form.get("original_username") or request.form.get("username") or "").strip().lower()
         new_role = (request.form.get("role") or "").strip().lower()
-        new_email = (request.form.get("email") or "").strip()
         new_agency = (request.form.get("agency") or "").strip()
         if not new_role:
             return _error("❌ Rôle manquant")
@@ -22729,7 +22719,6 @@ def create_app():
         for u in users:
             if (u.get("username") or "").lower() == orig:
                 u["role"] = new_role
-                u["email"] = new_email
                 u["agency"] = new_agency
                 found = True
                 break
@@ -22740,7 +22729,6 @@ def create_app():
         web_users = _load_web_users()
         if orig in web_users:
             web_users[orig]["role"] = new_role
-            web_users[orig]["email"] = new_email
             web_users[orig]["agency"] = new_agency
             _save_web_users(web_users)
         return _success(f"✅ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)")
