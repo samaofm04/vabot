@@ -18518,6 +18518,7 @@ async function fetchMyPulsMedia(){{
   }} catch(e) {{ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }}
 }}
 // === Bulk DELETE : supprime tous les events de tous les createurs ===
+// Job asynchrone avec modal de progression temps reel + bouton Annuler.
 async function deleteAllCreators(){{
   if(typeof showConfirmAsync === 'function'){{
     const ok = await showConfirmAsync(
@@ -18525,7 +18526,6 @@ async function deleteAllCreators(){{
       'TOUS les events planifies (posts + stories) de TOUS les createurs sur la periode du planning global seront retires de MyPuls. Action IRREVERSIBLE.'
     );
     if(!ok) return;
-    // Double confirm pour cette action destructrice
     const ok2 = await showConfirmAsync(
       'Confirmer encore ?',
       'Cette action ne peut PAS etre annulee. Tape Confirmer si tu es sur.'
@@ -18533,35 +18533,144 @@ async function deleteAllCreators(){{
     if(!ok2) return;
   }} else {{
     if(!confirm('Tout supprimer pour TOUS les createurs ? IRREVERSIBLE.')) return;
-    if(!confirm('Vraiment sur ? Cette action ne peut PAS etre annulee.')) return;
+    if(!confirm('Vraiment sur ?')) return;
   }}
-  if(typeof showToast === 'function') showToast('Bulk delete en cours, patiente...', 'info', 120000);
+  // Start job
+  let jobId;
   try {{
-    const r = await fetch('/mypulslive/delete_all_creators', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: '{{}}',
+    const r = await fetch('/mypulslive/delete_all_creators/start', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}',
     }});
     const j = await r.json();
     if(!j.ok){{
       if(typeof showToast === 'function') showToast('Erreur : ' + (j.error || '?'), 'error', 8000);
       return;
     }}
-    const s = j.summary || {{}};
-    const lines = [
-      `${{s.creators_scanned || 0}} createurs scannes`,
-      `Events supprimes : ${{s.total_deleted || 0}}`,
-      `Periode : ${{s.date_start}} -> ${{s.date_end}}`,
-    ];
-    if(s.total_failed) lines.push(`Echecs : ${{s.total_failed}}`);
-    const msg = lines.join(' - ');
-    if(typeof showToast === 'function') showToast(msg, s.total_failed > 0 ? 'warning' : 'success', 15000);
-    // Reload pour voir le calendrier vide
-    setTimeout(() => window.location.reload(), 2000);
+    jobId = j.job_id;
   }} catch(e){{
     if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error', 8000);
-    console.error('deleteAllCreators:', e);
+    return;
   }}
+  // Modal de progression
+  _openBulkDeleteProgress(jobId);
+}}
+
+// Modal stylise avec barre de progression
+function _openBulkDeleteProgress(jobId){{
+  // Cleanup ancien modal s il existe
+  const existing = document.getElementById('bulk-del-modal');
+  if(existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'bulk-del-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(6px)';
+  overlay.innerHTML = `
+    <div style="background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden">
+      <div style="padding:24px 26px 14px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+          <div style="width:42px;height:42px;border-radius:50%;background:rgba(239,68,68,.12);color:#ef4444;display:flex;align-items:center;justify-content:center;font-size:20px">🗑</div>
+          <div>
+            <div style="color:#fff;font-size:16px;font-weight:700">Suppression en cours...</div>
+            <div id="bdm-phase" style="color:#888;font-size:12px;margin-top:2px">En attente</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:0 26px 18px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#aaa;margin-bottom:6px">
+          <span id="bdm-counter">0 / 0 events</span>
+          <span id="bdm-percent" style="color:#fff;font-weight:600">0%</span>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;height:14px;overflow:hidden">
+          <div id="bdm-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#ef4444,#f97316);transition:width .3s ease;border-radius:10px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;font-size:12px">
+          <div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:10px;text-align:center">
+            <div id="bdm-scanned" style="color:#3b82f6;font-weight:700;font-size:18px">0</div>
+            <div style="color:#888;font-size:10px;text-transform:uppercase;margin-top:2px">Créateurs scannés</div>
+          </div>
+          <div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:10px;text-align:center">
+            <div id="bdm-deleted" style="color:#22c55e;font-weight:700;font-size:18px">0</div>
+            <div style="color:#888;font-size:10px;text-transform:uppercase;margin-top:2px">Supprimés</div>
+          </div>
+          <div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:10px;text-align:center">
+            <div id="bdm-failed" style="color:#ef4444;font-weight:700;font-size:18px">0</div>
+            <div style="color:#888;font-size:10px;text-transform:uppercase;margin-top:2px">Echecs</div>
+          </div>
+        </div>
+        <div id="bdm-errors" style="margin-top:10px;font-size:11px;color:#ef4444;max-height:80px;overflow-y:auto;display:none"></div>
+      </div>
+      <div style="padding:14px 22px 20px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #222">
+        <button id="bdm-cancel" style="background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">Annuler</button>
+        <button id="bdm-close" style="background:#3b82f6;color:#fff;border:0;padding:9px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;display:none">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  // Cancel handler
+  document.getElementById('bdm-cancel').onclick = async () => {{
+    try {{
+      await fetch('/mypulslive/delete_all_creators/cancel/' + encodeURIComponent(jobId), {{method:'POST'}});
+    }} catch(e){{}}
+    document.getElementById('bdm-phase').textContent = 'Annulation en cours...';
+  }};
+  // Close handler (apparait quand le job est termine)
+  document.getElementById('bdm-close').onclick = () => {{
+    overlay.remove();
+    window.location.reload();
+  }};
+  // Poll status toutes les 1.2s
+  const pollInterval = setInterval(async () => {{
+    try {{
+      const r = await fetch('/mypulslive/delete_all_creators/status/' + encodeURIComponent(jobId));
+      const j = await r.json();
+      if(!j.ok){{
+        document.getElementById('bdm-phase').textContent = 'Erreur : ' + (j.error || '?');
+        clearInterval(pollInterval);
+        document.getElementById('bdm-cancel').style.display = 'none';
+        document.getElementById('bdm-close').style.display = '';
+        return;
+      }}
+      const job = j.job;
+      // Update UI
+      const phaseMap = {{
+        queued: 'En attente...',
+        listing: `Listing des events... (${{job.creators_scanned}}/${{job.creators_count || 9}} créateurs)`,
+        deleting: `Suppression en cours... (${{job.current}}/${{job.total}})`,
+        done: 'Terminé !',
+        cancelled: 'Annulé',
+        error: 'Erreur',
+      }};
+      document.getElementById('bdm-phase').textContent = phaseMap[job.status] || job.status;
+      document.getElementById('bdm-scanned').textContent = job.creators_scanned || 0;
+      document.getElementById('bdm-deleted').textContent = job.deleted || 0;
+      document.getElementById('bdm-failed').textContent = job.failed || 0;
+      const tot = job.total || 1;
+      const cur = job.current || 0;
+      const pct = job.status === 'done' ? 100 : Math.floor((cur / tot) * 100);
+      document.getElementById('bdm-counter').textContent = `${{cur}} / ${{tot}} events`;
+      document.getElementById('bdm-percent').textContent = pct + '%';
+      document.getElementById('bdm-bar').style.width = pct + '%';
+      // Errors
+      if(job.errors && job.errors.length){{
+        const errBox = document.getElementById('bdm-errors');
+        errBox.style.display = 'block';
+        errBox.innerHTML = job.errors.slice(0, 5).map(e => '• ' + String(e).replace(/</g,'&lt;')).join('<br>');
+      }}
+      // Done / cancelled / error : stoppe le polling
+      if(['done', 'cancelled', 'error'].includes(job.status)){{
+        clearInterval(pollInterval);
+        document.getElementById('bdm-cancel').style.display = 'none';
+        document.getElementById('bdm-close').style.display = '';
+        // Color the bar
+        if(job.status === 'done'){{
+          document.getElementById('bdm-bar').style.background = 'linear-gradient(90deg,#22c55e,#10b981)';
+        }} else if(job.status === 'cancelled'){{
+          document.getElementById('bdm-bar').style.background = 'linear-gradient(90deg,#888,#aaa)';
+        }}
+      }}
+    }} catch(e){{
+      console.warn('poll err:', e);
+    }}
+  }}, 1200);
 }}
 
 // === Bulk push : applique le planning global a TOUS les createurs ===
@@ -23376,91 +23485,145 @@ def create_app():
             msg += " | Premieres erreurs : " + "; ".join(all_errors[:3])
         return _success(msg, tab="mypulslive")
 
-    @app.route("/mypulslive/delete_all_creators", methods=["POST"])
-    def mypulslive_delete_all_creators():
-        """Bulk REMOVE : supprime tous les events planifies de tous les createurs
-        sur la periode du planning global. L oppose de push_all_creators.
+    # ============ BULK DELETE ALL CREATORS — async with progress polling ============
+    # Le bulk delete peut prendre 5+ minutes (1 list + N delete per creator).
+    # On le fait en background thread + endpoint de status pour feedback temps reel.
+    # _BULK_DELETE_JOBS : {job_id: {status, creators_scanned, total, current,
+    #   deleted, failed, errors, cancelled, started_at}}
+    if not hasattr(app, "_bulk_delete_jobs"):
+        app._bulk_delete_jobs = {}
+        app._bulk_delete_lock = threading.Lock()
 
-        Utilise par le bouton 'Tout supprimer'. Operation longue (1 API call
-        de listing + 1 API call par event a supprimer)."""
+    def _run_bulk_delete_job(job_id, creator_ids, start_iso, end_iso):
+        """Worker thread : phase 1 list events, phase 2 delete events."""
+        import mypuls_scheduler
+        job = app._bulk_delete_jobs[job_id]
+        try:
+            # Phase 1 : list
+            job["status"] = "listing"
+            all_events = []  # [(creator_id, event_id), ...]
+            for cid in creator_ids:
+                if job["cancelled"]:
+                    job["status"] = "cancelled"
+                    return
+                try:
+                    lst = mypuls_scheduler.list_calendar_events([cid], start_iso, end_iso)
+                    if lst.get("ok"):
+                        for ev in lst.get("events") or []:
+                            eid = ev.get("id")
+                            if eid:
+                                all_events.append((cid, int(eid)))
+                    else:
+                        job["errors"].append(f"#{cid} list: {lst.get('error', '?')}")
+                except Exception as e:
+                    job["errors"].append(f"#{cid} list err: {e}")
+                job["creators_scanned"] += 1
+            job["total"] = len(all_events)
+            # Phase 2 : delete
+            job["status"] = "deleting"
+            for cid, eid in all_events:
+                if job["cancelled"]:
+                    job["status"] = "cancelled"
+                    return
+                try:
+                    res = mypuls_scheduler.delete_event(eid)
+                    if res.get("ok"):
+                        job["deleted"] += 1
+                    else:
+                        job["failed"] += 1
+                        if len(job["errors"]) < 20:
+                            job["errors"].append(f"#{cid} ev#{eid}: {res.get('error', '?')}")
+                except Exception as e:
+                    job["failed"] += 1
+                    if len(job["errors"]) < 20:
+                        job["errors"].append(f"#{cid} ev#{eid}: {e}")
+                job["current"] += 1
+            job["status"] = "done"
+        except Exception as e:
+            job["status"] = "error"
+            job["errors"].append(f"fatal: {e}")
+        finally:
+            import time as _t
+            job["finished_at"] = _t.time()
+
+    @app.route("/mypulslive/delete_all_creators/start", methods=["POST"])
+    def mypulslive_delete_all_creators_start():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         try:
             import mypuls_creator_settings as mcs
-            import mypuls_scheduler
             import seed_media_pools
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo : {e}"})
 
-        # Lit les dates du planning global
         g = mcs.get_global_settings()
         date_start = (g.get("start_date") or "").strip()
         date_end = (g.get("end_date") or "").strip()
-        # Override possible via JSON body (l user peut elargir le range
-        # pour cleanup tout meme si la config courante est plus etroite)
         body = (request.get_json(silent=True) or {})
         if body.get("start_date"): date_start = body["start_date"]
         if body.get("end_date"): date_end = body["end_date"]
         if not date_start or not date_end:
-            return jsonify({"ok": False, "error": "Dates manquantes (ni dans body ni dans config globale)"})
+            return jsonify({"ok": False, "error": "Dates manquantes"})
 
-        # ISO format requis par MyPuls (date avec T00:00:00 et fin du jour pour end)
         start_iso = f"{date_start}T00:00:00"
-        # +23h59m pour inclure le dernier jour entierement
         end_iso = f"{date_end}T23:59:59"
-
         creator_ids = list(seed_media_pools.MEDIA_SEEDS.keys())
-        results = []
-        total_deleted = 0
-        total_failed = 0
-        first_errors: list = []
 
-        for cid in creator_ids:
-            try:
-                lst = mypuls_scheduler.list_calendar_events([cid], start_iso, end_iso)
-                if not lst.get("ok"):
-                    err = lst.get("error", "?")
-                    results.append({"cid": cid, "list_error": err})
-                    first_errors.append(f"#{cid} list: {err}")
-                    continue
-                events = lst.get("events") or []
-                deleted_here = 0
-                failed_here = 0
-                for ev in events:
-                    eid = ev.get("id")
-                    if not eid: continue
-                    res = mypuls_scheduler.delete_event(int(eid))
-                    if res.get("ok"):
-                        deleted_here += 1
-                    else:
-                        failed_here += 1
-                        if len(first_errors) < 10:
-                            first_errors.append(f"#{cid} event#{eid}: {res.get('error','?')}")
-                total_deleted += deleted_here
-                total_failed += failed_here
-                results.append({
-                    "cid": cid,
-                    "found": len(events),
-                    "deleted": deleted_here,
-                    "failed": failed_here,
-                })
-            except Exception as e:
-                results.append({"cid": cid, "error": str(e)})
-                first_errors.append(f"#{cid}: {e}")
-
-        return jsonify({
-            "ok": True,
-            "summary": {
-                "creators_scanned": len(creator_ids),
-                "total_deleted": total_deleted,
-                "total_failed": total_failed,
+        import uuid, time as _t
+        job_id = uuid.uuid4().hex[:12]
+        with app._bulk_delete_lock:
+            # Cleanup vieux jobs (> 1h) pour pas que la dict grossisse a l infini
+            now = _t.time()
+            old = [k for k, v in app._bulk_delete_jobs.items() if v.get("finished_at", now) < now - 3600]
+            for k in old:
+                app._bulk_delete_jobs.pop(k, None)
+            app._bulk_delete_jobs[job_id] = {
+                "status": "queued",
+                "creators_scanned": 0,
+                "total": 0,
+                "current": 0,
+                "deleted": 0,
+                "failed": 0,
+                "errors": [],
+                "cancelled": False,
+                "started_at": _t.time(),
+                "creators_count": len(creator_ids),
                 "date_start": date_start,
                 "date_end": date_end,
-            },
-            "results": results,
-            "first_errors": first_errors[:10],
+            }
+        threading.Thread(
+            target=_run_bulk_delete_job,
+            args=(job_id, creator_ids, start_iso, end_iso),
+            daemon=True,
+            name=f"bulk-delete-{job_id}",
+        ).start()
+        return jsonify({"ok": True, "job_id": job_id})
+
+    @app.route("/mypulslive/delete_all_creators/status/<job_id>", methods=["GET"])
+    def mypulslive_delete_all_creators_status(job_id):
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        job = app._bulk_delete_jobs.get(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "job introuvable (peut-etre expire)"})
+        # Renvoie une copie sans champs internes
+        return jsonify({
+            "ok": True,
+            "job": {k: v for k, v in job.items() if k != "cancelled"},
         })
+
+    @app.route("/mypulslive/delete_all_creators/cancel/<job_id>", methods=["POST"])
+    def mypulslive_delete_all_creators_cancel(job_id):
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        job = app._bulk_delete_jobs.get(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "job introuvable"})
+        job["cancelled"] = True
+        return jsonify({"ok": True})
 
     @app.route("/mypulslive/push_all_creators", methods=["POST"])
     def mypulslive_push_all_creators():
