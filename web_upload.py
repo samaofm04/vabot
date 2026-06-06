@@ -10053,23 +10053,57 @@ def _render_depenses_html() -> str:
         "}"
         "</script>"
     )
+    # ===== Bloc stats (total all-time, ce mois, recurrent/mois) =====
+    try:
+        stats = expense_stats()
+    except Exception:
+        stats = {"total_all_time": 0, "total_this_month": 0, "monthly_recurring": 0, "by_category": {}}
+    total_all = stats.get("total_all_time", 0)
+    total_month = stats.get("total_this_month", 0)
+    monthly_rec = stats.get("monthly_recurring", 0)
+    nb_items = len(items)
+    rows.append(
+        "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:4px 0 18px'>"
+        # Total dépensé (all time)
+        "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px 18px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#f87171;letter-spacing:-.02em;line-height:1.1'>-{total_all:.2f} €</div>"
+        "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:5px;font-weight:600'>Total dépensé</div>"
+        f"<div style='font-size:11px;color:#666;margin-top:2px'>{nb_items} dépense{'s' if nb_items > 1 else ''}</div>"
+        "</div>"
+        # Ce mois-ci
+        "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px 18px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#fbbf24;letter-spacing:-.02em;line-height:1.1'>-{total_month:.2f} €</div>"
+        "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:5px;font-weight:600'>Ce mois-ci</div>"
+        "</div>"
+        # Récurrent / mois
+        "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px 18px'>"
+        f"<div style='font-size:24px;font-weight:800;color:#a855f7;letter-spacing:-.02em;line-height:1.1'>-{monthly_rec:.2f} €</div>"
+        "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:5px;font-weight:600'>🔄 Récurrent / mois</div>"
+        f"<div style='font-size:11px;color:#666;margin-top:2px'>≈ {monthly_rec * 12:.0f} € / an</div>"
+        "</div>"
+        "</div>"
+    )
     if not items:
-        rows.append("<p style='color:#888'>Aucune dépense enregistrée.</p>")
+        rows.append("<p style='color:#888'>Aucune dépense enregistrée. Ajoute-en une avec le formulaire ci-dessus ⬆</p>")
     else:
         rows.append("<div class='box'>")
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
-            "<tr style='background:#1a1a1a'>"
+            "<thead><tr style='background:#1a1a1a'>"
             "<th style='padding:8px;text-align:left'>Date</th>"
             "<th style='padding:8px;text-align:left'>Catégorie</th>"
             "<th style='padding:8px;text-align:left'>Description</th>"
             "<th style='padding:8px;text-align:right'>Montant</th>"
             "<th style='padding:8px;text-align:center'>Récurrent</th>"
             "<th style='padding:8px;text-align:right'></th>"
-            "</tr>"
+            "</tr></thead><tbody>"
         )
-        for it in items:
+        # Tri par date décroissante (plus récent en haut)
+        items_sorted = sorted(items, key=lambda x: x.get("date", ""), reverse=True)
+        running_total = 0.0
+        for it in items_sorted:
             rec_icon = "🔄" if it.get("recurring") else ""
+            running_total += float(it.get("amount", 0) or 0)
             rows.append(
                 f"<tr style='border-bottom:1px solid #2a2a2a'>"
                 f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
@@ -10083,6 +10117,15 @@ def _render_depenses_html() -> str:
                 f"<button type='submit' class='danger-btn' data-confirm='Supprimer cette dépense ?'>×</button>"
                 f"</form></td></tr>"
             )
+        rows.append("</tbody>")
+        # Ligne TOTAL en pied de table
+        rows.append(
+            "<tfoot><tr style='border-top:2px solid #3a3a3a;background:#161616'>"
+            "<td colspan='3' style='padding:12px 8px;font-weight:700;font-size:14px'>TOTAL</td>"
+            f"<td style='padding:12px 8px;text-align:right;font-weight:800;font-size:15px;color:#f87171'>-{running_total:.2f} €</td>"
+            "<td colspan='2'></td>"
+            "</tr></tfoot>"
+        )
         rows.append("</table></div>")
     return "".join(rows)
 
