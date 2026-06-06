@@ -10,6 +10,7 @@ import sys
 import time
 import subprocess
 from pathlib import Path
+from html import escape as html_escape
 
 log = logging.getLogger("vabot.web")
 
@@ -9920,16 +9921,19 @@ def _render_depenses_html() -> str:
         from business import list_expenses, expense_stats, CATEGORIES, CATEGORY_PRESETS
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    # Options de categorie avec data-attrs pour l auto-remplissage (montant/devise/desc/recurrent)
+    # Options de categorie avec data-attrs pour l auto-remplissage (montant/devise/desc/recurrent).
+    # html_escape(..., quote=True) gere TOUS les caracteres dangereux (< > & ' ") pour les contextes
+    # attribut HTML, alors que l ancien .replace ne couvrait que les guillemets.
     _opt_parts = []
     for c in CATEGORIES:
         preset = CATEGORY_PRESETS.get(c) or {}
         amt = preset.get("amount", "")
         cur = (preset.get("currency", "EUR") or "EUR").upper()
-        desc = (preset.get("description", "") or "").replace("'", "&#39;").replace('"', "&quot;")
+        desc = html_escape(str(preset.get("description", "") or ""), quote=True)
         rec = "1" if preset.get("recurring") else "0"
+        c_safe = html_escape(str(c), quote=True)
         _opt_parts.append(
-            f"<option value='{c}' data-amount='{amt}' data-currency='{cur}' data-desc='{desc}' data-recurring='{rec}'>{c}</option>"
+            f"<option value='{c_safe}' data-amount='{amt}' data-currency='{cur}' data-desc='{desc}' data-recurring='{rec}'>{c_safe}</option>"
         )
     cat_opts = "".join(_opt_parts)
     # Valeurs initiales = preset de la 1ere categorie (si elle en a un)
@@ -9938,7 +9942,7 @@ def _render_depenses_html() -> str:
     init_cur = (_first_preset or {}).get("currency", "EUR").upper()
     init_desc = (_first_preset or {}).get("description", "")
     init_rec_checked = "checked" if (_first_preset or {}).get("recurring") else ""
-    init_desc_attr = str(init_desc).replace("'", "&#39;").replace('"', "&quot;")
+    init_desc_attr = html_escape(str(init_desc), quote=True)
     _eur_sel = "selected" if init_cur == "EUR" else ""
     _usd_sel = "selected" if init_cur == "USD" else ""
     import datetime
@@ -10034,11 +10038,27 @@ def _render_depenses_html() -> str:
         running_total_eur = 0.0  # total toujours en EUR (base)
         for it in items_sorted:
             rec_icon = "🔄" if it.get("recurring") else ""
-            amount_eur = float(it.get("amount", 0) or 0)
+            try:
+                amount_eur = float(it.get("amount", 0) or 0)
+            except (TypeError, ValueError):
+                amount_eur = 0.0
             running_total_eur += amount_eur
             # Affichage dans la devise native : $X.XX si USD, sinon X.XX €
+            # Validation defensive : currency doit etre EUR ou USD (sinon defaut EUR)
             cur = (it.get("currency") or "EUR").upper()
-            orig = float(it.get("amount_original", amount_eur) or amount_eur)
+            if cur not in ("EUR", "USD"):
+                cur = "EUR"
+            # amount_original : on PRESERVE le zero (ne pas tomber sur amount_eur via `or`).
+            # On utilise None comme sentinelle, et on enveloppe le float() pour resister a
+            # une donnee corrompue (string non numerique, None, etc.).
+            raw_orig = it.get("amount_original")
+            if raw_orig is None:
+                orig = amount_eur  # legacy : pas de champ -> fallback sur amount EUR
+            else:
+                try:
+                    orig = float(raw_orig)
+                except (TypeError, ValueError):
+                    orig = amount_eur
             if cur == "USD":
                 amount_disp = f"-${orig:.2f}"
                 # Sous-ligne : equivalent EUR (pour le rapprochement avec le total)
@@ -10046,16 +10066,26 @@ def _render_depenses_html() -> str:
             else:
                 amount_disp = f"-{orig:.2f} €"
                 sub = ""
+            # HTML escape de tous les champs venant du JSON (defense-in-depth contre
+            # une edition manuelle du fichier ou une donnee corrompue qui contiendrait
+            # du HTML/JS arbitraire). Les valeurs numeriques formatees par nous sont sures.
+            date_s = html_escape(str(it.get("date", "")), quote=True)
+            cat_s = html_escape(str(it.get("category", "")), quote=True)
+            desc_s = html_escape(str(it.get("description", "")), quote=True)
+            try:
+                it_id = int(it.get("id", 0))
+            except (TypeError, ValueError):
+                it_id = 0
             rows.append(
                 f"<tr style='border-bottom:1px solid #2a2a2a'>"
-                f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
-                f"<td style='padding:8px;font-size:13px'>{it.get('category','')}</td>"
-                f"<td style='padding:8px'>{it.get('description','')}</td>"
+                f"<td style='padding:8px;font-size:13px'>{date_s}</td>"
+                f"<td style='padding:8px;font-size:13px'>{cat_s}</td>"
+                f"<td style='padding:8px'>{desc_s}</td>"
                 f"<td style='padding:8px;text-align:right;font-weight:600;color:#f99'>{amount_disp}{sub}</td>"
                 f"<td style='padding:8px;text-align:center;font-size:18px'>{rec_icon}</td>"
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/business/expense/remove' style='display:inline;margin:0'>"
-                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<input type='hidden' name='id' value='{it_id}'>"
                 f"<button type='submit' class='danger-btn' data-confirm='Supprimer cette dépense ?'>×</button>"
                 f"</form></td></tr>"
             )
@@ -11444,21 +11474,35 @@ def _render_paievas_html() -> str:
             paid = it.get("paid", False)
             badge = "<span style='background:#00d68f;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700'>PAYÉ</span>" if paid else "<span style='background:#ffb800;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700'>À PAYER</span>"
             color = "color:#00d68f" if paid else "color:#ffb800"
+            # HTML escape de tous les champs venant du JSON (defense-in-depth, voir
+            # _render_depenses_html pour la rationale).
+            date_s = html_escape(str(it.get("date", "")), quote=True)
+            va_s = html_escape(str(it.get("va_username", "")), quote=True)
+            desc_s = html_escape(str(it.get("description", "")), quote=True)
+            method_s = html_escape(str(it.get("payment_method", "")), quote=True)
+            try:
+                amt = float(it.get("amount", 0) or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            try:
+                it_id = int(it.get("id", 0))
+            except (TypeError, ValueError):
+                it_id = 0
             rows.append(
                 f"<tr style='border-bottom:1px solid #2a2a2a'>"
                 f"<td style='padding:8px;text-align:center'>"
                 f"<form method='POST' action='/business/vapayment/toggle' style='display:inline;margin:0'>"
-                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<input type='hidden' name='id' value='{it_id}'>"
                 f"<button type='submit' style='background:none;border:0;cursor:pointer;padding:0;margin:0'>{badge}</button>"
                 f"</form></td>"
-                f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
-                f"<td style='padding:8px'>@{it.get('va_username','')}</td>"
-                f"<td style='padding:8px'>{it.get('description','')}</td>"
-                f"<td style='padding:8px;font-size:12px;color:#aaa'>{it.get('payment_method','')}</td>"
-                f"<td style='padding:8px;text-align:right;font-weight:600;{color}'>{it.get('amount',0):.2f}€</td>"
+                f"<td style='padding:8px;font-size:13px'>{date_s}</td>"
+                f"<td style='padding:8px'>@{va_s}</td>"
+                f"<td style='padding:8px'>{desc_s}</td>"
+                f"<td style='padding:8px;font-size:12px;color:#aaa'>{method_s}</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:600;{color}'>{amt:.2f}€</td>"
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/business/vapayment/remove' style='display:inline;margin:0'>"
-                f"<input type='hidden' name='id' value='{it['id']}'>"
+                f"<input type='hidden' name='id' value='{it_id}'>"
                 f"<button type='submit' class='danger-btn' data-confirm='Supprimer ce paiement ?'>×</button>"
                 f"</form></td></tr>"
             )
