@@ -237,14 +237,15 @@ CATEGORY_PRESETS = {
     # Facture Hostinger : KVM 2 (9.99) + Daily Backup (5.99) + taxes (3.20) = 19.18 EUR/mois
     "VPS / Hosting": {
         "amount": 19.18,
+        "currency": "EUR",
         "description": "VPS Hostinger KVM 2 + Daily Backup",
         "recurring": True,
     },
-    # RapidAPI Instagram Scraper Stable API — plan PRO : facture 28.99 $/mois
-    # ~ 24.91 EUR au taux EUR->USD 1.164 (stockage en EUR, devise de base)
+    # RapidAPI Instagram Scraper Stable API — plan PRO : facture 28.99 $/mois (devise native USD)
     "RapidAPI / Scraping": {
-        "amount": 24.91,
-        "description": "RapidAPI Instagram Scraper Stable API (PRO) — 28.99$/mois",
+        "amount": 28.99,
+        "currency": "USD",
+        "description": "RapidAPI Instagram Scraper Stable API (PRO)",
         "recurring": True,
     },
 }
@@ -255,14 +256,28 @@ def list_expenses() -> List[Dict]:
 
 
 def add_expense(category: str, description: str, amount: float,
-                date_iso: str, recurring: bool = False):
+                date_iso: str, recurring: bool = False,
+                currency: str = "EUR", amount_original: float = None):
+    """Ajoute une depense.
+
+    `amount` est TOUJOURS en EUR (devise de base, sert aux totaux/stats).
+    Si l user a paye en USD, le caller convertit en EUR et passe :
+      - currency="USD"
+      - amount_original=montant en USD (pour l affichage)
+      - amount=equivalent EUR (pour les totaux)
+    """
     items = _load(EXPENSES_FILE)
     new_id = int(time.time() * 1000)
+    cur = (currency or "EUR").upper()
+    if cur not in ("EUR", "USD"):
+        cur = "EUR"
     items.append({
         "id": new_id,
         "category": category,
         "description": description.strip()[:200],
-        "amount": float(amount),
+        "amount": float(amount),  # EUR (base, pour totaux)
+        "currency": cur,          # devise saisie (EUR / USD)
+        "amount_original": float(amount_original if amount_original is not None else amount),
         "date": date_iso,
         "recurring": bool(recurring),
         "created_at": int(time.time()),

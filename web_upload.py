@@ -2560,108 +2560,6 @@ window.upClearPrefill = function(utab){
   </span>
   <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
 </div>
-<!-- Currency toggle (EUR <-> USD) -->
-<div id="cur-floating" style="position:fixed;top:18px;right:124px;z-index:90;display:flex;align-items:center;gap:4px;padding:6px 4px;background:#fff;border:1px solid #e5e7eb;border-radius:20px;box-shadow:0 4px 16px rgba(0,0,0,.08);user-select:none;transition:all .15s" title="Devise d affichage">
-  <button id="cur-btn-eur" type="button" onclick="setCurrency('EUR')" style="background:transparent;border:0;cursor:pointer;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:800;color:#9ca3af;transition:all .15s">€ EUR</button>
-  <button id="cur-btn-usd" type="button" onclick="setCurrency('USD')" style="background:transparent;border:0;cursor:pointer;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:800;color:#9ca3af;transition:all .15s">$ USD</button>
-</div>
-<script>
-/* Devise d affichage : EUR (defaut) ou USD. Stocke en localStorage.
-   Au load, si USD, on walk les text nodes et on convertit X€ -> $Y. */
-window.__eurUsdRate = parseFloat('{eur_usd_rate}') || 1.08;
-function getCurrency(){ try { return localStorage.getItem('vabot_currency') || 'EUR'; } catch(e){ return 'EUR'; } }
-function setCurrency(cur){
-  try { localStorage.setItem('vabot_currency', cur); } catch(e){}
-  /* Reload pour re-render proprement en partant du serveur (toujours EUR) */
-  window.location.reload();
-}
-function _styleCurBtns(){
-  var cur = getCurrency();
-  var eurBtn = document.getElementById('cur-btn-eur');
-  var usdBtn = document.getElementById('cur-btn-usd');
-  if(!eurBtn || !usdBtn) return;
-  if(cur === 'USD'){
-    usdBtn.style.background = '#3b82f6'; usdBtn.style.color = '#fff';
-    eurBtn.style.background = 'transparent'; eurBtn.style.color = '#9ca3af';
-  } else {
-    eurBtn.style.background = '#3b82f6'; eurBtn.style.color = '#fff';
-    usdBtn.style.background = 'transparent'; usdBtn.style.color = '#9ca3af';
-  }
-}
-function _convertText(txt, rate){
-  /* Pattern : nombre + optionnel decimale (, ou .) + optionnels espaces + €
-     Replace par "$" + (nombre * rate) avec meme nb de decimales */
-  return txt.replace(/(\d+(?:[.,]\d+)?)\s*€/g, function(m, num){
-    var raw = num.replace(',', '.');
-    var v = parseFloat(raw);
-    if(isNaN(v)) return m;
-    var hasDecimal = /[.,]/.test(num);
-    var conv = v * rate;
-    /* Garde meme nombre de decimales (max 2) */
-    var dec = hasDecimal ? (num.split(/[.,]/)[1] || '').length : 0;
-    if(dec > 2) dec = 2;
-    var formatted = dec ? conv.toFixed(dec) : Math.round(conv).toString();
-    return '$' + formatted;
-  });
-}
-window.__curObserver = null;
-window.__curRuns = 0;
-function applyCurrency(){
-  _styleCurBtns();
-  if(getCurrency() !== 'USD') return;
-  var rate = window.__eurUsdRate;
-  if(!rate || rate <= 0) return;
-  /* IMPORTANT : on deconnecte l observer pendant qu on modifie le texte,
-     sinon nos propres modifications redeclenchent l observer -> boucle
-     infinie -> crash "Out of Memory". */
-  if(window.__curObserver){ try{ window.__curObserver.disconnect(); }catch(e){} }
-  try {
-    /* TreeWalker sur tout le body, skip script/style/textarea/input */
-    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode: function(n){
-        var p = n.parentNode;
-        if(!p) return NodeFilter.FILTER_REJECT;
-        var tag = (p.tagName || '').toLowerCase();
-        if(tag === 'script' || tag === 'style' || tag === 'textarea' || tag === 'input' || tag === 'option') return NodeFilter.FILTER_REJECT;
-        if(p.closest && p.closest('[data-no-currency]')) return NodeFilter.FILTER_REJECT;
-        if(n.nodeValue && n.nodeValue.indexOf('€') !== -1) return NodeFilter.FILTER_ACCEPT;
-        return NodeFilter.FILTER_REJECT;
-      }
-    });
-    var nodes = []; var n;
-    while((n = walker.nextNode())) nodes.push(n);
-    nodes.forEach(function(node){
-      var converted = _convertText(node.nodeValue, rate);
-      if(converted !== node.nodeValue) node.nodeValue = converted;  /* skip si rien ne change */
-    });
-  } finally {
-    /* Reconnecte SANS characterData (on n observe que l ajout de nouveaux
-       elements, pas nos propres edits de texte) */
-    if(window.__curObserver && getCurrency() === 'USD'){
-      try{ window.__curObserver.observe(document.body, {childList:true, subtree:true}); }catch(e){}
-    }
-  }
-}
-/* Run au load. Observer optionnel (USD only) pour le contenu charge en async,
-   avec debounce + cap de securite anti-boucle. */
-document.addEventListener('DOMContentLoaded', function(){
-  applyCurrency();
-  if(getCurrency() !== 'USD') return;  /* en EUR : aucun observer, zero overhead */
-  var t = null;
-  window.__curObserver = new MutationObserver(function(){
-    if(t) return;
-    /* cap de securite : jamais plus de 100 passes (backstop anti-boucle) */
-    if(window.__curRuns > 100){ try{ window.__curObserver.disconnect(); }catch(e){} return; }
-    t = setTimeout(function(){
-      t = null;
-      window.__curRuns++;
-      applyCurrency();
-    }, 600);
-  });
-  /* childList + subtree UNIQUEMENT (pas characterData -> pas de feedback loop) */
-  try{ window.__curObserver.observe(document.body, {childList:true, subtree:true}); }catch(e){}
-});
-</script>
 <h1 id="page-title">Dashboard</h1>
 <div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
 {msg_html}
@@ -10022,23 +9920,27 @@ def _render_depenses_html() -> str:
         from business import list_expenses, expense_stats, CATEGORIES, CATEGORY_PRESETS
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    # Options de categorie avec data-attrs pour l auto-remplissage du montant/description/recurrent
+    # Options de categorie avec data-attrs pour l auto-remplissage (montant/devise/desc/recurrent)
     _opt_parts = []
     for c in CATEGORIES:
         preset = CATEGORY_PRESETS.get(c) or {}
         amt = preset.get("amount", "")
+        cur = (preset.get("currency", "EUR") or "EUR").upper()
         desc = (preset.get("description", "") or "").replace("'", "&#39;").replace('"', "&quot;")
         rec = "1" if preset.get("recurring") else "0"
         _opt_parts.append(
-            f"<option value='{c}' data-amount='{amt}' data-desc='{desc}' data-recurring='{rec}'>{c}</option>"
+            f"<option value='{c}' data-amount='{amt}' data-currency='{cur}' data-desc='{desc}' data-recurring='{rec}'>{c}</option>"
         )
     cat_opts = "".join(_opt_parts)
     # Valeurs initiales = preset de la 1ere categorie (si elle en a un)
     _first_preset = CATEGORY_PRESETS.get(CATEGORIES[0]) if CATEGORIES else None
     init_amount = (_first_preset or {}).get("amount", 29.99)
+    init_cur = (_first_preset or {}).get("currency", "EUR").upper()
     init_desc = (_first_preset or {}).get("description", "")
     init_rec_checked = "checked" if (_first_preset or {}).get("recurring") else ""
     init_desc_attr = str(init_desc).replace("'", "&#39;").replace('"', "&quot;")
+    _eur_sel = "selected" if init_cur == "EUR" else ""
+    _usd_sel = "selected" if init_cur == "USD" else ""
     import datetime
     today = datetime.date.today().isoformat()
     items = list_expenses()
@@ -10048,7 +9950,14 @@ def _render_depenses_html() -> str:
         f"<h4 style='margin-top:0'>➕ Nouvelle dépense</h4>"
         f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'>"
         f"<div><label>Catégorie</label><select name='category' id='exp-category' onchange='expApplyPreset(this)' required>{cat_opts}</select></div>"
-        f"<div><label>Montant (€)</label><input type='number' name='amount' id='exp-amount' step='0.01' min='0' value='{init_amount}' required></div>"
+        f"<div><label>Montant</label>"
+        f"<div style='display:flex;gap:6px'>"
+        f"<input type='number' name='amount' id='exp-amount' step='0.01' min='0' value='{init_amount}' required style='flex:1;min-width:0'>"
+        f"<select name='currency' id='exp-currency' style='width:auto;flex-shrink:0' title='Devise payée'>"
+        f"<option value='EUR' {_eur_sel}>€ EUR</option>"
+        f"<option value='USD' {_usd_sel}>$ USD</option>"
+        f"</select>"
+        f"</div></div>"
         f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
         f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='recurring' id='exp-recurring' {init_rec_checked} style='width:auto;margin:0'> Mensuel récurrent</label></div>"
         f"</div>"
@@ -10060,13 +9969,16 @@ def _render_depenses_html() -> str:
         "function expApplyPreset(sel){"
         "  var o = sel.options[sel.selectedIndex]; if(!o) return;"
         "  var amt = o.getAttribute('data-amount');"
+        "  var cur = o.getAttribute('data-currency');"
         "  var desc = o.getAttribute('data-desc');"
         "  var rec = o.getAttribute('data-recurring');"
         "  var amtEl = document.getElementById('exp-amount');"
+        "  var curEl = document.getElementById('exp-currency');"
         "  var descEl = document.getElementById('exp-description');"
         "  var recEl = document.getElementById('exp-recurring');"
         "  /* N ecrase le montant que s il y a un preset (sinon on laisse ce que l user a tape) */"
         "  if(amt !== null && amt !== ''){ if(amtEl) amtEl.value = amt; }"
+        "  if(cur && curEl){ curEl.value = cur; }"
         "  if(desc !== null && desc !== ''){ if(descEl) descEl.value = desc; }"
         "  if(recEl){ recEl.checked = (rec === '1'); }"
         "}"
@@ -10119,16 +10031,27 @@ def _render_depenses_html() -> str:
         )
         # Tri par date décroissante (plus récent en haut)
         items_sorted = sorted(items, key=lambda x: x.get("date", ""), reverse=True)
-        running_total = 0.0
+        running_total_eur = 0.0  # total toujours en EUR (base)
         for it in items_sorted:
             rec_icon = "🔄" if it.get("recurring") else ""
-            running_total += float(it.get("amount", 0) or 0)
+            amount_eur = float(it.get("amount", 0) or 0)
+            running_total_eur += amount_eur
+            # Affichage dans la devise native : $X.XX si USD, sinon X.XX €
+            cur = (it.get("currency") or "EUR").upper()
+            orig = float(it.get("amount_original", amount_eur) or amount_eur)
+            if cur == "USD":
+                amount_disp = f"-${orig:.2f}"
+                # Sous-ligne : equivalent EUR (pour le rapprochement avec le total)
+                sub = f"<div style='font-size:10px;color:#888'>≈ {amount_eur:.2f} €</div>"
+            else:
+                amount_disp = f"-{orig:.2f} €"
+                sub = ""
             rows.append(
                 f"<tr style='border-bottom:1px solid #2a2a2a'>"
                 f"<td style='padding:8px;font-size:13px'>{it.get('date','')}</td>"
                 f"<td style='padding:8px;font-size:13px'>{it.get('category','')}</td>"
                 f"<td style='padding:8px'>{it.get('description','')}</td>"
-                f"<td style='padding:8px;text-align:right;font-weight:600;color:#f99'>-{it.get('amount',0):.2f} €</td>"
+                f"<td style='padding:8px;text-align:right;font-weight:600;color:#f99'>{amount_disp}{sub}</td>"
                 f"<td style='padding:8px;text-align:center;font-size:18px'>{rec_icon}</td>"
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/business/expense/remove' style='display:inline;margin:0'>"
@@ -10137,11 +10060,11 @@ def _render_depenses_html() -> str:
                 f"</form></td></tr>"
             )
         rows.append("</tbody>")
-        # Ligne TOTAL en pied de table
+        # Ligne TOTAL en pied de table (toujours en EUR, devise de base)
         rows.append(
             "<tfoot><tr style='border-top:2px solid #3a3a3a;background:#161616'>"
-            "<td colspan='3' style='padding:12px 8px;font-weight:700;font-size:14px'>TOTAL</td>"
-            f"<td style='padding:12px 8px;text-align:right;font-weight:800;font-size:15px;color:#f87171'>-{running_total:.2f} €</td>"
+            "<td colspan='3' style='padding:12px 8px;font-weight:700;font-size:14px'>TOTAL <span style='font-size:11px;color:#888;font-weight:400'>(converti en €)</span></td>"
+            f"<td style='padding:12px 8px;text-align:right;font-weight:800;font-size:15px;color:#f87171'>-{running_total_eur:.2f} €</td>"
             "<td colspan='2'></td>"
             "</tr></tfoot>"
         )
@@ -19578,18 +19501,10 @@ def _render_upload_inner(msg=None, error=None):
     stat_pps = 0
     if PROFILE_PICS_DIR.exists():
         stat_pps = sum(1 for p in PROFILE_PICS_DIR.iterdir() if p.is_file())
-    # Taux EUR -> USD pour le toggle currency (devise d affichage)
-    try:
-        import mypuls as _mp
-        _r = _mp.get_eur_usd_rate()
-        _eur_usd = float(_r.get("rate", 1.08)) if isinstance(_r, dict) else 1.08
-    except Exception:
-        _eur_usd = 1.08
     return (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
         .replace("{msg_html}", msg_html)
-        .replace("{eur_usd_rate}", f"{_eur_usd:.4f}")
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
         .replace("{va_list_html}", _render_va_list_html())
@@ -20515,15 +20430,38 @@ def create_app():
         category = (request.form.get("category") or "").strip()
         description = (request.form.get("description") or "").strip()
         date = (request.form.get("date") or "").strip()
+        currency = (request.form.get("currency") or "EUR").strip().upper()
+        if currency not in ("EUR", "USD"):
+            currency = "EUR"
         try:
-            amount = float(request.form.get("amount") or "0")
+            amount_input = float(request.form.get("amount") or "0")
         except Exception:
             return _error("❌ Montant invalide")
         recurring = request.form.get("recurring") == "on"
-        if not category or not description or not date or amount <= 0:
+        if not category or not description or not date or amount_input <= 0:
             return _error("❌ Champs requis manquants ou invalides")
-        add_expense(category, description, amount, date, recurring)
-        return _success(f"✅ Dépense ajoutée : <b>{description}</b> ({amount:.2f}€)")
+        # Conversion : on stocke TOUJOURS amount en EUR (devise de base, pour les totaux).
+        # Si l user a paye en USD, on convertit au taux actuel et on garde le montant USD d origine.
+        if currency == "USD":
+            try:
+                import mypuls
+                r = mypuls.get_eur_usd_rate()
+                rate = float(r.get("rate", 1.08)) if isinstance(r, dict) else 1.08
+            except Exception:
+                rate = 1.08
+            if rate <= 0:
+                rate = 1.08
+            amount_eur = round(amount_input / rate, 2)  # USD -> EUR
+            add_expense(category, description, amount_eur, date, recurring,
+                        currency="USD", amount_original=amount_input)
+            return _success(
+                f"✅ Dépense ajoutée : <b>{description}</b> "
+                f"(${amount_input:.2f} ≈ {amount_eur:.2f}€)"
+            )
+        else:
+            add_expense(category, description, amount_input, date, recurring,
+                        currency="EUR", amount_original=amount_input)
+            return _success(f"✅ Dépense ajoutée : <b>{description}</b> ({amount_input:.2f}€)")
 
     @app.route("/business/expense/remove", methods=["POST"])
     def business_expense_remove():
