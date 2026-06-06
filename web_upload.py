@@ -16644,6 +16644,18 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       </label>
       <input type='hidden' name='infinite_mode' id='mpl-infinite' value='0'>
 
+      <!-- Hint qui apparait quand Mode infini est ON pour guider l user -->
+      <div id='mpl-infinite-hint' style="display:none;margin:0 0 14px 0;padding:12px 14px;background:linear-gradient(135deg,rgba(168,85,247,.12),rgba(59,130,246,.08));border:1px solid rgba(168,85,247,.35);border-radius:10px;font-size:13px;color:#e0d7ff;line-height:1.5">
+        <div style="display:flex;align-items:start;gap:10px">
+          <span style="font-size:18px;flex-shrink:0">♾️</span>
+          <div style="flex:1">
+            <b style="color:#c084fc;display:block;margin-bottom:4px">Mode infini activé.</b>
+            <span style="color:#aaa">Pour créer la campagne récurrente : configure tes slots (heures de post / story) et tes médias <b style="color:#fff">ci-dessous</b>, puis clique sur <b style="color:#fff">"♾️ Lancer la campagne infinie"</b> tout en bas.</span>
+            <button type="button" onclick="mplScrollToPush()" style="margin-top:8px;background:rgba(168,85,247,.18);border:1px solid rgba(168,85,247,.4);color:#c084fc;padding:6px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">↓ Aller au bouton Lancer</button>
+          </div>
+        </div>
+      </div>
+
       <div class='mpl-2col'>
         <div>
           <label id='mpl-lbl-start'>Date debut</label>
@@ -17315,6 +17327,9 @@ function toggleInfinite(){{
   // Change le label de "Date debut" en "Demarrer le"
   const lbl = document.getElementById('mpl-lbl-start');
   if(lbl) lbl.textContent = on?'Demarrer le':'Date debut';
+  // Affiche/cache le hint d explication (user croyait que le toggle creait la campagne)
+  const hint = document.getElementById('mpl-infinite-hint');
+  if(hint) hint.style.display = on?'block':'none';
   // Adapter le bouton push
   const btn = document.querySelector('.mpl-push-btn');
   if(btn){{
@@ -17326,6 +17341,21 @@ function toggleInfinite(){{
       btn.innerHTML = (ct==='story')?'⚡ Pousser les stories':'⚡ Pousser les posts';
     }}
   }}
+}}
+
+// Scroll fluide vers le bouton Pousser/Lancer + highlight visuel
+function mplScrollToPush(){{
+  const btn = document.querySelector('.mpl-push-btn');
+  if(!btn) return;
+  btn.scrollIntoView({{behavior:'smooth', block:'center'}});
+  // Pulse visuel pour attirer l attention
+  btn.style.transition = 'box-shadow .3s, transform .2s';
+  btn.style.boxShadow = '0 0 0 4px rgba(168,85,247,.5), 0 8px 24px rgba(168,85,247,.4)';
+  btn.style.transform = 'scale(1.02)';
+  setTimeout(function(){{
+    btn.style.boxShadow = '';
+    btn.style.transform = '';
+  }}, 1400);
 }}
 
 // === Auto-Delete : fetch events + select + delete ===
@@ -17807,6 +17837,15 @@ async function mplLoadSettings(cid){{
       inf.value = s.infinite_mode ? '1' : '0';
       const t = document.getElementById('mpl-infinite-toggle');
       if(t) t.classList.toggle('active', s.infinite_mode);
+      // Sync aussi le hint d explication (visible si mode actif)
+      const hint = document.getElementById('mpl-infinite-hint');
+      if(hint) hint.style.display = s.infinite_mode ? 'block' : 'none';
+      // Et le label "Date debut" / "Demarrer le"
+      const lbl = document.getElementById('mpl-lbl-start');
+      if(lbl) lbl.textContent = s.infinite_mode ? 'Demarrer le' : 'Date debut';
+      // Cache la date de fin si infini
+      const ew = document.getElementById('mpl-end-wrap');
+      if(ew) ew.style.display = s.infinite_mode ? 'none' : '';
     }}
     // Posts count + slots : on remplace direct le array global
     if(s.posts){{
