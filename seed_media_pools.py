@@ -111,6 +111,79 @@ MEDIA_SEEDS = {
 }
 
 
+# Slots horaires par defaut pour le PLANNING GLOBAL MyPuls Live.
+# Config user : 9 posts/jour (5 publics + 4 prives) + 2 stories/jour (toutes
+# en audience 'everyone' / Tous MYM). Applique a tous les createurs.
+DEFAULT_POST_SLOTS = [
+    {"time": "01:00", "visibility": "public"},   # #1 01 AM
+    {"time": "02:00", "visibility": "private"},  # #2 02 AM
+    {"time": "04:00", "visibility": "public"},   # #3 04 AM
+    {"time": "08:00", "visibility": "private"},  # #4 08 AM
+    {"time": "13:00", "visibility": "public"},   # #5 01 PM
+    {"time": "15:00", "visibility": "private"},  # #6 03 PM
+    {"time": "18:00", "visibility": "public"},   # #7 06 PM
+    {"time": "19:00", "visibility": "private"},  # #8 07 PM
+    {"time": "20:00", "visibility": "public"},   # #9 08 PM
+]
+
+DEFAULT_STORY_SLOTS = [
+    {"time": "10:00", "audience": "everyone"},  # #1 10 AM Tous MYM
+    {"time": "20:00", "audience": "everyone"},  # #2 08 PM Tous MYM
+]
+
+
+def seed_global_slots(force: bool = False) -> str:
+    """Seed le planning global (slots posts + stories + dates par defaut).
+
+    Si force=True : ecrase les slots existants.
+    Si force=False : ne touche que si les slots actuels sont vides OU
+    identiques aux 14-slots par defaut hardcoded en JS (= l user n a rien
+    customise).
+
+    Returns : 'seeded' | 'skipped' | 'error: ...'
+    """
+    try:
+        import mypuls_creator_settings as mcs
+    except Exception as e:
+        return f"error: {e}"
+    try:
+        current = mcs.get_global_settings()
+        existing_posts = (current.get("posts") or {}).get("slots") or []
+        if existing_posts and not force:
+            # On ne re-seed que si l existant est le default hardcoded 14-slots
+            # (= l user n a rien change). Si l user a customise, on touche pas.
+            default_hardcoded_times = {
+                "01:00", "02:00", "08:00", "13:00", "15:00", "16:00",
+                "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"
+            }
+            existing_times = {s.get("time") for s in existing_posts if isinstance(s, dict)}
+            is_hardcoded_default = (
+                len(existing_posts) == 14
+                and existing_times == default_hardcoded_times
+            )
+            if not is_hardcoded_default:
+                return "skipped"
+        payload = dict(current)
+        payload["posts"] = {"count": len(DEFAULT_POST_SLOTS), "slots": list(DEFAULT_POST_SLOTS)}
+        payload["stories"] = {"count": len(DEFAULT_STORY_SLOTS), "slots": list(DEFAULT_STORY_SLOTS)}
+        # Date defaut : aujourd hui -> fin du mois courant
+        from datetime import date as _d, timedelta as _td
+        today = _d.today()
+        # Calcule fin du mois (=1er du mois suivant - 1 jour)
+        if today.month == 12:
+            next_month = _d(today.year + 1, 1, 1)
+        else:
+            next_month = _d(today.year, today.month + 1, 1)
+        end_of_month = next_month - _td(days=1)
+        payload["start_date"] = today.isoformat()
+        payload["end_date"] = end_of_month.isoformat()
+        payload.setdefault("infinite_mode", False)
+        ok = mcs.save_global_settings(payload)
+        return "seeded" if ok else "error: save failed"
+    except Exception as e:
+        return f"error: {e}"
+
+
 def seed_media_pools(force: bool = False) -> dict:
     """Restaure les media_pool_posts depuis MEDIA_SEEDS si vides.
 
@@ -148,16 +221,19 @@ def seed_media_pools(force: bool = False) -> dict:
     except Exception:
         pass
 
+    # Seed aussi le planning global (slots posts + stories + dates)
+    result["__global_slots__"] = seed_global_slots(force=force)
+
     return result
 
 
 if __name__ == "__main__":
     import sys
     force = "--force" in sys.argv
-    print("Seeding media pools...", "(FORCE mode)" if force else "")
+    print("Seeding media pools + global slots...", "(FORCE mode)" if force else "")
     res = seed_media_pools(force=force)
     for cid, status in res.items():
-        print(f"  #{cid}: {status}")
+        print(f"  {cid}: {status}")
     n_seeded = sum(1 for v in res.values() if v == "seeded")
     n_skipped = sum(1 for v in res.values() if v == "skipped")
     print(f"\nDone: {n_seeded} seeded, {n_skipped} skipped.")
