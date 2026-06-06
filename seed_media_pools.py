@@ -22,8 +22,12 @@ import json
 
 # (creator_id MyPuls) -> liste de media_id (str)
 # IDs verifies via mypuls.list_creators() :
-#   Julia_dv=679, Amelia_xoxo=769, Lolatacrush=1116, Talittlechloe=1121,
-#   Maria_coco=1407, Sarahmycrush=1469, Emmabrn=1733
+#   Julia_dv=679, Amelia_xoxo=769, Lolatacrush=1116, Lilibett=1120,
+#   Talittlechloe=1121, Maria_coco=1407, Sarahmycrush=1469, Emmabrn=1733
+# Mapping nom-user -> creator MyPuls :
+#   EMMA=Emmabrn(1733), AMELIA=Amelia_xoxo(769), JULIA=Julia_dv(679),
+#   SARAH=Sarahmycrush(1469), LOLA=Lolatacrush(1116), MARIA=Maria_coco(1407),
+#   CHLOE=Talittlechloe(1121), CAMILLE=Lilibett(1120)
 MEDIA_SEEDS = {
     1733: [  # EMMA / Emmabrn (29)
         "75114546", "75114545", "75114544", "75114543", "75114541",
@@ -81,16 +85,12 @@ MEDIA_SEEDS = {
         "74183510", "74183516", "74183671", "74183678", "74183683",
         "74183711", "74186526", "74186590",
     ],
+    1120: [  # CAMILLE / Lilibett (15)
+        "74168342", "74168373", "74295578", "74295588", "74295596",
+        "74295631", "74295669", "74295677", "74295688", "74295702",
+        "74295711", "74295716", "74295795", "74295797", "74295802",
+    ],
 }
-
-# CAMILLE : creator_id MyPuls inconnu pour l instant. On stocke ses medias
-# a part dans un fichier orphelin pour que le user puisse les rattacher
-# quand il aura son creator_id.
-CAMILLE_MEDIAS = [
-    "74168342", "74168373", "74295578", "74295588", "74295596",
-    "74295631", "74295669", "74295677", "74295688", "74295702",
-    "74295711", "74295716", "74295795", "74295797", "74295802",
-]
 
 
 def seed_media_pools(force: bool = False) -> dict:
@@ -120,30 +120,15 @@ def seed_media_pools(force: bool = False) -> dict:
         except Exception as e:
             result[cid] = f"error: {e}"
 
-    # CAMILLE orphan
+    # Cleanup : l ancien fichier orphan_media_pools.json contenait CAMILLE
+    # avant qu on connaisse son creator_id (Lilibett=1120). Maintenant
+    # qu elle est rattachee dans MEDIA_SEEDS, on peut effacer ce fichier.
     try:
         orphan_file = Path("data/orphan_media_pools.json")
-        orphan_file.parent.mkdir(parents=True, exist_ok=True)
-        orphan_data = {}
         if orphan_file.exists():
-            try:
-                orphan_data = json.loads(orphan_file.read_text(encoding="utf-8"))
-            except Exception:
-                orphan_data = {}
-        if not orphan_data.get("CAMILLE", {}).get("media_pool_posts") or force:
-            orphan_data["CAMILLE"] = {
-                "media_pool_posts": list(CAMILLE_MEDIAS),
-                "note": "creator_id MyPuls inconnu - rattacher quand connu",
-            }
-            orphan_file.write_text(
-                json.dumps(orphan_data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            result["CAMILLE_orphan"] = "seeded"
-        else:
-            result["CAMILLE_orphan"] = "skipped"
-    except Exception as e:
-        result["CAMILLE_orphan"] = f"error: {e}"
+            orphan_file.unlink()
+    except Exception:
+        pass
 
     return result
 
