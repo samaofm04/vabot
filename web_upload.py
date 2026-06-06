@@ -3563,6 +3563,61 @@ def _render_login(err=""):
     return LOGIN_HTML.replace("{err}", err_html)
 
 
+# ============ PERF : cache TTL pour les fonctions lourdes ============
+# Memoize avec expiration. Marche pour funcs(args hashables) -> any.
+import time as _time_perf
+import functools as _ft_perf
+import threading as _th_perf
+
+_TTL_CACHE: dict = {}
+_TTL_CACHE_LOCK = _th_perf.Lock()
+
+
+def ttl_cache(seconds: int = 30, max_entries: int = 256):
+    """Decorator : memoize une fonction pour N secondes.
+
+    Utilise pour les fonctions cher a calculer mais qu on appelle bcp
+    (renders HTML, appels API externes, etc.). Auto-cleanup si > max_entries.
+    """
+    def deco(fn):
+        cache_key_prefix = f"{fn.__module__}.{fn.__qualname__}"
+        @_ft_perf.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                k = (cache_key_prefix, args, tuple(sorted(kwargs.items())))
+            except TypeError:
+                # args non-hashables -> bypass cache
+                return fn(*args, **kwargs)
+            now = _time_perf.time()
+            with _TTL_CACHE_LOCK:
+                hit = _TTL_CACHE.get(k)
+                if hit and (now - hit[0]) < seconds:
+                    return hit[1]
+            # Compute hors lock pour ne pas bloquer d autres threads
+            result = fn(*args, **kwargs)
+            with _TTL_CACHE_LOCK:
+                _TTL_CACHE[k] = (now, result)
+                # Cleanup si trop d entrees
+                if len(_TTL_CACHE) > max_entries:
+                    # Drop les 50 plus vieilles
+                    olds = sorted(_TTL_CACHE.items(), key=lambda x: x[1][0])[:50]
+                    for kk, _ in olds:
+                        _TTL_CACHE.pop(kk, None)
+            return result
+        wrapper.invalidate = lambda: [
+            _TTL_CACHE.pop(k, None)
+            for k in [kk for kk in list(_TTL_CACHE.keys()) if kk[0] == cache_key_prefix]
+        ]
+        return wrapper
+    return deco
+
+
+def _invalidate_all_ttl_cache():
+    """Vide tout le cache TTL (a appeler apres une mutation importante)."""
+    with _TTL_CACHE_LOCK:
+        _TTL_CACHE.clear()
+
+
 # ============ PERF : cache des JSON par mtime ============
 # Cache simple { path_str: (mtime, parsed_data) }. Invalide automatiquement
 # quand le fichier est modifie. Evite de re-parse N fois par page-load.
@@ -4695,6 +4750,7 @@ body.light .vac-card-name{color:#111}
     )
 
 
+@ttl_cache(seconds=10)
 def _render_va_list_html() -> str:
     try:
         # Priorite GMS (par defaut), fallback Linkscale si GMS pas configure
@@ -7395,6 +7451,7 @@ document.addEventListener('DOMContentLoaded', function(){
     )
 
 
+@ttl_cache(seconds=30)
 def _render_identity_stats_html() -> str:
     identities = _list_identities()
     if not identities:
@@ -12030,6 +12087,7 @@ function lsOpenCreateModal(){
     )
 
 
+@ttl_cache(seconds=15)
 def _render_gms_html() -> str:
     """Page GetMySocial : gestion clé API + liste/création/suppression liens."""
     try:
@@ -12381,6 +12439,7 @@ function gmsFilter(btn, cat){
     )
 
 
+@ttl_cache(seconds=10)
 def _render_geelark_html() -> str:
     """Page GeeLark : push planifies + watchers + historique.
 
