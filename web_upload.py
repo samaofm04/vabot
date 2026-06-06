@@ -3261,13 +3261,7 @@ document.addEventListener('keydown', function(e){
 <small>Crée un compte d'accès avec un rôle spécifique</small>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
 <div><label>Nom</label><input type="text" name="username" placeholder="Nom de l'utilisateur" required></div>
-<div><label>Rôle</label><select name="role" required>
-<option value="admin">Admin (tout)</option>
-<option value="creator">Creator (upload + cloud)</option>
-<option value="chatter">Chatter (revenus + sfs)</option>
-<option value="va">VA (lecture seule)</option>
-<option value="custom">Custom (à définir)</option>
-</select></div>
+<div><label>Rôle</label><select name="role" required>{role_dropdown_options}</select></div>
 </div>
 <label>Mot de passe initial</label>
 <input type="password" name="password" placeholder="Min 6 caractères" required minlength="6">
@@ -18698,6 +18692,64 @@ ROLE_MENU_STRUCTURE = [
 ]
 
 
+def _get_all_roles():
+    """Retourne la liste unifiee des roles (defauts + custom). Source unique
+    de verite pour le tableau ET le dropdown 'Ajouter un utilisateur'."""
+    role_defs = _load_role_definitions()
+    default_roles = [
+        ("owner",   "Owner",   "Toutes permissions, sans restriction",                                                     "#3b82f6"),
+        ("admin",   "Admin",   "Accès complet à toutes les pages + gestion des utilisateurs / VAs / paiements",            "#3b82f6"),
+        ("va",      "VA",      "Upload contenu, planning posts/stories, gestion des comptes Insta assignés à son identité", "#a855f7"),
+        ("chatter", "Chatter", "Vue revenus + planning SFS + historique conversations. Pas d'upload, pas de gestion VAs",  "#fbbf24"),
+        ("creator", "Creator", "Modèle (OF/MyM) — vue de ses propres revenus, dashboard perso, validation contenu",         "#10b981"),
+        ("sfs",     "SFS Manager", "Création / édition / validation des SFS uniquement (calendrier SFS + preuves AVANT/APRÈS)", "#ec4899"),
+    ]
+    out = []
+    for key, name, desc, color in default_roles:
+        custom = role_defs.get(key, {}) if isinstance(role_defs, dict) else {}
+        out.append({
+            "key": key,
+            "name": custom.get("name", name),
+            "desc": custom.get("description", desc),
+            "color": color,
+            "enabled": custom.get("enabled", True),
+            "default": True,
+        })
+    # Roles custom ajoutes par l user (non dans la liste default)
+    if isinstance(role_defs, dict):
+        for key, info in role_defs.items():
+            if any(r["key"] == key for r in out):
+                continue
+            if not isinstance(info, dict):
+                continue
+            out.append({
+                "key": key,
+                "name": info.get("name", key.title()),
+                "desc": info.get("description", ""),
+                "color": info.get("color", "#6b7280"),
+                "enabled": info.get("enabled", True),
+                "default": False,
+            })
+    return out
+
+
+def _render_role_dropdown_options() -> str:
+    """Genere les <option> du select 'Role' pour le form Ajouter un user.
+    Lit la meme source que le tableau des roles -> tjrs synchronise."""
+    roles = _get_all_roles()
+    # Skip 'owner' (pas attribuable a un nouveau user)
+    parts = []
+    for r in roles:
+        if r["key"] == "owner":
+            continue
+        if not r["enabled"]:
+            continue
+        # On garde le label court : "Admin — Accès complet..." mais cap a 60 chars
+        desc_short = r["desc"][:50] + ("…" if len(r["desc"]) > 50 else "")
+        parts.append(f"<option value='{r['key']}'>{r['name']} — {desc_short}</option>")
+    return "".join(parts)
+
+
 def _render_role_settings_html() -> str:
     """Tableau des rôles et permissions + utilisateurs."""
     users = _load_role_users()
@@ -19082,6 +19134,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{account_email}", _load_account_settings().get("email", ""))
         .replace("{security_sessions_html}", _render_security_sessions_html())
         .replace("{role_settings_html}", _render_role_settings_html())
+        .replace("{role_dropdown_options}", _render_role_dropdown_options())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
         .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
