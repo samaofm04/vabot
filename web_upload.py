@@ -10000,10 +10000,26 @@ window.addEventListener('DOMContentLoaded', function(){{
 
 def _render_depenses_html() -> str:
     try:
-        from business import list_expenses, expense_stats, CATEGORIES
+        from business import list_expenses, expense_stats, CATEGORIES, CATEGORY_PRESETS
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    cat_opts = "".join(f"<option value='{c}'>{c}</option>" for c in CATEGORIES)
+    # Options de categorie avec data-attrs pour l auto-remplissage du montant/description/recurrent
+    _opt_parts = []
+    for c in CATEGORIES:
+        preset = CATEGORY_PRESETS.get(c) or {}
+        amt = preset.get("amount", "")
+        desc = (preset.get("description", "") or "").replace("'", "&#39;").replace('"', "&quot;")
+        rec = "1" if preset.get("recurring") else "0"
+        _opt_parts.append(
+            f"<option value='{c}' data-amount='{amt}' data-desc='{desc}' data-recurring='{rec}'>{c}</option>"
+        )
+    cat_opts = "".join(_opt_parts)
+    # Valeurs initiales = preset de la 1ere categorie (si elle en a un)
+    _first_preset = CATEGORY_PRESETS.get(CATEGORIES[0]) if CATEGORIES else None
+    init_amount = (_first_preset or {}).get("amount", 29.99)
+    init_desc = (_first_preset or {}).get("description", "")
+    init_rec_checked = "checked" if (_first_preset or {}).get("recurring") else ""
+    init_desc_attr = str(init_desc).replace("'", "&#39;").replace('"', "&quot;")
     import datetime
     today = datetime.date.today().isoformat()
     items = list_expenses()
@@ -10012,15 +10028,30 @@ def _render_depenses_html() -> str:
         f"<form method='POST' action='/business/expense/add' class='box'>"
         f"<h4 style='margin-top:0'>➕ Nouvelle dépense</h4>"
         f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px'>"
-        f"<div><label>Catégorie</label><select name='category' required>{cat_opts}</select></div>"
-        f"<div><label>Montant (€)</label><input type='number' name='amount' step='0.01' min='0' value='29.99' required></div>"
+        f"<div><label>Catégorie</label><select name='category' id='exp-category' onchange='expApplyPreset(this)' required>{cat_opts}</select></div>"
+        f"<div><label>Montant (€)</label><input type='number' name='amount' id='exp-amount' step='0.01' min='0' value='{init_amount}' required></div>"
         f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
-        f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='recurring' style='width:auto;margin:0'> Mensuel récurrent</label></div>"
+        f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='recurring' id='exp-recurring' {init_rec_checked} style='width:auto;margin:0'> Mensuel récurrent</label></div>"
         f"</div>"
         f"<label>Description</label>"
-        f"<input type='text' name='description' placeholder='RapidAPI PRO, VPS Hostinger...' required maxlength='200'>"
+        f"<input type='text' name='description' id='exp-description' value='{init_desc_attr}' placeholder='RapidAPI PRO, VPS Hostinger...' required maxlength='200'>"
         f"<button type='submit'>Ajouter</button>"
         f"</form>"
+        "<script>"
+        "function expApplyPreset(sel){"
+        "  var o = sel.options[sel.selectedIndex]; if(!o) return;"
+        "  var amt = o.getAttribute('data-amount');"
+        "  var desc = o.getAttribute('data-desc');"
+        "  var rec = o.getAttribute('data-recurring');"
+        "  var amtEl = document.getElementById('exp-amount');"
+        "  var descEl = document.getElementById('exp-description');"
+        "  var recEl = document.getElementById('exp-recurring');"
+        "  /* N ecrase le montant que s il y a un preset (sinon on laisse ce que l user a tape) */"
+        "  if(amt !== null && amt !== ''){ if(amtEl) amtEl.value = amt; }"
+        "  if(desc !== null && desc !== ''){ if(descEl) descEl.value = desc; }"
+        "  if(recEl){ recEl.checked = (rec === '1'); }"
+        "}"
+        "</script>"
     )
     if not items:
         rows.append("<p style='color:#888'>Aucune dépense enregistrée.</p>")

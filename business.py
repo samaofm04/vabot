@@ -230,6 +230,24 @@ CATEGORIES = [
     "Autre",
 ]
 
+# Prix presets par categorie : quand l user choisit la categorie dans le
+# formulaire de depense, le montant + description + recurrent s auto-remplissent.
+# Tous les montants en EUR (devise de stockage). Modifiable a la volee dans le form.
+CATEGORY_PRESETS = {
+    # Facture Hostinger : KVM 2 (9.99) + Daily Backup (5.99) + taxes (3.20) = 19.18 EUR/mois
+    "VPS / Hosting": {
+        "amount": 19.18,
+        "description": "VPS Hostinger KVM 2 + Daily Backup",
+        "recurring": True,
+    },
+    # RapidAPI Instagram Scraper Stable API — plan BASIC (~5 $/mois ~ 4.30 EUR)
+    "RapidAPI / Scraping": {
+        "amount": 4.30,
+        "description": "RapidAPI Instagram Scraper (plan BASIC)",
+        "recurring": True,
+    },
+}
+
 
 def list_expenses() -> List[Dict]:
     return _load(EXPENSES_FILE)
