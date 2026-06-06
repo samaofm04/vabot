@@ -17069,9 +17069,9 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
   <div style='text-align:center;margin-top:24px;display:flex;flex-direction:column;gap:12px;align-items:center'>
     <button type='submit' class='mpl-push-btn'>⚡ Pousser dans MyPuls (LIVE)</button>
     <button type='button' onclick='pushAllCreators()' style='background:linear-gradient(135deg,#10b981,#3b82f6);color:#fff;border:0;padding:12px 24px;border-radius:11px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,.3);display:inline-flex;align-items:center;gap:8px'>
-      🚀 Pousser pour TOUS les créateurs (avec leurs medias seedes)
+      🚀 Pousser POSTS + STORIES pour TOUS les créateurs
     </button>
-    <small style='color:#888;font-size:11px;max-width:520px;text-align:center'>Utilise le planning global (slots + dates) + les media_pool_posts seedes pour chaque createur. Operation longue : ~30s a 2min selon le nombre de createurs.</small>
+    <small style='color:#888;font-size:11px;max-width:540px;text-align:center'>Un seul clic = posts ET stories planifies sur tous les ~9 createurs avec leurs medias seedes, sur la periode du planning global. Operation longue : ~30s a 2min.</small>
   </div>
 </form>
 """
@@ -18537,8 +18537,16 @@ async function pushAllCreators(){{
       return;
     }}
     const s = j.summary || {{}};
-    const msg = `OK ${{s.creators_processed || 0}} createurs - ${{s.total_posts_planned || 0}} posts + ${{s.total_stories_planned || 0}} stories planifies du ${{s.date_start}} au ${{s.date_end}}` + (s.total_failed ? ` - ${{s.total_failed}} echecs` : '');
-    if(typeof showToast === 'function') showToast(msg, s.total_failed > 0 ? 'warning' : 'success', 12000);
+    // Message explicite : posts ET stories ont ete pousses, pas besoin de re-cliquer
+    const lines = [
+      `${{s.creators_processed || 0}} createurs traites`,
+      `Posts planifies : ${{s.total_posts_planned || 0}}`,
+      `Stories planifiees : ${{s.total_stories_planned || 0}}`,
+      `Periode : ${{s.date_start}} -> ${{s.date_end}}`,
+    ];
+    if(s.total_failed) lines.push(`Echecs : ${{s.total_failed}}`);
+    const msg = lines.join(' - ');
+    if(typeof showToast === 'function') showToast(msg, s.total_failed > 0 ? 'warning' : 'success', 15000);
     // Reload pour voir les events dans le calendrier
     setTimeout(() => window.location.reload(), 2000);
   }} catch(e){{
