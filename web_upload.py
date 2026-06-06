@@ -18516,7 +18516,10 @@ function submitMyPulsForm(ev){{
   const de = document.querySelector('input[name=date_end]').value;
   if(ct==='delete'){{
     const ids = parseSelectedIds();
-    if(!ids.length){{ alert('Aucun event selectionne.'); return false; }}
+    if(!ids.length){{
+      if(typeof showToast === 'function') showToast('Aucun event sélectionné', 'error', 4000);
+      return false;
+    }}
     mplConfirmAction({{
       icon: '🗑',
       title: 'Supprimer ' + ids.length + ' event(s) ?',
@@ -18530,6 +18533,45 @@ function submitMyPulsForm(ev){{
     }});
     return false;
   }}
+  // === PRE-CHECKS CLIENT (evite de submit pour rien et d avoir un toast rouge serveur peu utile) ===
+  // 1) Au moins un media charge
+  const mediaCount = (window.mediaSlots && window.mediaSlots.length) || 0;
+  if(mediaCount === 0){{
+    if(typeof showToast === 'function'){{
+      showToast('Aucun média chargé. Va dans "Bibliothèque Médias" plus bas pour en ajouter avant de pousser.', 'error', 6000);
+    }}
+    // Scroll vers la section media pour aider l user
+    const mediaBlock = document.getElementById('mpl-media-ids') || document.querySelector('[id*=\"media\"]');
+    if(mediaBlock){{ mediaBlock.scrollIntoView({{behavior:'smooth', block:'center'}}); }}
+    return false;
+  }}
+  // 2) Au moins un slot configure pour le content_type courant.
+  // postSlots/storySlots sont declares 'let' au niveau global -> accessible
+  // directement dans le scope mais PAS attache a window. typeof check pour
+  // robustesse au cas ou le var ne serait pas defini.
+  const slotsCount = (ct === 'story')
+    ? (typeof storySlots !== 'undefined' ? storySlots.length : 0)
+    : (typeof postSlots !== 'undefined' ? postSlots.length : 0);
+  if(slotsCount === 0){{
+    if(typeof showToast === 'function'){{
+      showToast('Aucun créneau configuré pour ce mode. Ajoute au moins un créneau dans la planification ci-dessus.', 'error', 6000);
+    }}
+    return false;
+  }}
+  // 3) Date debut requise
+  if(!ds){{
+    if(typeof showToast === 'function') showToast('Date de début manquante.', 'error', 4000);
+    return false;
+  }}
+  // 4) En mode classique (pas infini), date fin requise
+  const infMode = (document.getElementById('mpl-infinite') || {{}}).value === '1';
+  if(!infMode && !de){{
+    if(typeof showToast === 'function'){{
+      showToast('Date de fin manquante (ou active "Mode infini").', 'error', 4000);
+    }}
+    return false;
+  }}
+  // Tout OK -> modal confirm
   const label = (ct==='story')?'stories':'posts';
   mplConfirmAction({{
     icon: '⚡',
