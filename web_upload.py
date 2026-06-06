@@ -8808,7 +8808,12 @@ function igScrapeAll(btn){
       btn.disabled = false;
       btn.textContent = orig;
       if(d && d.ok){
-        if(typeof showToast === 'function') showToast(d.message || 'Scrape global lance', 'success');
+        // Affiche uniquement le game-loader (pas de toast en parallele)
+        if(typeof showGameLoader === 'function'){
+          showGameLoader(d.count || 1);
+        } else if(typeof showToast === 'function'){
+          showToast(d.message || 'Scrape global lance', 'success');
+        }
         // Spinner + polling sur toutes les cards existantes
         var now = Date.now();
         document.querySelectorAll('.cloud-card[data-insta-user]').forEach(function(card){
