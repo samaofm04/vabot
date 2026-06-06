@@ -3256,6 +3256,9 @@ document.addEventListener('keydown', function(e){
 <small>Gère qui peut accéder à quelles fonctions du site</small>
 {role_settings_html}
 </div>
+<div class="box">
+{employees_table_html}
+</div>
 <form method="POST" action="/settings/role/add" class="box">
 <h3 style="margin-top:0">➕ Ajouter un utilisateur</h3>
 <small>Crée un compte d'accès avec un rôle spécifique</small>
@@ -18733,6 +18736,150 @@ def _get_all_roles():
     return out
 
 
+def _render_employees_table_html() -> str:
+    """Tableau riche des employes : nom + assigned creators + role + status + actions.
+    Style inspiré d Agency Hess. Toggle active/deactive inline."""
+    users = _load_role_users()
+    roles = _get_all_roles()
+    role_colors = {r["key"]: r["color"] for r in roles}
+    role_names = {r["key"]: r["name"] for r in roles}
+    identities = _list_identities() if callable(_list_identities) else []
+    # Header de la section
+    head = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<h3 style='margin:0;font-size:18px;font-weight:700'>👥 Employees</h3>"
+        f"<div style='color:#888;font-size:12px'>{len(users)} compte{'s' if len(users) > 1 else ''}</div>"
+        "</div>"
+    )
+    # Filtres (decoratifs : filter live cote JS)
+    filters = (
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px'>"
+        "<input type='text' id='emp-filter-name' placeholder='🔍 Rechercher un employé…' oninput='filterEmployees()' "
+        "style='flex:1;min-width:200px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:9px 14px;border-radius:9px;font-size:13px'>"
+        "<select id='emp-filter-role' onchange='filterEmployees()' "
+        "style='background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer;min-width:160px'>"
+        "<option value=''>Tous les rôles</option>"
+    )
+    for r in roles:
+        rk = r["key"]; rn = r["name"]
+        filters += f"<option value='{rk}'>{rn}</option>"
+    filters += (
+        "</select>"
+        "<select id='emp-filter-status' onchange='filterEmployees()' "
+        "style='background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer'>"
+        "<option value=''>Tous statuts</option>"
+        "<option value='active'>Activated</option>"
+        "<option value='inactive'>Deactivated</option>"
+        "</select>"
+        "</div>"
+    )
+    # Le tableau
+    table = [
+        "<div style='overflow-x:auto;border:1px solid #232323;border-radius:10px'>"
+        "<table id='emp-table' style='width:100%;border-collapse:collapse;font-size:13px'>"
+        "<thead><tr style='background:#1a1a1a;text-align:left'>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Employee</th>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Assigned Creators</th>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Rôle</th>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700;text-align:center'>Status</th>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700;text-align:right'>Actions</th>"
+        "</tr></thead><tbody>"
+    ]
+    if not users:
+        table.append(
+            "<tr><td colspan='5' style='padding:40px 20px;text-align:center;color:#666;font-size:13px'>"
+            "Aucun employé enregistré. Ajoute-en un avec le formulaire ci-dessous ⬇"
+            "</td></tr>"
+        )
+    for u in users:
+        uname = (u.get("username") or "?").strip()
+        role_key = (u.get("role") or "?").strip().lower()
+        role_color = role_colors.get(role_key, "#aaa")
+        role_name = role_names.get(role_key, role_key.title())
+        is_active = u.get("active", True)
+        assigned = u.get("assigned_creators") or []
+        if isinstance(assigned, str):
+            assigned = [x.strip() for x in assigned.split(",") if x.strip()]
+        assigned_str = (
+            ", ".join(
+                f"<span style='color:#3b82f6'>{a}</span>"
+                for a in assigned
+            )
+            if assigned
+            else "<span style='color:#666;font-style:italic'>+ Click to set</span>"
+        )
+        status_color = "#22c55e" if is_active else "#888"
+        status_label = "Activated" if is_active else "Deactivated"
+        next_action = "deactivate" if is_active else "activate"
+        next_label = "Désactiver" if is_active else "Activer"
+        avatar_letter = uname[:1].upper()
+        # Couleur deterministe pour l avatar
+        ah = sum(ord(c) for c in uname) % 360
+        _status_attr = "active" if is_active else "inactive"
+        table.append(
+            f"<tr class='emp-row' data-emp-name='{uname.lower()}' data-emp-role='{role_key}' data-emp-status='{_status_attr}' style='border-top:1px solid #232323'>"
+            f"<td style='padding:14px 16px'>"
+            f"<div style='display:flex;align-items:center;gap:10px'>"
+            f"<div style='width:30px;height:30px;border-radius:50%;background:hsl({ah},60%,45%);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;flex-shrink:0'>{avatar_letter}</div>"
+            f"<div style='font-weight:600;color:#fff'>{uname}</div>"
+            f"</div></td>"
+            f"<td style='padding:14px 16px'>"
+            f"<div style='display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer' onclick='openAssignedModal(\"{uname}\")'>{assigned_str}</div>"
+            f"</td>"
+            f"<td style='padding:14px 16px'><b style='color:{role_color}'>{role_name}</b></td>"
+            f"<td style='padding:14px 16px;text-align:center'>"
+            f"<span style='display:inline-flex;align-items:center;gap:6px;color:{status_color};font-weight:600;font-size:12px'>"
+            f"<span style='width:6px;height:6px;border-radius:50%;background:{status_color}'></span>{status_label}"
+            f"</span></td>"
+            f"<td style='padding:14px 16px;text-align:right;white-space:nowrap'>"
+            f"<a onclick='editEmployee(\"{uname}\",\"{role_key}\")' style='color:#3b82f6;cursor:pointer;font-size:13px;font-weight:500;margin-right:14px;text-decoration:none'>Edit</a>"
+            f"<form method='POST' action='/settings/role/toggle_active' style='display:inline;margin:0'>"
+            f"<input type='hidden' name='username' value='{uname}'>"
+            f"<input type='hidden' name='action' value='{next_action}'>"
+            f"<button type='submit' style='background:transparent;border:0;color:#aaa;cursor:pointer;font-size:13px;font-weight:500;padding:0;margin-right:14px'>{next_label}</button>"
+            f"</form>"
+            f"<form method='POST' action='/settings/role/remove' style='display:inline;margin:0' onsubmit=\"return confirm('Supprimer {uname} et révoquer son accès ?')\">"
+            f"<input type='hidden' name='username' value='{uname}'>"
+            f"<button type='submit' style='background:transparent;border:0;color:#ef4444;cursor:pointer;font-size:14px;padding:0' title='Supprimer'>🗑</button>"
+            f"</form>"
+            f"</td></tr>"
+        )
+    table.append("</tbody></table></div>")
+    # JS de filtrage
+    js = """
+<script>
+function filterEmployees(){
+  var q = (document.getElementById('emp-filter-name').value || '').toLowerCase().trim();
+  var rf = document.getElementById('emp-filter-role').value;
+  var sf = document.getElementById('emp-filter-status').value;
+  document.querySelectorAll('.emp-row').forEach(function(row){
+    var n = row.getAttribute('data-emp-name') || '';
+    var r = row.getAttribute('data-emp-role') || '';
+    var s = row.getAttribute('data-emp-status') || '';
+    var ok = (!q || n.indexOf(q) !== -1) && (!rf || r === rf) && (!sf || s === sf);
+    row.style.display = ok ? '' : 'none';
+  });
+}
+function editEmployee(name, role){
+  var newRole = prompt('Nouveau rôle pour ' + name + ' (admin/va/chatter/creator/sfs) :', role);
+  if(!newRole) return;
+  var f = document.createElement('form');
+  f.method='POST'; f.action='/settings/role/edit_user'; f.style.display='none';
+  f.innerHTML = '<input name=username value="'+name+'"><input name=role value="'+newRole+'">';
+  document.body.appendChild(f); f.submit();
+}
+function openAssignedModal(name){
+  var raw = prompt('Identités assignées à ' + name + ' (séparées par virgule, ex: amelia,julia,lola)', '');
+  if(raw === null) return;
+  var f = document.createElement('form');
+  f.method='POST'; f.action='/settings/role/set_assigned'; f.style.display='none';
+  f.innerHTML = '<input name=username value="'+name+'"><input name=assigned value="'+raw+'">';
+  document.body.appendChild(f); f.submit();
+}
+</script>"""
+    return head + filters + "".join(table) + js
+
+
 def _render_role_dropdown_options() -> str:
     """Genere les <option> du select 'Role' pour le form Ajouter un user.
     Lit la meme source que le tableau des roles -> tjrs synchronise."""
@@ -19135,6 +19282,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{security_sessions_html}", _render_security_sessions_html())
         .replace("{role_settings_html}", _render_role_settings_html())
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
+        .replace("{employees_table_html}", _render_employees_table_html())
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _render_insta_accounts_html())
         .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
@@ -22421,6 +22569,64 @@ def create_app():
         return _success(
             f"✅ Utilisateur <b>{username}</b> créé (rôle : <b>{role}</b>). "
             f"Il peut maintenant se connecter avec ce username + le mot de passe défini."
+        )
+
+    @app.route("/settings/role/toggle_active", methods=["POST"])
+    def settings_role_toggle_active():
+        if not is_auth():
+            return redirect("/")
+        username = (request.form.get("username") or "").strip().lower()
+        action = (request.form.get("action") or "").strip()
+        users = _load_role_users()
+        for u in users:
+            if (u.get("username") or "").lower() == username:
+                u["active"] = (action == "activate")
+                break
+        _save_role_users(users)
+        # Sync : si deactivate -> retirer de web_admin_users.json
+        web_users = _load_web_users()
+        if action == "deactivate" and username in web_users:
+            web_users.pop(username, None)
+            _save_web_users(web_users)
+        return _success(f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}")
+
+    @app.route("/settings/role/edit_user", methods=["POST"])
+    def settings_role_edit_user():
+        if not is_auth():
+            return redirect("/")
+        username = (request.form.get("username") or "").strip().lower()
+        new_role = (request.form.get("role") or "").strip().lower()
+        if not new_role:
+            return _error("❌ Rôle manquant")
+        users = _load_role_users()
+        for u in users:
+            if (u.get("username") or "").lower() == username:
+                u["role"] = new_role
+                break
+        _save_role_users(users)
+        # Sync dans web_admin_users
+        web_users = _load_web_users()
+        if username in web_users:
+            web_users[username]["role"] = new_role
+            _save_web_users(web_users)
+        return _success(f"✅ Rôle de {username} mis à jour : <b>{new_role}</b>")
+
+    @app.route("/settings/role/set_assigned", methods=["POST"])
+    def settings_role_set_assigned():
+        if not is_auth():
+            return redirect("/")
+        username = (request.form.get("username") or "").strip().lower()
+        raw = (request.form.get("assigned") or "").strip()
+        assigned = [x.strip().lower() for x in raw.split(",") if x.strip()]
+        users = _load_role_users()
+        for u in users:
+            if (u.get("username") or "").lower() == username:
+                u["assigned_creators"] = assigned
+                break
+        _save_role_users(users)
+        return _success(
+            f"✅ Identités assignées à {username} : " +
+            (", ".join(assigned) if assigned else "<i>(aucune)</i>")
         )
 
     @app.route("/settings/role/remove", methods=["POST"])
