@@ -17747,6 +17747,13 @@ async function saveCreatorOrder(){{
 }}
 
 function selectCreator(cid, name, color, hue){{
+  // Flush IMMEDIATEMENT tout save en attente sur le createur courant AVANT de
+  // changer de createur. Sinon, le timer 600ms d auto-save aurait fire APRES
+  // le switch et : soit serait drop par __mplLoadingSettings, soit aurait
+  // sauvegarde les data du NOUVEAU createur (storySlots/postSlots remplaces
+  // par mplLoadSettings). Resultat : les audiences ou autres changes du
+  // dernier moment seraient perdus.
+  try {{ mplFlushPendingSaves(); }} catch(e){{ console.warn('flush err:', e); }}
   document.querySelectorAll('.mpl-cr-card').forEach(c=>{{
     c.classList.toggle('active', String(c.dataset.id)===String(cid));
   }});
@@ -17950,8 +17957,38 @@ function mplScheduleSave(){{
         body: JSON.stringify(settings),
       }});
     }} catch(e){{ console.warn('mplScheduleSave:', e); }}
+    window.__mplSaveTimers[id] = null;
   }}, 600);
 }}
+
+// Flush IMMEDIAT de tous les saves en attente. A appeler AVANT de switcher de
+// createur ou avant de quitter la page, sinon les changes (audience, slots, etc.)
+// faits dans les 600ms juste avant peuvent etre perdus :
+// - Le timer aurait fire APRES le switch -> il aurait POST sur le bon cid mais
+//   avec les data du NOUVEAU createur (mediaSlots a deja ete remplace)
+// - OU aurait ete drop par le test __mplLoadingSettings
+// fetch keepalive : garantit l envoi meme si la page navigue.
+function mplFlushPendingSaves(){{
+  if(!window.__mplSaveTimers) return;
+  const ids = Object.keys(window.__mplSaveTimers);
+  for(const id of ids){{
+    const timer = window.__mplSaveTimers[id];
+    if(!timer) continue;
+    clearTimeout(timer);
+    try {{
+      const settings = mplGetCurrentSettings();
+      fetch('/mypulslive/settings/' + encodeURIComponent(id), {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(settings),
+        keepalive: true,
+      }});
+    }} catch(e){{ console.warn('mplFlushPendingSaves:', e); }}
+    window.__mplSaveTimers[id] = null;
+  }}
+}}
+// Flush au beforeunload pour ne JAMAIS perdre le dernier change
+window.addEventListener('beforeunload', mplFlushPendingSaves);
 // Hook les events sur la section MyPuls Live
 document.addEventListener('DOMContentLoaded', () => {{
   const section = document.getElementById('form-mypulslive');
