@@ -822,12 +822,35 @@ function showConfirm(title, message, onConfirm){
   document.getElementById('confirm-message').textContent = message || '';
   overlay.classList.add('show');
   var confirmBtn = document.getElementById('confirm-yes');
-  // Reset listener
+  // Reset listener (cloneNode supprime les old listeners)
   var newBtn = confirmBtn.cloneNode(true);
   confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+  // Reset visuel (au cas ou il etait disabled par un appel precedent)
+  newBtn.disabled = false;
+  newBtn.style.opacity = '';
+  newBtn.style.cursor = '';
+  var fired = false;
   newBtn.addEventListener('click', function(){
+    if(fired) return;  // anti-double-click
+    fired = true;
+    // Disable visuellement pour feedback + bloquer 2eme click
+    newBtn.disabled = true;
+    newBtn.style.opacity = '.6';
+    newBtn.style.cursor = 'wait';
     overlay.classList.remove('show');
-    if(typeof onConfirm === 'function') onConfirm();
+    if(typeof onConfirm === 'function'){
+      try { onConfirm(); }
+      catch(err){
+        // Si le callback throw, on remet le bouton dans un etat utilisable
+        // (cas tres rare mais evite que l user se retrouve bloque)
+        fired = false;
+        newBtn.disabled = false;
+        newBtn.style.opacity = '';
+        newBtn.style.cursor = '';
+        if(typeof showToast === 'function') showToast('Erreur : ' + (err && err.message || err), 'error');
+        if(window.console && console.error) console.error('showConfirm callback failed:', err);
+      }
+    }
   });
 }
 function closeConfirm(){
@@ -20708,6 +20731,9 @@ def create_app():
         if len(name) > 50:
             return _error("❌ Nom trop long (max 50 caractères)")
         if add_category(name):
+            # Invalide tous les caches au cas ou un render aurait cache l ancienne liste
+            try: _invalidate_all_ttl_cache()
+            except Exception: pass
             return _success(f"✅ Catégorie <b>{name}</b> ajoutée")
         return _error(f"❌ La catégorie <b>{name}</b> existe déjà")
 
@@ -20726,6 +20752,8 @@ def create_app():
         if len(new_name) > 50:
             return _error("❌ Nom trop long (max 50 caractères)")
         if update_category(old_name, new_name):
+            try: _invalidate_all_ttl_cache()
+            except Exception: pass
             return _success(f"✅ <b>{old_name}</b> renommée en <b>{new_name}</b>")
         return _error(f"❌ Renommage impossible (nom invalide ou déjà existant)")
 
@@ -20741,6 +20769,8 @@ def create_app():
         if not name:
             return _error("❌ Nom requis")
         if remove_category(name):
+            try: _invalidate_all_ttl_cache()
+            except Exception: pass
             return _success(
                 f"✅ Catégorie <b>{name}</b> supprimée. "
                 f"Les dépenses existantes gardent leur catégorie en texte."
