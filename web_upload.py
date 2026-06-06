@@ -17066,8 +17066,12 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     </div>
   </div>
 
-  <div style='text-align:center;margin-top:24px'>
+  <div style='text-align:center;margin-top:24px;display:flex;flex-direction:column;gap:12px;align-items:center'>
     <button type='submit' class='mpl-push-btn'>⚡ Pousser dans MyPuls (LIVE)</button>
+    <button type='button' onclick='pushAllCreators()' style='background:linear-gradient(135deg,#10b981,#3b82f6);color:#fff;border:0;padding:12px 24px;border-radius:11px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,.3);display:inline-flex;align-items:center;gap:8px'>
+      🚀 Pousser pour TOUS les créateurs (avec leurs medias seedes)
+    </button>
+    <small style='color:#888;font-size:11px;max-width:520px;text-align:center'>Utilise le planning global (slots + dates) + les media_pool_posts seedes pour chaque createur. Operation longue : ~30s a 2min selon le nombre de createurs.</small>
   </div>
 </form>
 """
@@ -18508,6 +18512,41 @@ async function fetchMyPulsMedia(){{
     }} else {{ status.textContent='Erreur: '+(j.error||'?'); status.style.color='#f99'; }}
   }} catch(e) {{ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }}
 }}
+// === Bulk push : applique le planning global a TOUS les createurs ===
+async function pushAllCreators(){{
+  if(typeof showConfirmAsync === 'function'){{
+    const ok = await showConfirmAsync(
+      'Pousser pour TOUS les créateurs ?',
+      'Le planning global (slots + dates) sera applique aux ~9 createurs ayant des medias seedes. Operation potentiellement longue (30s - 2min). Action IRREVERSIBLE.'
+    );
+    if(!ok) return;
+  }} else if(!confirm('Pousser pour TOUS les createurs ? Action irreversible.')) {{
+    return;
+  }}
+  // Affiche un toast 'En cours...'
+  if(typeof showToast === 'function') showToast('Bulk push en cours, patiente...', 'info', 60000);
+  try {{
+    const r = await fetch('/mypulslive/push_all_creators', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: '{{}}',
+    }});
+    const j = await r.json();
+    if(!j.ok){{
+      if(typeof showToast === 'function') showToast('Erreur : ' + (j.error || '?'), 'error', 8000);
+      return;
+    }}
+    const s = j.summary || {{}};
+    const msg = `OK ${{s.creators_processed || 0}} createurs - ${{s.total_posts_planned || 0}} posts + ${{s.total_stories_planned || 0}} stories planifies du ${{s.date_start}} au ${{s.date_end}}` + (s.total_failed ? ` - ${{s.total_failed}} echecs` : '');
+    if(typeof showToast === 'function') showToast(msg, s.total_failed > 0 ? 'warning' : 'success', 12000);
+    // Reload pour voir les events dans le calendrier
+    setTimeout(() => window.location.reload(), 2000);
+  }} catch(e){{
+    if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error', 8000);
+    console.error('pushAllCreators:', e);
+  }}
+}}
+
 function submitMyPulsForm(ev){{
   ev.preventDefault();
   syncSlots();
@@ -23276,6 +23315,119 @@ def create_app():
         if all_errors:
             msg += " | Premieres erreurs : " + "; ".join(all_errors[:3])
         return _success(msg, tab="mypulslive")
+
+    @app.route("/mypulslive/push_all_creators", methods=["POST"])
+    def mypulslive_push_all_creators():
+        """Bulk push : applique le planning GLOBAL (slots + dates) a tous les
+        createurs qui ont au moins 1 media_pool_posts dans leur config.
+
+        Utilise par le bouton 'Pousser tous les createurs' pour eviter de
+        cliquer 9x. Operation potentiellement longue -> renvoie JSON pour
+        que le front affiche un loader.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls_creator_settings as mcs
+            import mypuls_scheduler
+            import seed_media_pools
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo : {e}"})
+
+        # Lit le planning GLOBAL (slots + dates)
+        g = mcs.get_global_settings()
+        post_slots = (g.get("posts") or {}).get("slots") or []
+        story_slots = (g.get("stories") or {}).get("slots") or []
+        date_start = (g.get("start_date") or "").strip()
+        date_end = (g.get("end_date") or "").strip()
+        if not date_start or not date_end:
+            return jsonify({"ok": False, "error": "Dates globales non configurees"})
+        if not post_slots and not story_slots:
+            return jsonify({"ok": False, "error": "Aucun slot global configure"})
+
+        # Stories : convertir au format attendu par bulk_schedule_stories
+        # ([{time:"HH:MM", audience:"..."}] -> [{time:"HH:MM", audience:"..."}])
+        # (les audiences sont preservees telles quelles)
+
+        creator_ids = list(seed_media_pools.MEDIA_SEEDS.keys())
+        results = []
+        total_planned_posts = 0
+        total_planned_stories = 0
+        total_failed = 0
+        first_errors: list = []
+
+        for cid in creator_ids:
+            try:
+                c_settings = mcs.get_creator_settings(cid)
+                media_pool = c_settings.get("media_pool_posts") or []
+                captions = c_settings.get("captions") or [""]
+                if not media_pool:
+                    results.append({"cid": cid, "skip": "no_media"})
+                    continue
+                # Cast media_ids en int (le scheduler veut des ints)
+                try:
+                    media_ids = [int(m) for m in media_pool]
+                except Exception:
+                    results.append({"cid": cid, "skip": "bad_media_ids"})
+                    continue
+                summary = {"cid": cid, "posts": 0, "stories": 0, "failed": 0}
+                # Push posts
+                if post_slots:
+                    res = mypuls_scheduler.bulk_schedule_posts(
+                        creator_id=cid,
+                        media_ids=media_ids,
+                        captions=captions,
+                        date_start=date_start,
+                        date_end=date_end,
+                        post_slots=post_slots,
+                        action="delete",
+                        delay_sec=172800,
+                        shuffle_media=False,
+                        randomize_minutes=True,
+                    )
+                    summary["posts"] = res.get("planned", 0)
+                    summary["failed"] += res.get("failed", 0)
+                    total_planned_posts += summary["posts"]
+                    total_failed += res.get("failed", 0)
+                    if res.get("errors"):
+                        first_errors.extend(res["errors"][:2])
+                # Push stories
+                if story_slots:
+                    res = mypuls_scheduler.bulk_schedule_stories(
+                        creator_id=cid,
+                        media_ids=media_ids,
+                        date_start=date_start,
+                        date_end=date_end,
+                        story_slots=story_slots,
+                        shuffle_media=False,
+                        randomize_minutes=True,
+                    )
+                    summary["stories"] = res.get("planned", 0)
+                    summary["failed"] += res.get("failed", 0)
+                    total_planned_stories += summary["stories"]
+                    total_failed += res.get("failed", 0)
+                    if res.get("errors"):
+                        first_errors.extend(res["errors"][:2])
+                results.append(summary)
+            except Exception as e:
+                results.append({"cid": cid, "error": str(e)})
+                first_errors.append(f"#{cid}: {e}")
+
+        return jsonify({
+            "ok": True,
+            "summary": {
+                "creators_processed": len([r for r in results if "posts" in r or "stories" in r]),
+                "creators_skipped": len([r for r in results if "skip" in r]),
+                "total_posts_planned": total_planned_posts,
+                "total_stories_planned": total_planned_stories,
+                "total_failed": total_failed,
+                "date_start": date_start,
+                "date_end": date_end,
+            },
+            "results": results,
+            "first_errors": first_errors[:10],
+        })
 
     @app.route("/schedule/generate", methods=["POST"])
     def schedule_generate():
