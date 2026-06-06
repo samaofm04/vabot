@@ -9946,7 +9946,7 @@ def _render_depenses_html() -> str:
     _eur_sel = "selected" if init_cur == "EUR" else ""
     _usd_sel = "selected" if init_cur == "USD" else ""
     import datetime
-    today = datetime.date.today().isoformat()
+    today_month = datetime.date.today().strftime("%Y-%m")  # YYYY-MM pour le picker
     items = list_expenses()
     rows = []
     rows.append(
@@ -9962,7 +9962,7 @@ def _render_depenses_html() -> str:
         f"<option value='USD' {_usd_sel}>$ USD</option>"
         f"</select>"
         f"</div></div>"
-        f"<div><label>Date</label><input type='date' name='date' value='{today}' required></div>"
+        f"<div><label>Mois</label><input type='month' name='date' value='{today_month}' required title='Mois de la dépense'></div>"
         f"<div><label style='display:flex;align-items:center;gap:6px;margin-top:24px'><input type='checkbox' name='recurring' id='exp-recurring' {init_rec_checked} style='width:auto;margin:0'> Mensuel récurrent</label></div>"
         f"</div>"
         f"<label>Description</label>"
@@ -10025,7 +10025,7 @@ def _render_depenses_html() -> str:
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
             "<thead><tr style='background:#1a1a1a'>"
-            "<th style='padding:8px;text-align:left'>Date</th>"
+            "<th style='padding:8px;text-align:left'>Mois</th>"
             "<th style='padding:8px;text-align:left'>Catégorie</th>"
             "<th style='padding:8px;text-align:left'>Description</th>"
             "<th style='padding:8px;text-align:right'>Montant</th>"
@@ -10069,7 +10069,19 @@ def _render_depenses_html() -> str:
             # HTML escape de tous les champs venant du JSON (defense-in-depth contre
             # une edition manuelle du fichier ou une donnee corrompue qui contiendrait
             # du HTML/JS arbitraire). Les valeurs numeriques formatees par nous sont sures.
-            date_s = html_escape(str(it.get("date", "")), quote=True)
+            # Affichage joli de la date : 'Juin 2026' au lieu de '2026-06-01'
+            raw_date = str(it.get("date", ""))
+            try:
+                _MOIS = ["", "Janv", "Févr", "Mars", "Avril", "Mai", "Juin",
+                         "Juil", "Août", "Sept", "Oct", "Nov", "Déc"]
+                _parts = raw_date.split("-")
+                if len(_parts) >= 2:
+                    _y = int(_parts[0]); _m = int(_parts[1])
+                    date_s = html_escape(f"{_MOIS[_m]} {_y}", quote=True) if 1 <= _m <= 12 else html_escape(raw_date, quote=True)
+                else:
+                    date_s = html_escape(raw_date, quote=True)
+            except Exception:
+                date_s = html_escape(raw_date, quote=True)
             cat_s = html_escape(str(it.get("category", "")), quote=True)
             desc_s = html_escape(str(it.get("description", "")), quote=True)
             try:
@@ -20474,6 +20486,11 @@ def create_app():
         category = (request.form.get("category") or "").strip()
         description = (request.form.get("description") or "").strip()
         date = (request.form.get("date") or "").strip()
+        # Le picker <input type='month'> renvoie 'YYYY-MM'.
+        # On normalise en 'YYYY-MM-01' pour rester compatible avec les filtres
+        # par date (revenue_stats, expense_stats, etc. qui font startswith YYYY-MM).
+        if len(date) == 7 and date[4] == "-":
+            date = date + "-01"
         currency = (request.form.get("currency") or "EUR").strip().upper()
         if currency not in ("EUR", "USD"):
             currency = "EUR"
