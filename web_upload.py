@@ -359,11 +359,12 @@ input::placeholder{color:#9ca3af}
               localStorage.removeItem('vabot_remembered_user');
             }
           }catch(e){}
+          // Feedback : juste sur le bouton (pas d overlay spinner)
           var b = document.getElementById('login-btn');
           if(b){ b.classList.add('loading'); b.disabled = true; }
-          var pl = document.getElementById('page-loader');
-          if(pl) setTimeout(function(){ pl.classList.add('show'); }, 300);
         });
+        // Filet de securite : si le page-loader avait ete affiche par
+        // l ancienne version, on le cache au load.
         window.addEventListener('pageshow', function(){
           var pl = document.getElementById('page-loader');
           if(pl) pl.classList.remove('show');
@@ -23783,4 +23784,29 @@ def start_in_thread():
         _start_daily_insta_thread()
     except Exception as e:
         print(f"[start_in_thread] daily insta refresh failed to start: {e}", flush=True)
+    # Warm-up : pre-rend les fonctions lourdes 30s apres le boot pour que
+    # le 1er user hit / ne se prenne pas 15s d attente.
+    def _boot_warmup():
+        import time as _t_wu
+        _t_wu.sleep(30)  # attend que le serveur soit pret + les autres threads
+        try:
+            print("[warmup] pre-rendering heavy pages...", flush=True)
+            t0 = _t_wu.time()
+            # Appelle les fonctions decorees @ttl_cache pour peupler le cache
+            try: _render_va_list_html()
+            except Exception as e: print(f"[warmup] va_list err: {e}", flush=True)
+            try: _render_geelark_html()
+            except Exception as e: print(f"[warmup] geelark err: {e}", flush=True)
+            try: _render_gms_html()
+            except Exception as e: print(f"[warmup] gms err: {e}", flush=True)
+            try: _render_identity_stats_html()
+            except Exception as e: print(f"[warmup] identity_stats err: {e}", flush=True)
+            print(f"[warmup] done in {_t_wu.time()-t0:.1f}s", flush=True)
+        except Exception as e:
+            print(f"[warmup] crash: {e}", flush=True)
+    try:
+        _wu = threading.Thread(target=_boot_warmup, daemon=True, name="boot-warmup")
+        _wu.start()
+    except Exception as e:
+        print(f"[start_in_thread] warmup thread failed: {e}", flush=True)
     return thread
