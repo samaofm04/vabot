@@ -2465,23 +2465,10 @@ window.upClearPrefill = function(utab){
   </div>
 </div>
 
-<div class="group" id="grp-public">
-  <button class="group-head" onclick="toggleGroup('public')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-    <span class="label">Profil public</span>
-    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-  </button>
-  <div class="items">
-    <button class="item" id="tab-biolinks" onclick="showTab('public','biolinks','Bio Links','Pages publiques style Linktree par identite')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      Bio Links
-    </button>
-    <button class="item" id="tab-gms" onclick="showTab('public','gms','GetMySocial','Gere tes liens GetMySocial depuis le site')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      GetMySocial
-    </button>
-  </div>
-</div>
+<!-- 'Profil public' (Bio Links + GetMySocial) retire de la sidebar : l user
+     dit les utiliser deja au niveau VA. Les routes backend (/biolinks/*,
+     /gms/*) et les form-sections (form-biolinks, form-gms) restent intactes
+     pour usage interne / appels API depuis l interface VA. -->
 
 <div class="group" id="grp-finances">
   <button class="group-head" onclick="toggleGroup('finances')">
