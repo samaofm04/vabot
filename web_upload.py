@@ -16229,7 +16229,11 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       </div>
       <div style='font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase;margin:18px 0 6px'>Horaires des stories</div>
       <div class='mpl-slots' id='mpl-story-slots'></div>
-      <button type='button' onclick='addStorySlot()' style='margin-top:10px;background:transparent;border:1px dashed #2e4f80;color:#3b82f6;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter une story</button>
+      <div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>
+        <button type='button' onclick='addStorySlot()' style='flex:1;background:transparent;border:1px dashed #2e4f80;color:#3b82f6;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600'>+ Ajouter une story</button>
+        <button type='button' onclick='saveAsMyDefaultStorySlots()' title='Sauvegarde la configuration actuelle comme defaut perso (utilise par Reset)' style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600' id='mpl-story-save-default-btn'>🔒 Lock comme defaut</button>
+        <button type='button' onclick='resetStorySlotsToDefault()' title='Reset au defaut (perso si sauvegarde, sinon defaut)' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600' id='mpl-story-reset-btn'>↻ Reset au defaut</button>
+      </div>
     </div>
   </div>
 
@@ -16615,6 +16619,79 @@ function addPostSlot(){{
   postSlots.push({{time:'12:00', visibility:'public'}});
   document.getElementById('mpl-posts-count').value = postSlots.length;
   renderPostSlots();
+}}
+
+// === Stories Lock as default (meme pattern que Posts) ===
+const STORY_SLOTS_DEFAULT_KEY = 'vabot_story_slots_user_default';
+function getUserDefaultStorySlots(){{
+  try {{
+    const raw = localStorage.getItem(STORY_SLOTS_DEFAULT_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(Array.isArray(parsed) && parsed.length > 0) return parsed;
+  }} catch(e){{}}
+  return null;
+}}
+function saveAsMyDefaultStorySlots(){{
+  if(!storySlots || !storySlots.length){{
+    if(typeof showToast === 'function') showToast('Pas de creneaux a sauvegarder', 'error');
+    return;
+  }}
+  mplConfirmAction({{
+    icon: '🔒',
+    title: 'Lock ' + storySlots.length + ' creneaux stories comme defaut ?',
+    subtitle: 'Reset utilisera cette config tant que tu ne re-lock pas une autre liste.',
+    confirmLabel: 'Lock',
+    danger: false,
+    onConfirm: () => {{
+      try {{
+        const copy = storySlots.map(s => ({{time: s.time, audience: s.audience || 'everyone'}}));
+        localStorage.setItem(STORY_SLOTS_DEFAULT_KEY, JSON.stringify(copy));
+        updateStoryResetBtnLabel();
+        if(typeof showToast === 'function') showToast('🔒 ' + copy.length + ' creneaux stories sauvegardes', 'success', 2500);
+      }} catch(e){{
+        if(typeof showToast === 'function') showToast('Erreur sauvegarde : ' + e, 'error');
+      }}
+    }}
+  }});
+}}
+function clearMyDefaultStorySlots(){{
+  try {{ localStorage.removeItem(STORY_SLOTS_DEFAULT_KEY); }} catch(e){{}}
+  updateStoryResetBtnLabel();
+  if(typeof showToast === 'function') showToast('Defaut stories efface — Reset utilise les horaires hardcoded', 'info', 2500);
+}}
+function updateStoryResetBtnLabel(){{
+  const btn = document.getElementById('mpl-story-reset-btn');
+  if(!btn) return;
+  const userDef = getUserDefaultStorySlots();
+  if(userDef){{
+    btn.textContent = '↻ Reset au defaut (' + userDef.length + ' lock)';
+    btn.title = 'Reset aux ' + userDef.length + ' creneaux stories que tu as locke. Shift+click pour effacer.';
+    btn.onclick = function(e){{ if(e.shiftKey){{ clearMyDefaultStorySlots(); }} else {{ resetStorySlotsToDefault(); }} }};
+  }} else {{
+    btn.textContent = '↻ Reset au defaut';
+    btn.title = 'Reset aux horaires stories hardcoded (aucun defaut perso lock)';
+    btn.onclick = function(){{ resetStorySlotsToDefault(); }};
+  }}
+}}
+function resetStorySlotsToDefault(){{
+  const userDef = getUserDefaultStorySlots();
+  const source = userDef ? userDef : DEFAULT_STORY_SLOTS;
+  const sourceLabel = userDef ? ('ton defaut perso (' + source.length + ' creneaux)') : (source.length + ' horaires stories par defaut');
+  mplConfirmAction({{
+    icon: '↻',
+    title: 'Reset stories au defaut ?',
+    subtitle: 'La liste actuelle de ' + storySlots.length + ' creneaux sera remplacee par ' + sourceLabel + '.',
+    confirmLabel: 'Reset',
+    danger: false,
+    onConfirm: () => {{
+      storySlots.length = 0;
+      source.forEach(s => storySlots.push({{time: s.time, audience: s.audience || 'everyone'}}));
+      document.getElementById('mpl-stories-count').value = source.length;
+      renderStorySlots();
+      if(typeof showToast === 'function') showToast('✓ Stories reset (' + source.length + ' creneaux)', 'success', 2500);
+    }}
+  }});
 }}
 
 function renderStorySlots(){{
@@ -17894,6 +17971,7 @@ document.getElementById('mpl-stories-count').value = storySlots.length;
 renderPostSlots();
 renderStorySlots();
 if(typeof updateResetBtnLabel === 'function') updateResetBtnLabel();
+if(typeof updateStoryResetBtnLabel === 'function') updateStoryResetBtnLabel();
 switchTab('post');
 updatePostAction();
 updateMediaCount();
