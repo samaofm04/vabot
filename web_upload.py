@@ -9625,7 +9625,7 @@ window.addEventListener('DOMContentLoaded', function(){{
     </div>
     <div id='sfs-modal-existing'></div>
     <h4 style='margin:18px 0 8px'>➕ Nouvel SFS</h4>
-    <form method='POST' action='/business/sfs/add'>
+    <form method='POST' action='/business/sfs/add' enctype='multipart/form-data'>
       <input type='hidden' name='date' id='sfs-modal-date'>
       <input type='hidden' name='platform' id='sfs-modal-platform' value='OF'>
       <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
@@ -9650,12 +9650,24 @@ window.addEventListener('DOMContentLoaded', function(){{
           <select name='status'>
             <option value='scheduled'>✓ Scheduled</option>
             <option value='to_program'>⚙ To program</option>
+            <option value='to_verify'>🔍 À vérifier</option>
+            <option value='done'>✅ Done</option>
           </select>
         </div>
         <div></div>
       </div>
       <label>Notes (optionnel)</label>
       <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
+      <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px'>
+        <div>
+          <label>📎 Preuve AVANT (accord/schedule)</label>
+          <input type='file' name='proof_before' accept='image/*' style='font-size:11px;color:#888;width:100%'>
+        </div>
+        <div>
+          <label>📎 Preuve APRÈS (post publié)</label>
+          <input type='file' name='proof_after' accept='image/*' style='font-size:11px;color:#888;width:100%'>
+        </div>
+      </div>
       <div style='display:flex;gap:8px;margin-top:14px;justify-content:flex-end'>
         <button type='button' class='btn-cancel' onclick='closeSfsModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Annuler</button>
         <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
@@ -19516,9 +19528,64 @@ def create_app():
         notes = (request.form.get("notes") or "").strip()
         if not identity or not partner or not date or not time_s:
             return _error("❌ Champs requis manquants")
-        add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
+        new_id = add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
+        # Upload des preuves si fournies
+        try:
+            from business import update_sfs as _upd_sfs
+            import os as _os
+            SFS_PROOFS_DIR = DATA_DIR / "sfs_proofs"
+            SFS_PROOFS_DIR.mkdir(parents=True, exist_ok=True)
+            for slot in ("proof_before", "proof_after"):
+                f = request.files.get(slot)
+                if f and getattr(f, "filename", "") and f.filename.strip():
+                    ext = _os.path.splitext(f.filename)[1].lower() or ".jpg"
+                    if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                        target = SFS_PROOFS_DIR / f"sfs_{new_id}_{slot}{ext}"
+                        f.save(str(target))
+                        _upd_sfs(new_id, **{slot: f"/sfs_proof/{target.name}"})
+        except Exception:
+            pass
         recv_lbl = f" → 🎯 <b>{receiver_identity}</b>" if receiver_identity != identity else ""
         return _success(f"✅ SFS ajouté : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
+
+    @app.route("/business/sfs/update_proof", methods=["POST"])
+    def business_sfs_update_proof():
+        """Upload une preuve (avant ou apres) sur un SFS existant."""
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import update_sfs as _upd_sfs
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        try:
+            sid = int(request.form.get("sfs_id") or 0)
+        except Exception:
+            sid = 0
+        slot = (request.form.get("slot") or "").strip()
+        if sid <= 0 or slot not in ("proof_before", "proof_after"):
+            return _error("❌ Params invalides")
+        f = request.files.get("file")
+        if not f or not getattr(f, "filename", "").strip():
+            return _error("❌ Fichier manquant")
+        import os as _os
+        ext = _os.path.splitext(f.filename)[1].lower() or ".jpg"
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            return _error("❌ Format non supporte (jpg/png/webp/gif)")
+        SFS_PROOFS_DIR = DATA_DIR / "sfs_proofs"
+        SFS_PROOFS_DIR.mkdir(parents=True, exist_ok=True)
+        target = SFS_PROOFS_DIR / f"sfs_{sid}_{slot}{ext}"
+        f.save(str(target))
+        _upd_sfs(sid, **{slot: f"/sfs_proof/{target.name}"})
+        return _success(f"✅ Preuve {slot.replace('proof_','')} sauvegardée")
+
+    @app.route("/sfs_proof/<path:fname>", methods=["GET"])
+    def sfs_proof_serve(fname):
+        """Sert les fichiers de preuves (images)."""
+        if not is_auth():
+            return redirect("/")
+        from flask import send_from_directory
+        SFS_PROOFS_DIR = DATA_DIR / "sfs_proofs"
+        return send_from_directory(str(SFS_PROOFS_DIR.resolve()), fname)
 
     @app.route("/business/identity_platforms", methods=["POST"])
     def business_identity_platforms():

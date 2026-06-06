@@ -95,8 +95,8 @@ def add_sfs(identity: str, partner: str, date_iso: str, time_str: str,
 
     identity         : modèle qui ENVOIE (celle qui poste sur OF/MyM)
     partner          : @ du partenaire externe (compte tiers)
-    receiver_identity: modèle qui RECEVRA le SFS (la promo). Si vide,
-                       par defaut = identity (auto-SFS = la modele s envoie a elle-meme)
+    receiver_identity: modèle qui RECEVRA le SFS (la promo)
+    status           : 'to_program' | 'scheduled' | 'to_verify' | 'done'
     """
     items = _load(SFS_FILE)
     new_id = int(time.time() * 1000)
@@ -108,14 +108,31 @@ def add_sfs(identity: str, partner: str, date_iso: str, time_str: str,
         "date": date_iso,
         "time": time_str,
         "platform": platform.upper(),
-        "status": status,  # scheduled | to_program
+        "status": status,
         "notes": notes.strip()[:200],
+        "proof_before": "",  # path/url de la preuve avant le schedule (accord/screenshot)
+        "proof_after": "",   # path/url de la preuve apres (post publie)
         "done": False,
         "created_at": int(time.time()),
     })
     items.sort(key=lambda x: (x.get("date", ""), x.get("time", "")))
     _save(SFS_FILE, items)
     return new_id
+
+
+def update_sfs(item_id: int, **fields) -> bool:
+    """Update partiel d'un SFS (proof_before, proof_after, status, notes, ...)."""
+    items = _load(SFS_FILE)
+    for x in items:
+        if x.get("id") == item_id:
+            allowed = {"status", "notes", "proof_before", "proof_after", "done",
+                       "identity", "receiver_identity", "partner", "date", "time", "platform"}
+            for k, v in fields.items():
+                if k in allowed and v is not None:
+                    x[k] = v
+            _save(SFS_FILE, items)
+            return True
+    return False
 
 
 def sfs_weekly_received(target_per_week: int = 3) -> Dict:
