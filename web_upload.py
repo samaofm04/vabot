@@ -15983,7 +15983,8 @@ def _render_mypulslive_html() -> str:
         toggle_action = "pause" if active else "resume"
         toggle_label = "⏸" if active else "▶"
         return (
-            f"<div style='display:flex;align-items:center;gap:10px;padding:11px 14px;"
+            f"<div class='mpl-campaign-row' data-campaign-creator-id='{c.get('creator_id') or ''}' data-campaign-creator-name='{cname}' "
+            f"style='display:flex;align-items:center;gap:10px;padding:11px 14px;"
             f"background:#0f0f0f;border:1px solid #232323;border-left:3px solid {cr_color};border-radius:10px;margin-bottom:6px'>"
             f"<img src='/mypuls/avatar/{c.get('creator_id')}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid {cr_color}' onerror=\"this.style.display='none'\">"
             f"<div style='flex:1;min-width:0'>"
@@ -15999,12 +16000,15 @@ def _render_mypulslive_html() -> str:
     campaigns_html = ""
     if active_campaigns:
         campaigns_html = (
-            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
+            "<div id='mpl-campaigns-block' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:18px'>"
             "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px'>"
             "<span style='color:#888;font-size:11px;letter-spacing:1.2px;text-transform:uppercase'>♾️ Campagnes</span>"
-            f"<span style='color:#666;font-size:11px'>{sum(1 for c in active_campaigns if c.get('active'))} actives / {len(active_campaigns)} total</span>"
+            f"<span id='mpl-campaigns-count' style='color:#666;font-size:11px' data-total='{len(active_campaigns)}' data-actives='{sum(1 for c in active_campaigns if c.get('active'))}'>{sum(1 for c in active_campaigns if c.get('active'))} actives / {len(active_campaigns)} total</span>"
             "</div>"
-            + "".join(_campaign_row(c) for c in active_campaigns) +
+            "<div id='mpl-campaigns-rows'>"
+            + "".join(_campaign_row(c) for c in active_campaigns)
+            + "</div>"
+            "<p id='mpl-campaigns-empty' style='display:none;color:#666;font-size:12px;text-align:center;padding:10px 0;margin:0'>Aucune campagne pour ce créateur. Crée-en une depuis Auto-Post / Auto-Story.</p>"
             "</div>"
         )
 
@@ -17395,6 +17399,26 @@ function selectCreator(cid, name, color, hue){{
   if(elist) elist.innerHTML = '';
   // Auto-load settings persistes pour ce createur (defensive)
   try{{ mplLoadSettings(cid); }}catch(e){{ console.warn('mplLoadSettings err:', e); }}
+  // Filtre la section CAMPAGNES sur ce createur uniquement
+  try{{ filterCampaignsByCreator(cid); }}catch(e){{}}
+}}
+function filterCampaignsByCreator(cid){{
+  var rows = document.querySelectorAll('.mpl-campaign-row');
+  var nVisible = 0;
+  var nActives = 0;
+  rows.forEach(function(r){{
+    var match = String(r.getAttribute('data-campaign-creator-id') || '') === String(cid);
+    r.style.display = match ? '' : 'none';
+    if(match){{
+      nVisible++;
+      // Compte les actives via badge "ACTIF" dans la row
+      if(r.textContent.indexOf('ACTIF') !== -1) nActives++;
+    }}
+  }});
+  var countEl = document.getElementById('mpl-campaigns-count');
+  if(countEl){{ countEl.textContent = nActives + ' active' + (nActives>1?'s':'') + ' / ' + nVisible + ' total'; }}
+  var emptyEl = document.getElementById('mpl-campaigns-empty');
+  if(emptyEl){{ emptyEl.style.display = nVisible === 0 ? 'block' : 'none'; }}
 }}
 // === Per-creator settings persistence ===
 window.__mplSaveTimers = window.__mplSaveTimers || {{}};
@@ -17540,11 +17564,11 @@ document.addEventListener('DOMContentLoaded', () => {{
     }}, true);
   }});
   // Auto-load settings du createur initial au chargement de la page
-  // (selectCreator n est pas appele explicitement au boot)
   setTimeout(() => {{
     const ci = document.getElementById('mpl-creator-id');
     if(ci && ci.value){{
       try{{ mplLoadSettings(ci.value); }}catch(e){{ console.warn(e); }}
+      try{{ filterCampaignsByCreator(ci.value); }}catch(e){{}}
     }}
   }}, 200);
 }});
