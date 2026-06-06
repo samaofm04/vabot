@@ -22342,28 +22342,51 @@ def create_app():
         role = (request.form.get("role") or "").strip().lower()
         password = (request.form.get("password") or "").strip()
         if not username or not role or len(password) < 6:
-            return _error("❌ Champs requis manquants ou password trop court")
+            return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)")
+        # Normalise le username : lowercase + sans espaces
+        username = username.lower().strip()
         users = _load_role_users()
-        if any(u.get("username") == username for u in users):
+        if any((u.get("username") or "").lower() == username for u in users):
             return _error(f"❌ {username} existe déjà")
+        # 1) Enregistre dans role_users.json (pour affichage + permissions)
+        hashed = _hash_password(password)
         users.append({
             "username": username,
             "role": role,
-            "password_hash": password,  # TODO: bcrypt hash in real prod
+            "password_hash": hashed,
             "created_at": int(time.time()),
         })
         _save_role_users(users)
-        return _success(f"✅ Utilisateur <b>{username}</b> ajouté (rôle : {role})")
+        # 2) Sync dans web_admin_users.json POUR QU IL PUISSE LOGIN
+        web_users = _load_web_users()
+        web_users[username] = {
+            "password_hash": hashed,
+            "role": role,
+            "created_at": int(time.time()),
+        }
+        _save_web_users(web_users)
+        return _success(
+            f"✅ Utilisateur <b>{username}</b> créé (rôle : <b>{role}</b>). "
+            f"Il peut maintenant se connecter avec ce username + le mot de passe défini."
+        )
 
     @app.route("/settings/role/remove", methods=["POST"])
     def settings_role_remove():
         if not is_auth():
             return redirect("/")
-        username = (request.form.get("username") or "").strip()
+        username = (request.form.get("username") or "").strip().lower()
+        if username == "samaali":
+            return _error("❌ Impossible de supprimer le owner.")
+        # Retire de role_users.json
         users = _load_role_users()
-        users = [u for u in users if u.get("username") != username]
+        users = [u for u in users if (u.get("username") or "").lower() != username]
         _save_role_users(users)
-        return _success(f"✅ {username} supprimé")
+        # Retire aussi de web_admin_users.json pour bloquer le login
+        web_users = _load_web_users()
+        if username in web_users:
+            web_users.pop(username, None)
+            _save_web_users(web_users)
+        return _success(f"✅ {username} supprimé — accès révoqué.")
 
     @app.route("/settings/role/delete", methods=["POST"])
     def settings_role_delete():
