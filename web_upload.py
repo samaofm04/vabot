@@ -18759,16 +18759,23 @@ def _render_employees_table_html() -> str:
         "+ Add employee</button>"
         "</div></div>"
     )
-    # Ligne de filtres (4 colonnes + Reset/Search)
+    # Ligne de filtres : grille avec 3 colonnes auto-fit pour rester horizontale meme en container etroit
+    # 3 champs de filtre puis Reset+Search a droite, tout sur la meme ligne avec wrap responsive
     filters = (
-        "<div style='display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:18px;padding:14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px'>"
-        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By employee :"
-        "<input type='text' id='emp-filter-name' placeholder='Employee' oninput='filterEmployees()' "
-        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;min-width:180px'>"
+        "<style>"
+        ".emp-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px;padding:14px 16px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px}"
+        ".emp-filters .ef{display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px;white-space:nowrap;flex:1 1 auto;min-width:220px}"
+        ".emp-filters .ef > input,.emp-filters .ef > select{flex:1;min-width:0;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px}"
+        ".emp-filters .ef-actions{display:flex;gap:10px;margin-left:auto}"
+        ".emp-filters button.ef-reset{background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}"
+        ".emp-filters button.ef-search{background:#3b82f6;border:0;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}"
+        "</style>"
+        "<div class='emp-filters'>"
+        "<label class='ef'>By employee :"
+        "<input type='text' id='emp-filter-name' placeholder='Employee' oninput='filterEmployees()'>"
         "</label>"
-        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By Creator :"
-        "<select id='emp-filter-creator' onchange='filterEmployees()' "
-        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;min-width:180px'>"
+        "<label class='ef'>By Creator :"
+        "<select id='emp-filter-creator' onchange='filterEmployees()'>"
         "<option value=''>Creator</option>"
     )
     for ident in identities:
@@ -18777,18 +18784,16 @@ def _render_employees_table_html() -> str:
             filters += f"<option value='{nm.lower()}'>{nm}</option>"
     filters += (
         "</select></label>"
-        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By status :"
-        "<select id='emp-filter-status' onchange='filterEmployees()' "
-        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;min-width:140px'>"
+        "<label class='ef'>By status :"
+        "<select id='emp-filter-status' onchange='filterEmployees()'>"
         "<option value=''>Status</option>"
         "<option value='active'>Activated</option>"
         "<option value='inactive'>Deactivated</option>"
         "</select></label>"
-        "<div style='flex:1'></div>"
-        "<button type='button' onclick='resetEmpFilters()' "
-        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer'>Reset</button>"
-        "<button type='button' onclick='filterEmployees()' "
-        "style='background:#3b82f6;border:0;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer'>Search</button>"
+        "<div class='ef-actions'>"
+        "<button type='button' class='ef-reset' onclick='resetEmpFilters()'>Reset</button>"
+        "<button type='button' class='ef-search' onclick='filterEmployees()'>Search</button>"
+        "</div>"
         "</div>"
     )
     # Tableau : Employee | Role | Status | Actions (no Assigned Creators)
