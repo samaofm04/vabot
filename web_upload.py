@@ -9967,6 +9967,7 @@ def _render_depenses_html() -> str:
         f".exp-submit:hover{{background:#2563eb;transform:translateY(-1px)}}"
         f"</style>"
         f"<form method='POST' action='/business/expense/add' class='box'>"
+        f"<input type='hidden' name='back_tab' value='depenses'>"
         f"<h4 style='margin-top:0;margin-bottom:18px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px'>"
         f"<span style='color:#3b82f6'>+</span> Nouvelle dépense</h4>"
         f"<div class='exp-form-wrap'>"
@@ -10144,6 +10145,7 @@ def _render_depenses_html() -> str:
                 f"<td style='padding:8px;text-align:right'>"
                 f"<form method='POST' action='/business/expense/remove' style='display:inline;margin:0'>"
                 f"<input type='hidden' name='id' value='{it_id}'>"
+                f"<input type='hidden' name='back_tab' value='depenses'>"
                 f"<button type='submit' class='danger-btn' data-confirm='Supprimer cette dépense ?'>×</button>"
                 f"</form></td></tr>"
             )
@@ -19921,17 +19923,33 @@ def create_app():
         return session.get("auth") is True
 
     def _redirect_back(tab=None):
-        """Retourne l'URL où rediriger : tab explicite > Referer > /."""
+        """Retourne l URL ou rediriger.
+        Priorite : tab explicite > form.back_tab > Referer > /
+
+        Pourquoi back_tab dans le form : certains navigateurs n envoient
+        pas Referer (politique restrictive, no-referrer policy, form
+        submit() en JS apres confirm modal...) -> on tombait sur '/'
+        (Dashboard) au lieu de rester sur l onglet courant.
+        Solution : chaque form ajoute <input name='back_tab' value='depenses'>
+        et on lit ca en priorite. Plus de dependance au Referer.
+        """
         if tab:
             return f"/?tab={tab}"
+        # Form-level fallback (pose explicitement par le form)
+        try:
+            ft = (request.form.get("back_tab") or "").strip()
+            if ft and ft.replace("_", "").isalnum() and len(ft) <= 30:
+                return f"/?tab={ft}"
+        except Exception:
+            pass
         # Use Referer pour rester sur l'onglet actuel
         ref = request.headers.get("Referer", "")
         if ref:
-            # Garder uniquement le path+query relatifs (sécurité : pas de redirection externe)
+            # Garder uniquement le path+query relatifs (securite : pas de redirection externe)
             try:
                 from urllib.parse import urlparse
                 parsed = urlparse(ref)
-                # Vérifier que c'est bien notre host (ou un path relatif)
+                # Verifier que c est bien notre host (ou un path relatif)
                 if parsed.netloc and request.host and parsed.netloc != request.host:
                     return "/"
                 relative = parsed.path or "/"
