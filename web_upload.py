@@ -8367,33 +8367,57 @@ window.vaultGoTo = function(ev, url){
   });
   if(!sec) { window.location.href = url; return false; }
   // UPDATE HEADER INSTANTANEMENT : copie avatar + @nom + count de la sidebar
-  // (sinon le header @emma reste visible le temps du fetch -> impression de bug)
   try {
     if(activeItem){
-      // Extrait l identite cliquee
       var newIdent = activeItem.getAttribute('data-ident') || '';
-      // Trouve le header (le 1er h2/h3 ou bloc qui contient @<ident>)
-      var headerH = sec.querySelector('h2, h3, [data-vault-header-name]');
-      // Update le @ident dans le header s il existe
+      // @nom + count
       sec.querySelectorAll('[data-vault-header-name]').forEach(function(n){ n.textContent = '@' + newIdent; });
-      // Update le compteur "N fichiers"
       var srcCount = activeItem.querySelector('div[style*="color:#888"]');
       if(srcCount){
         sec.querySelectorAll('[data-vault-header-count]').forEach(function(c){ c.textContent = srcCount.textContent; });
       }
-      // Update l avatar
-      var srcAvatar = activeItem.querySelector('img');
-      var dstAvatar = sec.querySelector('[data-vault-header-avatar] img, [data-vault-header-avatar]');
-      if(srcAvatar && dstAvatar && dstAvatar.tagName === 'IMG'){ dstAvatar.src = srcAvatar.src; }
+      // Avatar : swap par innerHTML (gere img ET div fallback initial)
+      // L item sidebar a une structure {avatar_html + status_dot} dans son
+      // premier <div style='position:relative'>. On clone juste l avatar
+      // (premier enfant de ce wrapper).
+      var srcAvatarWrap = activeItem.querySelector('div[style*="position:relative"]');
+      var dstAvatar = sec.querySelector('[data-vault-header-avatar]');
+      if(srcAvatarWrap && dstAvatar){
+        // Recupere le premier child (img OU div fallback)
+        var srcEl = srcAvatarWrap.children[0];
+        if(srcEl){
+          // Clone et adapte la taille pour le header (42px au lieu de 42px sidebar - meme taille en fait)
+          var cloned = srcEl.cloneNode(true);
+          // Force la border sur img pour le header style
+          if(cloned.tagName === 'IMG'){
+            cloned.style.border = '2px solid #2a2a2a';
+            cloned.style.background = '#0a0a0a';
+          }
+          dstAvatar.innerHTML = '';
+          dstAvatar.appendChild(cloned);
+        }
+      }
+      // Effet visuel : pulse violet bref sur le header
+      sec.querySelectorAll('.vault-gallery-header').forEach(function(h){
+        h.style.transition = 'background-color .3s, transform .2s';
+        h.style.backgroundColor = 'rgba(168,85,247,.06)';
+        h.style.transform = 'scale(1.005)';
+        setTimeout(function(){
+          h.style.backgroundColor = '';
+          h.style.transform = '';
+        }, 350);
+      });
     }
   } catch(e){}
-  // Skeleton instant : remplace les images existantes par placeholder + fade les cards
+  // Skeleton plus visible : fade les cards en grise + fond pulse
   sec.querySelectorAll('.vault-card-bg img').forEach(img=>{
+    img.style.transition = 'opacity .15s';
     img.style.opacity = '0';
   });
   sec.querySelectorAll('.vault-card-bg').forEach(c=>{
-    c.style.animation = '';
-    c.style.opacity = '.35';
+    c.style.transition = 'opacity .15s, transform .15s';
+    c.style.opacity = '.25';
+    c.style.transform = 'scale(.98)';
   });
   // Charge le nouveau HTML
   const apply = (html)=>{
