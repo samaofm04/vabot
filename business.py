@@ -15,6 +15,7 @@ EXPENSES_FILE = BUSINESS_DIR / "expenses.json"
 REVENUES_FILE = BUSINESS_DIR / "revenues.json"
 VA_PAYMENTS_FILE = BUSINESS_DIR / "va_payments.json"
 IDENTITY_PLATFORMS_FILE = BUSINESS_DIR / "identity_platforms.json"
+CATEGORIES_FILE = BUSINESS_DIR / "expense_categories.json"
 
 # Plateformes par défaut
 DEFAULT_IDENTITY_PLATFORMS = {
@@ -220,7 +221,9 @@ def sfs_stats() -> Dict:
 
 # ============ DÉPENSES ============
 
-CATEGORIES = [
+# Categories par defaut (seedees la 1ere fois ; l user peut tout
+# add/edit/remove ensuite via l UI).
+DEFAULT_CATEGORIES = [
     "VPS / Hosting",
     "RapidAPI / Scraping",
     "Proxies",
@@ -230,22 +233,116 @@ CATEGORIES = [
     "Autre",
 ]
 
-# Prix presets par categorie : quand l user choisit la categorie dans le
-# formulaire de depense, le montant + description + recurrent s auto-remplissent.
-# Tous les montants en EUR (devise de stockage). Modifiable a la volee dans le form.
+
+def list_categories() -> List[str]:
+    """Liste des categories de depense (editable par l user).
+    Charge depuis CATEGORIES_FILE ; seed avec DEFAULT_CATEGORIES la 1ere fois."""
+    if not CATEGORIES_FILE.exists():
+        # Seed initial
+        try:
+            BUSINESS_DIR.mkdir(parents=True, exist_ok=True)
+            CATEGORIES_FILE.write_text(json.dumps(DEFAULT_CATEGORIES, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return list(DEFAULT_CATEGORIES)
+    try:
+        data = json.loads(CATEGORIES_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Filtre les strings non vides, max 50 chars
+            return [str(x).strip()[:50] for x in data if str(x).strip()]
+    except Exception:
+        pass
+    return list(DEFAULT_CATEGORIES)
+
+
+def _save_categories(cats: List[str]) -> None:
+    BUSINESS_DIR.mkdir(parents=True, exist_ok=True)
+    CATEGORIES_FILE.write_text(json.dumps(cats, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def add_category(name: str) -> bool:
+    """Ajoute une nouvelle categorie. False si elle existe deja ou nom invalide."""
+    n = (name or "").strip()[:50]
+    if not n:
+        return False
+    cats = list_categories()
+    # Comparaison insensible a la casse pour eviter les doublons
+    if any(c.lower() == n.lower() for c in cats):
+        return False
+    cats.append(n)
+    _save_categories(cats)
+    return True
+
+
+def update_category(old_name: str, new_name: str) -> bool:
+    """Renomme une categorie. Retroactivement, met aussi a jour les depenses
+    existantes qui referencaient l ancien nom."""
+    old_n = (old_name or "").strip()
+    new_n = (new_name or "").strip()[:50]
+    if not old_n or not new_n or old_n == new_n:
+        return False
+    cats = list_categories()
+    if not any(c == old_n for c in cats):
+        return False
+    if any(c.lower() == new_n.lower() and c != old_n for c in cats):
+        return False  # le nouveau nom existe deja
+    cats = [new_n if c == old_n else c for c in cats]
+    _save_categories(cats)
+    # Met aussi a jour les depenses existantes
+    items = _load(EXPENSES_FILE)
+    changed = False
+    for it in items:
+        if it.get("category") == old_n:
+            it["category"] = new_n
+            changed = True
+    if changed:
+        _save(EXPENSES_FILE, items)
+    return True
+
+
+def remove_category(name: str) -> bool:
+    """Supprime une categorie. Les depenses existantes gardent leur categorie
+    en texte (juste plus dispo dans le dropdown). Refuse si c est la derniere."""
+    n = (name or "").strip()
+    cats = list_categories()
+    if n not in cats:
+        return False
+    if len(cats) <= 1:
+        return False  # garde-fou : ne pas vider entierement la liste
+    cats = [c for c in cats if c != n]
+    _save_categories(cats)
+    return True
+
+
+# Wrapper de retro-compat pour les modules qui font 'from business import CATEGORIES'.
+# Toujours dynamique : on relit le fichier a chaque acces.
+class _CategoriesProxy:
+    def __iter__(self):
+        return iter(list_categories())
+    def __len__(self):
+        return len(list_categories())
+    def __getitem__(self, i):
+        return list_categories()[i]
+    def __contains__(self, x):
+        return x in list_categories()
+
+
+CATEGORIES = _CategoriesProxy()
+
+# Presets de prix par categorie (montant + devise + recurrent uniquement).
+# La description n est PLUS auto-remplie (l user la tape lui-meme a chaque fois).
+# Tous les montants stockes dans la devise native du paiement.
 CATEGORY_PRESETS = {
     # Facture Hostinger : KVM 2 (9.99) + Daily Backup (5.99) + taxes (3.20) = 19.18 EUR/mois
     "VPS / Hosting": {
         "amount": 19.18,
         "currency": "EUR",
-        "description": "VPS Hostinger KVM 2 + Daily Backup",
         "recurring": True,
     },
-    # RapidAPI Instagram Scraper Stable API — plan PRO : facture 28.99 $/mois (devise native USD)
+    # RapidAPI Instagram Scraper Stable API — plan PRO : 28.99 $/mois (devise native USD)
     "RapidAPI / Scraping": {
         "amount": 28.99,
         "currency": "USD",
-        "description": "RapidAPI Instagram Scraper Stable API (PRO)",
         "recurring": True,
     },
 }

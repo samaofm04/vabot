@@ -9905,31 +9905,30 @@ window.addEventListener('DOMContentLoaded', function(){{
 
 def _render_depenses_html() -> str:
     try:
-        from business import list_expenses, expense_stats, CATEGORIES, CATEGORY_PRESETS
+        from business import list_expenses, expense_stats, list_categories, CATEGORY_PRESETS
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    # Options de categorie avec data-attrs pour l auto-remplissage (montant/devise/desc/recurrent).
-    # html_escape(..., quote=True) gere TOUS les caracteres dangereux (< > & ' ") pour les contextes
-    # attribut HTML, alors que l ancien .replace ne couvrait que les guillemets.
+    # Liste dynamique des categories (chargees du JSON, editables par l user)
+    cats = list_categories()
+    # Options du dropdown : juste amount + currency + recurring (PAS de description -
+    # l user la tape lui-meme, plus de pre-fill description).
     _opt_parts = []
-    for c in CATEGORIES:
+    for c in cats:
         preset = CATEGORY_PRESETS.get(c) or {}
         amt = preset.get("amount", "")
         cur = (preset.get("currency", "EUR") or "EUR").upper()
-        desc = html_escape(str(preset.get("description", "") or ""), quote=True)
         rec = "1" if preset.get("recurring") else "0"
         c_safe = html_escape(str(c), quote=True)
         _opt_parts.append(
-            f"<option value='{c_safe}' data-amount='{amt}' data-currency='{cur}' data-desc='{desc}' data-recurring='{rec}'>{c_safe}</option>"
+            f"<option value='{c_safe}' data-amount='{amt}' data-currency='{cur}' data-recurring='{rec}'>{c_safe}</option>"
         )
     cat_opts = "".join(_opt_parts)
     # Valeurs initiales = preset de la 1ere categorie (si elle en a un)
-    _first_preset = CATEGORY_PRESETS.get(CATEGORIES[0]) if CATEGORIES else None
-    init_amount = (_first_preset or {}).get("amount", 29.99)
+    _first_preset = CATEGORY_PRESETS.get(cats[0]) if cats else None
+    init_amount = (_first_preset or {}).get("amount", 0)
     init_cur = (_first_preset or {}).get("currency", "EUR").upper()
-    init_desc = (_first_preset or {}).get("description", "")
     init_rec_checked = "checked" if (_first_preset or {}).get("recurring") else ""
-    init_desc_attr = html_escape(str(init_desc), quote=True)
+    init_desc_attr = ""  # plus d auto-fill description
     _eur_sel = "selected" if init_cur == "EUR" else ""
     _usd_sel = "selected" if init_cur == "USD" else ""
     import datetime
@@ -9966,6 +9965,44 @@ def _render_depenses_html() -> str:
         f".exp-submit{{width:100%;padding:13px 20px;background:#3b82f6;color:#fff;border:0;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;transition:transform .12s,background .15s;margin-top:4px}}"
         f".exp-submit:hover{{background:#2563eb;transform:translateY(-1px)}}"
         f"</style>"
+        # ============ Gestion des categories (chips editables) ============
+        f"<div class='box' style='margin-bottom:14px'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px'>"
+        f"<h4 style='margin:0;font-size:14px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.05em'>📁 Catégories</h4>"
+        f"<button type='button' onclick='toggleCatManager()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer'>Gérer ⚙</button>"
+        f"</div>"
+        # Liste des chips (mode lecture)
+        f"<div id='cat-chips-view' style='display:flex;flex-wrap:wrap;gap:6px'>"
+        + "".join(
+            f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:5px 12px;border-radius:16px;font-size:12px'>{html_escape(c, quote=True)}</span>"
+            for c in cats
+        )
+        + f"</div>"
+        # Mode gestion (cache par defaut) : chaque categorie avec edit/delete + form add
+        f"<div id='cat-chips-edit' style='display:none;flex-direction:column;gap:8px;margin-top:4px'>"
+        + "".join(
+            (
+                f"<div style='display:flex;align-items:center;gap:6px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:6px 10px'>"
+                f"<input type='text' value='{html_escape(c, quote=True)}' data-original='{html_escape(c, quote=True)}' "
+                f"style='flex:1;min-width:0;background:transparent;border:0;color:#fff;font-size:13px;padding:4px 0;outline:none'>"
+                f"<button type='button' onclick=\"catSave(this)\" "
+                f"style='background:#3b82f6;border:0;color:#fff;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer'>Save</button>"
+                f"<button type='button' onclick=\"catRemove(this)\" "
+                f"title='Supprimer' "
+                f"style='background:transparent;border:0;color:#ef4444;padding:5px 8px;border-radius:6px;font-size:14px;cursor:pointer'>×</button>"
+                f"</div>"
+            )
+            for c in cats
+        )
+        # Form add
+        + f"<div style='display:flex;gap:6px;margin-top:4px'>"
+        f"<input type='text' id='cat-add-input' placeholder='Nouvelle catégorie...' maxlength='50' "
+        f"style='flex:1;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px'>"
+        f"<button type='button' onclick='catAdd()' style='background:#22c55e;border:0;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer'>+ Ajouter</button>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+        # ============ Form Nouvelle depense ============
         f"<form method='POST' action='/business/expense/add' class='box'>"
         f"<input type='hidden' name='back_tab' value='depenses'>"
         f"<h4 style='margin-top:0;margin-bottom:18px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px'>"
@@ -10009,16 +10046,14 @@ def _render_depenses_html() -> str:
         "  var o = sel.options[sel.selectedIndex]; if(!o) return;"
         "  var amt = o.getAttribute('data-amount');"
         "  var cur = o.getAttribute('data-currency');"
-        "  var desc = o.getAttribute('data-desc');"
         "  var rec = o.getAttribute('data-recurring');"
         "  var amtEl = document.getElementById('exp-amount');"
-        "  var descEl = document.getElementById('exp-description');"
         "  var recEl = document.getElementById('exp-recurring');"
         "  /* N ecrase le montant que s il y a un preset (sinon on laisse ce que l user a tape) */"
         "  if(amt !== null && amt !== ''){ if(amtEl) amtEl.value = amt; }"
         "  if(cur){ setExpCurrency(cur); }"
-        "  if(desc !== null && desc !== ''){ if(descEl) descEl.value = desc; }"
         "  if(recEl){ recEl.checked = (rec === '1'); }"
+        "  /* PAS de pre-fill description : l user la tape lui-meme a chaque fois. */"
         "}"
         "function setExpCurrency(cur){"
         "  var hidden = document.getElementById('exp-currency');"
@@ -10032,6 +10067,49 @@ def _render_depenses_html() -> str:
         "    if(eurBtn) eurBtn.classList.add('active');"
         "    if(usdBtn) usdBtn.classList.remove('active');"
         "  }"
+        "}"
+        # === Gestion des categories (toggle / add / edit / remove) ===
+        "function toggleCatManager(){"
+        "  var v = document.getElementById('cat-chips-view');"
+        "  var e = document.getElementById('cat-chips-edit');"
+        "  if(!v || !e) return;"
+        "  var open = e.style.display !== 'none';"
+        "  v.style.display = open ? 'flex' : 'none';"
+        "  e.style.display = open ? 'none' : 'flex';"
+        "}"
+        "function _catPost(action, data, ok){"
+        "  var f = document.createElement('form');"
+        "  f.method='POST'; f.action=action; f.style.display='none';"
+        "  Object.keys(data).forEach(function(k){"
+        "    var i=document.createElement('input'); i.name=k; i.value=data[k]; f.appendChild(i);"
+        "  });"
+        "  var bt=document.createElement('input'); bt.name='back_tab'; bt.value='depenses'; f.appendChild(bt);"
+        "  document.body.appendChild(f); f.submit();"
+        "}"
+        "function catAdd(){"
+        "  var inp = document.getElementById('cat-add-input');"
+        "  if(!inp) return;"
+        "  var v = (inp.value || '').trim();"
+        "  if(!v){ alert('Nom de catégorie vide'); return; }"
+        "  _catPost('/business/category/add', {name: v});"
+        "}"
+        "function catSave(btn){"
+        "  var row = btn.closest('div');"
+        "  var inp = row && row.querySelector('input[type=text]');"
+        "  if(!inp) return;"
+        "  var oldn = inp.getAttribute('data-original') || '';"
+        "  var newn = (inp.value || '').trim();"
+        "  if(!newn){ alert('Nom vide'); return; }"
+        "  if(newn === oldn){ return; }"
+        "  _catPost('/business/category/edit', {old_name: oldn, new_name: newn});"
+        "}"
+        "function catRemove(btn){"
+        "  var row = btn.closest('div');"
+        "  var inp = row && row.querySelector('input[type=text]');"
+        "  if(!inp) return;"
+        "  var name = inp.getAttribute('data-original') || '';"
+        "  if(!confirm('Supprimer la catégorie \"' + name + '\" ? Les dépenses existantes garderont leur catégorie en texte.')) return;"
+        "  _catPost('/business/category/remove', {name: name});"
         "}"
         "</script>"
     )
@@ -20603,6 +20681,60 @@ def create_app():
         if remove_expense(iid):
             return _success("✅ Dépense supprimée")
         return _error("❌ Dépense introuvable")
+
+    # ============ GESTION DES CATEGORIES DE DEPENSE ============
+    @app.route("/business/category/add", methods=["POST"])
+    def business_category_add():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import add_category
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return _error("❌ Nom de catégorie vide")
+        if len(name) > 50:
+            return _error("❌ Nom trop long (max 50 caractères)")
+        if add_category(name):
+            return _success(f"✅ Catégorie <b>{name}</b> ajoutée")
+        return _error(f"❌ La catégorie <b>{name}</b> existe déjà")
+
+    @app.route("/business/category/edit", methods=["POST"])
+    def business_category_edit():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import update_category
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        old_name = (request.form.get("old_name") or "").strip()
+        new_name = (request.form.get("new_name") or "").strip()
+        if not old_name or not new_name:
+            return _error("❌ Ancien et nouveau nom requis")
+        if len(new_name) > 50:
+            return _error("❌ Nom trop long (max 50 caractères)")
+        if update_category(old_name, new_name):
+            return _success(f"✅ <b>{old_name}</b> renommée en <b>{new_name}</b>")
+        return _error(f"❌ Renommage impossible (nom invalide ou déjà existant)")
+
+    @app.route("/business/category/remove", methods=["POST"])
+    def business_category_remove():
+        if not is_auth():
+            return redirect("/")
+        try:
+            from business import remove_category
+        except Exception as e:
+            return _error(f"Module indispo: {e}")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return _error("❌ Nom requis")
+        if remove_category(name):
+            return _success(
+                f"✅ Catégorie <b>{name}</b> supprimée. "
+                f"Les dépenses existantes gardent leur catégorie en texte."
+            )
+        return _error(f"❌ Impossible de supprimer (catégorie introuvable ou c'est la dernière)")
 
     @app.route("/business/revenue/add", methods=["POST"])
     def business_revenue_add():
