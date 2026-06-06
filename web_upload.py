@@ -2547,6 +2547,89 @@ window.upClearPrefill = function(utab){
   </span>
   <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
 </div>
+<!-- Currency toggle (EUR <-> USD) -->
+<div id="cur-floating" style="position:fixed;top:18px;right:124px;z-index:90;display:flex;align-items:center;gap:4px;padding:6px 4px;background:#fff;border:1px solid #e5e7eb;border-radius:20px;box-shadow:0 4px 16px rgba(0,0,0,.08);user-select:none;transition:all .15s" title="Devise d affichage">
+  <button id="cur-btn-eur" type="button" onclick="setCurrency('EUR')" style="background:transparent;border:0;cursor:pointer;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:800;color:#9ca3af;transition:all .15s">€ EUR</button>
+  <button id="cur-btn-usd" type="button" onclick="setCurrency('USD')" style="background:transparent;border:0;cursor:pointer;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:800;color:#9ca3af;transition:all .15s">$ USD</button>
+</div>
+<script>
+/* Devise d affichage : EUR (defaut) ou USD. Stocke en localStorage.
+   Au load, si USD, on walk les text nodes et on convertit X€ -> $Y. */
+window.__eurUsdRate = parseFloat('{eur_usd_rate}') || 1.08;
+function getCurrency(){ try { return localStorage.getItem('vabot_currency') || 'EUR'; } catch(e){ return 'EUR'; } }
+function setCurrency(cur){
+  try { localStorage.setItem('vabot_currency', cur); } catch(e){}
+  /* Reload pour re-render proprement en partant du serveur (toujours EUR) */
+  window.location.reload();
+}
+function _styleCurBtns(){
+  var cur = getCurrency();
+  var eurBtn = document.getElementById('cur-btn-eur');
+  var usdBtn = document.getElementById('cur-btn-usd');
+  if(!eurBtn || !usdBtn) return;
+  if(cur === 'USD'){
+    usdBtn.style.background = '#3b82f6'; usdBtn.style.color = '#fff';
+    eurBtn.style.background = 'transparent'; eurBtn.style.color = '#9ca3af';
+  } else {
+    eurBtn.style.background = '#3b82f6'; eurBtn.style.color = '#fff';
+    usdBtn.style.background = 'transparent'; usdBtn.style.color = '#9ca3af';
+  }
+}
+function _convertText(txt, rate){
+  /* Pattern : nombre + optionnel decimale (, ou .) + optionnels espaces + €
+     Replace par "$" + (nombre * rate) avec meme nb de decimales */
+  return txt.replace(/(\d+(?:[.,]\d+)?)\s*€/g, function(m, num){
+    var raw = num.replace(',', '.');
+    var v = parseFloat(raw);
+    if(isNaN(v)) return m;
+    var hasDecimal = /[.,]/.test(num);
+    var conv = v * rate;
+    /* Garde meme nombre de decimales (max 2) */
+    var dec = hasDecimal ? (num.split(/[.,]/)[1] || '').length : 0;
+    if(dec > 2) dec = 2;
+    var formatted = dec ? conv.toFixed(dec) : Math.round(conv).toString();
+    return '$' + formatted;
+  });
+}
+function applyCurrency(){
+  _styleCurBtns();
+  if(getCurrency() !== 'USD') return;
+  var rate = window.__eurUsdRate;
+  if(!rate || rate <= 0) return;
+  /* TreeWalker sur tout le body, skip script/style/textarea/input */
+  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: function(n){
+      var p = n.parentNode;
+      if(!p) return NodeFilter.FILTER_REJECT;
+      var tag = (p.tagName || '').toLowerCase();
+      if(tag === 'script' || tag === 'style' || tag === 'textarea' || tag === 'input' || tag === 'option') return NodeFilter.FILTER_REJECT;
+      if(p.closest && p.closest('[data-no-currency]')) return NodeFilter.FILTER_REJECT;
+      if(n.nodeValue && n.nodeValue.indexOf('€') !== -1) return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_REJECT;
+    }
+  });
+  var nodes = []; var n;
+  while((n = walker.nextNode())) nodes.push(n);
+  nodes.forEach(function(node){
+    node.nodeValue = _convertText(node.nodeValue, rate);
+  });
+}
+/* Run au load + apres mutations (MyPuls update ses stats en JS, etc.) */
+document.addEventListener('DOMContentLoaded', function(){
+  applyCurrency();
+  /* Re-applique apres les updates JS via MutationObserver throttle */
+  var pending = false;
+  var obs = new MutationObserver(function(){
+    if(pending) return;
+    pending = true;
+    requestAnimationFrame(function(){
+      pending = false;
+      applyCurrency();
+    });
+  });
+  obs.observe(document.body, {childList:true, subtree:true, characterData:true});
+});
+</script>
 <h1 id="page-title">Dashboard</h1>
 <div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
 {msg_html}
@@ -19389,10 +19472,18 @@ def _render_upload_inner(msg=None, error=None):
     stat_pps = 0
     if PROFILE_PICS_DIR.exists():
         stat_pps = sum(1 for p in PROFILE_PICS_DIR.iterdir() if p.is_file())
+    # Taux EUR -> USD pour le toggle currency (devise d affichage)
+    try:
+        import mypuls as _mp
+        _r = _mp.get_eur_usd_rate()
+        _eur_usd = float(_r.get("rate", 1.08)) if isinstance(_r, dict) else 1.08
+    except Exception:
+        _eur_usd = 1.08
     return (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
         .replace("{msg_html}", msg_html)
+        .replace("{eur_usd_rate}", f"{_eur_usd:.4f}")
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
         .replace("{va_list_html}", _render_va_list_html())
