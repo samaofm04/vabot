@@ -7836,10 +7836,10 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         # === Row 1 : identite a gauche + Add media a droite ===
         f"<div class='vault-gallery-header' style='justify-content:space-between'>"
         f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
-        f"{sel_avatar_html}"
+        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         f"<div style='flex:1;min-width:0'>"
-        f"<div style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
-        f"<div style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         f"{add_media_btn}"
@@ -8352,25 +8352,48 @@ window.vaultGoTo = function(ev, url){
   ev.preventDefault();
   // Active item sidebar (UI feedback instant)
   const allItems = document.querySelectorAll('.vault-item');
+  let activeItem = null;
   allItems.forEach(i=>{
     const same = i.getAttribute('href') === url || (i.href === url);
     i.classList.toggle('vault-item-active', same);
+    if(same) activeItem = i;
   });
   // Met a jour l URL
   try{ history.pushState({}, '', url); }catch(e){}
   // Trouve la section ciblee (form-cloud<...>)
   let sec = document.querySelector('.form-section[id^="form-cloud"]');
-  // Choisis la section visible (style block), sinon premiere matchant
   document.querySelectorAll('.form-section[id^="form-cloud"]').forEach(s=>{
     if(s.style.display && s.style.display !== 'none') sec = s;
   });
   if(!sec) { window.location.href = url; return false; }
-  // Skeleton instant : remplace les images existantes par placeholder
+  // UPDATE HEADER INSTANTANEMENT : copie avatar + @nom + count de la sidebar
+  // (sinon le header @emma reste visible le temps du fetch -> impression de bug)
+  try {
+    if(activeItem){
+      // Extrait l identite cliquee
+      var newIdent = activeItem.getAttribute('data-ident') || '';
+      // Trouve le header (le 1er h2/h3 ou bloc qui contient @<ident>)
+      var headerH = sec.querySelector('h2, h3, [data-vault-header-name]');
+      // Update le @ident dans le header s il existe
+      sec.querySelectorAll('[data-vault-header-name]').forEach(function(n){ n.textContent = '@' + newIdent; });
+      // Update le compteur "N fichiers"
+      var srcCount = activeItem.querySelector('div[style*="color:#888"]');
+      if(srcCount){
+        sec.querySelectorAll('[data-vault-header-count]').forEach(function(c){ c.textContent = srcCount.textContent; });
+      }
+      // Update l avatar
+      var srcAvatar = activeItem.querySelector('img');
+      var dstAvatar = sec.querySelector('[data-vault-header-avatar] img, [data-vault-header-avatar]');
+      if(srcAvatar && dstAvatar && dstAvatar.tagName === 'IMG'){ dstAvatar.src = srcAvatar.src; }
+    }
+  } catch(e){}
+  // Skeleton instant : remplace les images existantes par placeholder + fade les cards
   sec.querySelectorAll('.vault-card-bg img').forEach(img=>{
     img.style.opacity = '0';
   });
   sec.querySelectorAll('.vault-card-bg').forEach(c=>{
     c.style.animation = '';
+    c.style.opacity = '.35';
   });
   // Charge le nouveau HTML
   const apply = (html)=>{
