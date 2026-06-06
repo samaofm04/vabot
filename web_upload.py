@@ -857,6 +857,46 @@ function closeConfirm(){
   var overlay = document.getElementById('confirm-overlay');
   if(overlay) overlay.classList.remove('show');
 }
+// Version async/Promise du modal confirm. Permet d ecrire :
+//   if(!(await showConfirmAsync('Titre', 'Question ?'))) return;
+// au lieu du confirm() natif moche.
+function showConfirmAsync(title, message){
+  return new Promise(function(resolve){
+    var overlay = document.getElementById('confirm-overlay');
+    if(!overlay){ resolve(false); return; }
+    try { dismissAllToasts(); } catch(e){}
+    document.getElementById('confirm-title').textContent = title || 'Confirmer';
+    document.getElementById('confirm-message').textContent = message || '';
+    overlay.classList.add('show');
+    var confirmBtn = document.getElementById('confirm-yes');
+    // Reset Confirm listener via cloneNode
+    var newConfirm = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+    newConfirm.disabled = false;
+    newConfirm.style.opacity = '';
+    newConfirm.style.cursor = '';
+    var fired = false;
+    function _done(val){
+      if(fired) return;
+      fired = true;
+      overlay.classList.remove('show');
+      resolve(val);
+    }
+    newConfirm.addEventListener('click', function(){ _done(true); });
+    // Cancel : click sur le bouton Annuler OU sur l overlay
+    var cancelBtn = overlay.querySelector('.btn-cancel');
+    if(cancelBtn){
+      var newCancel = cancelBtn.cloneNode(true);
+      cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+      newCancel.addEventListener('click', function(){ _done(false); });
+    }
+    // Click sur le backdrop (overlay) = cancel
+    var bdHandler = function(e){
+      if(e.target === overlay){ _done(false); overlay.removeEventListener('click', bdHandler); }
+    };
+    overlay.addEventListener('click', bdHandler);
+  });
+}
 // === INTERCEPT FORMS AVEC data-confirm ===
 document.addEventListener('submit', function(e){
   var form = e.target;
@@ -17582,7 +17622,7 @@ function calDayDetail(iso){{
 }}
 
 async function deleteOneEvent(eventId){{
-  if(!confirm('Supprimer cet event ?')) return;
+  if(!(await showConfirmAsync('Supprimer cet event ?', 'Le post/story planifie sera retire de MyPuls.'))) return;
   const fd = new FormData();
   fd.set('delete_ids', String(eventId));
   const r = await fetch('/mypulslive/delete_events', {{method:'POST', body:fd}});
@@ -17592,7 +17632,10 @@ async function deleteOneEvent(eventId){{
 async function deleteAllDay(iso, ids){{
   const idArr = ids.split(',').filter(Boolean);
   if(!idArr.length) return;
-  if(!confirm('Supprimer les '+idArr.length+' events du '+iso+' ?\\n\\nAction IRREVERSIBLE.')) return;
+  if(!(await showConfirmAsync(
+    'Supprimer ' + idArr.length + ' event(s) ?',
+    'Tous les posts/stories planifies du ' + iso + ' seront supprimes. Action irreversible.'
+  ))) return;
   const fd = new FormData();
   fd.set('delete_ids', ids);
   const r = await fetch('/mypulslive/delete_events', {{method:'POST', body:fd}});
@@ -17625,7 +17668,10 @@ async function quickClean(){{
       status.style.color = '#888';
       return;
     }}
-    if(!confirm('Supprimer '+ids.length+' event(s) planifie(s) a partir du '+from+' ?\\n\\nCette action est IRREVERSIBLE.')){{
+    if(!(await showConfirmAsync(
+      'Supprimer ' + ids.length + ' event(s) planifies ?',
+      'A partir du ' + from + '. Les posts/stories seront retires de MyPuls. Action irreversible.'
+    ))){{
       status.textContent = 'Annule';
       status.style.color = '#888';
       return;
