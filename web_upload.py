@@ -19698,15 +19698,12 @@ def create_app():
         return redirect(_redirect_back(tab))
 
     def _track_session():
-        """Met à jour la session courante dans active_sessions.json."""
+        """Met a jour la session courante dans active_sessions.json.
+        Dedupe par (ip, user_agent) : meme browser + meme IP = meme session,
+        pas une nouvelle entree a chaque cookie / reload."""
         try:
-            sid = session.get("session_id")
-            if not sid:
-                import uuid
-                sid = uuid.uuid4().hex[:16]
-                session["session_id"] = sid
             ua = request.headers.get("User-Agent", "")
-            # User-agent simplifié
+            # User-agent simplifie
             ua_short = "Unknown"
             for tag, label in [
                 ("Chrome", "Chrome"), ("Firefox", "Firefox"), ("Safari", "Safari"),
@@ -19724,25 +19721,44 @@ def create_app():
                     os_name = label
                     break
             ua_label = f"{ua_short} sur {os_name}"
+            ip = request.remote_addr or "?"
             sessions = _load_active_sessions()
             now = int(time.time())
-            updated = False
+            # Cle de dedupe : (ip, ua_label). On cherche d abord une session existante
+            # qui match (ip, ua_label) -> on la reutilise (pas de nouvelle entree).
+            match = None
             for s in sessions:
-                if s.get("id") == sid:
-                    s["last_seen"] = now
-                    s["ip"] = request.remote_addr or "?"
-                    s["user_agent_short"] = ua_label
-                    updated = True
+                if s.get("ip") == ip and s.get("user_agent_short") == ua_label:
+                    match = s
                     break
-            if not updated:
+            if match is not None:
+                # Reuse l ID de la session existante pour cette IP/UA
+                match["last_seen"] = now
+                # Associe le cookie courant a cette session canonique
+                session["session_id"] = match.get("id")
+            else:
+                # Nouvelle paire (ip, ua) -> nouvelle session
+                sid = session.get("session_id")
+                if not sid:
+                    import uuid
+                    sid = uuid.uuid4().hex[:16]
+                    session["session_id"] = sid
                 sessions.append({
                     "id": sid,
-                    "ip": request.remote_addr or "?",
+                    "ip": ip,
                     "user_agent_short": ua_label,
                     "first_seen": now,
                     "last_seen": now,
                 })
-            # Garder seulement les 50 plus récentes
+            # Cleanup retroactif : si plusieurs entrees ont la meme (ip, ua),
+            # on garde la plus recente et on supprime les autres.
+            seen = {}
+            for s in sorted(sessions, key=lambda x: x.get("last_seen", 0), reverse=True):
+                key = (s.get("ip"), s.get("user_agent_short"))
+                if key not in seen:
+                    seen[key] = s
+            sessions = list(seen.values())
+            # Garder seulement les 50 plus recentes
             sessions = sorted(sessions, key=lambda s: s.get("last_seen", 0), reverse=True)[:50]
             (DATA_DIR / "active_sessions.json").write_text(
                 json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8"
