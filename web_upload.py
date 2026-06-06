@@ -2507,9 +2507,13 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       Sécurité
     </button>
-    <button class="item" id="tab-srole" onclick="showTab('settings','srole','Rôles & permissions','Gérer les utilisateurs et leurs accès')">
+    <button class="item" id="tab-srole" onclick="showTab('settings','srole','Rôles & permissions','Tableau des rôles, descriptions et permissions')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+      Rôles
+    </button>
+    <button class="item" id="tab-semp" onclick="showTab('settings','semp','Manage employees','Liste des employés, identités assignées, statut')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Rôles & permissions
+      Manage employees
     </button>
     <div class="sub-label" style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;padding:10px 22px 4px;font-weight:700;border-top:1px solid #1a1a1a;margin-top:6px">Intégrations</div>
     <button class="item" id="tab-stoken" onclick="showTab('settings','stoken','Token bot admin','Token du 2e bot Discord')">
@@ -3249,26 +3253,30 @@ document.addEventListener('keydown', function(e){
 </div>
 </div>
 
-<!-- SETTINGS - RÔLES -->
+<!-- SETTINGS - RÔLES (tableau des roles uniquement) -->
 <div class="form-section" id="form-srole" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">👥 Rôles & permissions</h3>
-<small>Gère qui peut accéder à quelles fonctions du site</small>
+<h3 style="margin-top:0">🛡️ Rôles & permissions</h3>
+<small>Définis les rôles existants, leurs descriptions et qui les utilise. Pour gérer les comptes/employés, va dans <b>Manage employees</b>.</small>
 {role_settings_html}
 </div>
+</div>
+
+<!-- SETTINGS - MANAGE EMPLOYEES -->
+<div class="form-section" id="form-semp" style="display:none">
 <div class="box">
 {employees_table_html}
 </div>
 <form method="POST" action="/settings/role/add" class="box">
-<h3 style="margin-top:0">➕ Ajouter un utilisateur</h3>
-<small>Crée un compte d'accès avec un rôle spécifique</small>
+<h3 style="margin-top:0">➕ Ajouter un employé</h3>
+<small>Crée un compte d'accès avec un rôle spécifique. Le user pourra se connecter avec ce username + mot de passe.</small>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
-<div><label>Nom</label><input type="text" name="username" placeholder="Nom de l'utilisateur" required></div>
+<div><label>Nom</label><input type="text" name="username" placeholder="Nom de l'employé" required></div>
 <div><label>Rôle</label><select name="role" required>{role_dropdown_options}</select></div>
 </div>
 <label>Mot de passe initial</label>
 <input type="password" name="password" placeholder="Min 6 caractères" required minlength="6">
-<button type="submit">Ajouter l'utilisateur</button>
+<button type="submit">Ajouter l'employé</button>
 </form>
 </div>
 
