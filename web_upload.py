@@ -22090,40 +22090,53 @@ def create_app():
 
         captions = _parse_lines(captions_raw) or [""]
 
-        # === Mode INFINI : creer une campagne au lieu d'un push one-shot ===
-        if infinite_mode and content_type in ("story", "post"):
+        # === Mode INFINI : creer une (ou 2) campagnes au lieu d un push one-shot ===
+        if infinite_mode:
             try:
                 import mypuls_campaigns
                 import mypuls
             except Exception as e:
                 return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
-            # Recup nom du createur
             creators = mypuls.list_creators().get("creators", {})
             cname = ""
             for n, cid in creators.items():
                 if int(cid) == creator_id:
                     cname = n
                     break
-            slots = story_slots if content_type == "story" else post_slots
-            if not slots:
-                return _error("❌ Aucun slot configure pour ce type", tab="mypulslive")
-            res = mypuls_campaigns.create_campaign(
-                creator_id=creator_id,
-                creator_name=cname,
-                campaign_type=content_type,
-                slots=slots,
-                media_ids=media_ids,
-                captions=captions,
-                options={"shuffle_media": shuffle_media, "randomize_minutes": randomize_minutes},
-                post_action=post_action,
-                delay_sec=delay_sec,
-                start_date=date_start,
-            )
-            if not res.get("ok"):
-                return _error(f"❌ Creation campagne : {res.get('error', '?')}", tab="mypulslive")
+            # Pour chaque type configure (post / story), on cree une campagne.
+            # content_type="both" -> 2 campagnes si les 2 slots sont remplis.
+            campaigns_to_create = []
+            if content_type in ("post", "both") and post_slots:
+                campaigns_to_create.append(("post", post_slots))
+            if content_type in ("story", "both") and story_slots:
+                campaigns_to_create.append(("story", story_slots))
+            if not campaigns_to_create:
+                return _error(
+                    "❌ Mode infini : configure au moins un slot post ou story (et clique sur l'onglet correspondant)",
+                    tab="mypulslive",
+                )
+            results = []
+            for ctype, slots in campaigns_to_create:
+                res = mypuls_campaigns.create_campaign(
+                    creator_id=creator_id,
+                    creator_name=cname,
+                    campaign_type=ctype,
+                    slots=slots,
+                    media_ids=media_ids,
+                    captions=captions,
+                    options={"shuffle_media": shuffle_media, "randomize_minutes": randomize_minutes},
+                    post_action=post_action,
+                    delay_sec=delay_sec,
+                    start_date=date_start,
+                )
+                if not res.get("ok"):
+                    return _error(f"❌ Creation campagne {ctype} : {res.get('error', '?')}", tab="mypulslive")
+                results.append((ctype, res.get("planned", 0)))
+            msg_parts = [f"♾️ {n} {ct}(s) sur les 2 prochains jours" for ct, n in results]
             return _success(
-                f"♾️ Campagne {content_type} lancee — premiers 2 jours planifies : "
-                f"{res.get('planned', 0)} {content_type}(s). Le cron etend de 2 jours toutes les heures.",
+                f"Campagne(s) lancée(s) pour <b>{cname}</b> : "
+                + " · ".join(msg_parts)
+                + ". Le cron étend de 2 jours toutes les heures.",
                 tab="mypulslive",
             )
 
