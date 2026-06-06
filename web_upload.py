@@ -3563,18 +3563,47 @@ def _render_login(err=""):
     return LOGIN_HTML.replace("{err}", err_html)
 
 
-def _load_users():
-    if not USERS_FILE.exists():
-        return {}
+# ============ PERF : cache des JSON par mtime ============
+# Cache simple { path_str: (mtime, parsed_data) }. Invalide automatiquement
+# quand le fichier est modifie. Evite de re-parse N fois par page-load.
+_JSON_MTIME_CACHE: dict = {}
+
+
+def _cached_json_load(path) -> dict:
+    """Lit un JSON et le met en cache par mtime. Re-parse uniquement si modifie."""
     try:
-        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+        p = path if hasattr(path, "exists") else Path(path)
+        if not p.exists():
+            return {}
+        mtime = p.stat().st_mtime
+        key = str(p.resolve())
+        cached = _JSON_MTIME_CACHE.get(key)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        data = json.loads(p.read_text(encoding="utf-8"))
+        _JSON_MTIME_CACHE[key] = (mtime, data)
+        return data
     except Exception:
         return {}
+
+
+def _invalidate_json_cache(path):
+    """Force le re-load au prochain appel (apres un save manuel hors helper)."""
+    try:
+        p = path if hasattr(path, "exists") else Path(path)
+        _JSON_MTIME_CACHE.pop(str(p.resolve()), None)
+    except Exception:
+        pass
+
+
+def _load_users():
+    return _cached_json_load(USERS_FILE)
 
 
 def _save_users(users):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    _invalidate_json_cache(USERS_FILE)
 
 
 def _load_identities_config():
@@ -3780,6 +3809,7 @@ def _load_va_insta_3() -> dict:
 def _save_va_insta_3(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     VA_INSTA_3_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _invalidate_json_cache(VA_INSTA_3_FILE)
 
 
 def _normalize_insta_handle(raw: str) -> str:
@@ -4057,6 +4087,7 @@ def _load_external_insta() -> list:
 def _save_external_insta(items: list):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     EXT_INSTA_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    _invalidate_json_cache(EXT_INSTA_FILE)
 
 
 def _add_external_insta(handle: str, password: str = "", totp_seed: str = "",
@@ -4342,18 +4373,14 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
 
 
 def _load_va_links() -> dict:
-    """Retourne {user_id_str: [link_id_1, link_id_2, ...]}."""
-    if not VA_LINKS_FILE.exists():
-        return {}
-    try:
-        return json.loads(VA_LINKS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    """Retourne {user_id_str: [link_id_1, link_id_2, ...]} (cache par mtime)."""
+    return _cached_json_load(VA_LINKS_FILE)
 
 
 def _save_va_links(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     VA_LINKS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _invalidate_json_cache(VA_LINKS_FILE)
 
 
 def _get_links_for_va(user_id) -> list:
@@ -19199,6 +19226,55 @@ def create_app():
     app.secret_key = os.environ.get("WEB_SECRET", os.urandom(24).hex())
     # Demarre l'auto-scrape Instagram en background
     _start_auto_scrape_daemon()
+
+    # ============ PERF : gzip compression + cache headers ============
+    import gzip as _gz_mod
+    import io as _io_mod
+
+    @app.after_request
+    def _perf_after_request(response):
+        # 1) Cache-Control aggressif sur les fichiers statiques (images, etc.)
+        try:
+            path = request.path
+            if any(path.startswith(p) for p in (
+                "/static/", "/identity/avatar/", "/sfs_proof/",
+                "/insta/proxy_video", "/insta/video/", "/profile_pic/",
+            )):
+                # 7 jours pour les medias (avatars, screenshots, etc.)
+                response.headers.setdefault("Cache-Control", "public, max-age=604800, immutable")
+            elif path.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+                               ".woff", ".woff2", ".ttf", ".css", ".js")):
+                response.headers.setdefault("Cache-Control", "public, max-age=86400")
+        except Exception:
+            pass
+
+        # 2) Gzip pour les reponses text/html, json, css, js > 512 octets
+        try:
+            accepts = request.headers.get("Accept-Encoding", "")
+            if "gzip" not in accepts.lower():
+                return response
+            ct = (response.content_type or "").lower()
+            if not any(t in ct for t in ("text/", "application/json", "application/javascript", "application/xml")):
+                return response
+            if response.direct_passthrough or response.status_code >= 300:
+                return response
+            data = response.get_data()
+            if len(data) < 512:
+                return response
+            buf = _io_mod.BytesIO()
+            with _gz_mod.GzipFile(fileobj=buf, mode="wb", compresslevel=5) as f:
+                f.write(data)
+            compressed = buf.getvalue()
+            # Skip si on gagne moins de 5%
+            if len(compressed) > len(data) * 0.95:
+                return response
+            response.set_data(compressed)
+            response.headers["Content-Encoding"] = "gzip"
+            response.headers["Content-Length"] = str(len(compressed))
+            response.headers.add("Vary", "Accept-Encoding")
+        except Exception:
+            pass
+        return response
 
     def is_auth():
         return session.get("auth") is True
