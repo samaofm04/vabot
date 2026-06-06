@@ -24717,6 +24717,21 @@ def start_in_thread():
         _start_daily_insta_thread()
     except Exception as e:
         print(f"[start_in_thread] daily insta refresh failed to start: {e}", flush=True)
+    # Seed des media pools MyPuls (idempotent : skip si pool deja peuple).
+    # Au boot, restaure les listes hardcoded dans seed_media_pools.py pour
+    # chaque createur (EMMA, AMELIA, JULIA, etc.) si le pool est vide.
+    # Resilience anti-perte : meme si le JSON se corrompt, un restart suffit.
+    try:
+        from seed_media_pools import seed_media_pools
+        res = seed_media_pools(force=False)
+        seeded = [str(k) for k, v in res.items() if v == "seeded"]
+        skipped = [str(k) for k, v in res.items() if v == "skipped"]
+        if seeded:
+            print(f"[seed-media] populated for: {', '.join(seeded)}", flush=True)
+        if skipped:
+            print(f"[seed-media] kept existing for: {', '.join(skipped)}", flush=True)
+    except Exception as e:
+        print(f"[seed-media] failed: {e}", flush=True)
     # Warm-up : 8s apres le boot, on tape GET / via test_client pour pre-remplir
     # TOUS les caches TTL en une fois (mypuls, gms, va_list, dashboard, etc.).
     # Comme ca le 1er user qui se loggue voit du warm (~600ms) au lieu de cold (~15s).
