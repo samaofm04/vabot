@@ -15510,6 +15510,59 @@ def _render_schedule_html() -> str:
         "<span style='color:#888;font-weight:400'>(une par ligne — tirees au hasard pour chaque post)</span></label>"
         f"<textarea name='captions' rows='8' style='font-family:inherit;font-size:13px'>{captions_default}</textarea>"
 
+        # ===== Section OPTIONS (style MyPuls Live) =====
+        # 3 toggles : recycle infini / shuffle medias / randomiser minutes
+        "<style>"
+        ".sx-opts-label{display:block;margin:18px 0 8px;color:#888;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}"
+        ".sx-opt{display:flex;align-items:center;gap:14px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s;user-select:none}"
+        ".sx-opt:hover{border-color:#3b82f6}"
+        ".sx-opt-icon{flex-shrink:0;width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center}"
+        ".sx-opt-text{flex:1;min-width:0}"
+        ".sx-opt-title{margin:0;font-size:14px;font-weight:600;color:#fff}"
+        ".sx-opt-sub{margin:4px 0 0;font-size:12px;color:#aaa;line-height:1.4}"
+        ".sx-opt-tog{flex-shrink:0;position:relative;width:46px;height:24px;background:#2a2a2a;border-radius:12px;transition:background .2s}"
+        ".sx-opt-tog::after{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .2s,background .2s}"
+        ".sx-opt input{display:none}"
+        ".sx-opt input:checked ~ .sx-opt-tog{background:#3b82f6}"
+        ".sx-opt input:checked ~ .sx-opt-tog::after{transform:translateX(22px)}"
+        "</style>"
+        "<div class='sx-opts-label'>Options</div>"
+        # Recyclage infini (ON par defaut)
+        "<label class='sx-opt'>"
+        "<input type='checkbox' name='recycle_infinite' value='on' checked>"
+        "<div class='sx-opt-icon' style='background:rgba(59,130,246,.15);color:#3b82f6'>"
+        "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.739-8z'/></svg>"
+        "</div>"
+        "<div class='sx-opt-text'>"
+        "<p class='sx-opt-title'>♾ Recyclage infini</p>"
+        "<p class='sx-opt-sub'>Tes médias sont recyclés dans l'ordre quand on arrive au bout de la liste. Si désactivé : 1 média = 1 post, on s'arrête quand la liste est épuisée.</p>"
+        "</div>"
+        "<div class='sx-opt-tog'></div>"
+        "</label>"
+        # Ordre aleatoire (OFF par defaut)
+        "<label class='sx-opt'>"
+        "<input type='checkbox' name='shuffle_media' value='on'>"
+        "<div class='sx-opt-icon' style='background:rgba(168,85,247,.15);color:#a855f7'>"
+        "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M16 3h5v5'/><path d='M21 3l-7 7'/><path d='M8 21H3v-5'/><path d='M3 21l7-7'/><path d='M3 8V3h5'/><path d='M21 16v5h-5'/></svg>"
+        "</div>"
+        "<div class='sx-opt-text'>"
+        "<p class='sx-opt-title'>🔀 Ordre aléatoire des médias</p>"
+        "<p class='sx-opt-sub'>Shuffle la liste avant de planifier (au lieu de l'ordre fourni).</p>"
+        "</div>"
+        "<div class='sx-opt-tog'></div>"
+        "</label>"
+        # Randomiser les minutes (ON par defaut)
+        "<label class='sx-opt'>"
+        "<input type='checkbox' name='randomize_minutes' value='on' checked>"
+        "<div class='sx-opt-icon' style='background:rgba(34,197,94,.15);color:#22c55e'>"
+        "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>"
+        "</div>"
+        "<div class='sx-opt-text'>"
+        "<p class='sx-opt-title'>🔄 Randomiser les minutes</p>"
+        "<p class='sx-opt-sub'>Les minutes varient (3 à 25) chaque jour pour faire plus humain. Si désactivé : minute :00 exacte (20:00 reste 20:00).</p>"
+        "</div>"
+        "<div class='sx-opt-tog'></div>"
+        "</label>"
         "<button type='submit' style='margin-top:14px;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer' onclick='return sxSyncBeforeSubmit()'>"
         "⬇ Generer le fichier Excel"
         "</button>"
@@ -23198,6 +23251,17 @@ def create_app():
         private_hours = (request.form.get("private_hours") or "").strip()
         media_ids = request.form.get("media_ids") or ""
         captions = request.form.get("captions") or ""
+        # Toggles (style MyPuls Live) : checked == "on" pour les checkboxes
+        # On accepte aussi "1" pour compat avec des inputs hidden
+        def _flag(name, default=False):
+            v = (request.form.get(name) or "").strip().lower()
+            if v in ("on", "1", "true", "yes"): return True
+            if v in ("off", "0", "false", "no", ""):
+                return default if v == "" else False
+            return default
+        recycle_infinite = _flag("recycle_infinite", default=True)
+        shuffle_media = _flag("shuffle_media", default=False)
+        randomize_minutes = _flag("randomize_minutes", default=True)
 
         if not model_name:
             return _error("❌ Nom du modele manquant", tab="schedule")
@@ -23217,6 +23281,9 @@ def create_app():
                 private_hours_raw=private_hours,
                 media_ids_raw=media_ids,
                 captions_raw=captions,
+                recycle_infinite=recycle_infinite,
+                shuffle_media=shuffle_media,
+                randomize_minutes=randomize_minutes,
             )
         except ValueError as e:
             return _error(f"❌ {e}", tab="schedule")

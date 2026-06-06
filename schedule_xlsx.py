@@ -84,14 +84,25 @@ def build_rows(
     private_hours: List[int],
     media_ids: List[str],
     captions: List[str],
+    recycle_infinite: bool = True,
+    shuffle_media: bool = False,
+    randomize_minutes: bool = True,
 ) -> List[Tuple[str, str, str, str, int, str]]:
     """Genere la liste des rows pour le xlsx.
 
     Pour chaque jour de date_start a date_end inclus :
-      - 1 post public par heure publique (minute random 3-25)
-      - 1 post prive par heure privee  (minute random 3-25)
-    Les media_ids sont recyclees en ordre.
+      - 1 post public par heure publique
+      - 1 post prive par heure privee
     Les captions sont tirees au hasard.
+
+    Options :
+    - recycle_infinite (defaut True) : recycle les medias en boucle quand on
+      arrive au bout. Si False : on s arrete des qu on a epuise la liste
+      (ex: 3 medias = 3 posts max, peu importe la periode).
+    - shuffle_media (defaut False) : melange la liste des medias avant
+      utilisation (au lieu de l ordre fourni).
+    - randomize_minutes (defaut True) : minutes aleatoires :03 a :25 chaque
+      jour pour faire plus humain. Si False : :00 (heure exacte du planning).
     """
     if not media_ids:
         raise ValueError("Aucun media_id fourni")
@@ -103,37 +114,70 @@ def build_rows(
     if d_end < d_start:
         raise ValueError("date_end < date_start")
 
+    # Shuffle si demande (copie locale - n affecte pas la liste de l appelant)
+    media_ids = list(media_ids)
+    if shuffle_media:
+        random.shuffle(media_ids)
+
     rows: List[Tuple[str, str, str, str, int, str]] = []
     media_idx = 0
+    total_media = len(media_ids)
+
+    def _minute() -> int:
+        return _random_minute() if randomize_minutes else 0
+
+    def _next_media() -> str:
+        """Retourne le prochain media. Recycle en boucle si recycle_infinite,
+        sinon retourne None quand epuise."""
+        nonlocal media_idx
+        if recycle_infinite:
+            mid = media_ids[media_idx % total_media]
+            media_idx += 1
+            return mid
+        # Pas de recycle : on s arrete quand on est au bout
+        if media_idx >= total_media:
+            return None
+        mid = media_ids[media_idx]
+        media_idx += 1
+        return mid
 
     day = d_start
-    while day <= d_end:
+    stop = False
+    while day <= d_end and not stop:
         # Public posts
         for h in public_hours:
-            m = _random_minute()
+            mid = _next_media()
+            if mid is None:
+                stop = True
+                break
+            m = _minute()
             dt = datetime(day.year, day.month, day.day, h, m, 0)
             rows.append((
-                media_ids[media_idx % len(media_ids)],
+                mid,
                 dt.strftime("%Y-%m-%d %H:%M:%S"),
                 "public",
                 "delete",
                 172800,
                 random.choice(captions),
             ))
-            media_idx += 1
+        if stop:
+            break
         # Private posts
         for h in private_hours:
-            m = _random_minute()
+            mid = _next_media()
+            if mid is None:
+                stop = True
+                break
+            m = _minute()
             dt = datetime(day.year, day.month, day.day, h, m, 0)
             rows.append((
-                media_ids[media_idx % len(media_ids)],
+                mid,
                 dt.strftime("%Y-%m-%d %H:%M:%S"),
                 "private",
                 "delete",
                 172800,
                 random.choice(captions),
             ))
-            media_idx += 1
         day += timedelta(days=1)
 
     # Trier par date pour avoir un fichier propre chronologiquement
@@ -149,6 +193,9 @@ def generate_xlsx(
     private_hours_raw: str,
     media_ids_raw: str,
     captions_raw: str,
+    recycle_infinite: bool = True,
+    shuffle_media: bool = False,
+    randomize_minutes: bool = True,
 ) -> Tuple[bytes, str]:
     """Genere le fichier xlsx et retourne (bytes, filename).
 
@@ -157,6 +204,7 @@ def generate_xlsx(
     public_hours_raw / private_hours_raw : "9, 14, 20"
     media_ids_raw : un id par ligne
     captions_raw : une caption par ligne (vide -> defauts)
+    recycle_infinite / shuffle_media / randomize_minutes : voir build_rows.
     """
     if Workbook is None:
         raise RuntimeError(
@@ -176,6 +224,9 @@ def generate_xlsx(
         private_hours=private_hours,
         media_ids=media_ids,
         captions=captions,
+        recycle_infinite=recycle_infinite,
+        shuffle_media=shuffle_media,
+        randomize_minutes=randomize_minutes,
     )
 
     wb = Workbook()
