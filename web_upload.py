@@ -9616,65 +9616,145 @@ window.addEventListener('DOMContentLoaded', function(){{
 }});
 </script>
 
-<!-- Modal d'ajout SFS -->
+<!-- Modal d'ajout SFS — inflow-style design -->
+<style>
+#sfs-modal.confirm-overlay{{backdrop-filter:blur(12px);background:rgba(8,10,16,.7)}}
+.sfs-modal-card{{max-width:580px;width:92%;background:linear-gradient(180deg,#13151c 0%,#0e1015 100%);border:1px solid #2a2d36;border-radius:18px;padding:0;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.6),0 0 0 1px rgba(168,85,247,.08) inset;animation:sfsPopIn .25s cubic-bezier(.18,.89,.32,1.28)}}
+@keyframes sfsPopIn{{from{{opacity:0;transform:translateY(8px) scale(.96)}}to{{opacity:1;transform:translateY(0) scale(1)}}}}
+.sfs-modal-head{{background:linear-gradient(135deg,rgba(168,85,247,.12),rgba(59,130,246,.08));border-bottom:1px solid #2a2d36;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;gap:14px}}
+.sfs-modal-head-title{{display:flex;align-items:center;gap:12px}}
+.sfs-modal-head-icon{{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#a855f7,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 6px 20px rgba(168,85,247,.4)}}
+.sfs-modal-head h3{{margin:0;font-size:16px;font-weight:800;color:#fff;letter-spacing:-.01em}}
+.sfs-modal-head-sub{{font-size:11px;color:#888;margin-top:2px;font-weight:500}}
+.sfs-modal-close{{background:rgba(255,255,255,.04);border:1px solid #2a2d36;color:#aaa;width:32px;height:32px;border-radius:9px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;padding:0}}
+.sfs-modal-close:hover{{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444;transform:rotate(90deg)}}
+.sfs-modal-body{{padding:20px 24px;max-height:70vh;overflow-y:auto}}
+.sfs-section{{background:rgba(255,255,255,.02);border:1px solid #22252e;border-radius:14px;padding:16px;margin-bottom:14px}}
+.sfs-section-head{{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:11px;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.12em}}
+.sfs-section-head-num{{width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#a855f7,#3b82f6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:900}}
+.sfs-row{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+.sfs-field{{display:flex;flex-direction:column;gap:6px}}
+.sfs-field label{{font-size:10px;color:#888;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin:0}}
+.sfs-field input[type="text"],.sfs-field input[type="time"],.sfs-field select,.sfs-modal-body textarea{{background:#16191f;border:1px solid #2a2d36;color:#fff;padding:10px 12px;border-radius:9px;font-size:13px;font-family:inherit;transition:all .15s;margin:0;width:100%;box-sizing:border-box}}
+.sfs-field input:focus,.sfs-field select:focus,.sfs-modal-body textarea:focus{{border-color:#a855f7;outline:none;box-shadow:0 0 0 3px rgba(168,85,247,.15)}}
+.sfs-field select{{cursor:pointer}}
+.sfs-upload-wrap{{position:relative;overflow:hidden;border:2px dashed #2a2d36;border-radius:11px;padding:18px 12px;background:rgba(168,85,247,.02);text-align:center;cursor:pointer;transition:all .15s}}
+.sfs-upload-wrap:hover{{border-color:#a855f7;background:rgba(168,85,247,.05)}}
+.sfs-upload-wrap.has-file{{border-style:solid;border-color:#22c55e;background:rgba(34,197,94,.06)}}
+.sfs-upload-wrap input[type="file"]{{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}}
+.sfs-upload-ico{{font-size:22px;display:block;margin-bottom:4px}}
+.sfs-upload-label{{font-size:11px;color:#888;font-weight:600}}
+.sfs-upload-name{{font-size:10px;color:#22c55e;margin-top:3px;font-weight:700;word-break:break-all}}
+.sfs-modal-foot{{margin:6px -24px -20px;padding:16px 24px;border-top:1px solid #2a2d36;background:rgba(0,0,0,.25);display:flex;gap:10px;justify-content:flex-end}}
+.sfs-btn-cancel{{padding:11px 22px;background:transparent;border:1px solid #2a2d36;color:#aaa;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit;transition:all .15s}}
+.sfs-btn-cancel:hover{{border-color:#444;color:#fff}}
+.sfs-btn-submit{{padding:11px 26px;background:linear-gradient(135deg,#a855f7,#3b82f6);color:#fff;border:0;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px;font-family:inherit;box-shadow:0 8px 24px rgba(168,85,247,.35);transition:all .15s;display:flex;align-items:center;gap:6px}}
+.sfs-btn-submit:hover{{transform:translateY(-1px);box-shadow:0 12px 30px rgba(168,85,247,.5)}}
+</style>
 <div id='sfs-modal' class='confirm-overlay' onclick='closeSfsModal()'>
-  <div class='confirm-box' style='max-width:520px;width:90%' onclick='event.stopPropagation()'>
-    <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>
-      <h3 id='sfs-modal-title' style='margin:0'>📅 SFS</h3>
-      <button onclick='closeSfsModal()' style='background:none;border:0;color:#888;font-size:20px;cursor:pointer;margin:0;padding:0'>×</button>
+  <div class='sfs-modal-card' onclick='event.stopPropagation()'>
+    <div class='sfs-modal-head'>
+      <div class='sfs-modal-head-title'>
+        <div class='sfs-modal-head-icon'>📅</div>
+        <div>
+          <h3 id='sfs-modal-title'>Nouvel SFS</h3>
+          <div class='sfs-modal-head-sub' id='sfs-modal-subtitle'>—</div>
+        </div>
+      </div>
+      <button class='sfs-modal-close' onclick='closeSfsModal()'>×</button>
     </div>
-    <div id='sfs-modal-existing'></div>
-    <h4 style='margin:18px 0 8px'>➕ Nouvel SFS</h4>
-    <form method='POST' action='/business/sfs/add' enctype='multipart/form-data'>
-      <input type='hidden' name='date' id='sfs-modal-date'>
-      <input type='hidden' name='platform' id='sfs-modal-platform' value='OF'>
-      <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
-        <div>
-          <label>Identité (qui ENVOIE sur <span id='sfs-modal-platform-display'>OF</span>)</label>
-          <select name='identity' id='sfs-modal-identity' required></select>
+    <div class='sfs-modal-body'>
+      <div id='sfs-modal-existing'></div>
+      <form method='POST' action='/business/sfs/add' enctype='multipart/form-data'>
+        <input type='hidden' name='date' id='sfs-modal-date'>
+        <input type='hidden' name='platform' id='sfs-modal-platform' value='OF'>
+
+        <div class='sfs-section'>
+          <div class='sfs-section-head'><span class='sfs-section-head-num'>1</span>👥 Identités</div>
+          <div class='sfs-row'>
+            <div class='sfs-field'>
+              <label>📤 Qui envoie (sur <span id='sfs-modal-platform-display'>OF</span>)</label>
+              <select name='identity' id='sfs-modal-identity' required></select>
+            </div>
+            <div class='sfs-field'>
+              <label>🎯 Qui reçoit</label>
+              <select name='receiver_identity' id='sfs-modal-receiver' required></select>
+            </div>
+          </div>
         </div>
-        <div>
-          <label>Heure</label>
-          <input type='time' name='time' value='19:00' required>
+
+        <div class='sfs-section'>
+          <div class='sfs-section-head'><span class='sfs-section-head-num'>2</span>⏰ Quand · Avec qui</div>
+          <div class='sfs-row'>
+            <div class='sfs-field'>
+              <label>🕘 Heure</label>
+              <input type='time' name='time' value='19:00' required>
+            </div>
+            <div class='sfs-field'>
+              <label>🤝 Partenaire @ (externe)</label>
+              <input type='text' name='partner' placeholder='partner_username' required>
+            </div>
+          </div>
         </div>
-        <div>
-          <label>Modèle qui REÇOIT 🎯</label>
-          <select name='receiver_identity' id='sfs-modal-receiver' required></select>
+
+        <div class='sfs-section'>
+          <div class='sfs-section-head'><span class='sfs-section-head-num'>3</span>📌 Statut · Notes</div>
+          <div class='sfs-row'>
+            <div class='sfs-field'>
+              <label>Statut</label>
+              <select name='status'>
+                <option value='scheduled'>✓ Scheduled</option>
+                <option value='to_program'>⚙ To program</option>
+                <option value='to_verify'>🔍 À vérifier</option>
+                <option value='done'>✅ Done</option>
+              </select>
+            </div>
+            <div class='sfs-field'>
+              <label>Notes</label>
+              <input type='text' name='notes' placeholder='Story exchange, tag…' maxlength='200'>
+            </div>
+          </div>
         </div>
-        <div>
-          <label>Partenaire @ (externe)</label>
-          <input type='text' name='partner' placeholder='partner_username' required>
+
+        <div class='sfs-section'>
+          <div class='sfs-section-head'><span class='sfs-section-head-num'>4</span>📎 Preuves visuelles</div>
+          <div class='sfs-row'>
+            <label class='sfs-upload-wrap' id='sfs-upload-before'>
+              <span class='sfs-upload-ico'>📋</span>
+              <div class='sfs-upload-label'><b>AVANT</b><br>accord / schedule</div>
+              <div class='sfs-upload-name' id='sfs-before-name'></div>
+              <input type='file' name='proof_before' accept='image/*' onchange='sfsHandleFile(this,"before")'>
+            </label>
+            <label class='sfs-upload-wrap' id='sfs-upload-after'>
+              <span class='sfs-upload-ico'>🎉</span>
+              <div class='sfs-upload-label'><b>APRÈS</b><br>post publié</div>
+              <div class='sfs-upload-name' id='sfs-after-name'></div>
+              <input type='file' name='proof_after' accept='image/*' onchange='sfsHandleFile(this,"after")'>
+            </label>
+          </div>
         </div>
-        <div>
-          <label>Statut</label>
-          <select name='status'>
-            <option value='scheduled'>✓ Scheduled</option>
-            <option value='to_program'>⚙ To program</option>
-            <option value='to_verify'>🔍 À vérifier</option>
-            <option value='done'>✅ Done</option>
-          </select>
+
+        <div class='sfs-modal-foot'>
+          <button type='button' class='sfs-btn-cancel' onclick='closeSfsModal()'>Annuler</button>
+          <button type='submit' class='sfs-btn-submit'><span>✨</span> Créer le SFS</button>
         </div>
-        <div></div>
-      </div>
-      <label>Notes (optionnel)</label>
-      <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
-      <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px'>
-        <div>
-          <label>📎 Preuve AVANT (accord/schedule)</label>
-          <input type='file' name='proof_before' accept='image/*' style='font-size:11px;color:#888;width:100%'>
-        </div>
-        <div>
-          <label>📎 Preuve APRÈS (post publié)</label>
-          <input type='file' name='proof_after' accept='image/*' style='font-size:11px;color:#888;width:100%'>
-        </div>
-      </div>
-      <div style='display:flex;gap:8px;margin-top:14px;justify-content:flex-end'>
-        <button type='button' class='btn-cancel' onclick='closeSfsModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Annuler</button>
-        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
-      </div>
-    </form>
+      </form>
+    </div>
   </div>
 </div>
+<script>
+function sfsHandleFile(input, slot){{
+  var wrap = document.getElementById('sfs-upload-'+slot);
+  var name = document.getElementById('sfs-'+slot+'-name');
+  if(input.files && input.files.length){{
+    if(wrap) wrap.classList.add('has-file');
+    if(name) name.textContent = '✓ ' + input.files[0].name;
+  }} else {{
+    if(wrap) wrap.classList.remove('has-file');
+    if(name) name.textContent = '';
+  }}
+}}
+</script>
 """)
 
     # === LISTE DES SFS (filtré par platform aussi) ===
