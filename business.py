@@ -240,10 +240,11 @@ CATEGORY_PRESETS = {
         "description": "VPS Hostinger KVM 2 + Daily Backup",
         "recurring": True,
     },
-    # RapidAPI Instagram Scraper Stable API — plan BASIC (~5 $/mois ~ 4.30 EUR)
+    # RapidAPI Instagram Scraper Stable API — plan PRO : facture 28.99 $/mois
+    # ~ 24.91 EUR au taux EUR->USD 1.164 (stockage en EUR, devise de base)
     "RapidAPI / Scraping": {
-        "amount": 4.30,
-        "description": "RapidAPI Instagram Scraper (plan BASIC)",
+        "amount": 24.91,
+        "description": "RapidAPI Instagram Scraper Stable API (PRO) — 28.99$/mois",
         "recurring": True,
     },
 }
