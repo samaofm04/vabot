@@ -9116,6 +9116,17 @@ def _render_sfs_html() -> str:
     for _p, _il in platform_idents.items():
         _all_idents_set.update(_il)
     all_identities_json = _json.dumps(sorted(_all_idents_set))
+    # MyPuls creators (pour le dropdown receveur quand plateforme = MYM)
+    _mypuls_creators = []
+    try:
+        import mypuls as _mypuls
+        if _mypuls.is_configured():
+            _cr_res = _mypuls.list_creators()
+            if _cr_res.get("ok"):
+                _mypuls_creators = sorted((_cr_res.get("creators") or {}).keys(), key=str.lower)
+    except Exception:
+        pass
+    mypuls_creators_json = _json.dumps(_mypuls_creators)
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -9412,6 +9423,7 @@ def _render_sfs_html() -> str:
 window.__sfsData = {sfs_by_date_json};
 window.__platformIdents = {platform_idents_json};
 window.__allIdentities = {all_identities_json};
+window.__mypulsCreators = {mypuls_creators_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
@@ -9566,13 +9578,20 @@ function openSfsModal(date){{
     ? idents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
     : '<option value="">(aucune identité sur ' + platform + ')</option>';
   select.innerHTML = optsHtml;
-  // Le dropdown "qui recoit" : on liste TOUTES les identites (cross-plateforme)
-  // pour permettre par ex Emma sur OF qui poste pour Amelia (autre identite).
-  var allIdents = window.__allIdentities || idents;
+  // Le dropdown "qui recoit" depend de la plateforme :
+  // - MyM : on utilise les creators MyPuls (Amelia_xoxo, Julia_dv, etc.)
+  // - OF / autre : toutes les identites locales cross-plateforme
+  var pUp = (platform || '').toUpperCase();
+  var receiverIdents;
+  if(pUp === 'MYM' && Array.isArray(window.__mypulsCreators) && window.__mypulsCreators.length){{
+    receiverIdents = window.__mypulsCreators;
+  }} else {{
+    receiverIdents = window.__allIdentities || idents;
+  }}
   var receiver = document.getElementById('sfs-modal-receiver');
   if(receiver){{
-    receiver.innerHTML = allIdents.length
-      ? allIdents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
+    receiver.innerHTML = receiverIdents.length
+      ? receiverIdents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
       : '<option value="">(aucune identité)</option>';
   }}
   // Afficher les SFS existants ce jour pour cette plateforme
