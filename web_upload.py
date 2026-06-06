@@ -3268,17 +3268,6 @@ document.addEventListener('keydown', function(e){
 <div class="box">
 {employees_table_html}
 </div>
-<form method="POST" action="/settings/role/add" class="box">
-<h3 style="margin-top:0">➕ Ajouter un employé</h3>
-<small>Crée un compte d'accès avec un rôle spécifique. Le user pourra se connecter avec ce username + mot de passe.</small>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
-<div><label>Nom</label><input type="text" name="username" placeholder="Nom de l'employé" required></div>
-<div><label>Rôle</label><select name="role" required>{role_dropdown_options}</select></div>
-</div>
-<label>Mot de passe initial</label>
-<input type="password" name="password" placeholder="Min 6 caractères" required minlength="6">
-<button type="submit">Ajouter l'employé</button>
-</form>
 </div>
 
 <!-- SETTINGS - MOT DE PASSE -->
@@ -18746,50 +18735,72 @@ def _get_all_roles():
 
 
 def _render_employees_table_html() -> str:
-    """Tableau riche des employes : nom + assigned creators + role + status + actions.
-    Style inspiré d Agency Hess. Toggle active/deactive inline."""
+    """Tableau Employees style Agency Hess :
+    - Header : titre + Batch actions + + Add employee (droite)
+    - Filtres : By employee | By Creator | By status | Reset | Search
+    - Colonnes : Employee | Role | Status | Actions
+    - Modal Edit/Add : Name | Email | Group | Role (no assigned creators)
+    """
     users = _load_role_users()
     roles = _get_all_roles()
     role_colors = {r["key"]: r["color"] for r in roles}
     role_names = {r["key"]: r["name"] for r in roles}
     identities = _list_identities() if callable(_list_identities) else []
-    # Header de la section
+    # Header de la section : titre a gauche, boutons a droite (style Agency Hess)
     head = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<h3 style='margin:0;font-size:18px;font-weight:700'>👥 Employees</h3>"
-        f"<div style='color:#888;font-size:12px'>{len(users)} compte{'s' if len(users) > 1 else ''}</div>"
-        "</div>"
+        "<div style='display:flex;gap:10px;align-items:center'>"
+        "<button type='button' onclick='toggleBatchActions()' "
+        "style='background:#0f0f0f;border:1px solid #2a3f70;color:#3b82f6;padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px'>"
+        "Batch actions ▾</button>"
+        "<button type='button' onclick='openAddEmployee()' "
+        "style='background:#3b82f6;border:0;color:#fff;padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer'>"
+        "+ Add employee</button>"
+        "</div></div>"
     )
-    # Filtres (decoratifs : filter live cote JS)
+    # Ligne de filtres (4 colonnes + Reset/Search)
     filters = (
-        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px'>"
-        "<input type='text' id='emp-filter-name' placeholder='🔍 Rechercher un employé…' oninput='filterEmployees()' "
-        "style='flex:1;min-width:200px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:9px 14px;border-radius:9px;font-size:13px'>"
-        "<select id='emp-filter-role' onchange='filterEmployees()' "
-        "style='background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer;min-width:160px'>"
-        "<option value=''>Tous les rôles</option>"
+        "<div style='display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:18px;padding:14px;background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px'>"
+        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By employee :"
+        "<input type='text' id='emp-filter-name' placeholder='Employee' oninput='filterEmployees()' "
+        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;min-width:180px'>"
+        "</label>"
+        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By Creator :"
+        "<select id='emp-filter-creator' onchange='filterEmployees()' "
+        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;min-width:180px'>"
+        "<option value=''>Creator</option>"
     )
-    for r in roles:
-        rk = r["key"]; rn = r["name"]
-        filters += f"<option value='{rk}'>{rn}</option>"
+    for ident in identities:
+        nm = (ident.get("name") if isinstance(ident, dict) else str(ident)) or ""
+        if nm:
+            filters += f"<option value='{nm.lower()}'>{nm}</option>"
     filters += (
-        "</select>"
+        "</select></label>"
+        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:13px'>By status :"
         "<select id='emp-filter-status' onchange='filterEmployees()' "
-        "style='background:#0f0f0f;border:1px solid #2a2a2a;color:#aaa;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer'>"
-        "<option value=''>Tous statuts</option>"
+        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;min-width:140px'>"
+        "<option value=''>Status</option>"
         "<option value='active'>Activated</option>"
         "<option value='inactive'>Deactivated</option>"
-        "</select>"
+        "</select></label>"
+        "<div style='flex:1'></div>"
+        "<button type='button' onclick='resetEmpFilters()' "
+        "style='background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer'>Reset</button>"
+        "<button type='button' onclick='filterEmployees()' "
+        "style='background:#3b82f6;border:0;color:#fff;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer'>Search</button>"
         "</div>"
     )
-    # Le tableau
+    # Tableau : Employee | Role | Status | Actions (no Assigned Creators)
     table = [
         "<div style='overflow-x:auto;border:1px solid #232323;border-radius:10px'>"
         "<table id='emp-table' style='width:100%;border-collapse:collapse;font-size:13px'>"
         "<thead><tr style='background:#1a1a1a;text-align:left'>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700;width:36px'>"
+        "<input type='checkbox' id='emp-select-all' onchange='toggleAllEmp(this)' style='accent-color:#3b82f6'>"
+        "</th>"
         "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Employee</th>"
-        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Assigned Creators</th>"
-        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Rôle</th>"
+        "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700'>Role</th>"
         "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700;text-align:center'>Status</th>"
         "<th style='padding:14px 16px;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.6px;font-weight:700;text-align:right'>Actions</th>"
         "</tr></thead><tbody>"
@@ -18797,7 +18808,7 @@ def _render_employees_table_html() -> str:
     if not users:
         table.append(
             "<tr><td colspan='5' style='padding:40px 20px;text-align:center;color:#666;font-size:13px'>"
-            "Aucun employé enregistré. Ajoute-en un avec le formulaire ci-dessous ⬇"
+            "No employee yet. Click <b style='color:#3b82f6'>+ Add employee</b> to create one."
             "</td></tr>"
         )
     for u in users:
@@ -18806,87 +18817,178 @@ def _render_employees_table_html() -> str:
         role_color = role_colors.get(role_key, "#aaa")
         role_name = role_names.get(role_key, role_key.title())
         is_active = u.get("active", True)
+        email = (u.get("email") or "").strip()
+        agency = (u.get("agency") or "").strip()
+        # Assigned creators -> stocke en data-attr pour le filtre "By Creator"
         assigned = u.get("assigned_creators") or []
         if isinstance(assigned, str):
             assigned = [x.strip() for x in assigned.split(",") if x.strip()]
-        assigned_str = (
-            ", ".join(
-                f"<span style='color:#3b82f6'>{a}</span>"
-                for a in assigned
-            )
-            if assigned
-            else "<span style='color:#666;font-style:italic'>+ Click to set</span>"
-        )
+        assigned_csv = ",".join([a.lower() for a in assigned])
         status_color = "#22c55e" if is_active else "#888"
         status_label = "Activated" if is_active else "Deactivated"
-        next_action = "deactivate" if is_active else "activate"
-        next_label = "Désactiver" if is_active else "Activer"
         avatar_letter = uname[:1].upper()
-        # Couleur deterministe pour l avatar
         ah = sum(ord(c) for c in uname) % 360
         _status_attr = "active" if is_active else "inactive"
+        # Echappe les ' pour les onclick
+        uname_js = uname.replace("'", "\\'")
+        email_js = email.replace("'", "\\'")
+        agency_js = agency.replace("'", "\\'")
         table.append(
-            f"<tr class='emp-row' data-emp-name='{uname.lower()}' data-emp-role='{role_key}' data-emp-status='{_status_attr}' style='border-top:1px solid #232323'>"
+            f"<tr class='emp-row' data-emp-name='{uname.lower()}' data-emp-role='{role_key}' data-emp-status='{_status_attr}' data-emp-creators='{assigned_csv}' style='border-top:1px solid #232323'>"
+            f"<td style='padding:14px 16px;width:36px'>"
+            f"<input type='checkbox' class='emp-check' data-emp='{uname}' onchange='updateEmpBatch()' style='accent-color:#3b82f6'></td>"
             f"<td style='padding:14px 16px'>"
             f"<div style='display:flex;align-items:center;gap:10px'>"
             f"<div style='width:30px;height:30px;border-radius:50%;background:hsl({ah},60%,45%);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;flex-shrink:0'>{avatar_letter}</div>"
-            f"<div style='font-weight:600;color:#fff'>{uname}</div>"
-            f"</div></td>"
-            f"<td style='padding:14px 16px'>"
-            f"<div style='display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer' onclick='openAssignedModal(\"{uname}\")'>{assigned_str}</div>"
-            f"</td>"
+            f"<div><div style='font-weight:600;color:#fff'>{uname}</div>"
+            + (f"<div style='font-size:11px;color:#888;margin-top:2px'>{email}</div>" if email else "")
+            + f"</div></div></td>"
             f"<td style='padding:14px 16px'><b style='color:{role_color}'>{role_name}</b></td>"
             f"<td style='padding:14px 16px;text-align:center'>"
             f"<span style='display:inline-flex;align-items:center;gap:6px;color:{status_color};font-weight:600;font-size:12px'>"
             f"<span style='width:6px;height:6px;border-radius:50%;background:{status_color}'></span>{status_label}"
             f"</span></td>"
             f"<td style='padding:14px 16px;text-align:right;white-space:nowrap'>"
-            f"<a onclick='editEmployee(\"{uname}\",\"{role_key}\")' style='color:#3b82f6;cursor:pointer;font-size:13px;font-weight:500;margin-right:14px;text-decoration:none'>Edit</a>"
-            f"<form method='POST' action='/settings/role/toggle_active' style='display:inline;margin:0'>"
-            f"<input type='hidden' name='username' value='{uname}'>"
-            f"<input type='hidden' name='action' value='{next_action}'>"
-            f"<button type='submit' style='background:transparent;border:0;color:#aaa;cursor:pointer;font-size:13px;font-weight:500;padding:0;margin-right:14px'>{next_label}</button>"
-            f"</form>"
-            f"<form method='POST' action='/settings/role/remove' style='display:inline;margin:0' onsubmit=\"return confirm('Supprimer {uname} et révoquer son accès ?')\">"
-            f"<input type='hidden' name='username' value='{uname}'>"
-            f"<button type='submit' style='background:transparent;border:0;color:#ef4444;cursor:pointer;font-size:14px;padding:0' title='Supprimer'>🗑</button>"
-            f"</form>"
+            f"<a onclick=\"openEditEmployee('{uname_js}','{email_js}','{agency_js}','{role_key}',{str(is_active).lower()})\" "
+            f"style='color:#3b82f6;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none'>Edit</a>"
             f"</td></tr>"
         )
     table.append("</tbody></table></div>")
-    # JS de filtrage
+    # Modal Edit/Add employee + JS
+    role_opts = "".join(
+        f"<option value='{r['key']}'>{r['name']}</option>"
+        for r in roles if r["key"] != "owner" and r["enabled"]
+    )
+    modal = f"""
+<!-- Modal Add/Edit employee -->
+<div id='emp-modal' class='confirm-overlay' onclick='closeEmpModal()'>
+  <div class='confirm-box' style='max-width:480px' onclick='event.stopPropagation()'>
+    <h3 id='emp-modal-title' style='margin-top:0'>Edit employee</h3>
+    <form id='emp-modal-form' method='POST'>
+      <input type='hidden' name='original_username' id='emp-modal-orig'>
+      <label><span style='color:#ef4444'>*</span>Employee name</label>
+      <input type='text' name='username' id='emp-modal-name' required>
+      <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Email</label>
+      <input type='email' name='email' id='emp-modal-email' placeholder='employee@example.com'>
+      <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Group</label>
+      <input type='text' name='agency' id='emp-modal-agency' placeholder='Agency name' value=''>
+      <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Role</label>
+      <select name='role' id='emp-modal-role' required>{role_opts}</select>
+      <div id='emp-modal-pwd-wrap' style='display:none'>
+        <label style='margin-top:10px'><span style='color:#ef4444'>*</span>Initial password (min 6 chars)</label>
+        <input type='password' name='password' id='emp-modal-pwd' minlength='6'>
+      </div>
+      <div style='display:flex;gap:8px;justify-content:flex-end;margin-top:18px'>
+        <button type='button' onclick='closeEmpModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Cancel</button>
+        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Dropdown Batch actions -->
+<div id='emp-batch-menu' style='display:none;position:absolute;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:6px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50'>
+  <button type='button' onclick='batchEmpAction("activate")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#22c55e;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>✓ Activate selected</button>
+  <button type='button' onclick='batchEmpAction("deactivate")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#aaa;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>⊘ Deactivate selected</button>
+  <button type='button' onclick='batchEmpAction("delete")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#ef4444;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>🗑 Delete selected</button>
+</div>
+"""
     js = """
 <script>
+/* ---- Filtres employees ---- */
 function filterEmployees(){
   var q = (document.getElementById('emp-filter-name').value || '').toLowerCase().trim();
-  var rf = document.getElementById('emp-filter-role').value;
+  var cf = (document.getElementById('emp-filter-creator').value || '').toLowerCase().trim();
   var sf = document.getElementById('emp-filter-status').value;
   document.querySelectorAll('.emp-row').forEach(function(row){
     var n = row.getAttribute('data-emp-name') || '';
-    var r = row.getAttribute('data-emp-role') || '';
     var s = row.getAttribute('data-emp-status') || '';
-    var ok = (!q || n.indexOf(q) !== -1) && (!rf || r === rf) && (!sf || s === sf);
+    var cs = (row.getAttribute('data-emp-creators') || '').split(',');
+    var creatorOk = !cf || cs.indexOf(cf) !== -1;
+    var ok = (!q || n.indexOf(q) !== -1) && creatorOk && (!sf || s === sf);
     row.style.display = ok ? '' : 'none';
   });
 }
-function editEmployee(name, role){
-  var newRole = prompt('Nouveau rôle pour ' + name + ' (admin/va/chatter/creator/sfs) :', role);
-  if(!newRole) return;
-  var f = document.createElement('form');
-  f.method='POST'; f.action='/settings/role/edit_user'; f.style.display='none';
-  f.innerHTML = '<input name=username value="'+name+'"><input name=role value="'+newRole+'">';
-  document.body.appendChild(f); f.submit();
+function resetEmpFilters(){
+  document.getElementById('emp-filter-name').value = '';
+  document.getElementById('emp-filter-creator').value = '';
+  document.getElementById('emp-filter-status').value = '';
+  filterEmployees();
 }
-function openAssignedModal(name){
-  var raw = prompt('Identités assignées à ' + name + ' (séparées par virgule, ex: amelia,julia,lola)', '');
-  if(raw === null) return;
+
+/* ---- Modal Add/Edit ---- */
+function openAddEmployee(){
+  document.getElementById('emp-modal-title').textContent = 'Add employee';
+  document.getElementById('emp-modal-form').action = '/settings/role/add';
+  document.getElementById('emp-modal-orig').value = '';
+  document.getElementById('emp-modal-name').value = '';
+  document.getElementById('emp-modal-name').readOnly = false;
+  document.getElementById('emp-modal-email').value = '';
+  document.getElementById('emp-modal-agency').value = '';
+  document.getElementById('emp-modal-role').value = '';
+  document.getElementById('emp-modal-pwd-wrap').style.display = 'block';
+  document.getElementById('emp-modal-pwd').required = true;
+  document.getElementById('emp-modal-pwd').value = '';
+  document.getElementById('emp-modal').classList.add('show');
+}
+function openEditEmployee(name, email, agency, role, isActive){
+  document.getElementById('emp-modal-title').textContent = 'Edit employee';
+  document.getElementById('emp-modal-form').action = '/settings/role/edit_user';
+  document.getElementById('emp-modal-orig').value = name;
+  document.getElementById('emp-modal-name').value = name;
+  document.getElementById('emp-modal-name').readOnly = true;  /* nom de login non modifiable */
+  document.getElementById('emp-modal-email').value = email || '';
+  document.getElementById('emp-modal-agency').value = agency || '';
+  document.getElementById('emp-modal-role').value = role || '';
+  document.getElementById('emp-modal-pwd-wrap').style.display = 'none';
+  document.getElementById('emp-modal-pwd').required = false;
+  document.getElementById('emp-modal').classList.add('show');
+}
+function closeEmpModal(){
+  document.getElementById('emp-modal').classList.remove('show');
+}
+
+/* ---- Batch actions ---- */
+function toggleAllEmp(cb){
+  document.querySelectorAll('.emp-check').forEach(function(c){
+    var row = c.closest('tr');
+    if(row && row.style.display !== 'none'){ c.checked = cb.checked; }
+  });
+  updateEmpBatch();
+}
+function updateEmpBatch(){
+  var n = document.querySelectorAll('.emp-check:checked').length;
+  /* on pourrait afficher un counter ici */
+}
+function toggleBatchActions(){
+  var m = document.getElementById('emp-batch-menu');
+  if(m.style.display === 'block'){ m.style.display = 'none'; return; }
+  /* position sous le bouton */
+  var btn = event.currentTarget;
+  var r = btn.getBoundingClientRect();
+  m.style.top = (window.scrollY + r.bottom + 6) + 'px';
+  m.style.left = (window.scrollX + r.left) + 'px';
+  m.style.display = 'block';
+  /* close on outside click */
+  setTimeout(function(){
+    document.addEventListener('click', function _cb(e){
+      if(!m.contains(e.target)){ m.style.display='none'; document.removeEventListener('click', _cb); }
+    });
+  }, 0);
+}
+function batchEmpAction(action){
+  document.getElementById('emp-batch-menu').style.display = 'none';
+  var names = Array.from(document.querySelectorAll('.emp-check:checked')).map(function(c){ return c.getAttribute('data-emp'); });
+  if(!names.length){ alert('No employee selected'); return; }
+  var label = action === 'delete' ? 'Delete' : (action === 'activate' ? 'Activate' : 'Deactivate');
+  if(!confirm(label + ' ' + names.length + ' employee(s)?')) return;
   var f = document.createElement('form');
-  f.method='POST'; f.action='/settings/role/set_assigned'; f.style.display='none';
-  f.innerHTML = '<input name=username value="'+name+'"><input name=assigned value="'+raw+'">';
+  f.method='POST'; f.action='/settings/role/batch'; f.style.display='none';
+  f.innerHTML = '<input name=action value="'+action+'"><input name=usernames value="'+names.join(',')+'">';
   document.body.appendChild(f); f.submit();
 }
 </script>"""
-    return head + filters + "".join(table) + js
+    return head + filters + "".join(table) + modal + js
 
 
 def _render_role_dropdown_options() -> str:
@@ -22551,6 +22653,8 @@ def create_app():
         username = (request.form.get("username") or "").strip()
         role = (request.form.get("role") or "").strip().lower()
         password = (request.form.get("password") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        agency = (request.form.get("agency") or "").strip()
         if not username or not role or len(password) < 6:
             return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)")
         # Normalise le username : lowercase + sans espaces
@@ -22563,7 +22667,10 @@ def create_app():
         users.append({
             "username": username,
             "role": role,
+            "email": email,
+            "agency": agency,
             "password_hash": hashed,
+            "active": True,
             "created_at": int(time.time()),
         })
         _save_role_users(users)
@@ -22572,6 +22679,8 @@ def create_app():
         web_users[username] = {
             "password_hash": hashed,
             "role": role,
+            "email": email,
+            "agency": agency,
             "created_at": int(time.time()),
         }
         _save_web_users(web_users)
@@ -22603,22 +22712,64 @@ def create_app():
     def settings_role_edit_user():
         if not is_auth():
             return redirect("/")
-        username = (request.form.get("username") or "").strip().lower()
+        # original_username : on identifie sur l ancien nom (le nom est readonly dans le modal)
+        orig = (request.form.get("original_username") or request.form.get("username") or "").strip().lower()
         new_role = (request.form.get("role") or "").strip().lower()
+        new_email = (request.form.get("email") or "").strip()
+        new_agency = (request.form.get("agency") or "").strip()
         if not new_role:
             return _error("❌ Rôle manquant")
         users = _load_role_users()
+        found = False
         for u in users:
-            if (u.get("username") or "").lower() == username:
+            if (u.get("username") or "").lower() == orig:
                 u["role"] = new_role
+                u["email"] = new_email
+                u["agency"] = new_agency
+                found = True
                 break
+        if not found:
+            return _error(f"❌ Utilisateur {orig} introuvable")
         _save_role_users(users)
         # Sync dans web_admin_users
         web_users = _load_web_users()
-        if username in web_users:
-            web_users[username]["role"] = new_role
+        if orig in web_users:
+            web_users[orig]["role"] = new_role
+            web_users[orig]["email"] = new_email
+            web_users[orig]["agency"] = new_agency
             _save_web_users(web_users)
-        return _success(f"✅ Rôle de {username} mis à jour : <b>{new_role}</b>")
+        return _success(f"✅ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)")
+
+    @app.route("/settings/role/batch", methods=["POST"])
+    def settings_role_batch():
+        """Actions batch sur plusieurs employes : activate / deactivate / delete."""
+        if not is_auth():
+            return redirect("/")
+        action = (request.form.get("action") or "").strip()
+        raw = (request.form.get("usernames") or "").strip()
+        names = [n.strip().lower() for n in raw.split(",") if n.strip()]
+        if not names or action not in ("activate", "deactivate", "delete"):
+            return _error("❌ Action ou sélection invalide")
+        # Protege le owner
+        names = [n for n in names if n != "samaali"]
+        users = _load_role_users()
+        web_users = _load_web_users()
+        if action == "delete":
+            users = [u for u in users if (u.get("username") or "").lower() not in names]
+            for n in names:
+                web_users.pop(n, None)
+        else:
+            is_act = (action == "activate")
+            for u in users:
+                if (u.get("username") or "").lower() in names:
+                    u["active"] = is_act
+            if not is_act:
+                for n in names:
+                    web_users.pop(n, None)
+        _save_role_users(users)
+        _save_web_users(web_users)
+        verb = {"activate": "activé(s)", "deactivate": "désactivé(s)", "delete": "supprimé(s)"}[action]
+        return _success(f"✅ {len(names)} employé(s) {verb}")
 
     @app.route("/settings/role/set_assigned", methods=["POST"])
     def settings_role_set_assigned():
