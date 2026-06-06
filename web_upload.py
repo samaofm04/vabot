@@ -3570,6 +3570,42 @@ def _invalidate_all_ttl_cache():
         _TTL_CACHE.clear()
 
 
+def _arg_cached(seconds: int = 60, key_args=()):
+    """Cache TTL qui inclut des request.args dans la cle.
+
+    Pour les renders qui depend de query string (mp_start/mp_end, home_period...).
+    Hit du cache si meme (args fn, meme query string keys, dans le TTL).
+    """
+    def deco(fn):
+        cache_key_prefix = f"{fn.__module__}.{fn.__qualname__}"
+        @_ft_perf.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                from flask import request as _flask_req
+                arg_vals = tuple(_flask_req.args.get(k, "") for k in key_args)
+            except Exception:
+                arg_vals = ()
+            try:
+                k = (cache_key_prefix, args, tuple(sorted(kwargs.items())), arg_vals)
+            except TypeError:
+                return fn(*args, **kwargs)
+            now = _time_perf.time()
+            with _TTL_CACHE_LOCK:
+                hit = _TTL_CACHE.get(k)
+                if hit and (now - hit[0]) < seconds:
+                    return hit[1]
+            result = fn(*args, **kwargs)
+            with _TTL_CACHE_LOCK:
+                _TTL_CACHE[k] = (now, result)
+            return result
+        wrapper.invalidate = lambda: [
+            _TTL_CACHE.pop(k, None)
+            for k in [kk for kk in list(_TTL_CACHE.keys()) if kk[0] == cache_key_prefix]
+        ]
+        return wrapper
+    return deco
+
+
 # ============ PERF : cache des JSON par mtime ============
 # Cache simple { path_str: (mtime, parsed_data) }. Invalide automatiquement
 # quand le fichier est modifie. Evite de re-parse N fois par page-load.
@@ -9924,6 +9960,7 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
+@_arg_cached(seconds=60, key_args=("home_period",))
 def _render_home_dashboard_html() -> str:
     """Dashboard global affiché à la racine — synthèse de TOUS les revenus.
 
@@ -9931,6 +9968,7 @@ def _render_home_dashboard_html() -> str:
     - MyPuls (ventes chatteurs live) — cache 5min
     - Revenus manuels (module Business → Revenus)
     Avec sélecteur de période (Aujourd'hui / Hier / Cette semaine / Ce mois).
+    Cache TTL 60s keye sur home_period.
     """
     import datetime as _dt
     from flask import request as flask_request
@@ -10192,11 +10230,13 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     )
 
 
+@_arg_cached(seconds=60, key_args=("mp_start", "mp_end"))
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
 
     Scrape le dashboard MyPuls via cookies de session (PHPSESSID + REMEMBERME).
     Affiche : stats globales, top chatteurs, transactions récentes, filtre période.
+    Cache TTL 60s keye sur (mp_start, mp_end).
     """
     try:
         import mypuls
@@ -11555,11 +11595,13 @@ body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:10
 </html>"""
 
 
+@_arg_cached(seconds=60, key_args=("ls_folder",))
 def _render_linkscale_html() -> str:
     """Page Linkscale : gestion cle API + liste/creation/suppression/dup links.
 
     Click sur une pill folder -> page reload avec ?ls_folder=NAME et la liste
     se filtre + un mini-dash affiche les clicks today/7j/30j du folder.
+    Cache TTL 60s keye sur ls_folder.
     """
     try:
         import linkscale
@@ -23944,24 +23986,23 @@ def start_in_thread():
         _start_daily_insta_thread()
     except Exception as e:
         print(f"[start_in_thread] daily insta refresh failed to start: {e}", flush=True)
-    # Warm-up : pre-rend les fonctions lourdes 30s apres le boot pour que
-    # le 1er user hit / ne se prenne pas 15s d attente.
+    # Warm-up : 8s apres le boot, on tape GET / via test_client pour pre-remplir
+    # TOUS les caches TTL en une fois (mypuls, gms, va_list, dashboard, etc.).
+    # Comme ca le 1er user qui se loggue voit du warm (~600ms) au lieu de cold (~15s).
     def _boot_warmup():
         import time as _t_wu
-        _t_wu.sleep(30)  # attend que le serveur soit pret + les autres threads
+        _t_wu.sleep(8)  # le serveur Flask doit etre pret + thread daemon
         try:
-            print("[warmup] pre-rendering heavy pages...", flush=True)
+            print("[warmup] hit GET / pour pre-remplir tous les caches...", flush=True)
             t0 = _t_wu.time()
-            # Appelle les fonctions decorees @ttl_cache pour peupler le cache
-            try: _render_va_list_html()
-            except Exception as e: print(f"[warmup] va_list err: {e}", flush=True)
-            try: _render_geelark_html()
-            except Exception as e: print(f"[warmup] geelark err: {e}", flush=True)
-            try: _render_gms_html()
-            except Exception as e: print(f"[warmup] gms err: {e}", flush=True)
-            try: _render_identity_stats_html()
-            except Exception as e: print(f"[warmup] identity_stats err: {e}", flush=True)
-            print(f"[warmup] done in {_t_wu.time()-t0:.1f}s", flush=True)
+            # Utilise un test_client interne pour render comme un vrai user
+            app = create_app()
+            with app.test_client() as c:
+                with c.session_transaction() as s:
+                    s["auth"] = True
+                    s["username"] = "samaali"
+                r = c.get("/")
+                print(f"[warmup] GET / -> {r.status_code} en {_t_wu.time()-t0:.1f}s ({len(r.data)//1024}KB)", flush=True)
         except Exception as e:
             print(f"[warmup] crash: {e}", flush=True)
     try:
