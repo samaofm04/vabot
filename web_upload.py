@@ -17068,10 +17068,15 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
 
   <div style='text-align:center;margin-top:24px;display:flex;flex-direction:column;gap:12px;align-items:center'>
     <button type='submit' class='mpl-push-btn'>⚡ Pousser dans MyPuls (LIVE)</button>
-    <button type='button' onclick='pushAllCreators()' style='background:linear-gradient(135deg,#10b981,#3b82f6);color:#fff;border:0;padding:12px 24px;border-radius:11px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,.3);display:inline-flex;align-items:center;gap:8px'>
-      🚀 Pousser POSTS + STORIES pour TOUS les créateurs
-    </button>
-    <small style='color:#888;font-size:11px;max-width:540px;text-align:center'>Un seul clic = posts ET stories planifies sur tous les ~9 createurs avec leurs medias seedes, sur la periode du planning global. Operation longue : ~30s a 2min.</small>
+    <div style='display:flex;gap:10px;flex-wrap:wrap;justify-content:center'>
+      <button type='button' onclick='pushAllCreators()' style='background:linear-gradient(135deg,#10b981,#3b82f6);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,.3);display:inline-flex;align-items:center;gap:8px'>
+        🚀 Pousser POSTS + STORIES pour TOUS
+      </button>
+      <button type='button' onclick='deleteAllCreators()' style='background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.3);display:inline-flex;align-items:center;gap:8px'>
+        🗑 Tout supprimer (TOUS les créateurs)
+      </button>
+    </div>
+    <small style='color:#888;font-size:11px;max-width:540px;text-align:center'>Bulk PUSH : posts ET stories planifies sur les ~9 createurs.<br>Bulk DELETE : retire tous les events planifies de tous les createurs sur la periode du planning global.</small>
   </div>
 </form>
 """
@@ -18512,6 +18517,53 @@ async function fetchMyPulsMedia(){{
     }} else {{ status.textContent='Erreur: '+(j.error||'?'); status.style.color='#f99'; }}
   }} catch(e) {{ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }}
 }}
+// === Bulk DELETE : supprime tous les events de tous les createurs ===
+async function deleteAllCreators(){{
+  if(typeof showConfirmAsync === 'function'){{
+    const ok = await showConfirmAsync(
+      'Tout supprimer pour TOUS les créateurs ?',
+      'TOUS les events planifies (posts + stories) de TOUS les createurs sur la periode du planning global seront retires de MyPuls. Action IRREVERSIBLE.'
+    );
+    if(!ok) return;
+    // Double confirm pour cette action destructrice
+    const ok2 = await showConfirmAsync(
+      'Confirmer encore ?',
+      'Cette action ne peut PAS etre annulee. Tape Confirmer si tu es sur.'
+    );
+    if(!ok2) return;
+  }} else {{
+    if(!confirm('Tout supprimer pour TOUS les createurs ? IRREVERSIBLE.')) return;
+    if(!confirm('Vraiment sur ? Cette action ne peut PAS etre annulee.')) return;
+  }}
+  if(typeof showToast === 'function') showToast('Bulk delete en cours, patiente...', 'info', 120000);
+  try {{
+    const r = await fetch('/mypulslive/delete_all_creators', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: '{{}}',
+    }});
+    const j = await r.json();
+    if(!j.ok){{
+      if(typeof showToast === 'function') showToast('Erreur : ' + (j.error || '?'), 'error', 8000);
+      return;
+    }}
+    const s = j.summary || {{}};
+    const lines = [
+      `${{s.creators_scanned || 0}} createurs scannes`,
+      `Events supprimes : ${{s.total_deleted || 0}}`,
+      `Periode : ${{s.date_start}} -> ${{s.date_end}}`,
+    ];
+    if(s.total_failed) lines.push(`Echecs : ${{s.total_failed}}`);
+    const msg = lines.join(' - ');
+    if(typeof showToast === 'function') showToast(msg, s.total_failed > 0 ? 'warning' : 'success', 15000);
+    // Reload pour voir le calendrier vide
+    setTimeout(() => window.location.reload(), 2000);
+  }} catch(e){{
+    if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error', 8000);
+    console.error('deleteAllCreators:', e);
+  }}
+}}
+
 // === Bulk push : applique le planning global a TOUS les createurs ===
 async function pushAllCreators(){{
   if(typeof showConfirmAsync === 'function'){{
@@ -23323,6 +23375,92 @@ def create_app():
         if all_errors:
             msg += " | Premieres erreurs : " + "; ".join(all_errors[:3])
         return _success(msg, tab="mypulslive")
+
+    @app.route("/mypulslive/delete_all_creators", methods=["POST"])
+    def mypulslive_delete_all_creators():
+        """Bulk REMOVE : supprime tous les events planifies de tous les createurs
+        sur la periode du planning global. L oppose de push_all_creators.
+
+        Utilise par le bouton 'Tout supprimer'. Operation longue (1 API call
+        de listing + 1 API call par event a supprimer)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls_creator_settings as mcs
+            import mypuls_scheduler
+            import seed_media_pools
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo : {e}"})
+
+        # Lit les dates du planning global
+        g = mcs.get_global_settings()
+        date_start = (g.get("start_date") or "").strip()
+        date_end = (g.get("end_date") or "").strip()
+        # Override possible via JSON body (l user peut elargir le range
+        # pour cleanup tout meme si la config courante est plus etroite)
+        body = (request.get_json(silent=True) or {})
+        if body.get("start_date"): date_start = body["start_date"]
+        if body.get("end_date"): date_end = body["end_date"]
+        if not date_start or not date_end:
+            return jsonify({"ok": False, "error": "Dates manquantes (ni dans body ni dans config globale)"})
+
+        # ISO format requis par MyPuls (date avec T00:00:00 et fin du jour pour end)
+        start_iso = f"{date_start}T00:00:00"
+        # +23h59m pour inclure le dernier jour entierement
+        end_iso = f"{date_end}T23:59:59"
+
+        creator_ids = list(seed_media_pools.MEDIA_SEEDS.keys())
+        results = []
+        total_deleted = 0
+        total_failed = 0
+        first_errors: list = []
+
+        for cid in creator_ids:
+            try:
+                lst = mypuls_scheduler.list_calendar_events([cid], start_iso, end_iso)
+                if not lst.get("ok"):
+                    err = lst.get("error", "?")
+                    results.append({"cid": cid, "list_error": err})
+                    first_errors.append(f"#{cid} list: {err}")
+                    continue
+                events = lst.get("events") or []
+                deleted_here = 0
+                failed_here = 0
+                for ev in events:
+                    eid = ev.get("id")
+                    if not eid: continue
+                    res = mypuls_scheduler.delete_event(int(eid))
+                    if res.get("ok"):
+                        deleted_here += 1
+                    else:
+                        failed_here += 1
+                        if len(first_errors) < 10:
+                            first_errors.append(f"#{cid} event#{eid}: {res.get('error','?')}")
+                total_deleted += deleted_here
+                total_failed += failed_here
+                results.append({
+                    "cid": cid,
+                    "found": len(events),
+                    "deleted": deleted_here,
+                    "failed": failed_here,
+                })
+            except Exception as e:
+                results.append({"cid": cid, "error": str(e)})
+                first_errors.append(f"#{cid}: {e}")
+
+        return jsonify({
+            "ok": True,
+            "summary": {
+                "creators_scanned": len(creator_ids),
+                "total_deleted": total_deleted,
+                "total_failed": total_failed,
+                "date_start": date_start,
+                "date_end": date_end,
+            },
+            "results": results,
+            "first_errors": first_errors[:10],
+        })
 
     @app.route("/mypulslive/push_all_creators", methods=["POST"])
     def mypulslive_push_all_creators():
