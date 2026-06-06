@@ -17252,7 +17252,40 @@ async function quickClean(){{
 function toggleOpt(elId, hiddenId){{
   const el = document.getElementById(elId);
   el.classList.toggle('active');
-  document.getElementById(hiddenId).value = el.classList.contains('active')?'1':'0';
+  const val = el.classList.contains('active') ? '1' : '0';
+  document.getElementById(hiddenId).value = val;
+  // Persiste en localStorage pour que le toggle soit conserve entre sessions
+  try {{ localStorage.setItem('vabot_mpl_opt_' + elId, val); }} catch(e){{}}
+}}
+// Restaure les toggles au chargement de la page MyPuls Live
+function restoreMplOpts(){{
+  const opts = [
+    {{el: 'opt-recycle',  hidden: 'mpl-recycle'}},
+    {{el: 'opt-shuffle',  hidden: 'mpl-shuffle-media'}},
+    {{el: 'opt-randmin',  hidden: 'mpl-random-min'}},
+  ];
+  opts.forEach(function(o){{
+    try {{
+      const saved = localStorage.getItem('vabot_mpl_opt_' + o.el);
+      if(saved === null) return;
+      const el = document.getElementById(o.el);
+      const hi = document.getElementById(o.hidden);
+      if(!el || !hi) return;
+      if(saved === '1'){{
+        if(!el.classList.contains('active')){{ el.classList.add('active'); }}
+        hi.value = '1';
+      }} else {{
+        el.classList.remove('active');
+        hi.value = '0';
+      }}
+    }} catch(e){{}}
+  }});
+}}
+// Appelle au load (apres DOMContentLoaded)
+if(document.readyState === 'loading'){{
+  document.addEventListener('DOMContentLoaded', function(){{ setTimeout(restoreMplOpts, 50); }});
+}} else {{
+  setTimeout(restoreMplOpts, 50);
 }}
 
 function mplToggle(el){{ el.classList.toggle('open'); }}
