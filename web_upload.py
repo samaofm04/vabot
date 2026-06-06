@@ -15491,15 +15491,27 @@ def _render_schedule_html() -> str:
         "</style>"
         "<div style='margin-top:14px'>"
         "<label style='display:flex;align-items:center;gap:8px'>"
-        "<span>🕐 Heures de publication</span>"
+        "<span>🕐 Posts — heures de publication</span>"
         "<span style='font-weight:400;color:#666;font-size:12px'>(<span style='color:#22c55e'>🌍 Public</span> ou <span style='color:#a855f7'>🔒 Privé</span> par slot)</span>"
         "</label>"
         "<small style='display:block;margin-bottom:8px;color:#888'>1 post sera planifié à chaque heure indiquée, chaque jour de la période. Minutes aléatoires :03 à :25.</small>"
         "<div id='sx-slots-container' class='sx-slots'></div>"
-        "<button type='button' id='sx-add-slot' class='sx-add-btn' onclick='sxAddSlot()'>+ Ajouter un slot</button>"
+        "<button type='button' id='sx-add-slot' class='sx-add-btn' onclick='sxAddSlot()'>+ Ajouter un slot post</button>"
         # Hidden CSV inputs - mis a jour par JS au submit
         "<input type='hidden' name='public_hours' id='sx-public-hours' value='9, 14, 20'>"
         "<input type='hidden' name='private_hours' id='sx-private-hours' value='11, 17, 23'>"
+        "</div>"
+        # ===== Stories =====
+        "<div style='margin-top:18px'>"
+        "<label style='display:flex;align-items:center;gap:8px'>"
+        "<span>📱 Stories — heures de publication</span>"
+        "<span style='font-weight:400;color:#666;font-size:12px'>(audience : Tous MyM / Abonnés / Ex-abonnés / Intéressés)</span>"
+        "</label>"
+        "<small style='display:block;margin-bottom:8px;color:#888'>Optionnel. 1 story par heure indiquée, chaque jour. Sheet \"Stories\" séparée dans l'Excel. Auto-suppression 24h native MyPuls.</small>"
+        "<div id='sx-story-slots-container' class='sx-slots'></div>"
+        "<button type='button' class='sx-add-btn' onclick='sxAddStorySlot()' style='border-color:#a855f7;color:#a855f7'>+ Ajouter un slot story</button>"
+        # Hidden JSON pour les stories
+        "<input type='hidden' name='story_slots_json' id='sx-story-slots-json' value='[]'>"
         "</div>"
 
         "<label style='margin-top:14px'>media_id <span style='color:#f99'>*</span> "
@@ -15579,6 +15591,14 @@ def _render_schedule_html() -> str:
         "  {time:'20:00', visibility:'public'},"
         "  {time:'23:00', visibility:'private'}"
         "];"
+        "// Stories : chaque slot = {time:'HH:MM', audience:'everyone'|'subscribers'|...}"
+        "let sxStorySlots = [];"
+        "const SX_AUDIENCES = ["
+        "  {value:'everyone', label:'🌍 Tous MyM'},"
+        "  {value:'subscribers', label:'✓ Abonnés'},"
+        "  {value:'former_subscribers', label:'⏰ Ex-abonnés'},"
+        "  {value:'interested', label:'👁 Intéressés'}"
+        "];"
         "function sxRenderSlots(){"
         "  // Tri par heure ascendante puis render."
         "  sxSlots.sort((a,b)=>(a.time||'00:00').localeCompare(b.time||'00:00'));"
@@ -15614,11 +15634,41 @@ def _render_schedule_html() -> str:
         "  const prv = sxSlots.filter(s=>s.visibility==='private').map(s=>parseInt((s.time||'0:0').split(':')[0]));"
         "  document.getElementById('sx-public-hours').value = pub.join(', ');"
         "  document.getElementById('sx-private-hours').value = prv.join(', ');"
+        "  // Stories : envoyees en JSON {time, audience}"
+        "  document.getElementById('sx-story-slots-json').value = JSON.stringify(sxStorySlots);"
         "  return true;  /* laisse le submit continuer */"
         "}"
-        "document.addEventListener('DOMContentLoaded', sxRenderSlots);"
+        # === Story slots UI ===
+        "function sxRenderStorySlots(){"
+        "  sxStorySlots.sort((a,b)=>(a.time||'00:00').localeCompare(b.time||'00:00'));"
+        "  const c = document.getElementById('sx-story-slots-container');"
+        "  if(!c) return;"
+        "  const audOpts = SX_AUDIENCES.map(a=>'<option value=\"'+a.value+'\">'+a.label+'</option>').join('');"
+        "  c.innerHTML = sxStorySlots.map((s,i)=>`"
+        "    <div class='sx-slot' data-idx='${i}'>"
+        "      <div class='sx-slot-badge' style='background:rgba(168,85,247,.15);color:#a855f7'>#${i+1}</div>"
+        "      <input type='time' value='${s.time}' onchange='sxStorySlots[${i}].time=this.value;sxRenderStorySlots()'>"
+        "      <select onchange='sxStorySlots[${i}].audience=this.value;sxRenderStorySlots()' style='color:#a855f7'>"
+        "        ${audOpts.replace('value=\"'+s.audience+'\"','value=\"'+s.audience+'\" selected')}"
+        "      </select>"
+        "      <button type='button' class='sx-slot-rm' onclick='sxRemoveStorySlot(${i})' title='Retirer'>×</button>"
+        "    </div>"
+        "  `).join('');"
+        "}"
+        "function sxAddStorySlot(){"
+        "  const last = sxStorySlots[sxStorySlots.length-1];"
+        "  const lastH = last ? parseInt((last.time||'12:00').split(':')[0]) : 10;"
+        "  const nextH = Math.min(23, lastH + 4);"
+        "  sxStorySlots.push({time:String(nextH).padStart(2,'0')+':00', audience:'everyone'});"
+        "  sxRenderStorySlots();"
+        "}"
+        "function sxRemoveStorySlot(i){"
+        "  sxStorySlots.splice(i,1);"
+        "  sxRenderStorySlots();"
+        "}"
+        "document.addEventListener('DOMContentLoaded', function(){ sxRenderSlots(); sxRenderStorySlots(); });"
         "// Rend aussi maintenant au cas ou DOMContentLoaded est deja passe (script inline)"
-        "if(document.readyState !== 'loading') sxRenderSlots();"
+        "if(document.readyState !== 'loading'){ sxRenderSlots(); sxRenderStorySlots(); }"
         "</script>"
 
         "<div style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;padding:14px;margin-top:18px;font-size:13px;color:#aaa;line-height:1.7'>"
@@ -17073,10 +17123,13 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
         🚀 Pousser POSTS + STORIES pour TOUS
       </button>
       <button type='button' onclick='deleteAllCreators()' style='background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.3);display:inline-flex;align-items:center;gap:8px'>
-        🗑 Tout supprimer (TOUS les créateurs)
+        🗑 Tout supprimer (période du planning)
+      </button>
+      <button type='button' onclick='deleteAllUpcoming()' style='background:linear-gradient(135deg,#dc2626,#7f1d1d);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(220,38,38,.4);display:inline-flex;align-items:center;gap:8px'>
+        🔥 Vider TOUT à partir d'aujourd'hui
       </button>
     </div>
-    <small style='color:#888;font-size:11px;max-width:540px;text-align:center'>Bulk PUSH : posts ET stories planifies sur les ~9 createurs.<br>Bulk DELETE : retire tous les events planifies de tous les createurs sur la periode du planning global.</small>
+    <small style='color:#888;font-size:11px;max-width:580px;text-align:center'>Bulk PUSH : posts ET stories planifies sur les ~9 createurs.<br>Bulk DELETE (orange) : retire les events sur la periode du planning global.<br>VIDER A PARTIR D AUJOURD HUI (rouge fonce) : efface tout du jour J jusqu a +1 an.</small>
   </div>
 </form>
 """
@@ -18517,6 +18570,48 @@ async function fetchMyPulsMedia(){{
     }} else {{ status.textContent='Erreur: '+(j.error||'?'); status.style.color='#f99'; }}
   }} catch(e) {{ status.textContent='Erreur reseau: '+e; status.style.color='#f99'; }}
 }}
+// === Bulk DELETE : vider TOUT a partir d aujourd hui (jusqu a +1 an) ===
+async function deleteAllUpcoming(){{
+  if(typeof showConfirmAsync === 'function'){{
+    const ok = await showConfirmAsync(
+      'Vider TOUT a partir d\\'aujourd\\'hui ?',
+      'TOUS les events planifies (posts + stories) sur TOUS les createurs, du jour J jusqu\\'a +1 an, seront retires de MyPuls. Action IRREVERSIBLE.'
+    );
+    if(!ok) return;
+    const ok2 = await showConfirmAsync(
+      'Vraiment ?',
+      'Cette action est destructrice et ne peut PAS etre annulee.'
+    );
+    if(!ok2) return;
+  }} else {{
+    if(!confirm('Vider tout a partir d aujourd hui ?')) return;
+    if(!confirm('Vraiment ?')) return;
+  }}
+  // Override dates : aujourd hui -> +1 an
+  const today = new Date();
+  const inOneYear = new Date(today);
+  inOneYear.setFullYear(today.getFullYear() + 1);
+  const fmt = (d) => d.toISOString().slice(0,10);
+  let jobId;
+  try {{
+    const r = await fetch('/mypulslive/delete_all_creators/start', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{start_date: fmt(today), end_date: fmt(inOneYear)}}),
+    }});
+    const j = await r.json();
+    if(!j.ok){{
+      if(typeof showToast === 'function') showToast('Erreur : ' + (j.error || '?'), 'error', 8000);
+      return;
+    }}
+    jobId = j.job_id;
+  }} catch(e){{
+    if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error', 8000);
+    return;
+  }}
+  _openBulkDeleteProgress(jobId);
+}}
+
 // === Bulk DELETE : supprime tous les events de tous les createurs ===
 // Job asynchrone avec modal de progression temps reel + bouton Annuler.
 async function deleteAllCreators(){{
@@ -23765,6 +23860,16 @@ def create_app():
         recycle_infinite = _flag("recycle_infinite", default=True)
         shuffle_media = _flag("shuffle_media", default=False)
         randomize_minutes = _flag("randomize_minutes", default=True)
+        # Stories : JSON [{time:"HH:MM", audience:"everyone"|"subscribers"|...}]
+        # Si absent ou liste vide -> pas de sheet Stories generee.
+        story_slots_raw = request.form.get("story_slots_json") or "[]"
+        import json as _json_sx
+        try:
+            story_slots_list = _json_sx.loads(story_slots_raw)
+            if not isinstance(story_slots_list, list):
+                story_slots_list = []
+        except Exception:
+            story_slots_list = []
 
         if not model_name:
             return _error("❌ Nom du modele manquant", tab="schedule")
@@ -23772,8 +23877,8 @@ def create_app():
             return _error("❌ Dates manquantes", tab="schedule")
         if not media_ids.strip():
             return _error("❌ Aucun media_id fourni", tab="schedule")
-        if not public_hours and not private_hours:
-            return _error("❌ Au moins une heure (publique ou privee) doit etre indiquee", tab="schedule")
+        if not public_hours and not private_hours and not story_slots_list:
+            return _error("❌ Au moins un slot (post public/prive ou story) doit etre indique", tab="schedule")
 
         try:
             xlsx_bytes, filename = schedule_xlsx.generate_xlsx(
@@ -23784,6 +23889,7 @@ def create_app():
                 private_hours_raw=private_hours,
                 media_ids_raw=media_ids,
                 captions_raw=captions,
+                story_slots=story_slots_list,
                 recycle_infinite=recycle_infinite,
                 shuffle_media=shuffle_media,
                 randomize_minutes=randomize_minutes,

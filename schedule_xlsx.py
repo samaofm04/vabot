@@ -46,6 +46,14 @@ COLUMNS = [
     "caption",
 ]
 
+# Colonnes pour la sheet Stories (auto-suppression 24h native MyPuls,
+# pas besoin de post_action / delay).
+STORY_COLUMNS = [
+    "media_id",
+    "date_schedule",
+    "story_audience",  # 'everyone' / 'subscribers' / 'former_subscribers' / 'interested'
+]
+
 
 def _random_minute() -> int:
     """Retourne une minute aleatoire entre 3 et 25 inclus (jamais sur l'heure)."""
@@ -185,6 +193,81 @@ def build_rows(
     return rows
 
 
+def build_story_rows(
+    *,
+    date_start: str,
+    date_end: str,
+    story_slots: List[dict],  # [{"time":"HH:MM", "audience":"everyone"}, ...]
+    media_ids: List[str],
+    recycle_infinite: bool = True,
+    shuffle_media: bool = False,
+    randomize_minutes: bool = True,
+) -> List[Tuple[str, str, str]]:
+    """Genere les rows pour la sheet Stories.
+
+    Chaque slot story = (time, audience). MyPuls auto-supprime les stories
+    24h apres -> pas de post_action / delay (gere nativement).
+
+    Memes options que les posts : recycle_infinite (defaut True),
+    shuffle_media (defaut False), randomize_minutes (defaut True).
+    """
+    if not media_ids:
+        return []
+    if not story_slots:
+        return []
+
+    d_start = datetime.strptime(date_start, "%Y-%m-%d").date()
+    d_end = datetime.strptime(date_end, "%Y-%m-%d").date()
+    if d_end < d_start:
+        raise ValueError("date_end < date_start")
+
+    media_ids = list(media_ids)
+    if shuffle_media:
+        random.shuffle(media_ids)
+
+    rows: List[Tuple[str, str, str]] = []
+    media_idx = 0
+    total_media = len(media_ids)
+
+    def _minute() -> int:
+        return _random_minute() if randomize_minutes else 0
+
+    def _next_media() -> str:
+        nonlocal media_idx
+        if recycle_infinite:
+            mid = media_ids[media_idx % total_media]
+            media_idx += 1
+            return mid
+        if media_idx >= total_media:
+            return None
+        mid = media_ids[media_idx]
+        media_idx += 1
+        return mid
+
+    day = d_start
+    stop = False
+    while day <= d_end and not stop:
+        for sl in story_slots:
+            t = (sl.get("time") or "").strip()
+            audience = (sl.get("audience") or "everyone").strip() or "everyone"
+            try:
+                hh, mm = t.split(":")
+                h = int(hh)
+            except Exception:
+                continue
+            mid = _next_media()
+            if mid is None:
+                stop = True
+                break
+            m = _minute() if randomize_minutes else int(mm or 0)
+            dt = datetime(day.year, day.month, day.day, h, m, 0)
+            rows.append((mid, dt.strftime("%Y-%m-%d %H:%M:%S"), audience))
+        day += timedelta(days=1)
+
+    rows.sort(key=lambda r: r[1])
+    return rows
+
+
 def generate_xlsx(
     model_name: str,
     date_start: str,
@@ -193,6 +276,7 @@ def generate_xlsx(
     private_hours_raw: str,
     media_ids_raw: str,
     captions_raw: str,
+    story_slots: List[dict] = None,
     recycle_infinite: bool = True,
     shuffle_media: bool = False,
     randomize_minutes: bool = True,
@@ -232,18 +316,35 @@ def generate_xlsx(
     wb = Workbook()
     ws = wb.active
     ws.title = "Posts"
-
-    # Header
+    # Header + data Posts
     ws.append(COLUMNS)
-
-    # Data
     for r in rows:
         ws.append(list(r))
-
-    # Largeur de colonnes lisible
+    # Largeur colonnes Posts
     widths = [22, 22, 16, 14, 28, 80]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
+
+    # Sheet Stories (optionnelle - seulement si story_slots fourni et non vide)
+    if story_slots:
+        story_rows = build_story_rows(
+            date_start=date_start,
+            date_end=date_end,
+            story_slots=story_slots,
+            media_ids=media_ids,
+            recycle_infinite=recycle_infinite,
+            shuffle_media=shuffle_media,
+            randomize_minutes=randomize_minutes,
+        )
+        if story_rows:
+            ws_s = wb.create_sheet("Stories")
+            ws_s.append(STORY_COLUMNS)
+            for r in story_rows:
+                ws_s.append(list(r))
+            # Largeur colonnes Stories (media_id, date, audience)
+            story_widths = [22, 22, 22]
+            for i, w in enumerate(story_widths, start=1):
+                ws_s.column_dimensions[get_column_letter(i)].width = w
 
     # Bytes
     buf = io.BytesIO()
