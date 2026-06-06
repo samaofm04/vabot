@@ -776,6 +776,8 @@ function showToast(message, type, duration){
   // Skip les messages d auth (geres par le wrapper fetch global qui redirige)
   var msgLower = (message || '').toString().toLowerCase();
   if(msgLower.indexOf('unauth') !== -1) return;
+  // Strip emoji de tete pour eviter le double "✅ ✅" (le toast en ajoute deja un)
+  var msgClean = (message || '').toString().replace(/^[\s✅❌⚠️ℹ]+/, '').trim();
   var container = document.getElementById('toast-container');
   if(!container){
     container = document.createElement('div');
@@ -787,11 +789,18 @@ function showToast(message, type, duration){
   var toast = document.createElement('div');
   toast.className = 'toast ' + type;
   toast.innerHTML = '<div class="toast-icon">' + icon + '</div>' +
-    '<div class="toast-msg">' + message + '</div>' +
+    '<div class="toast-msg">' + msgClean + '</div>' +
     '<button class="toast-close" onclick="dismissToast(this.parentElement)">×</button>';
   container.appendChild(toast);
   // Auto-dismiss
   setTimeout(function(){ dismissToast(toast); }, duration);
+}
+/* Dismiss tous les toasts d un coup. Appele avant d ouvrir un modal de confirmation
+   pour eviter qu un toast (deletion precedente) cohabite avec le nouveau modal. */
+function dismissAllToasts(){
+  var c = document.getElementById('toast-container');
+  if(!c) return;
+  Array.from(c.children).forEach(function(t){ dismissToast(t); });
 }
 function dismissToast(toast){
   if(!toast || !toast.parentElement) return;
@@ -802,6 +811,10 @@ function dismissToast(toast){
 }
 // === MODALE CONFIRM CUSTOM ===
 function showConfirm(title, message, onConfirm){
+  // Dismiss les toasts en cours pour eviter qu un "Dépense supprimée"
+  // (deletion precedente) cohabite avec le modal de la deletion suivante
+  // -> l user croit que l action s est faite avant confirmation.
+  try { dismissAllToasts(); } catch(e){}
   var overlay = document.getElementById('confirm-overlay');
   if(!overlay) return;
   document.getElementById('confirm-title').textContent = title || 'Confirmer';
