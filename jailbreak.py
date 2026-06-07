@@ -178,8 +178,8 @@ def add_account(identity: str, username: str, password: str = "",
     entry["accounts"].append(acct)
     # Auto-ajout du va dans la liste si pas deja la (insensible a la casse)
     if va_clean:
-        if not any(v.lower() == va_clean.lower() for v in entry["vas"]):
-            entry["vas"].append(va_clean)
+        if not any(_va_name(v).lower() == va_clean.lower() for v in entry["vas"]):
+            entry["vas"].append({"name": va_clean, "discord_username": ""})
     _save(data)
     return acct
 
@@ -222,8 +222,8 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
             # Si on a touche au va, assurer qu il existe dans la liste
             if "va" in fields:
                 new_va = acct.get("va", "").strip()
-                if new_va and not any(v.lower() == new_va.lower() for v in entry["vas"]):
-                    entry["vas"].append(new_va)
+                if new_va and not any(_va_name(v).lower() == new_va.lower() for v in entry["vas"]):
+                    entry["vas"].append({"name": new_va, "discord_username": ""})
             found = True
             break
     if found:

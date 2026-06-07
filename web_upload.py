@@ -14076,9 +14076,20 @@ def _render_jailbreak_html() -> str:
         ".jb-acct{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;border:1px solid transparent;transition:all .12s}"
         ".jb-acct:hover{background:rgba(255,255,255,.03);border-color:#232323}"
         ".jb-acct-icon{width:30px;height:30px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}"
+        # PP Instagram (rond) - taille legerement plus grosse pour bien voir
+        ".jb-acct-pp{width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.08)}"
         ".jb-acct-main{flex:1;min-width:0}"
         ".jb-acct-username{color:#fff;font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".jb-acct-username-link{color:#fff;text-decoration:none}"
+        ".jb-acct-username-link:hover{color:#60a5fa;text-decoration:underline}"
         ".jb-acct-meta{font-size:11px;color:#666;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
+        # Stats inline (PP + abos + vues 24h/sem/2sem) - format compact 4 mini-cartes
+        ".jb-acct-stats{display:flex;gap:10px;flex-shrink:0;padding:0 4px}"
+        ".jb-stat{display:flex;flex-direction:column;align-items:center;min-width:42px}"
+        ".jb-stat-num{font-size:13px;font-weight:800;color:#fff;letter-spacing:-.01em;line-height:1}"
+        ".jb-stat-green{color:#22c55e}"
+        ".jb-stat-lab{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}"
+        ".jb-no-stats{background:rgba(120,120,120,.08);color:#666;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600}"
         ".jb-va-pill{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}"
         ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0}"
         ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
@@ -14123,6 +14134,24 @@ def _render_jailbreak_html() -> str:
     datalist_html = "<datalist id='jb-va-suggestions'>" + "".join(
         f"<option value='{html_escape(v)}'>" for v in all_vas
     ) + "</datalist>"
+
+    # Cache stats Insta (keye par handle normalise) - reutilise celui de la page VAs
+    try:
+        ig_stats_cache = _load_insta_3_stats_cache()
+    except Exception:
+        ig_stats_cache = {}
+
+    def _fmt_count(n):
+        """Format compact : 1234 -> 1.2k, 1_500_000 -> 1.5M."""
+        try:
+            n = int(n)
+        except Exception:
+            return "—"
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f}M"
+        if n >= 1000:
+            return f"{n/1000:.1f}k"
+        return str(n)
 
     # Section per identite (collapsible style VAs)
     if not identities:
@@ -14197,12 +14226,56 @@ def _render_jailbreak_html() -> str:
 
             def _render_account_row(a: dict, ident_lc_arg: str) -> str:
                 aid = int(a.get("id", 0))
-                username = html_escape(str(a.get("username", "?")))
+                raw_username = str(a.get("username", "?"))
+                username = html_escape(raw_username)
                 email = html_escape(str(a.get("email", "")))
                 va_name = (a.get("va") or "").strip()
                 has_pwd = bool(a.get("password"))
                 has_2fa = bool((a.get("two_fa") or "").strip())
                 is_2fa_valid = bool(a.get("two_fa_validated")) and has_2fa
+
+                # Lookup stats Insta : normalise le handle (lowercase, strip @)
+                handle_norm = _normalize_insta_handle(raw_username) if callable(_normalize_insta_handle) else raw_username.lower().lstrip("@")
+                s = ig_stats_cache.get(handle_norm) or {}
+                has_stats = bool(s) and not s.get("error")
+                pp_url = s.get("profile_pic_url") or ""
+
+                # Avatar / icone
+                if pp_url:
+                    pp_html = (
+                        f"<img src='{html_escape(pp_url)}' class='jb-acct-pp' "
+                        f"referrerpolicy='no-referrer' loading='lazy' "
+                        f"onerror=\"this.style.display='none';var f=document.createElement('div');"
+                        f"f.className='jb-acct-icon';f.textContent='👤';this.parentNode.insertBefore(f,this);this.remove()\">"
+                    )
+                else:
+                    pp_html = "<div class='jb-acct-icon'>👤</div>"
+
+                # Username : cliquable -> Instagram
+                username_link = (
+                    f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
+                    f"rel='noopener noreferrer' class='jb-acct-username-link' "
+                    f"onclick='event.stopPropagation()' title='Ouvrir sur Instagram'>"
+                    f"@{username}</a>"
+                )
+
+                # Bloc stats Insta (seulement si on a des stats)
+                stats_html = ""
+                if has_stats:
+                    foll = _fmt_count(s.get("followers"))
+                    d_v = _fmt_count(s.get("daily"))
+                    w_v = _fmt_count(s.get("weekly"))
+                    bw_v = _fmt_count(s.get("biweekly"))
+                    stats_html = (
+                        f"<div class='jb-acct-stats'>"
+                        f"<div class='jb-stat'><div class='jb-stat-num'>{foll}</div><div class='jb-stat-lab'>abos</div></div>"
+                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{d_v}</div><div class='jb-stat-lab'>24h</div></div>"
+                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{w_v}</div><div class='jb-stat-lab'>sem</div></div>"
+                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{bw_v}</div><div class='jb-stat-lab'>2 sem</div></div>"
+                        f"</div>"
+                    )
+
+                # Meta line (credentials badges)
                 meta_parts = []
                 if email:
                     meta_parts.append(f"<span>✉ {email}</span>")
@@ -14212,7 +14285,10 @@ def _render_jailbreak_html() -> str:
                     meta_parts.append("<span class='jb-2fa-badge jb-2fa-validated'>🔐 2FA ✓</span>")
                 elif has_2fa:
                     meta_parts.append("<span class='jb-2fa-badge jb-2fa-pending'>🔐 2FA</span>")
+                if not has_stats and handle_norm:
+                    meta_parts.append("<span class='jb-no-stats' title='Pas encore scrape par le bot'>📊 stats indispo</span>")
                 meta_html = "".join(meta_parts)
+
                 a_json = json.dumps({
                     "id": aid,
                     "username": a.get("username", ""),
@@ -14224,12 +14300,14 @@ def _render_jailbreak_html() -> str:
                     "notes": a.get("notes", ""),
                 }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
                 return (
-                    f"<div class='jb-acct' data-username='{username}' data-va='{html_escape(va_name)}'>"
-                    f"<div class='jb-acct-icon'>👤</div>"
+                    f"<div class='jb-acct{' jb-acct-with-stats' if has_stats else ''}' "
+                    f"data-username='{username}' data-va='{html_escape(va_name)}'>"
+                    f"{pp_html}"
                     f"<div class='jb-acct-main'>"
-                    f"<div class='jb-acct-username'>@{username}</div>"
+                    f"<div class='jb-acct-username'>{username_link}</div>"
                     + (f"<div class='jb-acct-meta'>{meta_html}</div>" if meta_html else "")
                     + f"</div>"
+                    f"{stats_html}"
                     f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}')\">Edit</button>"
                     f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}')\">×</button>"
                     f"</div>"
