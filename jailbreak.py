@@ -34,28 +34,54 @@ JAILBREAK_FILE = DATA_DIR / "jailbreak.json"
 
 def _migrate_identity_entry(entry: Any) -> Dict[str, Any]:
     """Normalise une entree d identite vers le format v2.
-    - list -> {vas: [union des va], accounts: list}
-    - dict avec 'accounts' -> garde tel quel (assure vas existe)
-    - autre -> {vas: [], accounts: []}
+
+    Le format VAs evolue :
+    - v2.0 : vas = ["Marie", "Paul"]  (string list)
+    - v2.1 : vas = [{"name": "Marie", "discord_username": "marie123"}, ...]
+
+    Cette fonction migre tous les anciens formats vers v2.1.
     """
     if isinstance(entry, dict) and "accounts" in entry:
-        # Deja v2 - juste s assurer que vas existe et est une list
         out = dict(entry)
-        if not isinstance(out.get("vas"), list):
-            out["vas"] = []
+        raw_vas = out.get("vas") if isinstance(out.get("vas"), list) else []
+        # Normalise chaque va en {name, discord_username} (vs string)
+        normalized_vas = []
+        for v in raw_vas:
+            if isinstance(v, dict):
+                name = (v.get("name") or "").strip()
+                if not name:
+                    continue
+                normalized_vas.append({
+                    "name": name,
+                    "discord_username": (v.get("discord_username") or "").strip(),
+                })
+            elif isinstance(v, str) and v.strip():
+                normalized_vas.append({"name": v.strip(), "discord_username": ""})
+        out["vas"] = normalized_vas
         if not isinstance(out.get("accounts"), list):
             out["accounts"] = []
         return out
     if isinstance(entry, list):
-        # v1 -> v2
-        vas: List[str] = []
+        # v1 -> v2 : extrait les vas depuis les comptes
+        vas: List[Dict[str, str]] = []
+        seen: set = set()
         for a in entry:
             if isinstance(a, dict):
                 va = (a.get("va") or "").strip()
-                if va and va not in vas:
-                    vas.append(va)
+                if va and va.lower() not in seen:
+                    seen.add(va.lower())
+                    vas.append({"name": va, "discord_username": ""})
         return {"vas": vas, "accounts": list(entry)}
     return {"vas": [], "accounts": []}
+
+
+def _va_name(va: Any) -> str:
+    """Helper : extrait le nom d un VA (dict ou string)."""
+    if isinstance(va, dict):
+        return (va.get("name") or "").strip()
+    if isinstance(va, str):
+        return va.strip()
+    return ""
 
 
 def _load() -> Dict[str, Dict[str, Any]]:
@@ -215,45 +241,94 @@ def remove_account(identity: str, account_id: int) -> bool:
 
 # ============ VAs ============
 
-def list_vas_for_identity(identity: str) -> List[str]:
-    """Liste les VAs declares pour une identite (sources explicites + comptes)."""
+def list_vas_for_identity(identity: str) -> List[Dict[str, str]]:
+    """Liste les VAs declares pour une identite (sources explicites + comptes).
+    Retourne une liste de dicts {name, discord_username}."""
     identity = (identity or "").strip().lower()
     data = _load()
     entry = data.get(identity)
     if not entry:
         return []
-    seen: List[str] = list(entry.get("vas") or [])
+    result: List[Dict[str, str]] = list(entry.get("vas") or [])
+    seen_lc = {_va_name(v).lower() for v in result if _va_name(v)}
     # Ajoute aussi tout va present sur un compte mais absent de la liste
-    seen_lc = {v.lower() for v in seen}
     for a in (entry.get("accounts") or []):
         va = (a.get("va") or "").strip()
         if va and va.lower() not in seen_lc:
-            seen.append(va)
+            result.append({"name": va, "discord_username": ""})
             seen_lc.add(va.lower())
-    return seen
+    return result
 
 
-def add_va(identity: str, va_name: str) -> bool:
-    """Ajoute un VA a une identite (sans compte). Returns True si ajoute,
-    False si vide ou doublon (case-insensitive)."""
+def list_va_names_for_identity(identity: str) -> List[str]:
+    """Helper : liste des noms (string) uniquement, pour autocomplete."""
+    return [_va_name(v) for v in list_vas_for_identity(identity) if _va_name(v)]
+
+
+def add_va(identity: str, va_name: str, discord_username: str = "") -> bool:
+    """Ajoute un VA a une identite. Returns True si ajoute, False si doublon."""
     identity = (identity or "").strip().lower()
     if not identity:
         return False
     va_name = (va_name or "").strip()[:60]
     if not va_name:
         return False
+    discord_username = (discord_username or "").strip()[:60]
     data = _load()
     entry = _ensure_identity(data, identity)
-    if any(v.lower() == va_name.lower() for v in entry["vas"]):
+    if any(_va_name(v).lower() == va_name.lower() for v in entry["vas"]):
         return False
-    entry["vas"].append(va_name)
+    entry["vas"].append({
+        "name": va_name,
+        "discord_username": discord_username,
+    })
+    _save(data)
+    return True
+
+
+def update_va(identity: str, old_name: str, new_name: str = None,
+              discord_username: str = None) -> bool:
+    """Met a jour un VA (nom et/ou discord_username).
+    - Si new_name fourni et != old : renomme. Si conflit -> False.
+    - Si discord_username fourni : met a jour.
+    Si on renomme, les comptes referencant l ancien nom sont mis a jour aussi."""
+    identity = (identity or "").strip().lower()
+    old_name = (old_name or "").strip()
+    if not identity or not old_name:
+        return False
+    data = _load()
+    entry = data.get(identity)
+    if not entry:
+        return False
+    target = None
+    for v in entry["vas"]:
+        if _va_name(v).lower() == old_name.lower():
+            target = v
+            break
+    if target is None:
+        return False
+    new_name_clean = None
+    if new_name is not None:
+        new_name_clean = (new_name or "").strip()[:60]
+        if not new_name_clean:
+            return False
+        # Conflit si nouveau nom existe (autre que le notre)
+        if new_name_clean.lower() != old_name.lower():
+            if any(_va_name(v).lower() == new_name_clean.lower() for v in entry["vas"]):
+                return False
+            target["name"] = new_name_clean
+            # Propage le rename aux comptes
+            for a in entry["accounts"]:
+                if (a.get("va") or "").strip().lower() == old_name.lower():
+                    a["va"] = new_name_clean
+    if discord_username is not None:
+        target["discord_username"] = discord_username.strip()[:60]
     _save(data)
     return True
 
 
 def remove_va(identity: str, va_name: str) -> bool:
-    """Retire un VA de la liste. Les comptes qui y referencent gardent leur
-    champ va inchange (l user peut les reassigner)."""
+    """Retire un VA de la liste."""
     identity = (identity or "").strip().lower()
     va_name = (va_name or "").strip()
     if not identity or not va_name:
@@ -262,7 +337,7 @@ def remove_va(identity: str, va_name: str) -> bool:
     entry = data.get(identity)
     if not entry:
         return False
-    new_list = [v for v in entry["vas"] if v.lower() != va_name.lower()]
+    new_list = [v for v in entry["vas"] if _va_name(v).lower() != va_name.lower()]
     if len(new_list) == len(entry["vas"]):
         return False
     entry["vas"] = new_list
@@ -271,26 +346,8 @@ def remove_va(identity: str, va_name: str) -> bool:
 
 
 def rename_va(identity: str, old_name: str, new_name: str) -> bool:
-    """Renomme un VA dans la liste ET dans tous les comptes qui y referencent."""
-    identity = (identity or "").strip().lower()
-    old_name = (old_name or "").strip()
-    new_name = (new_name or "").strip()[:60]
-    if not identity or not old_name or not new_name or old_name == new_name:
-        return False
-    data = _load()
-    entry = data.get(identity)
-    if not entry:
-        return False
-    if not any(v.lower() == old_name.lower() for v in entry["vas"]):
-        return False
-    if any(v.lower() == new_name.lower() for v in entry["vas"]):
-        return False  # conflit
-    entry["vas"] = [new_name if v.lower() == old_name.lower() else v for v in entry["vas"]]
-    for a in entry["accounts"]:
-        if (a.get("va") or "").strip().lower() == old_name.lower():
-            a["va"] = new_name
-    _save(data)
-    return True
+    """Helper retrocompat - delegue a update_va(new_name=...)."""
+    return update_va(identity, old_name, new_name=new_name)
 
 
 # ============ Stats ============

@@ -119,6 +119,47 @@ def _resolve_username(user_id) -> str:
     return str(user_id)
 
 
+def _resolve_discord_user_by_handle(handle: str):
+    """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
+
+    Retourne un dict {id, username, display_name, avatar_url} si trouve, sinon None.
+    Match case-insensitive contre user.name, user.global_name et member.display_name
+    dans toutes les guilds connues du bot.
+    """
+    if not handle or _BOT_REF is None:
+        return None
+    handle_lc = str(handle).strip().lower().lstrip("@")
+    if not handle_lc:
+        return None
+    seen_ids = set()
+    try:
+        for g in _BOT_REF.guilds:
+            try:
+                for m in g.members:
+                    if m.id in seen_ids:
+                        continue
+                    seen_ids.add(m.id)
+                    name = (getattr(m, "name", "") or "").lower()
+                    global_name = (getattr(m, "global_name", "") or "").lower()
+                    disp_name = (getattr(m, "display_name", "") or "").lower()
+                    if handle_lc in (name, global_name, disp_name):
+                        try:
+                            avatar_url = str(m.display_avatar.url)
+                        except Exception:
+                            avatar_url = ""
+                        return {
+                            "id": str(m.id),
+                            "username": getattr(m, "name", "") or "",
+                            "display_name": getattr(m, "display_name", "") or getattr(m, "name", ""),
+                            "avatar_url": avatar_url,
+                        }
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
 def _find_identity_category(guild, identity: str):
     """Trouve la categorie portant le nom de l'identite (case-insensitive)."""
     target = identity.lower().strip()
@@ -14018,6 +14059,9 @@ def _render_jailbreak_html() -> str:
         ".jb-va-group-name{display:flex;align-items:center;gap:7px;flex:1;min-width:0;font-size:12px;color:#c084fc;font-weight:600}"
         ".jb-va-group-name b{color:#fff;font-weight:700}"
         ".jb-va-icon{font-size:13px;flex-shrink:0}"
+        ".jb-va-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid rgba(168,85,247,.3)}"
+        ".jb-va-avatar-fb{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px}"
+        ".jb-discord-pill{background:rgba(88,101,242,.15);color:#7c8eff;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:monospace}"
         ".jb-va-group-count{background:rgba(168,85,247,.18);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
         ".jb-va-remove-btn{background:transparent;border:1px solid #232323;color:#666;width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;padding:0}"
         ".jb-va-remove-btn:hover{border-color:#ef4444;color:#ef4444}"
@@ -14124,13 +14168,24 @@ def _render_jailbreak_html() -> str:
             # Body : 1 sous-section par VA + 1 zone "sans VA" + bouton "+ Ajouter un VA"
             section_body = "<div class='jb-section-body'>"
             # Construire la liste finale des VAs a afficher :
-            # explicit_vas (ordre user) + tout va present sur un compte mais pas dans explicit
-            display_vas: list = list(explicit_vas)
-            display_vas_lc = {v.lower() for v in display_vas}
+            # explicit_vas (ordre user, format dict {name, discord_username})
+            # + tout va present sur un compte mais pas dans explicit
+            display_vas: list = []
+            display_vas_lc: set = set()
+            for v in explicit_vas:
+                # explicit_vas est deja en format dict v2.1 grace au load
+                if isinstance(v, dict):
+                    nm = (v.get("name") or "").strip()
+                    if nm:
+                        display_vas.append({"name": nm, "discord_username": (v.get("discord_username") or "").strip()})
+                        display_vas_lc.add(nm.lower())
+                elif isinstance(v, str) and v.strip():
+                    display_vas.append({"name": v.strip(), "discord_username": ""})
+                    display_vas_lc.add(v.strip().lower())
             for a in accts:
                 va = (a.get("va") or "").strip()
                 if va and va.lower() not in display_vas_lc:
-                    display_vas.append(va)
+                    display_vas.append({"name": va, "discord_username": ""})
                     display_vas_lc.add(va.lower())
 
             def _render_account_row(a: dict, ident_lc_arg: str) -> str:
@@ -14170,16 +14225,47 @@ def _render_jailbreak_html() -> str:
                 )
 
             # Sous-section par VA
-            for va_name in display_vas:
+            for va_obj in display_vas:
+                va_name = va_obj["name"]
+                discord_username = va_obj.get("discord_username", "")
                 va_accts = [a for a in accts if (a.get("va") or "").strip().lower() == va_name.lower()]
                 va_safe = html_escape(va_name)
                 ident_safe = html_escape(ident_lc)
+                # Resolution Discord avatar si discord_username renseigne
+                discord_info = _resolve_discord_user_by_handle(discord_username) if discord_username else None
+                if discord_info and discord_info.get("avatar_url"):
+                    # Avatar Discord rond + indicateur Discord
+                    avatar_html = (
+                        f"<img src='{html_escape(discord_info['avatar_url'])}' class='jb-va-avatar' "
+                        f"alt='@{html_escape(discord_username)}' title='Discord @{html_escape(discord_username)}'>"
+                    )
+                elif discord_username:
+                    # Discord username renseigne mais user introuvable : fallback initiale + badge bleu
+                    avatar_html = (
+                        f"<div class='jb-va-avatar jb-va-avatar-fb' "
+                        f"style='background:hsl({sum(ord(c) for c in va_name) % 360},55%,45%)' "
+                        f"title='Discord @{html_escape(discord_username)} (non trouvé dans le cache)'>"
+                        f"{html_escape(va_name[:1].upper() if va_name else '?')}"
+                        f"</div>"
+                    )
+                else:
+                    avatar_html = (
+                        f"<div class='jb-va-avatar jb-va-avatar-fb' "
+                        f"style='background:hsl({sum(ord(c) for c in va_name) % 360},45%,40%)'>"
+                        f"{html_escape(va_name[:1].upper() if va_name else '?')}"
+                        f"</div>"
+                    )
+                discord_pill = (
+                    f"<span class='jb-discord-pill' title='Discord username'>@{html_escape(discord_username)}</span>"
+                    if discord_username else ""
+                )
                 section_body += (
                     f"<div class='jb-va-group' data-va='{va_safe}'>"
                     f"<div class='jb-va-group-head'>"
                     f"<div class='jb-va-group-name'>"
-                    f"<span class='jb-va-icon'>👤</span>"
-                    f"<span>VA : <b>{va_safe}</b></span>"
+                    f"{avatar_html}"
+                    f"<span><b>{va_safe}</b></span>"
+                    f"{discord_pill}"
                     f"<span class='jb-va-group-count'>{len(va_accts)}</span>"
                     f"</div>"
                     f"<button type='button' class='jb-va-remove-btn' "
@@ -14267,11 +14353,14 @@ def _render_jailbreak_html() -> str:
         "<form id='jb-add-va-form' method='POST' action='/jailbreak/add_va' onsubmit='return jbValidateAddVa()'>"
         "<input type='hidden' name='back_tab' value='jailbreak'>"
         "<input type='hidden' name='identity' id='jb-add-va-identity'>"
-        "<label>Nom du VA <span style='color:#ef4444'>*</span></label>"
+        "<label>Nom affiché <span style='color:#ef4444'>*</span></label>"
         "<input type='text' name='va_name' id='jb-add-va-name' required maxlength='60' "
-        "list='jb-va-suggestions' placeholder='ex: Marie, Paul, ...'>"
+        "list='jb-va-suggestions' placeholder='ex: Safidy, BOSS LA BOULE, Noum...'>"
+        "<label style='margin-top:12px'>🟣 Discord username <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(optionnel — pour lier la PP Discord)</span></label>"
+        "<input type='text' name='discord_username' id='jb-add-va-discord' maxlength='60' "
+        "placeholder='ex: safidy0356_08105, laboule.8, noum0075'>"
         "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>"
-        "Le VA pourra ensuite gérer ses propres comptes."
+        "Si le user est dans ton serveur Discord, sa photo de profil sera récupérée automatiquement."
         "</small>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseAddVaModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
@@ -14423,6 +14512,7 @@ def _render_jailbreak_html() -> str:
         "  try {"
         "    var idEl = document.getElementById('jb-add-va-identity');"
         "    var nameEl = document.getElementById('jb-add-va-name');"
+        "    var discEl = document.getElementById('jb-add-va-discord');"
         "    var overlay = document.getElementById('jb-add-va-overlay');"
         "    if(!idEl || !nameEl || !overlay){"
         "      if(typeof showToast === 'function') showToast('Erreur : modal Ajouter VA introuvable', 'error');"
@@ -14431,6 +14521,7 @@ def _render_jailbreak_html() -> str:
         "    }"
         "    idEl.value = identity || '';"
         "    nameEl.value = '';"
+        "    if(discEl) discEl.value = '';"
         "    overlay.classList.add('show');"
         "    setTimeout(function(){ try { nameEl.focus(); } catch(e){} }, 50);"
         "  } catch(e){"
@@ -23528,13 +23619,38 @@ def create_app():
             return _error(f"❌ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         va_name = (request.form.get("va_name") or "").strip()
+        discord_username = (request.form.get("discord_username") or "").strip().lstrip("@")
         if not identity:
             return _error("❌ Identité manquante", tab="jailbreak")
         if not va_name:
             return _error("❌ Nom du VA manquant", tab="jailbreak")
-        if jb.add_va(identity, va_name):
-            return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>", tab="jailbreak")
+        if jb.add_va(identity, va_name, discord_username=discord_username):
+            extra = f" (lié à <code>@{discord_username}</code>)" if discord_username else ""
+            return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
         return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
+
+    @app.route("/jailbreak/update_va", methods=["POST"])
+    def jailbreak_update_va():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        old_name = (request.form.get("old_name") or "").strip()
+        new_name = (request.form.get("new_name") or "").strip()
+        # discord_username peut etre vide pour le retirer
+        discord_username = (request.form.get("discord_username") or "").strip().lstrip("@")
+        if not identity or not old_name:
+            return _error("❌ Identité ou ancien nom manquant", tab="jailbreak")
+        kwargs = {}
+        if new_name:
+            kwargs["new_name"] = new_name
+        kwargs["discord_username"] = discord_username
+        if jb.update_va(identity, old_name, **kwargs):
+            return _success(f"✅ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
+        return _error("❌ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
 
     @app.route("/jailbreak/remove_va", methods=["POST"])
     def jailbreak_remove_va():
