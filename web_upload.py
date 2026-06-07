@@ -2521,9 +2521,20 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
       Schedule Excel
     </button>
-    <button class="item" id="tab-geelark" onclick="showTab('autopost','geelark','GeeLark — Push cloud phones','Push reels/stories/CTAs sur les cloud phones GeeLark')">
+  </div>
+</div>
+
+<!-- GeeLark : groupe separe (extrait de Auto-Post pour le mettre en avant) -->
+<div class="group" id="grp-geelark">
+  <button class="group-head" onclick="toggleGroup('geelark')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+    <span class="label">GeeLark</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-geelark" onclick="showTab('geelark','geelark','GeeLark — Push cloud phones','Push reels/stories/CTAs sur les cloud phones GeeLark')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-      GeeLark
+      Push cloud phones
     </button>
   </div>
 </div>
