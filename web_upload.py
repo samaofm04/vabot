@@ -13936,7 +13936,7 @@ async function glDeleteWatcher(id, btn){
 
 def _render_jailbreak_html() -> str:
     """Page Jailbreak : gestion manuelle des comptes par identite.
-    Pattern simple : 1 carte par identite + liste de comptes + bouton +Add.
+    Layout style VAs : search + filter + groupes pliables par identite.
     """
     try:
         import jailbreak as jb
@@ -13963,33 +13963,50 @@ def _render_jailbreak_html() -> str:
         "</div>"
     )
 
-    # CSS local
+    # CSS local (reutilise les classes .va-vlist-* qui sont deja dans le DOM
+    # via _render_va_list_html - les pages sont toutes rendues a chaque load).
     css = (
         "<style>"
-        ".jb-card{background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px}"
-        ".jb-card-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}"
-        ".jb-avatar{width:42px;height:42px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;flex-shrink:0;overflow:hidden}"
-        ".jb-avatar img{width:100%;height:100%;object-fit:cover}"
-        ".jb-id-name{flex:1;min-width:0;font-weight:700;color:#fff;font-size:15px}"
-        ".jb-id-count{font-size:11px;color:#888;font-weight:600}"
-        ".jb-add-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.3)}"
-        ".jb-add-btn:hover{background:#db2777}"
-        ".jb-edit-id-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:30px;height:30px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}"
-        ".jb-edit-id-btn:hover{border-color:#3b82f6;color:#3b82f6}"
-        ".jb-acct{display:flex;align-items:center;gap:12px;padding:10px 12px;background:#0f0f0f;border:1px solid #232323;border-radius:10px;margin-top:8px}"
-        ".jb-acct-icon{width:32px;height:32px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}"
+        # Toolbar (search + filter) - clone du style va-vault
+        ".jb-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}"
+        ".jb-search{flex:1;min-width:220px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:8px 12px;display:flex;align-items:center;gap:8px;transition:all .15s}"
+        ".jb-search:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}"
+        ".jb-search input{flex:1;background:transparent;border:0;color:#fff;outline:none;font-size:13px;font-family:inherit;padding:0;margin:0}"
+        ".jb-search input::placeholder{color:#666}"
+        ".jb-filter{background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:9px;padding:8px 12px;font-size:12px;font-family:inherit;cursor:pointer;outline:none;min-width:200px}"
+        ".jb-filter:focus{border-color:#3b82f6}"
+        # Section pliable par identite (style va-vlist-section)
+        ".jb-section{display:flex;flex-direction:column;gap:3px;margin-bottom:8px;background:#0f0f0f;border:1px solid #1a1a1a;border-radius:12px;padding:8px;transition:all .15s}"
+        ".jb-section:hover{border-color:#2a2a2a}"
+        ".jb-section-head{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px}"
+        ".jb-section-head-main{display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0;padding:2px 0}"
+        ".jb-section-head-main img,.jb-section-head-main .jb-avatar-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
+        ".jb-avatar-fb{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px}"
+        ".jb-section-name{flex:1;color:#fff;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".jb-section-count{background:rgba(236,72,153,.18);color:#f472b6;padding:2px 9px;border-radius:9px;font-size:11px;font-weight:800;flex-shrink:0}"
+        ".jb-section-edit-btn,.jb-section-toggle{background:transparent;border:0;color:#888;width:30px;height:30px;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;transition:all .15s}"
+        ".jb-section-edit-btn:hover{background:rgba(59,130,246,.1);color:#3b82f6}"
+        ".jb-section-toggle:hover{background:rgba(255,255,255,.06);color:#fff}"
+        ".jb-section-toggle svg{transition:transform .2s}"
+        ".jb-section.collapsed .jb-section-toggle svg{transform:rotate(-90deg)}"
+        ".jb-section-body{display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height .25s ease,opacity .15s,padding .15s;max-height:2000px;opacity:1;padding:8px 4px 4px}"
+        ".jb-section.collapsed .jb-section-body{max-height:0;opacity:0;padding-top:0;padding-bottom:0;pointer-events:none}"
+        # Bouton + Ajouter compte (en bas du body)
+        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.3);align-self:flex-start;margin-top:6px}"
+        ".jb-add-account-btn:hover{background:#db2777}"
+        # Ligne de compte (compact, style screenshot)
+        ".jb-acct{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;border:1px solid transparent;transition:all .12s}"
+        ".jb-acct:hover{background:rgba(255,255,255,.03);border-color:#232323}"
+        ".jb-acct-icon{width:30px;height:30px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}"
         ".jb-acct-main{flex:1;min-width:0}"
-        ".jb-acct-username{color:#fff;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
-        ".jb-acct-username code{background:#0a0a0a;border:1px solid #2a2a2a;color:#3b82f6;padding:1px 6px;border-radius:4px;font-size:11px}"
-        ".jb-acct-meta{font-size:11px;color:#666;margin-top:3px}"
-        ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600}"
+        ".jb-acct-username{color:#fff;font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".jb-acct-meta{font-size:11px;color:#666;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
+        ".jb-va-pill{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}"
+        ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0}"
         ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
         ".jb-acct-btn.danger:hover{border-color:#ef4444;color:#ef4444}"
-        ".jb-empty{color:#666;font-size:12px;padding:14px;text-align:center;background:#0f0f0f;border:1px dashed #232323;border-radius:10px;margin-top:8px}"
-        ".jb-va-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;margin-bottom:6px;padding:8px 12px;background:linear-gradient(135deg,rgba(168,85,247,.08),rgba(168,85,247,.02));border:1px solid rgba(168,85,247,.18);border-radius:8px;font-size:12px;color:#c084fc;font-weight:600}"
-        ".jb-va-head.jb-va-none{background:linear-gradient(135deg,rgba(120,120,120,.05),rgba(120,120,120,.02));border-color:#2a2a2a;color:#888}"
-        ".jb-va-count{background:rgba(168,85,247,.15);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
-        ".jb-va-head.jb-va-none .jb-va-count{background:#1a1a1a;color:#888}"
+        ".jb-empty-section{color:#666;font-size:12px;padding:12px;text-align:center;font-style:italic}"
+        ".jb-empty-page{color:#666;font-size:13px;padding:40px;text-align:center;background:#0f0f0f;border:1px dashed #232323;border-radius:12px}"
         # Modal
         ".jb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:20px}"
         ".jb-overlay.show{display:flex}"
@@ -14000,6 +14017,22 @@ def _render_jailbreak_html() -> str:
         ".jb-modal input:focus,.jb-modal textarea:focus{border-color:#ec4899;outline:none}"
         ".jb-modal textarea{resize:vertical;min-height:60px}"
         "</style>"
+    )
+
+    # Toolbar : search + filter
+    filter_opts = "<option value=''>Toutes les identités</option>" + "".join(
+        f"<option value='{html_escape(i.lower())}'>@{html_escape(i.lower())}</option>"
+        for i in sorted(identities)
+    )
+    toolbar = (
+        "<div class='jb-toolbar'>"
+        "<div class='jb-search'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
+        "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        "<input type='text' id='jb-search-input' placeholder='Rechercher (identité ou username)…' oninput='jbApplyFilter()'>"
+        "</div>"
+        f"<select id='jb-filter-identity' class='jb-filter' onchange='jbApplyFilter()'>{filter_opts}</select>"
+        "</div>"
     )
 
     # Datalist global des VAs deja utilises (autocomplete dans le modal)
@@ -14013,35 +14046,43 @@ def _render_jailbreak_html() -> str:
         f"<option value='{html_escape(v)}'>" for v in all_vas
     ) + "</datalist>"
 
-    # Section per identite
+    # Section per identite (collapsible style VAs)
     if not identities:
-        body = "<p style='color:#888;text-align:center;padding:40px'>Aucune identité disponible. Crée-en d'abord (Bibliothèque ou Discord).</p>"
+        body = "<div class='jb-empty-page'>Aucune identité disponible. Clique <b>+ Nouvelle identité</b> ci-dessus pour en créer une.</div>"
     else:
-        cards = []
+        sections = []
         for ident in identities:
             ident_lc = ident.lower()
             accts = all_accounts.get(ident_lc, [])
             avatar_letter = ident[:1].upper()
             avatar_hue = sum(ord(c) for c in ident) % 360
             n = len(accts)
-            card = (
-                f"<div class='jb-card'>"
-                f"<div class='jb-card-head'>"
-                f"<div class='jb-avatar' style='background:hsl({avatar_hue},60%,45%)'>"
-                f"<img src='/identity/avatar/{html_escape(ident_lc)}' onerror=\"this.style.display='none';this.parentElement.textContent='{avatar_letter}'\">"
+            # Header
+            section_head = (
+                f"<div class='jb-section' data-identity='{html_escape(ident_lc)}' data-account-count='{n}'>"
+                f"<div class='jb-section-head'>"
+                f"<div class='jb-section-head-main' onclick='jbToggleSection(this.parentElement.parentElement)'>"
+                f"<img src='/identity/avatar/{html_escape(ident_lc)}' "
+                f"onerror=\"var d=document.createElement('div');d.className='jb-section-head-main jb-avatar-fb'.split(' ')[1]+' jb-avatar-fb';"
+                f"d.style.background='hsl({avatar_hue},60%,45%)';d.textContent='{avatar_letter}';d.style.width='30px';d.style.height='30px';d.style.borderRadius='50%';"
+                f"this.parentNode.insertBefore(d,this);this.remove()\">"
+                f"<span class='jb-section-name'>@{html_escape(ident_lc)}</span>"
+                f"<span class='jb-section-count'>{n}</span>"
                 f"</div>"
-                f"<div class='jb-id-name'>{html_escape(ident)}<div class='jb-id-count'>{n} compte{'s' if n > 1 else ''}</div></div>"
-                f"<button type='button' class='jb-edit-id-btn' onclick=\"jbOpenEditIdentityModal('{html_escape(ident_lc)}')\" title='Modifier l\\'identité (nom / photo)'>"
+                f"<button type='button' class='jb-section-edit-btn' onclick=\"jbOpenEditIdentityModal('{html_escape(ident_lc)}')\" title='Modifier l\\'identité'>"
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
                 f"</button>"
-                f"<button type='button' class='jb-add-btn' onclick=\"jbOpenAddModal('{html_escape(ident_lc)}')\">+ Ajouter</button>"
+                f"<button type='button' class='jb-section-toggle' onclick='jbToggleSection(this.parentElement.parentElement)' aria-label='Déplier/replier'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
+                f"</button>"
                 f"</div>"
             )
+            # Body
+            section_body = "<div class='jb-section-body'>"
             if not accts:
-                card += "<div class='jb-empty'>Aucun compte pour le moment</div>"
+                section_body += "<div class='jb-empty-section'>Aucun compte pour cette identité</div>"
             else:
-                # Groupe les comptes par VA. Cles vides -> regroupees sous '(sans VA)'.
-                # Preserve l ordre d apparition des VAs.
+                # Groupe par VA, preserve l ordre d apparition
                 groups: dict = {}
                 order: list = []
                 for a in accts:
@@ -14052,35 +14093,20 @@ def _render_jailbreak_html() -> str:
                     groups[va_key].append(a)
                 for va_key in order:
                     group_accts = groups[va_key]
-                    if va_key == "__no_va__":
-                        va_label_html = (
-                            "<div class='jb-va-head jb-va-none'>"
-                            "<span>👥 Sans VA assigné</span>"
-                            f"<span class='jb-va-count'>{len(group_accts)}</span>"
-                            "</div>"
-                        )
-                    else:
-                        va_safe = html_escape(va_key)
-                        va_label_html = (
-                            f"<div class='jb-va-head'>"
-                            f"<span>👤 VA : <b>{va_safe}</b></span>"
-                            f"<span class='jb-va-count'>{len(group_accts)} compte{'s' if len(group_accts) > 1 else ''}</span>"
-                            f"</div>"
-                        )
-                    card += va_label_html
                     for a in group_accts:
                         aid = int(a.get("id", 0))
                         username = html_escape(str(a.get("username", "?")))
                         email = html_escape(str(a.get("email", "")))
-                        notes = str(a.get("notes", ""))
+                        va_name = (a.get("va") or "").strip()
                         has_pwd = bool(a.get("password"))
                         has_2fa = bool(a.get("two_fa"))
                         meta_parts = []
-                        if email: meta_parts.append(f"✉ {email}")
-                        if has_pwd: meta_parts.append("🔑 mdp")
-                        if has_2fa: meta_parts.append("🔐 2FA")
-                        if notes: meta_parts.append(f"📝 {html_escape(notes[:40])}{'...' if len(notes) > 40 else ''}")
-                        meta = " · ".join(meta_parts) if meta_parts else "(aucune info)"
+                        if va_name:
+                            meta_parts.append(f"<span class='jb-va-pill'>👤 VA : {html_escape(va_name)}</span>")
+                        if email: meta_parts.append(f"<span>✉ {email}</span>")
+                        if has_pwd: meta_parts.append("<span>🔑 mdp</span>")
+                        if has_2fa: meta_parts.append("<span>🔐 2FA</span>")
+                        meta_html = "".join(meta_parts)
                         a_json = json.dumps({
                             "id": aid,
                             "username": a.get("username", ""),
@@ -14090,20 +14116,24 @@ def _render_jailbreak_html() -> str:
                             "va": a.get("va", ""),
                             "notes": a.get("notes", ""),
                         }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
-                        card += (
-                            f"<div class='jb-acct'>"
+                        section_body += (
+                            f"<div class='jb-acct' data-username='{username}' data-va='{html_escape(va_name)}'>"
                             f"<div class='jb-acct-icon'>👤</div>"
                             f"<div class='jb-acct-main'>"
-                            f"<div class='jb-acct-username'><code>@{username}</code></div>"
-                            f"<div class='jb-acct-meta'>{meta}</div>"
-                            f"</div>"
+                            f"<div class='jb-acct-username'>@{username}</div>"
+                            + (f"<div class='jb-acct-meta'>{meta_html}</div>" if meta_html else "")
+                            + f"</div>"
                             f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc)}','{a_json}')\">Edit</button>"
                             f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc)}',{aid},'{username}')\">×</button>"
                             f"</div>"
                         )
-            card += "</div>"
-            cards.append(card)
-        body = "".join(cards)
+            # + Ajouter compte (toujours visible dans le body)
+            section_body += (
+                f"<button type='button' class='jb-add-account-btn' onclick=\"jbOpenAddModal('{html_escape(ident_lc)}')\">+ Ajouter un compte</button>"
+                f"</div>"
+            )
+            sections.append(section_head + section_body + "</div>")
+        body = "".join(sections)
 
     # Modal EDIT D IDENTITE (rename + change avatar)
     edit_id_modal = (
@@ -14268,6 +14298,38 @@ def _render_jailbreak_html() -> str:
         "  }"
         "  return true;"
         "}"
+        # === Toggle section pliable ===
+        "function jbToggleSection(sec){"
+        "  if(!sec) return;"
+        "  sec.classList.toggle('collapsed');"
+        "}"
+        # === Filter / search ===
+        "function jbApplyFilter(){"
+        "  var q = (document.getElementById('jb-search-input').value || '').trim().toLowerCase();"
+        "  var fId = (document.getElementById('jb-filter-identity').value || '').toLowerCase();"
+        "  document.querySelectorAll('.jb-section').forEach(function(sec){"
+        "    var sid = (sec.getAttribute('data-identity') || '').toLowerCase();"
+        # Filter par identite : si select choisi et != ce sid -> hide
+        "    if(fId && sid !== fId){ sec.style.display = 'none'; return; }"
+        # Filter par recherche
+        "    if(!q){ sec.style.display = ''; return; }"
+        # On match si l identite contient la query, ou si au moins 1 compte match
+        "    var identMatch = sid.indexOf(q) !== -1;"
+        "    var anyAcctMatch = false;"
+        "    sec.querySelectorAll('.jb-acct').forEach(function(acct){"
+        "      var u = (acct.getAttribute('data-username') || '').toLowerCase();"
+        "      var v = (acct.getAttribute('data-va') || '').toLowerCase();"
+        "      var match = identMatch || u.indexOf(q) !== -1 || v.indexOf(q) !== -1;"
+        "      acct.style.display = match ? '' : 'none';"
+        "      if(match) anyAcctMatch = true;"
+        "    });"
+        # Section visible si identite match OU au moins 1 compte visible
+        "    var visible = identMatch || anyAcctMatch;"
+        "    sec.style.display = visible ? '' : 'none';"
+        # Si match par recherche -> auto-deplie pour montrer les resultats
+        "    if(visible && q) sec.classList.remove('collapsed');"
+        "  });"
+        "}"
         "function jbRemoveAccount(identity, accountId, username){"
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le compte ?', 'Compte @' + username + ' (' + identity + ') sera supprimé. Cette action est irréversible.').then(function(ok){"
@@ -14292,7 +14354,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + datalist_html + body + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + toolbar + body + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
