@@ -17552,6 +17552,142 @@ def _render_chatplanning_html() -> str:
         + "</div>"
     )
 
+    # ============ Récap paie bi-mensuel (1-15 / 16-fin) ============
+    # Décompte par chatteur des absences / retards / coupures sur les 2
+    # périodes de paie du mois de la semaine affichée. Compté jour par jour
+    # (gère les semaines à cheval sur le 15/16). Agrégé par pseudo (un même
+    # chatteur peut occuper plusieurs lignes / créneaux).
+    import datetime as _dt_rc
+    try:
+        _aw = _dt_rc.datetime.strptime(active_week, "%Y-%m-%d").date()
+    except Exception:
+        _aw = _dt_rc.date.today()
+    _mois_fr = ["", "janvier", "février", "mars", "avril", "mai", "juin",
+                "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    _periods = chatting.pay_periods_for_month(_aw.year, _aw.month)
+    _p1, _p2 = _periods[0], _periods[1]
+    _active_period = 1 if _aw.day <= 15 else 2
+
+    _recap_map = {}
+    for _r in active_edt.get("rows", []):
+        _ps = (_r.get("pseudo") or "").strip()
+        if not _ps:
+            continue
+        _k = _ps.lower()
+        if _k not in _recap_map:
+            _recap_map[_k] = {
+                "pseudo": _ps,
+                "p1": {"absences": 0, "retards": 0, "coupures": 0},
+                "p2": {"absences": 0, "retards": 0, "coupures": 0},
+            }
+        _i1 = chatting.row_incidents_in_range(_r, _p1[0], _p1[1])
+        _i2 = chatting.row_incidents_in_range(_r, _p2[0], _p2[1])
+        for _kk in ("absences", "retards", "coupures"):
+            _recap_map[_k]["p1"][_kk] += _i1[_kk]
+            _recap_map[_k]["p2"][_kk] += _i2[_kk]
+
+    _recap_list = list(_recap_map.values())
+    _recap_list.sort(key=lambda e: (
+        -(sum(e["p1"].values()) + sum(e["p2"].values())), e["pseudo"].lower()
+    ))
+
+    _tot = {"p1": {"absences": 0, "retards": 0, "coupures": 0},
+            "p2": {"absences": 0, "retards": 0, "coupures": 0}}
+    for _e in _recap_list:
+        for _per in ("p1", "p2"):
+            for _kk in ("absences", "retards", "coupures"):
+                _tot[_per][_kk] += _e[_per][_kk]
+
+    def _rc_cell(n, color):
+        c = color if n else "#555"
+        return (f"<td style='text-align:center;padding:6px 8px;font-weight:700;"
+                f"font-size:13px;color:{c}'>{n}</td>")
+
+    def _period_head(label, sub, active):
+        bg = "rgba(59,130,246,.16)" if active else "transparent"
+        bd = "#3b82f6" if active else "#232323"
+        star = " ★" if active else ""
+        return (f"<th colspan='3' style='padding:8px 10px;background:{bg};"
+                f"border-bottom:2px solid {bd};color:#cbd5e1;font-size:12px;font-weight:800'>"
+                f"{label}<div style='font-size:10px;color:#888;font-weight:600'>{sub}{star}</div></th>")
+
+    _sub1 = f"1–15 {_mois_fr[_aw.month]}"
+    _sub2 = f"16–{_p2[1].day} {_mois_fr[_aw.month]}"
+
+    if not _recap_list:
+        recap_html = (
+            "<div style='margin-top:16px;padding:16px;background:#0f0f0f;border:1px dashed #232323;"
+            "border-radius:12px;color:#666;font-size:13px;text-align:center'>"
+            "📊 Récap paie : ajoute des pseudos aux chatteurs pour voir le décompte des absences / retards / coupures."
+            "</div>"
+        )
+    else:
+        _sep = "<td style='width:1px;padding:0;background:#232323'></td>"
+        _sep_h = "<th style='width:1px;padding:0;background:#232323'></th>"
+        _body = []
+        for _e in _recap_list:
+            _body.append(
+                "<tr style='border-top:1px solid #1a1a1a'>"
+                f"<td style='padding:7px 12px;font-weight:600;color:#eee;white-space:nowrap'>{html_escape(_e['pseudo'])}</td>"
+                + _rc_cell(_e["p1"]["absences"], "#ef4444")
+                + _rc_cell(_e["p1"]["retards"], "#fb923c")
+                + _rc_cell(_e["p1"]["coupures"], "#eab308")
+                + _sep
+                + _rc_cell(_e["p2"]["absences"], "#ef4444")
+                + _rc_cell(_e["p2"]["retards"], "#fb923c")
+                + _rc_cell(_e["p2"]["coupures"], "#eab308")
+                + "</tr>"
+            )
+        _body.append(
+            "<tr style='border-top:2px solid #2a2a2a;background:#0d0d0d'>"
+            "<td style='padding:8px 12px;font-weight:800;color:#888;text-transform:uppercase;font-size:11px;letter-spacing:.5px'>Total</td>"
+            + _rc_cell(_tot["p1"]["absences"], "#ef4444")
+            + _rc_cell(_tot["p1"]["retards"], "#fb923c")
+            + _rc_cell(_tot["p1"]["coupures"], "#eab308")
+            + _sep
+            + _rc_cell(_tot["p2"]["absences"], "#ef4444")
+            + _rc_cell(_tot["p2"]["retards"], "#fb923c")
+            + _rc_cell(_tot["p2"]["coupures"], "#eab308")
+            + "</tr>"
+        )
+        _sub_head = (
+            "<tr style='font-size:10px'>"
+            "<th style='padding:3px 12px'></th>"
+            "<th style='padding:3px 6px;color:#ef4444'>Abs</th>"
+            "<th style='padding:3px 6px;color:#fb923c'>Ret</th>"
+            "<th style='padding:3px 6px;color:#eab308'>Coup</th>"
+            + _sep_h +
+            "<th style='padding:3px 6px;color:#ef4444'>Abs</th>"
+            "<th style='padding:3px 6px;color:#fb923c'>Ret</th>"
+            "<th style='padding:3px 6px;color:#eab308'>Coup</th>"
+            "</tr>"
+        )
+        recap_html = (
+            "<div style='margin-top:16px;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;overflow:hidden'>"
+            "<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1a1a1a'>"
+            "<div style='display:flex;align-items:center;gap:8px'>"
+            "<span style='font-size:16px'>📊</span>"
+            f"<span style='font-weight:800;font-size:14px;color:#eee'>Récap paie — {_mois_fr[_aw.month].capitalize()} {_aw.year}</span>"
+            "</div>"
+            "<span style='font-size:11px;color:#666'>★ = période de la semaine affichée · trié par incidents</span>"
+            "</div>"
+            "<div style='overflow-x:auto'>"
+            "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+            "<thead>"
+            "<tr>"
+            "<th style='padding:8px 12px;text-align:left;color:#3b82f6;font-size:12px;font-weight:700'>Chatteur</th>"
+            + _period_head("Période 1", _sub1, _active_period == 1)
+            + _sep_h
+            + _period_head("Période 2", _sub2, _active_period == 2)
+            + "</tr>"
+            + _sub_head
+            + "</thead>"
+            f"<tbody>{''.join(_body)}</tbody>"
+            "</table>"
+            "</div>"
+            "</div>"
+        )
+
     js = """
 <script>
 // AJAX switch entre EDTs et semaines : remplace juste le contenu de #form-chatplanning
@@ -17808,6 +17944,7 @@ async function addChatRow(creneau){
         f"<div style='margin:0 0 14px;color:#666;font-size:11px'>{edt_actions}</div>"
         + week_nav
         + table
+        + recap_html
         + legend
         + js
         + "</div>"

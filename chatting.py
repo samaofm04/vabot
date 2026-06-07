@@ -297,6 +297,40 @@ def row_counts(row: Dict[str, Any], week_start: str) -> Dict[str, int]:
     return {"retards": retards, "absences": absences}
 
 
+def row_incidents_in_range(row: Dict[str, Any], start: date, end: date) -> Dict[str, int]:
+    """Compte {absences, retards, coupures} pour une row sur la plage de dates
+    [start, end] INCLUS.
+
+    Itere jour par jour (et non semaine par semaine) afin de gerer correctement
+    les semaines a cheval sur la frontiere d une periode de paie (ex: le 15/16).
+    Les jours non renseignes comptent comme 'Present' (0 incident)."""
+    absn = retn = coupn = 0
+    d = start
+    while d <= end:
+        ws = week_start_for(d).isoformat()
+        dk = DAYS[d.weekday()]
+        v = row_presence(row, ws).get(dk, "Present")
+        if v == "Absent":
+            absn += 1
+        elif v == "Retard":
+            retn += 1
+        elif v == "Coupure":
+            coupn += 1
+        d += timedelta(days=1)
+    return {"absences": absn, "retards": retn, "coupures": coupn}
+
+
+def pay_periods_for_month(year: int, month: int) -> List:
+    """Retourne les 2 periodes de paie d un mois sous forme de tuples de dates :
+    [(1er, 15), (16, dernier jour du mois)]."""
+    import calendar as _cal
+    last = _cal.monthrange(year, month)[1]
+    return [
+        (date(year, month, 1), date(year, month, 15)),
+        (date(year, month, 16), date(year, month, last)),
+    ]
+
+
 def edt_weeks_with_data(edt_id: str) -> List[str]:
     """Liste les week_start qui ont des donnees pour cet EDT."""
     edt = get_edt(edt_id)
