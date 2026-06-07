@@ -14080,7 +14080,19 @@ def _render_jailbreak_html() -> str:
         ".jb-detail-count-badge{background:rgba(168,85,247,.16);color:#c084fc;padding:4px 11px;border-radius:9px;font-size:11px;font-weight:800}"
         ".jb-detail-head-remove{background:transparent;border:1px solid #2a2a2a;color:#888;width:30px;height:30px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}"
         ".jb-detail-head-remove:hover{border-color:#ef4444;color:#ef4444}"
-        ".jb-detail-accounts{display:flex;flex-direction:column;gap:6px}"
+        ".jb-detail-accounts{display:flex;flex-direction:column;gap:8px}"
+        # Override grille .va-ig3-row pour .jb-row : 9 cols = PP + name + 4 metrics + last + arrow + actions(group)
+        # On supprime le 2e slot d action (28px) et on remplace par 1 cellule actions auto pour edit+delete groupes
+        ".jb-row{grid-template-columns:36px 1fr auto auto auto auto auto 22px auto !important}"
+        ".jb-row-actions{display:flex;gap:5px;align-items:center}"
+        # Badge "NON SCRAPE" (orange : pas encore scrappe vs ban : rouge)
+        ".jb-not-scraped-badge{display:inline-block;background:rgba(251,146,60,.15);color:#fb923c;font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid rgba(251,146,60,.3);white-space:nowrap;flex-shrink:0}"
+        # Rows pas scrapees : opacite legere pour visuel "en attente"
+        ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
+        ".jb-row-not-scraped .va-ig3-row-handle{color:#a78bfa}"
+        ".jb-row-not-scraped:hover{opacity:1}"
+        # Hover row : bordure rose plus prononcee
+        ".jb-row:hover{background:#13161d;border-color:#ec4899 !important;box-shadow:0 4px 14px rgba(236,72,153,.08)}"
         ".jb-detail-actions{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px dashed #1f1f1f}"
         ".jb-no-selection{background:#0f0f0f;border:1px dashed #232323;border-radius:14px;padding:80px 40px;text-align:center;color:#666}"
         ".jb-no-selection-icon{font-size:42px;margin-bottom:12px;opacity:.5}"
@@ -14152,8 +14164,12 @@ def _render_jailbreak_html() -> str:
         handle_norm = _normalize_insta_handle(raw_username) if callable(_normalize_insta_handle) else raw_username.lower().lstrip("@")
         s = ig_stats_cache.get(handle_norm) or {}
         has_stats = bool(s) and not s.get("error")
+        is_banned = bool(s.get("banned"))
+        is_not_scraped = not s  # aucune entree cache du tout
         pp_url = s.get("profile_pic_url") or ""
 
+        # PP : 1) vrai PP si scrape OK, 2) initiale coloree sinon
+        # (couleur derivee du hash du handle pour stabilite visuelle)
         if pp_url:
             pp_html = (
                 f"<img src='{html_escape(pp_url)}' class='va-ig3-row-pp' "
@@ -14161,10 +14177,21 @@ def _render_jailbreak_html() -> str:
                 f"onerror=\"this.style.display='none'\">"
             )
         else:
+            hue_pp = sum(ord(c) for c in handle_norm) % 360
+            init_pp = html_escape(handle_norm[:1].upper() if handle_norm else '?')
+            if is_banned:
+                pp_bg = "linear-gradient(135deg,#7f1d1d,#3b0a0a)"
+                pp_color = "#fca5a5"
+            elif is_not_scraped:
+                pp_bg = "linear-gradient(135deg,#1f2937,#0f172a)"
+                pp_color = "#6b7280"
+            else:
+                pp_bg = f"hsl({hue_pp},50%,40%)"
+                pp_color = "#fff"
             pp_html = (
                 f"<div class='va-ig3-row-pp' "
-                f"style='display:flex;align-items:center;justify-content:center;"
-                f"color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+                f"style='background:{pp_bg};display:flex;align-items:center;justify-content:center;"
+                f"color:{pp_color};font-weight:800;font-size:15px'>{init_pp}</div>"
             )
 
         if has_stats:
@@ -14208,6 +14235,18 @@ def _render_jailbreak_html() -> str:
             cred_parts.append("<span style='color:#fb923c'>🔐 2FA</span>")
         cred_html = " · ".join(cred_parts) if cred_parts else ""
 
+        # Status badge a cote du handle : banni / non scrape / OK (rien)
+        if is_banned:
+            status_badge = "<span class='va-ig3-ban-badge'>BAN</span>"
+        elif is_not_scraped:
+            status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>NON SCRAPÉ</span>"
+        else:
+            status_badge = ""
+
+        # Row-level class additions
+        row_extra_cls = " va-ig3-row-banned" if is_banned else ""
+        row_extra_cls += " jb-row-not-scraped" if is_not_scraped else ""
+
         a_json = json.dumps({
             "id": aid,
             "username": a.get("username", ""),
@@ -14218,7 +14257,9 @@ def _render_jailbreak_html() -> str:
             "va": a.get("va", ""),
             "notes": a.get("notes", ""),
         }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+        # Edit + delete groupes dans 1 cellule grid (.jb-row-actions)
         actions_html = (
+            f"<div class='jb-row-actions'>"
             f"<button type='button' class='jb-row-btn' "
             f"onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}'); event.stopPropagation()\" "
             f"title='Editer'>"
@@ -14229,17 +14270,21 @@ def _render_jailbreak_html() -> str:
             f"<button type='button' class='jb-row-btn jb-row-btn-danger' "
             f"onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}'); event.stopPropagation()\" "
             f"title='Supprimer'>×</button>"
+            f"</div>"
         )
 
         return (
-            f"<div class='va-ig3-row jb-row' data-handle='{html_escape(handle_norm)}' "
+            f"<div class='va-ig3-row jb-row{row_extra_cls}' data-handle='{html_escape(handle_norm)}' "
             f"data-username='{username}' data-va='{html_escape(va_name)}'>"
             f"{pp_html}"
             f"<div class='va-ig3-row-name'>"
+            f"<div style='display:flex;align-items:center;gap:6px;min-width:0'>"
             f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
             f"rel='noopener noreferrer' class='va-ig3-row-handle' "
             f"onclick='event.stopPropagation()' "
             f"title='Ouvrir @{html_escape(handle_norm)} sur Instagram'>@{username}</a>"
+            f"{status_badge}"
+            f"</div>"
             f"<div class='va-ig3-row-platform'>Instagram{(' · ' + cred_html) if cred_html else ''}</div>"
             f"</div>"
             f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
