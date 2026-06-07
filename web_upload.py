@@ -14032,6 +14032,60 @@ def _render_jailbreak_html() -> str:
         ".jb-modal input,.jb-modal textarea{width:100%;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px}"
         ".jb-modal input:focus,.jb-modal textarea:focus{border-color:#ec4899;outline:none}"
         ".jb-modal textarea{resize:vertical;min-height:60px}"
+        # === Layout 2 colonnes (sidebar + main) ===
+        ".jb-layout{display:flex;gap:14px;align-items:flex-start}"
+        ".jb-sidebar{flex:0 0 290px;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:14px;padding:10px;max-height:calc(100vh - 200px);overflow-y:auto;position:sticky;top:14px}"
+        ".jb-sidebar .jb-toolbar{margin:0 0 8px;padding:0;background:transparent;border:0;flex-direction:column;gap:6px}"
+        ".jb-sidebar .jb-search{min-width:0;padding:6px 10px}"
+        ".jb-sidebar .jb-search input{font-size:11px}"
+        ".jb-sidebar .jb-filter{min-width:0;font-size:11px;padding:6px 10px;width:100%}"
+        ".jb-side-id{margin:6px 0;border-radius:10px;overflow:hidden}"
+        ".jb-side-id.collapsed .jb-side-id-body{display:none}"
+        ".jb-side-id-head{display:flex;align-items:center;gap:8px;padding:8px 10px;background:transparent;border:0;cursor:pointer;width:100%;color:#fff;font-size:12px;font-weight:700;border-radius:8px}"
+        ".jb-side-id-head:hover{background:rgba(255,255,255,.04)}"
+        ".jb-side-id-head img,.jb-side-id-head .jb-avatar-fb{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0}"
+        ".jb-side-id-head .jb-avatar-fb{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}"
+        ".jb-side-id-name{flex:1;text-align:left;color:#fff}"
+        ".jb-side-id-count{background:rgba(236,72,153,.18);color:#f472b6;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}"
+        ".jb-side-id-arrow{color:#666;transition:transform .15s}"
+        ".jb-side-id.collapsed .jb-side-id-arrow{transform:rotate(-90deg)}"
+        ".jb-side-id-body{padding:2px 0 6px;display:flex;flex-direction:column;gap:2px}"
+        ".jb-side-va{display:flex;align-items:center;gap:8px;padding:7px 8px;background:transparent;border:0;border-radius:8px;cursor:pointer;width:calc(100% - 4px);margin:0 2px;text-align:left;color:#fff;font-size:11px;font-weight:600;position:relative}"
+        ".jb-side-va:hover{background:rgba(255,255,255,.04)}"
+        ".jb-side-va.active{background:linear-gradient(90deg,rgba(168,85,247,.18),rgba(168,85,247,.04));box-shadow:inset 2px 0 0 #a855f7}"
+        ".jb-side-va img,.jb-side-va .jb-side-va-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
+        ".jb-side-va .jb-side-va-fb{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}"
+        ".jb-side-va-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}"
+        ".jb-side-va-name{color:#fff;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        ".jb-side-va-discord{color:#888;font-size:9.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        ".jb-side-va-discord.linked{color:#7289da}"
+        ".jb-side-va-count{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;flex-shrink:0}"
+        ".jb-side-va-status{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.5)}"
+        ".jb-side-add-va{display:flex;align-items:center;justify-content:center;gap:4px;width:calc(100% - 4px);margin:4px 2px 2px;padding:6px;background:transparent;border:1px dashed #2a2a2a;border-radius:8px;color:#888;cursor:pointer;font-size:10.5px;font-weight:600}"
+        ".jb-side-add-va:hover{border-color:#a855f7;color:#c084fc}"
+        ".jb-side-summary{margin-top:10px;padding:10px 12px;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.18);border-radius:10px;color:#aaa;font-size:11px;line-height:1.5}"
+        ".jb-side-summary b{color:#c084fc}"
+        ".jb-main-pane{flex:1;min-width:0}"
+        ".jb-va-detail{display:none;background:#0f0f0f;border:1px solid #1a1a1a;border-radius:14px;padding:18px;animation:jbFadeIn .15s ease-out}"
+        ".jb-va-detail.active{display:block}"
+        "@keyframes jbFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}"
+        ".jb-detail-head{display:flex;align-items:center;gap:12px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid #1a1a1a}"
+        ".jb-detail-head img,.jb-detail-head .jb-detail-head-fb{width:48px;height:48px;border-radius:50%;flex-shrink:0;object-fit:cover}"
+        ".jb-detail-head .jb-detail-head-fb{display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff}"
+        ".jb-detail-head-info{flex:1;min-width:0}"
+        ".jb-detail-head-name{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#fff;margin-bottom:3px}"
+        ".jb-detail-head-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#888}"
+        ".jb-detail-head-pill{background:rgba(236,72,153,.12);color:#ec4899;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;gap:4px}"
+        ".jb-detail-head-pill.discord{background:rgba(114,137,218,.16);color:#7289da}"
+        ".jb-detail-count-badge{background:rgba(168,85,247,.16);color:#c084fc;padding:4px 11px;border-radius:9px;font-size:11px;font-weight:800}"
+        ".jb-detail-head-remove{background:transparent;border:1px solid #2a2a2a;color:#888;width:30px;height:30px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}"
+        ".jb-detail-head-remove:hover{border-color:#ef4444;color:#ef4444}"
+        ".jb-detail-accounts{display:flex;flex-direction:column;gap:6px}"
+        ".jb-detail-actions{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px dashed #1f1f1f}"
+        ".jb-no-selection{background:#0f0f0f;border:1px dashed #232323;border-radius:14px;padding:80px 40px;text-align:center;color:#666}"
+        ".jb-no-selection-icon{font-size:42px;margin-bottom:12px;opacity:.5}"
+        ".jb-no-selection-title{color:#aaa;font-size:15px;font-weight:700;margin-bottom:6px}"
+        ".jb-no-selection-sub{color:#666;font-size:12px}"
         "</style>"
     )
 
@@ -14080,63 +14134,158 @@ def _render_jailbreak_html() -> str:
             return f"{n/1000:.1f}k"
         return str(n)
 
-    # Section per identite (collapsible style VAs)
+    # === Helper rendu compte (utilise globalement) ===
+    def _render_account_row(a: dict, ident_lc_arg: str) -> str:
+        """Style va-ig3-row : meme markup que la page VAs (CSS deja
+        charge globalement). Affichage horizontal compact avec PP +
+        @handle/Instagram + 4 stats + Dernier reel + fleche."""
+        aid = int(a.get("id", 0))
+        raw_username = str(a.get("username", "?"))
+        username = html_escape(raw_username)
+        email = html_escape(str(a.get("email", "")))
+        va_name = (a.get("va") or "").strip()
+        has_pwd = bool(a.get("password"))
+        has_2fa = bool((a.get("two_fa") or "").strip())
+        is_2fa_valid = bool(a.get("two_fa_validated")) and has_2fa
+
+        # Lookup stats Insta : normalise le handle (lowercase, strip @)
+        handle_norm = _normalize_insta_handle(raw_username) if callable(_normalize_insta_handle) else raw_username.lower().lstrip("@")
+        s = ig_stats_cache.get(handle_norm) or {}
+        has_stats = bool(s) and not s.get("error")
+        pp_url = s.get("profile_pic_url") or ""
+
+        if pp_url:
+            pp_html = (
+                f"<img src='{html_escape(pp_url)}' class='va-ig3-row-pp' "
+                f"loading='lazy' referrerpolicy='no-referrer' "
+                f"onerror=\"this.style.display='none'\">"
+            )
+        else:
+            pp_html = (
+                f"<div class='va-ig3-row-pp' "
+                f"style='display:flex;align-items:center;justify-content:center;"
+                f"color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+            )
+
+        if has_stats:
+            foll = _fmt_count(s.get("followers"))
+            d_v = _fmt_count(s.get("daily"))
+            w_v = _fmt_count(s.get("weekly"))
+            bw_v = _fmt_count(s.get("biweekly"))
+        else:
+            foll = d_v = w_v = bw_v = "—"
+
+        last_reel_lbl = "—"
+        last_reel_date = ""
+        if has_stats and s.get("last_reel_at"):
+            try:
+                import datetime as _dt_lr
+                d_post = _dt_lr.datetime.fromisoformat(
+                    str(s["last_reel_at"]).replace("Z", "+00:00")
+                )
+                if d_post.tzinfo is None:
+                    d_post = d_post.replace(tzinfo=_dt_lr.timezone.utc)
+                age = _dt_lr.datetime.now(_dt_lr.timezone.utc) - d_post
+                h_age = int(age.total_seconds() / 3600)
+                if h_age < 1:
+                    last_reel_lbl = "à l'instant"
+                elif h_age < 24:
+                    last_reel_lbl = f"il y a {h_age}h"
+                else:
+                    last_reel_lbl = f"il y a {h_age // 24}j"
+                last_reel_date = d_post.strftime("%d/%m %Hh%M")
+            except Exception:
+                pass
+
+        cred_parts = []
+        if email:
+            cred_parts.append(f"✉ {email}")
+        if has_pwd:
+            cred_parts.append("🔑 mdp")
+        if is_2fa_valid:
+            cred_parts.append("<span style='color:#22c55e;font-weight:700'>🔐 2FA ✓</span>")
+        elif has_2fa:
+            cred_parts.append("<span style='color:#fb923c'>🔐 2FA</span>")
+        cred_html = " · ".join(cred_parts) if cred_parts else ""
+
+        a_json = json.dumps({
+            "id": aid,
+            "username": a.get("username", ""),
+            "password": a.get("password", ""),
+            "email": a.get("email", ""),
+            "two_fa": a.get("two_fa", ""),
+            "two_fa_validated": bool(a.get("two_fa_validated")),
+            "va": a.get("va", ""),
+            "notes": a.get("notes", ""),
+        }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+        actions_html = (
+            f"<button type='button' class='jb-row-btn' "
+            f"onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}'); event.stopPropagation()\" "
+            f"title='Editer'>"
+            f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+            f"<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
+            f"<path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>"
+            f"</svg></button>"
+            f"<button type='button' class='jb-row-btn jb-row-btn-danger' "
+            f"onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}'); event.stopPropagation()\" "
+            f"title='Supprimer'>×</button>"
+        )
+
+        return (
+            f"<div class='va-ig3-row jb-row' data-handle='{html_escape(handle_norm)}' "
+            f"data-username='{username}' data-va='{html_escape(va_name)}'>"
+            f"{pp_html}"
+            f"<div class='va-ig3-row-name'>"
+            f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
+            f"rel='noopener noreferrer' class='va-ig3-row-handle' "
+            f"onclick='event.stopPropagation()' "
+            f"title='Ouvrir @{html_escape(handle_norm)} sur Instagram'>@{username}</a>"
+            f"<div class='va-ig3-row-platform'>Instagram{(' · ' + cred_html) if cred_html else ''}</div>"
+            f"</div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
+            f"<div class='va-ig3-row-last'>"
+            f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
+            f"<div class='va-ig3-row-last-val'>{last_reel_lbl}</div>"
+            f"<div class='va-ig3-row-last-date'>{last_reel_date}</div>"
+            f"</div>"
+            f"<a href='https://instagram.com/{html_escape(handle_norm)}' target='_blank' "
+            f"class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+            f"{actions_html}"
+            f"</div>"
+        )
+
+    # === Layout 2 colonnes (sidebar + main detail VA) ===
     if not identities:
         body = "<div class='jb-empty-page'>Aucune identité disponible. Clique <b>+ Nouvelle identité</b> ci-dessus pour en créer une.</div>"
+        toolbar = ""  # toolbar reste hors page (cache)
     else:
-        sections = []
+        sidebar_items_html: list = []
+        detail_cards_html: list = []
+        all_va_entries: list = []  # [(va_id, has_accts), ...] pour determiner le default
+        total_vas = 0
+        total_idents_with_vas = 0
+
         for ident in identities:
             ident_lc = ident.lower()
+            ident_safe = html_escape(ident_lc)
             entry = all_accounts.get(ident_lc) or {}
-            # New v2 format : {vas: [...], accounts: [...]}
             if isinstance(entry, list):
-                # Defensive : old data not yet migrated (shouldn t happen since _load migrates)
                 accts = entry
                 explicit_vas = []
             else:
                 accts = entry.get("accounts") or []
                 explicit_vas = list(entry.get("vas") or [])
-            avatar_letter = ident[:1].upper()
+            avatar_letter = html_escape(ident[:1].upper())
             avatar_hue = sum(ord(c) for c in ident) % 360
-            n = len(accts)
-            # Header. draggable sur la section entiere mais drag declenche uniquement via le handle
-            section_head = (
-                f"<div class='jb-section' data-identity='{html_escape(ident_lc)}' data-account-count='{n}'>"
-                f"<div class='jb-section-head'>"
-                f"<div class='jb-drag-handle' draggable='true' title='Glisser pour réordonner' "
-                f"ondragstart='jbDragStart(event, this.closest(\".jb-section\"))' "
-                f"ondragend='jbDragEnd(event)'>"
-                f"<div class='jb-grip'>"
-                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
-                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
-                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
-                f"</div>"
-                f"</div>"
-                f"<div class='jb-section-head-main' onclick='jbToggleSection(this.parentElement.parentElement)'>"
-                f"<img src='/identity/avatar/{html_escape(ident_lc)}' "
-                f"onerror=\"var d=document.createElement('div');d.className='jb-section-head-main jb-avatar-fb'.split(' ')[1]+' jb-avatar-fb';"
-                f"d.style.background='hsl({avatar_hue},60%,45%)';d.textContent='{avatar_letter}';d.style.width='30px';d.style.height='30px';d.style.borderRadius='50%';"
-                f"this.parentNode.insertBefore(d,this);this.remove()\">"
-                f"<span class='jb-section-name'>@{html_escape(ident_lc)}</span>"
-                f"<span class='jb-section-count'>{n}</span>"
-                f"</div>"
-                f"<button type='button' class='jb-section-edit-btn' onclick=\"jbOpenEditIdentityModal('{html_escape(ident_lc)}')\" title='Modifier l\\'identité'>"
-                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
-                f"</button>"
-                f"<button type='button' class='jb-section-toggle' onclick='jbToggleSection(this.parentElement.parentElement)' aria-label='Déplier/replier'>"
-                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
-                f"</button>"
-                f"</div>"
-            )
-            # Body : 1 sous-section par VA + 1 zone "sans VA" + bouton "+ Ajouter un VA"
-            section_body = "<div class='jb-section-body'>"
-            # Construire la liste finale des VAs a afficher :
-            # explicit_vas (ordre user, format dict {name, discord_username})
-            # + tout va present sur un compte mais pas dans explicit
+            n_accts_total = len(accts)
+
+            # display_vas (explicit + implicit from accounts)
             display_vas: list = []
             display_vas_lc: set = set()
             for v in explicit_vas:
-                # explicit_vas est deja en format dict v2.1 grace au load
                 if isinstance(v, dict):
                     nm = (v.get("name") or "").strip()
                     if nm:
@@ -14151,192 +14300,102 @@ def _render_jailbreak_html() -> str:
                     display_vas.append({"name": va, "discord_username": ""})
                     display_vas_lc.add(va.lower())
 
-            def _render_account_row(a: dict, ident_lc_arg: str) -> str:
-                """Style va-ig3-row : meme markup que la page VAs (CSS deja
-                charge globalement). Affichage horizontal compact avec PP +
-                @handle/Instagram + 4 stats + Dernier reel + fleche."""
-                aid = int(a.get("id", 0))
-                raw_username = str(a.get("username", "?"))
-                username = html_escape(raw_username)
-                email = html_escape(str(a.get("email", "")))
-                va_name = (a.get("va") or "").strip()
-                has_pwd = bool(a.get("password"))
-                has_2fa = bool((a.get("two_fa") or "").strip())
-                is_2fa_valid = bool(a.get("two_fa_validated")) and has_2fa
+            no_va_accts = [a for a in accts if not (a.get("va") or "").strip()]
+            if display_vas or no_va_accts:
+                total_idents_with_vas += 1
+            total_vas += len(display_vas) + (1 if no_va_accts else 0)
 
-                # Lookup stats Insta : normalise le handle (lowercase, strip @)
-                handle_norm = _normalize_insta_handle(raw_username) if callable(_normalize_insta_handle) else raw_username.lower().lstrip("@")
-                s = ig_stats_cache.get(handle_norm) or {}
-                has_stats = bool(s) and not s.get("error")
-                pp_url = s.get("profile_pic_url") or ""
+            sidebar_va_buttons: list = []
 
-                # PP : meme structure que la page VAs (.va-ig3-row-pp)
-                if pp_url:
-                    pp_html = (
-                        f"<img src='{html_escape(pp_url)}' class='va-ig3-row-pp' "
-                        f"loading='lazy' referrerpolicy='no-referrer' "
-                        f"onerror=\"this.style.display='none'\">"
-                    )
-                else:
-                    pp_html = (
-                        f"<div class='va-ig3-row-pp' "
-                        f"style='display:flex;align-items:center;justify-content:center;"
-                        f"color:#ec4899;font-weight:700;font-size:14px'>@</div>"
-                    )
-
-                # Stats values
-                if has_stats:
-                    foll = _fmt_count(s.get("followers"))
-                    d_v = _fmt_count(s.get("daily"))
-                    w_v = _fmt_count(s.get("weekly"))
-                    bw_v = _fmt_count(s.get("biweekly"))
-                else:
-                    foll = d_v = w_v = bw_v = "—"
-
-                # Dernier reel (label + date)
-                last_reel_lbl = "—"
-                last_reel_date = ""
-                if has_stats and s.get("last_reel_at"):
-                    try:
-                        import datetime as _dt_lr
-                        d_post = _dt_lr.datetime.fromisoformat(
-                            str(s["last_reel_at"]).replace("Z", "+00:00")
-                        )
-                        if d_post.tzinfo is None:
-                            d_post = d_post.replace(tzinfo=_dt_lr.timezone.utc)
-                        age = _dt_lr.datetime.now(_dt_lr.timezone.utc) - d_post
-                        h_age = int(age.total_seconds() / 3600)
-                        if h_age < 1:
-                            last_reel_lbl = "à l'instant"
-                        elif h_age < 24:
-                            last_reel_lbl = f"il y a {h_age}h"
-                        else:
-                            last_reel_lbl = f"il y a {h_age // 24}j"
-                        last_reel_date = d_post.strftime("%d/%m %Hh%M")
-                    except Exception:
-                        pass
-
-                # Credentials badges sous la platform line (en plus de Instagram)
-                cred_parts = []
-                if email:
-                    cred_parts.append(f"✉ {email}")
-                if has_pwd:
-                    cred_parts.append("🔑 mdp")
-                if is_2fa_valid:
-                    cred_parts.append("<span style='color:#22c55e;font-weight:700'>🔐 2FA ✓</span>")
-                elif has_2fa:
-                    cred_parts.append("<span style='color:#fb923c'>🔐 2FA</span>")
-                cred_html = (
-                    " · ".join(cred_parts) if cred_parts else ""
-                )
-
-                # Boutons Edit / × en fin de row
-                a_json = json.dumps({
-                    "id": aid,
-                    "username": a.get("username", ""),
-                    "password": a.get("password", ""),
-                    "email": a.get("email", ""),
-                    "two_fa": a.get("two_fa", ""),
-                    "two_fa_validated": bool(a.get("two_fa_validated")),
-                    "va": a.get("va", ""),
-                    "notes": a.get("notes", ""),
-                }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
-                actions_html = (
-                    f"<button type='button' class='jb-row-btn' "
-                    f"onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}'); event.stopPropagation()\" "
-                    f"title='Editer'>"
-                    f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-                    f"<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
-                    f"<path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>"
-                    f"</svg></button>"
-                    f"<button type='button' class='jb-row-btn jb-row-btn-danger' "
-                    f"onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}'); event.stopPropagation()\" "
-                    f"title='Supprimer'>×</button>"
-                )
-
-                # Row : meme structure que va-ig3-row
-                return (
-                    f"<div class='va-ig3-row jb-row' data-handle='{html_escape(handle_norm)}' "
-                    f"data-username='{username}' data-va='{html_escape(va_name)}'>"
-                    f"{pp_html}"
-                    f"<div class='va-ig3-row-name'>"
-                    f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
-                    f"rel='noopener noreferrer' class='va-ig3-row-handle' "
-                    f"onclick='event.stopPropagation()' "
-                    f"title='Ouvrir @{html_escape(handle_norm)} sur Instagram'>@{username}</a>"
-                    f"<div class='va-ig3-row-platform'>Instagram{(' · ' + cred_html) if cred_html else ''}</div>"
-                    f"</div>"
-                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
-                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
-                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
-                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
-                    f"<div class='va-ig3-row-last'>"
-                    f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
-                    f"<div class='va-ig3-row-last-val'>{last_reel_lbl}</div>"
-                    f"<div class='va-ig3-row-last-date'>{last_reel_date}</div>"
-                    f"</div>"
-                    f"<a href='https://instagram.com/{html_escape(handle_norm)}' target='_blank' "
-                    f"class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
-                    f"{actions_html}"
-                    f"</div>"
-                )
-
-            # Sous-section par VA
+            # === VAs explicites + implicites ===
             for va_obj in display_vas:
                 va_name = va_obj["name"]
                 discord_username = va_obj.get("discord_username", "")
                 va_accts = [a for a in accts if (a.get("va") or "").strip().lower() == va_name.lower()]
                 va_safe = html_escape(va_name)
-                ident_safe = html_escape(ident_lc)
-                # Resolution Discord avatar si discord_username renseigne
+                va_attr = va_safe.replace("'", "&#39;").replace('"', "&quot;")
+                va_id = f"{ident_lc}|{va_name.lower()}"
+                va_id_safe = html_escape(va_id)
+                all_va_entries.append((va_id, len(va_accts)))
+
+                # Discord avatar resolve
                 discord_info = _resolve_discord_user_by_handle(discord_username) if discord_username else None
+                hue_va = sum(ord(c) for c in va_name) % 360
+                init_va = html_escape(va_name[:1].upper() if va_name else '?')
                 if discord_info and discord_info.get("avatar_url"):
-                    # Avatar Discord rond + indicateur Discord
-                    avatar_html = (
-                        f"<img src='{html_escape(discord_info['avatar_url'])}' class='jb-va-avatar' "
-                        f"alt='@{html_escape(discord_username)}' title='Discord @{html_escape(discord_username)}'>"
+                    side_av = (
+                        f"<img src='{html_escape(discord_info['avatar_url'])}' "
+                        f"alt='@{html_escape(discord_username)}'>"
                     )
-                elif discord_username:
-                    # Discord username renseigne mais user introuvable : fallback initiale + badge bleu
-                    avatar_html = (
-                        f"<div class='jb-va-avatar jb-va-avatar-fb' "
-                        f"style='background:hsl({sum(ord(c) for c in va_name) % 360},55%,45%)' "
-                        f"title='Discord @{html_escape(discord_username)} (non trouvé dans le cache)'>"
-                        f"{html_escape(va_name[:1].upper() if va_name else '?')}"
-                        f"</div>"
+                    detail_av = (
+                        f"<img src='{html_escape(discord_info['avatar_url'])}' "
+                        f"alt='@{html_escape(discord_username)}'>"
                     )
                 else:
-                    avatar_html = (
-                        f"<div class='jb-va-avatar jb-va-avatar-fb' "
-                        f"style='background:hsl({sum(ord(c) for c in va_name) % 360},45%,40%)'>"
-                        f"{html_escape(va_name[:1].upper() if va_name else '?')}"
-                        f"</div>"
+                    bg_hsl = f"hsl({hue_va},55%,45%)" if discord_username else f"hsl({hue_va},45%,40%)"
+                    side_av = f"<div class='jb-side-va-fb' style='background:{bg_hsl}'>{init_va}</div>"
+                    detail_av = f"<div class='jb-detail-head-fb' style='background:{bg_hsl}'>{init_va}</div>"
+
+                # Sidebar : sub-line (discord linked / discord just text / nb comptes)
+                if discord_username and discord_info:
+                    sub_line = f"<div class='jb-side-va-discord linked'>@{html_escape(discord_username)}</div>"
+                elif discord_username:
+                    sub_line = f"<div class='jb-side-va-discord' title='Discord non trouvé dans le cache'>@{html_escape(discord_username)}</div>"
+                else:
+                    sub_line = f"<div class='jb-side-va-discord'>{len(va_accts)} compte{'s' if len(va_accts)!=1 else ''}</div>"
+
+                sidebar_va_buttons.append(
+                    f"<button type='button' class='jb-side-va' "
+                    f"data-va-id='{va_id_safe}' data-identity='{ident_safe}' data-va-name='{va_attr}' "
+                    f"onclick='jbSelectVa(this)'>"
+                    f"{side_av}"
+                    f"<div class='jb-side-va-info'>"
+                    f"<div class='jb-side-va-name'>{va_safe}</div>"
+                    f"{sub_line}"
+                    f"</div>"
+                    f"<span class='jb-side-va-count'>{len(va_accts)}</span>"
+                    f"</button>"
+                )
+
+                # Detail card
+                discord_pill_html = ""
+                if discord_username:
+                    cls_extra = "" if discord_info else " title='Discord non trouvé dans le cache'"
+                    discord_pill_html = (
+                        f"<span class='jb-detail-head-pill discord'{cls_extra}>"
+                        f"@{html_escape(discord_username)}</span>"
                     )
-                discord_pill = (
-                    f"<span class='jb-discord-pill' title='Discord username'>@{html_escape(discord_username)}</span>"
-                    if discord_username else ""
-                )
-                section_body += (
-                    f"<div class='jb-va-group' data-va='{va_safe}'>"
-                    f"<div class='jb-va-group-head'>"
-                    f"<div class='jb-va-group-name'>"
-                    f"{avatar_html}"
-                    f"<span><b>{va_safe}</b></span>"
-                    f"{discord_pill}"
-                    f"<span class='jb-va-group-count'>{len(va_accts)}</span>"
+
+                if va_accts:
+                    accounts_html = "".join(_render_account_row(a, ident_lc) for a in va_accts)
+                else:
+                    accounts_html = (
+                        "<div class='jb-empty-section'>Aucun compte sous ce VA — clique "
+                        "<b>+ Ajouter un compte</b> ci-dessous</div>"
+                    )
+
+                detail_cards_html.append(
+                    f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
+                    f"data-identity='{ident_safe}' data-va-name='{va_attr}'>"
+                    f"<div class='jb-detail-head'>"
+                    f"{detail_av}"
+                    f"<div class='jb-detail-head-info'>"
+                    f"<div class='jb-detail-head-name'>{va_safe}</div>"
+                    f"<div class='jb-detail-head-meta'>"
+                    f"<span class='jb-detail-head-pill'>@{ident_safe}</span>"
+                    f"{discord_pill_html}"
                     f"</div>"
-                    f"<button type='button' class='jb-va-remove-btn' "
-                    f"onclick=\"jbRemoveVa('{ident_safe}','{va_safe}')\" title='Retirer ce VA'>×</button>"
                     f"</div>"
-                )
-                for a in va_accts:
-                    section_body += _render_account_row(a, ident_lc)
-                section_body += (
-                    f"<div class='jb-va-actions'>"
+                    f"<span class='jb-detail-count-badge'>{len(va_accts)} compte{'s' if len(va_accts)!=1 else ''}</span>"
+                    f"<button type='button' class='jb-detail-head-remove' "
+                    f"onclick=\"jbRemoveVa('{ident_safe}','{va_attr}')\" title='Retirer ce VA'>×</button>"
+                    f"</div>"
+                    f"<div class='jb-detail-accounts'>{accounts_html}</div>"
+                    f"<div class='jb-detail-actions'>"
                     f"<button type='button' class='jb-add-account-btn' "
-                    f"onclick=\"jbOpenAddModal('{ident_safe}','{va_safe}')\">+ Ajouter un compte sous {va_safe}</button>"
+                    f"onclick=\"jbOpenAddModal('{ident_safe}','{va_attr}')\">+ Ajouter un compte sous {va_safe}</button>"
                     f"<button type='button' class='jb-bulk-btn' "
-                    f"onclick=\"jbOpenBulkModal('{ident_safe}','{va_safe}')\" title='Coller plusieurs usernames d un coup'>"
+                    f"onclick=\"jbOpenBulkModal('{ident_safe}','{va_attr}')\" title='Coller plusieurs usernames d un coup'>"
                     f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'>"
                     f"<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/>"
                     f"<rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>"
@@ -14345,40 +14404,142 @@ def _render_jailbreak_html() -> str:
                     f"</div>"
                 )
 
-            # Zone "sans VA" — uniquement si au moins 1 compte sans VA
-            no_va_accts = [a for a in accts if not (a.get("va") or "").strip()]
+            # === Zone "Sans VA" (virtuelle) ===
             if no_va_accts:
-                section_body += (
-                    "<div class='jb-va-group jb-va-group-novote'>"
-                    "<div class='jb-va-group-head'>"
-                    "<div class='jb-va-group-name'>"
-                    "<span class='jb-va-icon' style='color:#888'>👥</span>"
-                    f"<span style='color:#888'>Sans VA</span>"
-                    f"<span class='jb-va-group-count' style='background:#1a1a1a;color:#888'>{len(no_va_accts)}</span>"
-                    "</div>"
-                    "</div>"
+                va_id = f"{ident_lc}|__no_va__"
+                va_id_safe = html_escape(va_id)
+                all_va_entries.append((va_id, len(no_va_accts)))
+
+                sidebar_va_buttons.append(
+                    f"<button type='button' class='jb-side-va' "
+                    f"data-va-id='{va_id_safe}' data-identity='{ident_safe}' data-va-name='' "
+                    f"onclick='jbSelectVa(this)'>"
+                    f"<div class='jb-side-va-fb' style='background:#2a2a2a;color:#888'>?</div>"
+                    f"<div class='jb-side-va-info'>"
+                    f"<div class='jb-side-va-name' style='color:#aaa'>Sans VA</div>"
+                    f"<div class='jb-side-va-discord'>{len(no_va_accts)} compte{'s' if len(no_va_accts)!=1 else ''}</div>"
+                    f"</div>"
+                    f"<span class='jb-side-va-count'>{len(no_va_accts)}</span>"
+                    f"</button>"
                 )
-                for a in no_va_accts:
-                    section_body += _render_account_row(a, ident_lc)
-                section_body += "</div>"
 
-            # Si aucun VA et aucun compte
+                accounts_html = "".join(_render_account_row(a, ident_lc) for a in no_va_accts)
+                detail_cards_html.append(
+                    f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
+                    f"data-identity='{ident_safe}' data-va-name=''>"
+                    f"<div class='jb-detail-head'>"
+                    f"<div class='jb-detail-head-fb' style='background:#2a2a2a;color:#888'>?</div>"
+                    f"<div class='jb-detail-head-info'>"
+                    f"<div class='jb-detail-head-name' style='color:#aaa'>Sans VA</div>"
+                    f"<div class='jb-detail-head-meta'>"
+                    f"<span class='jb-detail-head-pill'>@{ident_safe}</span>"
+                    f"<span style='color:#666'>Comptes sans VA assigné</span>"
+                    f"</div>"
+                    f"</div>"
+                    f"<span class='jb-detail-count-badge'>{len(no_va_accts)} compte{'s' if len(no_va_accts)!=1 else ''}</span>"
+                    f"</div>"
+                    f"<div class='jb-detail-accounts'>{accounts_html}</div>"
+                    f"<div class='jb-detail-actions'>"
+                    f"<button type='button' class='jb-add-account-btn' "
+                    f"onclick=\"jbOpenAddModal('{ident_safe}','')\">+ Ajouter un compte (sans VA)</button>"
+                    f"</div>"
+                    f"</div>"
+                )
+
+            # === Sidebar : section identite (collapsible + drag) ===
+            n_vas_section = len(display_vas) + (1 if no_va_accts else 0)
             if not display_vas and not no_va_accts:
-                section_body += "<div class='jb-empty-section'>Aucun VA ni compte pour cette identité — commence par ajouter un VA ci-dessous</div>"
+                # Identite vide : message + bouton "+ Ajouter un VA" seulement
+                sidebar_va_buttons.append(
+                    "<div style='padding:8px 10px;color:#666;font-size:10.5px;font-style:italic'>"
+                    "Aucun VA — commence par en ajouter un</div>"
+                )
 
-            # Bouton "+ Ajouter un VA" en bas du body (toujours visible)
-            ident_safe = html_escape(ident_lc)
-            section_body += (
-                f"<button type='button' class='jb-add-va-btn' "
+            avatar_img = (
+                f"<img src='/identity/avatar/{ident_safe}' "
+                f"onerror=\"var d=document.createElement('div');d.className='jb-avatar-fb';"
+                f"d.style.background='hsl({avatar_hue},60%,45%)';d.textContent='{avatar_letter}';"
+                f"d.style.width='26px';d.style.height='26px';d.style.borderRadius='50%';"
+                f"d.style.display='flex';d.style.alignItems='center';d.style.justifyContent='center';"
+                f"d.style.fontSize='11px';d.style.fontWeight='700';d.style.color='#fff';"
+                f"this.parentNode.insertBefore(d,this);this.remove()\">"
+            )
+
+            sidebar_items_html.append(
+                f"<div class='jb-side-id jb-section' data-identity='{ident_safe}' data-account-count='{n_accts_total}'>"
+                f"<button type='button' class='jb-side-id-head' onclick='jbToggleSideId(this)'>"
+                f"<div class='jb-drag-handle' draggable='true' title='Glisser pour réordonner' "
+                f"ondragstart='jbDragStart(event, this.closest(\".jb-side-id\"))' "
+                f"ondragend='jbDragEnd(event)' "
+                f"style='display:flex;flex-direction:column;gap:1px;padding:2px 1px;cursor:grab' "
+                f"onclick='event.stopPropagation()'>"
+                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
+                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
+                f"<div class='jb-grip-row'><div class='jb-grip-dot'></div><div class='jb-grip-dot'></div></div>"
+                f"</div>"
+                f"{avatar_img}"
+                f"<span class='jb-side-id-name'>@{ident_safe}</span>"
+                f"<span class='jb-side-id-count'>{n_vas_section}</span>"
+                f"<span class='jb-side-id-arrow'>"
+                f"<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'>"
+                f"<polyline points='6 9 12 15 18 9'/></svg>"
+                f"</span>"
+                f"</button>"
+                f"<div class='jb-side-id-body'>"
+                f"{''.join(sidebar_va_buttons)}"
+                f"<button type='button' class='jb-side-add-va' "
                 f"onclick=\"jbOpenAddVaModal('{ident_safe}')\">+ Ajouter un VA</button>"
+                f"<button type='button' class='jb-side-add-va' "
+                f"onclick=\"jbOpenEditIdentityModal('{ident_safe}')\" "
+                f"style='color:#666;font-size:9.5px;border-style:solid;border-color:#1a1a1a'>"
+                f"✎ Modifier l'identité</button>"
+                f"</div>"
                 f"</div>"
             )
-            sections.append(section_head + section_body + "</div>")
-        body = (
-            "<div id='jb-sections-wrap' ondragover='jbDragOver(event)' ondrop='jbDrop(event)'>"
-            + "".join(sections)
-            + "</div>"
+
+        # === Default VA : premier non-vide, ou premier tout court ===
+        default_va_id = ""
+        for vid, cnt in all_va_entries:
+            if cnt > 0:
+                default_va_id = vid
+                break
+        if not default_va_id and all_va_entries:
+            default_va_id = all_va_entries[0][0]
+
+        # Footer sidebar
+        summary_html = (
+            f"<div class='jb-side-summary'>"
+            f"💡 <b>{total_vas}</b> VA{'s' if total_vas != 1 else ''} actif{'s' if total_vas != 1 else ''} "
+            f"répartis sur <b>{total_idents_with_vas}</b> identité{'s' if total_idents_with_vas != 1 else ''}"
+            f"</div>"
         )
+
+        # No-selection placeholder (affiché si aucun VA / cas extrême)
+        no_selection_html = (
+            "<div class='jb-no-selection' id='jb-no-selection'>"
+            "<div class='jb-no-selection-icon'>👥</div>"
+            "<div class='jb-no-selection-title'>Sélectionne un VA dans la sidebar</div>"
+            "<div class='jb-no-selection-sub'>Choisis une identité puis un VA pour voir ses comptes Instagram</div>"
+            "</div>"
+        )
+
+        body = (
+            "<div class='jb-layout'>"
+            "<aside class='jb-sidebar'>"
+            f"{toolbar}"
+            "<div id='jb-sections-wrap' ondragover='jbDragOver(event)' ondrop='jbDrop(event)'>"
+            f"{''.join(sidebar_items_html)}"
+            "</div>"
+            f"{summary_html}"
+            "</aside>"
+            "<main class='jb-main-pane' id='jb-main-pane' "
+            f"data-default-va='{html_escape(default_va_id)}'>"
+            f"{''.join(detail_cards_html)}"
+            f"{no_selection_html}"
+            "</main>"
+            "</div>"
+        )
+        toolbar = ""  # injecte dans la sidebar, plus besoin avant body
 
     # Modal EDIT D IDENTITE (rename + change avatar)
     edit_id_modal = (
@@ -14738,11 +14899,65 @@ def _render_jailbreak_html() -> str:
         "    if(confirm('Retirer le VA ' + vaName + ' ?')) _do();"
         "  }"
         "}"
-        # === Toggle section pliable ===
+        # === Toggle section pliable (legacy fallback - inutilise par sidebar) ===
         "function jbToggleSection(sec){"
         "  if(!sec) return;"
         "  sec.classList.toggle('collapsed');"
         "}"
+        # === Toggle identite dans la sidebar (collapse/expand VAs) ===
+        "function jbToggleSideId(btn){"
+        "  if(!btn) return;"
+        "  var sec = btn.closest('.jb-side-id');"
+        "  if(sec) sec.classList.toggle('collapsed');"
+        "}"
+        # === Selection d un VA dans la sidebar -> affiche son detail ===
+        "function jbSelectVa(btn){"
+        "  if(!btn) return;"
+        "  var vaId = btn.getAttribute('data-va-id') || '';"
+        "  if(!vaId) return;"
+        # 1. Update active state sidebar
+        "  document.querySelectorAll('.jb-side-va.active').forEach(function(b){ b.classList.remove('active'); });"
+        "  btn.classList.add('active');"
+        # 2. Hide tous les detail cards
+        "  document.querySelectorAll('.jb-va-detail').forEach(function(c){ c.classList.remove('active'); });"
+        # 3. Hide no-selection placeholder
+        "  var noSel = document.getElementById('jb-no-selection');"
+        "  if(noSel) noSel.style.display = 'none';"
+        # 4. Show le card matching
+        "  var card = document.querySelector(\".jb-va-detail[data-va-id='\" + vaId.replace(/'/g, \"\\\\'\") + \"']\");"
+        "  if(card){ card.classList.add('active'); }"
+        # 5. Persiste le choix en localStorage pour la prochaine visite
+        "  try { localStorage.setItem('vabot_jb_selected_va', vaId); } catch(e){}"
+        "}"
+        # === Au chargement : sélectionne la dernière VA ou la default ===
+        "function jbAutoSelectDefault(){"
+        "  var mainPane = document.getElementById('jb-main-pane');"
+        "  if(!mainPane) return;"
+        "  var saved = '';"
+        "  try { saved = localStorage.getItem('vabot_jb_selected_va') || ''; } catch(e){}"
+        "  var defaultVa = mainPane.getAttribute('data-default-va') || '';"
+        # Essaie d abord le saved (si existe encore dans DOM), sinon default
+        "  var target = null;"
+        "  if(saved){"
+        "    target = document.querySelector(\".jb-side-va[data-va-id='\" + saved.replace(/'/g, \"\\\\'\") + \"']\");"
+        "  }"
+        "  if(!target && defaultVa){"
+        "    target = document.querySelector(\".jb-side-va[data-va-id='\" + defaultVa.replace(/'/g, \"\\\\'\") + \"']\");"
+        "  }"
+        "  if(!target){"
+        # Fallback : premier VA dispo
+        "    target = document.querySelector('.jb-side-va');"
+        "  }"
+        "  if(target){ jbSelectVa(target); }"
+        "  else {"
+        # Aucun VA : show no-selection
+        "    var noSel = document.getElementById('jb-no-selection');"
+        "    if(noSel) noSel.style.display = '';"
+        "  }"
+        "}"
+        "if(document.readyState === 'loading'){"
+        "  document.addEventListener('DOMContentLoaded', jbAutoSelectDefault);"
+        "} else { jbAutoSelectDefault(); }"
         # === Drag & drop pour reordonner les identites ===
         "window.__jbDraggedSection = null;"
         # Cleanup global : appele a chaque dragend ET au drop. Chrome ne fire
@@ -14750,8 +14965,8 @@ def _render_jailbreak_html() -> str:
         # le drag (insertBefore) -> sans ce cleanup, la classe .jb-dragging
         # reste collee et la section apparait en semi-transparent + dashed border.
         "function _jbCleanupDrag(){"
-        "  document.querySelectorAll('.jb-section.jb-dragging').forEach(function(s){ s.classList.remove('jb-dragging'); });"
-        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        "  document.querySelectorAll('.jb-section.jb-dragging,.jb-side-id.jb-dragging').forEach(function(s){ s.classList.remove('jb-dragging'); });"
+        "  document.querySelectorAll('.jb-section.jb-drag-over,.jb-side-id.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
         "  window.__jbDraggedSection = null;"
         "}"
         "function jbDragStart(ev, sec){"
@@ -14839,30 +15054,36 @@ def _render_jailbreak_html() -> str:
         "window.addEventListener('mouseup', function(){"
         "  if(window.__jbDraggedSection) _jbCleanupDrag();"
         "});"
-        # === Filter / search ===
+        # === Filter / search (opere sur la sidebar) ===
         "function jbApplyFilter(){"
-        "  var q = (document.getElementById('jb-search-input').value || '').trim().toLowerCase();"
-        "  var fId = (document.getElementById('jb-filter-identity').value || '').toLowerCase();"
-        "  document.querySelectorAll('.jb-section').forEach(function(sec){"
+        "  var qInput = document.getElementById('jb-search-input');"
+        "  var fInput = document.getElementById('jb-filter-identity');"
+        "  var q = qInput ? (qInput.value || '').trim().toLowerCase() : '';"
+        "  var fId = fInput ? (fInput.value || '').toLowerCase() : '';"
+        "  document.querySelectorAll('.jb-side-id').forEach(function(sec){"
         "    var sid = (sec.getAttribute('data-identity') || '').toLowerCase();"
         # Filter par identite : si select choisi et != ce sid -> hide
         "    if(fId && sid !== fId){ sec.style.display = 'none'; return; }"
-        # Filter par recherche
-        "    if(!q){ sec.style.display = ''; return; }"
-        # On match si l identite contient la query, ou si au moins 1 compte match
+        "    if(!q){"
+        # Pas de query : on montre tout, mais on reset les visibilities VAs
+        "      sec.style.display = '';"
+        "      sec.querySelectorAll('.jb-side-va').forEach(function(v){ v.style.display = ''; });"
+        "      return;"
+        "    }"
+        # Avec query : on filtre les VAs dans cette identite
         "    var identMatch = sid.indexOf(q) !== -1;"
-        "    var anyAcctMatch = false;"
-        "    sec.querySelectorAll('.jb-acct').forEach(function(acct){"
-        "      var u = (acct.getAttribute('data-username') || '').toLowerCase();"
-        "      var v = (acct.getAttribute('data-va') || '').toLowerCase();"
-        "      var match = identMatch || u.indexOf(q) !== -1 || v.indexOf(q) !== -1;"
-        "      acct.style.display = match ? '' : 'none';"
-        "      if(match) anyAcctMatch = true;"
+        "    var anyVaMatch = false;"
+        "    sec.querySelectorAll('.jb-side-va').forEach(function(va){"
+        "      var name = (va.getAttribute('data-va-name') || '').toLowerCase();"
+        "      var info = (va.textContent || '').toLowerCase();"
+        "      var match = identMatch || name.indexOf(q) !== -1 || info.indexOf(q) !== -1;"
+        "      va.style.display = match ? '' : 'none';"
+        "      if(match) anyVaMatch = true;"
         "    });"
-        # Section visible si identite match OU au moins 1 compte visible
-        "    var visible = identMatch || anyAcctMatch;"
+        # Section visible si identite match OU au moins 1 VA visible
+        "    var visible = identMatch || anyVaMatch;"
         "    sec.style.display = visible ? '' : 'none';"
-        # Si match par recherche -> auto-deplie pour montrer les resultats
+        # Si match par recherche -> auto-deplie
         "    if(visible && q) sec.classList.remove('collapsed');"
         "  });"
         "}"
