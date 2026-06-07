@@ -13956,6 +13956,7 @@ def _render_jailbreak_html() -> str:
         "<p style='margin:0;color:#888;font-size:13px'>Stockage des comptes Jailbreak par identité — pas d'automation, juste un référentiel sécurisé.</p>"
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center'>"
+        f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
         "</div>"
@@ -14056,6 +14057,32 @@ def _render_jailbreak_html() -> str:
             cards.append(card)
         body = "".join(cards)
 
+    # Modal CREATION D IDENTITE (multipart pour upload avatar)
+    create_id_modal = (
+        "<div id='jb-create-id-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseCreateIdentityModal()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3>+ Nouvelle identité</h3>"
+        "<form method='POST' action='/jailbreak/create_identity' enctype='multipart/form-data' onsubmit='return jbValidateCreateIdentity()'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<label>Nom de l'identité <span style='color:#ef4444'>*</span></label>"
+        "<input type='text' name='identity_name' id='jb-create-id-name' required maxlength='30' "
+        "placeholder='ex: chloe, maria, kiara' "
+        "pattern='[a-zA-Z0-9_\\-]+' "
+        "title='Lettres, chiffres, _ et - uniquement (sera mis en minuscule)'>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>Sera converti en minuscules. Lettres, chiffres, _ et - uniquement.</small>"
+        "<label>Photo de profil <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(optionnel)</span></label>"
+        "<input type='file' name='avatar' id='jb-create-id-avatar' accept='image/png,image/jpeg,image/webp' "
+        "style='background:#0f0f0f;border:1px dashed #2a2a2a;color:#aaa;padding:14px;border-radius:8px;cursor:pointer;width:100%'>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>PNG, JPG ou WebP. Sera sauvé comme avatar de l'identité.</small>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseCreateIdentityModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Créer</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
+
     # Modal Add/Edit
     modal = (
         "<div id='jb-modal-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseModal()'>"
@@ -14119,6 +14146,22 @@ def _render_jailbreak_html() -> str:
         "  }"
         "}"
         "function jbCloseModal(){ document.getElementById('jb-modal-overlay').classList.remove('show'); }"
+        "function jbOpenCreateIdentityModal(){"
+        "  document.getElementById('jb-create-id-name').value = '';"
+        "  document.getElementById('jb-create-id-avatar').value = '';"
+        "  document.getElementById('jb-create-id-overlay').classList.add('show');"
+        "  setTimeout(function(){document.getElementById('jb-create-id-name').focus();}, 50);"
+        "}"
+        "function jbCloseCreateIdentityModal(){ document.getElementById('jb-create-id-overlay').classList.remove('show'); }"
+        "function jbValidateCreateIdentity(){"
+        "  var n = document.getElementById('jb-create-id-name').value.trim();"
+        "  if(!n){ if(typeof showToast === 'function') showToast('Nom requis', 'error'); return false; }"
+        "  if(!/^[a-zA-Z0-9_\\-]+$/.test(n)){"
+        "    if(typeof showToast === 'function') showToast('Nom invalide (lettres, chiffres, _ ou -)', 'error');"
+        "    return false;"
+        "  }"
+        "  return true;"
+        "}"
         "function jbRemoveAccount(identity, accountId, username){"
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le compte ?', 'Compte @' + username + ' (' + identity + ') sera supprimé. Cette action est irréversible.').then(function(ok){"
@@ -14143,7 +14186,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + body + modal + js
+    return css + header + body + create_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -22871,6 +22914,52 @@ def create_app():
         return jsonify({"ok": gv.delete_watcher(wid)})
 
     # ============ JAILBREAK : comptes manuels par identite ============
+    @app.route("/jailbreak/create_identity", methods=["POST"])
+    def jailbreak_create_identity():
+        """Cree une nouvelle identite (= dossier sous data/identities/<name>/)
+        avec une photo de profil optionnelle (avatar.<ext>).
+        Reutilise la meme structure que partout ailleurs dans l app."""
+        if not is_auth():
+            return redirect("/")
+        raw_name = (request.form.get("identity_name") or "").strip()
+        # Sanitize : lowercase, alphanum + _-, max 30 chars
+        import re
+        safe = re.sub(r'[^a-z0-9_\-]', '', raw_name.lower())[:30]
+        if not safe:
+            return _error("❌ Nom invalide (lettres, chiffres, _ ou - uniquement)", tab="jailbreak")
+        if safe in _list_identities():
+            return _error(f"❌ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
+        # Cree le dossier
+        target_dir = IDENTITIES_DIR / safe
+        try:
+            target_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            return _error(f"❌ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
+        except Exception as e:
+            return _error(f"❌ Création échouée : {e}", tab="jailbreak")
+        # Sous-dossiers standards (memes que les autres identites)
+        for sub in ("videos", "posts", "stories", "storyctas"):
+            (target_dir / sub).mkdir(exist_ok=True)
+        # Avatar optionnel
+        avatar_file = request.files.get("avatar")
+        if avatar_file and avatar_file.filename:
+            ext = os.path.splitext(avatar_file.filename)[1].lower().lstrip(".")
+            if ext in ("png", "jpg", "jpeg", "webp"):
+                try:
+                    avatar_file.save(str(target_dir / f"avatar.{ext}"))
+                except Exception as e:
+                    # Pas grave, l identite existe, juste pas d avatar
+                    return _success(
+                        f"✅ Identité <b>{safe}</b> créée (avatar non sauvé : {e})",
+                        tab="jailbreak",
+                    )
+            else:
+                return _success(
+                    f"✅ Identité <b>{safe}</b> créée (avatar refusé : format {ext} non supporté)",
+                    tab="jailbreak",
+                )
+        return _success(f"✅ Identité <b>{safe}</b> créée", tab="jailbreak")
+
     @app.route("/jailbreak/add_account", methods=["POST"])
     def jailbreak_add_account():
         if not is_auth():
