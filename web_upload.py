@@ -4082,7 +4082,12 @@ def _set_refresh_status(**kw):
 
 
 def _all_tracked_handles() -> set:
-    """Tous les handles Insta tracked dans le bot (VAs + externals)."""
+    """Tous les handles Insta tracked dans le bot (VAs + externals + jailbreak).
+
+    Les comptes Jailbreak (stockes par identite dans jailbreak.json) sont
+    inclus pour que leurs stats Insta (abos, vues 24h/sem/2sem, PP) soient
+    scrapees automatiquement comme les VAs — sinon ils restent 'NON SCRAPÉ'.
+    """
     handles = set()
     for accs in _load_va_insta_3().values():
         for a in accs:
@@ -4093,6 +4098,21 @@ def _all_tracked_handles() -> set:
         h = (it.get("handle") or "").strip()
         if h:
             handles.add(h)
+    # Jailbreak : tous les usernames de tous les comptes, toutes identites
+    try:
+        import jailbreak as _jb_h
+        for _ident_data in _jb_h.list_all().values():
+            if not isinstance(_ident_data, dict):
+                continue
+            for _acc in (_ident_data.get("accounts") or []):
+                raw = (_acc.get("username") or "").strip()
+                if not raw:
+                    continue
+                hn = _normalize_insta_handle(raw) if callable(_normalize_insta_handle) else raw.lower().lstrip("@")
+                if hn:
+                    handles.add(hn)
+    except Exception as _e_jb:
+        print(f"[insta-tracked] jailbreak handles skip: {_e_jb}", flush=True)
     return handles
 
 
@@ -4163,25 +4183,50 @@ def _run_daily_insta_refresh():
     return _do_refresh(handles, label="daily")
 
 
+# Heures de refresh Insta automatique (heure locale serveur).
+# 3x/jour = stats bien fraiches (vues 24h/sem qui evoluent en continu).
+_INSTA_REFRESH_HOURS = [0, 8, 16]
+
+
+def _next_insta_refresh_dt(now):
+    """Retourne le prochain datetime de refresh parmi _INSTA_REFRESH_HOURS.
+    Cherche sur aujourd'hui + demain, retient le plus proche dans le futur."""
+    import datetime as _dt_nx
+    candidates = []
+    for day_off in (0, 1):
+        base = (now + _dt_nx.timedelta(days=day_off)).replace(
+            minute=0, second=30, microsecond=0
+        )
+        for h in _INSTA_REFRESH_HOURS:
+            dt = base.replace(hour=h)
+            if dt > now:
+                candidates.append(dt)
+    return min(candidates) if candidates else (now + _dt_nx.timedelta(hours=8))
+
+
 def _daily_insta_loop():
-    """Thread daemon : refresh initial au boot + refresh quotidien a 00:00:30."""
+    """Thread daemon : refresh initial au boot + refresh recurrent 2-3x/jour.
+
+    Tourne a chaque heure de _INSTA_REFRESH_HOURS (00h / 08h / 16h) pour que
+    les vues 24h / semaine restent fraiches. Au boot, smart-refresh (skip les
+    handles dont le cache est encore frais) pour ne pas hammerer IG."""
     import time as _t_dl
     import datetime as _dt_dl
-    # Refresh initial au demarrage : seulement les handles dont le cache est
-    # plus vieux que 24h (ou jamais scrape). Evite de re-scrape inutilement.
+    # Refresh initial au demarrage : seulement les handles stale (cache > TTL
+    # ou jamais scrape). Evite de re-scrape inutilement au moindre redemarrage.
     try:
         _t_dl.sleep(30)  # attend que le bot soit stabilise (Discord ready, etc.)
         _run_daily_insta_refresh_smart()
     except Exception as e:
         print(f"[daily-insta] initial refresh crash: {e}", flush=True)
-    # Boucle quotidienne a 00:00:30
+    # Boucle recurrente : 00h / 08h / 16h chaque jour
     while True:
         try:
             now = _dt_dl.datetime.now()
-            tomorrow = (now + _dt_dl.timedelta(days=1)).replace(
-                hour=0, minute=0, second=30, microsecond=0
-            )
-            wait_s = (tomorrow - now).total_seconds()
+            nxt = _next_insta_refresh_dt(now)
+            wait_s = (nxt - now).total_seconds()
+            print(f"[daily-insta-loop] prochain refresh a {nxt.strftime('%d/%m %H:%M')} "
+                  f"(dans {int(wait_s // 60)} min)", flush=True)
             _t_dl.sleep(max(60, wait_s))
             _run_daily_insta_refresh()
         except Exception as e:
@@ -4218,7 +4263,8 @@ def _start_daily_insta_thread():
     import threading as _th
     t = _th.Thread(target=_daily_insta_loop, daemon=True, name="daily-insta-refresh")
     t.start()
-    print("[daily-insta] thread started — runs every 00:00:30", flush=True)
+    _hrs = "h / ".join(str(h).zfill(2) for h in _INSTA_REFRESH_HOURS) + "h"
+    print(f"[daily-insta] thread started — refresh {_hrs} (3x/jour)", flush=True)
 
 
 def _render_refresh_status_text(st: dict) -> str:
@@ -4308,7 +4354,7 @@ def _remove_external_insta(handle: str) -> bool:
 # ============ Stats Insta 3 (RapidAPI + cache 1h) ============
 
 VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
-_INSTA_3_STATS_TTL = 24 * 3600  # 24h (refresh quotidien automatique a 00:00)
+_INSTA_3_STATS_TTL = 8 * 3600  # 8h (refresh auto 3x/jour : 00h / 08h / 16h)
 
 
 def _load_insta_3_stats_cache() -> dict:
@@ -13917,10 +13963,19 @@ def _render_jailbreak_html() -> str:
         "<p style='margin:0;color:#888;font-size:13px'>Stockage des comptes Jailbreak par identité — pas d'automation, juste un référentiel sécurisé.</p>"
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center'>"
+        f"<button type='button' id='jb-scrape-now-btn' onclick='jbScrapeNow(this)' "
+        f"title='Lance un scrape immédiat de tous les comptes (sinon auto 3x/jour : 00h/08h/16h)' "
+        f"style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(34,197,94,.3);display:inline-flex;align-items:center;gap:7px'>"
+        f"<span id='jb-scrape-now-ico'>🔄</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
         f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
         "</div>"
+        "</div>"
+        "<div style='margin:-6px 0 16px;color:#666;font-size:11px;display:flex;align-items:center;gap:6px'>"
+        "<span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,.5)'></span>"
+        "Stats Insta rafraîchies automatiquement <b style='color:#aaa'>3×/jour</b> (00h / 08h / 16h). "
+        "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
     )
 
@@ -14053,6 +14108,7 @@ def _render_jailbreak_html() -> str:
         ".jb-side-va{display:flex;align-items:center;gap:8px;padding:7px 8px;background:transparent;border:0;border-radius:8px;cursor:pointer;width:calc(100% - 4px);margin:0 2px;text-align:left;color:#fff;font-size:11px;font-weight:600;position:relative}"
         ".jb-side-va:hover{background:rgba(255,255,255,.04)}"
         ".jb-side-va.active{background:linear-gradient(90deg,rgba(168,85,247,.18),rgba(168,85,247,.04));box-shadow:inset 2px 0 0 #a855f7}"
+        ".jb-side-va-pp-wrap{position:relative;width:30px;height:30px;flex-shrink:0}"
         ".jb-side-va img,.jb-side-va .jb-side-va-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
         ".jb-side-va .jb-side-va-fb{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}"
         ".jb-side-va-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}"
@@ -14060,7 +14116,11 @@ def _render_jailbreak_html() -> str:
         ".jb-side-va-discord{color:#888;font-size:9.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
         ".jb-side-va-discord.linked{color:#7289da}"
         ".jb-side-va-count{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;flex-shrink:0}"
-        ".jb-side-va-status{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.5)}"
+        # Status dot (overlay bottom-right de l avatar, style page VAs)
+        ".jb-side-va-status{position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;border-radius:50%;border:2px solid #0a0a0a;background:#6b7280;box-sizing:border-box}"
+        ".jb-side-va-status.on{background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,.55)}"
+        ".jb-side-va-status.pending{background:#6b7280}"
+        ".jb-side-va-status.banned{background:#ef4444;box-shadow:0 0 5px rgba(239,68,68,.5)}"
         ".jb-side-add-va{display:flex;align-items:center;justify-content:center;gap:4px;width:calc(100% - 4px);margin:4px 2px 2px;padding:6px;background:transparent;border:1px dashed #2a2a2a;border-radius:8px;color:#888;cursor:pointer;font-size:10.5px;font-weight:600}"
         ".jb-side-add-va:hover{border-color:#a855f7;color:#c084fc}"
         ".jb-side-summary{margin-top:10px;padding:10px 12px;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.18);border-radius:10px;color:#aaa;font-size:11px;line-height:1.5}"
@@ -14070,8 +14130,16 @@ def _render_jailbreak_html() -> str:
         ".jb-va-detail.active{display:block}"
         "@keyframes jbFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}"
         ".jb-detail-head{display:flex;align-items:center;gap:12px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid #1a1a1a}"
+        ".jb-detail-head-pp-wrap{position:relative;width:48px;height:48px;flex-shrink:0}"
         ".jb-detail-head img,.jb-detail-head .jb-detail-head-fb{width:48px;height:48px;border-radius:50%;flex-shrink:0;object-fit:cover}"
         ".jb-detail-head .jb-detail-head-fb{display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff}"
+        ".jb-detail-head-status{position:absolute;bottom:1px;right:1px;width:14px;height:14px;border-radius:50%;border:3px solid #0f0f0f;background:#6b7280;box-sizing:border-box}"
+        ".jb-detail-head-status.on{background:#22c55e;box-shadow:0 0 7px rgba(34,197,94,.5)}"
+        ".jb-detail-head-status.pending{background:#6b7280}"
+        ".jb-detail-head-status.banned{background:#ef4444;box-shadow:0 0 7px rgba(239,68,68,.5)}"
+        ".jb-detail-scrape-pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:2px}"
+        ".jb-detail-scrape-pill.on{background:rgba(34,197,94,.12);color:#22c55e}"
+        ".jb-detail-scrape-pill.pending{background:rgba(107,114,128,.15);color:#9ca3af}"
         ".jb-detail-head-info{flex:1;min-width:0}"
         ".jb-detail-head-name{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#fff;margin-bottom:3px}"
         ".jb-detail-head-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#888}"
@@ -14302,6 +14370,30 @@ def _render_jailbreak_html() -> str:
             f"</div>"
         )
 
+    def _scrape_health(va_accts: list) -> tuple:
+        """Etat de scrape d un groupe de comptes -> (status_cls, n_ok, n_total).
+        - 'on'      : au moins 1 compte scrape OK (stats fraiches)
+        - 'banned'  : aucun OK mais au moins 1 banni
+        - 'pending' : rien scrape encore (tous NON SCRAPÉ)
+        """
+        n_total = len(va_accts)
+        n_ok = n_banned = 0
+        for a in va_accts:
+            raw = str(a.get("username", ""))
+            hn = _normalize_insta_handle(raw) if callable(_normalize_insta_handle) else raw.lower().lstrip("@")
+            st = ig_stats_cache.get(hn) or {}
+            if st.get("banned"):
+                n_banned += 1
+            elif st and not st.get("error"):
+                n_ok += 1
+        if n_ok > 0:
+            cls = "on"
+        elif n_banned > 0:
+            cls = "banned"
+        else:
+            cls = "pending"
+        return cls, n_ok, n_total
+
     # === Layout 2 colonnes (sidebar + main detail VA) ===
     if not identities:
         body = "<div class='jb-empty-page'>Aucune identité disponible. Clique <b>+ Nouvelle identité</b> ci-dessus pour en créer une.</div>"
@@ -14381,6 +14473,15 @@ def _render_jailbreak_html() -> str:
                     side_av = f"<div class='jb-side-va-fb' style='background:{bg_hsl}'>{init_va}</div>"
                     detail_av = f"<div class='jb-detail-head-fb' style='background:{bg_hsl}'>{init_va}</div>"
 
+                # Etat de scrape du VA (dot vert/gris/rouge)
+                health_cls, n_ok, n_tot = _scrape_health(va_accts)
+                if health_cls == "on":
+                    health_title = f"{n_ok}/{n_tot} compte{'s' if n_tot != 1 else ''} scrapé{'s' if n_ok != 1 else ''}"
+                elif health_cls == "banned":
+                    health_title = "Comptes bannis détectés"
+                else:
+                    health_title = "Pas encore scrapé (stats à venir)"
+
                 # Sidebar : sub-line (discord linked / discord just text / nb comptes)
                 if discord_username and discord_info:
                     sub_line = f"<div class='jb-side-va-discord linked'>@{html_escape(discord_username)}</div>"
@@ -14393,7 +14494,9 @@ def _render_jailbreak_html() -> str:
                     f"<button type='button' class='jb-side-va' "
                     f"data-va-id='{va_id_safe}' data-identity='{ident_safe}' data-va-name='{va_attr}' "
                     f"onclick='jbSelectVa(this)'>"
-                    f"{side_av}"
+                    f"<div class='jb-side-va-pp-wrap'>{side_av}"
+                    f"<span class='jb-side-va-status {health_cls}' title='{html_escape(health_title)}'></span>"
+                    f"</div>"
                     f"<div class='jb-side-va-info'>"
                     f"<div class='jb-side-va-name'>{va_safe}</div>"
                     f"{sub_line}"
@@ -14419,16 +14522,27 @@ def _render_jailbreak_html() -> str:
                         "<b>+ Ajouter un compte</b> ci-dessous</div>"
                     )
 
+                # Scrape pill dans le header detail (X/Y scrapés)
+                if health_cls == "on":
+                    scrape_pill = f"<span class='jb-detail-scrape-pill on'>● {n_ok}/{n_tot} scrapés</span>"
+                elif health_cls == "pending":
+                    scrape_pill = "<span class='jb-detail-scrape-pill pending'>● en attente de scrape</span>"
+                else:
+                    scrape_pill = ""
+
                 detail_cards_html.append(
                     f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
                     f"data-identity='{ident_safe}' data-va-name='{va_attr}'>"
                     f"<div class='jb-detail-head'>"
-                    f"{detail_av}"
+                    f"<div class='jb-detail-head-pp-wrap'>{detail_av}"
+                    f"<span class='jb-detail-head-status {health_cls}' title='{html_escape(health_title)}'></span>"
+                    f"</div>"
                     f"<div class='jb-detail-head-info'>"
                     f"<div class='jb-detail-head-name'>{va_safe}</div>"
                     f"<div class='jb-detail-head-meta'>"
                     f"<span class='jb-detail-head-pill'>@{ident_safe}</span>"
                     f"{discord_pill_html}"
+                    f"{scrape_pill}"
                     f"</div>"
                     f"</div>"
                     f"<span class='jb-detail-count-badge'>{len(va_accts)} compte{'s' if len(va_accts)!=1 else ''}</span>"
@@ -14454,12 +14568,22 @@ def _render_jailbreak_html() -> str:
                 va_id = f"{ident_lc}|__no_va__"
                 va_id_safe = html_escape(va_id)
                 all_va_entries.append((va_id, len(no_va_accts)))
+                nv_cls, nv_ok, nv_tot = _scrape_health(no_va_accts)
+                if nv_cls == "on":
+                    nv_title = f"{nv_ok}/{nv_tot} scrapé{'s' if nv_ok != 1 else ''}"
+                elif nv_cls == "banned":
+                    nv_title = "Comptes bannis détectés"
+                else:
+                    nv_title = "Pas encore scrapé (stats à venir)"
 
                 sidebar_va_buttons.append(
                     f"<button type='button' class='jb-side-va' "
                     f"data-va-id='{va_id_safe}' data-identity='{ident_safe}' data-va-name='' "
                     f"onclick='jbSelectVa(this)'>"
+                    f"<div class='jb-side-va-pp-wrap'>"
                     f"<div class='jb-side-va-fb' style='background:#2a2a2a;color:#888'>?</div>"
+                    f"<span class='jb-side-va-status {nv_cls}' title='{html_escape(nv_title)}'></span>"
+                    f"</div>"
                     f"<div class='jb-side-va-info'>"
                     f"<div class='jb-side-va-name' style='color:#aaa'>Sans VA</div>"
                     f"<div class='jb-side-va-discord'>{len(no_va_accts)} compte{'s' if len(no_va_accts)!=1 else ''}</div>"
@@ -14473,7 +14597,10 @@ def _render_jailbreak_html() -> str:
                     f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
                     f"data-identity='{ident_safe}' data-va-name=''>"
                     f"<div class='jb-detail-head'>"
+                    f"<div class='jb-detail-head-pp-wrap'>"
                     f"<div class='jb-detail-head-fb' style='background:#2a2a2a;color:#888'>?</div>"
+                    f"<span class='jb-detail-head-status {nv_cls}' title='{html_escape(nv_title)}'></span>"
+                    f"</div>"
                     f"<div class='jb-detail-head-info'>"
                     f"<div class='jb-detail-head-name' style='color:#aaa'>Sans VA</div>"
                     f"<div class='jb-detail-head-meta'>"
@@ -15153,6 +15280,54 @@ def _render_jailbreak_html() -> str:
         "  });"
         "  document.body.appendChild(f); f.submit();"
         "}"
+        # === Scraper maintenant : declenche /insta/refresh_now puis poll l etat ===
+        "function jbScrapeNow(btn){"
+        "  if(btn && btn.dataset.busy === '1') return;"
+        "  var ico = document.getElementById('jb-scrape-now-ico');"
+        "  var lbl = document.getElementById('jb-scrape-now-lbl');"
+        "  if(btn){ btn.dataset.busy='1'; btn.style.opacity='.7'; btn.style.cursor='wait'; }"
+        "  if(ico){ ico.style.display='inline-block'; ico.style.animation='jbSpin 1s linear infinite'; }"
+        "  if(lbl) lbl.textContent='Scrape en cours…';"
+        "  fetch('/insta/refresh_now', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){"
+        "    if(d && d.ok){"
+        "      if(typeof showToast === 'function') showToast('🔄 Scrape lancé sur ' + (d.handles||'?') + ' comptes — recharge dans ~1 min', 'success', 4000);"
+        "      jbPollScrape(btn, ico, lbl);"
+        "    } else {"
+        "      var msg = (d && d.error) ? d.error : 'Erreur';"
+        "      if(typeof showToast === 'function') showToast('⚠ ' + msg, 'error', 3500);"
+        "      jbResetScrapeBtn(btn, ico, lbl);"
+        "    }"
+        "  }).catch(function(e){"
+        "    if(typeof showToast === 'function') showToast('⚠ Réseau : ' + e, 'error', 3500);"
+        "    jbResetScrapeBtn(btn, ico, lbl);"
+        "  });"
+        "}"
+        "function jbPollScrape(btn, ico, lbl){"
+        # Poll l etat du refresh toutes les 4s ; quand idle -> reload pour voir les stats
+        "  var tries = 0;"
+        "  var iv = setInterval(function(){"
+        "    tries++;"
+        "    fetch('/insta/refresh_status').then(function(r){ return r.json(); }).then(function(s){"
+        "      var stt = (s && s.state) ? s.state.status : null;"
+        "      if(stt === 'idle' && tries > 1){"
+        "        clearInterval(iv);"
+        "        if(lbl) lbl.textContent='Terminé ✓';"
+        "        if(typeof showToast === 'function') showToast('✓ Scrape terminé — rechargement…', 'success', 2000);"
+        "        setTimeout(function(){ location.reload(); }, 1200);"
+        "      } else if(tries > 75){"  # ~5 min max
+        "        clearInterval(iv);"
+        "        jbResetScrapeBtn(btn, ico, lbl);"
+        "        if(typeof showToast === 'function') showToast('Scrape long — recharge la page manuellement', 'info', 3000);"
+        "      }"
+        "    }).catch(function(){});"
+        "  }, 4000);"
+        "}"
+        "function jbResetScrapeBtn(btn, ico, lbl){"
+        "  if(btn){ btn.dataset.busy=''; btn.style.opacity='1'; btn.style.cursor='pointer'; }"
+        "  if(ico){ ico.style.animation=''; }"
+        "  if(lbl) lbl.textContent='Scraper maintenant';"
+        "}"
+        "if(!document.getElementById('jb-spin-kf')){var _sk=document.createElement('style');_sk.id='jb-spin-kf';_sk.textContent='@keyframes jbSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';document.head.appendChild(_sk);}"
         "</script>"
     )
 
