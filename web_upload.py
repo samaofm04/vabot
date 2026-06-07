@@ -735,6 +735,61 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
   .layout{flex-direction:column}
   .sidebar{width:100%;border-right:0;border-bottom:1px solid #2a2a2a}
 }
+
+/* =========================================================================
+   POLISH ANIMATIONS — couche 100% additive (aucune modif des layouts ci-dessus).
+   Micro-interactions douces partout. Tout se coupe automatiquement si
+   l'utilisateur a activé "prefers-reduced-motion" (accessibilité + perf).
+   ========================================================================= */
+
+/* Entrée de page : le contenu principal apparaît en fondu + léger slide */
+@keyframes siteMainIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+.main{animation:siteMainIn .42s cubic-bezier(.16,1,.3,1)}
+
+/* Changement d'onglet : slide+fade plus vivant (remplace le fade simple
+   défini plus haut — même sélecteur, donc cette règle, étant la dernière,
+   gagne proprement la cascade sans toucher l'ancienne). */
+@keyframes siteSectionIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.form-section[style*="block"]{animation:siteSectionIn .36s cubic-bezier(.16,1,.3,1)}
+
+/* Transition douce des couleurs lors du toggle light/dark (plus de flash). */
+body,.sidebar,.main,.box{transition:background-color .35s ease,border-color .3s ease,color .3s ease,box-shadow .3s ease}
+
+/* Boxes (sections dashboard) : hover subtil — bord + ombre, AUCUN déplacement
+   pour ne jamais décaler le contenu. */
+.box:hover{border-color:#3a3a3a;box-shadow:0 6px 22px rgba(0,0,0,.28)}
+body.light .box:hover{border-color:#d1d5db;box-shadow:0 6px 18px rgba(0,0,0,.07)}
+
+/* Stat cards : petit lift élégant au survol. */
+.stat{transition:transform .18s cubic-bezier(.16,1,.3,1),box-shadow .22s ease,border-color .22s ease,background-color .35s ease,color .3s ease}
+.stat:hover{transform:translateY(-3px);box-shadow:0 10px 26px rgba(0,0,0,.3);border-color:#3a3a3a}
+body.light .stat:hover{box-shadow:0 10px 24px rgba(0,0,0,.08);border-color:#d1d5db}
+
+/* Lignes de tableau : highlight doux au survol. */
+tbody td{transition:background-color .14s ease}
+tbody tr:hover td{background:rgba(59,130,246,.06)}
+body.light tbody tr:hover td{background:rgba(59,130,246,.05)}
+
+/* Liens : transition de couleur douce. */
+a{transition:color .15s ease,opacity .15s ease}
+
+/* Boutons : press tactile un peu plus marqué (s'ajoute au lift existant). */
+button[type=submit]:active,.btn:active{transform:translateY(0) scale(.985)}
+
+/* Login card : entrée en fondu. */
+@keyframes siteCardIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+.card{animation:siteCardIn .5s cubic-bezier(.16,1,.3,1)}
+
+/* Filet de sécurité + accessibilité : si l'utilisateur préfère moins
+   d'animations (réglage OS), on neutralise TOUT le mouvement du site. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+    scroll-behavior:auto !important;
+  }
+}
 </style>
 <script>
 function toggleGroup(group){
