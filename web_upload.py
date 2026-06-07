@@ -26364,6 +26364,19 @@ def start_in_thread():
             print(f"[seed-media] kept existing for: {', '.join(skipped)}", flush=True)
     except Exception as e:
         print(f"[seed-media] failed: {e}", flush=True)
+    # Seed Jailbreak VAs (idempotent : ne re-ajoute pas si deja la).
+    # Pour rajouter des VAs : editer VAS_SEEDS dans seed_jailbreak.py.
+    try:
+        from seed_jailbreak import seed_vas
+        res_jb = seed_vas(force=False)
+        for identity, vas in (res_jb or {}).items():
+            if not isinstance(vas, dict):
+                continue
+            added = [n for n, s in vas.items() if s == "added"]
+            if added:
+                print(f"[seed-jb] {identity}: ajoute {', '.join(added)}", flush=True)
+    except Exception as e:
+        print(f"[seed-jb] failed: {e}", flush=True)
     # Warm-up : 8s apres le boot, on tape GET / via test_client pour pre-remplir
     # TOUS les caches TTL en une fois (mypuls, gms, va_list, dashboard, etc.).
     # Comme ca le 1er user qui se loggue voit du warm (~600ms) au lieu de cold (~15s).
