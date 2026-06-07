@@ -5892,40 +5892,10 @@ body.light .va-id{color:#9ca3af}
                             last_reel_date = d_post.strftime("%d/%m %Hh%M")
                         except Exception:
                             pass
-                    # Preview grille 3x2 : 6 mini-thumbs style profil IG
+                    # Preview thumbs retire (user a demande de remove pour
+                    # alleger la page). Si tu veux les remettre, voir l historique
+                    # git pour le bloc original.
                     preview_html = ""
-                    if has_stats and s.get("preview"):
-                        thumbs = []
-                        for p in (s.get("preview") or [])[:6]:
-                            th = p.get("thumbnail_url") or ""
-                            sc_p = p.get("shortcode") or ""
-                            vues = int(p.get("views") or 0)
-                            is_vid = bool(p.get("is_video"))
-                            if th and sc_p:
-                                def _fmt_v(n):
-                                    if n >= 1_000_000:
-                                        return f"{n/1_000_000:.1f}M"
-                                    if n >= 1000:
-                                        return f"{n/1000:.1f}k"
-                                    return str(n)
-                                play_icon = "<span class='va-ig3-thumb-play'>▶</span>" if is_vid else ""
-                                views_overlay = (
-                                    f"<span class='va-ig3-thumb-views'>{_fmt_v(vues)}</span>"
-                                    if vues > 0 else ""
-                                )
-                                thumbs.append(
-                                    f"<a href='https://instagram.com/p/{sc_p}/' target='_blank' "
-                                    f"class='va-ig3-thumb' onclick='event.stopPropagation()' "
-                                    f"title='Voir le reel'>"
-                                    f"<img src='{th}' referrerpolicy='no-referrer' "
-                                    f"onerror=\"this.style.display='none'\">"
-                                    f"{play_icon}{views_overlay}"
-                                    f"</a>"
-                                )
-                        if thumbs:
-                            preview_html = (
-                                f"<div class='va-ig3-preview'>" + "".join(thumbs) + "</div>"
-                            )
                     err_html = ""
                     if s.get("error"):
                         err_html = f"<div class='va-ig3-row-err'>⚠️ {s['error'][:40]}</div>"
@@ -6325,24 +6295,9 @@ function extAutoLoadOne(row, force){
     if(lastDate && s.last_reel_at){
       try { var dt = new Date(s.last_reel_at); var dd = String(dt.getDate()).padStart(2,'0'); var mm = String(dt.getMonth()+1).padStart(2,'0'); var hh = String(dt.getHours()).padStart(2,'0'); var mi = String(dt.getMinutes()).padStart(2,'0'); lastDate.textContent = dd+'/'+mm+' '+hh+'h'+mi; } catch(e){}
     }
-    // Preview grille 3x2 style profil IG
-    function _fmtV(n){if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n||0);}
-    var oldPv = row.querySelector('.va-ig3-preview');
-    if(oldPv) oldPv.remove();
-    if(s.preview && s.preview.length){
-      var pv = document.createElement('div');
-      pv.className = 'va-ig3-preview';
-      s.preview.slice(0,6).forEach(function(p){
-        if(!p.thumbnail_url || !p.shortcode) return;
-        var a = document.createElement('a'); a.href = 'https://instagram.com/p/' + p.shortcode + '/'; a.target = '_blank'; a.className = 'va-ig3-thumb'; a.onclick = function(ev){ ev.stopPropagation(); };
-        var img = document.createElement('img'); img.src = p.thumbnail_url; img.referrerPolicy = 'no-referrer'; img.onerror = function(){ this.style.display='none'; };
-        a.appendChild(img);
-        if(p.is_video){var play=document.createElement('span');play.className='va-ig3-thumb-play';play.textContent='▶';a.appendChild(play);}
-        if(p.views){var vs=document.createElement('span');vs.className='va-ig3-thumb-views';vs.textContent=_fmtV(p.views);a.appendChild(vs);}
-        pv.appendChild(a);
-      });
-      row.appendChild(pv);
-    }
+    // Previews retirees - user a demande de simplifier la vue (voir git
+    // pour le bloc original si tu veux les reactiver).
+    var oldPv = row.querySelector('.va-ig3-preview'); if(oldPv) oldPv.remove();
   });
 }
 function extAutoLoadAll(){
@@ -6400,20 +6355,8 @@ function extRenderStats(row, s){
   if(last) last.textContent=ago(s.last_reel_at);
   var lastDate = row.querySelector('.va-ig3-row-last-date');
   if(lastDate && s.last_reel_at){try{var dt=new Date(s.last_reel_at);var dd=String(dt.getDate()).padStart(2,'0');var mm=String(dt.getMonth()+1).padStart(2,'0');var hh=String(dt.getHours()).padStart(2,'0');var mi=String(dt.getMinutes()).padStart(2,'0');lastDate.textContent=dd+'/'+mm+' '+hh+'h'+mi;}catch(e){}}
+  // Previews retirees (user a demande de simplifier la vue).
   var oldPv = row.querySelector('.va-ig3-preview'); if(oldPv) oldPv.remove();
-  if(s.preview && s.preview.length){
-    var pv = document.createElement('div'); pv.className='va-ig3-preview';
-    s.preview.slice(0,6).forEach(function(p){
-      if(!p.thumbnail_url || !p.shortcode) return;
-      var a=document.createElement('a');a.href='https://instagram.com/p/'+p.shortcode+'/';a.target='_blank';a.className='va-ig3-thumb';a.onclick=function(ev){ev.stopPropagation();};
-      var img=document.createElement('img');img.src=p.thumbnail_url;img.referrerPolicy='no-referrer';img.onerror=function(){this.style.display='none';};
-      a.appendChild(img);
-      if(p.is_video){var pl=document.createElement('span');pl.className='va-ig3-thumb-play';pl.textContent='▶';a.appendChild(pl);}
-      if(p.views){var vw=document.createElement('span');vw.className='va-ig3-thumb-views';vw.textContent=_fmtVm(p.views);a.appendChild(vw);}
-      pv.appendChild(a);
-    });
-    row.appendChild(pv);
-  }
 }
 // Click sur une row external = force re-scrape
 document.addEventListener('click', function(e){
@@ -6508,32 +6451,9 @@ function vaIg3MiniLoad(uid, detail, force){
           lastDate.textContent = '';
         }
       }
-      // Preview strip : ajoute / remplace les thumbs
+      // Preview strip retire (user a demande de simplifier la vue).
       var oldPreview = row.querySelector('.va-ig3-preview');
       if(oldPreview) oldPreview.remove();
-      if(s.preview && s.preview.length){
-        function _fmtVm(n){if(n>=1000000)return (n/1000000).toFixed(1)+'M';if(n>=1000)return (n/1000).toFixed(1)+'k';return String(n||0);}
-        var preview = document.createElement('div');
-        preview.className = 'va-ig3-preview';
-        s.preview.slice(0,6).forEach(function(p){
-          if(!p.thumbnail_url || !p.shortcode) return;
-          var a = document.createElement('a');
-          a.href = 'https://instagram.com/p/' + p.shortcode + '/';
-          a.target = '_blank';
-          a.className = 'va-ig3-thumb';
-          a.title = 'Voir le reel';
-          a.onclick = function(ev){ ev.stopPropagation(); };
-          var img = document.createElement('img');
-          img.src = p.thumbnail_url;
-          img.referrerPolicy = 'no-referrer';
-          img.onerror = function(){ this.style.display='none'; };
-          a.appendChild(img);
-          if(p.is_video){var pl=document.createElement('span');pl.className='va-ig3-thumb-play';pl.textContent='▶';a.appendChild(pl);}
-          if(p.views){var vw=document.createElement('span');vw.className='va-ig3-thumb-views';vw.textContent=_fmtVm(p.views);a.appendChild(vw);}
-          preview.appendChild(a);
-        });
-        row.appendChild(preview);
-      }
     });
   }).catch(function(err){
     rows.forEach(function(r){
