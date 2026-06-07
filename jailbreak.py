@@ -145,3 +145,26 @@ def stats() -> Dict[str, Any]:
         "total_accounts": total_accounts,
         "identities_with_accounts": identities_with_accounts,
     }
+
+
+def rename_identity_in_storage(old_name: str, new_name: str) -> bool:
+    """Renomme la cle d une identite dans le storage Jailbreak.
+    Move data[old_name] -> data[new_name]. Retourne True si OK.
+
+    NB : ne touche PAS au filesystem (dossier de l identite) - c est au
+    caller de gerer le mv du dossier IDENTITIES_DIR/<name>.
+    """
+    old_name = (old_name or "").strip().lower()
+    new_name = (new_name or "").strip().lower()
+    if not old_name or not new_name or old_name == new_name:
+        return False
+    data = _load()
+    if old_name not in data:
+        # Pas d entree storage pour cette identite -> rien a faire, ok
+        return True
+    if new_name in data:
+        # Conflit : ne pas ecraser, le caller devrait avoir refuse avant
+        return False
+    data[new_name] = data.pop(old_name)
+    _save(data)
+    return True

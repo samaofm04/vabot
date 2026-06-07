@@ -13974,6 +13974,8 @@ def _render_jailbreak_html() -> str:
         ".jb-id-count{font-size:11px;color:#888;font-weight:600}"
         ".jb-add-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.3)}"
         ".jb-add-btn:hover{background:#db2777}"
+        ".jb-edit-id-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:30px;height:30px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}"
+        ".jb-edit-id-btn:hover{border-color:#3b82f6;color:#3b82f6}"
         ".jb-acct{display:flex;align-items:center;gap:12px;padding:10px 12px;background:#0f0f0f;border:1px solid #232323;border-radius:10px;margin-top:8px}"
         ".jb-acct-icon{width:32px;height:32px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}"
         ".jb-acct-main{flex:1;min-width:0}"
@@ -14014,6 +14016,9 @@ def _render_jailbreak_html() -> str:
                 f"<img src='/identity/avatar/{html_escape(ident_lc)}' onerror=\"this.style.display='none';this.parentElement.textContent='{avatar_letter}'\">"
                 f"</div>"
                 f"<div class='jb-id-name'>{html_escape(ident)}<div class='jb-id-count'>{n} compte{'s' if n > 1 else ''}</div></div>"
+                f"<button type='button' class='jb-edit-id-btn' onclick=\"jbOpenEditIdentityModal('{html_escape(ident_lc)}')\" title='Modifier l\\'identité (nom / photo)'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
+                f"</button>"
                 f"<button type='button' class='jb-add-btn' onclick=\"jbOpenAddModal('{html_escape(ident_lc)}')\">+ Ajouter</button>"
                 f"</div>"
             )
@@ -14056,6 +14061,35 @@ def _render_jailbreak_html() -> str:
             card += "</div>"
             cards.append(card)
         body = "".join(cards)
+
+    # Modal EDIT D IDENTITE (rename + change avatar)
+    edit_id_modal = (
+        "<div id='jb-edit-id-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseEditIdentityModal()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3>✎ Modifier l'identité</h3>"
+        "<form method='POST' action='/jailbreak/edit_identity' enctype='multipart/form-data' onsubmit='return jbValidateEditIdentity()'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='old_name' id='jb-edit-id-old'>"
+        "<label>Nom de l'identité <span style='color:#ef4444'>*</span></label>"
+        "<input type='text' name='identity_name' id='jb-edit-id-name' required maxlength='30' "
+        "pattern='[a-zA-Z0-9_\\-]+'>"
+        "<small style='display:block;color:#f59e0b;margin-top:4px;font-size:11px'>"
+        "⚠ Renommer une identité déplace son dossier et ses comptes Jailbreak, "
+        "mais peut casser des références dans d'autres modules (campagnes MyPuls, "
+        "GMS, etc.). Préfère re-créer si l'identité est utilisée ailleurs."
+        "</small>"
+        "<label>Nouvelle photo de profil <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(optionnel — laisser vide pour garder l'actuelle)</span></label>"
+        "<input type='file' name='avatar' id='jb-edit-id-avatar' accept='image/png,image/jpeg,image/webp' "
+        "style='background:#0f0f0f;border:1px dashed #2a2a2a;color:#aaa;padding:14px;border-radius:8px;cursor:pointer;width:100%'>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>PNG, JPG ou WebP. Remplace l'avatar actuel.</small>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseEditIdentityModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
 
     # Modal CREATION D IDENTITE (multipart pour upload avatar)
     create_id_modal = (
@@ -14162,6 +14196,30 @@ def _render_jailbreak_html() -> str:
         "  }"
         "  return true;"
         "}"
+        "function jbOpenEditIdentityModal(identityLc){"
+        "  document.getElementById('jb-edit-id-old').value = identityLc;"
+        "  document.getElementById('jb-edit-id-name').value = identityLc;"
+        "  document.getElementById('jb-edit-id-avatar').value = '';"
+        "  document.getElementById('jb-edit-id-overlay').classList.add('show');"
+        "  setTimeout(function(){document.getElementById('jb-edit-id-name').focus();}, 50);"
+        "}"
+        "function jbCloseEditIdentityModal(){ document.getElementById('jb-edit-id-overlay').classList.remove('show'); }"
+        "function jbValidateEditIdentity(){"
+        "  var n = document.getElementById('jb-edit-id-name').value.trim();"
+        "  var old = document.getElementById('jb-edit-id-old').value.trim();"
+        "  var fileInp = document.getElementById('jb-edit-id-avatar');"
+        "  var hasFile = fileInp.files && fileInp.files.length > 0;"
+        "  if(!n){ if(typeof showToast === 'function') showToast('Nom requis', 'error'); return false; }"
+        "  if(!/^[a-zA-Z0-9_\\-]+$/.test(n)){"
+        "    if(typeof showToast === 'function') showToast('Nom invalide', 'error');"
+        "    return false;"
+        "  }"
+        "  if(n === old && !hasFile){"
+        "    if(typeof showToast === 'function') showToast('Aucun changement', 'info');"
+        "    return false;"
+        "  }"
+        "  return true;"
+        "}"
         "function jbRemoveAccount(identity, accountId, username){"
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le compte ?', 'Compte @' + username + ' (' + identity + ') sera supprimé. Cette action est irréversible.').then(function(ok){"
@@ -14186,7 +14244,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + body + create_id_modal + modal + js
+    return css + header + body + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -22959,6 +23017,65 @@ def create_app():
                     tab="jailbreak",
                 )
         return _success(f"✅ Identité <b>{safe}</b> créée", tab="jailbreak")
+
+    @app.route("/jailbreak/edit_identity", methods=["POST"])
+    def jailbreak_edit_identity():
+        """Edit une identite existante : rename et/ou nouvelle photo de profil."""
+        if not is_auth():
+            return redirect("/")
+        old_name = (request.form.get("old_name") or "").strip().lower()
+        if not old_name or old_name not in _list_identities():
+            return _error("❌ Identité introuvable", tab="jailbreak")
+        # Nouveau nom : sanitize comme la creation
+        raw_new = (request.form.get("identity_name") or "").strip()
+        import re
+        new_name = re.sub(r'[^a-z0-9_\-]', '', raw_new.lower())[:30]
+        if not new_name:
+            return _error("❌ Nouveau nom invalide", tab="jailbreak")
+        renamed = False
+        if new_name != old_name:
+            # Le nouveau nom ne doit pas exister deja
+            if new_name in _list_identities():
+                return _error(f"❌ L'identité <b>{new_name}</b> existe déjà", tab="jailbreak")
+            # Move filesystem
+            try:
+                (IDENTITIES_DIR / old_name).rename(IDENTITIES_DIR / new_name)
+            except Exception as e:
+                return _error(f"❌ Rename échoué : {e}", tab="jailbreak")
+            # Move storage jailbreak.json
+            try:
+                import jailbreak as jb
+                jb.rename_identity_in_storage(old_name, new_name)
+            except Exception:
+                pass  # storage echec non bloquant - le filesystem est deja move
+            renamed = True
+        # Avatar : remplace si fourni
+        avatar_file = request.files.get("avatar")
+        target_dir = IDENTITIES_DIR / new_name  # le dossier apres rename eventuel
+        avatar_changed = False
+        if avatar_file and avatar_file.filename:
+            ext = os.path.splitext(avatar_file.filename)[1].lower().lstrip(".")
+            if ext in ("png", "jpg", "jpeg", "webp"):
+                # Supprime les anciens avatars (memes regles que identity_upload_avatar)
+                for old_ext in ("png", "jpg", "jpeg", "webp"):
+                    old_a = target_dir / f"avatar.{old_ext}"
+                    if old_a.exists():
+                        try:
+                            old_a.unlink()
+                        except Exception:
+                            pass
+                try:
+                    avatar_file.save(str(target_dir / f"avatar.{ext}"))
+                    avatar_changed = True
+                except Exception as e:
+                    pass
+        # Message recap
+        parts = []
+        if renamed: parts.append(f"renommée <b>{old_name}</b> → <b>{new_name}</b>")
+        if avatar_changed: parts.append("photo de profil mise à jour")
+        if not parts:
+            return _success(f"✅ Aucun changement pour <b>{new_name}</b>", tab="jailbreak")
+        return _success("✅ Identité " + ", ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/add_account", methods=["POST"])
     def jailbreak_add_account():
