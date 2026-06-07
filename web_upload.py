@@ -13978,6 +13978,11 @@ def _render_jailbreak_html() -> str:
         # Section pliable par identite (style va-vlist-section)
         ".jb-section{display:flex;flex-direction:column;gap:3px;margin-bottom:8px;background:#0f0f0f;border:1px solid #1a1a1a;border-radius:12px;padding:8px;transition:all .15s}"
         ".jb-section:hover{border-color:#2a2a2a}"
+        ".jb-section.jb-dragging{opacity:.4;border-style:dashed;border-color:#3b82f6}"
+        ".jb-section.jb-drag-over{border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.3) inset}"
+        ".jb-drag-handle{cursor:grab;color:#444;padding:0 2px;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:22px;border-radius:5px;transition:all .15s}"
+        ".jb-drag-handle:hover{color:#888;background:rgba(255,255,255,.04)}"
+        ".jb-drag-handle:active{cursor:grabbing;color:#3b82f6}"
         ".jb-section-head{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px}"
         ".jb-section-head-main{display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0;padding:2px 0}"
         ".jb-section-head-main img,.jb-section-head-main .jb-avatar-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
@@ -14057,10 +14062,18 @@ def _render_jailbreak_html() -> str:
             avatar_letter = ident[:1].upper()
             avatar_hue = sum(ord(c) for c in ident) % 360
             n = len(accts)
-            # Header
+            # Header. draggable sur la section entiere mais drag declenche uniquement via le handle
             section_head = (
                 f"<div class='jb-section' data-identity='{html_escape(ident_lc)}' data-account-count='{n}'>"
                 f"<div class='jb-section-head'>"
+                f"<div class='jb-drag-handle' draggable='true' title='Glisser pour réordonner' "
+                f"ondragstart='jbDragStart(event, this.closest(\".jb-section\"))' "
+                f"ondragend='jbDragEnd(event)'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='currentColor'>"
+                f"<circle cx='9' cy='6' r='1.5'/><circle cx='9' cy='12' r='1.5'/><circle cx='9' cy='18' r='1.5'/>"
+                f"<circle cx='15' cy='6' r='1.5'/><circle cx='15' cy='12' r='1.5'/><circle cx='15' cy='18' r='1.5'/>"
+                f"</svg>"
+                f"</div>"
                 f"<div class='jb-section-head-main' onclick='jbToggleSection(this.parentElement.parentElement)'>"
                 f"<img src='/identity/avatar/{html_escape(ident_lc)}' "
                 f"onerror=\"var d=document.createElement('div');d.className='jb-section-head-main jb-avatar-fb'.split(' ')[1]+' jb-avatar-fb';"
@@ -14133,7 +14146,11 @@ def _render_jailbreak_html() -> str:
                 f"</div>"
             )
             sections.append(section_head + section_body + "</div>")
-        body = "".join(sections)
+        body = (
+            "<div id='jb-sections-wrap' ondragover='jbDragOver(event)' ondrop='jbDrop(event)'>"
+            + "".join(sections)
+            + "</div>"
+        )
 
     # Modal EDIT D IDENTITE (rename + change avatar)
     edit_id_modal = (
@@ -14303,6 +14320,88 @@ def _render_jailbreak_html() -> str:
         "  if(!sec) return;"
         "  sec.classList.toggle('collapsed');"
         "}"
+        # === Drag & drop pour reordonner les identites ===
+        "window.__jbDraggedSection = null;"
+        "function jbDragStart(ev, sec){"
+        "  window.__jbDraggedSection = sec;"
+        "  sec.classList.add('jb-dragging');"
+        "  ev.dataTransfer.effectAllowed = 'move';"
+        # Firefox needs setData to start the drag
+        "  try { ev.dataTransfer.setData('text/plain', sec.getAttribute('data-identity') || ''); } catch(e){}"
+        "}"
+        "function jbDragEnd(ev){"
+        "  if(window.__jbDraggedSection) window.__jbDraggedSection.classList.remove('jb-dragging');"
+        "  window.__jbDraggedSection = null;"
+        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        "}"
+        "function jbDragOver(ev){"
+        "  if(!window.__jbDraggedSection) return;"
+        "  ev.preventDefault();"
+        "  ev.dataTransfer.dropEffect = 'move';"
+        # Trouve la section sur laquelle on hover (target sous le curseur)
+        "  var target = ev.target.closest && ev.target.closest('.jb-section');"
+        "  if(!target || target === window.__jbDraggedSection){"
+        "    document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        "    return;"
+        "  }"
+        # Highlight la section sous le curseur
+        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){"
+        "    if(s !== target) s.classList.remove('jb-drag-over');"
+        "  });"
+        "  target.classList.add('jb-drag-over');"
+        # Inserer la section draggee avant ou apres en fonction de la position verticale
+        "  var rect = target.getBoundingClientRect();"
+        "  var afterMidpoint = ev.clientY > rect.top + rect.height / 2;"
+        "  var wrap = document.getElementById('jb-sections-wrap');"
+        "  if(!wrap) return;"
+        "  if(afterMidpoint){"
+        "    if(target.nextSibling !== window.__jbDraggedSection){"
+        "      wrap.insertBefore(window.__jbDraggedSection, target.nextSibling);"
+        "    }"
+        "  } else {"
+        "    if(target !== window.__jbDraggedSection.nextSibling){"
+        "      wrap.insertBefore(window.__jbDraggedSection, target);"
+        "    }"
+        "  }"
+        "}"
+        "function jbDrop(ev){"
+        "  ev.preventDefault();"
+        # Cleanup highlights
+        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        # Sauve le nouvel ordre en localStorage (preference perso, par navigateur)
+        "  jbSaveOrder();"
+        "}"
+        "function jbSaveOrder(){"
+        "  var wrap = document.getElementById('jb-sections-wrap');"
+        "  if(!wrap) return;"
+        "  var order = Array.prototype.map.call("
+        "    wrap.querySelectorAll('.jb-section'),"
+        "    function(s){ return s.getAttribute('data-identity') || ''; }"
+        "  ).filter(Boolean);"
+        "  try { localStorage.setItem('vabot_jb_order', JSON.stringify(order)); } catch(e){}"
+        "  if(typeof showToast === 'function') showToast('Ordre sauvegardé', 'success', 1500);"
+        "}"
+        "function jbApplySavedOrder(){"
+        "  try {"
+        "    var raw = localStorage.getItem('vabot_jb_order');"
+        "    if(!raw) return;"
+        "    var order = JSON.parse(raw);"
+        "    if(!Array.isArray(order)) return;"
+        "    var wrap = document.getElementById('jb-sections-wrap');"
+        "    if(!wrap) return;"
+        # Pour chaque identite dans l ordre sauvegarde, deplace sa section a la fin
+        # (ainsi a la fin de la boucle, les identites apparaissent dans l ordre voulu).
+        # Les identites NON presentes dans le saved order restent a leur place initiale au debut.
+        "    order.forEach(function(idLc){"
+        "      var sec = wrap.querySelector('.jb-section[data-identity=\"' + idLc + '\"]');"
+        "      if(sec) wrap.appendChild(sec);"
+        "    });"
+        "  } catch(e) { console.warn('jbApplySavedOrder:', e); }"
+        "}"
+        # Applique l ordre sauvegarde au load (DOMContentLoaded OU maintenant si deja loade)
+        "if(document.readyState === 'loading'){"
+        "  document.addEventListener('DOMContentLoaded', jbApplySavedOrder);"
+        "} else { jbApplySavedOrder(); }"
         # === Filter / search ===
         "function jbApplyFilter(){"
         "  var q = (document.getElementById('jb-search-input').value || '').trim().toLowerCase();"
