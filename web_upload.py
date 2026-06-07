@@ -2539,6 +2539,22 @@ window.upClearPrefill = function(utab){
   </div>
 </div>
 
+<!-- Jailbreak : meme pattern que GeeLark mais ULTRA-LIGHT (juste stockage de
+     comptes par identite, l user gere lui-meme). -->
+<div class="group" id="grp-jailbreak">
+  <button class="group-head" onclick="toggleGroup('jailbreak')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    <span class="label">Jailbreak</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-jailbreak" onclick="showTab('jailbreak','jailbreak','Jailbreak — Comptes par identité','Gestion manuelle des comptes Jailbreak par identité (Amelia, Julia, ...)')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Comptes par identité
+    </button>
+  </div>
+</div>
+
 <!-- 'Profil public' (Bio Links + GetMySocial) retire de la sidebar : l user
      dit les utiliser deja au niveau VA. Les routes backend (/biolinks/*,
      /gms/*) et les form-sections (form-biolinks, form-gms) restent intactes
@@ -3098,6 +3114,11 @@ document.addEventListener('keydown', function(e){
 <!-- GEELARK -->
 <div class="form-section" id="form-geelark" style="display:none">
 {geelark_html}
+</div>
+
+<!-- JAILBREAK -->
+<div class="form-section" id="form-jailbreak" style="display:none">
+{jailbreak_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -13913,6 +13934,211 @@ async function glDeleteWatcher(id, btn){
     return header_html + upcoming_block + schedules_block + watchers_block + history_block + ext_inline_css + ext_section + ext_modal_html + js
 
 
+def _render_jailbreak_html() -> str:
+    """Page Jailbreak : gestion manuelle des comptes par identite.
+    Pattern simple : 1 carte par identite + liste de comptes + bouton +Add.
+    """
+    try:
+        import jailbreak as jb
+    except Exception as e:
+        return f"<p style='color:#f99'>Module jailbreak indispo : {e}</p>"
+    identities = _list_identities() if callable(_list_identities) else []
+    all_accounts = jb.list_all()
+    stats = jb.stats()
+
+    # Header
+    header = (
+        "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
+        "<div>"
+        "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
+        "🔓 Jailbreak"
+        "<span style='font-size:11px;background:#ec4899;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>COMPTES MANUELS</span></h2>"
+        "<p style='margin:0;color:#888;font-size:13px'>Stockage des comptes Jailbreak par identité — pas d'automation, juste un référentiel sécurisé.</p>"
+        "</div>"
+        f"<div style='display:flex;gap:14px;align-items:center'>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
+        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
+        "</div>"
+        "</div>"
+    )
+
+    # CSS local
+    css = (
+        "<style>"
+        ".jb-card{background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-bottom:14px}"
+        ".jb-card-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}"
+        ".jb-avatar{width:42px;height:42px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;flex-shrink:0;overflow:hidden}"
+        ".jb-avatar img{width:100%;height:100%;object-fit:cover}"
+        ".jb-id-name{flex:1;min-width:0;font-weight:700;color:#fff;font-size:15px}"
+        ".jb-id-count{font-size:11px;color:#888;font-weight:600}"
+        ".jb-add-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.3)}"
+        ".jb-add-btn:hover{background:#db2777}"
+        ".jb-acct{display:flex;align-items:center;gap:12px;padding:10px 12px;background:#0f0f0f;border:1px solid #232323;border-radius:10px;margin-top:8px}"
+        ".jb-acct-icon{width:32px;height:32px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}"
+        ".jb-acct-main{flex:1;min-width:0}"
+        ".jb-acct-username{color:#fff;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
+        ".jb-acct-username code{background:#0a0a0a;border:1px solid #2a2a2a;color:#3b82f6;padding:1px 6px;border-radius:4px;font-size:11px}"
+        ".jb-acct-meta{font-size:11px;color:#666;margin-top:3px}"
+        ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600}"
+        ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
+        ".jb-acct-btn.danger:hover{border-color:#ef4444;color:#ef4444}"
+        ".jb-empty{color:#666;font-size:12px;padding:14px;text-align:center;background:#0f0f0f;border:1px dashed #232323;border-radius:10px;margin-top:8px}"
+        # Modal
+        ".jb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:20px}"
+        ".jb-overlay.show{display:flex}"
+        ".jb-modal{background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:480px;box-shadow:0 24px 60px rgba(0,0,0,.6)}"
+        ".jb-modal h3{margin:0 0 16px;font-size:17px;color:#fff;font-weight:700}"
+        ".jb-modal label{display:block;margin:10px 0 4px;color:#aaa;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}"
+        ".jb-modal input,.jb-modal textarea{width:100%;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px}"
+        ".jb-modal input:focus,.jb-modal textarea:focus{border-color:#ec4899;outline:none}"
+        ".jb-modal textarea{resize:vertical;min-height:60px}"
+        "</style>"
+    )
+
+    # Section per identite
+    if not identities:
+        body = "<p style='color:#888;text-align:center;padding:40px'>Aucune identité disponible. Crée-en d'abord (Bibliothèque ou Discord).</p>"
+    else:
+        cards = []
+        for ident in identities:
+            ident_lc = ident.lower()
+            accts = all_accounts.get(ident_lc, [])
+            avatar_letter = ident[:1].upper()
+            avatar_hue = sum(ord(c) for c in ident) % 360
+            n = len(accts)
+            card = (
+                f"<div class='jb-card'>"
+                f"<div class='jb-card-head'>"
+                f"<div class='jb-avatar' style='background:hsl({avatar_hue},60%,45%)'>"
+                f"<img src='/identity/avatar/{html_escape(ident_lc)}' onerror=\"this.style.display='none';this.parentElement.textContent='{avatar_letter}'\">"
+                f"</div>"
+                f"<div class='jb-id-name'>{html_escape(ident)}<div class='jb-id-count'>{n} compte{'s' if n > 1 else ''}</div></div>"
+                f"<button type='button' class='jb-add-btn' onclick=\"jbOpenAddModal('{html_escape(ident_lc)}')\">+ Ajouter</button>"
+                f"</div>"
+            )
+            if not accts:
+                card += "<div class='jb-empty'>Aucun compte pour le moment</div>"
+            else:
+                for a in accts:
+                    aid = int(a.get("id", 0))
+                    username = html_escape(str(a.get("username", "?")))
+                    email = html_escape(str(a.get("email", "")))
+                    notes = str(a.get("notes", ""))
+                    has_pwd = bool(a.get("password"))
+                    meta_parts = []
+                    if email: meta_parts.append(f"✉ {email}")
+                    if has_pwd: meta_parts.append("🔑 mdp")
+                    if notes: meta_parts.append(f"📝 {html_escape(notes[:40])}{'...' if len(notes) > 40 else ''}")
+                    meta = " · ".join(meta_parts) if meta_parts else "(aucune info)"
+                    # JS-escape pour les onclick (utilise json.dumps pour proprete)
+                    a_json = json.dumps({
+                        "id": aid,
+                        "username": a.get("username", ""),
+                        "password": a.get("password", ""),
+                        "email": a.get("email", ""),
+                        "notes": a.get("notes", ""),
+                    }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+                    card += (
+                        f"<div class='jb-acct'>"
+                        f"<div class='jb-acct-icon'>👤</div>"
+                        f"<div class='jb-acct-main'>"
+                        f"<div class='jb-acct-username'><code>@{username}</code></div>"
+                        f"<div class='jb-acct-meta'>{meta}</div>"
+                        f"</div>"
+                        f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc)}','{a_json}')\">Edit</button>"
+                        f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc)}',{aid},'{username}')\">×</button>"
+                        f"</div>"
+                    )
+            card += "</div>"
+            cards.append(card)
+        body = "".join(cards)
+
+    # Modal Add/Edit
+    modal = (
+        "<div id='jb-modal-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseModal()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3 id='jb-modal-title'>Ajouter un compte</h3>"
+        "<form id='jb-modal-form' method='POST'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='identity' id='jb-modal-identity'>"
+        "<input type='hidden' name='account_id' id='jb-modal-account-id'>"
+        "<label>Username <span style='color:#ef4444'>*</span></label>"
+        "<input type='text' name='username' id='jb-modal-username' required maxlength='80' placeholder='ex: amelia_main'>"
+        "<label>Mot de passe</label>"
+        "<input type='text' name='password' id='jb-modal-password' maxlength='200' placeholder='(optionnel)'>"
+        "<label>Email</label>"
+        "<input type='email' name='email' id='jb-modal-email' maxlength='120' placeholder='(optionnel)'>"
+        "<label>Notes</label>"
+        "<textarea name='notes' id='jb-modal-notes' maxlength='500' placeholder='Notes libres (optionnel)'></textarea>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:#ec4899;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
+
+    # JS
+    js = (
+        "<script>"
+        "function jbOpenAddModal(identity){"
+        "  document.getElementById('jb-modal-title').textContent = 'Ajouter un compte (' + identity + ')';"
+        "  document.getElementById('jb-modal-form').action = '/jailbreak/add_account';"
+        "  document.getElementById('jb-modal-identity').value = identity;"
+        "  document.getElementById('jb-modal-account-id').value = '';"
+        "  document.getElementById('jb-modal-username').value = '';"
+        "  document.getElementById('jb-modal-password').value = '';"
+        "  document.getElementById('jb-modal-email').value = '';"
+        "  document.getElementById('jb-modal-notes').value = '';"
+        "  document.getElementById('jb-modal-overlay').classList.add('show');"
+        "  setTimeout(function(){document.getElementById('jb-modal-username').focus();}, 50);"
+        "}"
+        "function jbOpenEditModal(identity, dataJson){"
+        "  try{"
+        "    var d = JSON.parse(dataJson.replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\"));"
+        "    document.getElementById('jb-modal-title').textContent = 'Edit compte @' + d.username;"
+        "    document.getElementById('jb-modal-form').action = '/jailbreak/edit_account';"
+        "    document.getElementById('jb-modal-identity').value = identity;"
+        "    document.getElementById('jb-modal-account-id').value = d.id;"
+        "    document.getElementById('jb-modal-username').value = d.username || '';"
+        "    document.getElementById('jb-modal-password').value = d.password || '';"
+        "    document.getElementById('jb-modal-email').value = d.email || '';"
+        "    document.getElementById('jb-modal-notes').value = d.notes || '';"
+        "    document.getElementById('jb-modal-overlay').classList.add('show');"
+        "  } catch(e){"
+        "    if(typeof showToast === 'function') showToast('Erreur parsing : ' + e.message, 'error');"
+        "    console.error('jbOpenEditModal:', e);"
+        "  }"
+        "}"
+        "function jbCloseModal(){ document.getElementById('jb-modal-overlay').classList.remove('show'); }"
+        "function jbRemoveAccount(identity, accountId, username){"
+        "  if(typeof showConfirmAsync === 'function'){"
+        "    showConfirmAsync('Supprimer le compte ?', 'Compte @' + username + ' (' + identity + ') sera supprimé. Cette action est irréversible.').then(function(ok){"
+        "      if(!ok) return;"
+        "      _jbPostRemove(identity, accountId);"
+        "    });"
+        "  } else {"
+        "    if(!confirm('Supprimer le compte @' + username + ' ?')) return;"
+        "    _jbPostRemove(identity, accountId);"
+        "  }"
+        "}"
+        "function _jbPostRemove(identity, accountId){"
+        "  var f = document.createElement('form');"
+        "  f.method='POST'; f.action='/jailbreak/remove_account'; f.style.display='none';"
+        "  ['identity','account_id','back_tab'].forEach(function(name){"
+        "    var i = document.createElement('input'); i.name = name;"
+        "    i.value = (name==='identity') ? identity : (name==='account_id' ? accountId : 'jailbreak');"
+        "    f.appendChild(i);"
+        "  });"
+        "  document.body.appendChild(f); f.submit();"
+        "}"
+        "</script>"
+    )
+
+    return css + header + body + modal + js
+
+
 def _render_textpool_html() -> str:
     """Bibliotheque de textes : Names / Usernames / Bios / CTAs en 4 colonnes."""
     try:
@@ -20344,6 +20570,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{onboarding_html}", _render_onboarding_html())
         .replace("{textpool_html}", _render_textpool_html())
         .replace("{geelark_html}", _render_geelark_html())
+        .replace("{jailbreak_html}", _render_jailbreak_html())
         .replace("{gms_html}", _render_gms_html())
         .replace("{linkscale_html}", _render_linkscale_html())
         .replace("{schedule_html}", _render_schedule_html())
@@ -22635,6 +22862,77 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         wid = (request.form.get("watcher_id") or "").strip()
         return jsonify({"ok": gv.delete_watcher(wid)})
+
+    # ============ JAILBREAK : comptes manuels par identite ============
+    @app.route("/jailbreak/add_account", methods=["POST"])
+    def jailbreak_add_account():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        username = (request.form.get("username") or "").strip()
+        password = (request.form.get("password") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        if not identity:
+            return _error("❌ Identité manquante", tab="jailbreak")
+        if not username:
+            return _error("❌ Username manquant", tab="jailbreak")
+        try:
+            jb.add_account(identity, username, password=password, email=email, notes=notes)
+        except ValueError as e:
+            return _error(f"❌ {e}", tab="jailbreak")
+        except Exception as e:
+            return _error(f"❌ Ajout échoué : {e}", tab="jailbreak")
+        return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b>", tab="jailbreak")
+
+    @app.route("/jailbreak/edit_account", methods=["POST"])
+    def jailbreak_edit_account():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        try:
+            account_id = int(request.form.get("account_id") or 0)
+        except Exception:
+            return _error("❌ account_id invalide", tab="jailbreak")
+        if not identity or not account_id:
+            return _error("❌ Identité ou account_id manquant", tab="jailbreak")
+        ok = jb.update_account(
+            identity, account_id,
+            username=(request.form.get("username") or "").strip(),
+            password=(request.form.get("password") or "").strip(),
+            email=(request.form.get("email") or "").strip(),
+            notes=(request.form.get("notes") or "").strip(),
+        )
+        if not ok:
+            return _error("❌ Compte introuvable", tab="jailbreak")
+        return _success("✅ Compte mis à jour", tab="jailbreak")
+
+    @app.route("/jailbreak/remove_account", methods=["POST"])
+    def jailbreak_remove_account():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        try:
+            account_id = int(request.form.get("account_id") or 0)
+        except Exception:
+            return _error("❌ account_id invalide", tab="jailbreak")
+        if not identity or not account_id:
+            return _error("❌ Identité ou account_id manquant", tab="jailbreak")
+        if jb.remove_account(identity, account_id):
+            return _success("✅ Compte supprimé", tab="jailbreak")
+        return _error("❌ Compte introuvable", tab="jailbreak")
 
     # ============ TEXT POOL (Bibliotheque) ============
     @app.route("/textpool/render", methods=["GET"])
