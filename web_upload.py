@@ -14025,9 +14025,11 @@ def _render_jailbreak_html() -> str:
                     email = html_escape(str(a.get("email", "")))
                     notes = str(a.get("notes", ""))
                     has_pwd = bool(a.get("password"))
+                    has_2fa = bool(a.get("two_fa"))
                     meta_parts = []
                     if email: meta_parts.append(f"✉ {email}")
                     if has_pwd: meta_parts.append("🔑 mdp")
+                    if has_2fa: meta_parts.append("🔐 2FA")
                     if notes: meta_parts.append(f"📝 {html_escape(notes[:40])}{'...' if len(notes) > 40 else ''}")
                     meta = " · ".join(meta_parts) if meta_parts else "(aucune info)"
                     # JS-escape pour les onclick (utilise json.dumps pour proprete)
@@ -14036,6 +14038,7 @@ def _render_jailbreak_html() -> str:
                         "username": a.get("username", ""),
                         "password": a.get("password", ""),
                         "email": a.get("email", ""),
+                        "two_fa": a.get("two_fa", ""),
                         "notes": a.get("notes", ""),
                     }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
                     card += (
@@ -14069,6 +14072,8 @@ def _render_jailbreak_html() -> str:
         "<input type='text' name='password' id='jb-modal-password' maxlength='200' placeholder='(optionnel)'>"
         "<label>Email</label>"
         "<input type='email' name='email' id='jb-modal-email' maxlength='120' placeholder='(optionnel)'>"
+        "<label>🔐 2FA <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(secret TOTP / codes backup / SMS)</span></label>"
+        "<textarea name='two_fa' id='jb-modal-two-fa' maxlength='500' placeholder='ex: JBSWY3DPEHPK3PXP (secret TOTP)&#10;ou codes backup, 1 par ligne'></textarea>"
         "<label>Notes</label>"
         "<textarea name='notes' id='jb-modal-notes' maxlength='500' placeholder='Notes libres (optionnel)'></textarea>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
@@ -14090,6 +14095,7 @@ def _render_jailbreak_html() -> str:
         "  document.getElementById('jb-modal-username').value = '';"
         "  document.getElementById('jb-modal-password').value = '';"
         "  document.getElementById('jb-modal-email').value = '';"
+        "  document.getElementById('jb-modal-two-fa').value = '';"
         "  document.getElementById('jb-modal-notes').value = '';"
         "  document.getElementById('jb-modal-overlay').classList.add('show');"
         "  setTimeout(function(){document.getElementById('jb-modal-username').focus();}, 50);"
@@ -14104,6 +14110,7 @@ def _render_jailbreak_html() -> str:
         "    document.getElementById('jb-modal-username').value = d.username || '';"
         "    document.getElementById('jb-modal-password').value = d.password || '';"
         "    document.getElementById('jb-modal-email').value = d.email || '';"
+        "    document.getElementById('jb-modal-two-fa').value = d.two_fa || '';"
         "    document.getElementById('jb-modal-notes').value = d.notes || '';"
         "    document.getElementById('jb-modal-overlay').classList.add('show');"
         "  } catch(e){"
@@ -22876,13 +22883,15 @@ def create_app():
         username = (request.form.get("username") or "").strip()
         password = (request.form.get("password") or "").strip()
         email = (request.form.get("email") or "").strip()
+        two_fa = (request.form.get("two_fa") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity:
             return _error("❌ Identité manquante", tab="jailbreak")
         if not username:
             return _error("❌ Username manquant", tab="jailbreak")
         try:
-            jb.add_account(identity, username, password=password, email=email, notes=notes)
+            jb.add_account(identity, username, password=password, email=email,
+                           two_fa=two_fa, notes=notes)
         except ValueError as e:
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
@@ -22909,6 +22918,7 @@ def create_app():
             username=(request.form.get("username") or "").strip(),
             password=(request.form.get("password") or "").strip(),
             email=(request.form.get("email") or "").strip(),
+            two_fa=(request.form.get("two_fa") or "").strip(),
             notes=(request.form.get("notes") or "").strip(),
         )
         if not ok:

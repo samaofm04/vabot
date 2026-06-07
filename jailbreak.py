@@ -61,8 +61,11 @@ def list_all() -> Dict[str, List[Dict[str, Any]]]:
 
 
 def add_account(identity: str, username: str, password: str = "",
-                email: str = "", notes: str = "") -> Dict[str, Any]:
-    """Ajoute un compte a une identite. Retourne le compte ajoute."""
+                email: str = "", notes: str = "", two_fa: str = "") -> Dict[str, Any]:
+    """Ajoute un compte a une identite. Retourne le compte ajoute.
+
+    two_fa : secret TOTP / codes de backup / SMS / autre - texte libre 500 chars.
+    """
     identity = (identity or "").strip().lower()
     if not identity:
         raise ValueError("Identite vide")
@@ -79,6 +82,7 @@ def add_account(identity: str, username: str, password: str = "",
         "username": username,
         "password": (password or "").strip()[:200],
         "email": (email or "").strip()[:120],
+        "two_fa": (two_fa or "").strip()[:500],
         "notes": (notes or "").strip()[:500],
         "created_at": int(time.time()),
     }
@@ -88,7 +92,7 @@ def add_account(identity: str, username: str, password: str = "",
 
 
 def update_account(identity: str, account_id: int, **fields) -> bool:
-    """Met a jour les champs d un compte (username/password/email/notes).
+    """Met a jour les champs d un compte (username/password/email/two_fa/notes).
     Retourne True si trouve + mis a jour."""
     identity = (identity or "").strip().lower()
     if not identity:
@@ -96,7 +100,7 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
     data = _load()
     if identity not in data:
         return False
-    allowed = {"username", "password", "email", "notes"}
+    allowed = {"username", "password", "email", "two_fa", "notes"}
     found = False
     for acct in data[identity]:
         if int(acct.get("id", 0)) == int(account_id):
