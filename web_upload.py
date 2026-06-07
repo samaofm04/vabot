@@ -14045,9 +14045,12 @@ def _render_jailbreak_html() -> str:
         ".jb-section.collapsed .jb-section-toggle svg{transform:rotate(-90deg)}"
         ".jb-section-body{display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height .25s ease,opacity .15s,padding .15s;max-height:2000px;opacity:1;padding:8px 4px 4px}"
         ".jb-section.collapsed .jb-section-body{max-height:0;opacity:0;padding-top:0;padding-bottom:0;pointer-events:none}"
-        # Bouton + Ajouter compte (en bas de chaque groupe VA)
-        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.25);align-self:flex-start;margin-top:6px}"
+        # Boutons en bas de chaque groupe VA
+        ".jb-va-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}"
+        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.25)}"
         ".jb-add-account-btn:hover{background:#db2777}"
+        ".jb-bulk-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}"
+        ".jb-bulk-btn:hover{border-color:#ec4899;color:#ec4899}"
         # Bouton + Ajouter un VA (en bas de la carte identite)
         ".jb-add-va-btn{background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:9px 16px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(168,85,247,.3);align-self:flex-start;margin-top:8px;transition:all .15s}"
         ".jb-add-va-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(168,85,247,.4)}"
@@ -14062,6 +14065,10 @@ def _render_jailbreak_html() -> str:
         ".jb-va-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid rgba(168,85,247,.3)}"
         ".jb-va-avatar-fb{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px}"
         ".jb-discord-pill{background:rgba(88,101,242,.15);color:#7c8eff;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:monospace}"
+        # Badges 2FA : vert si validee, orange si juste rempli
+        ".jb-2fa-badge{padding:1px 7px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.02em}"
+        ".jb-2fa-badge.jb-2fa-validated{background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.25)}"
+        ".jb-2fa-badge.jb-2fa-pending{background:rgba(251,146,60,.12);color:#fb923c;border:1px solid rgba(251,146,60,.22)}"
         ".jb-va-group-count{background:rgba(168,85,247,.18);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
         ".jb-va-remove-btn{background:transparent;border:1px solid #232323;color:#666;width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;padding:0}"
         ".jb-va-remove-btn:hover{border-color:#ef4444;color:#ef4444}"
@@ -14194,14 +14201,17 @@ def _render_jailbreak_html() -> str:
                 email = html_escape(str(a.get("email", "")))
                 va_name = (a.get("va") or "").strip()
                 has_pwd = bool(a.get("password"))
-                has_2fa = bool(a.get("two_fa"))
+                has_2fa = bool((a.get("two_fa") or "").strip())
+                is_2fa_valid = bool(a.get("two_fa_validated")) and has_2fa
                 meta_parts = []
                 if email:
                     meta_parts.append(f"<span>✉ {email}</span>")
                 if has_pwd:
                     meta_parts.append("<span>🔑 mdp</span>")
-                if has_2fa:
-                    meta_parts.append("<span>🔐 2FA</span>")
+                if is_2fa_valid:
+                    meta_parts.append("<span class='jb-2fa-badge jb-2fa-validated'>🔐 2FA ✓</span>")
+                elif has_2fa:
+                    meta_parts.append("<span class='jb-2fa-badge jb-2fa-pending'>🔐 2FA</span>")
                 meta_html = "".join(meta_parts)
                 a_json = json.dumps({
                     "id": aid,
@@ -14209,6 +14219,7 @@ def _render_jailbreak_html() -> str:
                     "password": a.get("password", ""),
                     "email": a.get("email", ""),
                     "two_fa": a.get("two_fa", ""),
+                    "two_fa_validated": bool(a.get("two_fa_validated")),
                     "va": a.get("va", ""),
                     "notes": a.get("notes", ""),
                 }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
@@ -14275,8 +14286,16 @@ def _render_jailbreak_html() -> str:
                 for a in va_accts:
                     section_body += _render_account_row(a, ident_lc)
                 section_body += (
+                    f"<div class='jb-va-actions'>"
                     f"<button type='button' class='jb-add-account-btn' "
                     f"onclick=\"jbOpenAddModal('{ident_safe}','{va_safe}')\">+ Ajouter un compte sous {va_safe}</button>"
+                    f"<button type='button' class='jb-bulk-btn' "
+                    f"onclick=\"jbOpenBulkModal('{ident_safe}','{va_safe}')\" title='Coller plusieurs usernames d un coup'>"
+                    f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2'>"
+                    f"<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/>"
+                    f"<rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>"
+                    f"</svg> Bulk usernames</button>"
+                    f"</div>"
                     f"</div>"
                 )
 
@@ -14339,6 +14358,35 @@ def _render_jailbreak_html() -> str:
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseEditIdentityModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
         "<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
+
+    # Modal BULK ADD usernames
+    bulk_modal = (
+        "<div id='jb-bulk-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseBulkModal()'>"
+        "<div class='jb-modal' style='max-width:540px' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3 id='jb-bulk-title'>Bulk : ajouter des usernames</h3>"
+        "<form id='jb-bulk-form' method='POST' action='/jailbreak/bulk_add_accounts' onsubmit='return jbValidateBulk()'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='identity' id='jb-bulk-identity'>"
+        "<input type='hidden' name='va' id='jb-bulk-va'>"
+        "<label>Usernames Instagram <span style='color:#ef4444'>*</span> "
+        "<span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(1 par ligne)</span></label>"
+        "<textarea name='usernames' id='jb-bulk-textarea' required maxlength='8000' rows='10' "
+        "style='font-family:monospace;font-size:13px' "
+        "placeholder='ex:&#10;jessye_acc1&#10;jessye_acc2&#10;jessye_acc3&#10;@avec_arobase_ok'></textarea>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>"
+        "Chaque ligne = 1 compte créé avec juste le username. Les autres champs (mdp, 2FA, email, notes) "
+        "se complètent plus tard via Edit. Les doublons (même username déjà existant) sont ignorés. "
+        "Le préfixe @ est retiré automatiquement."
+        "</small>"
+        "<div id='jb-bulk-count' style='margin-top:8px;font-size:12px;color:#888'></div>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseBulkModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:#ec4899;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter tout</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -14418,7 +14466,15 @@ def _render_jailbreak_html() -> str:
         "<input type='text' name='va' id='jb-modal-va' maxlength='60' "
         "list='jb-va-suggestions' placeholder='ex: Marie, Paul, ...'>"
         "<label>🔐 2FA <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(secret TOTP / codes backup / SMS)</span></label>"
-        "<textarea name='two_fa' id='jb-modal-two-fa' maxlength='500' placeholder='ex: JBSWY3DPEHPK3PXP (secret TOTP)&#10;ou codes backup, 1 par ligne'></textarea>"
+        "<textarea name='two_fa' id='jb-modal-two-fa' maxlength='500' "
+        "oninput='jbToggle2FAValidate()' "
+        "placeholder='ex: JBSWY3DPEHPK3PXP (secret TOTP)&#10;ou codes backup, 1 par ligne'></textarea>"
+        # Checkbox de validation - activable uniquement si le 2FA est rempli
+        "<label class='jb-2fa-validate-row' style='display:flex;align-items:center;gap:8px;margin:8px 0 0;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:500;color:#aaa'>"
+        "<input type='checkbox' name='two_fa_validated' value='on' id='jb-modal-two-fa-validated' "
+        "style='width:16px;height:16px;accent-color:#22c55e;cursor:pointer' disabled>"
+        "<span id='jb-modal-two-fa-validated-label'>✓ Valider la 2FA <span style='color:#666;font-size:11px'>(remplis d'abord le champ ci-dessus)</span></span>"
+        "</label>"
         "<label>Notes</label>"
         "<textarea name='notes' id='jb-modal-notes' maxlength='500' placeholder='Notes libres (optionnel)'></textarea>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
@@ -14443,7 +14499,9 @@ def _render_jailbreak_html() -> str:
         "  document.getElementById('jb-modal-email').value = '';"
         "  document.getElementById('jb-modal-va').value = vaName || '';"
         "  document.getElementById('jb-modal-two-fa').value = '';"
+        "  document.getElementById('jb-modal-two-fa-validated').checked = false;"
         "  document.getElementById('jb-modal-notes').value = '';"
+        "  jbToggle2FAValidate();"
         "  document.getElementById('jb-modal-overlay').classList.add('show');"
         "  setTimeout(function(){document.getElementById('jb-modal-username').focus();}, 50);"
         "}"
@@ -14459,11 +14517,32 @@ def _render_jailbreak_html() -> str:
         "    document.getElementById('jb-modal-email').value = d.email || '';"
         "    document.getElementById('jb-modal-va').value = d.va || '';"
         "    document.getElementById('jb-modal-two-fa').value = d.two_fa || '';"
+        "    document.getElementById('jb-modal-two-fa-validated').checked = !!d.two_fa_validated;"
         "    document.getElementById('jb-modal-notes').value = d.notes || '';"
+        "    jbToggle2FAValidate();"
         "    document.getElementById('jb-modal-overlay').classList.add('show');"
         "  } catch(e){"
         "    if(typeof showToast === 'function') showToast('Erreur parsing : ' + e.message, 'error');"
         "    console.error('jbOpenEditModal:', e);"
+        "  }"
+        "}"
+        # Active/desactive la checkbox de validation selon que le 2FA est rempli
+        "function jbToggle2FAValidate(){"
+        "  var ta = document.getElementById('jb-modal-two-fa');"
+        "  var cb = document.getElementById('jb-modal-two-fa-validated');"
+        "  var lbl = document.getElementById('jb-modal-two-fa-validated-label');"
+        "  if(!ta || !cb || !lbl) return;"
+        "  var hasContent = (ta.value || '').trim().length > 0;"
+        "  cb.disabled = !hasContent;"
+        "  if(!hasContent){"
+        "    cb.checked = false;"
+        "    lbl.innerHTML = '✓ Valider la 2FA <span style=\"color:#666;font-size:11px\">(remplis d abord le champ ci-dessus)</span>';"
+        "    lbl.parentElement.style.opacity = '.55';"
+        "    lbl.parentElement.style.cursor = 'not-allowed';"
+        "  } else {"
+        "    lbl.innerHTML = '✓ Valider la 2FA <span style=\"color:#666;font-size:11px\">(coche quand tu as testé que ça fonctionne)</span>';"
+        "    lbl.parentElement.style.opacity = '1';"
+        "    lbl.parentElement.style.cursor = 'pointer';"
         "  }"
         "}"
         "function jbCloseModal(){ document.getElementById('jb-modal-overlay').classList.remove('show'); }"
@@ -14507,6 +14586,51 @@ def _render_jailbreak_html() -> str:
         "  }"
         "  return true;"
         "}"
+        # === Modal Bulk Add Usernames ===
+        "function jbOpenBulkModal(identity, vaName){"
+        "  var idEl = document.getElementById('jb-bulk-identity');"
+        "  var vaEl = document.getElementById('jb-bulk-va');"
+        "  var ta = document.getElementById('jb-bulk-textarea');"
+        "  var title = document.getElementById('jb-bulk-title');"
+        "  var cnt = document.getElementById('jb-bulk-count');"
+        "  if(!idEl || !ta){"
+        "    if(typeof showToast === 'function') showToast('Erreur : modal Bulk introuvable', 'error');"
+        "    return;"
+        "  }"
+        "  idEl.value = identity || '';"
+        "  if(vaEl) vaEl.value = vaName || '';"
+        "  ta.value = '';"
+        "  if(cnt) cnt.textContent = '';"
+        "  if(title){"
+        "    var suffix = vaName ? (' sous VA : ' + vaName) : '';"
+        "    title.textContent = 'Bulk : ajouter des usernames (' + identity + ')' + suffix;"
+        "  }"
+        "  document.getElementById('jb-bulk-overlay').classList.add('show');"
+        "  setTimeout(function(){ try { ta.focus(); } catch(e){} }, 50);"
+        "}"
+        "function jbCloseBulkModal(){"
+        "  var o = document.getElementById('jb-bulk-overlay');"
+        "  if(o) o.classList.remove('show');"
+        "}"
+        "function jbValidateBulk(){"
+        "  var ta = document.getElementById('jb-bulk-textarea');"
+        "  var raw = (ta && ta.value || '').trim();"
+        "  if(!raw){"
+        "    if(typeof showToast === 'function') showToast('Liste vide', 'error');"
+        "    return false;"
+        "  }"
+        "  return true;"
+        "}"
+        # Counter live de lignes valides dans la textarea
+        "document.addEventListener('input', function(e){"
+        "  if(e.target && e.target.id === 'jb-bulk-textarea'){"
+        "    var cnt = document.getElementById('jb-bulk-count');"
+        "    if(!cnt) return;"
+        "    var lines = e.target.value.split(/[\\n,;\\t]+/).map(function(l){return l.trim().replace(/^@/,'')}).filter(function(l){return l.length>0});"
+        "    cnt.textContent = lines.length + ' username(s) detecte(s)';"
+        "    cnt.style.color = lines.length > 0 ? '#22c55e' : '#888';"
+        "  }"
+        "});"
         # === Modal Add VA ===
         "function jbOpenAddVaModal(identity){"
         "  try {"
@@ -14720,7 +14844,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + datalist_html + toolbar + body + add_va_modal + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + toolbar + body + add_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -23566,6 +23690,7 @@ def create_app():
         password = (request.form.get("password") or "").strip()
         email = (request.form.get("email") or "").strip()
         two_fa = (request.form.get("two_fa") or "").strip()
+        two_fa_validated = (request.form.get("two_fa_validated") or "").strip().lower() in ("on", "1", "true")
         va = (request.form.get("va") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity:
@@ -23574,12 +23699,49 @@ def create_app():
             return _error("❌ Username manquant", tab="jailbreak")
         try:
             jb.add_account(identity, username, password=password, email=email,
-                           two_fa=two_fa, va=va, notes=notes)
+                           two_fa=two_fa, two_fa_validated=two_fa_validated,
+                           va=va, notes=notes)
         except ValueError as e:
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
             return _error(f"❌ Ajout échoué : {e}", tab="jailbreak")
         return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b>", tab="jailbreak")
+
+    @app.route("/jailbreak/bulk_add_accounts", methods=["POST"])
+    def jailbreak_bulk_add_accounts():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        va = (request.form.get("va") or "").strip()
+        usernames_raw = request.form.get("usernames") or ""
+        if not identity:
+            return _error("❌ Identité manquante", tab="jailbreak")
+        # Parse : 1 username par ligne. Aussi tolerer separateurs , ; et tabs.
+        usernames = []
+        for chunk in usernames_raw.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines():
+            u = chunk.strip().lstrip("@")
+            if u:
+                usernames.append(u)
+        if not usernames:
+            return _error("❌ Aucun username fourni", tab="jailbreak")
+        try:
+            res = jb.bulk_add_accounts(identity, usernames, va=va)
+        except ValueError as e:
+            return _error(f"❌ {e}", tab="jailbreak")
+        except Exception as e:
+            return _error(f"❌ Bulk add échoué : {e}", tab="jailbreak")
+        parts = [f"<b>{res['added']}</b> comptes ajoutés"]
+        if res['skipped_dup']:
+            parts.append(f"{res['skipped_dup']} doublons ignorés")
+        if res['skipped_invalid']:
+            parts.append(f"{res['skipped_invalid']} invalides")
+        if va:
+            parts.append(f"sous VA <b>{va}</b>")
+        return _success("✅ " + " · ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/edit_account", methods=["POST"])
     def jailbreak_edit_account():
@@ -23602,6 +23764,7 @@ def create_app():
             password=(request.form.get("password") or "").strip(),
             email=(request.form.get("email") or "").strip(),
             two_fa=(request.form.get("two_fa") or "").strip(),
+            two_fa_validated=(request.form.get("two_fa_validated") or "").strip().lower() in ("on", "1", "true"),
             va=(request.form.get("va") or "").strip(),
             notes=(request.form.get("notes") or "").strip(),
         )

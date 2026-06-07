@@ -139,7 +139,7 @@ def list_all() -> Dict[str, Dict[str, Any]]:
 
 def add_account(identity: str, username: str, password: str = "",
                 email: str = "", notes: str = "", two_fa: str = "",
-                va: str = "") -> Dict[str, Any]:
+                va: str = "", two_fa_validated: bool = False) -> Dict[str, Any]:
     """Ajoute un compte. Si va est fourni et n existe pas encore dans la liste
     des vas de l identite, il y est ajoute automatiquement."""
     identity = (identity or "").strip().lower()
@@ -162,12 +162,15 @@ def add_account(identity: str, username: str, password: str = "",
     while new_id in used_ids:
         new_id += 1
     va_clean = (va or "").strip()[:60]
+    two_fa_clean = (two_fa or "").strip()[:500]
     acct = {
         "id": new_id,
         "username": username,
         "password": (password or "").strip()[:200],
         "email": (email or "").strip()[:120],
-        "two_fa": (two_fa or "").strip()[:500],
+        "two_fa": two_fa_clean,
+        # Validated uniquement si on a un 2FA non vide ET le flag est True
+        "two_fa_validated": bool(two_fa_validated) and bool(two_fa_clean),
         "va": va_clean,
         "notes": (notes or "").strip()[:500],
         "created_at": int(time.time()),
@@ -191,7 +194,7 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
     entry = data.get(identity)
     if not entry:
         return False
-    allowed = {"username", "password", "email", "two_fa", "va", "notes"}
+    allowed = {"username", "password", "email", "two_fa", "va", "notes", "two_fa_validated"}
     found = False
     for acct in entry["accounts"]:
         if int(acct.get("id", 0)) == int(account_id):
@@ -203,9 +206,18 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
                             continue  # ne pas vider le username
                     elif k == "va":
                         v = str(v or "").strip()[:60]
+                    elif k == "two_fa_validated":
+                        # Bool field. Coerce les valeurs string ("on", "1", "true") en True.
+                        if isinstance(v, str):
+                            v = v.strip().lower() in ("on", "1", "true", "yes")
+                        else:
+                            v = bool(v)
                     else:
                         v = str(v or "").strip()[:500]
                     acct[k] = v
+            # Coherence : si two_fa est vide, two_fa_validated doit etre False
+            if not (acct.get("two_fa") or "").strip():
+                acct["two_fa_validated"] = False
             acct["updated_at"] = int(time.time())
             # Si on a touche au va, assurer qu il existe dans la liste
             if "va" in fields:
@@ -217,6 +229,79 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
     if found:
         _save(data)
     return found
+
+
+def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict[str, Any]:
+    """Cree plusieurs comptes 'skeleton' (juste username + va) en une fois.
+    L user complete plus tard les autres champs via Edit.
+
+    Returns : {added: int, skipped_dup: int, skipped_invalid: int,
+               added_usernames: [...], skipped_dups: [...]}
+    Dedupe : ne re-cree pas un compte dont le username existe deja pour
+    cette identite (case-insensitive)."""
+    identity = (identity or "").strip().lower()
+    if not identity:
+        raise ValueError("Identite vide")
+    if not usernames:
+        return {"added": 0, "skipped_dup": 0, "skipped_invalid": 0,
+                "added_usernames": [], "skipped_dups": []}
+    data = _load()
+    entry = _ensure_identity(data, identity)
+    va_clean = (va or "").strip()[:60]
+    # Set des usernames existants pour dedupe
+    existing = {(a.get("username") or "").strip().lower(): True
+                for a in entry["accounts"]}
+    # IDs deja utilises (globalement)
+    used_ids = set()
+    for k, v in data.items():
+        for a in (v.get("accounts") or []):
+            try:
+                used_ids.add(int(a.get("id", 0)))
+            except Exception:
+                pass
+    added_usernames: List[str] = []
+    skipped_dups: List[str] = []
+    skipped_invalid = 0
+    next_id = int(time.time() * 1000)
+    now_ts = int(time.time())
+    for raw in usernames:
+        u = (raw or "").strip().lstrip("@")[:80]
+        if not u:
+            skipped_invalid += 1
+            continue
+        if u.lower() in existing:
+            skipped_dups.append(u)
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        acct = {
+            "id": next_id,
+            "username": u,
+            "password": "",
+            "email": "",
+            "two_fa": "",
+            "two_fa_validated": False,
+            "va": va_clean,
+            "notes": "",
+            "created_at": now_ts,
+        }
+        entry["accounts"].append(acct)
+        used_ids.add(next_id)
+        existing[u.lower()] = True
+        added_usernames.append(u)
+        next_id += 1
+    # Si va donne et n existe pas dans la liste -> ajoute auto
+    if va_clean and added_usernames:
+        if not any(_va_name(v).lower() == va_clean.lower() for v in entry["vas"]):
+            entry["vas"].append({"name": va_clean, "discord_username": ""})
+    _save(data)
+    return {
+        "added": len(added_usernames),
+        "skipped_dup": len(skipped_dups),
+        "skipped_invalid": skipped_invalid,
+        "added_usernames": added_usernames,
+        "skipped_dups": skipped_dups,
+    }
 
 
 def remove_account(identity: str, account_id: int) -> bool:
