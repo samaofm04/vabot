@@ -61,10 +61,13 @@ def list_all() -> Dict[str, List[Dict[str, Any]]]:
 
 
 def add_account(identity: str, username: str, password: str = "",
-                email: str = "", notes: str = "", two_fa: str = "") -> Dict[str, Any]:
+                email: str = "", notes: str = "", two_fa: str = "",
+                va: str = "") -> Dict[str, Any]:
     """Ajoute un compte a une identite. Retourne le compte ajoute.
 
     two_fa : secret TOTP / codes de backup / SMS / autre - texte libre 500 chars.
+    va : nom du VA (assistante virtuelle) responsable de ce compte - texte libre.
+         Permet de grouper les comptes par VA dans l UI.
     """
     identity = (identity or "").strip().lower()
     if not identity:
@@ -75,14 +78,24 @@ def add_account(identity: str, username: str, password: str = "",
     data = _load()
     if identity not in data or not isinstance(data[identity], list):
         data[identity] = []
-    # ID unique = timestamp en ms (collision improbable pour l usage)
+    # ID unique = timestamp en ms. Si collision (adds rapides), on incremente
+    # jusqu a trouver un id libre. Check sur TOUTES les identites pour eviter
+    # toute collision globale.
+    used_ids = set()
+    for k, accts in data.items():
+        if isinstance(accts, list):
+            for a in accts:
+                used_ids.add(int(a.get("id", 0)))
     new_id = int(time.time() * 1000)
+    while new_id in used_ids:
+        new_id += 1
     acct = {
         "id": new_id,
         "username": username,
         "password": (password or "").strip()[:200],
         "email": (email or "").strip()[:120],
         "two_fa": (two_fa or "").strip()[:500],
+        "va": (va or "").strip()[:60],
         "notes": (notes or "").strip()[:500],
         "created_at": int(time.time()),
     }
@@ -91,8 +104,21 @@ def add_account(identity: str, username: str, password: str = "",
     return acct
 
 
+def list_vas_for_identity(identity: str) -> List[str]:
+    """Liste des VAs uniques presents sur les comptes d une identite.
+    Utile pour autocomplete dans l UI."""
+    identity = (identity or "").strip().lower()
+    accts = list_accounts(identity)
+    seen = []
+    for a in accts:
+        va = (a.get("va") or "").strip()
+        if va and va not in seen:
+            seen.append(va)
+    return seen
+
+
 def update_account(identity: str, account_id: int, **fields) -> bool:
-    """Met a jour les champs d un compte (username/password/email/two_fa/notes).
+    """Met a jour les champs d un compte (username/password/email/two_fa/va/notes).
     Retourne True si trouve + mis a jour."""
     identity = (identity or "").strip().lower()
     if not identity:
@@ -100,7 +126,7 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
     data = _load()
     if identity not in data:
         return False
-    allowed = {"username", "password", "email", "two_fa", "notes"}
+    allowed = {"username", "password", "email", "two_fa", "va", "notes"}
     found = False
     for acct in data[identity]:
         if int(acct.get("id", 0)) == int(account_id):

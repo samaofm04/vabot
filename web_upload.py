@@ -13986,6 +13986,10 @@ def _render_jailbreak_html() -> str:
         ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
         ".jb-acct-btn.danger:hover{border-color:#ef4444;color:#ef4444}"
         ".jb-empty{color:#666;font-size:12px;padding:14px;text-align:center;background:#0f0f0f;border:1px dashed #232323;border-radius:10px;margin-top:8px}"
+        ".jb-va-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;margin-bottom:6px;padding:8px 12px;background:linear-gradient(135deg,rgba(168,85,247,.08),rgba(168,85,247,.02));border:1px solid rgba(168,85,247,.18);border-radius:8px;font-size:12px;color:#c084fc;font-weight:600}"
+        ".jb-va-head.jb-va-none{background:linear-gradient(135deg,rgba(120,120,120,.05),rgba(120,120,120,.02));border-color:#2a2a2a;color:#888}"
+        ".jb-va-count{background:rgba(168,85,247,.15);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
+        ".jb-va-head.jb-va-none .jb-va-count{background:#1a1a1a;color:#888}"
         # Modal
         ".jb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:20px}"
         ".jb-overlay.show{display:flex}"
@@ -13997,6 +14001,17 @@ def _render_jailbreak_html() -> str:
         ".jb-modal textarea{resize:vertical;min-height:60px}"
         "</style>"
     )
+
+    # Datalist global des VAs deja utilises (autocomplete dans le modal)
+    all_vas = sorted({
+        (a.get("va") or "").strip()
+        for accts in all_accounts.values() if isinstance(accts, list)
+        for a in accts
+        if (a.get("va") or "").strip()
+    })
+    datalist_html = "<datalist id='jb-va-suggestions'>" + "".join(
+        f"<option value='{html_escape(v)}'>" for v in all_vas
+    ) + "</datalist>"
 
     # Section per identite
     if not identities:
@@ -14025,39 +14040,67 @@ def _render_jailbreak_html() -> str:
             if not accts:
                 card += "<div class='jb-empty'>Aucun compte pour le moment</div>"
             else:
+                # Groupe les comptes par VA. Cles vides -> regroupees sous '(sans VA)'.
+                # Preserve l ordre d apparition des VAs.
+                groups: dict = {}
+                order: list = []
                 for a in accts:
-                    aid = int(a.get("id", 0))
-                    username = html_escape(str(a.get("username", "?")))
-                    email = html_escape(str(a.get("email", "")))
-                    notes = str(a.get("notes", ""))
-                    has_pwd = bool(a.get("password"))
-                    has_2fa = bool(a.get("two_fa"))
-                    meta_parts = []
-                    if email: meta_parts.append(f"✉ {email}")
-                    if has_pwd: meta_parts.append("🔑 mdp")
-                    if has_2fa: meta_parts.append("🔐 2FA")
-                    if notes: meta_parts.append(f"📝 {html_escape(notes[:40])}{'...' if len(notes) > 40 else ''}")
-                    meta = " · ".join(meta_parts) if meta_parts else "(aucune info)"
-                    # JS-escape pour les onclick (utilise json.dumps pour proprete)
-                    a_json = json.dumps({
-                        "id": aid,
-                        "username": a.get("username", ""),
-                        "password": a.get("password", ""),
-                        "email": a.get("email", ""),
-                        "two_fa": a.get("two_fa", ""),
-                        "notes": a.get("notes", ""),
-                    }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
-                    card += (
-                        f"<div class='jb-acct'>"
-                        f"<div class='jb-acct-icon'>👤</div>"
-                        f"<div class='jb-acct-main'>"
-                        f"<div class='jb-acct-username'><code>@{username}</code></div>"
-                        f"<div class='jb-acct-meta'>{meta}</div>"
-                        f"</div>"
-                        f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc)}','{a_json}')\">Edit</button>"
-                        f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc)}',{aid},'{username}')\">×</button>"
-                        f"</div>"
-                    )
+                    va_key = (a.get("va") or "").strip() or "__no_va__"
+                    if va_key not in groups:
+                        groups[va_key] = []
+                        order.append(va_key)
+                    groups[va_key].append(a)
+                for va_key in order:
+                    group_accts = groups[va_key]
+                    if va_key == "__no_va__":
+                        va_label_html = (
+                            "<div class='jb-va-head jb-va-none'>"
+                            "<span>👥 Sans VA assigné</span>"
+                            f"<span class='jb-va-count'>{len(group_accts)}</span>"
+                            "</div>"
+                        )
+                    else:
+                        va_safe = html_escape(va_key)
+                        va_label_html = (
+                            f"<div class='jb-va-head'>"
+                            f"<span>👤 VA : <b>{va_safe}</b></span>"
+                            f"<span class='jb-va-count'>{len(group_accts)} compte{'s' if len(group_accts) > 1 else ''}</span>"
+                            f"</div>"
+                        )
+                    card += va_label_html
+                    for a in group_accts:
+                        aid = int(a.get("id", 0))
+                        username = html_escape(str(a.get("username", "?")))
+                        email = html_escape(str(a.get("email", "")))
+                        notes = str(a.get("notes", ""))
+                        has_pwd = bool(a.get("password"))
+                        has_2fa = bool(a.get("two_fa"))
+                        meta_parts = []
+                        if email: meta_parts.append(f"✉ {email}")
+                        if has_pwd: meta_parts.append("🔑 mdp")
+                        if has_2fa: meta_parts.append("🔐 2FA")
+                        if notes: meta_parts.append(f"📝 {html_escape(notes[:40])}{'...' if len(notes) > 40 else ''}")
+                        meta = " · ".join(meta_parts) if meta_parts else "(aucune info)"
+                        a_json = json.dumps({
+                            "id": aid,
+                            "username": a.get("username", ""),
+                            "password": a.get("password", ""),
+                            "email": a.get("email", ""),
+                            "two_fa": a.get("two_fa", ""),
+                            "va": a.get("va", ""),
+                            "notes": a.get("notes", ""),
+                        }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+                        card += (
+                            f"<div class='jb-acct'>"
+                            f"<div class='jb-acct-icon'>👤</div>"
+                            f"<div class='jb-acct-main'>"
+                            f"<div class='jb-acct-username'><code>@{username}</code></div>"
+                            f"<div class='jb-acct-meta'>{meta}</div>"
+                            f"</div>"
+                            f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc)}','{a_json}')\">Edit</button>"
+                            f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc)}',{aid},'{username}')\">×</button>"
+                            f"</div>"
+                        )
             card += "</div>"
             cards.append(card)
         body = "".join(cards)
@@ -14133,6 +14176,9 @@ def _render_jailbreak_html() -> str:
         "<input type='text' name='password' id='jb-modal-password' maxlength='200' placeholder='(optionnel)'>"
         "<label>Email</label>"
         "<input type='email' name='email' id='jb-modal-email' maxlength='120' placeholder='(optionnel)'>"
+        "<label>👤 VA assigné <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(optionnel — tape le nom)</span></label>"
+        "<input type='text' name='va' id='jb-modal-va' maxlength='60' "
+        "list='jb-va-suggestions' placeholder='ex: Marie, Paul, ...'>"
         "<label>🔐 2FA <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(secret TOTP / codes backup / SMS)</span></label>"
         "<textarea name='two_fa' id='jb-modal-two-fa' maxlength='500' placeholder='ex: JBSWY3DPEHPK3PXP (secret TOTP)&#10;ou codes backup, 1 par ligne'></textarea>"
         "<label>Notes</label>"
@@ -14156,6 +14202,7 @@ def _render_jailbreak_html() -> str:
         "  document.getElementById('jb-modal-username').value = '';"
         "  document.getElementById('jb-modal-password').value = '';"
         "  document.getElementById('jb-modal-email').value = '';"
+        "  document.getElementById('jb-modal-va').value = '';"
         "  document.getElementById('jb-modal-two-fa').value = '';"
         "  document.getElementById('jb-modal-notes').value = '';"
         "  document.getElementById('jb-modal-overlay').classList.add('show');"
@@ -14171,6 +14218,7 @@ def _render_jailbreak_html() -> str:
         "    document.getElementById('jb-modal-username').value = d.username || '';"
         "    document.getElementById('jb-modal-password').value = d.password || '';"
         "    document.getElementById('jb-modal-email').value = d.email || '';"
+        "    document.getElementById('jb-modal-va').value = d.va || '';"
         "    document.getElementById('jb-modal-two-fa').value = d.two_fa || '';"
         "    document.getElementById('jb-modal-notes').value = d.notes || '';"
         "    document.getElementById('jb-modal-overlay').classList.add('show');"
@@ -14244,7 +14292,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + body + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + body + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -23090,6 +23138,7 @@ def create_app():
         password = (request.form.get("password") or "").strip()
         email = (request.form.get("email") or "").strip()
         two_fa = (request.form.get("two_fa") or "").strip()
+        va = (request.form.get("va") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity:
             return _error("❌ Identité manquante", tab="jailbreak")
@@ -23097,7 +23146,7 @@ def create_app():
             return _error("❌ Username manquant", tab="jailbreak")
         try:
             jb.add_account(identity, username, password=password, email=email,
-                           two_fa=two_fa, notes=notes)
+                           two_fa=two_fa, va=va, notes=notes)
         except ValueError as e:
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
@@ -23125,6 +23174,7 @@ def create_app():
             password=(request.form.get("password") or "").strip(),
             email=(request.form.get("email") or "").strip(),
             two_fa=(request.form.get("two_fa") or "").strip(),
+            va=(request.form.get("va") or "").strip(),
             notes=(request.form.get("notes") or "").strip(),
         )
         if not ok:
