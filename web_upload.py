@@ -4058,6 +4058,12 @@ def _get_insta_3_for_va(user_id) -> list:
 INSTA_REFRESH_STATE_FILE = DATA_DIR / "insta_refresh_state.json"
 import threading as _threading_mod
 _REFRESH_LOCK = _threading_mod.Lock()
+# Lock dedie au cache stats : protege le read-modify-write de
+# va_insta_3_stats_cache.json. Sans lui, les 4 workers paralleles du
+# refresh s ecrasent mutuellement leurs ecritures (chaque worker load le
+# fichier entier, ajoute SON handle, re-save le tout) -> la plupart des
+# resultats sont perdus et les comptes restent "NON SCRAPÉ".
+_CACHE_LOCK = _threading_mod.RLock()
 
 
 def _load_refresh_state() -> dict:
@@ -4105,6 +4111,8 @@ def _all_tracked_handles() -> set:
             if not isinstance(_ident_data, dict):
                 continue
             for _acc in (_ident_data.get("accounts") or []):
+                if not isinstance(_acc, dict):
+                    continue  # defensif : entree malformee (string legacy)
                 raw = (_acc.get("username") or "").strip()
                 if not raw:
                     continue
@@ -4235,7 +4243,8 @@ def _daily_insta_loop():
 
 
 def _run_daily_insta_refresh_smart():
-    """Skip les handles dont le cache est encore frais (< 24h).
+    """Skip les handles dont le cache est encore frais (< _INSTA_3_STATS_TTL,
+    soit 8h pour aligner le refresh 3x/jour).
     Utilise au boot pour pre-warmer sans hammerer IG en cas de redemarrage."""
     import time as _t_dr
     cache = _load_insta_3_stats_cache()
@@ -4367,8 +4376,27 @@ def _load_insta_3_stats_cache() -> dict:
 
 
 def _save_insta_3_stats_cache(d: dict):
+    """Ecriture atomique (temp + replace) pour ne jamais laisser un fichier
+    JSON tronque si 2 ecritures se croisent ou si le process meurt en plein
+    write."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VA_INSTA_3_STATS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp = VA_INSTA_3_STATS_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    import os as _os_sv
+    _os_sv.replace(tmp, VA_INSTA_3_STATS_FILE)
+
+
+def _cache_put_stats(handle: str, entry: dict):
+    """Merge thread-safe d UN handle dans le cache stats.
+
+    Re-load le fichier SOUS le lock juste avant d ecrire, pour ne pas
+    ecraser les ecritures concurrentes des autres workers (sinon la plupart
+    des resultats du refresh parallele sont perdus). C est le fix du bug
+    'tout reste NON SCRAPÉ'."""
+    with _CACHE_LOCK:
+        cur = _load_insta_3_stats_cache()
+        cur[handle] = entry
+        _save_insta_3_stats_cache(cur)
 
 
 def _verify_ig_profile_exists(handle: str) -> bool:
@@ -4414,21 +4442,37 @@ def _scrape_via_ig_public(handle: str) -> dict:
 
     Retourne {profile: {...}, reels: [...]} au format compatible
     avec ce que scrape_profile renvoie.
+
+    Anti-429 : petit jitter avant la requete (desynchronise les 4 workers
+    paralleles), + 1 retry avec backoff si Instagram renvoie un rate-limit
+    429. Evite que tout un batch (~40 handles) parte exactement en meme
+    temps et se fasse jeter d un coup.
     """
-    try:
-        import requests
-        r = requests.get(
-            f"https://www.instagram.com/api/v1/users/web_profile_info/?username={handle}",
-            headers={
-                "X-IG-App-ID": "936619743392459",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "*/*",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=15,
-        )
-    except Exception as e:
-        return {"error": f"reseau IG public: {e}"}
+    import requests
+    import time as _t_sc
+    import random as _rnd_sc
+    # Jitter initial 0-1.2s : etale les departs des workers concurrents
+    _t_sc.sleep(_rnd_sc.uniform(0.0, 1.2))
+    _headers = {
+        "X-IG-App-ID": "936619743392459",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    _url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={handle}"
+    r = None
+    for _attempt in range(2):  # 1 essai + 1 retry sur 429
+        try:
+            r = requests.get(_url, headers=_headers, timeout=15)
+        except Exception as e:
+            return {"error": f"reseau IG public: {e}"}
+        if r.status_code == 429 and _attempt == 0:
+            # Backoff avant retry : 3-6s + jitter
+            _t_sc.sleep(_rnd_sc.uniform(3.0, 6.0))
+            continue
+        break
+    if r is None:
+        return {"error": "reseau IG public: pas de reponse"}
     if r.status_code == 404:
         return {"error": f"🚫 Compte banni ou supprimé (@{handle})", "banned": True}
     if r.status_code == 429:
@@ -4517,8 +4561,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                 err_msg = f"🚫 Compte banni ou supprimé (@{h})"
                 is_banned = True
         out = {"error": err_msg, "banned": is_banned, "scraped_at": now_ts}
-        cache[h] = out
-        _save_insta_3_stats_cache(cache)
+        _cache_put_stats(h, out)
         return out
 
     import datetime as _dt_s
@@ -4593,8 +4636,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "posts_count": posts_count,
         "preview": preview,
     }
-    cache[h] = out
-    _save_insta_3_stats_cache(cache)
+    _cache_put_stats(h, out)
     return out
 
 
@@ -14379,6 +14421,8 @@ def _render_jailbreak_html() -> str:
         n_total = len(va_accts)
         n_ok = n_banned = 0
         for a in va_accts:
+            if not isinstance(a, dict):
+                continue
             raw = str(a.get("username", ""))
             hn = _normalize_insta_handle(raw) if callable(_normalize_insta_handle) else raw.lower().lstrip("@")
             st = ig_stats_cache.get(hn) or {}
@@ -14415,6 +14459,9 @@ def _render_jailbreak_html() -> str:
             else:
                 accts = entry.get("accounts") or []
                 explicit_vas = list(entry.get("vas") or [])
+            # Defensif : ne garder que les comptes bien formes (dict). Une entree
+            # corrompue (string legacy) ferait planter tout le rendu de la page.
+            accts = [a for a in accts if isinstance(a, dict)]
             avatar_letter = html_escape(ident[:1].upper())
             avatar_hue = sum(ord(c) for c in ident) % 360
             n_accts_total = len(accts)
@@ -15305,9 +15352,11 @@ def _render_jailbreak_html() -> str:
         "function jbPollScrape(btn, ico, lbl){"
         # Poll l etat du refresh toutes les 4s ; quand idle -> reload pour voir les stats
         "  var tries = 0;"
+        "  var errs = 0;"
         "  var iv = setInterval(function(){"
         "    tries++;"
         "    fetch('/insta/refresh_status').then(function(r){ return r.json(); }).then(function(s){"
+        "      errs = 0;"  # reset compteur d erreurs sur succes
         "      var stt = (s && s.state) ? s.state.status : null;"
         "      if(stt === 'idle' && tries > 1){"
         "        clearInterval(iv);"
@@ -15319,7 +15368,14 @@ def _render_jailbreak_html() -> str:
         "        jbResetScrapeBtn(btn, ico, lbl);"
         "        if(typeof showToast === 'function') showToast('Scrape long — recharge la page manuellement', 'info', 3000);"
         "      }"
-        "    }).catch(function(){});"
+        "    }).catch(function(e){"
+        "      errs++;"  # apres 3 echecs reseau consecutifs on abandonne le poll
+        "      if(errs >= 3){"
+        "        clearInterval(iv);"
+        "        jbResetScrapeBtn(btn, ico, lbl);"
+        "        if(typeof showToast === 'function') showToast('⚠ Connexion perdue durant le scrape — recharge manuellement', 'error', 3500);"
+        "      }"
+        "    });"
         "  }, 4000);"
         "}"
         "function jbResetScrapeBtn(btn, ico, lbl){"
@@ -26849,14 +26905,21 @@ def create_app():
     @app.route("/insta/refresh_now", methods=["POST"])
     def insta_refresh_now():
         """Trigger un refresh complet en arriere-plan.
-        Retourne immediatement, le refresh tourne en thread."""
+        Retourne immediatement, le refresh tourne en thread.
+
+        Probe directement _REFRESH_LOCK (au lieu de juste lire le state file)
+        pour eviter le TOCTOU : si un refresh tourne deja (daemon 3x/jour ou
+        autre clic), on refuse proprement au lieu de spawn un thread qui
+        no-op et renvoie quand meme ok:True."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
-        # Si lock deja pris, on refuse
-        st = _load_refresh_state()
-        if st.get("status") == "in_progress":
+        # Probe non-bloquant : si on n arrive pas a prendre le lock, un refresh
+        # tourne deja. On relache aussitot (le thread bg le re-prendra).
+        if not _REFRESH_LOCK.acquire(blocking=False):
+            st = _load_refresh_state()
             return jsonify({"ok": False, "error": "Un refresh est deja en cours", "state": st})
+        _REFRESH_LOCK.release()
         # Lance en thread background
         import threading as _th2
         def _bg():
