@@ -14004,9 +14004,23 @@ def _render_jailbreak_html() -> str:
         ".jb-section.collapsed .jb-section-toggle svg{transform:rotate(-90deg)}"
         ".jb-section-body{display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height .25s ease,opacity .15s,padding .15s;max-height:2000px;opacity:1;padding:8px 4px 4px}"
         ".jb-section.collapsed .jb-section-body{max-height:0;opacity:0;padding-top:0;padding-bottom:0;pointer-events:none}"
-        # Bouton + Ajouter compte (en bas du body)
-        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.3);align-self:flex-start;margin-top:6px}"
+        # Bouton + Ajouter compte (en bas de chaque groupe VA)
+        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.25);align-self:flex-start;margin-top:6px}"
         ".jb-add-account-btn:hover{background:#db2777}"
+        # Bouton + Ajouter un VA (en bas de la carte identite)
+        ".jb-add-va-btn{background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:9px 16px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(168,85,247,.3);align-self:flex-start;margin-top:8px;transition:all .15s}"
+        ".jb-add-va-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(168,85,247,.4)}"
+        # Sous-section VA dans la carte identite
+        ".jb-va-group{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;transition:border-color .15s}"
+        ".jb-va-group:hover{border-color:rgba(168,85,247,.25)}"
+        ".jb-va-group-novote{background:#0a0a0a}"
+        ".jb-va-group-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 2px;margin-bottom:3px}"
+        ".jb-va-group-name{display:flex;align-items:center;gap:7px;flex:1;min-width:0;font-size:12px;color:#c084fc;font-weight:600}"
+        ".jb-va-group-name b{color:#fff;font-weight:700}"
+        ".jb-va-icon{font-size:13px;flex-shrink:0}"
+        ".jb-va-group-count{background:rgba(168,85,247,.18);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
+        ".jb-va-remove-btn{background:transparent;border:1px solid #232323;color:#666;width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;padding:0}"
+        ".jb-va-remove-btn:hover{border-color:#ef4444;color:#ef4444}"
         # Ligne de compte (compact, style screenshot)
         ".jb-acct{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;border:1px solid transparent;transition:all .12s}"
         ".jb-acct:hover{background:rgba(255,255,255,.03);border-color:#232323}"
@@ -14066,7 +14080,15 @@ def _render_jailbreak_html() -> str:
         sections = []
         for ident in identities:
             ident_lc = ident.lower()
-            accts = all_accounts.get(ident_lc, [])
+            entry = all_accounts.get(ident_lc) or {}
+            # New v2 format : {vas: [...], accounts: [...]}
+            if isinstance(entry, list):
+                # Defensive : old data not yet migrated (shouldn t happen since _load migrates)
+                accts = entry
+                explicit_vas = []
+            else:
+                accts = entry.get("accounts") or []
+                explicit_vas = list(entry.get("vas") or [])
             avatar_letter = ident[:1].upper()
             avatar_hue = sum(ord(c) for c in ident) % 360
             n = len(accts)
@@ -14099,59 +14121,105 @@ def _render_jailbreak_html() -> str:
                 f"</button>"
                 f"</div>"
             )
-            # Body
+            # Body : 1 sous-section par VA + 1 zone "sans VA" + bouton "+ Ajouter un VA"
             section_body = "<div class='jb-section-body'>"
-            if not accts:
-                section_body += "<div class='jb-empty-section'>Aucun compte pour cette identité</div>"
-            else:
-                # Groupe par VA, preserve l ordre d apparition
-                groups: dict = {}
-                order: list = []
-                for a in accts:
-                    va_key = (a.get("va") or "").strip() or "__no_va__"
-                    if va_key not in groups:
-                        groups[va_key] = []
-                        order.append(va_key)
-                    groups[va_key].append(a)
-                for va_key in order:
-                    group_accts = groups[va_key]
-                    for a in group_accts:
-                        aid = int(a.get("id", 0))
-                        username = html_escape(str(a.get("username", "?")))
-                        email = html_escape(str(a.get("email", "")))
-                        va_name = (a.get("va") or "").strip()
-                        has_pwd = bool(a.get("password"))
-                        has_2fa = bool(a.get("two_fa"))
-                        meta_parts = []
-                        if va_name:
-                            meta_parts.append(f"<span class='jb-va-pill'>👤 VA : {html_escape(va_name)}</span>")
-                        if email: meta_parts.append(f"<span>✉ {email}</span>")
-                        if has_pwd: meta_parts.append("<span>🔑 mdp</span>")
-                        if has_2fa: meta_parts.append("<span>🔐 2FA</span>")
-                        meta_html = "".join(meta_parts)
-                        a_json = json.dumps({
-                            "id": aid,
-                            "username": a.get("username", ""),
-                            "password": a.get("password", ""),
-                            "email": a.get("email", ""),
-                            "two_fa": a.get("two_fa", ""),
-                            "va": a.get("va", ""),
-                            "notes": a.get("notes", ""),
-                        }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
-                        section_body += (
-                            f"<div class='jb-acct' data-username='{username}' data-va='{html_escape(va_name)}'>"
-                            f"<div class='jb-acct-icon'>👤</div>"
-                            f"<div class='jb-acct-main'>"
-                            f"<div class='jb-acct-username'>@{username}</div>"
-                            + (f"<div class='jb-acct-meta'>{meta_html}</div>" if meta_html else "")
-                            + f"</div>"
-                            f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc)}','{a_json}')\">Edit</button>"
-                            f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc)}',{aid},'{username}')\">×</button>"
-                            f"</div>"
-                        )
-            # + Ajouter compte (toujours visible dans le body)
+            # Construire la liste finale des VAs a afficher :
+            # explicit_vas (ordre user) + tout va present sur un compte mais pas dans explicit
+            display_vas: list = list(explicit_vas)
+            display_vas_lc = {v.lower() for v in display_vas}
+            for a in accts:
+                va = (a.get("va") or "").strip()
+                if va and va.lower() not in display_vas_lc:
+                    display_vas.append(va)
+                    display_vas_lc.add(va.lower())
+
+            def _render_account_row(a: dict, ident_lc_arg: str) -> str:
+                aid = int(a.get("id", 0))
+                username = html_escape(str(a.get("username", "?")))
+                email = html_escape(str(a.get("email", "")))
+                va_name = (a.get("va") or "").strip()
+                has_pwd = bool(a.get("password"))
+                has_2fa = bool(a.get("two_fa"))
+                meta_parts = []
+                if email:
+                    meta_parts.append(f"<span>✉ {email}</span>")
+                if has_pwd:
+                    meta_parts.append("<span>🔑 mdp</span>")
+                if has_2fa:
+                    meta_parts.append("<span>🔐 2FA</span>")
+                meta_html = "".join(meta_parts)
+                a_json = json.dumps({
+                    "id": aid,
+                    "username": a.get("username", ""),
+                    "password": a.get("password", ""),
+                    "email": a.get("email", ""),
+                    "two_fa": a.get("two_fa", ""),
+                    "va": a.get("va", ""),
+                    "notes": a.get("notes", ""),
+                }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+                return (
+                    f"<div class='jb-acct' data-username='{username}' data-va='{html_escape(va_name)}'>"
+                    f"<div class='jb-acct-icon'>👤</div>"
+                    f"<div class='jb-acct-main'>"
+                    f"<div class='jb-acct-username'>@{username}</div>"
+                    + (f"<div class='jb-acct-meta'>{meta_html}</div>" if meta_html else "")
+                    + f"</div>"
+                    f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}')\">Edit</button>"
+                    f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}')\">×</button>"
+                    f"</div>"
+                )
+
+            # Sous-section par VA
+            for va_name in display_vas:
+                va_accts = [a for a in accts if (a.get("va") or "").strip().lower() == va_name.lower()]
+                va_safe = html_escape(va_name)
+                ident_safe = html_escape(ident_lc)
+                section_body += (
+                    f"<div class='jb-va-group' data-va='{va_safe}'>"
+                    f"<div class='jb-va-group-head'>"
+                    f"<div class='jb-va-group-name'>"
+                    f"<span class='jb-va-icon'>👤</span>"
+                    f"<span>VA : <b>{va_safe}</b></span>"
+                    f"<span class='jb-va-group-count'>{len(va_accts)}</span>"
+                    f"</div>"
+                    f"<button type='button' class='jb-va-remove-btn' "
+                    f"onclick=\"jbRemoveVa('{ident_safe}','{va_safe}')\" title='Retirer ce VA'>×</button>"
+                    f"</div>"
+                )
+                for a in va_accts:
+                    section_body += _render_account_row(a, ident_lc)
+                section_body += (
+                    f"<button type='button' class='jb-add-account-btn' "
+                    f"onclick=\"jbOpenAddModal('{ident_safe}','{va_safe}')\">+ Ajouter un compte sous {va_safe}</button>"
+                    f"</div>"
+                )
+
+            # Zone "sans VA" — uniquement si au moins 1 compte sans VA
+            no_va_accts = [a for a in accts if not (a.get("va") or "").strip()]
+            if no_va_accts:
+                section_body += (
+                    "<div class='jb-va-group jb-va-group-novote'>"
+                    "<div class='jb-va-group-head'>"
+                    "<div class='jb-va-group-name'>"
+                    "<span class='jb-va-icon' style='color:#888'>👥</span>"
+                    f"<span style='color:#888'>Sans VA</span>"
+                    f"<span class='jb-va-group-count' style='background:#1a1a1a;color:#888'>{len(no_va_accts)}</span>"
+                    "</div>"
+                    "</div>"
+                )
+                for a in no_va_accts:
+                    section_body += _render_account_row(a, ident_lc)
+                section_body += "</div>"
+
+            # Si aucun VA et aucun compte
+            if not display_vas and not no_va_accts:
+                section_body += "<div class='jb-empty-section'>Aucun VA ni compte pour cette identité — commence par ajouter un VA ci-dessous</div>"
+
+            # Bouton "+ Ajouter un VA" en bas du body (toujours visible)
+            ident_safe = html_escape(ident_lc)
             section_body += (
-                f"<button type='button' class='jb-add-account-btn' onclick=\"jbOpenAddModal('{html_escape(ident_lc)}')\">+ Ajouter un compte</button>"
+                f"<button type='button' class='jb-add-va-btn' "
+                f"onclick=\"jbOpenAddVaModal('{ident_safe}')\">+ Ajouter un VA</button>"
                 f"</div>"
             )
             sections.append(section_head + section_body + "</div>")
@@ -14185,6 +14253,29 @@ def _render_jailbreak_html() -> str:
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseEditIdentityModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
         "<button type='submit' style='background:#3b82f6;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
+
+    # Modal AJOUTER UN VA
+    add_va_modal = (
+        "<div id='jb-add-va-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseAddVaModal()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3>+ Ajouter un VA</h3>"
+        "<form id='jb-add-va-form' method='POST' action='/jailbreak/add_va'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='identity' id='jb-add-va-identity'>"
+        "<label>Nom du VA <span style='color:#ef4444'>*</span></label>"
+        "<input type='text' name='va_name' id='jb-add-va-name' required maxlength='60' "
+        "list='jb-va-suggestions' placeholder='ex: Marie, Paul, ...'>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>"
+        "Le VA pourra ensuite gérer ses propres comptes."
+        "</small>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseAddVaModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -14232,7 +14323,9 @@ def _render_jailbreak_html() -> str:
         "<input type='text' name='password' id='jb-modal-password' maxlength='200' placeholder='(optionnel)'>"
         "<label>Email</label>"
         "<input type='email' name='email' id='jb-modal-email' maxlength='120' placeholder='(optionnel)'>"
-        "<label>👤 VA assigné <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(optionnel — tape le nom)</span></label>"
+        # Champ VA : visible en mode Edit, mais auto-rempli (lecture seule par defaut)
+        # via jbOpenAddModal/jbOpenEditModal. L user peut tjrs le changer si besoin.
+        "<label>👤 VA assigné <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(éditable)</span></label>"
         "<input type='text' name='va' id='jb-modal-va' maxlength='60' "
         "list='jb-va-suggestions' placeholder='ex: Marie, Paul, ...'>"
         "<label>🔐 2FA <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(secret TOTP / codes backup / SMS)</span></label>"
@@ -14250,15 +14343,16 @@ def _render_jailbreak_html() -> str:
     # JS
     js = (
         "<script>"
-        "function jbOpenAddModal(identity){"
-        "  document.getElementById('jb-modal-title').textContent = 'Ajouter un compte (' + identity + ')';"
+        "function jbOpenAddModal(identity, vaName){"
+        "  var titleSuffix = vaName ? (' sous VA : ' + vaName) : '';"
+        "  document.getElementById('jb-modal-title').textContent = 'Ajouter un compte (' + identity + ')' + titleSuffix;"
         "  document.getElementById('jb-modal-form').action = '/jailbreak/add_account';"
         "  document.getElementById('jb-modal-identity').value = identity;"
         "  document.getElementById('jb-modal-account-id').value = '';"
         "  document.getElementById('jb-modal-username').value = '';"
         "  document.getElementById('jb-modal-password').value = '';"
         "  document.getElementById('jb-modal-email').value = '';"
-        "  document.getElementById('jb-modal-va').value = '';"
+        "  document.getElementById('jb-modal-va').value = vaName || '';"
         "  document.getElementById('jb-modal-two-fa').value = '';"
         "  document.getElementById('jb-modal-notes').value = '';"
         "  document.getElementById('jb-modal-overlay').classList.add('show');"
@@ -14323,6 +14417,34 @@ def _render_jailbreak_html() -> str:
         "    return false;"
         "  }"
         "  return true;"
+        "}"
+        # === Modal Add VA ===
+        "function jbOpenAddVaModal(identity){"
+        "  document.getElementById('jb-add-va-identity').value = identity;"
+        "  document.getElementById('jb-add-va-name').value = '';"
+        "  document.getElementById('jb-add-va-overlay').classList.add('show');"
+        "  setTimeout(function(){document.getElementById('jb-add-va-name').focus();}, 50);"
+        "}"
+        "function jbCloseAddVaModal(){ document.getElementById('jb-add-va-overlay').classList.remove('show'); }"
+        # === Remove VA (avec confirm stylise) ===
+        "function jbRemoveVa(identity, vaName){"
+        "  function _do(){"
+        "    var f = document.createElement('form');"
+        "    f.method='POST'; f.action='/jailbreak/remove_va'; f.style.display='none';"
+        "    ['identity','va_name','back_tab'].forEach(function(name){"
+        "      var i = document.createElement('input'); i.name = name;"
+        "      i.value = (name==='identity') ? identity : (name==='va_name' ? vaName : 'jailbreak');"
+        "      f.appendChild(i);"
+        "    });"
+        "    document.body.appendChild(f); f.submit();"
+        "  }"
+        "  if(typeof showConfirmAsync === 'function'){"
+        "    showConfirmAsync('Retirer le VA ?', 'VA \"' + vaName + '\" sera retiré de ' + identity + '. Les comptes existants gardent leur référence (tu pourras les réassigner).').then(function(ok){"
+        "      if(ok) _do();"
+        "    });"
+        "  } else {"
+        "    if(confirm('Retirer le VA ' + vaName + ' ?')) _do();"
+        "  }"
         "}"
         # === Toggle section pliable ===
         "function jbToggleSection(sec){"
@@ -14476,7 +14598,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + datalist_html + toolbar + body + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + toolbar + body + add_va_modal + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -23364,6 +23486,43 @@ def create_app():
         if not ok:
             return _error("❌ Compte introuvable", tab="jailbreak")
         return _success("✅ Compte mis à jour", tab="jailbreak")
+
+    @app.route("/jailbreak/add_va", methods=["POST"])
+    def jailbreak_add_va():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        va_name = (request.form.get("va_name") or "").strip()
+        if not identity:
+            return _error("❌ Identité manquante", tab="jailbreak")
+        if not va_name:
+            return _error("❌ Nom du VA manquant", tab="jailbreak")
+        if jb.add_va(identity, va_name):
+            return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>", tab="jailbreak")
+        return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
+
+    @app.route("/jailbreak/remove_va", methods=["POST"])
+    def jailbreak_remove_va():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+        identity = (request.form.get("identity") or "").strip().lower()
+        va_name = (request.form.get("va_name") or "").strip()
+        if not identity or not va_name:
+            return _error("❌ Identité ou nom du VA manquant", tab="jailbreak")
+        if jb.remove_va(identity, va_name):
+            return _success(
+                f"✅ VA <b>{va_name}</b> retirée. Les comptes existants gardent leur référence.",
+                tab="jailbreak",
+            )
+        return _error(f"❌ VA <b>{va_name}</b> introuvable", tab="jailbreak")
 
     @app.route("/jailbreak/remove_account", methods=["POST"])
     def jailbreak_remove_account():
