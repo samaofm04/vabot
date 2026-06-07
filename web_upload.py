@@ -14331,18 +14331,24 @@ def _render_jailbreak_html() -> str:
         "}"
         # === Drag & drop pour reordonner les identites ===
         "window.__jbDraggedSection = null;"
+        # Cleanup global : appele a chaque dragend ET au drop. Chrome ne fire
+        # pas toujours dragend apres un drop quand on a deplace l element pendant
+        # le drag (insertBefore) -> sans ce cleanup, la classe .jb-dragging
+        # reste collee et la section apparait en semi-transparent + dashed border.
+        "function _jbCleanupDrag(){"
+        "  document.querySelectorAll('.jb-section.jb-dragging').forEach(function(s){ s.classList.remove('jb-dragging'); });"
+        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        "  window.__jbDraggedSection = null;"
+        "}"
         "function jbDragStart(ev, sec){"
+        "  _jbCleanupDrag();"  # safety : nettoie tout etat residuel d un drag precedent
         "  window.__jbDraggedSection = sec;"
         "  sec.classList.add('jb-dragging');"
         "  ev.dataTransfer.effectAllowed = 'move';"
         # Firefox needs setData to start the drag
         "  try { ev.dataTransfer.setData('text/plain', sec.getAttribute('data-identity') || ''); } catch(e){}"
         "}"
-        "function jbDragEnd(ev){"
-        "  if(window.__jbDraggedSection) window.__jbDraggedSection.classList.remove('jb-dragging');"
-        "  window.__jbDraggedSection = null;"
-        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
-        "}"
+        "function jbDragEnd(ev){ _jbCleanupDrag(); }"
         "function jbDragOver(ev){"
         "  if(!window.__jbDraggedSection) return;"
         "  ev.preventDefault();"
@@ -14375,8 +14381,9 @@ def _render_jailbreak_html() -> str:
         "}"
         "function jbDrop(ev){"
         "  ev.preventDefault();"
-        # Cleanup highlights
-        "  document.querySelectorAll('.jb-section.jb-drag-over').forEach(function(s){ s.classList.remove('jb-drag-over'); });"
+        # Cleanup robuste : enleve dragging ET drag-over (au cas ou dragend
+        # ne fire pas apres le drop a cause du DOM-move pendant le drag)
+        "  _jbCleanupDrag();"
         # Sauve le nouvel ordre en localStorage (preference perso, par navigateur)
         "  jbSaveOrder();"
         "}"
@@ -14411,6 +14418,13 @@ def _render_jailbreak_html() -> str:
         "if(document.readyState === 'loading'){"
         "  document.addEventListener('DOMContentLoaded', jbApplySavedOrder);"
         "} else { jbApplySavedOrder(); }"
+        # Filet de securite global : cleanup si l user relache la souris en dehors
+        # de la dropzone (ex: sur la sidebar, hors fenetre, etc.). Sans ca, la
+        # classe .jb-dragging pourrait rester collee.
+        "window.addEventListener('dragend', _jbCleanupDrag);"
+        "window.addEventListener('mouseup', function(){"
+        "  if(window.__jbDraggedSection) _jbCleanupDrag();"
+        "});"
         # === Filter / search ===
         "function jbApplyFilter(){"
         "  var q = (document.getElementById('jb-search-input').value || '').trim().toLowerCase();"
