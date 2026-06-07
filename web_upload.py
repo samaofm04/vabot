@@ -14010,6 +14010,13 @@ def _render_jailbreak_html() -> str:
         ".jb-stat-green{color:#22c55e}"
         ".jb-stat-lab{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}"
         ".jb-no-stats{background:rgba(120,120,120,.08);color:#666;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600}"
+        # Boutons Edit / × en fin de row (style va-ig3 compact)
+        ".jb-row{transition:background .12s}"
+        ".jb-row:hover{background:rgba(255,255,255,.02)}"
+        ".jb-row-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;margin-left:4px;transition:all .15s}"
+        ".jb-row-btn:hover{border-color:#3b82f6;color:#fff;background:rgba(59,130,246,.08)}"
+        ".jb-row-btn-danger{font-size:16px;font-weight:700;line-height:1}"
+        ".jb-row-btn-danger:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,.08)}"
         ".jb-va-pill{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}"
         ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0}"
         ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
@@ -14145,6 +14152,9 @@ def _render_jailbreak_html() -> str:
                     display_vas_lc.add(va.lower())
 
             def _render_account_row(a: dict, ident_lc_arg: str) -> str:
+                """Style va-ig3-row : meme markup que la page VAs (CSS deja
+                charge globalement). Affichage horizontal compact avec PP +
+                @handle/Instagram + 4 stats + Dernier reel + fleche."""
                 aid = int(a.get("id", 0))
                 raw_username = str(a.get("username", "?"))
                 username = html_escape(raw_username)
@@ -14160,55 +14170,67 @@ def _render_jailbreak_html() -> str:
                 has_stats = bool(s) and not s.get("error")
                 pp_url = s.get("profile_pic_url") or ""
 
-                # Avatar / icone
+                # PP : meme structure que la page VAs (.va-ig3-row-pp)
                 if pp_url:
                     pp_html = (
-                        f"<img src='{html_escape(pp_url)}' class='jb-acct-pp' "
-                        f"referrerpolicy='no-referrer' loading='lazy' "
-                        f"onerror=\"this.style.display='none';var f=document.createElement('div');"
-                        f"f.className='jb-acct-icon';f.textContent='👤';this.parentNode.insertBefore(f,this);this.remove()\">"
+                        f"<img src='{html_escape(pp_url)}' class='va-ig3-row-pp' "
+                        f"loading='lazy' referrerpolicy='no-referrer' "
+                        f"onerror=\"this.style.display='none'\">"
                     )
                 else:
-                    pp_html = "<div class='jb-acct-icon'>👤</div>"
+                    pp_html = (
+                        f"<div class='va-ig3-row-pp' "
+                        f"style='display:flex;align-items:center;justify-content:center;"
+                        f"color:#ec4899;font-weight:700;font-size:14px'>@</div>"
+                    )
 
-                # Username : cliquable -> Instagram
-                username_link = (
-                    f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
-                    f"rel='noopener noreferrer' class='jb-acct-username-link' "
-                    f"onclick='event.stopPropagation()' title='Ouvrir sur Instagram'>"
-                    f"@{username}</a>"
-                )
-
-                # Bloc stats Insta (seulement si on a des stats)
-                stats_html = ""
+                # Stats values
                 if has_stats:
                     foll = _fmt_count(s.get("followers"))
                     d_v = _fmt_count(s.get("daily"))
                     w_v = _fmt_count(s.get("weekly"))
                     bw_v = _fmt_count(s.get("biweekly"))
-                    stats_html = (
-                        f"<div class='jb-acct-stats'>"
-                        f"<div class='jb-stat'><div class='jb-stat-num'>{foll}</div><div class='jb-stat-lab'>abos</div></div>"
-                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{d_v}</div><div class='jb-stat-lab'>24h</div></div>"
-                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{w_v}</div><div class='jb-stat-lab'>sem</div></div>"
-                        f"<div class='jb-stat'><div class='jb-stat-num jb-stat-green'>{bw_v}</div><div class='jb-stat-lab'>2 sem</div></div>"
-                        f"</div>"
-                    )
+                else:
+                    foll = d_v = w_v = bw_v = "—"
 
-                # Meta line (credentials badges)
-                meta_parts = []
+                # Dernier reel (label + date)
+                last_reel_lbl = "—"
+                last_reel_date = ""
+                if has_stats and s.get("last_reel_at"):
+                    try:
+                        import datetime as _dt_lr
+                        d_post = _dt_lr.datetime.fromisoformat(
+                            str(s["last_reel_at"]).replace("Z", "+00:00")
+                        )
+                        if d_post.tzinfo is None:
+                            d_post = d_post.replace(tzinfo=_dt_lr.timezone.utc)
+                        age = _dt_lr.datetime.now(_dt_lr.timezone.utc) - d_post
+                        h_age = int(age.total_seconds() / 3600)
+                        if h_age < 1:
+                            last_reel_lbl = "à l'instant"
+                        elif h_age < 24:
+                            last_reel_lbl = f"il y a {h_age}h"
+                        else:
+                            last_reel_lbl = f"il y a {h_age // 24}j"
+                        last_reel_date = d_post.strftime("%d/%m %Hh%M")
+                    except Exception:
+                        pass
+
+                # Credentials badges sous la platform line (en plus de Instagram)
+                cred_parts = []
                 if email:
-                    meta_parts.append(f"<span>✉ {email}</span>")
+                    cred_parts.append(f"✉ {email}")
                 if has_pwd:
-                    meta_parts.append("<span>🔑 mdp</span>")
+                    cred_parts.append("🔑 mdp")
                 if is_2fa_valid:
-                    meta_parts.append("<span class='jb-2fa-badge jb-2fa-validated'>🔐 2FA ✓</span>")
+                    cred_parts.append("<span style='color:#22c55e;font-weight:700'>🔐 2FA ✓</span>")
                 elif has_2fa:
-                    meta_parts.append("<span class='jb-2fa-badge jb-2fa-pending'>🔐 2FA</span>")
-                if not has_stats and handle_norm:
-                    meta_parts.append("<span class='jb-no-stats' title='Pas encore scrape par le bot'>📊 stats indispo</span>")
-                meta_html = "".join(meta_parts)
+                    cred_parts.append("<span style='color:#fb923c'>🔐 2FA</span>")
+                cred_html = (
+                    " · ".join(cred_parts) if cred_parts else ""
+                )
 
+                # Boutons Edit / × en fin de row
                 a_json = json.dumps({
                     "id": aid,
                     "username": a.get("username", ""),
@@ -14219,17 +14241,43 @@ def _render_jailbreak_html() -> str:
                     "va": a.get("va", ""),
                     "notes": a.get("notes", ""),
                 }, ensure_ascii=True).replace("'", "&#39;").replace('"', "&quot;")
+                actions_html = (
+                    f"<button type='button' class='jb-row-btn' "
+                    f"onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}'); event.stopPropagation()\" "
+                    f"title='Editer'>"
+                    f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+                    f"<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
+                    f"<path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>"
+                    f"</svg></button>"
+                    f"<button type='button' class='jb-row-btn jb-row-btn-danger' "
+                    f"onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}'); event.stopPropagation()\" "
+                    f"title='Supprimer'>×</button>"
+                )
+
+                # Row : meme structure que va-ig3-row
                 return (
-                    f"<div class='jb-acct{' jb-acct-with-stats' if has_stats else ''}' "
+                    f"<div class='va-ig3-row jb-row' data-handle='{html_escape(handle_norm)}' "
                     f"data-username='{username}' data-va='{html_escape(va_name)}'>"
                     f"{pp_html}"
-                    f"<div class='jb-acct-main'>"
-                    f"<div class='jb-acct-username'>{username_link}</div>"
-                    + (f"<div class='jb-acct-meta'>{meta_html}</div>" if meta_html else "")
-                    + f"</div>"
-                    f"{stats_html}"
-                    f"<button type='button' class='jb-acct-btn' onclick=\"jbOpenEditModal('{html_escape(ident_lc_arg)}','{a_json}')\">Edit</button>"
-                    f"<button type='button' class='jb-acct-btn danger' onclick=\"jbRemoveAccount('{html_escape(ident_lc_arg)}',{aid},'{username}')\">×</button>"
+                    f"<div class='va-ig3-row-name'>"
+                    f"<a href='https://instagram.com/{html_escape(handle_norm)}/' target='_blank' "
+                    f"rel='noopener noreferrer' class='va-ig3-row-handle' "
+                    f"onclick='event.stopPropagation()' "
+                    f"title='Ouvrir @{html_escape(handle_norm)} sur Instagram'>@{username}</a>"
+                    f"<div class='va-ig3-row-platform'>Instagram{(' · ' + cred_html) if cred_html else ''}</div>"
+                    f"</div>"
+                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
+                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
+                    f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"
+                    f"<div class='va-ig3-row-last'>"
+                    f"<div class='va-ig3-row-last-lab'>Dernier reel</div>"
+                    f"<div class='va-ig3-row-last-val'>{last_reel_lbl}</div>"
+                    f"<div class='va-ig3-row-last-date'>{last_reel_date}</div>"
+                    f"</div>"
+                    f"<a href='https://instagram.com/{html_escape(handle_norm)}' target='_blank' "
+                    f"class='va-ig3-row-open' onclick='event.stopPropagation()' title='Ouvrir profil'>→</a>"
+                    f"{actions_html}"
                     f"</div>"
                 )
 
