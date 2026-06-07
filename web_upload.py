@@ -3643,6 +3643,23 @@ def _list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+# Identités réservées à Jailbreak : volontairement masquées des pages
+# "Contenu / Bibliothèque" (Vue d'ensemble, Reels, Posts, Stories, Story CTA,
+# Photos profil). Elles n'ont pas de médias à programmer — elles servent
+# uniquement de référentiel de comptes dans la section Jailbreak.
+# Pour en masquer une autre : ajoute son nom (en minuscules) ici.
+JAILBREAK_ONLY_IDENTITIES = {"jessye"}
+
+
+def _list_content_identities():
+    """Identités affichées dans les pages Contenu/Bibliothèque : toutes SAUF
+    celles réservées à Jailbreak (JAILBREAK_ONLY_IDENTITIES).
+    Le backend (routes CRUD, page Jailbreak, VAs) continue d'utiliser
+    _list_identities() — donc Jessye reste pleinement fonctionnelle ailleurs."""
+    hidden = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+    return [i for i in _list_identities() if i.lower() not in hidden]
+
+
 # ============ Utilisateurs web (login user/password) ============
 
 WEB_USERS_FILE = DATA_DIR / "web_admin_users.json"
@@ -7641,7 +7658,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
 @ttl_cache(seconds=30)
 def _render_identity_stats_html() -> str:
-    identities = _list_identities()
+    identities = _list_content_identities()  # masque les identités Jailbreak-only
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
     cfg = _load_identities_config()
@@ -7858,7 +7875,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
     Pas de navigation back/forward, tout dans la même page.
     """
     from flask import request as _req
-    identities = _list_identities()
+    identities = _list_content_identities()  # masque les identités Jailbreak-only
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
     is_video = subdir == "videos"
@@ -9398,7 +9415,7 @@ def _identity_avatar_html(identity: str, size: int = 28) -> str:
 
 def _render_identity_avatars_section() -> str:
     """Section UI pour uploader les avatars de chaque identité."""
-    identities = _list_identities()
+    identities = _list_content_identities()  # masque les identités Jailbreak-only
     if not identities:
         return ""
     rows = ["<div class='box'><h4 style='margin-top:0'>🖼️ Avatars des identités</h4>"]
