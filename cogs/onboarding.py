@@ -125,11 +125,58 @@ STEPS = [
 ]
 
 
+def _web_steps():
+    """Charge les etapes editees via le SITE WEB (data/onboarding.json, module
+    racine `onboarding`). Retourne une liste de dicts {title, description} ou
+    None si indispo/vide. Permet que les modifs faites sur le site se
+    refletent dans l'onboarding Discord.
+
+    SECURITE : tout est wrappe ; en cas de probleme on retourne None et le cog
+    retombe sur les STEPS hardcodees -> l'onboarding ne casse jamais."""
+    try:
+        import onboarding as _web_ob  # bot/onboarding.py (module racine)
+        steps = _web_ob.list_steps()
+        if not steps:
+            return None
+        out = []
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            title = (s.get("title") or "").strip()
+            icon = (s.get("icon") or "").strip()
+            desc = (s.get("description") or "").strip()
+            if icon and title and not title.startswith(icon):
+                title = f"{icon} {title}".strip()
+            elif icon and not title:
+                title = icon
+            out.append({"title": title, "description": desc})
+        return out or None
+    except Exception:
+        return None
+
+
 def step_embed(index: int) -> discord.Embed:
+    # Structure canonique = STEPS hardcodees (compte, indexation des medias).
+    # On override UNIQUEMENT le texte (titre/description) depuis les modifs
+    # faites sur le site web, si elles existent pour cet index. Le footer garde
+    # len(STEPS) pour ne pas perturber la navigation (boutons →).
     s = STEPS[index]
+    title = s["title"]
+    desc = s["description"]
+    try:
+        web = _web_steps()
+        if web and 0 <= index < len(web):
+            wt = (web[index].get("title") or "").strip()
+            wd = (web[index].get("description") or "").strip()
+            if wt:
+                title = wt
+            if wd:
+                desc = wd
+    except Exception:
+        pass
     embed = discord.Embed(
-        title=s["title"],
-        description=s["description"],
+        title=title,
+        description=desc,
         color=discord.Color.blurple(),
     )
     embed.set_footer(text=f"Étape {index + 1}/{len(STEPS)}")
