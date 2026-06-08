@@ -340,3 +340,51 @@ def edt_weeks_with_data(edt_id: str) -> List[str]:
     for r in edt.get("rows", []):
         weeks.update((r.get("presence_by_week") or {}).keys())
     return sorted(weeks)
+
+
+def import_week(edt_id: str, creneau: str, week_start: str,
+                rows: List[Dict[str, Any]], replace_creneau: bool = False) -> int:
+    """Import en masse : cree une ligne par entree de `rows` dans le creneau
+    donne et fixe sa presence pour la semaine week_start.
+
+    rows = [{pseudo, statut, modele, off, presence:{lun..dim}}, ...]
+    Si replace_creneau=True : supprime d'abord les lignes existantes de ce
+    creneau (utile pour re-importer proprement sans doublons).
+    Retourne le nombre de lignes creees."""
+    data = _load()
+    edt = None
+    for e in data["edts"]:
+        if e["id"] == edt_id:
+            edt = e
+            break
+    if not edt:
+        return 0
+    ws = parse_week_start(week_start or current_week_start())
+    if creneau not in CRENEAUX:
+        creneau = CRENEAUX[0]
+    if replace_creneau:
+        edt["rows"] = [r for r in edt.get("rows", []) if r.get("creneau") != creneau]
+    n = 0
+    for r in rows:
+        statut = (r.get("statut") or "Nouveau").strip().capitalize()
+        if statut not in STATUTS:
+            statut = "Nouveau"
+        off = (r.get("off") or "").strip()
+        pres_in = r.get("presence") or {}
+        pres = _empty_presence()
+        for d in DAYS:
+            v = pres_in.get(d)
+            if v in PRESENCE_VALUES:
+                pres[d] = v
+        edt.setdefault("rows", []).append({
+            "id": "row_" + uuid.uuid4().hex[:10],
+            "creneau": creneau,
+            "pseudo": (r.get("pseudo") or "").strip(),
+            "statut": statut,
+            "modele": (r.get("modele") or "").strip(),
+            "off": off,
+            "presence_by_week": {ws: pres},
+        })
+        n += 1
+    _save(data)
+    return n

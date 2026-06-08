@@ -17479,6 +17479,9 @@ def _render_chatplanning_html() -> str:
         f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
         f"<button type='submit' style='background:transparent;border:0;color:#ef4444;font-size:13px;cursor:pointer;padding:4px 8px'>🗑 supprimer</button>"
         f"</form>"
+        f"<button type='button' onclick='chatOpenImport()' "
+        f"style='background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#3b82f6;font-size:13px;font-weight:600;cursor:pointer;padding:5px 12px;border-radius:8px;margin-left:8px'>"
+        f"📋 Importer (coller Excel)</button>"
     )
 
     # === Construction du tableau ===
@@ -17870,6 +17873,39 @@ function chatConfirmDelEdt(form){
   }
   return confirm('Supprimer ce planning et toutes ses lignes ?');
 }
+function chatOpenImport(){
+  var o=document.getElementById('chat-import-overlay');
+  if(o){ o.style.display='flex'; var t=document.getElementById('chat-import-data'); if(t) setTimeout(function(){t.focus();},50); }
+}
+function chatCloseImport(){
+  var o=document.getElementById('chat-import-overlay'); if(o) o.style.display='none';
+}
+async function chatDoImport(){
+  var cre=document.getElementById('chat-import-cre').value;
+  var data=document.getElementById('chat-import-data').value;
+  var replace=document.getElementById('chat-import-replace').checked?'1':'';
+  if(!data.trim()){ if(typeof showToast==='function')showToast('⚠ Colle des lignes d\\'abord','warning',2000); return; }
+  var btn=document.getElementById('chat-import-btn'); if(btn){btn.disabled=true;btn.textContent='Import…';}
+  var fd=new FormData();
+  fd.set('edt_id','""" + active_edt['id'] + """');
+  fd.set('week_start','""" + active_week + """');
+  fd.set('creneau',cre); fd.set('data',data); fd.set('replace',replace);
+  try{
+    var r=await fetch('/chatting/import',{method:'POST',body:fd});
+    var j=await r.json();
+    if(j.ok){
+      if(typeof showToast==='function')showToast('✓ '+j.created+' ligne(s) importée(s)','success',2500);
+      chatCloseImport();
+      if(window.chatSwitchTo){ window.chatSwitchTo(window.location.href); } else { location.reload(); }
+    } else {
+      if(typeof showToast==='function')showToast('⚠ '+(j.error||'Erreur'),'error',3500);
+      if(btn){btn.disabled=false;btn.textContent='Importer';}
+    }
+  }catch(e){
+    if(typeof showToast==='function')showToast('⚠ Réseau : '+e,'error',3500);
+    if(btn){btn.disabled=false;btn.textContent='Importer';}
+  }
+}
 async function deleteRow(rid){
   if(typeof showConfirmAsync === 'function'){
     const ok = await showConfirmAsync('Supprimer cette ligne ?', 'Cette ligne du planning sera retirée définitivement.');
@@ -18041,6 +18077,35 @@ async function addChatRow(creneau){
         f"</div>"
     )
 
+    # Modal d'import (coller un tableau Excel/TSV pour 1 creneau + la semaine affichee)
+    import_modal = (
+        "<div id='chat-import-overlay' class='confirm-overlay' style='display:none' "
+        "onclick='if(event.target===this)chatCloseImport()'>"
+        "<div class='confirm-box' style='max-width:660px;width:92%;text-align:left' onclick='event.stopPropagation()'>"
+        "<h3 style='margin:0 0 6px;font-size:18px;color:#fff'>📋 Importer le planning</h3>"
+        f"<p style='margin:0 0 14px;color:#888;font-size:13px'>EDT <b style='color:#fff'>{html_escape(active_edt['name'])}</b> · "
+        f"Semaine <b style='color:#3b82f6'>{week_lbl}</b> <span style='color:#666'>(navigue d'abord vers la bonne semaine)</span></p>"
+        "<label style='display:block;color:#aaa;font-size:12px;font-weight:600;margin-bottom:4px'>Créneau</label>"
+        "<select id='chat-import-cre' style='width:100%;padding:9px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;margin-bottom:12px'>"
+        + "".join(f"<option value='{c}'>{c}</option>" for c in chatting.CRENEAUX) +
+        "</select>"
+        "<label style='display:block;color:#aaa;font-size:12px;font-weight:600;margin-bottom:4px'>Colle ton tableau (depuis Excel / Google Sheets)</label>"
+        "<textarea id='chat-import-data' rows='9' "
+        "placeholder='Pseudo&#9;Statut&#9;Modele&#9;OFF&#9;Lun&#9;Mar&#9;Mer&#9;Jeu&#9;Ven&#9;Sam&#9;Dim&#10;Mariamos&#9;Ancien&#9;Lola&#9;FULLTIME&#9;Présent&#9;Présent&#9;...' "
+        "style='width:100%;padding:10px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box'></textarea>"
+        "<div style='font-size:11px;color:#666;margin:6px 0 12px;line-height:1.5'>"
+        "1 ligne = 1 chatteur. Colonnes séparées par des <b>TAB</b> (copie direct depuis Excel). "
+        "Présence : <b>Présent / Absent / Retard / Coupure / OFF</b>. "
+        "Les colonnes après Dimanche (retards, absences…) sont ignorées.</div>"
+        "<label style='display:flex;align-items:center;gap:8px;color:#aaa;font-size:12px;margin-bottom:14px;cursor:pointer'>"
+        "<input type='checkbox' id='chat-import-replace'> Remplacer les lignes existantes de ce créneau (évite les doublons si tu ré-importes)</label>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end'>"
+        "<button type='button' onclick='chatCloseImport()' style='padding:9px 18px;background:transparent;border:1px solid #2a2a2a;color:#aaa;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='button' id='chat-import-btn' onclick='chatDoImport()' style='padding:9px 22px;background:#3b82f6;border:0;color:#fff;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700'>Importer</button>"
+        "</div>"
+        "</div></div>"
+    )
+
     return (
         "<div style='max-width:1500px'>"
         "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
@@ -18057,6 +18122,7 @@ async function addChatRow(creneau){
         + table
         + recap_html
         + legend
+        + import_modal
         + js
         + "</div>"
     )
@@ -25307,6 +25373,69 @@ def create_app():
             week_start=(request.form.get("week_start") or "").strip(),
         )
         return jsonify({"ok": ok})
+
+    @app.route("/chatting/import", methods=["POST"])
+    def chatting_import():
+        """Import en masse : colle un tableau (Excel/TSV) pour 1 creneau + 1
+        semaine. Format par ligne (tab-separe) :
+        Pseudo  Statut  Modele  OFF  Lun  Mar  Mer  Jeu  Ven  Sam  Dim
+        (les colonnes au-dela de Dim sont ignorees : retards/absences/etc.)"""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import chatting
+        import re as _re_imp
+        from flask import jsonify
+        edt_id = (request.form.get("edt_id") or "").strip()
+        creneau = (request.form.get("creneau") or "").strip()
+        week_start = (request.form.get("week_start") or "").strip()
+        replace = (request.form.get("replace") or "") == "1"
+        raw = request.form.get("data") or ""
+        _DAYS = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
+
+        def _norm_pres(v):
+            v = (v or "").strip().lower()
+            # enleve les accents simples
+            v = v.replace("é", "e").replace("è", "e").replace("ê", "e")
+            if v in ("present", "presents", "p", "x", "ok"):
+                return "Present"
+            if v in ("absent", "absente", "abs", "a"):
+                return "Absent"
+            if v in ("retard", "retards", "r"):
+                return "Retard"
+            if v in ("coupure", "coupures", "c"):
+                return "Coupure"
+            if v in ("off", "repos"):
+                return "OFF"
+            return "Present"  # defaut + valeurs inconnues (notes, vide...)
+
+        rows = []
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            cells = line.split("\t")
+            if len(cells) < 5:  # pas de tabs -> tente 2+ espaces
+                cells = _re_imp.split(r"\t|\s{2,}", line)
+            cells = [c.strip() for c in cells]
+            pseudo = cells[0] if len(cells) > 0 else ""
+            statut = cells[1] if len(cells) > 1 else "Nouveau"
+            modele = cells[2] if len(cells) > 2 else ""
+            off = cells[3] if len(cells) > 3 else ""
+            day_cells = cells[4:11]  # les 7 jours qui suivent OFF
+            presence = {}
+            for i, d in enumerate(_DAYS):
+                presence[d] = _norm_pres(day_cells[i]) if i < len(day_cells) else "Present"
+            # ligne ignoree si tout est vide (pseudo + jours)
+            if not pseudo and not any(c for c in day_cells):
+                continue
+            rows.append({"pseudo": pseudo, "statut": statut,
+                         "modele": modele, "off": off, "presence": presence})
+        if not rows:
+            return jsonify({"ok": False, "error": "Rien a importer (colle des lignes avec des TAB entre colonnes)"})
+        n = chatting.import_week(edt_id, creneau, week_start, rows, replace_creneau=replace)
+        if n == 0:
+            return jsonify({"ok": False, "error": "EDT introuvable"})
+        return jsonify({"ok": True, "created": n})
 
     # ============ MyPuls Live - settings persistes par createur ============
     @app.route("/mypulslive/settings/<creator_id>", methods=["GET"])
