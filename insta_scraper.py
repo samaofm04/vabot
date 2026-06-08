@@ -105,6 +105,12 @@ def remove_from_watchlist(username: str) -> bool:
         return False
     wl.remove(username)
     save_watchlist(wl)
+    # Nettoie aussi le cache reels du compte (sinon ses reels resteraient
+    # dans get_all_cached_reels() / la page Trends).
+    try:
+        (CACHE_DIR / f"{username}.json").unlink(missing_ok=True)
+    except Exception:
+        pass
     return True
 
 

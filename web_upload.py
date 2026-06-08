@@ -9276,6 +9276,12 @@ def _render_insta_trends_grid_html() -> str:
         return ""
     reels = get_all_cached_reels()
     wl = load_watchlist()
+    # Ne garder QUE les reels des comptes actuellement dans la watchlist (onglet
+    # Accounts). Sinon les comptes supprimés / hors-liste (dont le cache reels
+    # n'est pas toujours nettoyé) continueraient d'apparaître dans Trends.
+    _wl_set = {str(u or "").lower().strip().lstrip("@") for u in wl}
+    reels = [r for r in reels
+             if str(r.get("_owner") or "").lower().strip().lstrip("@") in _wl_set]
     # Si watchlist non vide mais cache vide → afficher CTA pour scrape
     if not reels and wl:
         return (
