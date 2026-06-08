@@ -17475,7 +17475,7 @@ def _render_chatplanning_html() -> str:
         f"<button type='submit' style='background:transparent;border:0;color:#888;font-size:13px;cursor:pointer;padding:4px 8px'>✏ renommer</button>"
         f"</form>"
         f"<form method='POST' action='/chatting/delete_edt' style='display:inline;margin:0' "
-        f"onsubmit=\"return confirm('Supprimer ce planning et toutes ses lignes ?')\">"
+        f"onsubmit=\"return chatConfirmDelEdt(this)\">"
         f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
         f"<button type='submit' style='background:transparent;border:0;color:#ef4444;font-size:13px;cursor:pointer;padding:4px 8px'>🗑 supprimer</button>"
         f"</form>"
@@ -17863,8 +17863,18 @@ async function saveCell(el){
     document.getElementById('absences-'+row).style.color = abs ? '#ef4444' : '#666';
   }
 }
+function chatConfirmDelEdt(form){
+  if(typeof showConfirmAsync === 'function'){
+    showConfirmAsync('Supprimer ce planning ?', 'Le planning et toutes ses lignes seront supprimés définitivement.').then(function(ok){ if(ok){ form.submit(); } });
+    return false;
+  }
+  return confirm('Supprimer ce planning et toutes ses lignes ?');
+}
 async function deleteRow(rid){
-  if(!confirm('Supprimer cette ligne ?')) return;
+  if(typeof showConfirmAsync === 'function'){
+    const ok = await showConfirmAsync('Supprimer cette ligne ?', 'Cette ligne du planning sera retirée définitivement.');
+    if(!ok) return;
+  } else if(!confirm('Supprimer cette ligne ?')){ return; }
   const fd = new FormData();
   fd.set('edt_id', '""" + active_edt['id'] + """');
   fd.set('row_id', rid);
