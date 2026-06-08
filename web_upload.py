@@ -17603,7 +17603,13 @@ def _render_chatplanning_html() -> str:
             retards_cell = f"<td id='retards-{r['id']}' style='text-align:center;color:{'#fb923c' if counts['retards'] else '#666'};font-weight:700;padding:6px'>{counts['retards']}</td>"
             absences_cell = f"<td id='absences-{r['id']}' style='text-align:center;color:{'#ef4444' if counts['absences'] else '#666'};font-weight:700;padding:6px'>{counts['absences']}</td>"
             # Delete
-            del_btn = f"<td style='text-align:center'><button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px'>×</button></td>"
+            del_btn = (
+                f"<td style='text-align:center;white-space:nowrap'>"
+                f"<button type='button' onclick='chatFillOpen(event,this,\"{r['id']}\")' title='Remplir toute la ligne (les 7 jours)' "
+                f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>⚡</button>"
+                f"<button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 6px'>×</button>"
+                f"</td>"
+            )
             body_rows.append(
                 f"<tr data-rowid='{r['id']}' data-creneau='{creneau}' data-statut='{html_escape((r.get('statut') or '').strip())}'>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
             )
@@ -17898,6 +17904,46 @@ function chatConfirmDelEdt(form){
   }
   return confirm('Supprimer ce planning et toutes ses lignes ?');
 }
+// === Remplir une ligne (⚡) : applique 1 valeur aux 7 jours ===
+window._chatFillRowId = null;
+function chatFillOpen(ev, btn, rid){
+  if(ev){ ev.stopPropagation(); }
+  window._chatFillRowId = rid;
+  var pop = document.getElementById('chat-fill-pop');
+  if(!pop) return;
+  var r = btn.getBoundingClientRect();
+  pop.style.display = 'block';
+  var pw = pop.offsetWidth || 140;
+  var left = window.scrollX + r.right - pw;
+  if(left < 8) left = 8;
+  pop.style.left = left + 'px';
+  pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+}
+function chatFillClose(){ var p=document.getElementById('chat-fill-pop'); if(p) p.style.display='none'; window._chatFillRowId=null; }
+async function chatFillRow(value){
+  var rid = window._chatFillRowId; chatFillClose();
+  if(!rid) return;
+  var PRES_COL = {Present:['#86efac','#14532d'],Absent:['#fca5a5','#7f1d1d'],Retard:['#fed7aa','#7c2d12'],Coupure:['#fef08a','#713f12'],OFF:['#525252','#e5e5e5']};
+  var DAYS=['lun','mar','mer','jeu','ven','sam','dim'];
+  DAYS.forEach(function(d){
+    var sel=document.querySelector('select[data-row=\"'+rid+'\"][data-field=\"'+d+'\"]');
+    if(sel){ sel.value=value; if(PRES_COL[value]){ sel.style.background=PRES_COL[value][0]; sel.style.color=PRES_COL[value][1]; } }
+  });
+  var ret=(value==='Retard')?7:0, abs=(value==='Absent')?7:0;
+  var rc=document.getElementById('retards-'+rid), ac=document.getElementById('absences-'+rid);
+  if(rc){ rc.textContent=ret; rc.style.color=ret?'#fb923c':'#666'; }
+  if(ac){ ac.textContent=abs; ac.style.color=abs?'#ef4444':'#666'; }
+  var fd=new FormData();
+  fd.set('edt_id','""" + active_edt['id'] + """'); fd.set('row_id',rid);
+  fd.set('week_start','""" + active_week + """'); fd.set('value',value);
+  try{ await fetch('/chatting/fill_row',{method:'POST',body:fd});
+    if(typeof showToast==='function')showToast('✓ Ligne remplie : '+value,'success',1500);
+  }catch(e){ if(typeof showToast==='function')showToast('⚠ Erreur','error',2000); }
+}
+document.addEventListener('click', function(e){
+  var p=document.getElementById('chat-fill-pop');
+  if(p && p.style.display==='block' && !p.contains(e.target)) chatFillClose();
+});
 function chatOpenImport(){
   var o=document.getElementById('chat-import-overlay');
   if(o){ o.style.display='flex'; var t=document.getElementById('chat-import-data'); if(t) setTimeout(function(){t.focus();},50); }
@@ -18132,6 +18178,20 @@ async function addChatRow(creneau){
         "</div></div>"
     )
 
+    # Popup partagé "remplir la ligne" (⚡) : 5 valeurs de presence colorees
+    fill_pop = (
+        "<div id='chat-fill-pop' style='display:none;position:absolute;z-index:9999;background:#161616;"
+        "border:1px solid #2a2a2a;border-radius:10px;padding:6px;box-shadow:0 12px 30px rgba(0,0,0,.6);min-width:130px'>"
+        "<div style='font-size:10px;color:#888;padding:2px 6px 5px;font-weight:700;letter-spacing:.3px'>REMPLIR LA LIGNE</div>"
+        + "".join(
+            f"<button type='button' onclick=\"chatFillRow('{p}')\" "
+            f"style='display:block;width:100%;text-align:left;margin:2px 0;padding:6px 10px;border:0;border-radius:6px;"
+            f"cursor:pointer;font-size:12px;font-weight:700;background:{pres_colors[p]['bg']};color:{pres_colors[p]['fg']}'>{p}</button>"
+            for p in chatting.PRESENCE_VALUES
+        )
+        + "</div>"
+    )
+
     return (
         "<div style='max-width:1500px'>"
         "<h2 style='margin:0 0 6px;font-size:20px'>💬 Emploi du temps chatteurs</h2>"
@@ -18149,6 +18209,7 @@ async function addChatRow(creneau){
         + recap_html
         + legend
         + import_modal
+        + fill_pop
         + js
         + "</div>"
     )
@@ -25462,6 +25523,22 @@ def create_app():
         if not res or (res.get("created", 0) + res.get("updated", 0)) == 0:
             return jsonify({"ok": False, "error": "EDT introuvable ou aucune ligne valide"})
         return jsonify({"ok": True, "created": res.get("created", 0), "updated": res.get("updated", 0)})
+
+    @app.route("/chatting/fill_row", methods=["POST"])
+    def chatting_fill_row():
+        """Remplit les 7 jours d'une ligne avec la meme valeur (bouton ⚡)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False}), 401
+        import chatting
+        from flask import jsonify
+        ok = chatting.fill_row_week(
+            (request.form.get("edt_id") or "").strip(),
+            (request.form.get("row_id") or "").strip(),
+            (request.form.get("week_start") or "").strip(),
+            (request.form.get("value") or "").strip(),
+        )
+        return jsonify({"ok": ok})
 
     # ============ MyPuls Live - settings persistes par createur ============
     @app.route("/mypulslive/settings/<creator_id>", methods=["GET"])

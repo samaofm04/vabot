@@ -425,3 +425,22 @@ def import_week(edt_id: str, creneau: str, week_start: str,
             n_created += 1
     _save(data)
     return {"created": n_created, "updated": n_updated}
+
+
+def fill_row_week(edt_id: str, row_id: str, week_start: str, value: str) -> bool:
+    """Met TOUS les jours (lun..dim) d'une ligne a la meme valeur de presence
+    pour la semaine donnee. Pour le bouton 'remplir la ligne'."""
+    if value not in PRESENCE_VALUES:
+        return False
+    data = _load()
+    ws = parse_week_start(week_start or current_week_start())
+    for e in data["edts"]:
+        if e["id"] != edt_id:
+            continue
+        for r in e.get("rows", []):
+            if r["id"] != row_id:
+                continue
+            r.setdefault("presence_by_week", {})[ws] = {d: value for d in DAYS}
+            _save(data)
+            return True
+    return False
