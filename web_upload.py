@@ -17528,8 +17528,12 @@ def _render_chatplanning_html() -> str:
         )
 
     body_rows = []
+    # Ordre de tri par statut : Ancien (N1) -> Nouveau (N2) -> Support (N3)
+    _STATUT_ORDER = {"Ancien": 0, "Nouveau": 1, "Support": 2}
     for creneau in chatting.CRENEAUX:
         rows_in = rows_by_cre.get(creneau, [])
+        # Tri stable par statut (les memes statuts gardent leur ordre d'origine)
+        rows_in = sorted(rows_in, key=lambda r: _STATUT_ORDER.get((r.get("statut") or "").strip(), 9))
         cre_color = creneau_colors[creneau]
         # Si pas de lignes, ajoute une ligne placeholder avec le creneau cell
         if not rows_in:
@@ -17601,7 +17605,7 @@ def _render_chatplanning_html() -> str:
             # Delete
             del_btn = f"<td style='text-align:center'><button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 8px'>×</button></td>"
             body_rows.append(
-                f"<tr data-rowid='{r['id']}'>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
+                f"<tr data-rowid='{r['id']}' data-creneau='{creneau}' data-statut='{html_escape((r.get('statut') or '').strip())}'>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
             )
         # Bouton "+ ajouter ligne" sous chaque creneau (AJAX, no reload)
         body_rows.append(
@@ -17865,6 +17869,27 @@ async function saveCell(el){
     document.getElementById('retards-'+row).style.color = ret ? '#fb923c' : '#666';
     document.getElementById('absences-'+row).style.color = abs ? '#ef4444' : '#666';
   }
+  // Re-tri par statut (Ancien -> Nouveau -> Support) quand on change le statut
+  if(el.dataset.field === 'statut'){
+    const trS = el.closest('tr[data-rowid]');
+    if(trS){ trS.dataset.statut = el.value; chatResortCreneau(trS.dataset.creneau); }
+  }
+}
+function chatResortCreneau(cre){
+  const tbody = document.querySelector('#form-chatplanning table tbody');
+  if(!tbody || !cre) return;
+  const ORDER = {Ancien:0, Nouveau:1, Support:2};
+  function ord(s){ return (s in ORDER) ? ORDER[s] : 9; }
+  let rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-creneau=\"'+cre+'\"][data-rowid]'));
+  if(rows.length < 2) return;
+  // Detache la cellule creneau (rowspan) de la ligne ou elle est
+  let creCell = null;
+  rows.forEach(function(tr){ const cc = tr.querySelector('td.chat-cre-cell'); if(cc){ creCell = cc; cc.parentNode.removeChild(cc); } });
+  const anchor = rows[rows.length-1].nextSibling;  // '+ ajouter' ou groupe suivant
+  rows.sort(function(a,b){ return ord(a.dataset.statut) - ord(b.dataset.statut); });  // stable
+  rows.forEach(function(tr){ tbody.insertBefore(tr, anchor); });
+  // Remet la cellule creneau (rowspan) sur la nouvelle 1ere ligne
+  if(creCell){ creCell.setAttribute('rowspan', String(rows.length)); rows[0].insertBefore(creCell, rows[0].firstChild); }
 }
 function chatConfirmDelEdt(form){
   if(typeof showConfirmAsync === 'function'){
