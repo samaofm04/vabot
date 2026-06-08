@@ -119,6 +119,13 @@ def _resolve_username(user_id) -> str:
     return str(user_id)
 
 
+# Cache memoize des resolutions Discord (handle_lc -> result|None) avec TTL.
+# La page Jailbreak appelle cette fonction pour CHAQUE VA, et chaque appel
+# scanne TOUS les membres de TOUTES les guilds -> tres couteux avec bcp de VAs.
+# Les noms/avatars Discord changent rarement : un cache 120s est sans risque.
+_DISCORD_RESOLVE_CACHE = {}
+
+
 def _resolve_discord_user_by_handle(handle: str):
     """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
 
@@ -131,7 +138,14 @@ def _resolve_discord_user_by_handle(handle: str):
     handle_lc = str(handle).strip().lower().lstrip("@")
     if not handle_lc:
         return None
+    # Cache hit (TTL 120s)
+    import time as _t_dr
+    _now_dr = _t_dr.time()
+    _hit = _DISCORD_RESOLVE_CACHE.get(handle_lc)
+    if _hit is not None and (_now_dr - _hit[0]) < 120:
+        return _hit[1]
     seen_ids = set()
+    _result = None
     try:
         for g in _BOT_REF.guilds:
             try:
@@ -147,17 +161,27 @@ def _resolve_discord_user_by_handle(handle: str):
                             avatar_url = str(m.display_avatar.url)
                         except Exception:
                             avatar_url = ""
-                        return {
+                        _result = {
                             "id": str(m.id),
                             "username": getattr(m, "name", "") or "",
                             "display_name": getattr(m, "display_name", "") or getattr(m, "name", ""),
                             "avatar_url": avatar_url,
                         }
+                        break  # match trouve -> sort du for m
             except Exception:
                 continue
+            if _result is not None:
+                break  # sort du for g
     except Exception:
         pass
-    return None
+    # Memoize (succes ET echec) pour 120s
+    try:
+        _DISCORD_RESOLVE_CACHE[handle_lc] = (_now_dr, _result)
+        if len(_DISCORD_RESOLVE_CACHE) > 512:
+            _DISCORD_RESOLVE_CACHE.clear()
+    except Exception:
+        pass
+    return _result
 
 
 def _find_identity_category(guild, identity: str):
@@ -436,7 +460,7 @@ UPLOAD_HTML = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <style>
 *{box-sizing:border-box}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
@@ -752,8 +776,12 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 @keyframes siteSectionIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 .form-section[style*="block"]{animation:siteSectionIn .36s cubic-bezier(.16,1,.3,1)}
 
-/* Transition douce des couleurs lors du toggle light/dark (plus de flash). */
-body,.sidebar,.main,.box{transition:background-color .35s ease,border-color .3s ease,color .3s ease,box-shadow .3s ease}
+/* Transition douce des couleurs lors du toggle light/dark.
+   IMPORTANT : scopée à body.theme-anim (ajoutée par JS APRES le 1er paint).
+   Sinon body.light appliqué au chargement anime un fondu sombre->clair a
+   chaque page-load (le bug "theme blanc/noir"). Au load = instantané ;
+   uniquement le toggle manuel anime. */
+body.theme-anim,body.theme-anim .sidebar,body.theme-anim .main,body.theme-anim .box{transition:background-color .35s ease,border-color .3s ease,color .3s ease,box-shadow .3s ease}
 
 /* Boxes (sections dashboard) : hover subtil — bord + ombre, AUCUN déplacement
    pour ne jamais décaler le contenu. */
@@ -846,6 +874,21 @@ function setTheme(theme){
       });
     }
   }catch(e){}
+})();
+// Active les transitions de couleur du theme APRES le 1er paint, sinon
+// body.light applique au load anime un fondu sombre->clair a CHAQUE
+// chargement de page (le bug visuel "theme blanc/noir"). Double rAF =
+// on attend que le theme initial soit peint avant d'autoriser l'animation.
+(function(){
+  function arm(){
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        if(document.body) document.body.classList.add('theme-anim');
+      });
+    });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arm);
+  else arm();
 })();
 // === Wrapper fetch global : intercepte les 401 (session expirée) ===
 (function(){
@@ -2367,7 +2410,10 @@ window.upClearPrefill = function(utab){
       // Ajouter la classe sur <html> tout de suite + CSS critique
       document.documentElement.classList.add('light-pre');
       var s = document.createElement('style');
-      s.textContent = 'html.light-pre,html.light-pre body{background:#f9fafb !important;color:#111827 !important}';
+      s.textContent = 'html.light-pre,html.light-pre body{background:#f9fafb !important;color:#111827 !important}'+
+        'html.light-pre .sidebar{background:#fff !important;border-right-color:#e5e7eb !important}'+
+        'html.light-pre .box,html.light-pre .stat{background:#fff !important;border-color:#e5e7eb !important}'+
+        'html.light-pre .main{background:#f9fafb !important}';
       document.head.appendChild(s);
     }
     // SFW pre-apply : floute les images avant qu'elles s'affichent si actif
@@ -3637,10 +3683,27 @@ body.light .lb-btn-secondary:hover{background:#f3f4f6;color:#111}
 """
 
 
+# Cache mtime-based de la liste des identités. _list_identities() est appelé
+# ~30x par page-load ; chaque appel faisait un iterdir()+is_dir() sur le disque.
+# On garde le resultat tant que le mtime de IDENTITIES_DIR n'a pas change (=
+# aucun dossier d'identite ajoute/supprime). Zero staleness : creer/supprimer
+# une identite change le mtime du dossier -> refresh immediat au prochain appel.
+_IDENTITIES_CACHE = {"mtime": None, "v": []}
+
+
 def _list_identities():
     if not IDENTITIES_DIR.exists():
         return []
-    return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+    try:
+        mt = IDENTITIES_DIR.stat().st_mtime_ns
+    except Exception:
+        mt = None
+    if mt is not None and mt == _IDENTITIES_CACHE["mtime"]:
+        return list(_IDENTITIES_CACHE["v"])
+    v = sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+    _IDENTITIES_CACHE["mtime"] = mt
+    _IDENTITIES_CACHE["v"] = v
+    return list(v)
 
 
 # Identités réservées à Jailbreak : volontairement masquées des pages
@@ -4896,7 +4959,7 @@ def _render_gms_clicks_widget() -> str:
     days_count = (end_dt - start_dt).days + 1
 
     # Limiter aux modèles principaux (qui correspondent aux identités du bot)
-    identities = _list_identities()
+    identities = _list_content_identities()
     ident_to_model = {ident: ident.capitalize() for ident in identities}
     sorted_models = [ident_to_model[i] for i in sorted(identities)]
 
@@ -5066,7 +5129,7 @@ def _render_va_list_html() -> str:
         "</div>"
     )
     # Modal pour creer un VA manuel
-    identities = _list_identities()
+    identities = _list_content_identities()
     identity_opts = "".join(
         f"<option value='{i.lower()}'>@{i.lower()}</option>" for i in sorted(identities)
     )
@@ -5222,7 +5285,7 @@ def _render_linkscale_clicks_widget() -> str:
         if fname:
             ident_to_folder[fname] = f
 
-    identities = _list_identities() if callable(_list_identities) else []
+    identities = _list_content_identities() if callable(_list_content_identities) else []
     # Ajoute aussi les folders Linkscale qui ne sont pas dans les identites locales
     all_idents_set = set(identities)
     for fname in ident_to_folder.keys():
@@ -5389,7 +5452,7 @@ def _render_va_list_html_inner() -> str:
             identity = str(data)
         by_identity.setdefault(identity, []).append((uid, data))
 
-    all_identities = _list_identities()
+    all_identities = _list_content_identities()
 
     css = """
 <style>
@@ -9625,7 +9688,7 @@ def _render_sfs_html() -> str:
         ident = it.get("identity", "")
         if ident:
             sfs_count_by_ident[ident] = sfs_count_by_ident.get(ident, 0) + 1
-    for ident in sorted(_list_identities()):
+    for ident in sorted(_list_content_identities()):  # masque Jessye (jailbreak-only)
         avatar = _identity_avatar_html(ident, size=36)
         count = sfs_count_by_ident.get(ident, 0)
         # Plateformes auxquelles cette identité appartient
@@ -9757,7 +9820,7 @@ def _render_sfs_html() -> str:
 
     # JS pour platform switching + modal
     # Map des avatars pour le JS
-    avatar_map = {ident: _identity_avatar_url(ident) for ident in _list_identities()}
+    avatar_map = {ident: _identity_avatar_url(ident) for ident in _list_content_identities()}
     avatar_map_json = _json.dumps(avatar_map)
     rows.append(f"""
 <script>
@@ -10100,7 +10163,9 @@ window.addEventListener('DOMContentLoaded', function(){{
     for p in PLATFORMS:
         rows.append(f"<th style='padding:8px;text-align:center'>{p}</th>")
     rows.append("</tr>")
-    all_idents = set(platforms_map.keys()) | set(_list_identities())
+    _hidden_jb = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+    all_idents = {i for i in (set(platforms_map.keys()) | set(_list_identities()))
+                  if i.lower() not in _hidden_jb}  # masque Jessye (jailbreak-only)
     for ident in sorted(all_idents):
         rows.append(f"<tr style='border-bottom:1px solid #2a2a2a'><td style='padding:8px;font-weight:600'>{ident}</td>")
         active_plats = platforms_map.get(ident, [])
@@ -11671,7 +11736,7 @@ def _render_revenus_html() -> str:
         from business import list_revenues, revenue_stats
     except Exception as e:
         return f"<p style='color:#f99'>Module business indispo : {e}</p>"
-    identities = _list_identities()
+    identities = _list_content_identities()
     ident_opts = "".join(f"<option value='{i}'>{i}</option>" for i in identities)
     if not ident_opts:
         ident_opts = "<option value=''>(aucune identité)</option>"
@@ -11881,7 +11946,7 @@ def _render_biolinks_html() -> str:
         from bio_links import get_bio, stats
     except Exception as e:
         return f"<p style='color:#f99'>Module bio_links indispo : {e}</p>"
-    identities = _list_identities()
+    identities = _list_content_identities()
     s = stats()
     rows = []
     rows.append(
@@ -12764,7 +12829,7 @@ def _render_gms_html() -> str:
 
         # Section : templates par modèle + boutons Génération rapide
         templates = gms.load_templates()
-        identities = _list_identities()
+        identities = _list_content_identities()
 
         # Charge UNIQUEMENT les liens du workspace "marche francais" pour le
         # dropdown templates — c'est là que vivent les templates par identité.
@@ -16971,7 +17036,7 @@ def _render_schedule_html() -> str:
 
     # Liste des modeles depuis les identites
     try:
-        identities = sorted(_list_identities())
+        identities = sorted(_list_content_identities())
     except Exception:
         identities = []
 
@@ -17955,7 +18020,7 @@ def _render_mypulslive_html() -> str:
 
     # Identites pour le dropdown "Model"
     try:
-        identities = sorted(_list_identities())
+        identities = sorted(_list_content_identities())
     except Exception:
         identities = []
 
@@ -21979,7 +22044,7 @@ def _render_upload_inner(msg=None, error=None):
     except Exception:
         msg = msg or ""
         error = bool(error)
-    identities = _list_identities()
+    identities = _list_content_identities()
     opts = "".join(f'<option value="{i}">{i}</option>' for i in identities)
     if not opts:
         opts = '<option value="">(aucune identité - crée-en sur Discord)</option>'
@@ -21992,7 +22057,7 @@ def _render_upload_inner(msg=None, error=None):
     # Stats globales pour le home
     users = _load_users()
     va_count = len(users)
-    identities_list = _list_identities()
+    identities_list = _list_content_identities()
     stat_reels = sum(_identity_stats(i)["reels"] for i in identities_list)
     stat_posts = sum(_identity_stats(i)["posts"] for i in identities_list)
     stat_stories = sum(_identity_stats(i)["stories"] for i in identities_list)
