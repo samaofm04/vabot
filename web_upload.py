@@ -17380,9 +17380,9 @@ def _render_chatplanning_html() -> str:
 
     # Couleurs statuts (matche le xlsx)
     statut_colors = {
-        "Ancien":  {"bg": "#84e8c1", "fg": "#0a3d2c"},   # vert clair
-        "Nouveau": {"bg": "#a3e0f0", "fg": "#062f47"},   # bleu clair
-        "Support": {"bg": "#1f3a5f", "fg": "#cfe5ff"},   # bleu marine
+        "Ancien":  {"bg": "#6ee7b7", "fg": "#065f46"},   # vert emeraude
+        "Nouveau": {"bg": "#93c5fd", "fg": "#1e3a8a"},   # bleu
+        "Support": {"bg": "#c4b5fd", "fg": "#4c1d95"},   # violet
     }
     pres_colors = {
         "Present": {"bg": "#86efac", "fg": "#14532d"},
@@ -17843,7 +17843,7 @@ async function saveCell(el){
   fd.set('week_start', '""" + active_week + """');
   // Si c'est un select de presence, mettre a jour la couleur immediatement
   const PRES_COL = {Present:['#86efac','#14532d'], Absent:['#fca5a5','#7f1d1d'], Retard:['#fed7aa','#7c2d12'], Coupure:['#fef08a','#713f12'], OFF:['#525252','#e5e5e5']};
-  const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
+  const STA_COL = {Ancien:['#6ee7b7','#065f46'], Nouveau:['#93c5fd','#1e3a8a'], Support:['#c4b5fd','#4c1d95']};
   if(PRES_COL[el.value] && ['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
     el.style.background = PRES_COL[el.value][0];
     el.style.color = PRES_COL[el.value][1];
@@ -18021,7 +18021,7 @@ async function addChatRow(creneau){
   // Si une row placeholder 'aucune ligne' existait, on la vire
   const placeholder = document.querySelector('tr.chat-empty-placeholder[data-creneau=\"'+creneau+'\"]');
   if(placeholder) placeholder.remove();
-  const STA_COL = {Ancien:['#84e8c1','#0a3d2c'], Nouveau:['#a3e0f0','#062f47'], Support:['#1f3a5f','#cfe5ff']};
+  const STA_COL = {Ancien:['#6ee7b7','#065f46'], Nouveau:['#93c5fd','#1e3a8a'], Support:['#c4b5fd','#4c1d95']};
   const sta = 'Nouveau';
   const stCol = STA_COL[sta];
   const statutSel = '<select class=chat-cell data-row='+rid+' data-field=statut onchange=saveCell(this) style=\"width:90px;background:'+stCol[0]+';color:'+stCol[1]+';border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">' + STA_OPTS.map(o=>_opt(o,sta)).join('') + '</select>';
