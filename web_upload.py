@@ -17768,6 +17768,22 @@ def _render_chatplanning_html() -> str:
     _sub1 = f"1–15 {_mois_fr[_aw.month]}"
     _sub2 = f"16–{_p2[1].day} {_mois_fr[_aw.month]}"
 
+    def _behavior_badge(a, r, c):
+        # Score pondere du mois : absence x3 (le pire), retard x2, coupure x1
+        score = a * 3 + r * 2 + c * 1
+        if score == 0:
+            bg, fg, lab = "rgba(34,197,94,.16)", "#22c55e", "✨ Exemplaire"
+        elif score <= 3:
+            bg, fg, lab = "rgba(34,197,94,.12)", "#4ade80", "🟢 Bon"
+        elif score <= 7:
+            bg, fg, lab = "rgba(251,146,60,.16)", "#fb923c", "🟠 À surveiller"
+        else:
+            bg, fg, lab = "rgba(239,68,68,.18)", "#f87171", "🔴 Abuse"
+        return (f"<td style='text-align:center;padding:6px 10px'>"
+                f"<span title='Score {score} = abs×3 + retard×2 + coupure (sur le mois)' "
+                f"style='display:inline-block;background:{bg};color:{fg};font-size:11px;font-weight:800;"
+                f"padding:3px 11px;border-radius:8px;white-space:nowrap'>{lab}</span></td>")
+
     if not _recap_list:
         recap_html = (
             "<div style='margin-top:16px;padding:16px;background:#0f0f0f;border:1px dashed #232323;"
@@ -17790,6 +17806,11 @@ def _render_chatplanning_html() -> str:
                 + _rc_cell(_e["p2"]["absences"], "#ef4444")
                 + _rc_cell(_e["p2"]["retards"], "#fb923c")
                 + _rc_cell(_e["p2"]["coupures"], "#eab308")
+                + _sep
+                + _behavior_badge(
+                    _e["p1"]["absences"] + _e["p2"]["absences"],
+                    _e["p1"]["retards"] + _e["p2"]["retards"],
+                    _e["p1"]["coupures"] + _e["p2"]["coupures"])
                 + "</tr>"
             )
         _body.append(
@@ -17802,6 +17823,8 @@ def _render_chatplanning_html() -> str:
             + _rc_cell(_tot["p2"]["absences"], "#ef4444")
             + _rc_cell(_tot["p2"]["retards"], "#fb923c")
             + _rc_cell(_tot["p2"]["coupures"], "#eab308")
+            + _sep
+            + "<td></td>"
             + "</tr>"
         )
         _sub_head = (
@@ -17823,7 +17846,7 @@ def _render_chatplanning_html() -> str:
             "<span style='font-size:16px'>📊</span>"
             f"<span style='font-weight:800;font-size:14px;color:#eee'>Récap paie — {_mois_fr[_aw.month].capitalize()} {_aw.year}</span>"
             "</div>"
-            "<span style='font-size:11px;color:#666'>★ = période de la semaine affichée · trié par incidents</span>"
+            "<span style='font-size:11px;color:#666'>★ période affichée · trié par incidents · Comportement = abs×3 + retard×2 + coupure (✨ 0 · 🟢 ≤3 · 🟠 ≤7 · 🔴 +)</span>"
             "</div>"
             "<div style='overflow-x:auto'>"
             "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
@@ -17833,6 +17856,8 @@ def _render_chatplanning_html() -> str:
             + _period_head("Période 1", _sub1, _active_period == 1)
             + _sep_h
             + _period_head("Période 2", _sub2, _active_period == 2)
+            + "<th rowspan='2' style='width:1px;padding:0;background:#232323'></th>"
+            + "<th rowspan='2' style='padding:8px 14px;color:#a855f7;font-size:12px;font-weight:800;border-bottom:2px solid #232323'>Comportement<div style='font-size:9px;color:#777;font-weight:600'>du mois</div></th>"
             + "</tr>"
             + _sub_head
             + "</thead>"
