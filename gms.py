@@ -828,3 +828,81 @@ def list_links_team(team_id: str) -> Dict[str, Any]:
             break
         cursor = d.get("next_cursor")
     return {"ok": True, "links": all_links}
+
+
+# Team (workspace) "marche francais" — meme constante que la route web
+MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
+# Domaine public des liens GetMySocial
+PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
+
+
+def quick_generate_for_identity(ident: str) -> Dict[str, Any]:
+    """Genere un nouveau lien GMS pour une identite, a partir de son template :
+    - duplique le template de l'identite (toute la config conservee)
+    - shortcode = 4 chars random + identite (retry si pris)
+    - nom auto 'VA N' (compteur atomique par groupe)
+    - assigne au groupe de l'identite dans le bon workspace
+
+    Retourne {ok, shortcode, public_url, va_name, dest_url, group, error}.
+    Logique partagee entre la route web /gms/quick_generate et la commande
+    Discord (boss-only)."""
+    ident = (ident or "").strip().lower()
+    if not ident:
+        return {"ok": False, "error": "Identité manquante"}
+    templates = load_templates()
+    tpl_id = templates.get(ident)
+    if not tpl_id:
+        return {"ok": False, "error": f"Aucun template GMS défini pour @{ident}. Configure-le d'abord sur le site (onglet SFS/GMS)."}
+
+    # Detecte le workspace du template
+    team_id = None
+    try:
+        mf = list_links_team(MARCHE_FRANCAIS_TID)
+        if mf.get("ok") and any(l.get("id") == tpl_id for l in mf["links"]):
+            team_id = MARCHE_FRANCAIS_TID
+    except Exception:
+        pass
+
+    folder_name = ident.capitalize()
+    try:
+        n = claim_next_va_number(team_id, folder_name)
+    except Exception:
+        n = 1
+    new_name = f"VA {n}"
+
+    last_err = ""
+    dup_res: Dict[str, Any] = {}
+    new_shortcode = ""
+    for _ in range(5):
+        new_shortcode = generate_random_prefix(4) + ident
+        dup_res = duplicate_link(tpl_id, new_shortcode, new_name, team_id=team_id)
+        if dup_res.get("ok"):
+            break
+        last_err = str(dup_res.get("error", ""))
+        if "shortcode_taken" not in last_err.lower():
+            break
+    if not dup_res.get("ok"):
+        return {"ok": False, "error": last_err or "Génération échouée"}
+
+    grp = ""
+    try:
+        gid = get_group_id_for_folder(folder_name, team_id=team_id)
+        if gid:
+            ar = assign_link_to_group(
+                dup_res["link"]["id"], gid,
+                link_obj=dup_res["link"], team_id=team_id, after_link_id=tpl_id,
+            )
+            if ar.get("ok"):
+                grp = folder_name
+    except Exception:
+        pass
+
+    link = dup_res.get("link") or {}
+    return {
+        "ok": True,
+        "shortcode": new_shortcode,
+        "public_url": f"{PUBLIC_LINK_DOMAIN}/{new_shortcode}",
+        "va_name": new_name,
+        "dest_url": link.get("url") or "",
+        "group": grp,
+    }

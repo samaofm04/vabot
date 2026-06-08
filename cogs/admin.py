@@ -477,6 +477,51 @@ class Admin(commands.Cog):
         save_json(WHITELIST_FILE, wl)
         await interaction.response.send_message(f"✅ {user.mention} ajouté à la whitelist.", ephemeral=True)
 
+    # ---------- GMS (GetMySocial) ----------
+
+    @app_commands.command(name="gmslink", description="[BOSS] Génère un lien GetMySocial pour une identité")
+    @app_commands.describe(identite="Le modèle / identité (ex: amelia)")
+    async def gmslink(self, interaction: discord.Interaction, identite: str):
+        # Boss-only (owner + whitelist admin)
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        ident = (identite or "").strip().lower()
+        valids = [n.lower() for n in list_identities()]
+        if ident not in valids:
+            await interaction.followup.send(
+                f"❌ Identité `{identite}` inconnue.\nDispo : {', '.join(sorted(valids)) or '(aucune)'}",
+                ephemeral=True,
+            )
+            return
+        try:
+            import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        import asyncio
+        # Appels API GMS bloquants -> thread pour ne pas figer le bot
+        try:
+            res = await asyncio.to_thread(gms.quick_generate_for_identity, ident)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur GMS : {e}", ephemeral=True)
+            return
+        if not res.get("ok"):
+            await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
+            return
+        emb = discord.Embed(
+            title="🔗 Lien GetMySocial généré",
+            description=f"**{res['va_name']}** · identité **{ident}**",
+            color=discord.Color.blurple(),
+        )
+        emb.add_field(name="🔗 Lien", value=res["public_url"], inline=False)
+        emb.add_field(name="Shortcode", value=f"`/{res['shortcode']}`", inline=True)
+        if res.get("group"):
+            emb.add_field(name="Groupe", value=res["group"], inline=True)
+        if res.get("dest_url"):
+            emb.add_field(name="Destination", value=res["dest_url"][:300], inline=False)
+        await interaction.followup.send(embed=emb, ephemeral=True)
+
     # ---------- IDENTITES ----------
 
     @app_commands.command(name="addidentite", description="Crée une identité (avec ou sans zip de vidéos)")
