@@ -461,6 +461,34 @@ class Admin(commands.Cog):
             if current.lower() in n.lower()
         ][:25]
 
+    async def _sync_general_access(self, guild, member, identity):
+        """Donne au VA l'accès au salon 'général-<identité>' et le RETIRE des
+        autres 'général-*'. Best-effort : ignore salons absents / permissions
+        manquantes. Utilise des overwrites par-membre (ne touche pas aux rôles).
+        Appelé quand on assigne / déplace un VA d'identité."""
+        if guild is None or member is None:
+            return
+        ident_lc = (identity or "").strip().lower()
+        if not ident_lc:
+            return
+        for ch in getattr(guild, "text_channels", []):
+            norm = ch.name.lower().replace("é", "e").replace("è", "e")
+            if not norm.startswith("general-"):
+                continue
+            suffix = norm[len("general-"):].strip()
+            try:
+                if suffix == ident_lc:
+                    await ch.set_permissions(
+                        member, view_channel=True, read_message_history=True,
+                        reason="VA assigné à cette identité")
+                else:
+                    # retire seulement l'overwrite du membre (laisse les rôles)
+                    if ch.overwrites_for(member).view_channel is not None:
+                        await ch.set_permissions(member, overwrite=None,
+                                                 reason="VA retiré de cette identité")
+            except Exception:
+                pass
+
     # ---------- WHITELIST ----------
 
     @app_commands.command(name="whitelist", description="[OWNER] Whitelist un utilisateur pour les commandes admin")
@@ -481,6 +509,7 @@ class Admin(commands.Cog):
 
     @app_commands.command(name="gmslink", description="[BOSS] Génère un lien GetMySocial pour une identité")
     @app_commands.describe(identite="Le modèle / identité (ex: amelia)")
+    @app_commands.autocomplete(identite=identity_autocomplete)
     async def gmslink(self, interaction: discord.Interaction, identite: str):
         # Boss-only (owner + whitelist admin)
         if not await self.require_admin(interaction):
@@ -521,6 +550,48 @@ class Admin(commands.Cog):
         if res.get("dest_url"):
             emb.add_field(name="Destination", value=res["dest_url"][:300], inline=False)
         await interaction.followup.send(embed=emb, ephemeral=True)
+
+    @app_commands.command(name="syncgeneral", description="[BOSS] Re-synchronise l'accès des VAs à leur salon général-<identité>")
+    async def syncgeneral(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        users = load_json(USERS_FILE, {})
+        n_ok = 0
+        n_skip = 0
+        for uid, data in users.items():
+            if isinstance(data, dict):
+                ident = data.get("identity") or ""
+            elif isinstance(data, str):
+                ident = data
+            else:
+                ident = ""
+            if not ident or not str(uid).isdigit():
+                n_skip += 1
+                continue
+            member = guild.get_member(int(uid))
+            if member is None:
+                try:
+                    member = await guild.fetch_member(int(uid))
+                except Exception:
+                    member = None
+            if member is None:
+                n_skip += 1
+                continue
+            try:
+                await self._sync_general_access(guild, member, ident)
+                n_ok += 1
+            except Exception:
+                n_skip += 1
+        await interaction.followup.send(
+            f"✅ Accès aux salons général synchronisé pour **{n_ok}** VA(s)."
+            + (f" ({n_skip} ignoré·s — membre absent / sans identité)" if n_skip else ""),
+            ephemeral=True,
+        )
 
     # ---------- IDENTITES ----------
 
@@ -1524,9 +1595,14 @@ class Admin(commands.Cog):
                 "auto_post": True,
             }
         save_json(USERS_FILE, users)
+        # Déplace l'accès au salon général-<identité> (ajoute la nouvelle, retire les autres)
+        try:
+            await self._sync_general_access(interaction.guild, user, safe)
+        except Exception:
+            pass
         chan_str = f" • salon: {channel.mention}" if channel else " • pas de salon (pas d'auto-post tant qu'aucun salon)"
         await interaction.response.send_message(
-            f"✅ {user.mention} assigné à `{safe}`{chan_str}.", ephemeral=True
+            f"✅ {user.mention} assigné à `{safe}`{chan_str}. Accès salon général-{safe} synchronisé.", ephemeral=True
         )
 
     @app_commands.command(name="testas", description="[ADMIN] Assigne-toi (toi-même) à une identité pour tester comme VA")
@@ -1691,6 +1767,11 @@ class Admin(commands.Cog):
         # Sauvegarder le channel_id pour l'auto-post quotidien
         users[str(user.id)]["channel_id"] = channel.id
         save_json(USERS_FILE, users)
+        # Accès auto au salon général-<identité>
+        try:
+            await self._sync_general_access(guild, user, identity)
+        except Exception:
+            pass
         await interaction.followup.send(
             f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`",
             ephemeral=True,
