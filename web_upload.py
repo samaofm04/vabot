@@ -22558,6 +22558,15 @@ def create_app():
             return _render_login("Nom d'utilisateur ou mot de passe incorrect")
         if not is_auth():
             return _render_login()
+        # AJAX leger : le switch d'onglet EDT / de semaine du planning chatteurs
+        # envoie le header X-Chat-Ajax. On renvoie alors UNIQUEMENT le fragment
+        # du planning au lieu de toute la page (~1.4MB, tous les onglets) ->
+        # changement d'EDT/semaine quasi instantane au lieu de "ca charge trop".
+        if request.headers.get("X-Chat-Ajax"):
+            try:
+                return f"<div id='form-chatplanning'>{_render_chatplanning_html()}</div>"
+            except Exception:
+                pass  # fallback : page complete
         return _render_upload()
 
     @app.route("/logout")
