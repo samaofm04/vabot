@@ -475,6 +475,11 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     reels.append(reel)
                 except Exception as e:
                     log.warning(f"Parse RapidAPI reel: {e}")
+            # Assez de reels -> stop. 'limit' controle donc le nb de pages =
+            # la vitesse du scrape (avant, on allait toujours jusqu'a 5 pages /
+            # 1 mois, ce qui etait lent).
+            if len(reels) >= limit:
+                break
             # Pagination : continuer si on n'a pas encore atteint 1 mois OU pas de token
             next_token = posts_data.get("pagination_token") or posts_data.get("next_max_id") or ""
             if not next_token:
@@ -660,7 +665,7 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
                 count += 1
             except Exception as e:
                 log.warning(f"Erreur lecture post {post.shortcode}: {e}")
-            time.sleep(0.6)
+            time.sleep(0.2)
         result = {
             "profile": {
                 "username": profile.username,

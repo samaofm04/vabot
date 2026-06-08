@@ -8987,7 +8987,7 @@ def _render_insta_accounts_html() -> str:
 window.__igScraping = window.__igScraping || {};
 function igStartPolling(){
   if(window.__igPollTimer) return;
-  window.__igPollTimer = setInterval(igPollStatus, 3000);
+  window.__igPollTimer = setInterval(igPollStatus, 1500);
   // 1er poll immediat
   setTimeout(igPollStatus, 1500);
 }
@@ -26800,7 +26800,7 @@ def create_app():
         import threading
         def _bg_scrape():
             try:
-                scrape_profile(clean, limit=50)
+                scrape_profile(clean, limit=24)
             except Exception:
                 pass
         threading.Thread(target=_bg_scrape, daemon=True).start()
@@ -27212,7 +27212,7 @@ def create_app():
         import threading
         def _bg_scrape():
             try:
-                scrape_profile(u, limit=50)
+                scrape_profile(u, limit=24)
             except Exception:
                 pass
         threading.Thread(target=_bg_scrape, daemon=True).start()
@@ -27253,7 +27253,7 @@ def create_app():
         def _bg_scrape_all():
             for i, u in enumerate(wl):
                 try:
-                    scrape_profile(u, limit=50)
+                    scrape_profile(u, limit=24)
                 except Exception:
                     pass
                 insta_scrape_status._state["done"] = i + 1
