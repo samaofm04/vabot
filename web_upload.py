@@ -8935,7 +8935,7 @@ def _render_insta_accounts_html() -> str:
             # Avatar : image ou initiale colorée
             if pic:
                 avatar_html = (
-                    f"<img src='{pic}' loading='lazy' "
+                    f"<img src='{pic}' loading='lazy' referrerpolicy='no-referrer' "
                     f"style='width:48px;height:48px;border-radius:50%;object-fit:cover;background:#0f0f0f' "
                     f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='flex'\">"
                     f"<div style='display:none;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);"
