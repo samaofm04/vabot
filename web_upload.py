@@ -17492,7 +17492,8 @@ def _render_chatplanning_html() -> str:
 
     # Genere les options pour les selects
     statut_opts = lambda v: "".join(
-        f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.STATUTS
+        f"<option value='{s}' style='background:{statut_colors[s]['bg']};color:{statut_colors[s]['fg']}' {'selected' if s == v else ''}>{s}</option>"
+        for s in chatting.STATUTS
     )
     off_opts = lambda v: "<option value=''></option>" + "".join(
         f"<option value='{s}' {'selected' if s == v else ''}>{s}</option>" for s in chatting.OFF_OPTIONS
@@ -17500,7 +17501,7 @@ def _render_chatplanning_html() -> str:
     # Liste des modeles disponibles pour cet EDT (Of ou MyM)
     available_modeles = chatting.models_for_edt(active_edt.get("name", ""))
     pres_opts = lambda v: "".join(
-        f"<option value='{p}' {'selected' if p == v else ''}>{p}</option>"
+        f"<option value='{p}' style='background:{pres_colors[p]['bg']};color:{pres_colors[p]['fg']}' {'selected' if p == v else ''}>{p}</option>"
         for p in chatting.PRESENCE_VALUES
     )
 
