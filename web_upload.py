@@ -17507,6 +17507,47 @@ def _render_chatplanning_html() -> str:
         f"<option value='{p}' style='background:{pres_colors[p]['bg']};color:{pres_colors[p]['fg']}' {'selected' if p == v else ''}>{p}</option>"
         for p in chatting.PRESENCE_VALUES
     )
+    # Options pour une case SIMPLE (5 valeurs + option "Diviser")
+    def _pres_opts_single(v):
+        h = "".join(
+            f"<option value='{p}' style='background:{pres_colors[p]['bg']};color:{pres_colors[p]['fg']}' {'selected' if p == v else ''}>{p}</option>"
+            for p in chatting.PRESENCE_VALUES
+        )
+        return h + "<option value='__split__' style='background:#1a1a1a;color:#3b82f6'>➗ Diviser</option>"
+    # Options pour une DEMI-case (5 valeurs + option "Fusionner")
+    def _pres_opts_half(v):
+        h = "".join(
+            f"<option value='{p}' style='background:{pres_colors[p]['bg']};color:{pres_colors[p]['fg']}' {'selected' if p == v else ''}>{p}</option>"
+            for p in chatting.PRESENCE_VALUES
+        )
+        return h + "<option value='__merge__' style='background:#1a1a1a;color:#888'>↩ Fusionner</option>"
+
+    def _day_cell(row_id, dk, pv):
+        """Case d'un jour : soit un select simple (avec option Diviser), soit
+        2 mini-selects empiles si la valeur est divisee (ex 'Present+Coupure')."""
+        parts = [p for p in str(pv or "").split("+") if p in chatting.PRESENCE_VALUES] or ["Present"]
+        if len(parts) >= 2:
+            top, bot = parts[0], parts[1]
+            tc = pres_colors.get(top, pres_colors["Present"])
+            bc = pres_colors.get(bot, pres_colors["Present"])
+            _hs = ("border:0;padding:3px 2px;font-weight:700;font-size:10px;cursor:pointer;"
+                   "font-family:inherit;text-align:center;width:85px")
+            return (
+                f"<td style='padding:4px 4px'>"
+                f"<div class='chat-split' data-row='{row_id}' data-field='{dk}' style='display:flex;flex-direction:column;gap:1px'>"
+                f"<select class='chat-split-top' onchange='saveSplit(this)' style='{_hs};background:{tc['bg']};color:{tc['fg']};border-radius:6px 6px 0 0'>{_pres_opts_half(top)}</select>"
+                f"<select class='chat-split-bot' onchange='saveSplit(this)' style='{_hs};background:{bc['bg']};color:{bc['fg']};border-radius:0 0 6px 6px'>{_pres_opts_half(bot)}</select>"
+                f"</div></td>"
+            )
+        pv1 = parts[0]
+        pc = pres_colors.get(pv1, pres_colors["Present"])
+        return (
+            f"<td style='padding:4px 4px'>"
+            f"<select class='chat-cell' data-row='{row_id}' data-field='{dk}' data-cur='{pv1}' onchange='saveCell(this)' "
+            f"style='width:85px;background:{pc['bg']};color:{pc['fg']};border:0;padding:6px 4px;"
+            f"border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center'>"
+            f"{_pres_opts_single(pv1)}</select></td>"
+        )
 
     def _select_cell(row_id, field, value, opts_html, bg, fg, width=None):
         wstyle = f"width:{width}px;" if width else ""
@@ -17597,8 +17638,7 @@ def _render_chatplanning_html() -> str:
             day_cells = ""
             for dk in chatting.DAYS:
                 pv = pres_for_row.get(dk, "Present")
-                pc = pres_colors.get(pv, pres_colors["Present"])
-                day_cells += f"<td style='padding:4px 4px'>{_select_cell(r['id'], dk, pv, pres_opts(pv), pc['bg'], pc['fg'], 85)}</td>"
+                day_cells += _day_cell(r['id'], dk, pv)
             # Retards/absences
             retards_cell = f"<td id='retards-{r['id']}' style='text-align:center;color:{'#fb923c' if counts['retards'] else '#666'};font-weight:700;padding:6px'>{counts['retards']}</td>"
             absences_cell = f"<td id='absences-{r['id']}' style='text-align:center;color:{'#ef4444' if counts['absences'] else '#666'};font-weight:700;padding:6px'>{counts['absences']}</td>"
@@ -17841,6 +17881,7 @@ window.chatSwitchTo = async function(url){
 window.addEventListener('popstate', ()=>{ window.chatSwitchTo(window.location.href); });
 
 async function saveCell(el){
+  if(el.value === '__split__' && ['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){ chatSplitCell(el); return; }
   const fd = new FormData();
   fd.set('edt_id', '""" + active_edt['id'] + """');
   fd.set('row_id', el.dataset.row);
@@ -17859,21 +17900,10 @@ async function saveCell(el){
     el.style.color = STA_COL[el.value][1];
   }
   await fetch('/chatting/update_cell', {method:'POST', body:fd});
-  // Update counts si on a touche un jour
+  // Update counts + memorise la valeur courante (utile pour 'Diviser')
   if(['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
-    const row = el.dataset.row;
-    const cells = document.querySelectorAll('select[data-row=\"'+row+'\"]');
-    let ret=0, abs=0;
-    cells.forEach(c=>{
-      if(['lun','mar','mer','jeu','ven','sam','dim'].includes(c.dataset.field)){
-        if(c.value==='Retard') ret++;
-        else if(c.value==='Absent') abs++;
-      }
-    });
-    document.getElementById('retards-'+row).textContent = ret;
-    document.getElementById('absences-'+row).textContent = abs;
-    document.getElementById('retards-'+row).style.color = ret ? '#fb923c' : '#666';
-    document.getElementById('absences-'+row).style.color = abs ? '#ef4444' : '#666';
+    el.dataset.cur = el.value;
+    chatUpdateCountsFor(el.dataset.row);
   }
   // Re-tri par statut (Ancien -> Nouveau -> Support) quand on change le statut
   if(el.dataset.field === 'statut'){
@@ -17903,6 +17933,68 @@ function chatConfirmDelEdt(form){
     return false;
   }
   return confirm('Supprimer ce planning et toutes ses lignes ?');
+}
+// === Cases divisees (1 jour = 2 valeurs : 'Present+Coupure') ===
+const _PC_PRES = {Present:['#86efac','#14532d'],Absent:['#fca5a5','#7f1d1d'],Retard:['#fed7aa','#7c2d12'],Coupure:['#fef08a','#713f12'],OFF:['#525252','#e5e5e5']};
+function _presHalfOpts(sel){
+  var h=''; ['Present','Absent','Retard','Coupure','OFF'].forEach(function(p){
+    h+='<option value=\"'+p+'\" style=\"background:'+_PC_PRES[p][0]+';color:'+_PC_PRES[p][1]+'\"'+(p===sel?' selected':'')+'>'+p+'</option>'; });
+  return h+'<option value=\"__merge__\" style=\"background:#1a1a1a;color:#888\">↩ Fusionner</option>';
+}
+function _presSingleOpts(sel){
+  var h=''; ['Present','Absent','Retard','Coupure','OFF'].forEach(function(p){
+    h+='<option value=\"'+p+'\" style=\"background:'+_PC_PRES[p][0]+';color:'+_PC_PRES[p][1]+'\"'+(p===sel?' selected':'')+'>'+p+'</option>'; });
+  return h+'<option value=\"__split__\" style=\"background:#1a1a1a;color:#3b82f6\">➗ Diviser</option>';
+}
+function saveDayValue(row, field, value){
+  var fd=new FormData();
+  fd.set('edt_id','""" + active_edt['id'] + """'); fd.set('row_id',row);
+  fd.set('field',field); fd.set('value',value); fd.set('week_start','""" + active_week + """');
+  fetch('/chatting/update_cell',{method:'POST',body:fd});
+}
+function chatUpdateCountsFor(row){
+  var DAYS=['lun','mar','mer','jeu','ven','sam','dim']; var ret=0, abs=0;
+  DAYS.forEach(function(d){
+    var vals=[];
+    var s=document.querySelector('select.chat-cell[data-row=\"'+row+'\"][data-field=\"'+d+'\"]');
+    if(s){ vals=[s.value]; }
+    else { var div=document.querySelector('.chat-split[data-row=\"'+row+'\"][data-field=\"'+d+'\"]');
+      if(div){ var t=div.querySelector('.chat-split-top'), b=div.querySelector('.chat-split-bot'); vals=[t&&t.value, b&&b.value]; } }
+    if(vals.indexOf('Retard')>=0) ret++;
+    if(vals.indexOf('Absent')>=0) abs++;
+  });
+  var rc=document.getElementById('retards-'+row), ac=document.getElementById('absences-'+row);
+  if(rc){ rc.textContent=ret; rc.style.color=ret?'#fb923c':'#666'; }
+  if(ac){ ac.textContent=abs; ac.style.color=abs?'#ef4444':'#666'; }
+}
+function _renderSplitTd(td,row,field,top,bot){
+  var hs='border:0;padding:3px 2px;font-weight:700;font-size:10px;cursor:pointer;font-family:inherit;text-align:center;width:85px';
+  var tc=_PC_PRES[top]||_PC_PRES.Present, bc=_PC_PRES[bot]||_PC_PRES.Present;
+  td.innerHTML='<div class=\"chat-split\" data-row=\"'+row+'\" data-field=\"'+field+'\" style=\"display:flex;flex-direction:column;gap:1px\">'
+    +'<select class=\"chat-split-top\" onchange=\"saveSplit(this)\" style=\"'+hs+';background:'+tc[0]+';color:'+tc[1]+';border-radius:6px 6px 0 0\">'+_presHalfOpts(top)+'</select>'
+    +'<select class=\"chat-split-bot\" onchange=\"saveSplit(this)\" style=\"'+hs+';background:'+bc[0]+';color:'+bc[1]+';border-radius:0 0 6px 6px\">'+_presHalfOpts(bot)+'</select>'
+    +'</div>';
+}
+function chatSplitCell(sel){
+  var td=sel.closest('td'); if(!td) return;
+  var row=sel.dataset.row, field=sel.dataset.field;
+  var first=sel.dataset.cur||'Present'; if(first==='__split__') first='Present';
+  _renderSplitTd(td,row,field,first,'Present');
+  saveDayValue(row,field,first+'+Present'); chatUpdateCountsFor(row);
+}
+function saveSplit(el){
+  var div=el.closest('.chat-split'); if(!div) return;
+  var row=div.dataset.row, field=div.dataset.field;
+  var top=div.querySelector('.chat-split-top'), bot=div.querySelector('.chat-split-bot');
+  if(el.value==='__merge__'){
+    var keep=(el===top)?bot.value:top.value; if(keep==='__merge__') keep='Present';
+    var td=div.closest('td'); var pc=_PC_PRES[keep]||_PC_PRES.Present;
+    td.innerHTML='<select class=\"chat-cell\" data-row=\"'+row+'\" data-field=\"'+field+'\" data-cur=\"'+keep+'\" onchange=\"saveCell(this)\" style=\"width:85px;background:'+pc[0]+';color:'+pc[1]+';border:0;padding:6px 4px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer;font-family:inherit;text-align:center\">'+_presSingleOpts(keep)+'</select>';
+    saveDayValue(row,field,keep); chatUpdateCountsFor(row); return;
+  }
+  if(_PC_PRES[top.value]){ top.style.background=_PC_PRES[top.value][0]; top.style.color=_PC_PRES[top.value][1]; }
+  if(_PC_PRES[bot.value]){ bot.style.background=_PC_PRES[bot.value][0]; bot.style.color=_PC_PRES[bot.value][1]; }
+  saveDayValue(row,field, top.value+'+'+bot.value); chatUpdateCountsFor(row);
 }
 // === Remplir une ligne (⚡) : applique 1 valeur aux 7 jours ===
 window._chatFillRowId = null;

@@ -47,6 +47,20 @@ OFF_OPTIONS = ["FULLTIME", "Lundi", "Mardi", "Mercredi", "Jeudi",
                "Vendredi", "Samedi", "Dimanche", "PAS DE REPONSE"]
 PRESENCE_VALUES = ["Present", "Absent", "Retard", "Coupure", "OFF"]
 
+
+def _day_parts(v):
+    """Une case de jour peut contenir 1 OU 2 valeurs separees par '+' (case
+    divisee, ex: 'Present+Coupure'). Retourne la liste des valeurs valides."""
+    return [p for p in str(v or "").split("+") if p in PRESENCE_VALUES]
+
+
+def _valid_day_value(v):
+    """True si v est une valeur de jour valide : 1 valeur, ou 2 separees par '+'
+    (toutes dans PRESENCE_VALUES)."""
+    parts = str(v or "").split("+")
+    return 1 <= len(parts) <= 2 and all(p in PRESENCE_VALUES for p in parts)
+
+
 DEFAULT_MODELES = ["", "Julia", "Amelia", "Lola", "Sarah", "Emma", "Kiara"]
 
 # Listes des modeles par plateforme (utilisees pour le multi-select)
@@ -264,7 +278,7 @@ def update_cell(edt_id: str, row_id: str, field: str, value: str,
                     r["presence_by_week"] = {}
                 if ws not in r["presence_by_week"]:
                     r["presence_by_week"][ws] = _empty_presence()
-                if value not in PRESENCE_VALUES:
+                if not _valid_day_value(value):
                     value = "Present"
                 r["presence_by_week"][ws][field] = value
             else:
@@ -285,15 +299,16 @@ def row_presence(row: Dict[str, Any], week_start: str) -> Dict[str, str]:
     if not p:
         return _empty_presence()
     out = _empty_presence()
-    out.update({k: v for k, v in p.items() if k in DAYS and v in PRESENCE_VALUES})
+    out.update({k: v for k, v in p.items() if k in DAYS and _valid_day_value(v)})
     return out
 
 
 def row_counts(row: Dict[str, Any], week_start: str) -> Dict[str, int]:
-    """Retourne {retards, absences} pour une row sur une semaine donnee."""
+    """Retourne {retards, absences} pour une row sur une semaine donnee.
+    Une case divisee (ex 'Present+Absent') compte l'incident present dedans."""
     pres = row_presence(row, week_start)
-    retards = sum(1 for d in DAYS if pres.get(d) == "Retard")
-    absences = sum(1 for d in DAYS if pres.get(d) == "Absent")
+    retards = sum(1 for d in DAYS if "Retard" in _day_parts(pres.get(d)))
+    absences = sum(1 for d in DAYS if "Absent" in _day_parts(pres.get(d)))
     return {"retards": retards, "absences": absences}
 
 
@@ -309,12 +324,12 @@ def row_incidents_in_range(row: Dict[str, Any], start: date, end: date) -> Dict[
     while d <= end:
         ws = week_start_for(d).isoformat()
         dk = DAYS[d.weekday()]
-        v = row_presence(row, ws).get(dk, "Present")
-        if v == "Absent":
+        parts = _day_parts(row_presence(row, ws).get(dk, "Present"))
+        if "Absent" in parts:
             absn += 1
-        elif v == "Retard":
+        if "Retard" in parts:
             retn += 1
-        elif v == "Coupure":
+        if "Coupure" in parts:
             coupn += 1
         d += timedelta(days=1)
     return {"absences": absn, "retards": retn, "coupures": coupn}
