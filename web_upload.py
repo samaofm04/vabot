@@ -17398,17 +17398,51 @@ def _render_chatplanning_html() -> str:
         "20h-02h": "#7e22ce",
     }
 
-    # Tabs des EDTs : JS-only switch (no page reload)
-    tabs_html = "".join(
-        f"<a href='?tab=chatplanning&edt_id={e['id']}' "
-        f"onclick='return chatSwitchTo(this.href)' data-no-loader='1' "
-        f"class='chat-tab {'active' if e['id'] == active_edt['id'] else ''}' "
-        f"style='padding:9px 18px;background:{'#1a1a1a' if e['id'] == active_edt['id'] else 'transparent'};"
-        f"border:1px solid {'#3b82f6' if e['id'] == active_edt['id'] else '#262626'};"
-        f"color:{'#fff' if e['id'] == active_edt['id'] else '#888'};"
-        f"text-decoration:none;border-radius:10px;font-size:13px;font-weight:600'>{e['name']}</a>"
-        for e in edts
+    # Logos de marque (inline SVG, 100% autonome) pour styliser les onglets :
+    #   OF  -> logo Inflow (carre noir "IF")
+    #   MYM -> logo MyPuls (triskelion degrade vert->bleu)
+    _INFLOW_LOGO = (
+        "<svg viewBox='0 0 100 100' width='17' height='17' style='display:block;flex-shrink:0;border-radius:5px'>"
+        "<rect width='100' height='100' rx='22' fill='#000' stroke='#3a3a3a' stroke-width='3'/>"
+        "<text x='50' y='52' text-anchor='middle' dominant-baseline='central' "
+        "font-family='Inter,Arial,sans-serif' font-weight='900' font-size='50' fill='#fff' letter-spacing='-4'>IF</text>"
+        "</svg>"
     )
+    _MYPULS_LOGO = (
+        "<svg viewBox='0 0 64 64' width='18' height='18' style='display:block;flex-shrink:0'>"
+        "<defs><linearGradient id='mpLg' x1='0' y1='0' x2='1' y2='1'>"
+        "<stop offset='0' stop-color='#7ee8a6'/><stop offset='.5' stop-color='#34cfc4'/>"
+        "<stop offset='1' stop-color='#3b82f6'/></linearGradient></defs>"
+        "<g fill='url(#mpLg)'>"
+        "<path d='M32 32 C30 20 34 8 47 12 C57 15 56 30 43 32 C38 33 35 33 32 32 Z' transform='rotate(0 32 32)'/>"
+        "<path d='M32 32 C30 20 34 8 47 12 C57 15 56 30 43 32 C38 33 35 33 32 32 Z' transform='rotate(120 32 32)'/>"
+        "<path d='M32 32 C30 20 34 8 47 12 C57 15 56 30 43 32 C38 33 35 33 32 32 Z' transform='rotate(240 32 32)'/>"
+        "</g></svg>"
+    )
+
+    def _edt_tab_logo(name: str) -> str:
+        nm = (name or "").lower()
+        if "mym" in nm:
+            return _MYPULS_LOGO
+        if "onlyfans" in nm or " of " in f" {nm} " or "edt of" in nm:
+            return _INFLOW_LOGO
+        return ""
+
+    # Tabs des EDTs : JS-only switch (no page reload) + logo de marque
+    def _edt_tab(e):
+        _act = e["id"] == active_edt["id"]
+        _logo = _edt_tab_logo(e.get("name", ""))
+        return (
+            f"<a href='?tab=chatplanning&edt_id={e['id']}' "
+            f"onclick='return chatSwitchTo(this.href)' data-no-loader='1' "
+            f"class='chat-tab {'active' if _act else ''}' "
+            f"style='padding:9px 16px;background:{'#1a1a1a' if _act else 'transparent'};"
+            f"border:1px solid {'#3b82f6' if _act else '#262626'};"
+            f"color:{'#fff' if _act else '#888'};"
+            f"text-decoration:none;border-radius:10px;font-size:13px;font-weight:600;"
+            f"display:inline-flex;align-items:center;gap:7px'>{_logo}{html_escape(e['name'])}</a>"
+        )
+    tabs_html = "".join(_edt_tab(e) for e in edts)
     # Detecte les presets deja crees (par nom contient OF / MYM)
     has_of = any("of" in (e.get("name","").lower()) for e in edts)
     has_mym = any("mym" in (e.get("name","").lower()) for e in edts)
