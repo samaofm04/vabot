@@ -343,14 +343,17 @@ def edt_weeks_with_data(edt_id: str) -> List[str]:
 
 
 def import_week(edt_id: str, creneau: str, week_start: str,
-                rows: List[Dict[str, Any]], replace_creneau: bool = False) -> int:
-    """Import en masse : cree une ligne par entree de `rows` dans le creneau
-    donne et fixe sa presence pour la semaine week_start.
+                rows: List[Dict[str, Any]], replace_creneau: bool = False) -> Dict[str, int]:
+    """Import en masse pour 1 creneau + 1 semaine. FUSION intelligente :
+    - si une ligne existe deja dans ce creneau avec le MEME pseudo -> on met
+      juste a jour sa presence pour week_start (les autres semaines de cette
+      ligne ne sont PAS touchees) + statut/modele/off si fournis. Pas de doublon.
+    - sinon -> on cree une nouvelle ligne.
 
     rows = [{pseudo, statut, modele, off, presence:{lun..dim}}, ...]
-    Si replace_creneau=True : supprime d'abord les lignes existantes de ce
-    creneau (utile pour re-importer proprement sans doublons).
-    Retourne le nombre de lignes creees."""
+    replace_creneau=True : repart de zero pour ce creneau (supprime ses lignes
+    avant import) -> ATTENTION supprime aussi leurs autres semaines.
+    Retourne {created, updated}."""
     data = _load()
     edt = None
     for e in data["edts"]:
@@ -358,17 +361,29 @@ def import_week(edt_id: str, creneau: str, week_start: str,
             edt = e
             break
     if not edt:
-        return 0
+        return {"created": 0, "updated": 0}
     ws = parse_week_start(week_start or current_week_start())
     if creneau not in CRENEAUX:
         creneau = CRENEAUX[0]
+    edt.setdefault("rows", [])
     if replace_creneau:
-        edt["rows"] = [r for r in edt.get("rows", []) if r.get("creneau") != creneau]
-    n = 0
+        edt["rows"] = [r for r in edt["rows"] if r.get("creneau") != creneau]
+
+    def _norm_pseudo(s):
+        return (s or "").strip().lower()
+
+    # Lignes existantes du creneau (pour la fusion par pseudo)
+    existing = [r for r in edt["rows"] if r.get("creneau") == creneau]
+    used_ids = set()
+    n_created = n_updated = 0
     for r in rows:
+        pseudo = (r.get("pseudo") or "").strip()
+        if not pseudo:
+            continue  # on ne cree pas de ligne sans pseudo
         statut = (r.get("statut") or "Nouveau").strip().capitalize()
         if statut not in STATUTS:
             statut = "Nouveau"
+        modele = (r.get("modele") or "").strip()
         off = (r.get("off") or "").strip()
         pres_in = r.get("presence") or {}
         pres = _empty_presence()
@@ -376,15 +391,37 @@ def import_week(edt_id: str, creneau: str, week_start: str,
             v = pres_in.get(d)
             if v in PRESENCE_VALUES:
                 pres[d] = v
-        edt.setdefault("rows", []).append({
-            "id": "row_" + uuid.uuid4().hex[:10],
-            "creneau": creneau,
-            "pseudo": (r.get("pseudo") or "").strip(),
-            "statut": statut,
-            "modele": (r.get("modele") or "").strip(),
-            "off": off,
-            "presence_by_week": {ws: pres},
-        })
-        n += 1
+        # Cherche une ligne existante (meme creneau, meme pseudo, pas deja prise)
+        match = None
+        for er in existing:
+            if id(er) in used_ids:
+                continue
+            if _norm_pseudo(er.get("pseudo")) == _norm_pseudo(pseudo):
+                match = er
+                break
+        if match is not None:
+            match.setdefault("presence_by_week", {})[ws] = pres
+            if statut:
+                match["statut"] = statut
+            if modele:
+                match["modele"] = modele
+            if off:
+                match["off"] = off
+            used_ids.add(id(match))
+            n_updated += 1
+        else:
+            new_row = {
+                "id": "row_" + uuid.uuid4().hex[:10],
+                "creneau": creneau,
+                "pseudo": pseudo,
+                "statut": statut,
+                "modele": modele,
+                "off": off,
+                "presence_by_week": {ws: pres},
+            }
+            edt["rows"].append(new_row)
+            existing.append(new_row)
+            used_ids.add(id(new_row))
+            n_created += 1
     _save(data)
-    return n
+    return {"created": n_created, "updated": n_updated}

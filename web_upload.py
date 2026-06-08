@@ -17894,7 +17894,8 @@ async function chatDoImport(){
     var r=await fetch('/chatting/import',{method:'POST',body:fd});
     var j=await r.json();
     if(j.ok){
-      if(typeof showToast==='function')showToast('✓ '+j.created+' ligne(s) importée(s)','success',2500);
+      var msg='✓ '+(j.updated||0)+' mise(s) à jour, '+(j.created||0)+' créée(s)';
+      if(typeof showToast==='function')showToast(msg,'success',3000);
       chatCloseImport();
       if(window.chatSwitchTo){ window.chatSwitchTo(window.location.href); } else { location.reload(); }
     } else {
@@ -25432,10 +25433,10 @@ def create_app():
                          "modele": modele, "off": off, "presence": presence})
         if not rows:
             return jsonify({"ok": False, "error": "Rien a importer (colle des lignes avec des TAB entre colonnes)"})
-        n = chatting.import_week(edt_id, creneau, week_start, rows, replace_creneau=replace)
-        if n == 0:
-            return jsonify({"ok": False, "error": "EDT introuvable"})
-        return jsonify({"ok": True, "created": n})
+        res = chatting.import_week(edt_id, creneau, week_start, rows, replace_creneau=replace)
+        if not res or (res.get("created", 0) + res.get("updated", 0)) == 0:
+            return jsonify({"ok": False, "error": "EDT introuvable ou aucune ligne valide"})
+        return jsonify({"ok": True, "created": res.get("created", 0), "updated": res.get("updated", 0)})
 
     # ============ MyPuls Live - settings persistes par createur ============
     @app.route("/mypulslive/settings/<creator_id>", methods=["GET"])
