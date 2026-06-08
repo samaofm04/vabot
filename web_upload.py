@@ -17444,21 +17444,22 @@ def _render_chatplanning_html() -> str:
         )
     tabs_html = "".join(_edt_tab(e) for e in edts)
     # Detecte les presets deja crees (par nom contient OF / MYM)
-    has_of = any("of" in (e.get("name","").lower()) for e in edts)
+    has_of = any(("onlyfans" in (e.get("name", "").lower())
+                  or " of " in (" " + e.get("name", "").lower() + " ")) for e in edts)
     has_mym = any("mym" in (e.get("name","").lower()) for e in edts)
     quick_btns = ""
     if not has_of:
         quick_btns += (
             "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
             "<input type='hidden' name='preset' value='of'>"
-            "<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#0099ff,#0066cc);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px'>💌 + EDT OF</button>"
+            f"<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#0099ff,#0066cc);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px'>{_INFLOW_LOGO} + EDT OF</button>"
             "</form>"
         )
     if not has_mym:
         quick_btns += (
             "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
             "<input type='hidden' name='preset' value='mym'>"
-            "<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px'>📱 + EDT MYM</button>"
+            f"<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px'>{_MYPULS_LOGO} + EDT MYM</button>"
             "</form>"
         )
     add_tab = quick_btns + (
