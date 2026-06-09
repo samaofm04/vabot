@@ -4775,6 +4775,41 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     return out
 
 
+def _kick_scrape_handles(handles, label: str = "kick-scrape") -> int:
+    """Lance un scrape IMMEDIAT en arriere-plan pour une liste de handles.
+
+    Sert a ce que les comptes fraichement ajoutes (Jailbreak, externals, ...)
+    ne restent pas 'NON SCRAPÉ' jusqu au prochain cycle auto (00h/08h/16h).
+    Non-bloquant : spawn un thread daemon et rend la main tout de suite.
+    Retourne le nombre de handles uniques mis en file."""
+    norm = []
+    seen = set()
+    for h in (handles or []):
+        try:
+            hn = _normalize_insta_handle(h) if callable(_normalize_insta_handle) else str(h or "").strip().lower().lstrip("@")
+        except Exception:
+            hn = str(h or "").strip().lower().lstrip("@")
+        if hn and hn not in seen:
+            seen.add(hn)
+            norm.append(hn)
+    if not norm:
+        return 0
+    import threading as _th_ks
+
+    def _bg():
+        from concurrent.futures import ThreadPoolExecutor
+        try:
+            with ThreadPoolExecutor(max_workers=min(4, len(norm))) as ex:
+                # force=True : on veut les vraies stats tout de suite, pas un cache vide
+                list(ex.map(lambda x: _compute_insta_3_stats(x, force=True), norm))
+            print(f"[{label}] scrape immediat OK ({len(norm)} comptes)", flush=True)
+        except Exception as e:
+            print(f"[{label}] scrape immediat crash: {e}", flush=True)
+
+    _th_ks.Thread(target=_bg, daemon=True, name=label).start()
+    return len(norm)
+
+
 def _load_va_links() -> dict:
     """Retourne {user_id_str: [link_id_1, link_id_2, ...]} (cache par mtime)."""
     return _cached_json_load(VA_LINKS_FILE)
@@ -24854,7 +24889,12 @@ def create_app():
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
             return _error(f"❌ Ajout échoué : {e}", tab="jailbreak")
-        return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b>", tab="jailbreak")
+        # Scrape immediat en arriere-plan : le compte ne reste pas "NON SCRAPÉ"
+        try:
+            _kick_scrape_handles([username], label="jb-add-scrape")
+        except Exception as _e_ks:
+            print(f"[jb-add-scrape] launch fail: {_e_ks}", flush=True)
+        return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b> — scrape lancé 🔄", tab="jailbreak")
 
     @app.route("/jailbreak/bulk_add_accounts", methods=["POST"])
     def jailbreak_bulk_add_accounts():
@@ -24883,6 +24923,13 @@ def create_app():
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
             return _error(f"❌ Bulk add échoué : {e}", tab="jailbreak")
+        # Scrape immediat en arriere-plan des comptes reellement ajoutes
+        n_kick = 0
+        try:
+            added_us = res.get("added_usernames") if isinstance(res, dict) else None
+            n_kick = _kick_scrape_handles(added_us if added_us else usernames, label="jb-bulk-scrape")
+        except Exception as _e_ks:
+            print(f"[jb-bulk-scrape] launch fail: {_e_ks}", flush=True)
         parts = [f"<b>{res['added']}</b> comptes ajoutés"]
         if res['skipped_dup']:
             parts.append(f"{res['skipped_dup']} doublons ignorés")
@@ -24890,6 +24937,8 @@ def create_app():
             parts.append(f"{res['skipped_invalid']} invalides")
         if va:
             parts.append(f"sous VA <b>{va}</b>")
+        if n_kick:
+            parts.append("scrape lancé 🔄")
         return _success("✅ " + " · ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/edit_account", methods=["POST"])
