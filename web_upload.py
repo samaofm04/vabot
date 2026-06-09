@@ -9451,7 +9451,7 @@ def _render_insta_trends_grid_html() -> str:
       <!-- Description panel : OUVERT PAR DEFAUT (caption + sound toujours visibles) -->
       <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:6px">
-          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html}</div>
+          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html}</div>
           <div style="display:flex;align-items:center;gap:5px;color:#bbb;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,.9)">
             <span style="color:#3b82f6">🎵</span>
             <span style="color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Original audio</span>
@@ -16311,7 +16311,7 @@ def _render_veille_feed_html() -> str:
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
       <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding-bottom:6px">
-          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html_v}</div>
+          <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html_v}</div>
         </div>
       </div>
       <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s">
