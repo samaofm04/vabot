@@ -294,61 +294,27 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     }
     base = f"https://{host}"
 
-    # 1) Profile info via Account Data V2 endpoint (POST + form data)
-    try:
-        r = requests.post(
-            f"{base}/ig_get_fb_profile_v3.php",
-            headers=headers,
-            data={"username_or_url": username},
-            timeout=20,
-        )
-        log.info(f"RapidAPI profile HTTP {r.status_code} pour {username}")
-        if r.status_code == 401 or r.status_code == 403:
-            return {"error": f"Clé RapidAPI invalide ou non-abonné (HTTP {r.status_code}). Vérifie sur RapidAPI."}
-        if r.status_code == 429:
-            return {"error": "Quota RapidAPI épuisé (HTTP 429). Upgrade ton plan ou attends."}
-        if r.status_code == 404:
-            return {"error": f"Endpoint introuvable (HTTP 404). L'API a peut-être changé."}
-        if r.status_code != 200:
-            return {"error": f"RapidAPI HTTP {r.status_code}: {r.text[:200]}"}
+    # PROFIL + REELS EN PARALLELE : 2 appels reseau independants. On lance le
+    # profil dans un thread pendant qu'on fetch les reels -> le scrape prend
+    # ~le temps du plus lent (1 aller-retour reseau) au lieu de leur somme.
+    import threading as _thr
+    _prof_box = {}
+
+    def _fetch_profile_resp():
         try:
-            user = r.json()
-        except Exception as je:
-            return {"error": f"Réponse non-JSON: {r.text[:150]}"}
-        # Plusieurs APIs renvoient un wrapper {"data": {...}} ou {"user": {...}}
-        if isinstance(user, dict):
-            if "user" in user and isinstance(user["user"], dict):
-                user = user["user"]
-            elif "data" in user and isinstance(user["data"], dict):
-                user = user["data"]
-        # Vérifier qu'on a bien des données utiles
-        if not isinstance(user, dict) or not (user.get("username") or user.get("pk") or user.get("id")):
-            err_msg = user.get("error") or user.get("message") or user.get("detail") if isinstance(user, dict) else str(user)
-            return {"error": f"Réponse vide/invalide. {err_msg or str(user)[:150]}"}
-    except Exception as e:
-        return {"error": f"Erreur fetch profil: {type(e).__name__}: {e}"}
+            _prof_box["resp"] = requests.post(
+                f"{base}/ig_get_fb_profile_v3.php",
+                headers=headers,
+                data={"username_or_url": username},
+                timeout=12,
+            )
+        except Exception as _e:
+            _prof_box["exc"] = _e
 
-    pic = ""
-    if isinstance(user.get("hd_profile_pic_url_info"), dict):
-        pic = user["hd_profile_pic_url_info"].get("url", "")
-    if not pic:
-        pic = user.get("profile_pic_url", "")
+    _prof_thread = _thr.Thread(target=_fetch_profile_resp, daemon=True)
+    _prof_thread.start()
 
-    profile_data = {
-        "username": user.get("username") or username,
-        "full_name": user.get("full_name", ""),
-        "followers": user.get("follower_count", 0),
-        "following": user.get("following_count", 0),
-        "posts_count": user.get("media_count", 0),
-        "profile_pic_url": pic,
-        "biography": (user.get("biography") or "")[:300],
-        "is_private": user.get("is_private", False),
-        "is_verified": user.get("is_verified", False),
-        "pk": user.get("pk") or user.get("id"),
-    }
-
-    # 2) User reels - boucle avec pagination jusqu'à avoir 1 mois de contenu
-    # Endpoint correct : /get_ig_user_reels.php
+    # 2) User reels - boucle avec pagination (tourne PENDANT le fetch du profil)
     reels = []
     one_month_ago = int(time.time()) - 30 * 86400  # 30 jours en secondes
     max_pages = 5  # Limite max d'API calls par profil
@@ -364,7 +330,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     "amount": str(limit),
                     "pagination_token": pagination_token,
                 },
-                timeout=25,
+                timeout=12,
             )
             log.info(f"RapidAPI reels page {pages_fetched+1} HTTP {r.status_code} pour {username}")
             pages_fetched += 1
@@ -490,6 +456,53 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             time.sleep(0.3)  # petit délai entre les pages
     except Exception as e:
         log.warning(f"Fetch reels via RapidAPI: {e}")
+
+    # Recupere le resultat du profil (lance en parallele) + validation/parse
+    _prof_thread.join()
+    if _prof_box.get("exc") is not None:
+        _pe = _prof_box["exc"]
+        return {"error": f"Erreur fetch profil: {type(_pe).__name__}: {_pe}"}
+    r = _prof_box.get("resp")
+    if r is None:
+        return {"error": "Pas de reponse profil RapidAPI"}
+    log.info(f"RapidAPI profile HTTP {r.status_code} pour {username}")
+    if r.status_code == 401 or r.status_code == 403:
+        return {"error": f"Clé RapidAPI invalide ou non-abonné (HTTP {r.status_code}). Vérifie sur RapidAPI."}
+    if r.status_code == 429:
+        return {"error": "Quota RapidAPI épuisé (HTTP 429). Upgrade ton plan ou attends."}
+    if r.status_code == 404:
+        return {"error": f"Endpoint introuvable (HTTP 404). L'API a peut-être changé."}
+    if r.status_code != 200:
+        return {"error": f"RapidAPI HTTP {r.status_code}: {r.text[:200]}"}
+    try:
+        user = r.json()
+    except Exception:
+        return {"error": f"Réponse non-JSON: {r.text[:150]}"}
+    if isinstance(user, dict):
+        if "user" in user and isinstance(user["user"], dict):
+            user = user["user"]
+        elif "data" in user and isinstance(user["data"], dict):
+            user = user["data"]
+    if not isinstance(user, dict) or not (user.get("username") or user.get("pk") or user.get("id")):
+        err_msg = user.get("error") or user.get("message") or user.get("detail") if isinstance(user, dict) else str(user)
+        return {"error": f"Réponse vide/invalide. {err_msg or str(user)[:150]}"}
+    pic = ""
+    if isinstance(user.get("hd_profile_pic_url_info"), dict):
+        pic = user["hd_profile_pic_url_info"].get("url", "")
+    if not pic:
+        pic = user.get("profile_pic_url", "")
+    profile_data = {
+        "username": user.get("username") or username,
+        "full_name": user.get("full_name", ""),
+        "followers": user.get("follower_count", 0),
+        "following": user.get("following_count", 0),
+        "posts_count": user.get("media_count", 0),
+        "profile_pic_url": pic,
+        "biography": (user.get("biography") or "")[:300],
+        "is_private": user.get("is_private", False),
+        "is_verified": user.get("is_verified", False),
+        "pk": user.get("pk") or user.get("id"),
+    }
 
     result = {
         "profile": profile_data,
