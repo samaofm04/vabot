@@ -9409,11 +9409,7 @@ def _render_insta_trends_grid_html() -> str:
     </div>
     <!-- Bottom: caption overlay + stats right -->
     <div style="position:absolute;bottom:50px;left:10px;right:80px;color:#fff;font-size:12px;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.9);max-height:60px;overflow:hidden;z-index:1;pointer-events:none">{caption_short}</div>
-    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:1;pointer-events:none">
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(views)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
-    </div>
+    <!-- stats (vues/likes/comments) deplacees dans la barre du bas -->
     <!-- Bottom stack DANS la card : expand au-dessus, trending + username en bas (toujours visibles) -->
     <!-- z-index:10 = au-dessus de l'iframe embed (z-1) pour rester cliquable + visible -->
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
@@ -9427,6 +9423,11 @@ def _render_insta_trends_grid_html() -> str:
             <span style="color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
           </div>
         </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:7px;color:#fff;font-size:12.5px;font-weight:800;letter-spacing:.2px">
+        <span style="display:flex;align-items:center;gap:5px" title="Vues"><svg viewBox="0 0 24 24" width="13" height="13" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(views)}</span>
+        <span style="display:flex;align-items:center;gap:5px;color:#fb7185" title="Likes"><svg viewBox="0 0 24 24" width="13" height="13" fill="#fb7185"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</span>
+        <span style="display:flex;align-items:center;gap:5px;color:#93c5fd" title="Commentaires"><svg viewBox="0 0 24 24" width="13" height="13" fill="#93c5fd"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</span>
       </div>
       {trending_html}
       <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' title="Cliquer : voir caption + sound + durée" class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.2)'" onmouseout="this.style.background='rgba(255,255,255,.1)'">
