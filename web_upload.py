@@ -9445,10 +9445,10 @@ def _render_insta_trends_grid_html() -> str:
     <!-- Bottom: caption overlay + stats right -->
     <div style="position:absolute;bottom:50px;left:10px;right:80px;color:#fff;font-size:12px;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.9);max-height:60px;overflow:hidden;z-index:1;pointer-events:none">{caption_short}</div>
     <!-- Stats vues/likes/comments : colonne verticale a droite, sur la video (comme a l origine) -->
-    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:11;pointer-events:none">
+    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:5px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:11;pointer-events:none">
       <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(views)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fb7185"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#93c5fd"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(likes)}</div>
+      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(comments)}</div>
     </div>
     <!-- Bottom stack DANS la card : expand au-dessus, trending + username en bas (toujours visibles) -->
     <!-- z-index:10 = au-dessus de l'iframe embed (z-1) pour rester cliquable + visible -->
