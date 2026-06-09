@@ -16339,10 +16339,13 @@ def _render_veille_feed_html() -> str:
                     f"</span></label>"
                 )
             # Video element (reutilise meme structure que Trends)
+            # Toujours emettre le <video> (meme si video_url vide/expire) : igPlayInline
+            # bascule alors sur le proxy via le permalink IG. Sinon la carte reste morte.
+            _src_attr_v = f" src='{video_url}'" if video_url else ""
             video_html_v = (
-                f"<video class='reel-video' muted loop playsinline preload='none' "
+                f"<video class='reel-video'{_src_attr_v} muted loop playsinline preload='none' "
                 f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
-            ) if video_url else ""
+            )
 
             # Card avec MEME structure que Trends (reel-card class) pour reutiliser tout le JS
             section_html += f"""
@@ -16351,6 +16354,8 @@ def _render_veille_feed_html() -> str:
      data-caption="{caption}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}"
      style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
+       onmouseenter='igHoverPlay(this)'
+       onmouseleave='igHoverStop(this)'
        onclick='igPlayInline(this)'>
     {cb_html}
     {ribbon}
@@ -16362,31 +16367,37 @@ def _render_veille_feed_html() -> str:
       </div>
     </div>
     <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:5" onclick="event.stopPropagation()">
-      <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
+      <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
-      <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+      <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
-      <button onclick='igCopyLink("{url}")' title="Partager" style="width:28px;height:28px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+      <button onclick='igCopyLink("{url}")' title="Partager" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
-      <button onclick="removeVeilleReel('{rid}', this)" title="Retirer de la Veille" style="width:28px;height:28px;background:rgba(220,38,38,.6);backdrop-filter:blur(8px);border:0;border-radius:50%;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+      <button onclick="removeVeilleReel('{rid}', this)" title="Retirer de la Veille" style="width:30px;height:30px;background:rgba(220,38,38,.5);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
       </button>
     </div>
-    <div style="position:absolute;bottom:50px;right:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:1;pointer-events:none">
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><polygon points="5 3 19 12 5 21"/></svg>{_format_count(d_views)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{_format_count(d_likes)}</div>
-      <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="#fff"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>{_format_count(d_comments)}</div>
-    </div>
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
-      <div class="reel-expand reel-expand-open" style="max-height:180px;overflow:hidden;transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
-        <div class="reel-expand-inner" style="padding-bottom:6px">
+      <!-- Stats : toujours visibles, colonne a droite (icones Lucide, comme Trends) -->
+      <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;margin-bottom:6px;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none">
+        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>{_format_count(d_views)}</div>
+        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>{_format_count(d_likes)}</div>
+        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>{_format_count(d_comments)}</div>
+      </div>
+      <div class="reel-expand" style="max-height:0;overflow:hidden;border-top:0 solid rgba(255,255,255,.12);transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
+        <div class="reel-expand-inner" style="padding:6px 0">
           <div class="reel-caption-area" onclick='igCopyCaption(this)' title="Cliquer pour copier la légende" style="color:#fff;white-space:pre-wrap;word-wrap:break-word;max-height:90px;overflow:hidden;margin-bottom:6px;font-weight:500;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.9);cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">{caption_html_v}</div>
+          <div style="display:flex;align-items:center;gap:5px;color:#bbb;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,.9)">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span style="color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Original audio</span>
+            <span style="color:#3b82f6;font-weight:700;font-family:monospace" class="reel-dur-label">--:--</span>
+          </div>
         </div>
       </div>
-      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s">
+      <button onclick='event.stopPropagation();toggleReelExpand(this.closest(".reel-card"))' class="reel-username-btn" style="display:flex;align-items:center;gap:7px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);cursor:pointer;font-size:12px;font-weight:700;width:100%;padding:7px 10px;border-radius:8px;text-align:left;font-family:inherit;backdrop-filter:blur(4px);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.2)'" onmouseout="this.style.background='rgba(255,255,255,.1)'">
         {avatar_v}<span style="flex:1">@{r.get('owner', '?')}</span>
         <svg class="reel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .25s ease"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
