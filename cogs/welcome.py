@@ -262,6 +262,56 @@ def find_identity_category(guild, identity):
     return None
 
 
+def find_general_channel_for_identity(guild, identity):
+    """Trouve le salon general-<identity> (case-insensitive, ignore accents)."""
+    target = (identity or "").strip().lower()
+    if not target:
+        return None
+    for ch in guild.text_channels:
+        norm = ch.name.lower().replace("é", "e").replace("è", "e")
+        if not norm.startswith("general-"):
+            continue
+        suffix = norm[len("general-"):].strip()
+        if suffix == target:
+            return ch
+    return None
+
+
+async def sync_general_channel_access(guild, member, identity):
+    """Donne au VA l'acces au salon general-<identity> et le RETIRE des autres
+    general-*. Best-effort, ignore les erreurs silencieusement.
+
+    Si identity est vide/None : retire l'overwrite specifique du membre sur
+    TOUS les salons general-* (utilise par /resetva).
+    """
+    ident_lc = (identity or "").strip().lower()
+    for ch in guild.text_channels:
+        norm = ch.name.lower().replace("é", "e").replace("è", "e")
+        if not norm.startswith("general-"):
+            continue
+        suffix = norm[len("general-"):].strip()
+        try:
+            if ident_lc and suffix == ident_lc:
+                await ch.set_permissions(
+                    member,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                    reason=f"VA assignee a {ident_lc} - acces au general",
+                )
+            else:
+                # retire l'overwrite specifique au membre (laisse les roles)
+                if ch.overwrites_for(member).view_channel is not None:
+                    await ch.set_permissions(
+                        member,
+                        overwrite=None,
+                        reason=f"VA retiree de {suffix}" if ident_lc else "VA reset",
+                    )
+        except Exception:
+            pass
+
+
 async def create_va_channel(guild, member, identity):
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -304,6 +354,13 @@ async def setup_va_ticket(guild, member):
                 )
             except Exception:
                 pass
+            # Re-sync l'acces au general (au cas ou il aurait ete perdu)
+            ident_existing = existing.get("identity") if isinstance(existing, dict) else None
+            if ident_existing:
+                try:
+                    await sync_general_channel_access(guild, member, ident_existing)
+                except Exception:
+                    pass
             return existing_channel, None
         # Salon supprime -> clear et continuer comme nouveau VA
         users.pop(str(member.id), None)
@@ -342,12 +399,16 @@ async def setup_va_ticket(guild, member):
     except Exception as e:
         log.error(f"setup_va_ticket: erreur envoi intro: {e}")
 
-    # Cacher TOUS les salons au VA sauf son ticket (anonymat)
+    # Cacher TOUS les salons au VA sauf son ticket + le general-<identite> (anonymat)
+    general_ch = find_general_channel_for_identity(guild, identity)
     if cfg.get("hide_all_channels_from_va", True):
         own_id = channel.id
         extra_visible = set(cfg.get("extra_visible_channel_ids", []))
+        skip_ids = {own_id, *extra_visible}
+        if general_ch:
+            skip_ids.add(general_ch.id)
         for ch in guild.channels:
-            if ch.id == own_id or ch.id in extra_visible:
+            if ch.id in skip_ids:
                 continue
             if isinstance(ch, discord.CategoryChannel):
                 continue
@@ -359,6 +420,12 @@ async def setup_va_ticket(guild, member):
                 )
             except Exception:
                 pass
+
+    # Donne acces au salon general de l'identite (apres le hide pour garantir l'ordre)
+    try:
+        await sync_general_channel_access(guild, member, identity)
+    except Exception as e:
+        log.warning(f"setup_va_ticket: sync_general_channel_access erreur: {e}")
 
     return channel, None
 
@@ -764,6 +831,11 @@ class Welcome(commands.Cog):
         pending = load_pending()
         pending.pop(str(user.id), None)
         save_pending(pending)
+        # Retire l'acces a TOUS les salons general-*
+        try:
+            await sync_general_channel_access(interaction.guild, user, "")
+        except Exception:
+            pass
         msg = f"✅ {user.mention} reseté complètement."
         if deleted:
             msg += " Salon supprimé."
