@@ -493,9 +493,11 @@ class Welcome(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self.check_pending_deletions.start()
+        self.auto_sort_channels.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
+        self.auto_sort_channels.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -638,6 +640,49 @@ class Welcome(commands.Cog):
 
     @check_pending_deletions.before_loop
     async def before_check_deletions(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=10)
+    async def auto_sort_channels(self):
+        """Toutes les 10 min, range les salons va-* dans la bonne categorie
+        d'identite (si l'admin les a deplaces, ou s'ils ont ete crees sans
+        categorie). Silencieux : aucun message envoye, juste les moves."""
+        try:
+            users = load_users()
+            if not users:
+                return
+            for guild in self.bot.guilds:
+                # Pre-construit la map nom_category_lower -> CategoryChannel
+                cat_map = {c.name.lower().strip(): c for c in guild.categories}
+                for user_id, data in users.items():
+                    ident = data if isinstance(data, str) else (data.get("identity") if isinstance(data, dict) else None)
+                    channel_id = data.get("channel_id") if isinstance(data, dict) else None
+                    if not ident or not channel_id:
+                        continue
+                    channel = guild.get_channel(channel_id)
+                    if not channel:
+                        continue
+                    target = ident.lower().strip()
+                    category = cat_map.get(target)
+                    if not category:
+                        continue  # pas de categorie matching, skip silencieusement
+                    if channel.category_id == category.id:
+                        continue  # deja au bon endroit
+                    try:
+                        await channel.edit(
+                            category=category,
+                            reason="Auto-sort : range salon VA dans sa categorie d'identite",
+                        )
+                        log.info(f"auto_sort: {channel.name} -> {category.name}")
+                    except discord.Forbidden:
+                        pass  # permission refusee
+                    except Exception as e:
+                        log.warning(f"auto_sort: erreur {channel.name}: {e}")
+        except Exception as e:
+            log.error(f"auto_sort_channels erreur globale: {e}")
+
+    @auto_sort_channels.before_loop
+    async def before_auto_sort(self):
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="setwelcomechannel", description="[ADMIN] Définit le salon où arrivera le welcome auto + configure perms")
