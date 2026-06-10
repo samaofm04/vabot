@@ -1700,9 +1700,17 @@ class Admin(commands.Cog):
                 ephemeral=True,
             )
 
-    @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding")
-    @app_commands.describe(user="Le VA à onboarder")
-    async def adduser(self, interaction: discord.Interaction, user: discord.Member):
+    @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding (option: identité forcée)")
+    @app_commands.describe(
+        user="Le VA à onboarder",
+        identity="Optionnel: identité spécifique (ex: amelia, emma). Sinon: réutilise ancienne / round-robin.",
+    )
+    async def adduser(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        identity: str = None,
+    ):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
@@ -1717,18 +1725,26 @@ class Admin(commands.Cog):
             )
             return
         users = load_json(USERS_FILE, {})
-        # Si user a deja une identite, on la garde. Sinon, round-robin via welcome cog.
         existing = users.get(str(user.id))
-        if isinstance(existing, dict) and existing.get("identity"):
+        existing_data = existing if isinstance(existing, dict) else None
+
+        # Si identite forcee fournie, prevaut sur tout
+        if identity:
+            forced_safe = sanitize_identity_name(identity)
+            if forced_safe not in [i.lower() for i in identities] and forced_safe not in identities:
+                await interaction.followup.send(
+                    f"Identité `{forced_safe}` introuvable. Voir /listidentites.",
+                    ephemeral=True,
+                )
+                return
+            identity = forced_safe
+        elif isinstance(existing, dict) and existing.get("identity"):
             identity = existing["identity"]
-            existing_data = existing
         elif isinstance(existing, str):
             identity = existing
-            existing_data = None
         else:
             from cogs.welcome import pick_next_identity
             identity = pick_next_identity() or random.choice(identities)
-            existing_data = None
         users[str(user.id)] = {
             "identity": identity,
             "channel_id": existing_data.get("channel_id") if existing_data else None,
@@ -1772,8 +1788,35 @@ class Admin(commands.Cog):
             await self._sync_general_access(guild, user, identity)
         except Exception:
             pass
+        # Assigne le role Discord qui porte le nom de l'identite (case-insensitive)
+        role_assigned = False
+        target_role = discord.utils.find(
+            lambda r: r.name.lower().strip() == identity.lower().strip(),
+            guild.roles,
+        )
+        if target_role and target_role not in user.roles:
+            try:
+                await user.add_roles(target_role, reason=f"Assignation identite {identity}")
+                role_assigned = True
+            except discord.Forbidden:
+                pass
+            except Exception:
+                pass
+        # Retirer les autres roles d'identite (pour eviter d'en avoir plusieurs)
+        try:
+            known_idents_lc = {i.lower() for i in identities}
+            roles_to_remove = [
+                r for r in user.roles
+                if r.name.lower().strip() in known_idents_lc
+                and r.name.lower().strip() != identity.lower().strip()
+            ]
+            if roles_to_remove:
+                await user.remove_roles(*roles_to_remove, reason="Sync identity role - cleanup")
+        except Exception:
+            pass
+        role_msg = f" • rôle **{target_role.name}** ajouté" if role_assigned else ""
         await interaction.followup.send(
-            f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`",
+            f"✅ Salon {channel.mention} créé pour {user.mention}. Identité: `{identity}`{role_msg}",
             ephemeral=True,
         )
 
