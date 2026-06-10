@@ -494,10 +494,12 @@ class Welcome(commands.Cog):
         self._owner_id = None
         self.check_pending_deletions.start()
         self.auto_sort_channels.start()
+        self.auto_secure_general_channels.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
         self.auto_sort_channels.cancel()
+        self.auto_secure_general_channels.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -683,6 +685,95 @@ class Welcome(commands.Cog):
 
     @auto_sort_channels.before_loop
     async def before_auto_sort(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=10)
+    async def auto_secure_general_channels(self):
+        """Toutes les 10 min, securise les salons general-<identity> :
+        - @everyone view_channel=False (cache par defaut)
+        - chaque VA de l'identite X a view_channel=True sur general-X
+        - les autres VAs (qui ne sont plus sur cette identite) sont retires.
+
+        Silencieux : pas de message envoye.
+        """
+        try:
+            users = load_users()
+            for guild in self.bot.guilds:
+                # Build identity_lower -> set of Member objects (VAs actifs)
+                identity_to_members = {}
+                for user_id, data in users.items():
+                    ident = data if isinstance(data, str) else (
+                        data.get("identity") if isinstance(data, dict) else None
+                    )
+                    if not ident:
+                        continue
+                    try:
+                        member = guild.get_member(int(user_id))
+                    except Exception:
+                        member = None
+                    if not member:
+                        continue
+                    identity_to_members.setdefault(
+                        ident.lower().strip(), set()
+                    ).add(member)
+
+                for ch in guild.text_channels:
+                    norm = ch.name.lower().replace("é", "e").replace("è", "e")
+                    if not norm.startswith("general-"):
+                        continue
+                    suffix = norm[len("general-"):].strip()
+
+                    # 1) @everyone : cache le salon par defaut
+                    everyone = guild.default_role
+                    if ch.overwrites_for(everyone).view_channel is not False:
+                        try:
+                            await ch.set_permissions(
+                                everyone,
+                                view_channel=False,
+                                reason="Auto-secure: restreint au identite",
+                            )
+                        except Exception:
+                            pass
+
+                    # 2) Grant view aux VAs de cette identite
+                    expected = identity_to_members.get(suffix, set())
+                    for member in expected:
+                        if ch.overwrites_for(member).view_channel is not True:
+                            try:
+                                await ch.set_permissions(
+                                    member,
+                                    view_channel=True,
+                                    send_messages=True,
+                                    read_message_history=True,
+                                    attach_files=True,
+                                    reason=f"Auto-secure: VA assignee a {suffix}",
+                                )
+                            except Exception:
+                                pass
+
+                    # 3) Remove l'overwrite des VAs qui ne sont pas/plus sur cette identite
+                    for target, ow in list(ch.overwrites.items()):
+                        if not isinstance(target, discord.Member):
+                            continue
+                        if target in expected:
+                            continue
+                        # Garde l'admin (proprio bot) et le bot lui-meme
+                        if target == guild.me:
+                            continue
+                        if ow.view_channel is not None:
+                            try:
+                                await ch.set_permissions(
+                                    target,
+                                    overwrite=None,
+                                    reason="Auto-secure: VA pas sur cette identite",
+                                )
+                            except Exception:
+                                pass
+        except Exception as e:
+            log.error(f"auto_secure_general_channels erreur: {e}")
+
+    @auto_secure_general_channels.before_loop
+    async def before_auto_secure(self):
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="setwelcomechannel", description="[ADMIN] Définit le salon où arrivera le welcome auto + configure perms")
