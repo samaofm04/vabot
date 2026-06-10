@@ -1642,11 +1642,75 @@ class Admin(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="listvas", description="Liste les VAs groupés par identité")
-    @app_commands.describe(identity="Optionnel: filtrer sur une identité")
-    async def listvas(self, interaction: discord.Interaction, identity: str = None):
+    @app_commands.command(name="listvas", description="Liste les VAs (ou répare les salons orphelins avec fix:True)")
+    @app_commands.describe(
+        identity="Optionnel: filtrer sur une identité",
+        fix="True = range les salons va-* dans la bonne catégorie selon leur identité (réparation one-shot)",
+    )
+    async def listvas(
+        self,
+        interaction: discord.Interaction,
+        identity: str = None,
+        fix: bool = False,
+    ):
         if not await self.require_admin(interaction):
             return
+
+        # Mode REPARATION : range les salons orphelins
+        if fix:
+            await interaction.response.defer(ephemeral=True)
+            users = load_json(USERS_FILE, {})
+            guild = interaction.guild
+            moved = 0
+            already_ok = 0
+            no_category = 0
+            no_channel = 0
+            details = []
+            for user_id, data in users.items():
+                ident = data if isinstance(data, str) else (data.get("identity") if isinstance(data, dict) else None)
+                channel_id = data.get("channel_id") if isinstance(data, dict) else None
+                if not ident or not channel_id:
+                    continue
+                channel = guild.get_channel(channel_id)
+                if not channel:
+                    no_channel += 1
+                    continue
+                target_cat_name = ident.lower().strip()
+                category = next(
+                    (c for c in guild.categories if c.name.lower().strip() == target_cat_name),
+                    None,
+                )
+                if not category:
+                    no_category += 1
+                    if len(details) < 10:
+                        details.append(f"  ❌ `{channel.name}` → catégorie `{ident}` introuvable")
+                    continue
+                if channel.category_id == category.id:
+                    already_ok += 1
+                    continue
+                try:
+                    await channel.edit(category=category, reason="Sync category to identity")
+                    moved += 1
+                    if len(details) < 10:
+                        details.append(f"  ✅ `{channel.name}` → `{category.name}`")
+                except discord.Forbidden:
+                    if len(details) < 10:
+                        details.append(f"  ⚠️ `{channel.name}` → permission refusée")
+                except Exception as e:
+                    if len(details) < 10:
+                        details.append(f"  ⚠️ `{channel.name}` → {str(e)[:50]}")
+            msg = (
+                f"🛠️ **Réparation des salons VA**\n"
+                f"• Déplacés : **{moved}**\n"
+                f"• Déjà au bon endroit : {already_ok}\n"
+                f"• Sans catégorie matching : {no_category}\n"
+                f"• Salon introuvable : {no_channel}"
+            )
+            if details:
+                msg += "\n\n**Détails (max 10) :**\n" + "\n".join(details)
+            await interaction.followup.send(msg[:1990], ephemeral=True)
+            return
+
         users = load_json(USERS_FILE, {})
         if not users:
             await interaction.response.send_message("Aucun VA assigné pour l'instant.", ephemeral=True)
