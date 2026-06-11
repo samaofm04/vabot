@@ -563,6 +563,7 @@ class Admin(commands.Cog):
         users = load_json(USERS_FILE, {})
         n_ok = 0
         n_skip = 0
+        by_ident = {}  # identite_lc -> [noms de VAs synchronises]
         for uid, data in users.items():
             if isinstance(data, dict):
                 ident = data.get("identity") or ""
@@ -585,13 +586,22 @@ class Admin(commands.Cog):
             try:
                 await self._sync_general_access(guild, member, ident)
                 n_ok += 1
+                by_ident.setdefault(ident.strip().lower(), []).append(
+                    member.display_name or member.name
+                )
             except Exception:
                 n_skip += 1
-        await interaction.followup.send(
+        # Rapport par identite : quel general -> quels VAs
+        report = ""
+        for ident_lc in sorted(by_ident):
+            names = sorted(by_ident[ident_lc])
+            report += f"\n**général-{ident_lc}** ({len(names)}) : " + ", ".join(names)
+        msg = (
             f"✅ Accès aux salons général synchronisé pour **{n_ok}** VA(s)."
-            + (f" ({n_skip} ignoré·s — membre absent / sans identité)" if n_skip else ""),
-            ephemeral=True,
+            + (f" ({n_skip} ignoré·s — membre absent / sans identité)" if n_skip else "")
+            + (report or "\n_(aucun VA avec identité à synchroniser)_")
         )
+        await interaction.followup.send(msg[:1990], ephemeral=True)
 
     # ---------- IDENTITES ----------
 
