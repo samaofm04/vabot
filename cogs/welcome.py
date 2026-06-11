@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Union
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -898,10 +899,14 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="showsalon",
-        description="[ADMIN] Rendre un salon visible par TOUS les VAs (ex: warm-up, aide)",
+        description="[ADMIN] Rendre un salon (texte OU vocal) visible par TOUS les VAs",
     )
-    @app_commands.describe(salon="Le salon a rendre visible aux VAs (existants + futurs)")
-    async def showsalon(self, interaction: discord.Interaction, salon: discord.TextChannel):
+    @app_commands.describe(salon="Le salon ou vocal a rendre visible aux VAs (existants + futurs)")
+    async def showsalon(
+        self,
+        interaction: discord.Interaction,
+        salon: Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel],
+    ):
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
@@ -914,24 +919,33 @@ class Welcome(commands.Cog):
             cfg["extra_visible_channel_ids"] = ids
             save_welcome_config(cfg)
         # 2) Debloque les VAs EXISTANTS : retire l'overwrite view_channel=False
-        #    pose par l'isolation (on met view_channel=True pour garantir l'acces
-        #    meme si @everyone est refuse sur ce salon).
+        #    pose par l'isolation. Pour un VOCAL : on autorise aussi a REJOINDRE
+        #    (connect), pas juste a voir.
+        is_voice = isinstance(salon, (discord.VoiceChannel, discord.StageChannel))
         fixed = 0
         for target, ow in list(salon.overwrites.items()):
             if isinstance(target, discord.Member) and ow.view_channel is False:
                 try:
-                    await salon.set_permissions(
-                        target, view_channel=True,
-                        reason="showsalon - rendre visible aux VAs",
-                    )
+                    if is_voice:
+                        await salon.set_permissions(
+                            target, view_channel=True, connect=True,
+                            reason="showsalon - vocal visible aux VAs",
+                        )
+                    else:
+                        await salon.set_permissions(
+                            target, view_channel=True,
+                            reason="showsalon - rendre visible aux VAs",
+                        )
                     fixed += 1
                 except Exception:
                     pass
+        kind = "vocal" if is_voice else "salon"
+        extra = " (voir + rejoindre)" if is_voice else ""
         await interaction.followup.send(
-            f"✅ {salon.mention} est maintenant visible par les VAs.\n"
+            f"✅ {salon.mention} ({kind}) est maintenant visible par les VAs.\n"
             f"• Liste blanche : {'déjà présent' if already else 'ajouté'} (futurs VAs ✅)\n"
-            f"• {fixed} VA(s) existant(s) débloqué(s) sur ce salon.\n\n"
-            f"_Astuce : relance la commande pour chaque salon d'aide (warm-up, commande-va, etc.)._",
+            f"• {fixed} VA(s) existant(s) débloqué(s){extra}.\n\n"
+            f"_Relance la commande pour chaque salon/vocal d'aide à rendre visible._",
             ephemeral=True,
         )
 
