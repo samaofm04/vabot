@@ -3779,6 +3779,20 @@ def _check_web_login(username: str, password: str) -> bool:
     return False
 
 
+def _web_user_role(username: str, password: str) -> str:
+    """Role de l'utilisateur web qui vient de se connecter.
+
+    - Login par username : retourne le role enregistre dans web_admin_users.json.
+    - Login par WEB_PASSWORD seul (legacy / owner) : retourne 'admin' (acces complet).
+    """
+    uname = (username or "").lower().strip()
+    if uname:
+        u = _load_web_users().get(uname)
+        if u and u.get("password_hash") == _hash_password(password or ""):
+            return (u.get("role") or "admin").lower()
+    return "admin"
+
+
 def _render_login(err=""):
     err_html = (
         f'<div class="err"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>{err}</div>'
@@ -21852,6 +21866,53 @@ ROLE_MENU_STRUCTURE = [
 ]
 
 
+# Roles restreints -> ensemble d'onglets (par 'name' showTab) visibles. owner /
+# admin (ou role non liste ici) = acces complet. Un Chatter ne voit QUE la
+# section Chatteurs (planning + revenus) + son profil + ses preferences.
+_ROLE_ALLOWED_TABS = {
+    "chatter": {"chatplanning", "revenus", "saccount", "sprefs"},
+}
+
+
+def _role_allowed_tabs(role):
+    """Set d'onglets autorises pour un role, ou None = acces complet (owner/admin
+    et tout role non explicitement restreint)."""
+    r = (role or "").lower().strip()
+    if r in ("", "owner", "admin"):
+        return None
+    return _ROLE_ALLOWED_TABS.get(r)
+
+
+def _role_gate_script(allowed) -> str:
+    """Script injecte (roles restreints uniquement) : cache les boutons sidebar,
+    groupes/sections vides et panneaux non autorises, puis active l'onglet par
+    defaut. Le CONTENU sensible est deja vide cote serveur (cf _render_upload_inner) ;
+    ceci nettoie la navigation pour que l'employe ne voie que ses onglets."""
+    import json as _json
+    allowed_js = _json.dumps(sorted(allowed))
+    return (
+        "<script>(function(){"
+        "var A=" + allowed_js + ";if(!A||!A.length)return;"
+        "var ok={};A.forEach(function(n){ok[n]=1;});"
+        "function nm(b){var o=b.getAttribute('onclick')||'';"
+        "var m=o.match(/showTab\\(\\s*'[^']*'\\s*,\\s*'([^']*)'/);"
+        "if(m)return m[1];return (b.id&&b.id.indexOf('tab-')===0)?b.id.slice(4):'';}"
+        "function run(){"
+        "document.querySelectorAll('.sidebar .item').forEach(function(b){var n=nm(b);if(n&&!ok[n])b.style.display='none';});"
+        "document.querySelectorAll('.sidebar .group, .sidebar .solo-group').forEach(function(g){"
+        "var it=g.querySelectorAll('.item'),v=false;Array.prototype.forEach.call(it,function(b){if(b.style.display!=='none')v=true;});"
+        "if(it.length&&!v)g.style.display='none';});"
+        "document.querySelectorAll('.sidebar .section-label').forEach(function(l){"
+        "var n=l.nextElementSibling,v=false;while(n&&!(n.classList&&n.classList.contains('section-label'))){if(n.style.display!=='none')v=true;n=n.nextElementSibling;}"
+        "if(!v)l.style.display='none';});"
+        "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.remove();});"
+        "var db=document.getElementById('tab-'+A[0]);if(db)db.click();"
+        "}"
+        "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}"
+        "})();</script>"
+    )
+
+
 def _get_all_roles():
     """Retourne la liste unifiee des roles (defauts + custom). Source unique
     de verite pour le tableau ET le dropdown 'Ajouter un utilisateur'."""
@@ -22506,15 +22567,40 @@ def _render_upload_inner(msg=None, error=None):
     stat_pps = 0
     if PROFILE_PICS_DIR.exists():
         stat_pps = sum(1 for p in PROFILE_PICS_DIR.iterdir() if p.is_file())
-    return (
+    # ===== Acces par role : un role restreint ne recoit QUE ses onglets =====
+    # owner/admin -> allowed=None -> rendu identique a avant (aucun gating).
+    role = ""
+    try:
+        role = (session.get("role") or "").lower()
+        if not role:
+            # Session ouverte avant l'ajout du role (pas de re-login) : on retrouve
+            # le role via le username enregistre dans web_admin_users.json.
+            uname = (session.get("username") or "").lower()
+            if uname:
+                u = _load_web_users().get(uname)
+                role = (u.get("role") or "").lower() if isinstance(u, dict) else ""
+    except Exception:
+        role = ""
+    allowed = _role_allowed_tabs(role)  # None = acces complet
+
+    def _g(tab, producer):
+        """Contenu d'un onglet ; vide (et non rendu) si le role n'y a pas acces."""
+        if allowed is not None and tab not in allowed:
+            return ""
+        try:
+            return producer()
+        except Exception:
+            return ""
+
+    html = (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
         .replace("{msg_html}", msg_html)
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
-        .replace("{va_list_html}", _render_va_list_html())
-        .replace("{identity_stats_html}", _render_identity_stats_html())
-        .replace("{home_dashboard_html}", _render_home_dashboard_html())
+        .replace("{va_list_html}", _g("valist", _render_va_list_html))
+        .replace("{identity_stats_html}", _g("vastats", _render_identity_stats_html))
+        .replace("{home_dashboard_html}", _g("home", _render_home_dashboard_html))
         .replace("{stat_va_count}", str(va_count))
         .replace("{stat_identities}", str(len(identities_list)))
         .replace("{stat_reels}", str(stat_reels))
@@ -22522,48 +22608,50 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{stat_stories}", str(stat_stories))
         .replace("{stat_storyctas}", str(stat_storyctas))
         .replace("{stat_pps}", str(stat_pps))
-        .replace("{cloud_reels_html}", _render_cloud_content_html("videos", VIDEO_EXTS))
-        .replace("{cloud_posts_html}", _render_cloud_content_html("posts", IMAGE_EXTS))
-        .replace("{cloud_stories_html}", _render_cloud_content_html("stories", IMAGE_EXTS))
-        .replace("{cloud_storyctas_html}", _render_cloud_content_html("storyctas", IMAGE_EXTS))
-        .replace("{cloud_pps_html}", _render_cloud_pps_html())
-        .replace("{sfs_html}", _render_sfs_html())
-        .replace("{revenus_html}", _render_revenus_html())
-        .replace("{depenses_html}", _render_depenses_html())
-        .replace("{paievas_html}", _render_paievas_html())
-        .replace("{biolinks_html}", _render_biolinks_html())
-        .replace("{onboarding_html}", _render_onboarding_html())
-        .replace("{textpool_html}", _render_textpool_html())
-        .replace("{geelark_html}", _render_geelark_html())
-        .replace("{jailbreak_html}", _render_jailbreak_html())
-        .replace("{gms_html}", _render_gms_html())
-        .replace("{linkscale_html}", _render_linkscale_html())
-        .replace("{schedule_html}", _render_schedule_html())
-        .replace("{sfssetupmym_html}", _render_sfssetup_html("mym"))
-        .replace("{sfssetupof_html}", _render_sfssetup_html("of"))
-        .replace("{vtg_html}", _render_vtg_html())
-        .replace("{veille_feed_html}", _render_veille_feed_html())
-        .replace("{mypulslive_html}", _render_mypulslive_html())
-        .replace("{chatplanning_html}", _render_chatplanning_html())
-        .replace("{bilan_html}", _render_bilan_html())
-        .replace("{profile_pic_html}", _render_profile_pic_html())
+        .replace("{cloud_reels_html}", _g("cloudreels", lambda: _render_cloud_content_html("videos", VIDEO_EXTS)))
+        .replace("{cloud_posts_html}", _g("cloudposts", lambda: _render_cloud_content_html("posts", IMAGE_EXTS)))
+        .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
+        .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
+        .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_html))
+        .replace("{sfs_html}", _g("sfs", _render_sfs_html))
+        .replace("{revenus_html}", _g("revenus", _render_revenus_html))
+        .replace("{depenses_html}", _g("depenses", _render_depenses_html))
+        .replace("{paievas_html}", _g("paievas", _render_paievas_html))
+        .replace("{biolinks_html}", _g("biolinks", _render_biolinks_html))
+        .replace("{onboarding_html}", _g("onboarding", _render_onboarding_html))
+        .replace("{textpool_html}", _g("textpool", _render_textpool_html))
+        .replace("{geelark_html}", _g("geelark", _render_geelark_html))
+        .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
+        .replace("{gms_html}", _g("gms", _render_gms_html))
+        .replace("{linkscale_html}", _g("linkscale", _render_linkscale_html))
+        .replace("{schedule_html}", _g("schedule", _render_schedule_html))
+        .replace("{sfssetupmym_html}", _g("sfssetupmym", lambda: _render_sfssetup_html("mym")))
+        .replace("{sfssetupof_html}", _g("sfssetupof", lambda: _render_sfssetup_html("of")))
+        .replace("{vtg_html}", _g("vtg", _render_vtg_html))
+        .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
+        .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
+        .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
+        .replace("{bilan_html}", _g("bilan", _render_bilan_html))
+        .replace("{profile_pic_html}", _g("saccount", _render_profile_pic_html))
         .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
         .replace("{account_email}", _load_account_settings().get("email", ""))
-        .replace("{security_sessions_html}", _render_security_sessions_html())
-        .replace("{role_settings_html}", _render_role_settings_html())
+        .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
+        .replace("{role_settings_html}", _g("srole", _render_role_settings_html))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
-        .replace("{employees_table_html}", _render_employees_table_html())
+        .replace("{employees_table_html}", _g("semp", _render_employees_table_html))
         .replace("{insta_auth_status}", _render_insta_auth_status())
-        .replace("{insta_accounts_html}", _render_insta_accounts_html())
-        .replace("{insta_accounts_html_for_trends}", _render_insta_accounts_html())
-        .replace("{insta_trends_html_or_empty}", _render_insta_trends_grid_html() or
+        .replace("{insta_accounts_html}", _g("igaccounts", _render_insta_accounts_html))
+        .replace("{insta_accounts_html_for_trends}", _g("igtrends", _render_insta_accounts_html))
+        .replace("{insta_trends_html_or_empty}", _g("igtrends", lambda: (_render_insta_trends_grid_html() or
             "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
             "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:14px'><polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/><polyline points='16 7 22 7 22 13'/></svg>"
             "<h3 style='margin:0 0 8px;color:#888'>Aucun reel scrapé</h3>"
             "<p style='margin:0;font-size:14px'>Ajoute des comptes dans <b>Instagram → Accounts</b> et lance un scrape.<br>Configure d'abord tes cookies dans <b>Settings → Cookies Instagram</b>.</p>"
-            "</div>"
-        )
+            "</div>")))
     )
+    if allowed is not None:
+        html += _role_gate_script(allowed)
+    return html
 
 
 INSTA_VIDEOS_DIR = Path("data/insta/videos")
@@ -22951,6 +23039,7 @@ def create_app():
             if _check_web_login(username, password):
                 session["auth"] = True
                 session["username"] = username or "admin"
+                session["role"] = _web_user_role(username, password)
                 # "Se souvenir de moi" : session de 30 jours au lieu de session navigateur
                 if remember:
                     session.permanent = True
