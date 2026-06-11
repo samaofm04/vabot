@@ -1591,6 +1591,18 @@ class Admin(commands.Cog):
                 f"Identité `{safe}` introuvable. Voir /listidentites.", ephemeral=True
             )
             return
+        # Bloque les identités jailbreak-only (jessye) : pas assignables aux VAs Discord
+        try:
+            from cogs.welcome import JAILBREAK_ONLY_IDENTITIES as _JB_ONLY
+        except Exception:
+            _JB_ONLY = {"jessye"}
+        if safe.lower() in {x.lower() for x in _JB_ONLY}:
+            await interaction.response.send_message(
+                f"❌ `{safe}` est une identité **jailbreak-only** (pas de salon général sur Discord). "
+                "Elle n'est pas assignable aux VAs — choisis une autre identité.",
+                ephemeral=True,
+            )
+            return
         users = load_json(USERS_FILE, {})
         existing = users.get(str(user.id))
         if isinstance(existing, dict):
@@ -1817,8 +1829,9 @@ class Admin(commands.Cog):
         elif isinstance(existing, str):
             identity = existing
         else:
-            from cogs.welcome import pick_next_identity
-            identity = pick_next_identity() or random.choice(identities)
+            from cogs.welcome import pick_next_identity, list_active_identities
+            _pool = list_active_identities() or identities  # exclut jessye (jailbreak-only)
+            identity = pick_next_identity() or random.choice(_pool)
         users[str(user.id)] = {
             "identity": identity,
             "channel_id": existing_data.get("channel_id") if existing_data else None,

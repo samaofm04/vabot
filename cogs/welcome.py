@@ -224,9 +224,17 @@ def list_identities():
     return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
 
 
+# Identités réservées à Jailbreak : JAMAIS assignées aux VAs Discord (pas de
+# salon général, gérées dans le système Jailbreak). Aligné avec web_upload.py.
+JAILBREAK_ONLY_IDENTITIES = {"jessye"}
+
+
 def list_active_identities():
-    """Seulement les identités activées (utilisées pour les nouvelles assignations)."""
-    return [n for n in list_identities() if is_identity_active(n)]
+    """Seulement les identités activées (utilisées pour les nouvelles assignations).
+    Exclut les identités jailbreak-only (jamais assignées aux VAs Discord)."""
+    jb = {x.lower() for x in JAILBREAK_ONLY_IDENTITIES}
+    return [n for n in list_identities()
+            if is_identity_active(n) and n.strip().lower() not in jb]
 
 
 def pick_next_identity():
