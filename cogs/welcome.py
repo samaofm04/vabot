@@ -966,6 +966,62 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="hidesalon",
+        description="[ADMIN] Re-cacher un salon/vocal aux VAs (inverse de /showsalon)",
+    )
+    @app_commands.describe(salon="Le salon ou vocal a cacher aux VAs (ex: bienvenue, payement)")
+    async def hidesalon(
+        self,
+        interaction: discord.Interaction,
+        salon: Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel],
+    ):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        # 1) Retire de la liste blanche -> les futurs VAs seront isoles de ce salon
+        cfg = load_welcome_config()
+        ids = list(cfg.get("extra_visible_channel_ids", []))
+        if salon.id in ids:
+            ids.remove(salon.id)
+            cfg["extra_visible_channel_ids"] = ids
+            save_welcome_config(cfg)
+        # 2) Cache pour chaque VA EXISTANT (membre dans users.json). On ne touche
+        #    JAMAIS au staff (boss / admins) pour ne pas leur cacher le salon.
+        users = load_users()
+        hidden = 0
+        for uid in list(users.keys()):
+            if not str(uid).isdigit():
+                continue
+            member = guild.get_member(int(uid))
+            if member is None:
+                continue
+            try:
+                gp = member.guild_permissions
+                if gp.administrator or gp.manage_guild or gp.manage_channels:
+                    continue
+            except Exception:
+                pass
+            try:
+                await salon.set_permissions(
+                    member, view_channel=False,
+                    reason="hidesalon - cacher aux VAs",
+                )
+                hidden += 1
+            except Exception:
+                pass
+        await interaction.followup.send(
+            f"✅ {salon.mention} est maintenant **caché** aux VAs.\n"
+            f"• Retiré de la liste blanche (futurs VAs isolés ✅)\n"
+            f"• {hidden} VA(s) existant(s) recaché(s).\n"
+            f"_(le staff garde l'accès)_",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="pendingdeletions", description="[ADMIN] Liste les VAs partis dont le salon va être supprimé")
     async def pendingdeletions(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
