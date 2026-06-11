@@ -758,9 +758,18 @@ class Welcome(commands.Cog):
                             continue
                         if target in expected:
                             continue
-                        # Garde l'admin (proprio bot) et le bot lui-meme
+                        # Garde le bot lui-meme
                         if target == guild.me:
                             continue
+                        # Garde le STAFF (boss / admins) : ne JAMAIS leur retirer
+                        # l'acces aux generaux, sinon le boss ne voit plus general-X
+                        # des identites ou il n'est pas assigne comme VA.
+                        try:
+                            gp = target.guild_permissions
+                            if gp.administrator or gp.manage_guild or gp.manage_channels:
+                                continue
+                        except Exception:
+                            pass
                         if ow.view_channel is not None:
                             try:
                                 await ch.set_permissions(
