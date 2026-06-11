@@ -3423,30 +3423,7 @@ document.addEventListener('keydown', function(e){
 
 <!-- SETTINGS - MON COMPTE -->
 <div class="form-section" id="form-saccount" style="display:none">
-<form method="POST" action="/settings/account" enctype="multipart/form-data" class="box">
-<h3 style="margin-top:0">👤 Informations personnelles</h3>
-<small>Profil et identifiants de connexion</small>
-<label style="margin-top:16px">Photo de profil</label>
-<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-  {profile_pic_html}
-  <input type="file" name="profile_pic" accept="image/*" style="flex:1">
-</div>
-<label>Nom affiché</label>
-<input type="text" name="display_name" value="{account_display_name}" placeholder="Ton nom">
-<label>Email</label>
-<input type="email" name="email" value="{account_email}" placeholder="email@exemple.com">
-<button type="submit">Sauvegarder le profil</button>
-</form>
-
-<form method="POST" action="/settings/account_password" class="box">
-<h3 style="margin-top:0">🔐 Changer le mot de passe</h3>
-<small>Mot de passe d'accès au site</small>
-<label style="margin-top:14px">Nouveau mot de passe</label>
-<input type="password" name="new_password" placeholder="Min 6 caractères" required minlength="6">
-<label>Confirmer le mot de passe</label>
-<input type="password" name="confirm_password" placeholder="Re-tape pour confirmer" required minlength="6">
-<button type="submit">Changer le mot de passe</button>
-</form>
+{account_section_html}
 </div>
 
 <!-- SETTINGS - PRÉFÉRENCES -->
@@ -22506,6 +22483,65 @@ def _admin_token_status() -> str:
     return "❌ Non configuré — colle ton token ci-dessous"
 
 
+def _render_account_section_html() -> str:
+    """Contenu de 'Mon compte', adapte au role.
+
+    - owner/admin : profil global (PP + nom) + mot de passe du SITE (sans email).
+    - role restreint (ex: chatter) : SON propre compte (username) + changer SON
+      mot de passe. Jamais le profil owner ni le mot de passe du site.
+    """
+    try:
+        from flask import session as _sess
+        role = (_sess.get("role") or "").lower()
+        uname = _sess.get("username") or ""
+    except Exception:
+        role, uname = "", ""
+    if not role:
+        try:
+            u = _load_web_users().get((uname or "").lower())
+            role = (u.get("role") or "").lower() if isinstance(u, dict) else ""
+        except Exception:
+            role = ""
+    if _role_allowed_tabs(role) is not None:
+        # Employe restreint : juste son propre mot de passe.
+        uname_safe = html_escape(uname or "", quote=True)
+        return (
+            "<form method='POST' action='/settings/my_password' class='box'>"
+            "<h3 style='margin-top:0'>👤 Mon compte</h3>"
+            f"<small>Connecté en tant que <b>@{uname_safe}</b></small>"
+            "<label style='margin-top:18px'>Nouveau mot de passe</label>"
+            "<input type='password' name='new_password' placeholder='Min 6 caractères' required minlength='6'>"
+            "<label>Confirmer le mot de passe</label>"
+            "<input type='password' name='confirm_password' placeholder='Re-tape pour confirmer' required minlength='6'>"
+            "<button type='submit' style='margin-top:8px'>Changer mon mot de passe</button>"
+            "</form>"
+        )
+    acc = _load_account_settings()
+    name_safe = html_escape(acc.get("display_name", "") or "", quote=True)
+    return (
+        "<form method='POST' action='/settings/account' enctype='multipart/form-data' class='box'>"
+        "<h3 style='margin-top:0'>👤 Informations personnelles</h3>"
+        "<small>Profil et identifiants de connexion</small>"
+        "<label style='margin-top:16px'>Photo de profil</label>"
+        "<div style='display:flex;align-items:center;gap:14px;margin-bottom:14px'>"
+        + _render_profile_pic_html() +
+        "<input type='file' name='profile_pic' accept='image/*' style='flex:1'></div>"
+        "<label>Nom affiché</label>"
+        f"<input type='text' name='display_name' value=\"{name_safe}\" placeholder='Ton nom'>"
+        "<button type='submit'>Sauvegarder le profil</button>"
+        "</form>"
+        "<form method='POST' action='/settings/account_password' class='box'>"
+        "<h3 style='margin-top:0'>🔐 Changer le mot de passe</h3>"
+        "<small>Mot de passe d'accès au site</small>"
+        "<label style='margin-top:14px'>Nouveau mot de passe</label>"
+        "<input type='password' name='new_password' placeholder='Min 6 caractères' required minlength='6'>"
+        "<label>Confirmer le mot de passe</label>"
+        "<input type='password' name='confirm_password' placeholder='Re-tape pour confirmer' required minlength='6'>"
+        "<button type='submit'>Changer le mot de passe</button>"
+        "</form>"
+    )
+
+
 def _render_upload(msg=None, error=None):
     try:
         return _render_upload_inner(msg=msg, error=error)
@@ -22645,9 +22681,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
         .replace("{bilan_html}", _g("bilan", _render_bilan_html))
-        .replace("{profile_pic_html}", _g("saccount", _render_profile_pic_html))
-        .replace("{account_display_name}", _load_account_settings().get("display_name", ""))
-        .replace("{account_email}", _load_account_settings().get("email", ""))
+        .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{role_settings_html}", _g("srole", _render_role_settings_html))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
@@ -22924,6 +22958,18 @@ def create_app():
 
     def is_auth():
         return session.get("auth") is True
+
+    def _is_admin():
+        """True si l'utilisateur connecte a un acces complet (owner/admin ou
+        role non restreint). Sert a proteger les routes sensibles."""
+        try:
+            role = (session.get("role") or "").lower()
+            if not role:
+                u = _load_web_users().get((session.get("username") or "").lower())
+                role = (u.get("role") or "").lower() if isinstance(u, dict) else ""
+        except Exception:
+            role = ""
+        return _role_allowed_tabs(role) is None
 
     def _redirect_back(tab=None):
         """Retourne l URL ou rediriger.
@@ -26636,6 +26682,8 @@ def create_app():
     def settings_account():
         if not is_auth():
             return redirect("/")
+        if not _is_admin():
+            return _error("❌ Action réservée à l'admin", tab="saccount")
         settings = _load_account_settings()
         display_name = (request.form.get("display_name") or "").strip()
         email = (request.form.get("email") or "").strip()
@@ -26663,6 +26711,8 @@ def create_app():
     def settings_account_password():
         if not is_auth():
             return redirect("/")
+        if not _is_admin():
+            return _error("❌ Action réservée à l'admin", tab="saccount")
         new_pwd = (request.form.get("new_password") or "").strip()
         confirm = (request.form.get("confirm_password") or "").strip()
         if not new_pwd or len(new_pwd) < 6:
@@ -26674,6 +26724,34 @@ def create_app():
             return _error("❌ Erreur écriture .env")
         _schedule_restart(2.0)
         return _success("✅ Mot de passe changé. Redémarrage dans 2 sec — reconnecte-toi.")
+
+    @app.route("/settings/my_password", methods=["POST"])
+    def settings_my_password():
+        """Un employe (role restreint) change SON propre mot de passe de login.
+        Ne touche ni au profil owner ni au mot de passe du site."""
+        if not is_auth():
+            return redirect("/")
+        uname = (session.get("username") or "").lower().strip()
+        new_pwd = (request.form.get("new_password") or "").strip()
+        confirm = (request.form.get("confirm_password") or "").strip()
+        if not uname:
+            return _error("❌ Utilisateur inconnu", tab="saccount")
+        if len(new_pwd) < 6:
+            return _error("❌ Mot de passe trop court (min 6 caractères)", tab="saccount")
+        if new_pwd != confirm:
+            return _error("❌ Les mots de passe ne correspondent pas", tab="saccount")
+        h = _hash_password(new_pwd)
+        wu = _load_web_users()
+        if uname in wu:
+            wu[uname]["password_hash"] = h
+            _save_web_users(wu)
+        ru = _load_role_users()
+        for u in ru:
+            if (u.get("username") or "").lower() == uname:
+                u["password_hash"] = h
+                break
+        _save_role_users(ru)
+        return _success("✅ Ton mot de passe a été changé.", tab="saccount")
 
     @app.route("/security/revoke_session", methods=["POST"])
     def security_revoke():
@@ -27521,6 +27599,8 @@ def create_app():
     def settings_web_password():
         if not is_auth():
             return redirect("/")
+        if not _is_admin():
+            return _error("❌ Action réservée à l'admin", tab="saccount")
         pwd = (request.form.get("password") or "").strip()
         if len(pwd) < 6:
             return _error("❌ Mot de passe trop court (min 6 caractères)")
