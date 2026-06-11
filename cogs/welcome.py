@@ -896,6 +896,45 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="showsalon",
+        description="[ADMIN] Rendre un salon visible par TOUS les VAs (ex: warm-up, aide)",
+    )
+    @app_commands.describe(salon="Le salon a rendre visible aux VAs (existants + futurs)")
+    async def showsalon(self, interaction: discord.Interaction, salon: discord.TextChannel):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        # 1) Ajoute a la liste blanche -> les FUTURS VAs ne seront plus isoles de ce salon
+        cfg = load_welcome_config()
+        ids = list(cfg.get("extra_visible_channel_ids", []))
+        already = salon.id in ids
+        if not already:
+            ids.append(salon.id)
+            cfg["extra_visible_channel_ids"] = ids
+            save_welcome_config(cfg)
+        # 2) Debloque les VAs EXISTANTS : retire l'overwrite view_channel=False
+        #    pose par l'isolation (on met view_channel=True pour garantir l'acces
+        #    meme si @everyone est refuse sur ce salon).
+        fixed = 0
+        for target, ow in list(salon.overwrites.items()):
+            if isinstance(target, discord.Member) and ow.view_channel is False:
+                try:
+                    await salon.set_permissions(
+                        target, view_channel=True,
+                        reason="showsalon - rendre visible aux VAs",
+                    )
+                    fixed += 1
+                except Exception:
+                    pass
+        await interaction.followup.send(
+            f"✅ {salon.mention} est maintenant visible par les VAs.\n"
+            f"• Liste blanche : {'déjà présent' if already else 'ajouté'} (futurs VAs ✅)\n"
+            f"• {fixed} VA(s) existant(s) débloqué(s) sur ce salon.\n\n"
+            f"_Astuce : relance la commande pour chaque salon d'aide (warm-up, commande-va, etc.)._",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="pendingdeletions", description="[ADMIN] Liste les VAs partis dont le salon va être supprimé")
     async def pendingdeletions(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
