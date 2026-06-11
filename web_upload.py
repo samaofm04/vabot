@@ -21890,6 +21890,9 @@ def _role_gate_script(allowed) -> str:
     ceci nettoie la navigation pour que l'employe ne voie que ses onglets."""
     import json as _json
     allowed_js = _json.dumps(sorted(allowed))
+    # Approche INVERSE (robuste aux structures imbriquees / boutons "SOON" sans
+    # showTab) : on cache TOUT le sidebar, puis on ne revele QUE les onglets
+    # autorises + leurs conteneurs parents.
     return (
         "<script>(function(){"
         "var A=" + allowed_js + ";if(!A||!A.length)return;"
@@ -21898,13 +21901,23 @@ def _role_gate_script(allowed) -> str:
         "var m=o.match(/showTab\\(\\s*'[^']*'\\s*,\\s*'([^']*)'/);"
         "if(m)return m[1];return (b.id&&b.id.indexOf('tab-')===0)?b.id.slice(4):'';}"
         "function run(){"
-        "document.querySelectorAll('.sidebar .item').forEach(function(b){var n=nm(b);if(n&&!ok[n])b.style.display='none';});"
-        "document.querySelectorAll('.sidebar .group, .sidebar .solo-group').forEach(function(g){"
-        "var it=g.querySelectorAll('.item'),v=false;Array.prototype.forEach.call(it,function(b){if(b.style.display!=='none')v=true;});"
-        "if(it.length&&!v)g.style.display='none';});"
-        "document.querySelectorAll('.sidebar .section-label').forEach(function(l){"
-        "var n=l.nextElementSibling,v=false;while(n&&!(n.classList&&n.classList.contains('section-label'))){if(n.style.display!=='none')v=true;n=n.nextElementSibling;}"
-        "if(!v)l.style.display='none';});"
+        "var sb=document.querySelector('.sidebar');if(!sb)return;"
+        # 1) tout cacher
+        "sb.querySelectorAll('.group,.solo-group,.items,.item,.section-label,.group-head').forEach(function(e){e.style.display='none';});"
+        # 2) reveler chaque onglet autorise + tous ses ancetres (+ ouvrir les groupes)
+        "function reveal(b){var el=b;while(el&&el!==sb){el.style.display='';"
+        "if(el.classList&&el.classList.contains('group')){el.classList.add('open');"
+        "var h=el.querySelector('.group-head');if(h)h.style.display='';}"
+        "el=el.parentElement;}}"
+        "A.forEach(function(name){var b=document.getElementById('tab-'+name);"
+        "if(!b){var all=sb.querySelectorAll('.item');for(var i=0;i<all.length;i++){if(nm(all[i])===name){b=all[i];break;}}}"
+        "if(b)reveal(b);});"
+        # 3) reveler les labels de section qui precedent un bloc redevenu visible
+        "Array.prototype.forEach.call(sb.children,function(c){"
+        "if(c.classList&&c.classList.contains('section-label')){var n=c.nextElementSibling,v=false;"
+        "while(n&&!(n.classList&&n.classList.contains('section-label'))){if(n.style.display!=='none')v=true;n=n.nextElementSibling;}"
+        "if(v)c.style.display='';}});"
+        # 4) retirer les panneaux de contenu non autorises + ouvrir l'onglet par defaut
         "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.remove();});"
         "var db=document.getElementById('tab-'+A[0]);if(db)db.click();"
         "}"
