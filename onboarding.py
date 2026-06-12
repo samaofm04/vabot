@@ -147,8 +147,20 @@ DEFAULT_STEPS = [
             "• **Poste 12 stories** aujourd'hui → clique sur **Story** : ajoute **4 stories sur "
             "chacune des 3 bulles** (me / life / travel)\n"
             "• 🎬 **Publie 1 reel à 20h (heure française)** → clique sur **Reel**\n\n"
-            "🎉 **Warm-up terminé !** Tu passes en routine : 1 story/jour, 1 reel le soir, "
-            "story CTA + lien. Bon courage 💪"
+            "Clique **→** quand c'est fait."
+        ),
+    },
+    {
+        "icon": "📆",
+        "title": "JOUR 6+ — Activation Reels + Réflexes journaliers",
+        "description": (
+            "**Ta routine quotidienne à partir de maintenant :**\n"
+            "• **Interagis 2-3 min/jour** (commentaire + 3 abonnements)\n"
+            "• Poste **1 story** quotidienne → clique sur **Story**\n"
+            "• 🎬 **Publie 2 reels entre 18h et 21h** → clique sur **Reel**\n"
+            "• **Repost les 2 reels de la veille en story** avec un texte **CTA** → clique sur **Story CTA**\n"
+            "• 📲 **Story CTA + liens de redirection** + crée une **bulle à la une « LINKS »** pour stocker les CTA\n\n"
+            "🎉 **Le warm-up est terminé** — c'est ta routine de tous les jours. Bon courage 💪"
         ),
     },
 ]

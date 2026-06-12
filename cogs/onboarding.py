@@ -101,8 +101,19 @@ STEPS = [
             "• **Poste 12 stories** aujourd'hui → clique sur **Story** : ajoute **4 stories sur "
             "chacune des 3 bulles** (me / life / travel)\n"
             "• 🎬 **Publie 1 reel à 20h (heure française)** → clique sur **Reel**\n\n"
-            "🎉 **Warm-up terminé !** Tu passes en routine : 1 story/jour, 1 reel le soir, "
-            "story CTA + lien. Bon courage 💪"
+            "Clique **→** quand c'est fait."
+        ),
+    },
+    {
+        "title": "📆 JOUR 6+ — Activation Reels + Réflexes journaliers",
+        "description": (
+            "**Ta routine quotidienne à partir de maintenant :**\n"
+            "• **Interagis 2-3 min/jour** (commentaire + 3 abonnements)\n"
+            "• Poste **1 story** quotidienne → clique sur **Story**\n"
+            "• 🎬 **Publie 2 reels entre 18h et 21h** → clique sur **Reel**\n"
+            "• **Repost les 2 reels de la veille en story** avec un texte **CTA** → clique sur **Story CTA**\n"
+            "• 📲 **Story CTA + liens de redirection** + crée une **bulle à la une « LINKS »** pour stocker les CTA\n\n"
+            "🎉 **Le warm-up est terminé** — c'est ta routine de tous les jours. Bon courage 💪"
         ),
     },
 ]
@@ -305,7 +316,7 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
 
 
 # Commandes qui acceptent un paramètre `nombre` (pour donner N items au warm-up)
-_COUNT_CMDS = {"story", "post", "reel", "bio", "profilepic"}
+_COUNT_CMDS = {"story", "post", "reel", "bio", "profilepic", "storycta"}
 
 
 async def _invoke_user_cmd(interaction, cmd_name, count=None):
@@ -336,6 +347,7 @@ _WARMUP_BTN = {
     "story":      ("Story", "📖"),
     "post":       ("Post", "🖼️"),
     "reel":       ("Reel", "🎬"),
+    "storycta":   ("Story CTA", "📲"),
 }
 
 
@@ -367,6 +379,7 @@ _WARMUP_DAYS = [
     (5, ("JOUR 3", "DAY 3"), [("story", 1), ("post", 1), ("reel", 1)]),
     (6, ("JOUR 4", "DAY 4"), [("story", 1), ("reel", 2)]),
     (7, ("JOUR 5", "DAY 5"), [("story", 12), ("reel", 1)]),
+    (8, ("JOUR 6", "DAY 6"), [("story", 1), ("reel", 2), ("storycta", 2)]),
 ]
 
 

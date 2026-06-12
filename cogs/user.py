@@ -844,8 +844,9 @@ class UserCog(commands.Cog):
         cfg = load_image_config()
         await self._send_image_content(interaction, "story", "story", random_story_for, cfg, count=nombre)
 
-    @app_commands.command(name="storycta", description="Génère 3 stories CTA: photo 1080x1920 + caption à écrire dessus")
-    async def storycta(self, interaction: discord.Interaction):
+    @app_commands.command(name="storycta", description="Génère des stories CTA: photo 1080x1920 + caption à écrire dessus")
+    @app_commands.describe(nombre="Combien de stories CTA (1-10, défaut 3)")
+    async def storycta(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -853,8 +854,8 @@ class UserCog(commands.Cog):
             )
             return
         images, seen = [], set()
-        for _ in range(15):
-            if len(images) >= 3:
+        for _ in range(nombre * 5):
+            if len(images) >= nombre:
                 break
             im = random_story_cta_image_for(identity)
             if not im:
