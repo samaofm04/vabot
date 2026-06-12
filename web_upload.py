@@ -21873,21 +21873,44 @@ ROLE_MENU_STRUCTURE = [
 ]
 
 
-# Roles restreints -> ensemble d'onglets (par 'name' showTab) visibles. owner /
-# admin (ou role non liste ici) = acces complet. Un Chatter ne voit QUE la
-# section Chatteurs (planning + revenus) + son profil + ses preferences.
+# Clé de permission (ROLE_MENU_STRUCTURE) -> noms d'onglets réels (showTab).
+# La plupart matchent déjà ; "cloud" couvre plusieurs sous-onglets Bibliothèque.
+_PERM_KEY_TO_TABS = {
+    "cloud": {"cloudoverview", "cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
+}
+
+# Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
 _ROLE_ALLOWED_TABS = {
     "chatter": {"chatplanning", "revenus", "saccount", "sprefs"},
 }
 
 
 def _role_allowed_tabs(role):
-    """Set d'onglets autorises pour un role, ou None = acces complet (owner/admin
-    et tout role non explicitement restreint)."""
+    """Onglets (showTab name) visibles pour un rôle, ou None = accès complet.
+
+    - owner / admin : None (accès complet).
+    - Autres rôles : DÉRIVÉ des permissions définies via "Set permissions"
+      (role_definitions[role]['permissions']) -> onglets dont enabled=True.
+    - Rôle sans permissions définies : map connu (chatter) sinon MINIMAL
+      (juste son compte) -> deny par défaut (un nouveau compte ne voit PAS tout).
+    """
     r = (role or "").lower().strip()
     if r in ("", "owner", "admin"):
         return None
-    return _ROLE_ALLOWED_TABS.get(r)
+    try:
+        perms = _load_role_definitions().get(r, {}).get("permissions", {})
+    except Exception:
+        perms = {}
+    if isinstance(perms, dict) and perms:
+        allowed = set()
+        for k, v in perms.items():
+            if isinstance(v, dict) and v.get("enabled"):
+                allowed |= _PERM_KEY_TO_TABS.get(k, {k})
+        allowed |= {"saccount", "sprefs"}  # toujours son propre compte + préférences
+        return allowed
+    if r in _ROLE_ALLOWED_TABS:
+        return _ROLE_ALLOWED_TABS[r]
+    return {"saccount", "sprefs"}  # minimal : ne voit PAS tout par défaut
 
 
 def _role_gate_script(allowed) -> str:
