@@ -25,25 +25,27 @@ STEPS = [
         ),
     },
     {
-        "title": "📆 JOUR 0 — Création du compte Instagram",
+        "title": "📆 JOUR 0 — Création des comptes Instagram au téléphone",
         "description": (
             "**Sur ton téléphone, fais cette séquence :**\n\n"
             "1️⃣ **Rotate l'IP** : mode avion 10 sec → enlève → remets la 5G\n"
-            "2️⃣ **Crée un Gmail** qui aura comme base le futur nom Insta\n"
+            "2️⃣ **Crée un Gmail** qui aura comme base le futur nom de l'Insta\n"
             "3️⃣ **Inscris le Gmail** sur Instagram\n"
-            "4️⃣ **Mets le code reçu** par mail\n"
+            "4️⃣ **Mets le code** reçu par mail\n"
             "5️⃣ **Crée un mot de passe** fort\n"
-            "6️⃣ **Mets un name (display)** → fais `/name` ici, je t'en donne un\n"
-            "7️⃣ **Mets un username** → fais `/username` ici, je t'en donne un\n\n"
+            "6️⃣ **Ne mets PAS de nom** (laisse le champ « nom » vide)\n"
+            "7️⃣ **Mets un nom d'utilisateur** → clique sur **Username** ci-dessous, je t'en donne un\n"
+            "8️⃣ Une fois sur l'Insta : va **regarder un profil + ouvre tes messages 30 sec** "
+            "pour simuler une interaction humaine\n\n"
             "⚠️ **Numéro US requis** — demande au boss.\n\n"
-            "Quand le compte est créé → clique sur **→** pour passer à la suite."
+            "Quand les comptes sont créés → clique sur **→**."
         ),
     },
     {
         "title": "⏳ ATTENDRE 24H à 48H",
         "description": (
             "**NE FAIS RIEN sur le compte pendant 24 à 48h.**\n\n"
-            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite, "
+            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite → "
             "shadowban garanti.\n\n"
             "Reviens cliquer sur **→** quand 24-48h sont passées."
         ),
@@ -53,73 +55,54 @@ STEPS = [
         "description": (
             "**Engagement (10-15 min) :**\n"
             "• Va sur les reels et **swipe naturellement** comme un humain\n"
-            "• Like seulement des **filles** au début (algo doit comprendre ton feed)\n"
-            "• Quand tu tombes sur une **fille OnlyFans**, va sur son profil :\n"
-            "  - Like ses reels\n"
-            "  - Mets un **commentaire humain** (pas \"trop belle mv\" générique — adapte au contenu)\n"
-            "  - Regarde ses stories\n"
-            "  - **Abonne-toi**\n\n"
+            "• Le but : avoir **que des filles OnlyFans** sur ton feed → like des filles au début\n"
+            "• Quand tu tombes sur une **fille OF** : like ses reels, mets un **commentaire humain** "
+            "adapté au contenu (pas un « trop belle mv » générique), regarde ses stories, puis **abonne-toi**\n\n"
             "⚠️ Max **3 abonnements** + max **5-6 commentaires** aujourd'hui.\n\n"
-            "**Photo de profil :** fais `/profilepic` ici → upload sur ton compte Insta.\n\n"
+            "📸 **Photo de profil** (unique) → clique sur **Photo de profil** ci-dessous, mets-la sur l'Insta.\n\n"
             "Ferme Insta. Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "📆 JOUR 2 — Bio + première story + premier post",
+        "title": "📆 JOUR 2 — Ajout de contenu soft + story",
         "description": (
-            "• **Interagis 10 min** (5-6 commentaires + max 3 abonnements)\n"
-            "• Ajoute la **bio** → fais `/bio` ici, je t'en donne une\n"
-            "• Poste **1 story** simple (photo ou vidéo neutre) → fais `/story`\n"
-            "• **Crée une bulle à la une** appelée **\"me\"** + ajoute ta story dedans\n"
-            "• Poste **1 publication photo** sur le feed avec musique → fais `/post`\n\n"
-            "Quand c'est fait, clique **→**."
-        ),
-    },
-    {
-        "title": "📆 JOUR 3 — Story + post + premier reel",
-        "description": (
-            "• **Interagis 10 min** (5-6 commentaires + 3 abonnements)\n"
-            "• Poste **1 story** simple → fais `/story`\n"
-            "• **Crée une bulle à la une** appelée **\"life\"** + ajoute ta story dedans\n"
-            "• Poste **1 publication photo** avec musique → fais `/post`\n"
-            "• 🎬 **PUBLIE TON PREMIER REEL entre 18h et 21h** → fais `/reel`\n\n"
+            "• **Interagis 10 min** comme au jour 1 (commentaires + max 3 abonnements)\n"
+            "• Ajoute une **bio efficace** → clique sur **Bio** (modèle fourni)\n"
+            "• Poste **1 story** simple (photo/vidéo neutre) → clique sur **Story**, puis crée une "
+            "**bulle à la une « me »** et ajoute ta story dedans\n"
+            "• Poste **1 carrousel de 3 photos** sur le feed avec musique → clique sur **Post**\n\n"
             "Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "📆 JOUR 4 — Carousels + bulle à la une",
+        "title": "📆 JOUR 3 — Optimisation du profil",
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
-            "• Poste **1 story** simple → fais `/story`\n"
-            "• **Crée une bulle à la une** appelée **\"travel\"** + ajoute ta story\n"
-            "• **PIN les 3 carousels** (épingle les 3 derniers posts en haut du profil)\n"
-            "• 🎬 **Publie 1 reel entre 18h et 21h** → fais `/reel`\n\n"
-            "Clique **→**."
+            "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « life »**\n"
+            "• Poste **1 carrousel de 3 photos** avec musique → clique sur **Post**\n"
+            "• 🎬 **Publie ton premier reel entre 18h et 21h** → clique sur **Reel**\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "📆 JOUR 5 — Remplissage des stories à la une",
+        "title": "📆 JOUR 4 — Posts à la une + montée en reels",
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
-            "• **Poste 12 stories** aujourd'hui → fais `/story` (refais la commande pour chaque story)\n"
-            "• Répartis-les : **4 stories par bulle à la une** (me / life / travel)\n"
-            "• 🎬 **Publie 1 reel à 20h heure française** → fais `/reel`\n\n"
-            "Clique **→** quand t'as fini."
+            "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « travel »**\n"
+            "• **PIN les 3 carrousels** (épingle tes 3 derniers posts en haut du profil)\n"
+            "• 🎬 **Publie 2 reels** entre 18h et 21h → clique sur **Reel** (possibilité de programmer)\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
-        "title": "📆 JOUR 6+ — Routine quotidienne (warmup terminé)",
+        "title": "📆 JOUR 5 — Mise en place des stories à la une",
         "description": (
-            "**Routine quotidienne à appliquer chaque jour :**\n\n"
-            "• Interagir 2-3 min/jour (commentaire + 3 abonnements)\n"
-            "• **1 story quotidienne** → fais `/story`\n"
-            "• 🎬 **1 reel entre 18h et 21h** → fais `/reel`\n"
-            "• **Repost le reel de la veille en story** avec texte CTA\n"
-            "• 📲 **Story CTA + lien redirection** → fais `/storycta`\n"
-            "• **Crée une bulle à la une \"LINKS\"** pour stocker les CTAs\n\n"
-            "🎉 **Le warmup est terminé !** À partir de maintenant tu enchaînes la routine "
-            "et tu utilises `/reel`, `/post`, `/story`, `/storycta` quand tu en as besoin.\n\n"
-            "Bon courage 💪"
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• **Poste 12 stories** aujourd'hui → clique sur **Story** : ajoute **4 stories sur "
+            "chacune des 3 bulles** (me / life / travel)\n"
+            "• 🎬 **Publie 1 reel à 20h (heure française)** → clique sur **Reel**\n\n"
+            "🎉 **Warm-up terminé !** Tu passes en routine : 1 story/jour, 1 reel le soir, "
+            "story CTA + lien. Bon courage 💪"
         ),
     },
 ]
@@ -336,86 +319,77 @@ async def _invoke_user_cmd(interaction, cmd_name):
     await cmd.callback(cog, interaction)
 
 
-class Day0MenuView(discord.ui.View):
-    """Mini-menu JOUR 0 : Name + Username (identité du compte fraîchement créé)."""
+# Boutons disponibles dans les menus warm-up : cmd -> (label, emoji)
+_WARMUP_BTN = {
+    "username":   ("Username", "👤"),
+    "name":       ("Name", "📝"),
+    "profilepic": ("Photo de profil", "🖼"),
+    "bio":        ("Bio", "💬"),
+    "story":      ("Story", "📖"),
+    "post":       ("Post", "🖼️"),
+    "reel":       ("Reel", "🎬"),
+}
 
-    def __init__(self):
+
+class _WarmupButton(discord.ui.Button):
+    """Bouton générique de menu warm-up : lance une commande du UserCog au clic."""
+
+    def __init__(self, cmd):
+        label, emoji = _WARMUP_BTN[cmd]
+        super().__init__(label=label, emoji=emoji,
+                         style=discord.ButtonStyle.primary, custom_id=f"warmup:{cmd}")
+        self._cmd = cmd
+
+    async def callback(self, interaction: discord.Interaction):
+        await _invoke_user_cmd(interaction, self._cmd)
+
+
+class WarmupMenuView(discord.ui.View):
+    """Menu warm-up générique : une liste de boutons (cmds). Vue persistante."""
+
+    def __init__(self, cmds):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.primary, custom_id="warmup:name")
-    async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "name")
-
-    @discord.ui.button(label="Username", emoji="👤", style=discord.ButtonStyle.primary, custom_id="warmup:username")
-    async def b_username(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "username")
+        for c in cmds:
+            if c in _WARMUP_BTN:
+                self.add_item(_WarmupButton(c))
 
 
-class Day1MenuView(discord.ui.View):
-    """Mini-menu JOUR 1 : Photo de profil."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Photo de profil", emoji="🖼", style=discord.ButtonStyle.primary, custom_id="warmup:pp")
-    async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "profilepic")
+def warmup_master_view():
+    """Vue persistante couvrant TOUS les boutons warm-up (routing après redémarrage)."""
+    return WarmupMenuView(list(_WARMUP_BTN.keys()))
 
 
-class Day2MenuView(discord.ui.View):
-    """Mini-menu JOUR 2 : Bio + Story + Post."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.primary, custom_id="warmup:bio")
-    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "bio")
-
-    @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="warmup:story")
-    async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "story")
-
-    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="warmup:post")
-    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _invoke_user_cmd(interaction, "post")
-
-
-WARMUP_VIEWS = [Day0MenuView, Day1MenuView, Day2MenuView]
+# Mapping jour -> mini-menu : (index canonique, libellés titre, [cmds], titre embed, desc embed)
+_WARMUP_DAYS = [
+    (1, ("JOUR 0", "DAY 0"), ["username"],
+     "🎯 Jour 0 — ton nom d'utilisateur",
+     "Pas de nom d'affichage au jour 0 ! Clique pour recevoir ton **username** (pseudo) à mettre sur le compte 👇"),
+    (3, ("JOUR 1", "DAY 1"), ["profilepic"],
+     "🖼 Jour 1 — ta photo de profil",
+     "Clique pour recevoir ta **photo de profil** (unique) à mettre sur le compte 👇"),
+    (4, ("JOUR 2", "DAY 2"), ["bio", "story", "post"],
+     "✨ Jour 2 — bio + story + carrousel",
+     "Clique pour recevoir ta **bio**, ta **story** et ton **carrousel** (3 photos) du jour 👇"),
+    (5, ("JOUR 3", "DAY 3"), ["story", "post", "reel"],
+     "🚀 Jour 3 — story + carrousel + 1er reel",
+     "Clique pour recevoir ta **story**, ton **carrousel** (3 photos) et ton **premier reel** 👇"),
+    (6, ("JOUR 4", "DAY 4"), ["story", "reel"],
+     "📌 Jour 4 — story + reels",
+     "Clique pour recevoir ta **story** et tes **reels** (2 aujourd'hui) 👇"),
+    (7, ("JOUR 5", "DAY 5"), ["story", "reel"],
+     "🌟 Jour 5 — stories à la une + reel",
+     "Clique pour recevoir tes **stories** (12 à répartir) et ton **reel** du soir 👇"),
+]
 
 
 def _warmup_menu_for(index, title=None):
     """Retourne (embed, view) du mini-menu pour cette étape warm-up, ou None.
     Détection par index canonique (STEPS) ET par titre (robuste si réordonné via le site)."""
     t = (title or "").upper()
-
-    def is_day(day_index, *labels):
-        return index == day_index or any(lbl in t for lbl in labels)
-
-    if is_day(1, "JOUR 0", "DAY 0"):
-        emb = discord.Embed(
-            title="🎯 Jour 0 — récupère ton identité",
-            description=(
-                "Clique pour recevoir ton **name** (nom d'affichage) et ton **username** "
-                "(pseudo) à mettre sur le compte que tu viens de créer 👇"
-            ),
-            color=discord.Color.green(),
-        )
-        return emb, Day0MenuView()
-    if is_day(3, "JOUR 1", "DAY 1"):
-        emb = discord.Embed(
-            title="🖼 Jour 1 — ta photo de profil",
-            description="Clique pour recevoir ta **photo de profil** à mettre sur le compte 👇",
-            color=discord.Color.green(),
-        )
-        return emb, Day1MenuView()
-    if is_day(4, "JOUR 2", "DAY 2"):
-        emb = discord.Embed(
-            title="✨ Jour 2 — bio + story + post",
-            description="Clique pour recevoir ta **bio**, ta **story** et ton **post** du jour 👇",
-            color=discord.Color.green(),
-        )
-        return emb, Day2MenuView()
+    for day_index, labels, cmds, emb_title, emb_desc in _WARMUP_DAYS:
+        if index == day_index or any(lbl in t for lbl in labels):
+            emb = discord.Embed(title=emb_title, description=emb_desc, color=discord.Color.green())
+            return emb, WarmupMenuView(cmds)
     return None
 
 
@@ -473,8 +447,7 @@ class Onboarding(commands.Cog):
 
     async def cog_load(self):
         self.bot.add_view(OnboardingView())
-        for _vcls in WARMUP_VIEWS:
-            self.bot.add_view(_vcls())
+        self.bot.add_view(warmup_master_view())
 
     async def get_owner_id(self):
         if self._owner_id is None:
@@ -699,6 +672,25 @@ class Onboarding(commands.Cog):
         await interaction.response.send_message(embed=embed)
         await send_step_media(interaction.channel, index, bot=self.bot)
         await send_warmup_menu(interaction.channel, index, embed.title)
+
+    @app_commands.command(
+        name="resetonboarding",
+        description="[ADMIN] Recharge le programme d'onboarding depuis le code (par défaut)",
+    )
+    async def resetonboarding(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        try:
+            import onboarding as _web_ob
+            data = _web_ob.reset_to_default()
+            n = len(data.get("steps", []))
+            await interaction.response.send_message(
+                f"✅ Onboarding réinitialisé : **{n} étapes** rechargées depuis le programme du code.\n"
+                "⚠️ Les médias attachés via le site ont été détachés — ré-uploade-les si besoin.",
+                ephemeral=True,
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erreur reset : {e}", ephemeral=True)
 
 
 async def setup(bot):

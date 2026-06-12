@@ -65,104 +65,90 @@ DEFAULT_STEPS = [
     },
     {
         "icon": "📆",
-        "title": "JOUR 0 — Création du compte Instagram",
+        "title": "JOUR 0 — Création des comptes Instagram au téléphone",
         "description": (
-            "Sur ton téléphone, fais cette séquence :\n\n"
-            "1) Rotate l'IP : mode avion 10 sec → enlève → remets la 5G\n"
-            "2) Crée un Gmail qui aura comme base le futur nom Insta\n"
-            "3) Inscris le Gmail sur Instagram\n"
-            "4) Mets le code reçu par mail\n"
-            "5) Crée un mot de passe fort\n"
-            "6) Mets un name (display) → fais /name ici, je t'en donne un\n"
-            "7) Mets un username → fais /username ici, je t'en donne un\n\n"
-            "⚠️ Numéro US requis — demande au boss.\n\n"
-            "Quand le compte est créé → passe à la suite."
+            "**Sur ton téléphone, fais cette séquence :**\n\n"
+            "1️⃣ **Rotate l'IP** : mode avion 10 sec → enlève → remets la 5G\n"
+            "2️⃣ **Crée un Gmail** qui aura comme base le futur nom de l'Insta\n"
+            "3️⃣ **Inscris le Gmail** sur Instagram\n"
+            "4️⃣ **Mets le code** reçu par mail\n"
+            "5️⃣ **Crée un mot de passe** fort\n"
+            "6️⃣ **Ne mets PAS de nom** (laisse le champ « nom » vide)\n"
+            "7️⃣ **Mets un nom d'utilisateur** → clique sur **Username** ci-dessous, je t'en donne un\n"
+            "8️⃣ Une fois sur l'Insta : va **regarder un profil + ouvre tes messages 30 sec** "
+            "pour simuler une interaction humaine\n\n"
+            "⚠️ **Numéro US requis** — demande au boss.\n\n"
+            "Quand les comptes sont créés → clique sur **→**."
         ),
     },
     {
         "icon": "⏳",
         "title": "ATTENDRE 24H à 48H",
         "description": (
-            "NE FAIS RIEN sur le compte pendant 24 à 48h.\n\n"
-            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite, "
+            "**NE FAIS RIEN sur le compte pendant 24 à 48h.**\n\n"
+            "Instagram doit considérer ton compte comme légitime. Si tu agis trop vite → "
             "shadowban garanti.\n\n"
-            "Reviens cliquer quand 24-48h sont passées."
+            "Reviens cliquer sur **→** quand 24-48h sont passées."
         ),
     },
     {
         "icon": "📆",
         "title": "JOUR 1 — Premier engagement + photo de profil",
         "description": (
-            "Engagement (10-15 min) :\n"
-            "• Va sur les reels et swipe naturellement comme un humain\n"
-            "• Like seulement des filles au début (algo doit comprendre ton feed)\n"
-            "• Quand tu tombes sur une fille OnlyFans, va sur son profil :\n"
-            "   - Like ses reels\n"
-            "   - Mets un commentaire humain (pas \"trop belle mv\" générique — adapte au contenu)\n"
-            "   - Regarde ses stories\n"
-            "   - Abonne-toi\n\n"
-            "⚠️ Max 3 abonnements + max 5-6 commentaires aujourd'hui.\n\n"
-            "Photo de profil : fais /profilepic ici → upload sur ton compte Insta.\n\n"
-            "Ferme Insta. Passe à la suite quand c'est fait."
+            "**Engagement (10-15 min) :**\n"
+            "• Va sur les reels et **swipe naturellement** comme un humain\n"
+            "• Le but : avoir **que des filles OnlyFans** sur ton feed → like des filles au début\n"
+            "• Quand tu tombes sur une **fille OF** : like ses reels, mets un **commentaire humain** "
+            "adapté au contenu (pas un « trop belle mv » générique), regarde ses stories, puis **abonne-toi**\n\n"
+            "⚠️ Max **3 abonnements** + max **5-6 commentaires** aujourd'hui.\n\n"
+            "📸 **Photo de profil** (unique) → clique sur **Photo de profil** ci-dessous, mets-la sur l'Insta.\n\n"
+            "Ferme Insta. Clique **→** quand c'est fait."
         ),
     },
     {
         "icon": "📆",
-        "title": "JOUR 2 — Bio + première story + premier post",
+        "title": "JOUR 2 — Ajout de contenu soft + story",
         "description": (
-            "• Interagis 10 min (5-6 commentaires + max 3 abonnements)\n"
-            "• Ajoute la bio → fais /bio ici, je t'en donne une\n"
-            "• Poste 1 story simple (photo ou vidéo neutre) → fais /story\n"
-            "• Crée une bulle à la une appelée \"me\" + ajoute ta story dedans\n"
-            "• Poste 1 publication photo sur le feed avec musique → fais /post"
+            "• **Interagis 10 min** comme au jour 1 (commentaires + max 3 abonnements)\n"
+            "• Ajoute une **bio efficace** → clique sur **Bio** (modèle fourni)\n"
+            "• Poste **1 story** simple (photo/vidéo neutre) → clique sur **Story**, puis crée une "
+            "**bulle à la une « me »** et ajoute ta story dedans\n"
+            "• Poste **1 carrousel de 3 photos** sur le feed avec musique → clique sur **Post**\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
         "icon": "📆",
-        "title": "JOUR 3 — Story + post + premier reel",
+        "title": "JOUR 3 — Optimisation du profil",
         "description": (
-            "• Interagis 10 min (5-6 commentaires + 3 abonnements)\n"
-            "• Poste 1 story simple → fais /story\n"
-            "• Crée une bulle à la une appelée \"life\" + ajoute ta story dedans\n"
-            "• Poste 1 publication photo avec musique → fais /post\n"
-            "• 🎬 PUBLIE TON PREMIER REEL entre 18h et 21h → fais /reel"
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « life »**\n"
+            "• Poste **1 carrousel de 3 photos** avec musique → clique sur **Post**\n"
+            "• 🎬 **Publie ton premier reel entre 18h et 21h** → clique sur **Reel**\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
         "icon": "📆",
-        "title": "JOUR 4 — Carousels + bulle à la une",
+        "title": "JOUR 4 — Posts à la une + montée en reels",
         "description": (
-            "• Interagis 10 min (commentaires + 3 abonnements)\n"
-            "• Poste 1 story simple → fais /story\n"
-            "• Crée une bulle à la une appelée \"travel\" + ajoute ta story\n"
-            "• PIN les 3 carousels (épingle les 3 derniers posts en haut du profil)\n"
-            "• 🎬 Publie 1 reel entre 18h et 21h → fais /reel"
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « travel »**\n"
+            "• **PIN les 3 carrousels** (épingle tes 3 derniers posts en haut du profil)\n"
+            "• 🎬 **Publie 2 reels** entre 18h et 21h → clique sur **Reel** (possibilité de programmer)\n\n"
+            "Clique **→** quand c'est fait."
         ),
     },
     {
         "icon": "📆",
-        "title": "JOUR 5 — Remplissage des stories à la une",
+        "title": "JOUR 5 — Mise en place des stories à la une",
         "description": (
-            "• Interagis 10 min (commentaires + 3 abonnements)\n"
-            "• Poste 12 stories aujourd'hui → fais /story (refais la commande pour chaque story)\n"
-            "• Répartis-les : 4 stories par bulle à la une (me / life / travel)\n"
-            "• 🎬 Publie 1 reel à 20h heure française → fais /reel"
-        ),
-    },
-    {
-        "icon": "📆",
-        "title": "JOUR 6+ — Routine quotidienne (warmup terminé)",
-        "description": (
-            "Routine quotidienne à appliquer chaque jour :\n\n"
-            "• Interagir 2-3 min/jour (commentaire + 3 abonnements)\n"
-            "• 1 story quotidienne → fais /story\n"
-            "• 🎬 1 reel entre 18h et 21h → fais /reel\n"
-            "• Repost le reel de la veille en story avec texte CTA\n"
-            "• 📲 Story CTA + lien redirection → fais /storycta\n"
-            "• Crée une bulle à la une \"LINKS\" pour stocker les CTAs\n\n"
-            "🎉 Le warmup est terminé ! À partir de maintenant tu enchaînes la routine "
-            "et tu utilises /reel, /post, /story, /storycta quand tu en as besoin.\n\n"
-            "Bon courage 💪"
+            "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
+            "• **Poste 12 stories** aujourd'hui → clique sur **Story** : ajoute **4 stories sur "
+            "chacune des 3 bulles** (me / life / travel)\n"
+            "• 🎬 **Publie 1 reel à 20h (heure française)** → clique sur **Reel**\n\n"
+            "🎉 **Warm-up terminé !** Tu passes en routine : 1 story/jour, 1 reel le soir, "
+            "story CTA + lien. Bon courage 💪"
         ),
     },
 ]
@@ -216,6 +202,12 @@ def _save(data: Dict[str, Any]):
     ONBOARDING_FILE.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+
+def reset_to_default() -> Dict[str, Any]:
+    """Réinitialise complètement l'onboarding aux étapes par défaut (DEFAULT_STEPS).
+    Écrase data/onboarding.json. ⚠️ Les associations média (par step_id) sont perdues."""
+    return _seed()
 
 
 def list_steps() -> List[Dict[str, Any]]:
