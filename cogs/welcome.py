@@ -279,11 +279,20 @@ PER_IDENTITY_PREFIXES = ("general-", "banger-", "exemple-compte-")
 
 def _identity_of_channel(ch_name):
     """Suffixe d'identité si le salon est un salon par-identité
-    (general-/banger-/exemple-compte-), sinon None. Accents ignorés."""
-    norm = (ch_name or "").lower().replace("é", "e").replace("è", "e").strip()
+    (general-/banger-/exemple-compte-), sinon None.
+
+    Robuste aux préfixes emoji/séparateurs DANS le nom du salon
+    (ex: '💥・banger-amelia', '📸-exemple-compte-lola') : on cherche le
+    préfixe n'importe où, pas seulement au début. Accents ignorés.
+    """
+    import re as _re
+    norm = (ch_name or "").lower().replace("é", "e").replace("è", "e")
     for p in PER_IDENTITY_PREFIXES:
-        if norm.startswith(p):
-            return norm[len(p):].strip()
+        idx = norm.find(p)
+        if idx != -1:
+            m = _re.match(r"[a-z0-9]+", norm[idx + len(p):])
+            if m:
+                return m.group(0)
     return None
 
 
