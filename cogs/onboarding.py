@@ -321,6 +321,56 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
                 log.error(f"Erreur envoi URL attachement: {e}")
 
 
+class Day0MenuView(discord.ui.View):
+    """Mini-menu du JOUR 0 (warm-up) : juste Name + Username.
+    Le VA clique pour recevoir son name d'affichage + son pseudo à mettre sur le
+    compte fraîchement créé. Vue persistante (custom_id) : marche après redémarrage.
+    Réutilise les commandes /name et /username du UserCog."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.primary, custom_id="warmup:name")
+    async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("UserCog")
+        if cog is not None:
+            await cog.name.callback(cog, interaction)
+        else:
+            await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
+
+    @discord.ui.button(label="Username", emoji="👤", style=discord.ButtonStyle.primary, custom_id="warmup:username")
+    async def b_username(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("UserCog")
+        if cog is not None:
+            await cog.username.callback(cog, interaction)
+        else:
+            await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
+
+
+def _is_day0_index(index, title=None):
+    """Vrai si l'étape correspond au JOUR 0 (création du compte)."""
+    if index == 1:  # index canonique du JOUR 0 dans STEPS
+        return True
+    t = (title or "").upper()
+    return ("JOUR 0" in t) or ("DAY 0" in t)
+
+
+async def send_day0_menu(channel):
+    """Poste le mini-menu warm-up JOUR 0 : juste Name + Username."""
+    try:
+        emb = discord.Embed(
+            title="🎯 Jour 0 — récupère ton identité",
+            description=(
+                "Clique pour recevoir ton **name** (nom d'affichage) et ton **username** "
+                "(pseudo) à mettre sur le compte que tu viens de créer 👇"
+            ),
+            color=discord.Color.green(),
+        )
+        await channel.send(embed=emb, view=Day0MenuView())
+    except Exception as e:
+        log.error(f"send_day0_menu: {e}")
+
+
 class OnboardingView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -352,6 +402,9 @@ class OnboardingView(discord.ui.View):
             await send_step_media(interaction.channel, next_index, bot=interaction.client)
         except Exception as e:
             log.error(f"Erreur send_step_media step {next_index+1}: {e}")
+        # JOUR 0 : poste le mini-menu Name + Username
+        if _is_day0_index(next_index, new_embed.title):
+            await send_day0_menu(interaction.channel)
 
 
 class Onboarding(commands.Cog):
@@ -361,6 +414,7 @@ class Onboarding(commands.Cog):
 
     async def cog_load(self):
         self.bot.add_view(OnboardingView())
+        self.bot.add_view(Day0MenuView())
 
     async def get_owner_id(self):
         if self._owner_id is None:
@@ -584,6 +638,8 @@ class Onboarding(commands.Cog):
         embed = step_embed(index)
         await interaction.response.send_message(embed=embed)
         await send_step_media(interaction.channel, index, bot=self.bot)
+        if _is_day0_index(index, embed.title):
+            await send_day0_menu(interaction.channel)
 
 
 async def setup(bot):
