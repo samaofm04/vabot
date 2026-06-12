@@ -21916,8 +21916,8 @@ def _role_allowed_tabs(role):
 def _role_gate_script(allowed) -> str:
     """Script injecte (roles restreints uniquement) : cache les boutons sidebar,
     groupes/sections vides et panneaux non autorises, puis active l'onglet par
-    defaut. Le CONTENU sensible est deja vide cote serveur (cf _render_upload_inner) ;
-    ceci nettoie la navigation pour que l'employe ne voie que ses onglets."""
+    defaut. Le contenu reste rendu cote serveur (pour ne pas casser le CSS/JS
+    partage) ; ce script restreint la navigation et cache les panneaux interdits."""
     import json as _json
     allowed_js = _json.dumps(sorted(allowed))
     # Approche INVERSE (robuste aux structures imbriquees / boutons "SOON" sans
@@ -21947,8 +21947,10 @@ def _role_gate_script(allowed) -> str:
         "if(c.classList&&c.classList.contains('section-label')){var n=c.nextElementSibling,v=false;"
         "while(n&&!(n.classList&&n.classList.contains('section-label'))){if(n.style.display!=='none')v=true;n=n.nextElementSibling;}"
         "if(v)c.style.display='';}});"
-        # 4) retirer les panneaux de contenu non autorises + ouvrir l'onglet par defaut
-        "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.remove();});"
+        # 4) CACHER (pas supprimer) les panneaux non autorises : on garde le CSS/JS
+        #    partage dans le DOM, sinon des pages autorisees (ex: Jailbreak) perdent
+        #    leur style. + ouvrir l'onglet autorise par defaut.
+        "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.style.display='none';});"
         "var db=document.getElementById('tab-'+A[0]);if(db)db.click();"
         "}"
         "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}"
@@ -22782,9 +22784,10 @@ def _render_upload_inner(msg=None, error=None):
     allowed = _role_allowed_tabs(role)  # None = acces complet
 
     def _g(tab, producer):
-        """Contenu d'un onglet ; vide (et non rendu) si le role n'y a pas acces."""
-        if allowed is not None and tab not in allowed:
-            return ""
+        """Contenu d'un onglet. On rend TOUJOURS le contenu : vider cote serveur
+        cassait le CSS/JS partage entre onglets (ex: la page Jailbreak perdait
+        son style quand l'onglet VA-list etait masque). La restriction est geree
+        cote client (nav + panneaux caches par _role_gate_script)."""
         try:
             return producer()
         except Exception:
