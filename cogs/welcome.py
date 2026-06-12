@@ -374,6 +374,40 @@ async def create_va_channel(guild, member, identity):
         return None
 
 
+async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
+    """Isole un VA (anonymat) ET lui (re)donne ses accès.
+
+    Cache TOUS les salons sauf : son ticket + ses salons d'identité
+    (general/banger/exemple-compte-X) + les salons extra_visible (warm-up...).
+    Puis GRANT explicitement l'accès aux salons extra_visible (sinon ils
+    restent invisibles si @everyone est en deny). Idempotent : sûr à rappeler
+    à chaque rejoin. Best-effort, ignore les erreurs."""
+    cfg = load_welcome_config()
+    if not cfg.get("hide_all_channels_from_va", True):
+        return
+    extra_visible = set(cfg.get("extra_visible_channel_ids", []))
+    skip_ids = {ticket_channel_id, *extra_visible}
+    for ch in find_identity_channels(guild, identity):
+        skip_ids.add(ch.id)
+    for ch in guild.channels:
+        if ch.id in skip_ids or isinstance(ch, discord.CategoryChannel):
+            continue
+        try:
+            await ch.set_permissions(member, view_channel=False,
+                                     reason="VA isolation - anonymat")
+        except Exception:
+            pass
+    # Grant explicite des salons d'aide (extra_visible) : warm-up, commande-va...
+    for cid in extra_visible:
+        ech = guild.get_channel(cid)
+        if ech and not isinstance(ech, discord.CategoryChannel):
+            try:
+                await ech.set_permissions(member, view_channel=True,
+                                          reason="VA - salon d'aide visible")
+            except Exception:
+                pass
+
+
 async def setup_va_ticket(guild, member):
     """Cree le ticket d'un VA: assignation identite + salon + intro.
 
@@ -396,13 +430,19 @@ async def setup_va_ticket(guild, member):
                 )
             except Exception:
                 pass
-            # Re-sync l'acces au general (au cas ou il aurait ete perdu)
+            # Re-sync l'acces aux salons d'identite (au cas ou il aurait ete perdu)
             ident_existing = existing.get("identity") if isinstance(existing, dict) else None
             if ident_existing:
                 try:
                     await sync_general_channel_access(guild, member, ident_existing)
                 except Exception:
                     pass
+            # Rejoin : re-applique l'isolation + re-donne les salons d'aide
+            # (warm-up...) car Discord efface les overwrites quand on quitte.
+            try:
+                await _isolate_va_and_grant(guild, member, ident_existing or "", existing_channel.id)
+            except Exception:
+                pass
             return existing_channel, None
         # Salon supprime -> clear et continuer comme nouveau VA
         users.pop(str(member.id), None)
@@ -441,29 +481,11 @@ async def setup_va_ticket(guild, member):
     except Exception as e:
         log.error(f"setup_va_ticket: erreur envoi intro: {e}")
 
-    # Cacher TOUS les salons au VA sauf son ticket + ses salons d'identité
-    # (general-X / banger-X / exemple-compte-X) + la liste blanche (anonymat)
-    if cfg.get("hide_all_channels_from_va", True):
-        own_id = channel.id
-        extra_visible = set(cfg.get("extra_visible_channel_ids", []))
-        skip_ids = {own_id, *extra_visible}
-        for ch in find_identity_channels(guild, identity):
-            skip_ids.add(ch.id)
-        for ch in guild.channels:
-            if ch.id in skip_ids:
-                continue
-            if isinstance(ch, discord.CategoryChannel):
-                continue
-            try:
-                await ch.set_permissions(
-                    member,
-                    view_channel=False,
-                    reason="VA isolation - anonymat",
-                )
-            except Exception:
-                pass
+    # Isole le VA (cache tout sauf ticket + salons d'identité + salons d'aide)
+    # et grant les salons d'aide.
+    await _isolate_va_and_grant(guild, member, identity, channel.id)
 
-    # Donne acces au salon general de l'identite (apres le hide pour garantir l'ordre)
+    # Donne acces aux salons de l'identite (general/banger/exemple-compte)
     try:
         await sync_general_channel_access(guild, member, identity)
     except Exception as e:
@@ -1053,6 +1075,43 @@ class Welcome(commands.Cog):
             f"_(le staff garde l'accès)_",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="cleansalons",
+        description="[ADMIN] Enlève les emojis au début des noms des salons d'identité",
+    )
+    async def cleansalons(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import re as _re
+        renamed = []
+        for ch in guild.text_channels:
+            # Seulement les salons par-identité (general/banger/exemple-compte-X)
+            if _identity_of_channel(ch.name) is None:
+                continue
+            # Retire les caractères non-alphanumériques en DÉBUT de nom
+            # (emoji, ・, ·, espaces, tirets décoratifs). Garde général-X (accent ok).
+            clean = _re.sub(r"^[^0-9A-Za-zÀ-ÿ]+", "", ch.name).strip()
+            if clean and clean != ch.name:
+                try:
+                    old = ch.name
+                    await ch.edit(name=clean, reason="cleansalons - retrait emoji")
+                    renamed.append(f"{old} → {clean}")
+                except Exception as e:
+                    renamed.append(f"⚠️ {ch.name} : {e}")
+        if not renamed:
+            await interaction.followup.send(
+                "✅ Rien à nettoyer — les salons d'identité n'ont pas d'emoji au début.",
+                ephemeral=True,
+            )
+            return
+        txt = "✅ **Salons nettoyés** :\n" + "\n".join(f"• {r}" for r in renamed)
+        await interaction.followup.send(txt[:1990], ephemeral=True)
 
     @app_commands.command(name="pendingdeletions", description="[ADMIN] Liste les VAs partis dont le salon va être supprimé")
     async def pendingdeletions(self, interaction: discord.Interaction):
