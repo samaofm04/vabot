@@ -22323,7 +22323,7 @@ def _render_role_settings_html() -> str:
 <div id='add-role-overlay' class='confirm-overlay' onclick='closeAddRole()'>
   <div class='confirm-box' style='max-width:480px' onclick='event.stopPropagation()'>
     <h3 style='margin-top:0'>Add role</h3>
-    <form method='POST' action='/settings/role/create'>
+    <form method='POST' action='/settings/role/create' onsubmit='return submitAddRole(event)'>
       <input type='hidden' name='back_tab' value='srole'>
       <label>Nom du rôle</label>
       <input type='text' name='name' maxlength='50' required placeholder='Ex: Team leader'>
@@ -22363,6 +22363,47 @@ function closeEditRole(){
 }
 function openAddRole(){ document.getElementById('add-role-overlay').classList.add('show'); }
 function closeAddRole(){ document.getElementById('add-role-overlay').classList.remove('show'); }
+// Submit AJAX : pas de rechargement de toute la page (fluide)
+function submitAddRole(ev){
+  ev.preventDefault();
+  var form = ev.target;
+  var btn = form.querySelector('button[type=submit]');
+  if(btn){ btn.disabled = true; }
+  fetch('/settings/role/create', {method:'POST', body:new FormData(form), headers:{'X-Requested-With':'fetch'}})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(btn){ btn.disabled = false; }
+      if(!d || !d.ok){ if(typeof showToast==='function') showToast((d&&d.error)||'Erreur','error'); return; }
+      addRoleRow(d);
+      closeAddRole();
+      form.reset();
+      if(typeof showToast==='function') showToast('Rôle ' + d.name + ' créé', 'success');
+    })
+    .catch(function(){ if(btn){ btn.disabled=false; } if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+  return false;
+}
+function addRoleRow(d){
+  var ref = document.querySelector('tr[data-rolename]');
+  if(!ref) return;
+  var nameSafe = (d.name||'').replace(/"/g,'&quot;');
+  var descSafe = (d.desc||'').replace(/"/g,'&quot;');
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-rolename', (d.name||'').toLowerCase());
+  tr.setAttribute('data-status','on');
+  tr.style.borderBottom='1px solid #2a2a2a';
+  var trash = "<button onclick='deleteRole(\""+d.key+"\",\""+nameSafe+"\")' title='Supprimer le rôle' style='background:transparent;border:0;color:#aaa;cursor:pointer;padding:4px 8px;margin-left:10px' onmouseover='this.style.color=\"#ef4444\"' onmouseout='this.style.color=\"#aaa\"'><svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/></svg></button>";
+  tr.innerHTML =
+    "<td style='padding:12px 8px'><b style='color:"+(d.color||'#6b7280')+"'>"+(d.name||'')+"</b></td>"
+    + "<td style='padding:12px 8px;font-size:13px;color:#aaa'>"+(d.desc||'')+"</td>"
+    + "<td style='padding:12px 8px;font-size:13px'><span style='color:#666'>—</span></td>"
+    + "<td style='padding:12px 8px;text-align:center'><div style='display:inline-block;width:36px;height:20px;background:#3b82f6;border-radius:10px;position:relative'><div style='position:absolute;right:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div></div></td>"
+    + "<td style='padding:12px 8px;text-align:right;white-space:nowrap'>"
+      + "<a onclick='openPermissions(\""+d.key+"\",\""+nameSafe+"\")' style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;margin-right:18px;text-decoration:none' onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Set permissions</a>"
+      + "<a onclick='openEditRole(\""+d.key+"\",\""+nameSafe+"\",\""+descSafe+"\")' style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none' onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Edit</a>"
+      + trash
+    + "</td>";
+  ref.parentNode.appendChild(tr);
+}
 function filterRoles(){
   var nEl=document.getElementById('role-filter-name'), sEl=document.getElementById('role-filter-status');
   var n=(nEl?nEl.value:'').toLowerCase().trim(), s=sEl?sEl.value:'';
@@ -26975,9 +27016,13 @@ def create_app():
     def settings_role_create():
         if not is_auth():
             return redirect("/")
+        from flask import jsonify
+        is_ajax = request.headers.get("X-Requested-With") == "fetch"
         name = (request.form.get("name") or "").strip()[:50]
         desc = (request.form.get("description") or "").strip()[:300]
         if not name:
+            if is_ajax:
+                return jsonify({"ok": False, "error": "Nom du rôle requis"})
             return _error("❌ Nom du rôle requis", tab="srole")
         import re as _re_role
         key = _re_role.sub(r"[^a-z0-9]+", "", name.lower())[:30] or "role"
@@ -26989,6 +27034,8 @@ def create_app():
             i += 1
         defs[key] = {"name": name, "description": desc, "enabled": True}
         _save_role_definitions(defs)
+        if is_ajax:
+            return jsonify({"ok": True, "key": key, "name": name, "desc": desc, "color": "#6b7280"})
         return _success(f"✅ Rôle <b>{name}</b> créé", tab="srole")
 
     @app.route("/settings/role/edit_def", methods=["POST"])
