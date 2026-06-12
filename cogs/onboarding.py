@@ -304,10 +304,15 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
                 log.error(f"Erreur envoi URL attachement: {e}")
 
 
-async def _invoke_user_cmd(interaction, cmd_name):
-    """Lance une commande du UserCog (/name, /username, /profilepic, /bio, /story, /post)
-    depuis un bouton de menu warm-up. Récupère le cog au moment du clic → la vue
-    n'a pas besoin de référence au cog (persistance facile)."""
+# Commandes qui acceptent un paramètre `nombre` (pour donner N items au warm-up)
+_COUNT_CMDS = {"story", "post", "reel", "bio", "profilepic"}
+
+
+async def _invoke_user_cmd(interaction, cmd_name, count=None):
+    """Lance une commande du UserCog (/name, /username, /profilepic, /bio, /story, /post, /reel)
+    depuis un bouton de menu warm-up. Si `count` est fourni et que la commande le supporte,
+    on lui passe ce nombre (ex: 12 stories au jour 5, 2 reels au jour 4).
+    Récupère le cog au moment du clic → la vue n'a pas besoin de référence au cog."""
     cog = interaction.client.get_cog("UserCog")
     if cog is None:
         await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
@@ -316,7 +321,10 @@ async def _invoke_user_cmd(interaction, cmd_name):
     if cmd is None:
         await interaction.response.send_message("Commande indisponible.", ephemeral=True)
         return
-    await cmd.callback(cog, interaction)
+    if count is not None and cmd_name in _COUNT_CMDS:
+        await cmd.callback(cog, interaction, count)
+    else:
+        await cmd.callback(cog, interaction)
 
 
 # Boutons disponibles dans les menus warm-up : cmd -> (label, emoji)
@@ -332,52 +340,63 @@ _WARMUP_BTN = {
 
 
 class _WarmupButton(discord.ui.Button):
-    """Bouton générique de menu warm-up : lance une commande du UserCog au clic."""
+    """Bouton de menu warm-up : lance une commande du UserCog au clic, avec un nombre
+    d'items précis (ex: 12 stories au jour 5). Le nombre est encodé dans le custom_id
+    (`warmup:story:12`) pour que le routing après redémarrage retrouve le bon nombre."""
 
-    def __init__(self, cmd):
+    def __init__(self, cmd, count=None):
         label, emoji = _WARMUP_BTN[cmd]
+        if count and count > 1:
+            label = f"{label} ×{count}"
+        cid = f"warmup:{cmd}" if not count else f"warmup:{cmd}:{count}"
         super().__init__(label=label, emoji=emoji,
-                         style=discord.ButtonStyle.primary, custom_id=f"warmup:{cmd}")
+                         style=discord.ButtonStyle.primary, custom_id=cid)
         self._cmd = cmd
+        self._count = count
 
     async def callback(self, interaction: discord.Interaction):
-        await _invoke_user_cmd(interaction, self._cmd)
+        await _invoke_user_cmd(interaction, self._cmd, self._count)
 
 
-class WarmupMenuView(discord.ui.View):
-    """Menu warm-up générique : une liste de boutons (cmds). Vue persistante."""
-
-    def __init__(self, cmds):
-        super().__init__(timeout=None)
-        for c in cmds:
-            if c in _WARMUP_BTN:
-                self.add_item(_WarmupButton(c))
-
-
-def warmup_master_view():
-    """Vue persistante couvrant TOUS les boutons warm-up (routing après redémarrage)."""
-    return WarmupMenuView(list(_WARMUP_BTN.keys()))
-
-
-# Mapping jour -> boutons de contenu : (index canonique, libellés titre, [cmds])
+# Mapping jour -> boutons de contenu : (index canonique, libellés titre, [(cmd, nombre)])
+# Le `nombre` = ce que l'étape demande de poster (1 story, 2 reels, 12 stories, carrousel=3 photos...).
 _WARMUP_DAYS = [
-    (1, ("JOUR 0", "DAY 0"), ["name", "username"]),
-    (3, ("JOUR 1", "DAY 1"), ["profilepic"]),
-    (4, ("JOUR 2", "DAY 2"), ["bio", "story", "post"]),
-    (5, ("JOUR 3", "DAY 3"), ["story", "post", "reel"]),
-    (6, ("JOUR 4", "DAY 4"), ["story", "reel"]),
-    (7, ("JOUR 5", "DAY 5"), ["story", "reel"]),
+    (1, ("JOUR 0", "DAY 0"), [("name", None), ("username", None)]),
+    (3, ("JOUR 1", "DAY 1"), [("profilepic", 1)]),
+    (4, ("JOUR 2", "DAY 2"), [("bio", 1), ("story", 1), ("post", 3)]),
+    (5, ("JOUR 3", "DAY 3"), [("story", 1), ("post", 3), ("reel", 1)]),
+    (6, ("JOUR 4", "DAY 4"), [("story", 1), ("reel", 2)]),
+    (7, ("JOUR 5", "DAY 5"), [("story", 12), ("reel", 1)]),
 ]
 
 
-def _warmup_cmds_for(index, title=None):
-    """Liste des boutons de contenu de cette étape (ou []).
+def _warmup_items_for(index, title=None):
+    """Liste des (cmd, nombre) de cette étape (ou []).
     Détection par index canonique (STEPS) ET par titre (robuste si réordonné via le site)."""
     t = (title or "").upper()
-    for day_index, labels, cmds in _WARMUP_DAYS:
+    for day_index, labels, items in _WARMUP_DAYS:
         if index == day_index or any(lbl in t for lbl in labels):
-            return cmds
+            return items
     return []
+
+
+def _all_warmup_combos():
+    """Toutes les paires (cmd, count) uniques utilisées dans le warm-up."""
+    seen = []
+    for _, _, items in _WARMUP_DAYS:
+        for cmd, count in items:
+            if (cmd, count) not in seen:
+                seen.append((cmd, count))
+    return seen
+
+
+def warmup_master_view():
+    """Vue persistante couvrant TOUTES les paires (bouton, nombre) du warm-up
+    (routing des clics après un redémarrage du bot)."""
+    view = discord.ui.View(timeout=None)
+    for cmd, count in _all_warmup_combos():
+        view.add_item(_WarmupButton(cmd, count))
+    return view
 
 
 class _NextButton(discord.ui.Button):
@@ -395,8 +414,8 @@ def build_step_view(index, title=None):
     """Vue d'une étape : boutons de contenu du jour + bouton → sur le MÊME message.
     Retourne None s'il n'y a rien à afficher (ne pas envoyer de vue vide)."""
     view = discord.ui.View(timeout=None)
-    for c in _warmup_cmds_for(index, title):
-        view.add_item(_WarmupButton(c))
+    for cmd, count in _warmup_items_for(index, title):
+        view.add_item(_WarmupButton(cmd, count))
     if index < len(STEPS) - 1:
         view.add_item(_NextButton())
     return view if view.children else None

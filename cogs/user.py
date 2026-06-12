@@ -673,8 +673,9 @@ class UserCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="bio", description="Donne 3 bios Instagram de ton identité")
-    async def bio(self, interaction: discord.Interaction):
+    @app_commands.command(name="bio", description="Donne des bios Instagram de ton identité")
+    @app_commands.describe(nombre="Combien de bios (1-10, défaut 3)")
+    async def bio(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -683,8 +684,8 @@ class UserCog(commands.Cog):
             )
             return
         bios, seen = [], set()
-        for _ in range(15):
-            if len(bios) >= 3:
+        for _ in range(nombre * 5):
+            if len(bios) >= nombre:
                 break
             b = random_bio_for(identity)
             if not b:
@@ -707,11 +708,12 @@ class UserCog(commands.Cog):
             )
             await interaction.response.send_message(msg[:2000])
 
-    @app_commands.command(name="profilepic", description="Donne 3 photos de profil (transformées)")
-    async def profilepic(self, interaction: discord.Interaction):
+    @app_commands.command(name="profilepic", description="Donne des photos de profil (transformées)")
+    @app_commands.describe(nombre="Combien de photos (1-10, défaut 3)")
+    async def profilepic(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         pics, seen = [], set()
-        for _ in range(15):
-            if len(pics) >= 3:
+        for _ in range(nombre * 5):
+            if len(pics) >= nombre:
                 break
             p = random_profile_pic()
             if not p:
