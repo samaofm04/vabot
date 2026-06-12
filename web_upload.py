@@ -22429,7 +22429,7 @@ function openPermissions(key, name){
     .then(function(data){
       var perms = data.permissions || {};
       var content = document.getElementById('perm-content');
-      var html = '';
+      var html = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;font-weight:700;font-size:13.5px;color:#fff"><input type="checkbox" id="perm-all-toggle" onchange="togglePermAll(this)" style="accent-color:#3b82f6;width:18px;height:18px"> All (tout cocher / décocher)</label>';
       window.__roleMenuStructure.forEach(function(section){
         html += '<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700">' + section.section + '</h4>';
         html += '<table style="width:100%;border-collapse:collapse;background:#0f0f0f;border-radius:8px;overflow:hidden;margin-bottom:14px">';
@@ -22439,7 +22439,7 @@ function openPermissions(key, name){
           var enabled = menuPerms.enabled !== false;
           var scope = menuPerms.scope || 'self';
           html += '<tr style="border-top:1px solid #1a1a1a">';
-          html += '<td style="padding:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="enabled" ' + (enabled ? 'checked' : '') + ' style="accent-color:#3b82f6;width:18px;height:18px"> ' + item.name + '</label></td>';
+          html += '<td style="padding:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="enabled" onchange="toggleMenuRow(this)" ' + (enabled ? 'checked' : '') + ' style="accent-color:#3b82f6;width:18px;height:18px"> ' + item.name + '</label></td>';
           // Function perms
           var fnHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
           (item.perms || []).forEach(function(p){
@@ -22462,6 +22462,20 @@ function openPermissions(key, name){
       content.innerHTML = html;
       document.getElementById('perm-overlay').classList.add('show');
     });
+}
+// Coche/décoche toutes les permissions de la même ligne (menu) quand on
+// (dé)coche la case du menu.
+function toggleMenuRow(cb){
+  var menu = cb.getAttribute('data-menu');
+  document.querySelectorAll('#perm-content input[data-field="perm"][data-menu="' + menu + '"]').forEach(function(p){
+    p.checked = cb.checked;
+  });
+}
+// Case "All" en haut : coche/décoche TOUT (menus + permissions).
+function togglePermAll(cb){
+  document.querySelectorAll('#perm-content input[type=checkbox]').forEach(function(c){
+    if(c.id !== 'perm-all-toggle') c.checked = cb.checked;
+  });
 }
 function closePermissions(){
   document.getElementById('perm-overlay').classList.remove('show');
