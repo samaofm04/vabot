@@ -33,10 +33,13 @@ def _build_menu_embed(identity):
     )
     emb.add_field(name="🎬 Reel", value="Vidéos + captions (1 par compte)", inline=True)
     emb.add_field(name="📖 Story", value="Photo + texte pour ta story", inline=True)
+    emb.add_field(name="🖼️ Post", value="Photo + légende pour le feed", inline=True)
     emb.add_field(name="📲 Story CTA", value="Photo CTA (à poster le soir)", inline=True)
     emb.add_field(name="👤 Pseudo", value="Des pseudos Insta dispo", inline=True)
     emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
-    emb.add_field(name="​", value="​", inline=True)  # aligne la grille 3×2
+    emb.add_field(name="💬 Bio", value="Une bio Insta de ton identité", inline=True)
+    emb.add_field(name="​", value="​", inline=True)  # alignement grille 3×3
+    emb.add_field(name="​", value="​", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -1008,6 +1011,10 @@ class ContentMenuView(discord.ui.View):
     async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.story.callback(self.cog, interaction)
 
+    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="cmenu:post", row=0)
+    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.post.callback(self.cog, interaction)
+
     @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu:storycta", row=0)
     async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.storycta.callback(self.cog, interaction)
@@ -1019,6 +1026,10 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.secondary, custom_id="cmenu:name", row=1)
     async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.name.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu:bio", row=1)
+    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.bio.callback(self.cog, interaction)
 
 
 async def setup(bot):
