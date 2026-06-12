@@ -610,6 +610,83 @@ class Admin(commands.Cog):
         )
         await interaction.followup.send(msg[:1990], ephemeral=True)
 
+    @app_commands.command(
+        name="assignall",
+        description="[BOSS] Assigne un groupe (identité) aux VAs qui n'en ont pas (réparti)",
+    )
+    @app_commands.describe(exclure="Identités à NE PAS utiliser (séparées par virgule). Défaut: sarah")
+    async def assignall(self, interaction: discord.Interaction, exclure: str = "sarah"):
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        # Identités cibles : actives, non jailbreak-only (jessye exclu), non exclues
+        try:
+            from cogs.welcome import list_active_identities
+            pool = list_active_identities()
+        except Exception:
+            pool = list_identities()
+        excl = {x.strip().lower() for x in (exclure or "").split(",") if x.strip()}
+        pool = [i for i in pool if i.lower() not in excl]
+        if not pool:
+            await interaction.followup.send(
+                f"❌ Aucune identité disponible (exclues : {', '.join(sorted(excl)) or '-'}).",
+                ephemeral=True)
+            return
+        # Charge tous les membres de la guild
+        try:
+            await guild.chunk()
+        except Exception:
+            pass
+        users = load_json(USERS_FILE, {})
+        # Compte actuel par identité (pour répartir équitablement)
+        counts = {i.lower(): 0 for i in pool}
+        for d in users.values():
+            ident = (d.get("identity") or "").lower() if isinstance(d, dict) else (d.lower() if isinstance(d, str) else "")
+            if ident in counts:
+                counts[ident] += 1
+        # Assigne chaque membre SANS identité (en sautant le staff)
+        assigned = []
+        for member in guild.members:
+            if member.bot:
+                continue
+            try:
+                gp = member.guild_permissions
+                if gp.administrator or gp.manage_guild or gp.manage_channels:
+                    continue  # ne pas mettre le boss/admins dans un groupe
+            except Exception:
+                pass
+            d = users.get(str(member.id))
+            has_ident = (isinstance(d, dict) and d.get("identity")) or isinstance(d, str)
+            if has_ident:
+                continue
+            target = min(pool, key=lambda i: counts[i.lower()])  # la moins peuplée
+            counts[target.lower()] += 1
+            if isinstance(d, dict):
+                d["identity"] = target
+                users[str(member.id)] = d
+            else:
+                users[str(member.id)] = {"identity": target, "channel_id": None, "auto_post": True}
+            assigned.append((member, target))
+        if not assigned:
+            await interaction.followup.send(
+                "✅ Tout le monde a déjà un groupe (rien à assigner).", ephemeral=True)
+            return
+        save_json(USERS_FILE, users)
+        # Donne l'accès aux salons de leur groupe (general/banger/exemple-compte)
+        for member, target in assigned:
+            try:
+                await self._sync_general_access(guild, member, target)
+            except Exception:
+                pass
+        lines = [f"• {m.display_name} → **{t}**" for m, t in assigned]
+        txt = (f"✅ **{len(assigned)} personne(s) assignée(s)** "
+               f"(réparti, sans {', '.join(sorted(excl)) or '-'}) :\n" + "\n".join(lines))
+        await interaction.followup.send(txt[:1990], ephemeral=True)
+
     # ---------- IDENTITES ----------
 
     @app_commands.command(name="addidentite", description="Crée une identité (avec ou sans zip de vidéos)")
