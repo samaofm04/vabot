@@ -70,7 +70,7 @@ STEPS = [
             "• Ajoute une **bio efficace** → clique sur **Bio** (modèle fourni)\n"
             "• Poste **1 story** simple (photo/vidéo neutre) → clique sur **Story**, puis crée une "
             "**bulle à la une « me »** et ajoute ta story dedans\n"
-            "• Poste **1 carrousel de 3 photos** sur le feed avec musique → clique sur **Post**\n\n"
+            "• Poste **1 publication photo** sur le feed avec musique → clique sur **Post**\n\n"
             "Clique **→** quand c'est fait."
         ),
     },
@@ -79,7 +79,7 @@ STEPS = [
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
             "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « life »**\n"
-            "• Poste **1 carrousel de 3 photos** avec musique → clique sur **Post**\n"
+            "• Poste **1 publication photo** avec musique → clique sur **Post**\n"
             "• 🎬 **Publie ton premier reel entre 18h et 21h** → clique sur **Reel**\n\n"
             "Clique **→** quand c'est fait."
         ),
@@ -363,8 +363,8 @@ class _WarmupButton(discord.ui.Button):
 _WARMUP_DAYS = [
     (1, ("JOUR 0", "DAY 0"), [("name", None), ("username", None)]),
     (3, ("JOUR 1", "DAY 1"), [("profilepic", 1)]),
-    (4, ("JOUR 2", "DAY 2"), [("bio", 1), ("story", 1), ("post", 3)]),
-    (5, ("JOUR 3", "DAY 3"), [("story", 1), ("post", 3), ("reel", 1)]),
+    (4, ("JOUR 2", "DAY 2"), [("bio", 1), ("story", 1), ("post", 1)]),
+    (5, ("JOUR 3", "DAY 3"), [("story", 1), ("post", 1), ("reel", 1)]),
     (6, ("JOUR 4", "DAY 4"), [("story", 1), ("reel", 2)]),
     (7, ("JOUR 5", "DAY 5"), [("story", 12), ("reel", 1)]),
 ]

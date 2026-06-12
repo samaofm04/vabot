@@ -113,7 +113,7 @@ DEFAULT_STEPS = [
             "• Ajoute une **bio efficace** → clique sur **Bio** (modèle fourni)\n"
             "• Poste **1 story** simple (photo/vidéo neutre) → clique sur **Story**, puis crée une "
             "**bulle à la une « me »** et ajoute ta story dedans\n"
-            "• Poste **1 carrousel de 3 photos** sur le feed avec musique → clique sur **Post**\n\n"
+            "• Poste **1 publication photo** sur le feed avec musique → clique sur **Post**\n\n"
             "Clique **→** quand c'est fait."
         ),
     },
@@ -123,7 +123,7 @@ DEFAULT_STEPS = [
         "description": (
             "• **Interagis 10 min** (commentaires + 3 abonnements)\n"
             "• Poste **1 story** simple → clique sur **Story**, puis crée une **bulle à la une « life »**\n"
-            "• Poste **1 carrousel de 3 photos** avec musique → clique sur **Post**\n"
+            "• Poste **1 publication photo** avec musique → clique sur **Post**\n"
             "• 🎬 **Publie ton premier reel entre 18h et 21h** → clique sur **Reel**\n\n"
             "Clique **→** quand c'est fait."
         ),
