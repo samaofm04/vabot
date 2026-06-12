@@ -1,4 +1,5 @@
 import asyncio
+import datetime as _dt
 import json
 import os
 import random
@@ -6,7 +7,7 @@ import tempfile
 from pathlib import Path
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from video_transform import transform_video, load_config as load_transform_config
 from image_transform import transform_image, load_config as load_image_config
@@ -900,6 +901,40 @@ class UserCog(commands.Cog):
             self.bot.add_view(ContentMenuView(self))
         except Exception:
             pass
+        if not self.daily_menu.is_running():
+            self.daily_menu.start()
+
+    def cog_unload(self):
+        try:
+            self.daily_menu.cancel()
+        except Exception:
+            pass
+
+    @tasks.loop(time=_dt.time(hour=8, minute=0))
+    async def daily_menu(self):
+        """Chaque jour : poste le menu contenu (boutons) dans le salon de chaque VA."""
+        users = load_json(USERS_FILE, {})
+        for uid, data in users.items():
+            ch_id = data.get("channel_id") if isinstance(data, dict) else None
+            ident = (data.get("identity") if isinstance(data, dict)
+                     else (data if isinstance(data, str) else None))
+            if not ch_id or not ident:
+                continue
+            ch = self.bot.get_channel(ch_id)
+            if ch is None:
+                continue
+            try:
+                await ch.send(
+                    "☀️ **Ton contenu du jour** — clique sur ce que tu veux 👇\n"
+                    f"_(identité : **{ident}**)_",
+                    view=ContentMenuView(self),
+                )
+            except Exception:
+                pass
+
+    @daily_menu.before_loop
+    async def _before_daily_menu(self):
+        await self.bot.wait_until_ready()
 
     @app_commands.command(
         name="menu",
