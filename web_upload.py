@@ -7997,20 +7997,30 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             "n_images": n_images, "size_mb": size_mb,
         }
 
-    # Identité sélectionnée (par défaut : la première qui a des fichiers, sinon la 1re)
+    # Identité sélectionnée. Priorité : ?param explicite > dernière identité
+    # où on vient d'uploader (pour voir son upload tout de suite) > 1re avec
+    # fichiers > 1re tout court.
     selected = ""
     try:
         selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
     except Exception:
         pass
     if not selected or selected not in identities:
-        # Auto-select : la 1re identité avec des fichiers
-        for ident in identities:
-            if ident_stats[ident]["n_files"] > 0:
-                selected = ident
-                break
-        if not selected:
-            selected = identities[0]
+        last_up = ""
+        try:
+            from flask import session as _sess_cloud
+            last_up = (_sess_cloud.get("last_upload_identity") or "").lower().strip()
+        except Exception:
+            last_up = ""
+        if last_up in identities:
+            selected = last_up
+        else:
+            for ident in identities:
+                if ident_stats[ident]["n_files"] > 0:
+                    selected = ident
+                    break
+            if not selected:
+                selected = identities[0]
 
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
                 "stories": "cloudstories", "storyctas": "cloudstoryctas"}.get(subdir, "cloudoverview")
@@ -23308,6 +23318,7 @@ def create_app():
             if ex_ext in allow_exts:
                 ex_target = target_dir / f"{stem}.example{ex_ext}"
                 example.save(str(ex_target))
+        session["last_upload_identity"] = identity  # le Cloud s'ouvrira sur cette identité
         return _success(f"✅ Ajouté à {identity}/{subdir_name} : {photo.filename}")
 
     @app.route("/upload/reel", methods=["POST"])
@@ -23357,6 +23368,7 @@ def create_app():
         if target.exists():
             return _error(f"Fichier existe déjà")
         photo.save(str(target))
+        session["last_upload_identity"] = identity  # le Cloud s'ouvrira sur cette identité
         return _success(f"✅ Story CTA ajoutée à {identity}")
 
     @app.route("/identity/avatar/<identity>")
