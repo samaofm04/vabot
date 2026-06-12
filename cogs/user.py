@@ -685,8 +685,8 @@ class UserCog(commands.Cog):
         if len(bios) == 1:
             await interaction.response.send_message(bios[0])
         else:
-            msg = "💬 **Bios pour ton identité** (choisis-en une) :\n\n" + "\n\n".join(
-                f"**{i}.** {b}" for i, b in enumerate(bios, 1)
+            msg = "💬 **Bios pour ton identité** (mets-en une différente par compte) :\n\n" + "\n\n".join(
+                f"**Compte {i}.** {b}" for i, b in enumerate(bios, 1)
             )
             await interaction.response.send_message(msg[:2000])
 
@@ -721,9 +721,13 @@ class UserCog(commands.Cog):
                     tmp_path = Path(tmp_dir) / pic.name
                     if await asyncio.to_thread(transform_image, pic, tmp_path, cfg, "profile"):
                         send_path = tmp_path
-                num = f" {i}/{n}" if n > 1 else ""
+                head = (
+                    f"📸 **Photo de profil {i}/{n}** → une différente sur ton **compte n°{i}**"
+                    if n > 1
+                    else "📸 **Photo de profil**"
+                )
                 await interaction.followup.send(
-                    f"📸 **Photo de profil{num}**\n*Télécharge et upload sur Instagram.*",
+                    f"{head}\n*Télécharge et upload sur Instagram.*",
                     file=discord.File(send_path),
                 )
             finally:
@@ -774,7 +778,13 @@ class UserCog(commands.Cog):
                     if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
                         send_path = tmp_path
                 num = f" {i}/{n}" if n > 1 else ""
-                intro = f"🖼️ **{kind_label.upper()}{num} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
+                if n > 1:
+                    intro = (
+                        f"🖼️ **{kind_label.upper()} {i}/{n}** → à poster sur ton **compte n°{i}** (`{identity}`)\n"
+                        f"📥 Télécharge la photo CLEAN."
+                    )
+                else:
+                    intro = f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
                 if example:
                     intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
                 files = [discord.File(send_path, filename=image.name)]
@@ -859,9 +869,13 @@ class UserCog(commands.Cog):
                     tmp_path = Path(tmp_dir) / image.name
                     if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
                         send_path = tmp_path
-                num = f" {i}/{n}" if n > 1 else ""
+                head = (
+                    f"📲 **STORY CTA {i}/{n}** → pour ton **compte n°{i}** (`{identity}`)"
+                    if n > 1
+                    else f"📲 **STORY CTA — identité `{identity}`**"
+                )
                 intro = (
-                    f"📲 **STORY CTA{num} — identité `{identity}`**\n"
+                    f"{head}\n"
                     f"📥 Télécharge la photo, écris la caption dessus en story.\n\n"
                     f"🕖 **À POSTER LE SOIR ENTRE 19H ET 23H** — c'est le créneau "
                     f"où tes clics convertissent le mieux 💰"
