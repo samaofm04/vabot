@@ -22220,34 +22220,32 @@ def _render_role_dropdown_options() -> str:
 def _render_role_settings_html() -> str:
     """Tableau des rôles et permissions + utilisateurs."""
     users = _load_role_users()
-    role_defs = _load_role_definitions()
-    # Rôles par défaut
-    default_roles = [
-        ("owner",   "Owner",   "Toutes permissions, sans restriction",                                                     "#3b82f6"),
-        ("admin",   "Admin",   "Accès complet à toutes les pages + gestion des utilisateurs / VAs / paiements",            "#3b82f6"),
-        ("va",      "VA",      "Upload contenu, planning posts/stories, gestion des comptes Insta assignés à son identité", "#a855f7"),
-        ("chatter", "Chatter", "Vue revenus + planning SFS + historique conversations. Pas d'upload, pas de gestion VAs",  "#fbbf24"),
-        ("creator", "Creator", "Modèle (OF/MyM) — vue de ses propres revenus, dashboard perso, validation contenu",         "#10b981"),
-        ("sfs",     "SFS Manager", "Création / édition / validation des SFS uniquement (calendrier SFS + preuves AVANT/APRÈS)", "#ec4899"),
-    ]
-    # Construire la liste finale en mergeant avec les overrides custom
-    roles_info = []
-    for key, name, desc, color in default_roles:
-        custom = role_defs.get(key, {})
-        roles_info.append({
-            "key": key,
-            "name": custom.get("name", name),
-            "desc": custom.get("description", desc),
-            "color": color,
-            "enabled": custom.get("enabled", True),
-        })
+    # Source unique : defauts + roles custom (pour que "Add role" apparaisse ici)
+    roles_info = _get_all_roles()
 
     users_by_role = {}
     for u in users:
         r = u.get("role", "?")
         users_by_role.setdefault(r, []).append(u.get("username", "?"))
 
-    rows = ["<table style='width:100%;border-collapse:collapse;margin-top:14px'>"]
+    rows = [
+        # Header : titre + bouton Add role (style OFM)
+        "<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin:4px 0 16px'>"
+        "<h3 style='margin:0;font-size:16px;font-weight:700;color:#fff'>Role settings</h3>"
+        "<button type='button' onclick='openAddRole()' style='padding:9px 18px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px'>+ Add role</button>"
+        "</div>",
+        # Barre de filtres : By role / By status / Reset / Search
+        "<div style='display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:6px;padding:12px 14px;background:#141414;border:1px solid #2a2a2a;border-radius:10px'>"
+        "<div style='display:flex;align-items:center;gap:8px'><span style='font-size:12px;color:#888'>By role :</span>"
+        "<input type='text' id='role-filter-name' placeholder='Role name' oninput='filterRoles()' style='padding:7px 10px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:7px;color:#fff;font-size:13px;width:150px'></div>"
+        "<div style='display:flex;align-items:center;gap:8px'><span style='font-size:12px;color:#888'>By status :</span>"
+        "<select id='role-filter-status' onchange='filterRoles()' style='padding:7px 10px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:7px;color:#fff;font-size:13px'>"
+        "<option value=''>Status</option><option value='on'>Activé</option><option value='off'>Désactivé</option></select></div>"
+        "<button type='button' onclick='resetRoleFilter()' style='padding:7px 16px;background:#2a2a2a;color:#fff;border:0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600'>Reset</button>"
+        "<button type='button' onclick='filterRoles()' style='padding:7px 16px;background:#3b82f6;color:#fff;border:0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600'>Search</button>"
+        "</div>",
+        "<table style='width:100%;border-collapse:collapse;margin-top:10px'>",
+    ]
     rows.append(
         "<tr style='background:#1a1a1a'>"
         "<th style='padding:10px 8px;text-align:left;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Rôle</th>"
@@ -22281,7 +22279,7 @@ def _render_role_settings_html() -> str:
                 f"</button>"
             )
         rows.append(
-            f"<tr style='border-bottom:1px solid #2a2a2a'>"
+            f"<tr data-rolename=\"{r['name'].lower()}\" data-status=\"{'on' if r['enabled'] else 'off'}\" style='border-bottom:1px solid #2a2a2a'>"
             f"<td style='padding:12px 8px'><b style='color:{r_color}'>{r['name']}</b></td>"
             f"<td style='padding:12px 8px;font-size:13px;color:#aaa'>{r['desc']}</td>"
             f"<td style='padding:12px 8px;font-size:13px'>{members_str}</td>"
@@ -22322,6 +22320,23 @@ def _render_role_settings_html() -> str:
   </div>
 </div>
 
+<div id='add-role-overlay' class='confirm-overlay' onclick='closeAddRole()'>
+  <div class='confirm-box' style='max-width:480px' onclick='event.stopPropagation()'>
+    <h3 style='margin-top:0'>Add role</h3>
+    <form method='POST' action='/settings/role/create'>
+      <input type='hidden' name='back_tab' value='srole'>
+      <label>Nom du rôle</label>
+      <input type='text' name='name' maxlength='50' required placeholder='Ex: Team leader'>
+      <label style='margin-top:12px'>Description</label>
+      <textarea name='description' maxlength='300' rows='3' placeholder='Ce que ce rôle peut faire'></textarea>
+      <div style='display:flex;gap:8px;justify-content:flex-end;margin-top:14px'>
+        <button type='button' onclick='closeAddRole()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Cancel</button>
+        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id='perm-overlay' class='confirm-overlay' onclick='closePermissions()'>
   <div class='confirm-box' style='max-width:900px;width:95%;max-height:85vh;overflow-y:auto' onclick='event.stopPropagation()'>
     <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;position:sticky;top:0;background:#1a1a1a;padding-bottom:10px'>
@@ -22345,6 +22360,20 @@ function openEditRole(key, name, desc){
 }
 function closeEditRole(){
   document.getElementById('edit-role-overlay').classList.remove('show');
+}
+function openAddRole(){ document.getElementById('add-role-overlay').classList.add('show'); }
+function closeAddRole(){ document.getElementById('add-role-overlay').classList.remove('show'); }
+function filterRoles(){
+  var nEl=document.getElementById('role-filter-name'), sEl=document.getElementById('role-filter-status');
+  var n=(nEl?nEl.value:'').toLowerCase().trim(), s=sEl?sEl.value:'';
+  document.querySelectorAll('tr[data-rolename]').forEach(function(tr){
+    var name=tr.getAttribute('data-rolename')||'', st=tr.getAttribute('data-status')||'';
+    tr.style.display=((!n||name.indexOf(n)!==-1)&&(!s||st===s))?'':'none';
+  });
+}
+function resetRoleFilter(){
+  var nEl=document.getElementById('role-filter-name'), sEl=document.getElementById('role-filter-status');
+  if(nEl)nEl.value=''; if(sEl)sEl.value=''; filterRoles();
 }
 document.addEventListener('input', function(e){
   if(e.target.id === 'edit-role-name') document.getElementById('edit-role-name-count').textContent = e.target.value.length;
@@ -26941,6 +26970,26 @@ def create_app():
                 u["role"] = "va"  # downgrade en VA par défaut
         _save_role_users(users)
         return _success(f"✅ Rôle <b>{key}</b> supprimé")
+
+    @app.route("/settings/role/create", methods=["POST"])
+    def settings_role_create():
+        if not is_auth():
+            return redirect("/")
+        name = (request.form.get("name") or "").strip()[:50]
+        desc = (request.form.get("description") or "").strip()[:300]
+        if not name:
+            return _error("❌ Nom du rôle requis", tab="srole")
+        import re as _re_role
+        key = _re_role.sub(r"[^a-z0-9]+", "", name.lower())[:30] or "role"
+        existing = {r["key"] for r in _get_all_roles()}
+        defs = _load_role_definitions()
+        base, i = key, 2
+        while key in existing or key in defs:
+            key = f"{base}{i}"
+            i += 1
+        defs[key] = {"name": name, "description": desc, "enabled": True}
+        _save_role_definitions(defs)
+        return _success(f"✅ Rôle <b>{name}</b> créé", tab="srole")
 
     @app.route("/settings/role/edit_def", methods=["POST"])
     def settings_role_edit_def():
