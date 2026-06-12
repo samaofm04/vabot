@@ -73,7 +73,7 @@ DEFAULT_STEPS = [
             "3️⃣ **Inscris le Gmail** sur Instagram\n"
             "4️⃣ **Mets le code** reçu par mail\n"
             "5️⃣ **Crée un mot de passe** fort\n"
-            "6️⃣ **Ne mets PAS de nom** (laisse le champ « nom » vide)\n"
+            "6️⃣ **Mets un nom (display)** → clique sur **Name** ci-dessous, je t'en donne un\n"
             "7️⃣ **Mets un nom d'utilisateur** → clique sur **Username** ci-dessous, je t'en donne un\n"
             "8️⃣ Une fois sur l'Insta : va **regarder un profil + ouvre tes messages 30 sec** "
             "pour simuler une interaction humaine\n\n"

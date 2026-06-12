@@ -33,7 +33,7 @@ STEPS = [
             "3️⃣ **Inscris le Gmail** sur Instagram\n"
             "4️⃣ **Mets le code** reçu par mail\n"
             "5️⃣ **Crée un mot de passe** fort\n"
-            "6️⃣ **Ne mets PAS de nom** (laisse le champ « nom » vide)\n"
+            "6️⃣ **Mets un nom (display)** → clique sur **Name** ci-dessous, je t'en donne un\n"
             "7️⃣ **Mets un nom d'utilisateur** → clique sur **Username** ci-dessous, je t'en donne un\n"
             "8️⃣ Une fois sur l'Insta : va **regarder un profil + ouvre tes messages 30 sec** "
             "pour simuler une interaction humaine\n\n"
@@ -359,85 +359,87 @@ def warmup_master_view():
     return WarmupMenuView(list(_WARMUP_BTN.keys()))
 
 
-# Mapping jour -> mini-menu : (index canonique, libellés titre, [cmds], titre embed, desc embed)
+# Mapping jour -> boutons de contenu : (index canonique, libellés titre, [cmds])
 _WARMUP_DAYS = [
-    (1, ("JOUR 0", "DAY 0"), ["username"],
-     "🎯 Jour 0 — ton nom d'utilisateur",
-     "Pas de nom d'affichage au jour 0 ! Clique pour recevoir ton **username** (pseudo) à mettre sur le compte 👇"),
-    (3, ("JOUR 1", "DAY 1"), ["profilepic"],
-     "🖼 Jour 1 — ta photo de profil",
-     "Clique pour recevoir ta **photo de profil** (unique) à mettre sur le compte 👇"),
-    (4, ("JOUR 2", "DAY 2"), ["bio", "story", "post"],
-     "✨ Jour 2 — bio + story + carrousel",
-     "Clique pour recevoir ta **bio**, ta **story** et ton **carrousel** (3 photos) du jour 👇"),
-    (5, ("JOUR 3", "DAY 3"), ["story", "post", "reel"],
-     "🚀 Jour 3 — story + carrousel + 1er reel",
-     "Clique pour recevoir ta **story**, ton **carrousel** (3 photos) et ton **premier reel** 👇"),
-    (6, ("JOUR 4", "DAY 4"), ["story", "reel"],
-     "📌 Jour 4 — story + reels",
-     "Clique pour recevoir ta **story** et tes **reels** (2 aujourd'hui) 👇"),
-    (7, ("JOUR 5", "DAY 5"), ["story", "reel"],
-     "🌟 Jour 5 — stories à la une + reel",
-     "Clique pour recevoir tes **stories** (12 à répartir) et ton **reel** du soir 👇"),
+    (1, ("JOUR 0", "DAY 0"), ["name", "username"]),
+    (3, ("JOUR 1", "DAY 1"), ["profilepic"]),
+    (4, ("JOUR 2", "DAY 2"), ["bio", "story", "post"]),
+    (5, ("JOUR 3", "DAY 3"), ["story", "post", "reel"]),
+    (6, ("JOUR 4", "DAY 4"), ["story", "reel"]),
+    (7, ("JOUR 5", "DAY 5"), ["story", "reel"]),
 ]
 
 
-def _warmup_menu_for(index, title=None):
-    """Retourne (embed, view) du mini-menu pour cette étape warm-up, ou None.
+def _warmup_cmds_for(index, title=None):
+    """Liste des boutons de contenu de cette étape (ou []).
     Détection par index canonique (STEPS) ET par titre (robuste si réordonné via le site)."""
     t = (title or "").upper()
-    for day_index, labels, cmds, emb_title, emb_desc in _WARMUP_DAYS:
+    for day_index, labels, cmds in _WARMUP_DAYS:
         if index == day_index or any(lbl in t for lbl in labels):
-            emb = discord.Embed(title=emb_title, description=emb_desc, color=discord.Color.green())
-            return emb, WarmupMenuView(cmds)
-    return None
+            return cmds
+    return []
 
 
-async def send_warmup_menu(channel, index, title=None):
-    """Poste le mini-menu warm-up correspondant à l'étape, s'il y en a un."""
-    res = _warmup_menu_for(index, title)
-    if not res:
+class _NextButton(discord.ui.Button):
+    """Bouton « étape suivante » intégré au message de l'étape (même partie que les boutons)."""
+
+    def __init__(self):
+        super().__init__(label="Étape suivante →", style=discord.ButtonStyle.success,
+                         custom_id="va_onboarding_next")
+
+    async def callback(self, interaction: discord.Interaction):
+        await _advance_step(interaction)
+
+
+def build_step_view(index, title=None):
+    """Vue d'une étape : boutons de contenu du jour + bouton → sur le MÊME message.
+    Retourne None s'il n'y a rien à afficher (ne pas envoyer de vue vide)."""
+    view = discord.ui.View(timeout=None)
+    for c in _warmup_cmds_for(index, title):
+        view.add_item(_WarmupButton(c))
+    if index < len(STEPS) - 1:
+        view.add_item(_NextButton())
+    return view if view.children else None
+
+
+async def _advance_step(interaction: discord.Interaction):
+    """Passe à l'étape suivante (lit le footer « Étape X/Y » du message courant)."""
+    if not interaction.message or not interaction.message.embeds:
+        await interaction.response.send_message("Erreur: étape inconnue.", ephemeral=True)
         return
-    emb, view = res
+    footer = interaction.message.embeds[0].footer.text or ""
+    m = re.match(r"Étape (\d+)/(\d+)", footer)
+    if not m:
+        await interaction.response.send_message("Erreur: étape introuvable.", ephemeral=True)
+        return
+    current = int(m.group(1)) - 1
+    next_index = current + 1
+    if next_index >= len(STEPS):
+        await interaction.response.send_message("Tu es déjà à la dernière étape.", ephemeral=True)
+        return
+    new_embed = step_embed(next_index)
+    view = build_step_view(next_index, new_embed.title)
+    await interaction.response.send_message(embed=new_embed, view=view)
+    # Envoyer les medias de l'etape (si presents)
     try:
-        await channel.send(embed=emb, view=view)
+        await send_step_media(interaction.channel, next_index, bot=interaction.client)
     except Exception as e:
-        log.error(f"send_warmup_menu (step {index}): {e}")
+        log.error(f"Erreur send_step_media step {next_index+1}: {e}")
 
 
 class OnboardingView(discord.ui.View):
+    """Vue persistante du bouton → (routing des clics après un redémarrage)."""
+
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="→",
-        style=discord.ButtonStyle.primary,
+        label="Étape suivante →",
+        style=discord.ButtonStyle.success,
         custom_id="va_onboarding_next",
     )
     async def next_step(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.message or not interaction.message.embeds:
-            await interaction.response.send_message("Erreur: étape inconnue.", ephemeral=True)
-            return
-        footer = interaction.message.embeds[0].footer.text or ""
-        m = re.match(r"Étape (\d+)/(\d+)", footer)
-        if not m:
-            await interaction.response.send_message("Erreur: étape introuvable.", ephemeral=True)
-            return
-        current = int(m.group(1)) - 1
-        next_index = current + 1
-        if next_index >= len(STEPS):
-            await interaction.response.send_message("Tu es déjà à la dernière étape.", ephemeral=True)
-            return
-        new_embed = step_embed(next_index)
-        view = None if next_index == len(STEPS) - 1 else OnboardingView()
-        await interaction.response.send_message(embed=new_embed, view=view)
-        # Envoyer les medias de l'etape (si presents)
-        try:
-            await send_step_media(interaction.channel, next_index, bot=interaction.client)
-        except Exception as e:
-            log.error(f"Erreur send_step_media step {next_index+1}: {e}")
-        # Mini-menu warm-up (JOUR 0 = Name+Username, JOUR 1 = PP, JOUR 2 = Bio/Story/Post)
-        await send_warmup_menu(interaction.channel, next_index, new_embed.title)
+        await _advance_step(interaction)
 
 
 class Onboarding(commands.Cog):
@@ -669,9 +671,9 @@ class Onboarding(commands.Cog):
             return
         index = step - 1
         embed = step_embed(index)
-        await interaction.response.send_message(embed=embed)
+        view = build_step_view(index, embed.title)
+        await interaction.response.send_message(embed=embed, view=view)
         await send_step_media(interaction.channel, index, bot=self.bot)
-        await send_warmup_menu(interaction.channel, index, embed.title)
 
     @app_commands.command(
         name="resetonboarding",
