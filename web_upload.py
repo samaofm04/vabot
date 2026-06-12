@@ -21817,28 +21817,58 @@ def _save_role_definitions(data: dict):
 
 
 # Structure des menus avec permissions disponibles
+# Structure complète des menus (= toutes les pages réelles du dashboard).
+# Les "key" matchent les noms d'onglets (showTab) pour rester cohérent.
 ROLE_MENU_STRUCTURE = [
-    {"section": "Contenu", "items": [
-        {"key": "upload", "name": "Upload (Reel/Post/Story/StoryCTA/PP)", "perms": ["view", "create"]},
-        {"key": "cloud", "name": "Cloud (vue & gestion stockage)", "perms": ["view", "delete"]},
+    {"section": "Tableau de bord", "items": [
+        {"key": "home", "name": "Dashboard", "perms": ["view"]},
     ]},
-    {"section": "Management", "items": [
-        {"key": "vas_list", "name": "Liste VAs", "perms": ["view", "edit"]},
-        {"key": "vas_stats", "name": "Stats par identité", "perms": ["view"]},
+    {"section": "Contenu — Bibliothèque", "items": [
+        {"key": "upload", "name": "Upload (Reel/Post/Story/CTA/PP)", "perms": ["view", "create"]},
+        {"key": "cloud", "name": "Cloud (stockage par type)", "perms": ["view", "delete"]},
+        {"key": "textpool", "name": "Bibliothèque texte (Names/Bios/CTAs)", "perms": ["view", "edit"]},
     ]},
-    {"section": "Outils", "items": [
-        {"key": "trends_ig", "name": "Trends Instagram", "perms": ["view", "scrape"]},
-        {"key": "trends_tt", "name": "Trends TikTok", "perms": ["view"]},
-        {"key": "business_sfs", "name": "Business — SFS Planning", "perms": ["view", "create", "edit"]},
-        {"key": "business_revenus", "name": "Business — Revenus", "perms": ["view", "create", "edit"]},
-        {"key": "business_depenses", "name": "Business — Dépenses", "perms": ["view", "create"]},
-        {"key": "business_paievas", "name": "Business — Paie VAs", "perms": ["view", "create"]},
-        {"key": "business_bilan", "name": "Business — Bilan", "perms": ["view"]},
+    {"section": "Management — VAs", "items": [
+        {"key": "valist", "name": "Liste VAs / Délégations", "perms": ["view", "edit"]},
+        {"key": "vastats", "name": "Stats par identité", "perms": ["view"]},
+        {"key": "onboarding", "name": "Onboarding", "perms": ["view", "edit"]},
+        {"key": "paievas", "name": "Paie VAs", "perms": ["view", "create"]},
+    ]},
+    {"section": "Chatteurs", "items": [
+        {"key": "chatplanning", "name": "Emploi du temps chatteurs", "perms": ["view", "edit"]},
+        {"key": "revenus", "name": "Revenus chatteurs", "perms": ["view", "create", "edit"]},
+    ]},
+    {"section": "Trends", "items": [
+        {"key": "igaccounts", "name": "Instagram — Accounts (watchlist)", "perms": ["view", "edit"]},
+        {"key": "igtrends", "name": "Instagram — Trends", "perms": ["view", "scrape"]},
+        {"key": "veille", "name": "Veille (reels sauvegardés)", "perms": ["view", "create"]},
+    ]},
+    {"section": "Outils — SFS", "items": [
+        {"key": "sfs", "name": "SFS — Planning", "perms": ["view", "create", "edit"]},
+        {"key": "sfssetupmym", "name": "Setup SFS MYM", "perms": ["view"]},
+        {"key": "sfssetupof", "name": "Setup SFS OF", "perms": ["view"]},
+    ]},
+    {"section": "Outils — Auto-Post", "items": [
+        {"key": "mypulslive", "name": "MyPuls Live — Push direct", "perms": ["view", "create"]},
+        {"key": "schedule", "name": "Schedule — Auto-post", "perms": ["view", "create"]},
+    ]},
+    {"section": "Outils — Autres", "items": [
+        {"key": "geelark", "name": "GeeLark — Cloud phones", "perms": ["view", "create"]},
+        {"key": "jailbreak", "name": "Jailbreak — Comptes par identité", "perms": ["view", "edit"]},
+    ]},
+    {"section": "Finances", "items": [
+        {"key": "depenses", "name": "Dépenses", "perms": ["view", "create"]},
+        {"key": "bilan", "name": "Bilan", "perms": ["view"]},
     ]},
     {"section": "Settings", "items": [
-        {"key": "settings_account", "name": "Mon compte", "perms": ["view", "edit"]},
-        {"key": "settings_security", "name": "Sécurité (sessions)", "perms": ["view", "revoke"]},
-        {"key": "settings_roles", "name": "Rôles & permissions", "perms": ["view", "edit"]},
+        {"key": "saccount", "name": "Mon compte", "perms": ["view", "edit"]},
+        {"key": "sprefs", "name": "Préférences", "perms": ["view", "edit"]},
+        {"key": "ssecurity", "name": "Sécurité (sessions)", "perms": ["view", "revoke"]},
+        {"key": "srole", "name": "Rôles & permissions", "perms": ["view", "edit"]},
+        {"key": "semp", "name": "Manage employees", "perms": ["view", "edit"]},
+        {"key": "stoken", "name": "Token bot admin", "perms": ["view", "edit"]},
+        {"key": "sinsta", "name": "Cookies Instagram", "perms": ["view", "edit"]},
+        {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
     ]},
 ]
 
