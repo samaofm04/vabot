@@ -22385,23 +22385,35 @@ function submitAddRole(ev){
 function addRoleRow(d){
   var ref = document.querySelector('tr[data-rolename]');
   if(!ref) return;
-  var nameSafe = (d.name||'').replace(/"/g,'&quot;');
-  var descSafe = (d.desc||'').replace(/"/g,'&quot;');
   var tr = document.createElement('tr');
   tr.setAttribute('data-rolename', (d.name||'').toLowerCase());
   tr.setAttribute('data-status','on');
-  tr.style.borderBottom='1px solid #2a2a2a';
-  var trash = "<button onclick='deleteRole(\""+d.key+"\",\""+nameSafe+"\")' title='Supprimer le rôle' style='background:transparent;border:0;color:#aaa;cursor:pointer;padding:4px 8px;margin-left:10px' onmouseover='this.style.color=\"#ef4444\"' onmouseout='this.style.color=\"#aaa\"'><svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/></svg></button>";
+  tr.style.borderBottom = '1px solid #2a2a2a';
   tr.innerHTML =
-    "<td style='padding:12px 8px'><b style='color:"+(d.color||'#6b7280')+"'>"+(d.name||'')+"</b></td>"
-    + "<td style='padding:12px 8px;font-size:13px;color:#aaa'>"+(d.desc||'')+"</td>"
+    "<td style='padding:12px 8px'><b class='rr-name' style='color:"+(d.color||'#6b7280')+"'></b></td>"
+    + "<td style='padding:12px 8px;font-size:13px;color:#aaa' class='rr-desc'></td>"
     + "<td style='padding:12px 8px;font-size:13px'><span style='color:#666'>—</span></td>"
     + "<td style='padding:12px 8px;text-align:center'><div style='display:inline-block;width:36px;height:20px;background:#3b82f6;border-radius:10px;position:relative'><div style='position:absolute;right:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%'></div></div></td>"
-    + "<td style='padding:12px 8px;text-align:right;white-space:nowrap'>"
-      + "<a onclick='openPermissions(\""+d.key+"\",\""+nameSafe+"\")' style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;margin-right:18px;text-decoration:none' onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Set permissions</a>"
-      + "<a onclick='openEditRole(\""+d.key+"\",\""+nameSafe+"\",\""+descSafe+"\")' style='color:#aaa;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none' onmouseover='this.style.color=\"#3b82f6\"' onmouseout='this.style.color=\"#aaa\"'>Edit</a>"
-      + trash
-    + "</td>";
+    + "<td style='padding:12px 8px;text-align:right;white-space:nowrap' class='rr-actions'></td>";
+  // Texte via textContent (pas d'injection, pas d'echappement de quotes)
+  tr.querySelector('.rr-name').textContent = d.name || '';
+  tr.querySelector('.rr-desc').textContent = d.desc || '';
+  // Actions avec handlers directs (evite tout probleme de quotes)
+  var act = tr.querySelector('.rr-actions');
+  var aPerm = document.createElement('a');
+  aPerm.textContent = 'Set permissions';
+  aPerm.style.cssText = 'color:#aaa;cursor:pointer;font-size:13px;font-weight:500;margin-right:18px;text-decoration:none';
+  aPerm.onclick = function(){ openPermissions(d.key, d.name); };
+  var aEdit = document.createElement('a');
+  aEdit.textContent = 'Edit';
+  aEdit.style.cssText = 'color:#aaa;cursor:pointer;font-size:13px;font-weight:500;text-decoration:none';
+  aEdit.onclick = function(){ openEditRole(d.key, d.name, d.desc); };
+  var bDel = document.createElement('button');
+  bDel.title = 'Supprimer le rôle';
+  bDel.style.cssText = 'background:transparent;border:0;color:#aaa;cursor:pointer;padding:4px 8px;margin-left:10px';
+  bDel.innerHTML = "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/></svg>";
+  bDel.onclick = function(){ deleteRole(d.key, d.name); };
+  act.appendChild(aPerm); act.appendChild(aEdit); act.appendChild(bDel);
   ref.parentNode.appendChild(tr);
 }
 function filterRoles(){
