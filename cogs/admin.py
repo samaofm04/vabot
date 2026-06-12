@@ -471,11 +471,18 @@ class Admin(commands.Cog):
         ident_lc = (identity or "").strip().lower()
         if not ident_lc:
             return
+        try:
+            from cogs.welcome import _identity_of_channel
+        except Exception:
+            _identity_of_channel = None
         for ch in getattr(guild, "text_channels", []):
-            norm = ch.name.lower().replace("é", "e").replace("è", "e")
-            if not norm.startswith("general-"):
+            if _identity_of_channel:
+                suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
+            else:
+                norm = ch.name.lower().replace("é", "e").replace("è", "e")
+                suffix = norm[len("general-"):].strip() if norm.startswith("general-") else None
+            if suffix is None:
                 continue
-            suffix = norm[len("general-"):].strip()
             try:
                 if suffix == ident_lc:
                     await ch.set_permissions(

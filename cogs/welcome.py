@@ -271,6 +271,31 @@ def find_identity_category(guild, identity):
     return None
 
 
+# Salons par identité : chaque identité a plusieurs salons réservés à SES VAs
+# (general-X = discussion, banger-X = bangers, exemple-compte-X = exemples).
+# Tous suivent le même modèle d'accès (visibles uniquement par les VAs de X + staff).
+PER_IDENTITY_PREFIXES = ("general-", "banger-", "exemple-compte-")
+
+
+def _identity_of_channel(ch_name):
+    """Suffixe d'identité si le salon est un salon par-identité
+    (general-/banger-/exemple-compte-), sinon None. Accents ignorés."""
+    norm = (ch_name or "").lower().replace("é", "e").replace("è", "e").strip()
+    for p in PER_IDENTITY_PREFIXES:
+        if norm.startswith(p):
+            return norm[len(p):].strip()
+    return None
+
+
+def find_identity_channels(guild, identity):
+    """Tous les salons par-identité (general/banger/exemple-compte) d'une identité."""
+    target = (identity or "").strip().lower()
+    if not target:
+        return []
+    return [ch for ch in getattr(guild, "text_channels", [])
+            if _identity_of_channel(ch.name) == target]
+
+
 def find_general_channel_for_identity(guild, identity):
     """Trouve le salon general-<identity> (case-insensitive, ignore accents)."""
     target = (identity or "").strip().lower()
@@ -295,10 +320,9 @@ async def sync_general_channel_access(guild, member, identity):
     """
     ident_lc = (identity or "").strip().lower()
     for ch in guild.text_channels:
-        norm = ch.name.lower().replace("é", "e").replace("è", "e")
-        if not norm.startswith("general-"):
+        suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
+        if suffix is None:
             continue
-        suffix = norm[len("general-"):].strip()
         try:
             if ident_lc and suffix == ident_lc:
                 await ch.set_permissions(
@@ -307,7 +331,7 @@ async def sync_general_channel_access(guild, member, identity):
                     send_messages=True,
                     read_message_history=True,
                     attach_files=True,
-                    reason=f"VA assignee a {ident_lc} - acces au general",
+                    reason=f"VA assignee a {ident_lc} - acces salons identite",
                 )
             else:
                 # retire l'overwrite specifique au membre (laisse les roles)
@@ -408,14 +432,14 @@ async def setup_va_ticket(guild, member):
     except Exception as e:
         log.error(f"setup_va_ticket: erreur envoi intro: {e}")
 
-    # Cacher TOUS les salons au VA sauf son ticket + le general-<identite> (anonymat)
-    general_ch = find_general_channel_for_identity(guild, identity)
+    # Cacher TOUS les salons au VA sauf son ticket + ses salons d'identité
+    # (general-X / banger-X / exemple-compte-X) + la liste blanche (anonymat)
     if cfg.get("hide_all_channels_from_va", True):
         own_id = channel.id
         extra_visible = set(cfg.get("extra_visible_channel_ids", []))
         skip_ids = {own_id, *extra_visible}
-        if general_ch:
-            skip_ids.add(general_ch.id)
+        for ch in find_identity_channels(guild, identity):
+            skip_ids.add(ch.id)
         for ch in guild.channels:
             if ch.id in skip_ids:
                 continue
@@ -727,10 +751,9 @@ class Welcome(commands.Cog):
                     ).add(member)
 
                 for ch in guild.text_channels:
-                    norm = ch.name.lower().replace("é", "e").replace("è", "e")
-                    if not norm.startswith("general-"):
+                    suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
+                    if suffix is None:
                         continue
-                    suffix = norm[len("general-"):].strip()
 
                     # 1) @everyone : cache le salon par defaut
                     everyone = guild.default_role
