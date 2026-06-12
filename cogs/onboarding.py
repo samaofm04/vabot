@@ -321,43 +321,78 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
                 log.error(f"Erreur envoi URL attachement: {e}")
 
 
+async def _invoke_user_cmd(interaction, cmd_name):
+    """Lance une commande du UserCog (/name, /username, /profilepic, /bio, /story, /post)
+    depuis un bouton de menu warm-up. Récupère le cog au moment du clic → la vue
+    n'a pas besoin de référence au cog (persistance facile)."""
+    cog = interaction.client.get_cog("UserCog")
+    if cog is None:
+        await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
+        return
+    cmd = getattr(cog, cmd_name, None)
+    if cmd is None:
+        await interaction.response.send_message("Commande indisponible.", ephemeral=True)
+        return
+    await cmd.callback(cog, interaction)
+
+
 class Day0MenuView(discord.ui.View):
-    """Mini-menu du JOUR 0 (warm-up) : juste Name + Username.
-    Le VA clique pour recevoir son name d'affichage + son pseudo à mettre sur le
-    compte fraîchement créé. Vue persistante (custom_id) : marche après redémarrage.
-    Réutilise les commandes /name et /username du UserCog."""
+    """Mini-menu JOUR 0 : Name + Username (identité du compte fraîchement créé)."""
 
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.primary, custom_id="warmup:name")
     async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = interaction.client.get_cog("UserCog")
-        if cog is not None:
-            await cog.name.callback(cog, interaction)
-        else:
-            await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
+        await _invoke_user_cmd(interaction, "name")
 
     @discord.ui.button(label="Username", emoji="👤", style=discord.ButtonStyle.primary, custom_id="warmup:username")
     async def b_username(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = interaction.client.get_cog("UserCog")
-        if cog is not None:
-            await cog.username.callback(cog, interaction)
-        else:
-            await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
+        await _invoke_user_cmd(interaction, "username")
 
 
-def _is_day0_index(index, title=None):
-    """Vrai si l'étape correspond au JOUR 0 (création du compte)."""
-    if index == 1:  # index canonique du JOUR 0 dans STEPS
-        return True
+class Day1MenuView(discord.ui.View):
+    """Mini-menu JOUR 1 : Photo de profil."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Photo de profil", emoji="🖼", style=discord.ButtonStyle.primary, custom_id="warmup:pp")
+    async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _invoke_user_cmd(interaction, "profilepic")
+
+
+class Day2MenuView(discord.ui.View):
+    """Mini-menu JOUR 2 : Bio + Story + Post."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.primary, custom_id="warmup:bio")
+    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _invoke_user_cmd(interaction, "bio")
+
+    @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="warmup:story")
+    async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _invoke_user_cmd(interaction, "story")
+
+    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="warmup:post")
+    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _invoke_user_cmd(interaction, "post")
+
+
+WARMUP_VIEWS = [Day0MenuView, Day1MenuView, Day2MenuView]
+
+
+def _warmup_menu_for(index, title=None):
+    """Retourne (embed, view) du mini-menu pour cette étape warm-up, ou None.
+    Détection par index canonique (STEPS) ET par titre (robuste si réordonné via le site)."""
     t = (title or "").upper()
-    return ("JOUR 0" in t) or ("DAY 0" in t)
 
+    def is_day(day_index, *labels):
+        return index == day_index or any(lbl in t for lbl in labels)
 
-async def send_day0_menu(channel):
-    """Poste le mini-menu warm-up JOUR 0 : juste Name + Username."""
-    try:
+    if is_day(1, "JOUR 0", "DAY 0"):
         emb = discord.Embed(
             title="🎯 Jour 0 — récupère ton identité",
             description=(
@@ -366,9 +401,34 @@ async def send_day0_menu(channel):
             ),
             color=discord.Color.green(),
         )
-        await channel.send(embed=emb, view=Day0MenuView())
+        return emb, Day0MenuView()
+    if is_day(3, "JOUR 1", "DAY 1"):
+        emb = discord.Embed(
+            title="🖼 Jour 1 — ta photo de profil",
+            description="Clique pour recevoir ta **photo de profil** à mettre sur le compte 👇",
+            color=discord.Color.green(),
+        )
+        return emb, Day1MenuView()
+    if is_day(4, "JOUR 2", "DAY 2"):
+        emb = discord.Embed(
+            title="✨ Jour 2 — bio + story + post",
+            description="Clique pour recevoir ta **bio**, ta **story** et ton **post** du jour 👇",
+            color=discord.Color.green(),
+        )
+        return emb, Day2MenuView()
+    return None
+
+
+async def send_warmup_menu(channel, index, title=None):
+    """Poste le mini-menu warm-up correspondant à l'étape, s'il y en a un."""
+    res = _warmup_menu_for(index, title)
+    if not res:
+        return
+    emb, view = res
+    try:
+        await channel.send(embed=emb, view=view)
     except Exception as e:
-        log.error(f"send_day0_menu: {e}")
+        log.error(f"send_warmup_menu (step {index}): {e}")
 
 
 class OnboardingView(discord.ui.View):
@@ -402,9 +462,8 @@ class OnboardingView(discord.ui.View):
             await send_step_media(interaction.channel, next_index, bot=interaction.client)
         except Exception as e:
             log.error(f"Erreur send_step_media step {next_index+1}: {e}")
-        # JOUR 0 : poste le mini-menu Name + Username
-        if _is_day0_index(next_index, new_embed.title):
-            await send_day0_menu(interaction.channel)
+        # Mini-menu warm-up (JOUR 0 = Name+Username, JOUR 1 = PP, JOUR 2 = Bio/Story/Post)
+        await send_warmup_menu(interaction.channel, next_index, new_embed.title)
 
 
 class Onboarding(commands.Cog):
@@ -414,7 +473,8 @@ class Onboarding(commands.Cog):
 
     async def cog_load(self):
         self.bot.add_view(OnboardingView())
-        self.bot.add_view(Day0MenuView())
+        for _vcls in WARMUP_VIEWS:
+            self.bot.add_view(_vcls())
 
     async def get_owner_id(self):
         if self._owner_id is None:
@@ -638,8 +698,7 @@ class Onboarding(commands.Cog):
         embed = step_embed(index)
         await interaction.response.send_message(embed=embed)
         await send_step_media(interaction.channel, index, bot=self.bot)
-        if _is_day0_index(index, embed.title):
-            await send_day0_menu(interaction.channel)
+        await send_warmup_menu(interaction.channel, index, embed.title)
 
 
 async def setup(bot):
