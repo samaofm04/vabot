@@ -22099,6 +22099,7 @@ def _render_employees_table_html() -> str:
   <div class='confirm-box' style='max-width:480px' onclick='event.stopPropagation()'>
     <h3 id='emp-modal-title' style='margin-top:0'>Edit employee</h3>
     <form id='emp-modal-form' method='POST'>
+      <input type='hidden' name='back_tab' value='semp'>
       <input type='hidden' name='original_username' id='emp-modal-orig'>
       <label><span style='color:#ef4444'>*</span>Username (used to login)</label>
       <input type='text' name='username' id='emp-modal-name' required>
@@ -26897,12 +26898,12 @@ def create_app():
         password = (request.form.get("password") or "").strip()
         agency = (request.form.get("agency") or "").strip()
         if not username or not role or len(password) < 6:
-            return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)")
+            return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)", tab="semp")
         # Normalise le username : lowercase + sans espaces
         username = username.lower().strip()
         users = _load_role_users()
         if any((u.get("username") or "").lower() == username for u in users):
-            return _error(f"❌ {username} existe déjà")
+            return _error(f"❌ {username} existe déjà", tab="semp")
         # 1) Enregistre dans role_users.json (pour affichage + permissions)
         hashed = _hash_password(password)
         users.append({
@@ -26925,7 +26926,8 @@ def create_app():
         _save_web_users(web_users)
         return _success(
             f"✅ Utilisateur <b>{username}</b> créé (rôle : <b>{role}</b>). "
-            f"Il peut maintenant se connecter avec ce username + le mot de passe défini."
+            f"Il peut maintenant se connecter avec ce username + le mot de passe défini.",
+            tab="semp",
         )
 
     @app.route("/settings/role/toggle_active", methods=["POST"])
@@ -26945,7 +26947,7 @@ def create_app():
         if action == "deactivate" and username in web_users:
             web_users.pop(username, None)
             _save_web_users(web_users)
-        return _success(f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}")
+        return _success(f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}", tab="semp")
 
     @app.route("/settings/role/edit_user", methods=["POST"])
     def settings_role_edit_user():
@@ -26956,7 +26958,7 @@ def create_app():
         new_role = (request.form.get("role") or "").strip().lower()
         new_agency = (request.form.get("agency") or "").strip()
         if not new_role:
-            return _error("❌ Rôle manquant")
+            return _error("❌ Rôle manquant", tab="semp")
         users = _load_role_users()
         found = False
         for u in users:
@@ -26965,16 +26967,18 @@ def create_app():
                 u["agency"] = new_agency
                 found = True
                 break
-        if not found:
-            return _error(f"❌ Utilisateur {orig} introuvable")
-        _save_role_users(users)
-        # Sync dans web_admin_users
+        # Sync dans web_admin_users (et fallback si l'user n'existe que là)
         web_users = _load_web_users()
-        if orig in web_users:
-            web_users[orig]["role"] = new_role
-            web_users[orig]["agency"] = new_agency
-            _save_web_users(web_users)
-        return _success(f"✅ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)")
+        wu = web_users.get(orig)
+        if isinstance(wu, dict):
+            wu["role"] = new_role
+            wu["agency"] = new_agency
+            found = True
+        if not found:
+            return _error(f"❌ Utilisateur {orig} introuvable", tab="semp")
+        _save_role_users(users)
+        _save_web_users(web_users)
+        return _success(f"✅ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)", tab="semp")
 
     @app.route("/settings/role/batch", methods=["POST"])
     def settings_role_batch():
@@ -26985,7 +26989,7 @@ def create_app():
         raw = (request.form.get("usernames") or "").strip()
         names = [n.strip().lower() for n in raw.split(",") if n.strip()]
         if not names or action not in ("activate", "deactivate", "delete"):
-            return _error("❌ Action ou sélection invalide")
+            return _error("❌ Action ou sélection invalide", tab="semp")
         # Protege le owner
         names = [n for n in names if n != "samaali"]
         users = _load_role_users()
@@ -27005,7 +27009,7 @@ def create_app():
         _save_role_users(users)
         _save_web_users(web_users)
         verb = {"activate": "activé(s)", "deactivate": "désactivé(s)", "delete": "supprimé(s)"}[action]
-        return _success(f"✅ {len(names)} employé(s) {verb}")
+        return _success(f"✅ {len(names)} employé(s) {verb}", tab="semp")
 
     @app.route("/settings/role/set_assigned", methods=["POST"])
     def settings_role_set_assigned():
