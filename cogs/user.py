@@ -15,6 +15,31 @@ from image_transform import transform_image, load_config as load_image_config
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
+
+# Fuseau France pour le post quotidien à minuit (heure locale FR)
+try:
+    from zoneinfo import ZoneInfo
+    _PARIS_TZ = ZoneInfo("Europe/Paris")
+except Exception:
+    _PARIS_TZ = _dt.timezone(_dt.timedelta(hours=1))  # fallback UTC+1
+
+
+def _build_menu_embed(identity):
+    """Embed clair et intuitif : chaque bouton est expliqué en une ligne."""
+    emb = discord.Embed(
+        title="☀️ Ton contenu du jour",
+        description="Clique sur un bouton pour recevoir ton contenu **prêt à poster** 👇",
+        color=discord.Color.blurple(),
+    )
+    emb.add_field(name="🎬 Reel", value="Vidéos + captions (1 par compte)", inline=True)
+    emb.add_field(name="📖 Story", value="Photo + texte pour ta story", inline=True)
+    emb.add_field(name="📲 Story CTA", value="Photo CTA (à poster le soir)", inline=True)
+    emb.add_field(name="👤 Pseudo", value="Des pseudos Insta dispo", inline=True)
+    emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
+    emb.add_field(name="​", value="​", inline=True)  # aligne la grille 3×2
+    if identity:
+        emb.set_footer(text=f"Identité : {identity}")
+    return emb
 USERS_FILE = DATA_DIR / "users.json"
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
@@ -910,9 +935,10 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
-    @tasks.loop(time=_dt.time(hour=8, minute=0))
+    @tasks.loop(time=_dt.time(hour=0, minute=0, tzinfo=_PARIS_TZ))
     async def daily_menu(self):
-        """Chaque jour : poste le menu contenu (boutons) dans le salon de chaque VA."""
+        """Chaque jour à MINUIT (heure FR) : poste le menu contenu (boutons)
+        dans le salon de chaque VA."""
         users = load_json(USERS_FILE, {})
         for uid, data in users.items():
             ch_id = data.get("channel_id") if isinstance(data, dict) else None
@@ -924,11 +950,7 @@ class UserCog(commands.Cog):
             if ch is None:
                 continue
             try:
-                await ch.send(
-                    "☀️ **Ton contenu du jour** — clique sur ce que tu veux 👇\n"
-                    f"_(identité : **{ident}**)_",
-                    view=ContentMenuView(self),
-                )
+                await ch.send(embed=_build_menu_embed(ident), view=ContentMenuView(self))
             except Exception:
                 pass
 
@@ -942,12 +964,14 @@ class UserCog(commands.Cog):
     )
     async def menu(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
-        txt = "🎯 **Ton contenu** — clique sur ce que tu veux 👇"
-        if identity:
-            txt += f"\n_(identité : **{identity}**)_"
-        else:
-            txt += "\n⚠️ Tu n'as pas d'identité assignée — demande à un admin."
-        await interaction.response.send_message(txt, view=ContentMenuView(self))
+        if not identity:
+            await interaction.response.send_message(
+                "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            embed=_build_menu_embed(identity), view=ContentMenuView(self)
+        )
 
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
