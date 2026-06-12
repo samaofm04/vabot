@@ -37,9 +37,9 @@ def _build_menu_embed(identity):
     emb.add_field(name="📲 Story CTA", value="Photo CTA (à poster le soir)", inline=True)
     emb.add_field(name="👤 Pseudo", value="Des pseudos Insta dispo", inline=True)
     emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
-    emb.add_field(name="💬 Bio", value="Une bio Insta de ton identité", inline=True)
+    emb.add_field(name="💬 Bio", value="Des bios Insta de ton identité", inline=True)
+    emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
     emb.add_field(name="​", value="​", inline=True)  # alignement grille 3×3
-    emb.add_field(name="​", value="​", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -656,7 +656,7 @@ class UserCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="bio", description="Donne une bio Instagram aléatoire de ton identité")
+    @app_commands.command(name="bio", description="Donne 3 bios Instagram de ton identité")
     async def bio(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -665,49 +665,77 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        b = random_bio_for(identity)
-        if not b:
+        bios, seen = [], set()
+        for _ in range(15):
+            if len(bios) >= 3:
+                break
+            b = random_bio_for(identity)
+            if not b:
+                break
+            if b in seen:
+                continue
+            seen.add(b)
+            bios.append(b)
+        if not bios:
             await interaction.response.send_message(
                 f"Aucune bio pour ton identité `{identity}`. Demande à un admin (`/addbios`).",
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(b)
+        if len(bios) == 1:
+            await interaction.response.send_message(bios[0])
+        else:
+            msg = "💬 **Bios pour ton identité** (choisis-en une) :\n\n" + "\n\n".join(
+                f"**{i}.** {b}" for i, b in enumerate(bios, 1)
+            )
+            await interaction.response.send_message(msg[:2000])
 
-    @app_commands.command(name="profilepic", description="Donne une photo de profil aléatoire (transformée)")
+    @app_commands.command(name="profilepic", description="Donne 3 photos de profil (transformées)")
     async def profilepic(self, interaction: discord.Interaction):
-        pic = random_profile_pic()
-        if not pic:
+        pics, seen = [], set()
+        for _ in range(15):
+            if len(pics) >= 3:
+                break
+            p = random_profile_pic()
+            if not p:
+                break
+            if str(p) in seen:
+                continue
+            seen.add(str(p))
+            pics.append(p)
+        if not pics:
             await interaction.response.send_message(
                 "Aucune photo de profil disponible. Demande à un admin (`/addprofilepic`).",
                 ephemeral=True,
             )
             return
         await interaction.response.defer()
-        # Transformer
         cfg = load_image_config()
-        tmp_dir = None
-        send_path = pic
-        try:
-            if cfg.get("enabled", True):
-                tmp_dir = tempfile.mkdtemp(prefix="pp_")
-                tmp_path = Path(tmp_dir) / pic.name
-                if await asyncio.to_thread(transform_image, pic, tmp_path, cfg, "profile"):
-                    send_path = tmp_path
-            await interaction.followup.send(
-                "📸 **Photo de profil**\n*Télécharge et upload sur Instagram.*",
-                file=discord.File(send_path),
-            )
-        finally:
-            if tmp_dir:
-                try:
-                    import shutil
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                except Exception:
-                    pass
+        n = len(pics)
+        for i, pic in enumerate(pics, 1):
+            tmp_dir = None
+            send_path = pic
+            try:
+                if cfg.get("enabled", True):
+                    tmp_dir = tempfile.mkdtemp(prefix="pp_")
+                    tmp_path = Path(tmp_dir) / pic.name
+                    if await asyncio.to_thread(transform_image, pic, tmp_path, cfg, "profile"):
+                        send_path = tmp_path
+                num = f" {i}/{n}" if n > 1 else ""
+                await interaction.followup.send(
+                    f"📸 **Photo de profil{num}**\n*Télécharge et upload sur Instagram.*",
+                    file=discord.File(send_path),
+                )
+            finally:
+                if tmp_dir:
+                    try:
+                        import shutil
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    except Exception:
+                        pass
 
-    async def _send_image_content(self, interaction, kind_label, kind_target, random_fn, transform_cfg):
-        """Generic handler for /post and /story commands."""
+    async def _send_image_content(self, interaction, kind_label, kind_target, random_fn, transform_cfg, count=3):
+        """Generic handler pour /post et /story. Envoie `count` items DISTINCTS."""
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -715,62 +743,79 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        image, caption, description, example = random_fn(identity)
-        if not image:
+        # Recupere jusqu'a `count` images distinctes (best-effort)
+        picks, seen = [], set()
+        for _ in range(count * 5):
+            if len(picks) >= count:
+                break
+            image, caption, description, example = random_fn(identity)
+            if not image:
+                break
+            key = str(image)
+            if key in seen:
+                continue
+            seen.add(key)
+            picks.append((image, caption, description, example))
+        if not picks:
             await interaction.response.send_message(
                 f"Aucun {kind_label} pour ton identité `{identity}`. Demande à un admin.",
                 ephemeral=True,
             )
             return
         await interaction.response.defer()
-        tmp_dir = None
-        send_path = image
-        try:
-            if transform_cfg.get("enabled", True):
-                tmp_dir = tempfile.mkdtemp(prefix=f"{kind_target}_")
-                tmp_path = Path(tmp_dir) / image.name
-                if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
-                    send_path = tmp_path
-            intro = f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
-            if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
-            files = [discord.File(send_path, filename=image.name)]
-            if example:
-                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+        n = len(picks)
+        for i, (image, caption, description, example) in enumerate(picks, 1):
+            tmp_dir = None
+            send_path = image
             try:
-                await interaction.followup.send(content=intro, files=files)
-            except discord.HTTPException as e:
-                await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
-                return
-            if caption:
-                await interaction.followup.send(
-                    f"📝 **CAPTION {kind_label.upper()}** (à écrire **PAR-DESSUS la photo** dans l'éditeur Insta) :"
-                )
-                await interaction.followup.send(caption)
-            if description:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION {kind_label.upper()}** (à coller dans le **champ légende** du post) :"
-                )
-                await interaction.followup.send(description)
-        finally:
-            if tmp_dir:
+                if transform_cfg.get("enabled", True):
+                    tmp_dir = tempfile.mkdtemp(prefix=f"{kind_target}_")
+                    tmp_path = Path(tmp_dir) / image.name
+                    if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
+                        send_path = tmp_path
+                num = f" {i}/{n}" if n > 1 else ""
+                intro = f"🖼️ **{kind_label.upper()}{num} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
+                if example:
+                    intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
+                files = [discord.File(send_path, filename=image.name)]
+                if example:
+                    files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
                 try:
-                    import shutil
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                except Exception:
-                    pass
+                    await interaction.followup.send(content=intro, files=files)
+                except discord.HTTPException as e:
+                    await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
+                    continue
+                if caption:
+                    await interaction.followup.send(
+                        f"📝 **CAPTION {kind_label.upper()}{num}** (à écrire **PAR-DESSUS la photo**) :"
+                    )
+                    await interaction.followup.send(caption)
+                if description:
+                    await interaction.followup.send(
+                        f"📄 **DESCRIPTION {kind_label.upper()}{num}** (à coller dans le **champ légende**) :"
+                    )
+                    await interaction.followup.send(description)
+            finally:
+                if tmp_dir:
+                    try:
+                        import shutil
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    except Exception:
+                        pass
 
-    @app_commands.command(name="post", description="Génère un post photo (photo + caption + description)")
-    async def post(self, interaction: discord.Interaction):
+    @app_commands.command(name="post", description="Génère 3 posts photo (photo + caption + description)")
+    @app_commands.describe(nombre="Combien de posts (1-10, défaut 3)")
+    async def post(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         cfg = load_image_config()
-        await self._send_image_content(interaction, "post", "post", random_post_for, cfg)
+        await self._send_image_content(interaction, "post", "post", random_post_for, cfg, count=nombre)
 
-    @app_commands.command(name="story", description="Génère une story (photo + caption + description)")
-    async def story(self, interaction: discord.Interaction):
+    @app_commands.command(name="story", description="Génère 3 stories (photo + caption + description)")
+    @app_commands.describe(nombre="Combien de stories (1-10, défaut 3)")
+    async def story(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         cfg = load_image_config()
-        await self._send_image_content(interaction, "story", "story", random_story_for, cfg)
+        await self._send_image_content(interaction, "story", "story", random_story_for, cfg, count=nombre)
 
-    @app_commands.command(name="storycta", description="Génère une story CTA: photo 1080x1920 + caption à écrire dessus")
+    @app_commands.command(name="storycta", description="Génère 3 stories CTA: photo 1080x1920 + caption à écrire dessus")
     async def storycta(self, interaction: discord.Interaction):
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -778,15 +823,24 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True
             )
             return
-        image = random_story_cta_image_for(identity)
-        if not image:
+        images, seen = [], set()
+        for _ in range(15):
+            if len(images) >= 3:
+                break
+            im = random_story_cta_image_for(identity)
+            if not im:
+                break
+            if str(im) in seen:
+                continue
+            seen.add(str(im))
+            images.append(im)
+        if not images:
             await interaction.response.send_message(
                 f"Aucune story CTA pour ton identité `{identity}`. Demande à un admin (`/addstorycta`).",
                 ephemeral=True,
             )
             return
-        caption = random_story_cta_caption()
-        if not caption:
+        if not random_story_cta_caption():
             await interaction.response.send_message(
                 "Aucune caption disponible. Demande à un admin (`/addstoryctacaptions`).",
                 ephemeral=True,
@@ -794,33 +848,38 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         cfg = load_image_config()
-        tmp_dir = None
-        send_path = image
-        try:
-            if cfg.get("enabled", True):
-                tmp_dir = tempfile.mkdtemp(prefix="storycta_")
-                tmp_path = Path(tmp_dir) / image.name
-                if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
-                    send_path = tmp_path
-            intro = (
-                f"📲 **STORY CTA — identité `{identity}`**\n"
-                f"📥 Télécharge la photo, écris la caption dessus en story.\n\n"
-                f"🕖 **À POSTER LE SOIR ENTRE 19H ET 23H** — c'est le créneau "
-                f"où tes clics convertissent le mieux 💰"
-            )
+        n = len(images)
+        for i, image in enumerate(images, 1):
+            caption = random_story_cta_caption() or ""
+            tmp_dir = None
+            send_path = image
             try:
-                await interaction.followup.send(content=intro, file=discord.File(send_path))
-            except discord.HTTPException as e:
-                await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
-                return
-            await interaction.followup.send(caption)
-        finally:
-            if tmp_dir:
+                if cfg.get("enabled", True):
+                    tmp_dir = tempfile.mkdtemp(prefix="storycta_")
+                    tmp_path = Path(tmp_dir) / image.name
+                    if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
+                        send_path = tmp_path
+                num = f" {i}/{n}" if n > 1 else ""
+                intro = (
+                    f"📲 **STORY CTA{num} — identité `{identity}`**\n"
+                    f"📥 Télécharge la photo, écris la caption dessus en story.\n\n"
+                    f"🕖 **À POSTER LE SOIR ENTRE 19H ET 23H** — c'est le créneau "
+                    f"où tes clics convertissent le mieux 💰"
+                )
                 try:
-                    import shutil
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                except Exception:
-                    pass
+                    await interaction.followup.send(content=intro, file=discord.File(send_path))
+                except discord.HTTPException as e:
+                    await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
+                    continue
+                if caption:
+                    await interaction.followup.send(caption)
+            finally:
+                if tmp_dir:
+                    try:
+                        import shutil
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    except Exception:
+                        pass
 
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
@@ -1030,6 +1089,10 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu:bio", row=1)
     async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.bio.callback(self.cog, interaction)
+
+    @discord.ui.button(label="PP", emoji="🖼", style=discord.ButtonStyle.secondary, custom_id="cmenu:pp", row=1)
+    async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.profilepic.callback(self.cog, interaction)
 
 
 async def setup(bot):
