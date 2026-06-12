@@ -408,7 +408,20 @@ async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
                 pass
 
 
-async def setup_va_ticket(guild, member):
+async def _push_content_menu(bot, channel, identity, member):
+    """Poste le menu contenu (boutons reel/story/...) dans le salon d'un VA, en le @pingant.
+    Reutilise le helper du UserCog pour rester coherent avec le menu quotidien."""
+    if not bot or not channel or not identity:
+        return
+    try:
+        user_cog = bot.get_cog("UserCog")
+        if user_cog and hasattr(user_cog, "_post_menu"):
+            await user_cog._post_menu(channel, identity, mention_user_id=getattr(member, "id", None))
+    except Exception as e:
+        log.warning(f"_push_content_menu: {e}")
+
+
+async def setup_va_ticket(guild, member, bot=None):
     """Cree le ticket d'un VA: assignation identite + salon + intro.
 
     Retourne (channel, error_message_or_None).
@@ -491,6 +504,9 @@ async def setup_va_ticket(guild, member):
     except Exception as e:
         log.warning(f"setup_va_ticket: sync_general_channel_access erreur: {e}")
 
+    # Pousse le menu contenu (boutons) direct dans son salon, en le @pingant
+    await _push_content_menu(bot, channel, identity, member)
+
     return channel, None
 
 
@@ -534,7 +550,7 @@ class WelcomeContinueView(discord.ui.View):
             await interaction.followup.send("Doit etre utilise dans un serveur.", ephemeral=True)
             return
 
-        channel, error = await setup_va_ticket(guild, interaction.user)
+        channel, error = await setup_va_ticket(guild, interaction.user, bot=interaction.client)
         if error:
             await interaction.followup.send(f"❌ {error}", ephemeral=True)
             return
@@ -616,7 +632,7 @@ class Welcome(commands.Cog):
         # Mode auto-ticket: cree direct le salon, sans passer par le welcome public
         if cfg.get("auto_create_ticket_on_join", True):
             try:
-                channel, error = await setup_va_ticket(member.guild, member)
+                channel, error = await setup_va_ticket(member.guild, member, bot=self.bot)
                 if error:
                     log.error(f"on_member_join auto-ticket: {error} (member={member.id})")
                 else:

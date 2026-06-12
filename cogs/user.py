@@ -39,11 +39,13 @@ def _build_menu_embed(identity):
     emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
     emb.add_field(name="💬 Bio", value="Des bios Insta de ton identité", inline=True)
     emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
-    emb.add_field(name="​", value="​", inline=True)  # alignement grille 3×3
+    emb.add_field(name="🔗 Demander un lien", value="Prévient les managers → ils t'envoient ton lien", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
 USERS_FILE = DATA_DIR / "users.json"
+WHITELIST_FILE = DATA_DIR / "whitelist.json"
+LINK_REQ_CONFIG = DATA_DIR / "link_request_config.json"  # {channel_id, role_id}
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -56,6 +58,21 @@ def load_json(path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return default
+
+
+def save_json(path, data):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _is_staff_member(member):
+    """True si le membre a des permissions de staff/manager (admin / gerer serveur / gerer salons)."""
+    p = getattr(member, "guild_permissions", None)
+    return bool(p and (p.administrator or p.manage_guild or p.manage_channels))
 
 
 def unescape_newlines(text):
@@ -1011,11 +1028,24 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
-    @tasks.loop(time=_dt.time(hour=0, minute=0, tzinfo=_PARIS_TZ))
-    async def daily_menu(self):
-        """Chaque jour à MINUIT (heure FR) : poste le menu contenu (boutons)
-        dans le salon de chaque VA."""
+    async def _post_menu(self, channel, identity, mention_user_id=None):
+        """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni."""
+        content = f"<@{mention_user_id}> 👇 **Ton contenu du jour est prêt !**" if mention_user_id else None
+        try:
+            await channel.send(
+                content=content,
+                embed=_build_menu_embed(identity),
+                view=ContentMenuView(self),
+                allowed_mentions=discord.AllowedMentions(users=True),
+            )
+            return True
+        except Exception:
+            return False
+
+    async def _push_menu_to_all_vas(self):
+        """Poste le menu (avec @ping) dans le salon de chaque VA. Retourne le nb d'envois."""
         users = load_json(USERS_FILE, {})
+        sent = 0
         for uid, data in users.items():
             ch_id = data.get("channel_id") if isinstance(data, dict) else None
             ident = (data.get("identity") if isinstance(data, dict)
@@ -1026,13 +1056,156 @@ class UserCog(commands.Cog):
             if ch is None:
                 continue
             try:
-                await ch.send(embed=_build_menu_embed(ident), view=ContentMenuView(self))
-            except Exception:
-                pass
+                uid_int = int(uid)
+            except (TypeError, ValueError):
+                uid_int = None
+            if await self._post_menu(ch, ident, mention_user_id=uid_int):
+                sent += 1
+        return sent
+
+    @tasks.loop(time=_dt.time(hour=0, minute=0, tzinfo=_PARIS_TZ))
+    async def daily_menu(self):
+        """Chaque jour à MINUIT (heure FR) : poste le menu contenu (boutons)
+        dans le salon de chaque VA, en le @pingant."""
+        await self._push_menu_to_all_vas()
 
     @daily_menu.before_loop
     async def _before_daily_menu(self):
         await self.bot.wait_until_ready()
+
+    # ===== Demande de lien : notification des managers =====
+
+    async def _admin_ids(self):
+        """IDs des managers à prévenir en DM : owner du bot + whitelist."""
+        ids = set()
+        try:
+            app = await self.bot.application_info()
+            if app and app.owner:
+                ids.add(app.owner.id)
+        except Exception:
+            pass
+        wl = load_json(WHITELIST_FILE, [])
+        if isinstance(wl, list):
+            for x in wl:
+                try:
+                    ids.add(int(x))
+                except (TypeError, ValueError):
+                    pass
+        return ids
+
+    async def _notify_managers_link_request(self, member, identity, guild):
+        """Prévient les managers (salon + @rôle + DM) qu'un VA demande son lien."""
+        cfg = load_json(LINK_REQ_CONFIG, {})
+        ch_id = cfg.get("channel_id")
+        role_id = cfg.get("role_id")
+        name = getattr(member, "display_name", str(member))
+        emb = discord.Embed(
+            title="🔗 Demande de lien",
+            description=f"{member.mention} (**{name}**) demande son lien.",
+            color=discord.Color.orange(),
+        )
+        emb.add_field(name="Identité", value=f"`{identity}`", inline=True)
+        emb.add_field(name="VA", value=member.mention, inline=True)
+        emb.set_footer(text="Envoie-lui son lien GetMySocial.")
+
+        # 1) Salon manager (+ ping rôle si configuré)
+        ch = guild.get_channel(ch_id) if (guild and ch_id) else None
+        if ch is not None:
+            ping = f"<@&{role_id}> " if role_id else ""
+            try:
+                await ch.send(
+                    content=(ping + "nouvelle demande de lien").strip(),
+                    embed=emb,
+                    allowed_mentions=discord.AllowedMentions(roles=True),
+                )
+            except Exception:
+                pass
+
+        # 2) DM aux managers (owner + whitelist)
+        for aid in await self._admin_ids():
+            try:
+                u = self.bot.get_user(aid) or await self.bot.fetch_user(aid)
+                if u:
+                    await u.send(embed=emb)
+            except Exception:
+                pass
+
+    async def request_link(self, interaction: discord.Interaction):
+        """Le VA demande son lien → confirmation au VA + notif aux managers."""
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            "✅ **Demande envoyée aux managers !** Tu vas recevoir ton lien bientôt 🔗",
+            ephemeral=True,
+        )
+        try:
+            await self._notify_managers_link_request(
+                interaction.user, identity, interaction.guild
+            )
+        except Exception:
+            pass
+
+    @app_commands.command(name="lien", description="Demande ton lien aux managers")
+    async def lien(self, interaction: discord.Interaction):
+        await self.request_link(interaction)
+
+    @app_commands.command(
+        name="menuall",
+        description="[ADMIN] Pousse le menu contenu à TOUS les VAs maintenant (avec @ping)",
+    )
+    async def menuall(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message(
+                "Réservé aux managers/admins.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        sent = await self._push_menu_to_all_vas()
+        await interaction.followup.send(
+            f"✅ Menu poussé à **{sent}** VA(s) (chacun @pingé dans son salon).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="setliensalon",
+        description="[ADMIN] Définit le salon où arrivent les demandes de lien",
+    )
+    @app_commands.describe(salon="Le salon manager qui reçoit les demandes de lien")
+    async def setliensalon(self, interaction: discord.Interaction, salon: discord.TextChannel):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        cfg = load_json(LINK_REQ_CONFIG, {})
+        cfg["channel_id"] = salon.id
+        save_json(LINK_REQ_CONFIG, cfg)
+        await interaction.response.send_message(
+            f"✅ Les demandes de lien arriveront dans {salon.mention}.", ephemeral=True
+        )
+
+    @app_commands.command(
+        name="setlienrole",
+        description="[ADMIN] Définit le rôle à ping pour les demandes de lien",
+    )
+    @app_commands.describe(role="Le rôle manager à @ping (laisse vide pour enlever le ping)")
+    async def setlienrole(self, interaction: discord.Interaction, role: discord.Role = None):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        cfg = load_json(LINK_REQ_CONFIG, {})
+        cfg["role_id"] = role.id if role else None
+        save_json(LINK_REQ_CONFIG, cfg)
+        if role:
+            await interaction.response.send_message(
+                f"✅ Le rôle {role.mention} sera ping à chaque demande de lien.",
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        else:
+            await interaction.response.send_message("✅ Ping de rôle désactivé.", ephemeral=True)
 
     @app_commands.command(
         name="menu",
@@ -1107,6 +1280,10 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="PP", emoji="🖼", style=discord.ButtonStyle.secondary, custom_id="cmenu:pp", row=1)
     async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.profilepic.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=2)
+    async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.request_link(interaction)
 
 
 async def setup(bot):
