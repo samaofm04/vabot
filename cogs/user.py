@@ -894,6 +894,26 @@ class UserCog(commands.Cog):
                 except Exception:
                     pass
 
+    async def cog_load(self):
+        # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
+        try:
+            self.bot.add_view(ContentMenuView(self))
+        except Exception:
+            pass
+
+    @app_commands.command(
+        name="menu",
+        description="Menu contenu : reel / story / story CTA / pseudo / name en 1 clic",
+    )
+    async def menu(self, interaction: discord.Interaction):
+        identity = get_user_identity(interaction.user.id)
+        txt = "🎯 **Ton contenu** — clique sur ce que tu veux 👇"
+        if identity:
+            txt += f"\n_(identité : **{identity}**)_"
+        else:
+            txt += "\n⚠️ Tu n'as pas d'identité assignée — demande à un admin."
+        await interaction.response.send_message(txt, view=ContentMenuView(self))
+
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -910,6 +930,36 @@ class UserCog(commands.Cog):
             ),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class ContentMenuView(discord.ui.View):
+    """Menu de contenu cliquable. Chaque bouton sert le contenu correspondant
+    pour l'identité du VA qui clique (réutilise les commandes existantes).
+    Vue persistante (custom_id) : marche après un redémarrage du bot."""
+
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Reel", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:reel", row=0)
+    async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.reel.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="cmenu:story", row=0)
+    async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.story.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu:storycta", row=0)
+    async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.storycta.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
+    async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.username.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.secondary, custom_id="cmenu:name", row=1)
+    async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.name.callback(self.cog, interaction)
 
 
 async def setup(bot):
