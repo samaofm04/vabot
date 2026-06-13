@@ -10604,9 +10604,6 @@ window.addEventListener('DOMContentLoaded', function(){{
             )
         rows.append("</table></div>")
 
-    # === SECTION AVATARS ===
-    rows.append(_render_identity_avatars_section())
-
     # === CONFIG des plateformes ===
     rows.append("<div class='box'>")
     rows.append("<h4 style='margin-top:0'>⚙️ Mes identités par plateforme</h4>")
