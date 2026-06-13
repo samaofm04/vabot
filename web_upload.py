@@ -9726,6 +9726,50 @@ def _render_sfs_html() -> str:
             f"<a href='{today_link}' style='padding:6px 12px;background:#3b82f6;color:#fff;"
             f"border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;margin-right:6px'>Aujourd'hui</a>"
         )
+    # Panneau "Mes push (MyPuls)" : liste lecture seule des push (messages de masse) envoyes
+    rows.append(
+        "<div id='sfs-pushs-panel' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
+        "<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'>"
+        "<h3 style='margin:0;font-size:15px;font-weight:800'>📨 Mes push (MyPuls)</h3>"
+        "<button type='button' onclick='loadSfsPushes()' "
+        "style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>🔄 Charger</button>"
+        "</div>"
+        "<div id='sfs-pushs-list' style='color:#888;font-size:13px'>"
+        "Clique sur « Charger » pour voir tes push SFS (messages de masse) envoyés sur MyPuls, modèle par modèle."
+        "</div>"
+        "</div>"
+    )
+    rows.append(
+        "<script>"
+        "async function loadSfsPushes(){"
+        "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
+        "  box.innerHTML='⏳ Chargement des push MyPuls… (quelques secondes)';"
+        "  try{"
+        "    const r=await fetch('/sfssetup/mypuls_pushes'); const j=await r.json();"
+        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
+        "    const ps=j.pushs||[];"
+        "    if(!ps.length){ box.innerHTML=(j.note||'Aucun push trouvé.'); return; }"
+        "    const aud={subscribers:'Abonnés',ex_subscribers:'Anciens',interested:'Intéressés'};"
+        "    let html='';"
+        "    for(const p of ps){"
+        "      const who=(p.creator||'').replace(/</g,'&lt;');"
+        "      const desc=(p.description||'').replace(/</g,'&lt;');"
+        "      const types=(p.types||[]).map(function(t){return aud[t]||t;}).join(', ');"
+        "      const thumb=p.thumb?(\"<img src='\"+p.thumb+\"' style='width:34px;height:34px;border-radius:6px;object-fit:cover;flex-shrink:0'>\"):'';"
+        "      html+=\"<div style='display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid #232323'>\""
+        "        +thumb"
+        "        +\"<span style='color:#a855f7;font-weight:700;white-space:nowrap;font-size:12px'>\"+(p.sentAt||'')+\"</span>\""
+        "        +\"<span style='color:#fff;font-weight:600;white-space:nowrap'>\"+who+\"</span>\""
+        "        +\"<span style='color:#bbb;font-size:11px;white-space:nowrap'>\"+types+\"</span>\""
+        "        +\"<span style='color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1'>\"+desc+\"</span>\""
+        "        +\"</div>\";"
+        "    }"
+        "    box.innerHTML=html;"
+        "  }catch(err){ box.innerHTML='❌ '+err; }"
+        "}"
+        "</script>"
+    )
+
     # Header type "planning OF" : flèches + mois à gauche, bouton today à droite
     rows.append("<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px'>")
     rows.append("<div style='display:flex;align-items:center;gap:4px'>")
@@ -24789,104 +24833,55 @@ def create_app():
 
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
-        """Lecture seule : liste les push (stories/posts) deja programmes sur MyPuls
-        pour les identites SFS MyM (fenetre : aujourd hui -> +30 jours)."""
+        """Lecture seule : liste les push (messages de masse) envoyés sur MyPuls
+        pour les modèles SFS MyM. Source : /pushs/page/1 par créateur."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
         try:
             import mypuls
-            import mypuls_scheduler
         except Exception as e:
             return jsonify({"ok": False, "error": f"Module indispo : {e}"})
         try:
-            if not mypuls.is_configured() or not mypuls_scheduler.is_configured():
+            if not mypuls.is_configured():
                 return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
             cr = mypuls.list_creators()
             creators = cr.get("creators") or {}  # {name: id}
             name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
-            id_to_name = {str(v): str(k) for k, v in creators.items()}
             idents = _sfssetup_identities("mym")
-            creator_ids = []
+            targets, seen = [], set()  # [(label, cid)]
             for ident in idents:
-                model = (mypuls.get_model_for_identity(ident) or ident).lower().strip()
-                cid = name_to_id.get(model) or name_to_id.get(ident.lower().strip())
-                if cid is not None and cid not in creator_ids:
-                    creator_ids.append(cid)
-            if not creator_ids:
-                return jsonify({"ok": True, "events": [],
-                                "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
-            import datetime as _dt
-            now = _dt.datetime.now()
-            start_iso = now.strftime("%Y-%m-%dT00:00:00")
-            end_iso = (now + _dt.timedelta(days=30)).strftime("%Y-%m-%dT00:00:00")
-            res = mypuls_scheduler.list_calendar_events(creator_ids, start_iso, end_iso)
-            if not res.get("ok"):
-                return jsonify({"ok": False, "error": res.get("error", "Erreur MyPuls")})
-            out = []
-            for e in (res.get("events", []) or []):
-                if not isinstance(e, dict):
+                model = (mypuls.get_model_for_identity(ident) or ident).strip()
+                cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
+                if cid is None or cid in seen:
                     continue
-                props = e.get("extendedProps") or {}
-                cid = props.get("creator") or props.get("creatorId") or props.get("creator_id")
-                who = id_to_name.get(str(cid), "") if cid is not None else (props.get("creatorName") or "")
-                title = (props.get("title") or props.get("text") or props.get("caption")
-                         or e.get("title") or "")
-                out.append({
-                    "id": e.get("id"),
-                    "type": e.get("type") or props.get("type") or "",
-                    "start": e.get("start") or "",
-                    "creator": who,
-                    "title": str(title)[:120],
-                })
-            out.sort(key=lambda x: x.get("start") or "")
-            return jsonify({"ok": True, "events": out})
+                seen.add(cid)
+                targets.append((model or ident, cid))
+            if not targets:
+                return jsonify({"ok": True, "pushs": [],
+                                "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
+            all_pushs = []
+            for label, cid in targets:
+                res = mypuls.list_pushs(cid, max_pages=1)
+                if not res.get("ok"):
+                    continue
+                for p in res.get("pushs", []):
+                    p2 = dict(p)
+                    p2["creator"] = label
+                    all_pushs.append(p2)
+            import datetime as _dt
+
+            def _key(p):
+                try:
+                    return _dt.datetime.strptime(p.get("sentAt", ""), "%d/%m/%Y %H:%M")
+                except Exception:
+                    return _dt.datetime.min
+
+            all_pushs.sort(key=_key, reverse=True)
+            return jsonify({"ok": True, "pushs": all_pushs[:200]})
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
-
-    @app.route("/sfssetup/mypuls_raw", methods=["GET"])
-    def sfssetup_mypuls_raw():
-        """DEBUG (temporaire) : recupere une page MyPuls avec les cookies stockes
-        et renvoie sa structure (statut, type, debut du contenu / cles JSON).
-        Sert a inspecter la page 'Pushs' pour construire le parser. Auth-gated,
-        lecture seule, restreint a mypuls.app."""
-        if not is_auth():
-            from flask import jsonify
-            return jsonify({"ok": False, "error": "unauth"}), 401
-        from flask import jsonify
-        try:
-            import mypuls
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Module indispo : {e}"})
-        path = (request.args.get("path") or "").strip()
-        if not path.startswith("/"):
-            return jsonify({"ok": False, "error": "Donne un ?path=/... (ex: /push)"})
-        if not mypuls.is_configured():
-            return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
-        s = mypuls._make_session()
-        if s is None:
-            return jsonify({"ok": False, "error": "Session MyPuls indisponible"})
-        try:
-            r = s.get(f"{mypuls.BASE_URL}{path}", timeout=25, allow_redirects=True)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Réseau : {e}"})
-        body = r.text or ""
-        info = {
-            "ok": True,
-            "status": r.status_code,
-            "final_url": r.url,
-            "content_type": r.headers.get("Content-Type", ""),
-            "length": len(body),
-        }
-        try:
-            j = r.json()
-            info["is_json"] = True
-            info["json_sample"] = str(j)[:4000]
-        except Exception:
-            info["is_json"] = False
-            info["html_head"] = body[:4000]
-        return jsonify(info)
 
     @app.route("/debug/reel_raw", methods=["GET"])
     def debug_reel_raw():

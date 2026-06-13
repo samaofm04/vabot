@@ -711,6 +711,65 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     return {"ok": True, "creators": creators}
 
 
+def list_pushs(creator_id: int, max_pages: int = 1) -> Dict[str, Any]:
+    """Liste les push (messages de masse) d'un creator.
+
+    Flux observe : GET /switch-creator/{id}?from=app_pushs (selectionne le creator),
+    puis GET /pushs/page/N -> JSON {items:[...], hasMore, page}.
+    Chaque item : {id, description, sentAt 'JJ/MM/AAAA HH:MM', types[], price,
+    promoPrice, sales, ca, hasMod, medias:[{thumbUrl,...}]}.
+
+    Retourne {ok, pushs:[{id, description, sentAt, types, price, thumb}]}.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "Cookies MyPuls non configures"}
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Session MyPuls indisponible"}
+    try:
+        s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
+              timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "error": f"switch-creator: {e}"}
+    pushs: List[Dict[str, Any]] = []
+    page = 1
+    while page <= max(1, max_pages):
+        try:
+            r = s.get(f"{BASE_URL}/pushs/page/{page}", timeout=TIMEOUT)
+        except Exception as e:
+            return {"ok": False, "error": f"pushs page {page}: {e}"}
+        if r.status_code != 200:
+            break
+        try:
+            j = r.json()
+        except Exception:
+            break
+        items = j.get("items", []) or []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            medias = it.get("medias") or []
+            thumb = ""
+            if medias and isinstance(medias[0], dict):
+                thumb = medias[0].get("thumbUrl") or ""
+            pushs.append({
+                "id": it.get("id"),
+                "description": it.get("description") or "",
+                "sentAt": it.get("sentAt") or "",
+                "types": it.get("types") or [],
+                "price": it.get("price") or 0,
+                "thumb": thumb,
+            })
+        if not j.get("hasMore"):
+            break
+        page += 1
+    try:
+        _save_rotated_cookies(s)
+    except Exception:
+        pass
+    return {"ok": True, "pushs": pushs}
+
+
 def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
     """Proxy : récupère l'image avatar d'un créateur MyPuls.
 
