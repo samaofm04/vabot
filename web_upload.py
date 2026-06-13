@@ -8640,6 +8640,22 @@ document.addEventListener('dragleave', function(e){
   const drop = e.target.closest('.up-drop');
   if(drop){ drop.classList.remove('dragover'); }
 });
+// DROP : capture les fichiers glisses et les assigne a l'input (sinon le drag&drop ne faisait RIEN)
+document.addEventListener('drop', function(e){
+  const drop = e.target.closest('.up-drop');
+  if(!drop) return;
+  e.preventDefault();
+  drop.classList.remove('dragover');
+  const input = drop.querySelector('input[type=file]');
+  if(!input || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+  try {
+    const dt = new DataTransfer();
+    Array.from(e.dataTransfer.files).forEach(function(f){ dt.items.add(f); });
+    input.files = dt.files;
+  } catch(err){ return; }
+  try { input.dispatchEvent(new Event('change', {bubbles:true})); } catch(e2){}
+  if(typeof _upRefreshTable === 'function'){ try { _upRefreshTable(input); } catch(e3){} }
+});
 
 // === SFW toggle global (floute toutes les images de la dashboard) ===
 function toggleSFW(){
