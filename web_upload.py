@@ -9498,6 +9498,68 @@ def _render_identity_avatars_section() -> str:
     return "".join(rows)
 
 
+OF_PUSHS_FILE = DATA_DIR / "of_pushs.json"
+
+
+def _load_of_pushs() -> dict:
+    """Charge les SFS/messages OF importés via HAR (lecture seule, jamais d'appel OnlyFans)."""
+    try:
+        if OF_PUSHS_FILE.exists():
+            return json.loads(OF_PUSHS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"items": [], "counters": {}, "imported_at": 0}
+
+
+def _parse_of_har(har: dict) -> dict:
+    """Extrait les messages programmés OF (queue) d'un HAR onlyfans.com.
+
+    Lit /schedules/later/chat + /later/post (texte + date scheduledAt/publishDateTime)
+    et /schedules/counters (date -> nb de chats programmés). Aucun appel réseau.
+    """
+    import re as _re
+    entries = (har.get("log", {}) or {}).get("entries", []) or []
+    items = []
+    counters = {}
+    for e in entries:
+        try:
+            url = (e.get("request", {}).get("url", "") or "").split("?")[0]
+            body = e.get("response", {}).get("content", {}).get("text", "")
+            if not body:
+                continue
+            j = json.loads(body)
+        except Exception:
+            continue
+        if url.endswith("/schedules/counters"):
+            lst = j.get("list", {})
+            if isinstance(lst, dict):
+                for d, info in lst.items():
+                    n = info.get("chat", 0) if isinstance(info, dict) else 0
+                    if n:
+                        counters[d] = counters.get(d, 0) + int(n)
+        elif url.endswith("/schedules/later/chat") or url.endswith("/schedules/later/post"):
+            for it in (j.get("list", []) or []):
+                if not isinstance(it, dict):
+                    continue
+                ent = it.get("entity", {}) or {}
+                raw = ent.get("text") or ent.get("rawText") or ""
+                txt = _re.sub("<[^>]+>", " ", raw)
+                txt = _re.sub(r"\s+", " ", txt).strip()
+                dt = ent.get("scheduledAt") or it.get("publishDateTime") or ""
+                date, tm = "", ""
+                if dt and "T" in str(dt):
+                    parts = str(dt).split("T")
+                    date = parts[0]
+                    tm = parts[1][:5]
+                items.append({
+                    "id": ent.get("id") or it.get("id"),
+                    "date": date,
+                    "time": tm,
+                    "text": txt[:600],
+                })
+    return {"items": items, "counters": counters}
+
+
 def _render_sfs_html() -> str:
     try:
         from business import list_sfs, sfs_stats, load_identity_platforms, identities_for_platform, PLATFORMS, sfs_weekly_received
@@ -9555,6 +9617,8 @@ def _render_sfs_html() -> str:
     except Exception:
         pass
     ident_model_json = _json.dumps(_ident_model)
+    # SFS OnlyFans importés via HAR (lecture seule)
+    of_pushs_json = _json.dumps(_load_of_pushs())
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -9802,9 +9866,12 @@ def _render_sfs_html() -> str:
     rows.append(
         "<div id='sfs-pushs-panel' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
         "<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'>"
-        "<h3 style='margin:0;font-size:15px;font-weight:800'>📨 Mes push (MyPuls)</h3>"
-        "<button type='button' onclick='loadSfsPushes()' "
+        "<h3 id='sfs-pushs-title' style='margin:0;font-size:15px;font-weight:800'>📨 Mes push (MyPuls)</h3>"
+        "<button type='button' id='sfs-mym-sync' onclick='loadSfsPushes()' "
         "style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>🔄 Sync MyPuls</button>"
+        "<button type='button' id='sfs-of-import' onclick='ofHarPick()' "
+        "style='display:none;background:#0099ff;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>📥 Importer HAR OnlyFans</button>"
+        "<input type='file' id='sfs-of-har' accept='.har,application/json' style='display:none' onchange='importOfHar(this)'>"
         "</div>"
         "<label style='display:flex;align-items:center;gap:6px;font-size:11px;color:#888;margin-bottom:8px;cursor:pointer'>"
         "<input type='checkbox' id='sfs-show-all' onchange='window.__sfsShowAll=this.checked; if(typeof renderSfsPushes===\"function\") renderSfsPushes();' style='accent-color:#a855f7'>"
@@ -9822,10 +9889,15 @@ def _render_sfs_html() -> str:
         "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /@[a-z0-9_.]/i.test(d); }"
         "function renderSfsPushes(){"
         "  document.querySelectorAll('.sfs-push-bar').forEach(function(el){ el.remove(); });"
-        "  const panel=document.getElementById('sfs-pushs-panel');"
-        "  const isMym=(window.__currentSfsPlatform==='MYM');"
-        "  if(panel) panel.style.display=isMym?'':'none';"  # MyPuls = MyM uniquement
-        "  if(!isMym) return;"  # pas de push sur OnlyFans
+        "  var panel=document.getElementById('sfs-pushs-panel');"
+        "  var plat=window.__currentSfsPlatform;"
+        "  var onPlat=(plat==='MYM'||plat==='OF');"
+        "  if(panel) panel.style.display=onPlat?'':'none';"
+        "  var ttlEl=document.getElementById('sfs-pushs-title'); var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import');"
+        "  if(plat==='OF'){ if(ttlEl)ttlEl.textContent='📨 Mes SFS OnlyFans (importés)'; if(bMym)bMym.style.display='none'; if(bOf)bOf.style.display=''; }"
+        "  else if(plat==='MYM'){ if(ttlEl)ttlEl.textContent='📨 Mes push (MyPuls)'; if(bMym)bMym.style.display=''; if(bOf)bOf.style.display='none'; }"
+        "  if(!onPlat) return;"
+        "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
         "  const ps=window.__sfsPushCache; if(!ps) return;"
         "  const cells={};"
         "  document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
@@ -9930,8 +10002,67 @@ def _render_sfs_html() -> str:
         "    else if(prefix){ box.innerHTML=prefix+box.innerHTML; }"
         "  }catch(err){ box.innerHTML='❌ '+err; }"
         "}"
+        "function ofHarPick(){ var el=document.getElementById('sfs-of-har'); if(el) el.click(); }"
+        "async function importOfHar(input){"
+        "  if(!input || !input.files || !input.files[0]) return;"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box) box.innerHTML='⏳ Import du HAR OnlyFans…';"
+        "  var fd=new FormData(); fd.append('har', input.files[0]);"
+        "  try{"
+        "    var r=await fetch('/sfssetup/import_of_har',{method:'POST',body:fd}); var j=await r.json();"
+        "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
+        "    if(box) box.innerHTML='✅ Import OK : '+j.items+' message(s), '+j.dates+' date(s). Rechargement…';"
+        "    setTimeout(function(){ location.reload(); }, 700);"
+        "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
+        "}"
+        "function renderOfPushes(){"
+        "  var data=window.__ofPushData||{items:[],counters:{}};"
+        "  var cells={}; document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
+        "  var items=data.items||[]; var counters=data.counters||{};"
+        "  var byDate={}, placed=0, days=0;"
+        "  items.forEach(function(it){ if(!it.date) return; (byDate[it.date]=byDate[it.date]||[]).push(it); });"
+        "  for(var d in byDate){"
+        "    var cell=cells[d]; if(!cell) continue; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) continue;"
+        "    var list=byDate[d], cap=3;"
+        "    for(var i=0;i<Math.min(cap,list.length);i++){"
+        "      var it=list[i]; var bar=document.createElement('div'); bar.className='sfs-push-bar';"
+        "      bar.title=(it.time||'')+' : '+(it.text||''); bar.style.cssText='background:rgba(0,153,255,.15);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer';"
+        "      bar.textContent='📨 SFS OF'; (function(D,IT){ bar.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, IT); }; })(d,it);"
+        "      bars.appendChild(bar); placed++;"
+        "    }"
+        "    if(list.length>cap){ var more=document.createElement('div'); more.className='sfs-push-bar'; more.style.cssText='color:#0099ff;font-size:10px;font-weight:700'; more.textContent='+'+(list.length-cap)+' SFS'; bars.appendChild(more); }"
+        "    days++;"
+        "  }"
+        "  var undated=items.filter(function(it){ return !it.date; });"
+        "  for(var cd in counters){"
+        "    if(byDate[cd]) continue; var cc=cells[cd]; if(!cc) continue; var cb=cc.querySelector('.sfs-day-bars'); if(!cb) continue;"
+        "    if(undated.length){"
+        "      var cap2=3, shown=Math.min(cap2, undated.length);"
+        "      for(var k=0;k<shown;k++){ var u=undated[k]; var ub=document.createElement('div'); ub.className='sfs-push-bar'; ub.title=(u.text||''); ub.style.cssText='background:rgba(0,153,255,.15);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer'; ub.textContent='📨 SFS OF'; (function(D,IT){ ub.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, IT); }; })(cd,u); cb.appendChild(ub); placed++; }"
+        "      var extra=(counters[cd]||0)-shown; if(extra>0){ var mm=document.createElement('div'); mm.className='sfs-push-bar'; mm.style.cssText='color:#0099ff;font-size:10px;font-weight:700'; mm.textContent='+'+extra+' programmés'; cb.appendChild(mm); }"
+        "    } else {"
+        "      var b2=document.createElement('div'); b2.className='sfs-push-bar'; b2.style.cssText='background:rgba(0,153,255,.12);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;text-align:center'; b2.textContent='📅 '+counters[cd]+' programmé'+(counters[cd]>1?'s':''); cb.appendChild(b2);"
+        "    }"
+        "    days++;"
+        "  }"
+        "  var box=document.getElementById('sfs-pushs-list');"
+        "  if(box){ if(!items.length && !Object.keys(counters).length){ box.innerHTML='Aucun SFS OnlyFans importé. Clique « Importer HAR OnlyFans » et dépose ton fichier .har.'; } else { box.innerHTML='✅ '+placed+' SFS OF placés ('+days+' jour'+(days>1?'s':'')+') · '+items.length+' message(s) importé(s).'; } }"
+        "}"
+        "function addSfsFromOf(date, it){"
+        "  if(typeof openSfsModal!=='function') return;"
+        "  openSfsModal(date);"
+        "  var f=document.getElementById('sfs-form'); if(f && it && it.time){ var t=f.querySelector('[name=time]'); if(t) t.value=it.time; }"
+        "  var ex=document.getElementById('sfs-modal-existing');"
+        "  if(ex && it){"
+        "    var bx=document.createElement('div'); bx.style.cssText='background:#0b1a2a;border:1px solid #0099ff;border-radius:10px;padding:12px;margin-bottom:8px';"
+        "    var h=document.createElement('div'); h.style.cssText='color:#0099ff;font-weight:700;font-size:12px;margin-bottom:4px'; h.textContent='📨 Message OnlyFans programmé'+(it.time?(' · '+it.time):''); bx.appendChild(h);"
+        "    var b=document.createElement('div'); b.style.cssText='font-size:12px;color:#ddd;white-space:pre-wrap'; b.textContent=it.text||''; bx.appendChild(b);"
+        "    ex.insertBefore(bx, ex.firstChild);"
+        "  }"
+        "  var ttl=document.getElementById('sfs-modal-title'); if(ttl) ttl.textContent='Nouveau SFS (OnlyFans) — '+date;"
+        "}"
         "document.addEventListener('DOMContentLoaded',function(){"
-        "  try{ const c=sessionStorage.getItem('sfsPushCache'); if(c){ window.__sfsPushCache=JSON.parse(c); renderSfsPushes(); } }catch(e){}"
+        "  try{ var c=sessionStorage.getItem('sfsPushCache'); if(c){ window.__sfsPushCache=JSON.parse(c); } }catch(e){}"
+        "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "});"
         "</script>"
     )
@@ -10036,6 +10167,7 @@ window.__platformIdents = {platform_idents_json};
 window.__allIdentities = {all_identities_json};
 window.__mypulsCreators = {mypuls_creators_json};
 window.__sfsIdentModel = {ident_model_json};
+window.__ofPushData = {of_pushs_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
@@ -25131,6 +25263,32 @@ def create_app():
         idents = _sfssetup_identities(platform)
         msg = sfs_setup.generate_message(platform, idents)
         return jsonify({"ok": True, "message": msg})
+
+    @app.route("/sfssetup/import_of_har", methods=["POST"])
+    def sfssetup_import_of_har():
+        """Import HAR OnlyFans (lecture seule, zéro appel OF) : extrait les messages
+        programmés OF et les stocke pour affichage dans le calendrier SFS OF."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        f = request.files.get("har")
+        if not f or not getattr(f, "filename", ""):
+            return jsonify({"ok": False, "error": "Aucun fichier HAR reçu"})
+        try:
+            raw = f.read().decode("utf-8", "replace")
+            data = json.loads(raw)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"HAR illisible : {e}"})
+        try:
+            parsed = _parse_of_har(data)
+            parsed["imported_at"] = int(time.time())
+            OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            OF_PUSHS_FILE.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Erreur : {e}"})
+        return jsonify({"ok": True, "items": len(parsed.get("items", [])),
+                        "dates": len(parsed.get("counters", {}))})
 
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
