@@ -16892,24 +16892,6 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         _gen_msg = ""
     _gen_msg_esc = _gen_msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # Panel lecture seule : push (stories/posts) deja programmes sur MyPuls - MyM uniquement
-    if platform == "mym":
-        _mypuls_panel_html = (
-            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-top:18px'>"
-            "<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap'>"
-            "<h3 style='margin:0;font-size:15px;font-weight:800'>📅 Push déjà programmés sur MyPuls</h3>"
-            "<button type='button' onclick='loadMypulsPushes()' "
-            "style='background:#a855f7;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>"
-            "🔄 Charger</button>"
-            "</div>"
-            "<div id='mypuls-pushes-list' style='color:#888;font-size:13px'>"
-            "Clique sur « Charger » pour voir les push (stories/posts) déjà programmés sur MyPuls pour tes modèles."
-            "</div>"
-            "</div>"
-        )
-    else:
-        _mypuls_panel_html = ""
-
     # Cards par identite
     cards = []
     for i, ident in enumerate(identities):
@@ -17055,9 +17037,6 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'>{_gen_msg_esc}</textarea>"
         f"</div>"
 
-        # Panel lecture seule : push MyPuls deja programmes (MyM)
-        + _mypuls_panel_html
-
         # JS - utilise le panel parent pour scoper les querySelectors
         + "<script>"
         f"window.__sfs_platform_{platform} = '{platform}';"
@@ -17093,34 +17072,6 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
         f"}}"
-        # Lecture seule : charge les push (stories/posts) deja programmes sur MyPuls
-        "async function loadMypulsPushes(){"
-        "  const box=document.getElementById('mypuls-pushes-list');"
-        "  if(!box) return;"
-        "  box.innerHTML='⏳ Chargement des push MyPuls…';"
-        "  try{"
-        "    const r=await fetch('/sfssetup/mypuls_pushes');"
-        "    const j=await r.json();"
-        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
-        "    const evs=j.events||[];"
-        "    if(!evs.length){ box.innerHTML='Aucun push programmé trouvé (30 prochains jours).'; return; }"
-        "    let html='';"
-        "    for(const e of evs){"
-        "      let ds='';"
-        "      if(e.start){ const d=new Date(e.start); if(!isNaN(d)) ds=d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }"
-        "      const typ=(e.type==='story')?'📖 Story':((e.type==='feed'||e.type==='post')?'🖼️ Post':(e.type||'?'));"
-        "      const who=(e.creator||'').replace(/</g,'&lt;');"
-        "      const title=(e.title||'').replace(/</g,'&lt;');"
-        "      html+=\"<div style='display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #232323'>\""
-        "        +\"<span style='color:#a855f7;font-weight:700;white-space:nowrap'>\"+ds+\"</span>\""
-        "        +\"<span style='color:#bbb;white-space:nowrap'>\"+typ+\"</span>\""
-        "        +\"<span style='color:#fff;font-weight:600;white-space:nowrap'>\"+who+\"</span>\""
-        "        +\"<span style='color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>\"+title+\"</span>\""
-        "        +\"</div>\";"
-        "    }"
-        "    box.innerHTML=html;"
-        "  }catch(err){ box.innerHTML='❌ '+err; }"
-        "}"
         # Bulk apply - champs eligibles dependent de la plateforme
         f"async function applyBulk_{platform}(){{"
         f"  const sec=document.getElementById('form-sfssetup{platform}');"
@@ -24893,6 +24844,49 @@ def create_app():
             return jsonify({"ok": True, "events": out})
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
+
+    @app.route("/sfssetup/mypuls_raw", methods=["GET"])
+    def sfssetup_mypuls_raw():
+        """DEBUG (temporaire) : recupere une page MyPuls avec les cookies stockes
+        et renvoie sa structure (statut, type, debut du contenu / cles JSON).
+        Sert a inspecter la page 'Pushs' pour construire le parser. Auth-gated,
+        lecture seule, restreint a mypuls.app."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Module indispo : {e}"})
+        path = (request.args.get("path") or "").strip()
+        if not path.startswith("/"):
+            return jsonify({"ok": False, "error": "Donne un ?path=/... (ex: /push)"})
+        if not mypuls.is_configured():
+            return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
+        s = mypuls._make_session()
+        if s is None:
+            return jsonify({"ok": False, "error": "Session MyPuls indisponible"})
+        try:
+            r = s.get(f"{mypuls.BASE_URL}{path}", timeout=25, allow_redirects=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Réseau : {e}"})
+        body = r.text or ""
+        info = {
+            "ok": True,
+            "status": r.status_code,
+            "final_url": r.url,
+            "content_type": r.headers.get("Content-Type", ""),
+            "length": len(body),
+        }
+        try:
+            j = r.json()
+            info["is_json"] = True
+            info["json_sample"] = str(j)[:4000]
+        except Exception:
+            info["is_json"] = False
+            info["html_head"] = body[:4000]
+        return jsonify(info)
 
     @app.route("/debug/reel_raw", methods=["GET"])
     def debug_reel_raw():
