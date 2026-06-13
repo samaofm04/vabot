@@ -9747,8 +9747,10 @@ def _render_sfs_html() -> str:
         "  const ps=window.__sfsPushCache; if(!ps) return;"
         "  const cells={};"
         "  document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
+        "  const fIdent=window.__currentSfsIdent;"  # null = tous les modeles
         "  const byDate={};"
         "  for(const p of ps){"
+        "    if(fIdent && p.identity!==fIdent) continue;"
         "    const parts=(p.sentAt||'').split(' ');"
         "    const dmy=(parts[0]||'').split('/');"
         "    if(dmy.length!==3) continue;"
@@ -9982,6 +9984,8 @@ function refreshSfsCalendar(){{
     if(tr.dataset.platform === platform) tr.style.display = '';
     else tr.style.display = 'none';
   }});
+  // Re-dessine les push MyPuls (barres orange) pour le modele filtre
+  if(typeof renderSfsPushes === 'function') renderSfsPushes();
 }}
 
 function selectSfsDay(date){{
@@ -24877,25 +24881,26 @@ def create_app():
             creators = cr.get("creators") or {}  # {name: id}
             name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
             idents = _sfssetup_identities("mym")
-            targets, seen = [], set()  # [(label, cid)]
+            targets, seen = [], set()  # [(ident, label, cid)]
             for ident in idents:
                 model = (mypuls.get_model_for_identity(ident) or ident).strip()
                 cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
                 if cid is None or cid in seen:
                     continue
                 seen.add(cid)
-                targets.append((model or ident, cid))
+                targets.append((ident, model or ident, cid))
             if not targets:
                 return jsonify({"ok": True, "pushs": [],
                                 "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
             all_pushs = []
-            for label, cid in targets:
+            for ident, label, cid in targets:
                 res = mypuls.list_pushs(cid, max_pages=1)
                 if not res.get("ok"):
                     continue
                 for p in res.get("pushs", []):
                     p2 = dict(p)
                     p2["creator"] = label
+                    p2["identity"] = ident
                     all_pushs.append(p2)
             import datetime as _dt
 
