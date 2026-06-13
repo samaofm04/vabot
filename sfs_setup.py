@@ -200,7 +200,12 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
             lines.append(f"-> {label} : {val}")
             has_any_field = True
         lines.append("")
-    return "\n".join(lines).rstrip()
+    body = "\n".join(lines).rstrip()
+    if not body:
+        return ""
+    # Mention "SFS DISPO <PLATEFORME>" en tete (avant tout), suivie d un saut de ligne
+    tag = "OF" if platform == "of" else "MYM"
+    return f"SFS DISPO {tag}\n\n" + body
 
 
 # Cache TTL pour l auto-fetch MyPuls (en secondes)
