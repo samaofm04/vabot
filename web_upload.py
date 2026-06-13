@@ -10237,8 +10237,12 @@ function openSfsModal(date){{
   // Hidden input pour la plateforme
   var hidden = document.getElementById('sfs-modal-platform');
   if(hidden) hidden.value = platform;
-  // Populer le select des identités selon la plateforme
-  var idents = window.__platformIdents[platform] || [];
+  // Populer le select des identités selon la plateforme.
+  // MyM : la liste = les créateurs MyPuls (à jour : Kiarahockey, Lilibett...), comme la sidebar.
+  var _pUp0 = (platform || '').toUpperCase();
+  var idents = (_pUp0 === 'MYM' && Array.isArray(window.__mypulsCreators) && window.__mypulsCreators.length)
+    ? window.__mypulsCreators
+    : (window.__platformIdents[platform] || []);
   var select = document.getElementById('sfs-modal-identity');
   var optsHtml = idents.length
     ? idents.map(function(i){{ return '<option value="' + i + '">' + i + '</option>'; }}).join('')
