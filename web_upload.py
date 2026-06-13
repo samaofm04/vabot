@@ -16911,7 +16911,7 @@ async function sendSelectedVeille(){
   const orig = btn.innerHTML;
   btn.disabled = true;
   let done = 0, errs = 0, videos = 0, links = 0;
-  let firstErr = '';
+  let firstErr = '', firstLinkReason = '';
   for(let i = 0; i < ids.length; i++){
     const rid = ids[i];
     btn.innerHTML = '⏳ Téléchargement & envoi ' + (i+1) + '/' + ids.length + '...';
@@ -16922,7 +16922,7 @@ async function sendSelectedVeille(){
       if(j.ok){
         done++;
         if(j.mode === 'video') videos++;
-        else if(j.mode === 'link') links++;
+        else if(j.mode === 'link'){ links++; if(!firstLinkReason && j.fallback_reason) firstLinkReason = j.fallback_reason; }
         // Marque la card comme envoyee visuellement
         const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
         if(card){
@@ -16952,6 +16952,8 @@ async function sendSelectedVeille(){
   btn.style.background = errs ? '#f59e0b' : '#22c55e';
   if(errs && firstErr){
     alert('Première erreur : ' + firstErr + '\\n\\n(Vérifie ta config Telegram dans Settings → Veille Telegram)');
+  } else if(links && firstLinkReason){
+    alert('⚠️ Envoyé en LIEN (pas en vidéo).\\nRaison : ' + firstLinkReason + '\\n\\nPour récupérer la vidéo : configure une clé RapidAPI Instagram (Settings → Instagram) ou des cookies Instagram. Le lien reste cliquable en attendant.');
   }
   // Reset les selecteurs apres 2s
   setTimeout(() => {

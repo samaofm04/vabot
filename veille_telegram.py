@@ -212,34 +212,43 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
         out["_debug"] = "url_sans_shortcode"
         return out
     shortcode = m.group(1)
-    # 1) instaloader (le plus complet si auth dispo)
+    # 1) RapidAPI (endpoint post unique) : le plus FIABLE pour le video_url.
+    #    instaloader anonyme/legacy se fait rate-limit/bloquer -> on essaie RapidAPI d'abord.
     try:
         import insta_scraper
-        auth_ok = True
-        if hasattr(insta_scraper, "is_auth_configured"):
-            auth_ok = bool(insta_scraper.is_auth_configured())
-        if not auth_ok:
-            out["_debug"] = "cookies_instagram_pas_configures"
+        if (insta_scraper.load_auth().get("rapidapi_key") or "").strip():
+            try:
+                rp = insta_scraper._scrape_via_rapidapi_single_post(shortcode)
+                if rp.get("video_url"):
+                    out["video_url"] = rp["video_url"]
+                else:
+                    out["_debug"] = "rapidapi_pas_de_video_url"
+            except Exception as ee:
+                out["_debug"] = f"rapidapi_error: {type(ee).__name__}: {str(ee)[:150]}"
         else:
-            loader = insta_scraper._make_loader()
-            if loader is None:
-                out["_debug"] = "loader_creation_echec"
-            else:
+            out["_debug"] = "rapidapi_pas_configure"
+    except Exception as e:
+        out["_debug"] = f"rapidapi_top: {type(e).__name__}: {str(e)[:150]}"
+    # 2) instaloader (si dispo) : complète le video_url manquant + le caption
+    if (not out["video_url"]) or (not out["caption"]):
+        try:
+            import insta_scraper
+            loader = insta_scraper._make_loader() if hasattr(insta_scraper, "_make_loader") else None
+            if loader is not None:
                 import instaloader
                 try:
                     post = instaloader.Post.from_shortcode(loader.context, shortcode)
-                    if post.is_video:
-                        out["video_url"] = post.video_url or ""
-                        if not out["video_url"]:
-                            out["_debug"] = "post_video_mais_url_vide"
-                    else:
-                        out["_debug"] = "pas_une_video"
-                    out["caption"] = (post.caption or "")[:1000]
+                    if not out["video_url"] and getattr(post, "is_video", False):
+                        out["video_url"] = post.video_url or out["video_url"]
+                    if not out["caption"]:
+                        out["caption"] = (post.caption or "")[:1000]
                 except Exception as ee:
-                    out["_debug"] = f"instaloader_error: {type(ee).__name__}: {str(ee)[:200]}"
-    except Exception as e:
-        out["_debug"] = f"top_error: {type(e).__name__}: {str(e)[:200]}"
-    # 2) Fallback no-auth pour le caption uniquement
+                    if not out["_debug"] or "rapidapi" in out["_debug"]:
+                        out["_debug"] = f"instaloader_error: {type(ee).__name__}: {str(ee)[:200]}"
+        except Exception as e:
+            if not out["_debug"] or "rapidapi" in out["_debug"]:
+                out["_debug"] = f"instaloader_top: {type(e).__name__}: {str(e)[:200]}"
+    # 3) Fallback no-auth pour le caption uniquement
     if not out["caption"]:
         out["caption"] = _scrape_og_caption(post_url)
     return out
