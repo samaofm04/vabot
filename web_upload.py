@@ -16885,6 +16885,13 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     # Pre-charge la map MyPuls pour les avatars MyM
     mypuls_map = _mypuls_creators_map() if platform == "mym" else {}
 
+    # Apercu auto : message SFS pre-genere (affiche direct, sans cliquer sur Generer)
+    try:
+        _gen_msg = sfs_setup.generate_message(platform, identities)
+    except Exception:
+        _gen_msg = ""
+    _gen_msg_esc = _gen_msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
     # Cards par identite
     cards = []
     for i, ident in enumerate(identities):
@@ -17022,12 +17029,12 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"style='background:linear-gradient(135deg,#3b82f6,{platform_color});color:#fff;border:0;padding:12px 22px;border-radius:10px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(59,130,246,.3)'>"
         f"✨ Générer le message {platform_label}</button>"
         f"<button type='button' onclick='setupCopy_{platform}()' id='setup-copy-btn-{platform}' "
-        f"style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:none'>"
+        f"style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:{'inline-flex' if _gen_msg else 'none'}'>"
         f"📋 Copier</button>"
         f"<small id='setup-save-status-{platform}' style='color:#666;margin-left:auto;font-size:12px'></small>"
         f"</div>"
         f"<textarea id='setup-output-{platform}' rows='14' placeholder='Le message généré apparaîtra ici...' "
-        f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'></textarea>"
+        f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'>{_gen_msg_esc}</textarea>"
         f"</div>"
 
         # JS - utilise le panel parent pour scoper les querySelectors
