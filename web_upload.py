@@ -9528,13 +9528,28 @@ def _render_sfs_html() -> str:
     except Exception:
         pass
     mypuls_creators_json = _json.dumps(_mypuls_creators)
-    # Map identite -> modele MyPuls (relie la sidebar/filtre aux push MyPuls)
+    # Map identite -> modele MyPuls (relie la sidebar/filtre aux push MyPuls).
+    # 1) mapping explicite (model_map) ; 2) sinon match par prefixe de nom
+    #    (ex: 'lola' -> 'Lolatacrush', 'sarah' -> 'Sarahmycrush').
     _ident_model = {}
     try:
         import mypuls as _mp_mm
         _mm = _mp_mm.list_model_map()
         if isinstance(_mm, dict):
             _ident_model = {str(k).lower().strip(): str(v) for k, v in _mm.items() if v}
+    except Exception:
+        pass
+    try:
+        _cre_names = list(_mypuls_creators or [])
+        for _id in _list_content_identities():
+            _idl = (_id or "").lower().strip()
+            if not _idl or _ident_model.get(_idl):
+                continue
+            for _c in _cre_names:
+                _cl = str(_c).lower()
+                if _cl.startswith(_idl) or _cl.replace("_", "").replace(".", "").startswith(_idl):
+                    _ident_model[_idl] = str(_c)
+                    break
     except Exception:
         pass
     ident_model_json = _json.dumps(_ident_model)
@@ -9771,9 +9786,16 @@ def _render_sfs_html() -> str:
         "  document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
         "  const fIdent=window.__currentSfsIdent;"  # null = tous les modeles
         "  const fModel=(fIdent && window.__sfsIdentModel)?(window.__sfsIdentModel[String(fIdent).toLowerCase()]||''):'';"
+        "  const fi=(fIdent||'').toLowerCase();"
         "  const byDate={}; let parseFail=0;"
         "  for(const p of ps){"
-        "    if(fIdent){ const okId=(p.identity===fIdent); const okM=(fModel && (p.creator||'').toLowerCase()===String(fModel).toLowerCase()); if(!okId && !okM) continue; }"
+        "    if(fIdent){"
+        "      const cre=(p.creator||'').toLowerCase();"
+        "      const okId=(p.identity===fIdent);"
+        "      const okM=(fModel && cre===String(fModel).toLowerCase());"
+        "      const okFuzzy=(cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0);"
+        "      if(!okId && !okM && !okFuzzy) continue;"
+        "    }"
         "    const parts=(p.sentAt||'').trim().split(/[ T]/);"
         "    const dmy=(parts[0]||'').split(/[\\/.-]/);"
         "    let iso=null;"
