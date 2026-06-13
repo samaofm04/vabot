@@ -833,10 +833,15 @@ function comingSoon(){
 }
 // === THEME (light/dark) ===
 function setTheme(theme){
+  var de = document.documentElement;
   if(theme === 'light'){
     document.body.classList.add('light');
+    de.classList.add('light-pre'); de.classList.add('pre-light');
   } else {
     document.body.classList.remove('light');
+    // IMPORTANT : retirer les classes de pre-paint (CSS !important qui FORCE le clair)
+    // sinon le mode sombre reste bloqué en fond clair -> "ça bug".
+    de.classList.remove('light-pre'); de.classList.remove('pre-light');
   }
   try{ localStorage.setItem('vabot_theme', theme); }catch(e){}
   // Mettre à jour la sélection visuelle des cards
