@@ -9806,6 +9806,10 @@ def _render_sfs_html() -> str:
         "<button type='button' onclick='loadSfsPushes()' "
         "style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>🔄 Sync MyPuls</button>"
         "</div>"
+        "<label style='display:flex;align-items:center;gap:6px;font-size:11px;color:#888;margin-bottom:8px;cursor:pointer'>"
+        "<input type='checkbox' id='sfs-show-all' onchange='window.__sfsShowAll=this.checked; if(typeof renderSfsPushes===\"function\") renderSfsPushes();' style='accent-color:#a855f7'>"
+        "Afficher aussi les push hors-SFS (messages fans, sans lien mym.fans ni @)"
+        "</label>"
         "<div id='sfs-pushs-list' style='color:#888;font-size:13px'>"
         "Clique sur « Sync MyPuls » : met à jour les counts du setup (abonnés/anciens/intéressés) ET place tes push dans le calendrier (repère orange par jour)."
         "</div>"
@@ -9814,6 +9818,8 @@ def _render_sfs_html() -> str:
     rows.append(
         "<script>"
         "window.__sfsPushCache=null;"
+        "window.__sfsShowAll=false;"
+        "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /@[a-z0-9_.]/i.test(d); }"
         "function renderSfsPushes(){"
         "  document.querySelectorAll('.sfs-push-bar').forEach(function(el){ el.remove(); });"
         "  const panel=document.getElementById('sfs-pushs-panel');"
@@ -9826,7 +9832,7 @@ def _render_sfs_html() -> str:
         "  const fIdent=window.__currentSfsIdent;"  # null = tous les modeles
         "  const fModel=(fIdent && window.__sfsIdentModel)?(window.__sfsIdentModel[String(fIdent).toLowerCase()]||''):'';"
         "  const fi=(fIdent||'').toLowerCase();"
-        "  const byDate={}; let parseFail=0;"
+        "  const byDate={}; let parseFail=0, nonSfs=0;"
         "  for(const p of ps){"
         "    if(fIdent){"
         "      const cre=(p.creator||'').toLowerCase();"
@@ -9835,6 +9841,7 @@ def _render_sfs_html() -> str:
         "      const okFuzzy=(cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0);"
         "      if(!okId && !okM && !okFuzzy) continue;"
         "    }"
+        "    if(!window.__sfsShowAll && !isSfsPush(p.description)){ nonSfs++; continue; }"
         "    const parts=(p.sentAt||'').trim().split(/[ T]/);"
         "    const dmy=(parts[0]||'').split(/[\\/.-]/);"
         "    let iso=null;"
@@ -9865,9 +9872,7 @@ def _render_sfs_html() -> str:
         "    days++;"
         "  }"
         "  const box=document.getElementById('sfs-pushs-list');"
-        "  const keys=Object.keys(byDate).sort();"
-        "  const range=keys.length?(keys[0]+' → '+keys[keys.length-1]):'aucune date lue';"
-        "  if(box) box.innerHTML='✅ '+ps.length+' push — placés ce mois: '+placed+' ('+days+'j) · plage: '+range+' · parse KO: '+parseFail+' · cases: '+Object.keys(cells).length;"
+        "  if(box) box.innerHTML='✅ '+placed+' SFS placés ce mois ('+days+' jour'+(days>1?'s':'')+')'+(nonSfs?(' · '+nonSfs+' push hors-SFS masqués'):'')+' · '+ps.length+' push au total. Change de mois pour voir les autres.';"
         "}"
         "function addSfsFromPush(date, creator, time){"
         "  if(typeof openSfsModal!=='function') return;"
@@ -10167,6 +10172,7 @@ function refreshSfsDayPanel(){{
       if(dmy.length===3 && dmy[0].length===4){{ iso=dmy[0]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[2].padStart(2,'0'); }}
       else if(dmy.length===3){{ iso=dmy[2]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[0].padStart(2,'0'); }}
       if(iso!==date) return;
+      if(!window.__sfsShowAll && typeof isSfsPush==='function' && !isSfsPush(p.description)) return;
       dayPushes.push({{time:parts[1]||'', creator:p.creator||'', desc:p.description||'', types:p.types||[], thumb:p.thumb||''}});
     }});
     dayPushes.sort(function(a,b){{ return (a.time||'').localeCompare(b.time||''); }});
