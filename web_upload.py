@@ -10106,6 +10106,7 @@ function refreshSfsDayPanel(){{
   var ident = window.__currentSfsIdent;
   var items = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform && (!ident || x.identity === ident); }});
   var content = document.getElementById('sfs-day-panel-content');
+  var addBtn = '<button onclick="openSfsModalFromPanel()" style="width:100%;margin-top:12px;background:#3b82f6;color:#fff;border:0;padding:11px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">+ Ajouter un SFS (destinataire, heure...)</button>';
   // Push MyPuls de ce jour (MyM) : heure + texte complet + audience
   var pushHtml = '';
   if(platform === 'MYM' && window.__sfsPushCache){{
@@ -10144,7 +10145,7 @@ function refreshSfsDayPanel(){{
     }}
   }}
   if(items.length === 0 && !pushHtml){{
-    content.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg><div style="font-size:14px">Aucun SFS prévu</div><div style="font-size:12px;margin-top:8px;color:#555">Pour le ' + platform + ' ce jour-là</div></div>';
+    content.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg><div style="font-size:14px">Aucun SFS prévu</div><div style="font-size:12px;margin-top:8px;color:#555">Pour le ' + platform + ' ce jour-là</div></div>' + addBtn;
     return;
   }}
   var html = '';
@@ -10163,7 +10164,7 @@ function refreshSfsDayPanel(){{
     }});
     html += '</div>';
   }}
-  content.innerHTML = html + pushHtml;
+  content.innerHTML = html + pushHtml + addBtn;
 }}
 function shiftDayPanel(delta){{
   if(!window.__selectedSfsDate) return;
