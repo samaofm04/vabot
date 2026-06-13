@@ -9879,23 +9879,34 @@ def _render_sfs_html() -> str:
         "    var cl=String(creator).toLowerCase();"
         "    for(var i=0;i<idSel.options.length;i++){ var ov=idSel.options[i].value.toLowerCase(); if(ov===cl || cl.indexOf(ov)===0 || ov.indexOf(cl)===0){ idSel.value=idSel.options[i].value; break; } }"
         "  }"
-        "  var desc='';"
+        "  var desc='', thumb='';"
         "  (window.__sfsPushCache||[]).forEach(function(p){"
         "    if(String(p.creator).toLowerCase()!==String(creator).toLowerCase()) return;"
         "    var parts=(p.sentAt||'').trim().split(/[ T]/);"
         "    if((parts[1]||'')!==time) return;"
         "    var dmy=(parts[0]||'').split(/[\\/.-]/);"
         "    var iso=(dmy.length===3)?(dmy[0].length===4?dmy[0]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[2].padStart(2,'0'):dmy[2]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[0].padStart(2,'0')):'';"
-        "    if(iso===date) desc=p.description||'';"
+        "    if(iso===date){ desc=p.description||''; thumb=p.thumb||''; }"
         "  });"
         "  var ex=document.getElementById('sfs-modal-existing');"
         "  if(ex){"
-        "    var bx=document.createElement('div'); bx.style.cssText='background:#1a1330;border:1px solid #a855f7;border-radius:8px;padding:10px;margin-bottom:8px';"
-        "    var h=document.createElement('div'); h.style.cssText='color:#a855f7;font-weight:700;font-size:12px;margin-bottom:4px'; h.textContent='📨 Push '+creator+' · '+(time||''); bx.appendChild(h);"
-        "    var b=document.createElement('div'); b.style.cssText='font-size:12px;color:#ddd;white-space:pre-wrap'; b.textContent=desc; bx.appendChild(b);"
+        "    var bx=document.createElement('div'); bx.style.cssText='background:#1a1330;border:1px solid #a855f7;border-radius:10px;padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start';"
+        "    var col=document.createElement('div'); col.style.cssText='flex:1;min-width:0';"
+        "    var h=document.createElement('div'); h.style.cssText='color:#a855f7;font-weight:700;font-size:12px;margin-bottom:4px'; h.textContent='📨 Push '+creator+' · '+(time||''); col.appendChild(h);"
+        "    var b=document.createElement('div'); b.style.cssText='font-size:12px;color:#ddd;white-space:pre-wrap'; b.textContent=desc; col.appendChild(b);"
+        "    if(thumb){ var im=document.createElement('img'); im.src=thumb; im.style.cssText='width:90px;height:90px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid #2a2a2a'; im.onerror=function(){ this.remove(); }; bx.appendChild(im); }"
+        "    bx.appendChild(col);"
         "    ex.insertBefore(bx, ex.firstChild);"
         "  }"
         "  var ttl=document.getElementById('sfs-modal-title'); if(ttl) ttl.textContent='Nouveau SFS lié au push — '+date;"
+        "}"
+        "function proofPreview(input){"
+        "  if(!input || !input.files || !input.files[0]) return;"
+        "  var zone=input.closest('.proof-zone'); if(!zone) return;"
+        "  var img=zone.querySelector('.proof-preview');"
+        "  if(img){ try{ img.src=URL.createObjectURL(input.files[0]); img.style.display='block'; }catch(e){} }"
+        "  var hint=zone.querySelector('.proof-hint'); if(hint){ hint.textContent='✓ '+input.files[0].name; hint.style.color='#22c55e'; }"
+        "  zone.classList.add('filled'); zone.style.borderColor='#22c55e';"
         "}"
         "async function loadSfsPushes(){"
         "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
@@ -10359,15 +10370,21 @@ window.addEventListener('DOMContentLoaded', function(){{
       </div>
       <label>Notes (optionnel)</label>
       <input type='text' name='notes' placeholder='Story exchange, post tag...' maxlength='200'>
-      <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px'>
-        <div>
-          <label>📎 Preuve AVANT (accord/schedule)</label>
-          <input type='file' name='proof_before' accept='image/*' style='font-size:11px;color:#888;width:100%'>
-        </div>
-        <div>
-          <label>📎 Preuve APRÈS (post publié)</label>
-          <input type='file' name='proof_after' accept='image/*' style='font-size:11px;color:#888;width:100%'>
-        </div>
+      <div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px'>
+        <label class='proof-zone' style='display:flex;flex-direction:column;align-items:center;gap:5px;border:1.5px dashed #3a3a3a;border-radius:12px;padding:16px 10px;cursor:pointer;background:#0f0f0f;text-align:center;transition:border-color .15s,background .15s' onmouseover='this.style.borderColor="#3b82f6";this.style.background="#0d1526"' onmouseout='if(!this.classList.contains("filled")){{this.style.borderColor="#3a3a3a";this.style.background="#0f0f0f"}}'>
+          <svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='#3b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' x2='12' y1='3' y2='15'/></svg>
+          <span style='font-size:12px;color:#ddd;font-weight:600'>📎 Preuve AVANT</span>
+          <span class='proof-hint' style='font-size:10px;color:#666'>accord / schedule — clique pour choisir</span>
+          <img class='proof-preview' alt='' style='display:none;width:100%;max-height:110px;object-fit:cover;border-radius:8px;margin-top:6px'>
+          <input type='file' name='proof_before' accept='image/*' style='display:none' onchange='proofPreview(this)'>
+        </label>
+        <label class='proof-zone' style='display:flex;flex-direction:column;align-items:center;gap:5px;border:1.5px dashed #3a3a3a;border-radius:12px;padding:16px 10px;cursor:pointer;background:#0f0f0f;text-align:center;transition:border-color .15s,background .15s' onmouseover='this.style.borderColor="#22c55e";this.style.background="#0d1a12"' onmouseout='if(!this.classList.contains("filled")){{this.style.borderColor="#3a3a3a";this.style.background="#0f0f0f"}}'>
+          <svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' x2='12' y1='3' y2='15'/></svg>
+          <span style='font-size:12px;color:#ddd;font-weight:600'>✅ Preuve APRÈS</span>
+          <span class='proof-hint' style='font-size:10px;color:#666'>post publié — clique pour choisir</span>
+          <img class='proof-preview' alt='' style='display:none;width:100%;max-height:110px;object-fit:cover;border-radius:8px;margin-top:6px'>
+          <input type='file' name='proof_after' accept='image/*' style='display:none' onchange='proofPreview(this)'>
+        </label>
       </div>
       <div style='display:flex;gap:8px;margin-top:14px;justify-content:flex-end'>
         <button type='button' class='btn-cancel' onclick='closeSfsModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Annuler</button>
