@@ -10106,24 +10106,64 @@ function refreshSfsDayPanel(){{
   var ident = window.__currentSfsIdent;
   var items = (window.__sfsData[date] || []).filter(function(x){{ return x.platform === platform && (!ident || x.identity === ident); }});
   var content = document.getElementById('sfs-day-panel-content');
-  if(items.length === 0){{
+  // Push MyPuls de ce jour (MyM) : heure + texte complet + audience
+  var pushHtml = '';
+  if(platform === 'MYM' && window.__sfsPushCache){{
+    var fModel=(ident && window.__sfsIdentModel)?(window.__sfsIdentModel[String(ident).toLowerCase()]||''):'';
+    var fi=(ident||'').toLowerCase();
+    var aud={{subscribers:'Abonnés',ex_subscribers:'Anciens',interested:'Intéressés'}};
+    var dayPushes=[];
+    window.__sfsPushCache.forEach(function(p){{
+      if(ident){{
+        var cre=(p.creator||'').toLowerCase();
+        var okFuzzy=(cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0);
+        if(p.identity!==ident && !(fModel && cre===String(fModel).toLowerCase()) && !okFuzzy) return;
+      }}
+      var parts=(p.sentAt||'').trim().split(/[ T]/);
+      var dmy=(parts[0]||'').split(/[\\/.-]/);
+      var iso=null;
+      if(dmy.length===3 && dmy[0].length===4){{ iso=dmy[0]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[2].padStart(2,'0'); }}
+      else if(dmy.length===3){{ iso=dmy[2]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[0].padStart(2,'0'); }}
+      if(iso!==date) return;
+      dayPushes.push({{time:parts[1]||'', creator:p.creator||'', desc:p.description||'', types:p.types||[], thumb:p.thumb||''}});
+    }});
+    dayPushes.sort(function(a,b){{ return (a.time||'').localeCompare(b.time||''); }});
+    if(dayPushes.length){{
+      pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#a855f7;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Push MyPuls (' + dayPushes.length + ')</div>';
+      dayPushes.forEach(function(p){{
+        var th=p.thumb?('<img src="'+p.thumb+'" style="width:34px;height:34px;border-radius:6px;object-fit:cover;flex-shrink:0" onerror="this.remove()">'):'';
+        var typ=(p.types||[]).map(function(t){{ return aud[t]||t; }}).join(', ');
+        pushHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid #f59e0b;border-radius:8px;padding:10px;margin-bottom:8px">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+th
+          + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#f59e0b">'+String(p.creator).replace(/</g,"&lt;")+'</div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + ' &middot; ' + typ + '</div></div></div>'
+          + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.desc).replace(/</g,"&lt;")+'</div>'
+          + '</div>';
+      }});
+      pushHtml += '</div>';
+    }}
+  }}
+  if(items.length === 0 && !pushHtml){{
     content.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg><div style="font-size:14px">Aucun SFS prévu</div><div style="font-size:12px;margin-top:8px;color:#555">Pour le ' + platform + ' ce jour-là</div></div>';
     return;
   }}
-  var html = '<div style="display:flex;flex-direction:column;gap:8px">';
-  items.forEach(function(x){{
-    var statusBadge = x.status === 'scheduled'
-      ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
-      : '<span style="background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
-    html += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">'
-      + '<div style="display:flex;align-items:center;gap:8px">' + identityAvatarHtml(x.identity, 28)
-      + '<div style="flex:1"><div style="font-weight:700;font-size:13px">' + x.identity + '</div><div style="font-size:11px;color:#888">@' + x.partner + '</div></div></div>'
-      + '<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#aaa;font-size:12px">à ' + x.time + '</span>' + statusBadge + '</div>'
-      + (x.notes ? '<div style="font-size:12px;color:#888;border-top:1px solid #2a2a2a;padding-top:6px">' + x.notes + '</div>' : '')
-      + '</div>';
-  }});
-  html += '</div>';
-  content.innerHTML = html;
+  var html = '';
+  if(items.length){{
+    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+    items.forEach(function(x){{
+      var statusBadge = x.status === 'scheduled'
+        ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
+        : '<span style="background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
+      html += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">'
+        + '<div style="display:flex;align-items:center;gap:8px">' + identityAvatarHtml(x.identity, 28)
+        + '<div style="flex:1"><div style="font-weight:700;font-size:13px">' + x.identity + '</div><div style="font-size:11px;color:#888">@' + x.partner + '</div></div></div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#aaa;font-size:12px">à ' + x.time + '</span>' + statusBadge + '</div>'
+        + (x.notes ? '<div style="font-size:12px;color:#888;border-top:1px solid #2a2a2a;padding-top:6px">' + x.notes + '</div>' : '')
+        + '</div>';
+    }});
+    html += '</div>';
+  }}
+  content.innerHTML = html + pushHtml;
 }}
 function shiftDayPanel(delta){{
   if(!window.__selectedSfsDate) return;
