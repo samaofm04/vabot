@@ -9618,6 +9618,7 @@ def _render_sfs_html() -> str:
             {
                 "id": x.get("id"),
                 "identity": x.get("identity", ""),
+                "receiver_identity": x.get("receiver_identity", ""),
                 "partner": x.get("partner", ""),
                 "time": x.get("time", ""),
                 "platform": x.get("platform", "OF"),
@@ -10182,6 +10183,16 @@ function openSfsModal(date){{
   var modal = document.getElementById('sfs-modal');
   document.getElementById('sfs-modal-title').innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:8px"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><polyline points="9 14 11 16 15 12"/></svg>SFS du ' + date + ' — ' + platform;
   document.getElementById('sfs-modal-date').value = date;
+  // Reset en mode "nouveau" (editSfs surchargera si on edite un existant)
+  document.getElementById('sfs-modal-id').value = '';
+  var _sb0=document.getElementById('sfs-modal-submit'); if(_sb0) _sb0.textContent='Ajouter';
+  var _f0=document.getElementById('sfs-form');
+  if(_f0){{
+    var _t0=_f0.querySelector('[name=time]'); if(_t0) _t0.value='19:00';
+    var _p0=_f0.querySelector('[name=partner]'); if(_p0) _p0.value='';
+    var _n0=_f0.querySelector('[name=notes]'); if(_n0) _n0.value='';
+    var _s0=_f0.querySelector('[name=status]'); if(_s0) _s0.value='scheduled';
+  }}
   document.getElementById('sfs-modal-platform-display').textContent = platform;
   // Hidden input pour la plateforme
   var hidden = document.getElementById('sfs-modal-platform');
@@ -10218,10 +10229,10 @@ function openSfsModal(date){{
       var statusBadge = x.status === 'scheduled'
         ? '<span style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">SCHEDULED</span>'
         : '<span style="background:#6b7280;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">TO PROGRAM</span>';
-      existingHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px">'
+      existingHtml += '<div onclick="editSfs(' + x.id + ')" title="Cliquer pour modifier" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer">'
         + '<div style="display:flex;align-items:center;gap:10px">' + identityAvatarHtml(x.identity, 32)
         + '<div><b>' + x.identity + '</b> × @' + x.partner + ' <span style="color:#888">à ' + x.time + '</span></div></div>'
-        + '<div>' + statusBadge + '</div>'
+        + '<div>' + statusBadge + ' <span style="color:#3b82f6;font-size:11px;font-weight:700">✏️ Modifier</span></div>'
         + '</div>';
     }});
     existingHtml += '</div>';
@@ -10231,6 +10242,32 @@ function openSfsModal(date){{
 }}
 function closeSfsModal(){{
   document.getElementById('sfs-modal').classList.remove('show');
+}}
+// Edition d'un SFS existant : pre-remplit TOUT le formulaire avec ses infos
+function editSfs(id){{
+  var date = window.__selectedSfsDate;
+  var arr = (window.__sfsData[date] || []);
+  var item = null;
+  for(var i=0;i<arr.length;i++){{ if(String(arr[i].id)===String(id)){{ item=arr[i]; break; }} }}
+  if(!item) return;
+  document.getElementById('sfs-modal-id').value = item.id;
+  var idSel=document.getElementById('sfs-modal-identity'); if(idSel) idSel.value = item.identity || '';
+  var recv=document.getElementById('sfs-modal-receiver');
+  if(recv){{
+    var rv=(item.receiver_identity || item.identity || '');
+    // match insensible a la casse (les pseudos MyM ont des majuscules)
+    for(var j=0;j<recv.options.length;j++){{ if(recv.options[j].value.toLowerCase()===rv.toLowerCase()){{ recv.value=recv.options[j].value; break; }} }}
+  }}
+  var f=document.getElementById('sfs-form');
+  if(f){{
+    var t=f.querySelector('[name=time]'); if(t) t.value = item.time || '';
+    var pa=f.querySelector('[name=partner]'); if(pa) pa.value = item.partner || '';
+    var st=f.querySelector('[name=status]'); if(st) st.value = item.status || 'scheduled';
+    var no=f.querySelector('[name=notes]'); if(no) no.value = item.notes || '';
+  }}
+  document.getElementById('sfs-modal-title').innerHTML = '✏️ Modifier le SFS — ' + date;
+  var sb=document.getElementById('sfs-modal-submit'); if(sb) sb.textContent='Enregistrer';
+  var ex=document.getElementById('sfs-modal-existing'); if(ex && ex.scrollIntoView) ex.scrollIntoView({{block:'start'}});
 }}
 // Init calendrier au chargement
 window.addEventListener('DOMContentLoaded', function(){{
@@ -10259,7 +10296,8 @@ window.addEventListener('DOMContentLoaded', function(){{
     </div>
     <div id='sfs-modal-existing'></div>
     <h4 style='margin:18px 0 8px'>➕ Nouvel SFS</h4>
-    <form method='POST' action='/business/sfs/add' enctype='multipart/form-data'>
+    <form method='POST' action='/business/sfs/add' enctype='multipart/form-data' id='sfs-form'>
+      <input type='hidden' name='id' id='sfs-modal-id'>
       <input type='hidden' name='date' id='sfs-modal-date'>
       <input type='hidden' name='platform' id='sfs-modal-platform' value='OF'>
       <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
@@ -10304,7 +10342,7 @@ window.addEventListener('DOMContentLoaded', function(){{
       </div>
       <div style='display:flex;gap:8px;margin-top:14px;justify-content:flex-end'>
         <button type='button' class='btn-cancel' onclick='closeSfsModal()' style='padding:10px 22px;background:#2a2a2a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Annuler</button>
-        <button type='submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
+        <button type='submit' id='sfs-modal-submit' style='padding:10px 22px;background:#3b82f6;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;margin:0'>Ajouter</button>
       </div>
     </form>
   </div>
@@ -23829,7 +23867,27 @@ def create_app():
         notes = (request.form.get("notes") or "").strip()
         if not identity or not partner or not date or not time_s:
             return _error("❌ Champs requis manquants")
-        new_id = add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
+        edit_id = (request.form.get("id") or "").strip()
+        if edit_id:
+            # Edition d'un SFS existant
+            from business import update_sfs as _upd_edit
+            try:
+                _eid = int(edit_id)
+            except (TypeError, ValueError):
+                _eid = None
+            if _eid is not None and _upd_edit(
+                _eid,
+                identity=identity.lower().strip(),
+                receiver_identity=(receiver_identity or identity).lower().strip(),
+                partner=partner.replace("@", "").strip(),
+                date=date, time=time_s, platform=platform,
+                status=status, notes=notes[:200],
+            ):
+                new_id = _eid
+            else:
+                new_id = add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
+        else:
+            new_id = add_sfs(identity, partner, date, time_s, platform, status, notes, receiver_identity=receiver_identity)
         # Upload des preuves si fournies
         try:
             from business import update_sfs as _upd_sfs
@@ -23847,7 +23905,8 @@ def create_app():
         except Exception:
             pass
         recv_lbl = f" → 🎯 <b>{receiver_identity}</b>" if receiver_identity != identity else ""
-        return _success(f"✅ SFS ajouté : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
+        _verb = "modifié" if edit_id else "ajouté"
+        return _success(f"✅ SFS {_verb} : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
 
     @app.route("/business/sfs/update_proof", methods=["POST"])
     def business_sfs_update_proof():
