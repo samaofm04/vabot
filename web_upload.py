@@ -9528,6 +9528,16 @@ def _render_sfs_html() -> str:
     except Exception:
         pass
     mypuls_creators_json = _json.dumps(_mypuls_creators)
+    # Map identite -> modele MyPuls (relie la sidebar/filtre aux push MyPuls)
+    _ident_model = {}
+    try:
+        import mypuls as _mp_mm
+        _mm = _mp_mm.list_model_map()
+        if isinstance(_mm, dict):
+            _ident_model = {str(k).lower().strip(): str(v) for k, v in _mm.items() if v}
+    except Exception:
+        pass
+    ident_model_json = _json.dumps(_ident_model)
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -9698,16 +9708,24 @@ def _render_sfs_html() -> str:
                 f"border-radius:8px;font-weight:700;margin-left:auto;display:flex;align-items:center;gap:3px'>"
                 f"<svg viewBox='0 0 24 24' width='9' height='9' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9'/><path d='M10.3 21a1.94 1.94 0 0 0 3.4 0'/></svg>{count}</span>"
             )
+        _model_name = _ident_model.get(ident.lower().strip(), "")
+        model_sub = (
+            f"<span style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_model_name}</span>"
+            if _model_name else ""
+        )
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
-            f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' "
+            f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' data-model='{_model_name}' "
             f"style='display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
             f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
             f"<div style='position:relative'>{avatar}"
             f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
             f"</div>"
+            f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
             f"<span style='font-weight:600;font-size:13px;color:#fff'>{ident}</span>"
+            f"{model_sub}"
+            f"</div>"
             f"{badge}"
             f"</div>"
         )
@@ -9752,9 +9770,10 @@ def _render_sfs_html() -> str:
         "  const cells={};"
         "  document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
         "  const fIdent=window.__currentSfsIdent;"  # null = tous les modeles
+        "  const fModel=(fIdent && window.__sfsIdentModel)?(window.__sfsIdentModel[String(fIdent).toLowerCase()]||''):'';"
         "  const byDate={}; let parseFail=0;"
         "  for(const p of ps){"
-        "    if(fIdent && p.identity!==fIdent) continue;"
+        "    if(fIdent){ const okId=(p.identity===fIdent); const okM=(fModel && (p.creator||'').toLowerCase()===String(fModel).toLowerCase()); if(!okId && !okM) continue; }"
         "    const parts=(p.sentAt||'').trim().split(/[ T]/);"
         "    const dmy=(parts[0]||'').split(/[\\/.-]/);"
         "    let iso=null;"
@@ -9910,6 +9929,7 @@ window.__sfsData = {sfs_by_date_json};
 window.__platformIdents = {platform_idents_json};
 window.__allIdentities = {all_identities_json};
 window.__mypulsCreators = {mypuls_creators_json};
+window.__sfsIdentModel = {ident_model_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
