@@ -102,13 +102,16 @@ DEFAULT_WELCOME_CONFIG = {
     "ticket_intro_message": (
         "🎫 **Bienvenue {mention} !**\n\n"
         "Voici comment fonctionne le **paiement** dans l'agence :\n\n"
-        "💰 **PAIEMENT PRINCIPAL** *(clics FR/jour, payés tous les 1 et 16 du mois)*\n"
-        "• 50 clics/jour → **30 $**\n"
-        "• 100 clics/jour → **50 $**\n"
-        "• 200 clics/jour → **75 $**\n"
-        "• 500 clics/jour → **150 $**\n"
-        "• 1 000 clics/jour → **300 $**\n"
-        "*+ paliers supérieurs pour très gros volumes.*\n\n"
+        "💰 **PAIEMENT PRINCIPAL** *(clics FR, payés tous les 1 et 16 du mois)*\n"
+        "• 0 à 50 clics/jour → **0,05 $** par clic\n"
+        "• 51 à 100 clics/jour → **0,06 $** par clic\n"
+        "• Plus de 100 clics/jour → **0,07 $** par clic\n\n"
+        "**Exemples :**\n"
+        "• 50 clics/jour → **2,50 $/jour**\n"
+        "• 100 clics/jour → **6 $/jour**\n"
+        "• 200 clics/jour → **14 $/jour**\n"
+        "• 500 clics/jour → **35 $/jour**\n"
+        "• 1 000 clics/jour → **70 $/jour**\n\n"
         "🎁 **BONUS CLICS** *(comptés sur chaque période 1→15 / 16→fin du mois)*\n"
         "• 500 clics → **+20 $**\n"
         "• 1 000 clics → **+30 $**\n"
@@ -119,11 +122,13 @@ DEFAULT_WELCOME_CONFIG = {
         "• 2 000 abonnés → **+20 $**\n"
         "• 5 000 abonnés → **+30 $**\n"
         "*Et plus de bonus à chaque palier supérieur.*\n\n"
+        "🤝 **PRIME D'ÉQUIPE** : **+10 $/semaine** au VA qui aide le plus dans le groupe — "
+        "le plus impliqué, celui qui anime le **général**.\n\n"
         "Les primes dépendent des **performances réelles** du compte : publications, reels, "
         "activité, croissance et engagement. Plus le compte performe grâce à ton travail, "
         "plus tu débloques de récompenses.\n\n"
         "**En résumé :**\n"
-        "✅ Tu gagnes grâce aux clics\n"
+        "✅ Tu es payé pour chaque clic généré\n"
         "✅ Tu débloques des bonus grâce aux performances\n"
         "✅ Plus les chiffres montent, plus les primes augmentent\n\n"
         "Clique sur **🎬 Commencer l'onboarding** ci-dessous quand tu es prêt.\n\n"
@@ -131,7 +136,7 @@ DEFAULT_WELCOME_CONFIG = {
     ),
     # Version de la config: incrementer pour forcer la mise a jour d'un message
     # cote VPS au prochain demarrage du bot (migration automatique).
-    "config_version": 2,
+    "config_version": 3,
 }
 
 
