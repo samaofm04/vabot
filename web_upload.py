@@ -22322,8 +22322,11 @@ def _role_allowed_tabs(role):
       (juste son compte) -> deny par défaut (un nouveau compte ne voit PAS tout).
     """
     r = (role or "").lower().strip()
-    if r in ("", "owner", "admin"):
+    if r in ("owner", "admin"):
         return None
+    if not r:
+        # Rôle vide / inconnu : on NE donne PAS l'accès complet (fail-closed).
+        return {"saccount", "sprefs"}
     try:
         perms = _load_role_definitions().get(r, {}).get("permissions", {})
     except Exception:
@@ -23199,17 +23202,20 @@ def _render_upload_inner(msg=None, error=None):
     # owner/admin -> allowed=None -> rendu identique a avant (aucun gating).
     role = ""
     try:
-        role = (session.get("role") or "").lower()
+        # Source de vérité = web_admin_users.json (rôle LIVE). Comme ça un changement
+        # de rôle par le owner s'applique tout de suite, sans re-login, et une session
+        # ouverte quand le compte était admin ne reste pas bloquée sur "admin".
+        uname = (session.get("username") or "").lower()
+        if uname:
+            u = _load_web_users().get(uname)
+            if isinstance(u, dict):
+                role = (u.get("role") or "").lower()
         if not role:
-            # Session ouverte avant l'ajout du role (pas de re-login) : on retrouve
-            # le role via le username enregistre dans web_admin_users.json.
-            uname = (session.get("username") or "").lower()
-            if uname:
-                u = _load_web_users().get(uname)
-                role = (u.get("role") or "").lower() if isinstance(u, dict) else ""
+            # Fallback : rôle de la session (owner login par mot de passe seul -> "admin").
+            role = (session.get("role") or "").lower()
     except Exception:
-        role = ""
-    allowed = _role_allowed_tabs(role)  # None = acces complet
+        role = (session.get("role") or "").lower()
+    allowed = _role_allowed_tabs(role)  # None = acces complet (owner/admin uniquement)
 
     def _g(tab, producer):
         """Contenu d'un onglet. On rend TOUJOURS le contenu : vider cote serveur
