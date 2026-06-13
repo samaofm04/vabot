@@ -16892,6 +16892,24 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         _gen_msg = ""
     _gen_msg_esc = _gen_msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    # Panel lecture seule : push (stories/posts) deja programmes sur MyPuls - MyM uniquement
+    if platform == "mym":
+        _mypuls_panel_html = (
+            "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-top:18px'>"
+            "<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap'>"
+            "<h3 style='margin:0;font-size:15px;font-weight:800'>📅 Push déjà programmés sur MyPuls</h3>"
+            "<button type='button' onclick='loadMypulsPushes()' "
+            "style='background:#a855f7;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>"
+            "🔄 Charger</button>"
+            "</div>"
+            "<div id='mypuls-pushes-list' style='color:#888;font-size:13px'>"
+            "Clique sur « Charger » pour voir les push (stories/posts) déjà programmés sur MyPuls pour tes modèles."
+            "</div>"
+            "</div>"
+        )
+    else:
+        _mypuls_panel_html = ""
+
     # Cards par identite
     cards = []
     for i, ident in enumerate(identities):
@@ -17037,6 +17055,9 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'>{_gen_msg_esc}</textarea>"
         f"</div>"
 
+        # Panel lecture seule : push MyPuls deja programmes (MyM)
+        + _mypuls_panel_html
+
         # JS - utilise le panel parent pour scoper les querySelectors
         + "<script>"
         f"window.__sfs_platform_{platform} = '{platform}';"
@@ -17072,6 +17093,34 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
         f"}}"
+        # Lecture seule : charge les push (stories/posts) deja programmes sur MyPuls
+        "async function loadMypulsPushes(){"
+        "  const box=document.getElementById('mypuls-pushes-list');"
+        "  if(!box) return;"
+        "  box.innerHTML='⏳ Chargement des push MyPuls…';"
+        "  try{"
+        "    const r=await fetch('/sfssetup/mypuls_pushes');"
+        "    const j=await r.json();"
+        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
+        "    const evs=j.events||[];"
+        "    if(!evs.length){ box.innerHTML='Aucun push programmé trouvé (30 prochains jours).'; return; }"
+        "    let html='';"
+        "    for(const e of evs){"
+        "      let ds='';"
+        "      if(e.start){ const d=new Date(e.start); if(!isNaN(d)) ds=d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }"
+        "      const typ=(e.type==='story')?'📖 Story':((e.type==='feed'||e.type==='post')?'🖼️ Post':(e.type||'?'));"
+        "      const who=(e.creator||'').replace(/</g,'&lt;');"
+        "      const title=(e.title||'').replace(/</g,'&lt;');"
+        "      html+=\"<div style='display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #232323'>\""
+        "        +\"<span style='color:#a855f7;font-weight:700;white-space:nowrap'>\"+ds+\"</span>\""
+        "        +\"<span style='color:#bbb;white-space:nowrap'>\"+typ+\"</span>\""
+        "        +\"<span style='color:#fff;font-weight:600;white-space:nowrap'>\"+who+\"</span>\""
+        "        +\"<span style='color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>\"+title+\"</span>\""
+        "        +\"</div>\";"
+        "    }"
+        "    box.innerHTML=html;"
+        "  }catch(err){ box.innerHTML='❌ '+err; }"
+        "}"
         # Bulk apply - champs eligibles dependent de la plateforme
         f"async function applyBulk_{platform}(){{"
         f"  const sec=document.getElementById('form-sfssetup{platform}');"
@@ -24786,6 +24835,64 @@ def create_app():
         idents = _sfssetup_identities(platform)
         msg = sfs_setup.generate_message(platform, idents)
         return jsonify({"ok": True, "message": msg})
+
+    @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
+    def sfssetup_mypuls_pushes():
+        """Lecture seule : liste les push (stories/posts) deja programmes sur MyPuls
+        pour les identites SFS MyM (fenetre : aujourd hui -> +30 jours)."""
+        if not is_auth():
+            from flask import jsonify
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        from flask import jsonify
+        try:
+            import mypuls
+            import mypuls_scheduler
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Module indispo : {e}"})
+        try:
+            if not mypuls.is_configured() or not mypuls_scheduler.is_configured():
+                return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
+            cr = mypuls.list_creators()
+            creators = cr.get("creators") or {}  # {name: id}
+            name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
+            id_to_name = {str(v): str(k) for k, v in creators.items()}
+            idents = _sfssetup_identities("mym")
+            creator_ids = []
+            for ident in idents:
+                model = (mypuls.get_model_for_identity(ident) or ident).lower().strip()
+                cid = name_to_id.get(model) or name_to_id.get(ident.lower().strip())
+                if cid is not None and cid not in creator_ids:
+                    creator_ids.append(cid)
+            if not creator_ids:
+                return jsonify({"ok": True, "events": [],
+                                "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
+            import datetime as _dt
+            now = _dt.datetime.now()
+            start_iso = now.strftime("%Y-%m-%dT00:00:00")
+            end_iso = (now + _dt.timedelta(days=30)).strftime("%Y-%m-%dT00:00:00")
+            res = mypuls_scheduler.list_calendar_events(creator_ids, start_iso, end_iso)
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("error", "Erreur MyPuls")})
+            out = []
+            for e in (res.get("events", []) or []):
+                if not isinstance(e, dict):
+                    continue
+                props = e.get("extendedProps") or {}
+                cid = props.get("creator") or props.get("creatorId") or props.get("creator_id")
+                who = id_to_name.get(str(cid), "") if cid is not None else (props.get("creatorName") or "")
+                title = (props.get("title") or props.get("text") or props.get("caption")
+                         or e.get("title") or "")
+                out.append({
+                    "id": e.get("id"),
+                    "type": e.get("type") or props.get("type") or "",
+                    "start": e.get("start") or "",
+                    "creator": who,
+                    "title": str(title)[:120],
+                })
+            out.sort(key=lambda x: x.get("start") or "")
+            return jsonify({"ok": True, "events": out})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Erreur : {e}"})
 
     @app.route("/debug/reel_raw", methods=["GET"])
     def debug_reel_raw():
