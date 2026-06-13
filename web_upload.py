@@ -9519,12 +9519,14 @@ def _render_sfs_html() -> str:
     all_identities_json = _json.dumps(sorted(_all_idents_set))
     # MyPuls creators (pour le dropdown receveur quand plateforme = MYM)
     _mypuls_creators = []
+    _mypuls_creators_map = {}  # {name: creator_id} pour les avatars
     try:
         import mypuls as _mypuls
         if _mypuls.is_configured():
             _cr_res = _mypuls.list_creators()
             if _cr_res.get("ok"):
-                _mypuls_creators = sorted((_cr_res.get("creators") or {}).keys(), key=str.lower)
+                _mypuls_creators_map = _cr_res.get("creators") or {}
+                _mypuls_creators = sorted(_mypuls_creators_map.keys(), key=str.lower)
     except Exception:
         pass
     mypuls_creators_json = _json.dumps(_mypuls_creators)
@@ -9750,7 +9752,18 @@ def _render_sfs_html() -> str:
     for _cre in _mypuls_creators:
         _crel = str(_cre).lower()
         _matched = _creator_to_ident.get(_crel, _cre)
-        _av = _identity_avatar_html(_matched, size=36)
+        _cid = _mypuls_creators_map.get(_cre)
+        _initial = (str(_cre)[:1] or "?").upper()
+        if _cid:
+            # Avatar MyPuls (les memes pp que sur MyPuls) + fallback initiale si l image echoue
+            _av = (
+                f"<div style='position:relative;width:36px;height:36px;flex-shrink:0'>"
+                f"<div style='position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px'>{_initial}</div>"
+                f"<img src='/mypuls/avatar/{_cid}' style='position:absolute;inset:0;width:36px;height:36px;border-radius:50%;object-fit:cover' onerror=\"this.remove()\">"
+                f"</div>"
+            )
+        else:
+            _av = _identity_avatar_html(_matched, size=36)
         _cnt = sfs_count_by_ident.get(_matched, 0)
         _cbadge = (
             f"<span style='background:#ef4444;color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;font-weight:700;margin-left:auto'>{_cnt}</span>"
