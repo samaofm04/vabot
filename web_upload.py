@@ -10010,8 +10010,9 @@ def _render_sfs_html() -> str:
         "  try{"
         "    var r=await fetch('/sfssetup/import_of_har',{method:'POST',body:fd}); var j=await r.json();"
         "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
-        "    if(box) box.innerHTML='✅ Import OK : '+j.items+' message(s), '+j.dates+' date(s). Rechargement…';"
-        "    setTimeout(function(){ location.reload(); }, 700);"
+        "    window.__ofPushData=j.data||window.__ofPushData;"
+        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "    if(box) box.innerHTML='✅ Import OK : '+j.items+' message(s) · '+j.dates+' date(s) placés sur le calendrier.';"
         "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
         "}"
         "function renderOfPushes(){"
@@ -25288,7 +25289,8 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
         return jsonify({"ok": True, "items": len(parsed.get("items", [])),
-                        "dates": len(parsed.get("counters", {}))})
+                        "dates": len(parsed.get("counters", {})),
+                        "data": {"items": parsed.get("items", []), "counters": parsed.get("counters", {})}})
 
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
