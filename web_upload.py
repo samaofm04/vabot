@@ -9744,6 +9744,10 @@ def _render_sfs_html() -> str:
         "window.__sfsPushCache=null;"
         "function renderSfsPushes(){"
         "  document.querySelectorAll('.sfs-push-bar').forEach(function(el){ el.remove(); });"
+        "  const panel=document.getElementById('sfs-pushs-panel');"
+        "  const isMym=(window.__currentSfsPlatform==='MYM');"
+        "  if(panel) panel.style.display=isMym?'':'none';"  # MyPuls = MyM uniquement
+        "  if(!isMym) return;"  # pas de push sur OnlyFans
         "  const ps=window.__sfsPushCache; if(!ps) return;"
         "  const cells={};"
         "  document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
