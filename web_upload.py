@@ -9744,6 +9744,31 @@ def _render_sfs_html() -> str:
             f"{badge}"
             f"</div>"
         )
+    # Rangées MyM : la liste = créateurs MyPuls (pseudos), Kiarahockey inclus.
+    # data-rowsource='mypuls' + cachées par défaut (OF au départ) ; affichées au switch MYM.
+    _creator_to_ident = {str(_c).lower(): _i for _i, _c in _ident_model.items()}
+    for _cre in _mypuls_creators:
+        _crel = str(_cre).lower()
+        _matched = _creator_to_ident.get(_crel, _cre)
+        _av = _identity_avatar_html(_matched, size=36)
+        _cnt = sfs_count_by_ident.get(_matched, 0)
+        _cbadge = (
+            f"<span style='background:#ef4444;color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;font-weight:700;margin-left:auto'>{_cnt}</span>"
+            if _cnt > 0 else ""
+        )
+        rows.append(
+            f"<div onclick='filterSfsByIdentity(\"{_matched}\",this)' "
+            f"class='sfs-ident-row' data-rowsource='mypuls' data-ident='{_matched}' data-model='{_cre}' data-platforms='MYM' "
+            f"style='display:none;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
+            f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
+            f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
+            f"<div style='position:relative'>{_av}"
+            f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
+            f"</div>"
+            f"<span style='font-weight:600;font-size:13px;color:#fff'>{_cre}</span>"
+            f"{_cbadge}"
+            f"</div>"
+        )
     rows.append("</div>")
 
     # --- COLONNE 2 : CALENDRIER ---
@@ -9974,11 +9999,17 @@ function switchSfsPlatform(btn, platform){{
   // Filtrer la liste des identités selon la plateforme
   var currentIdent = window.__currentSfsIdent;
   var stillVisible = false;
-  document.querySelectorAll('.sfs-ident-row[data-platforms]').forEach(function(row){{
-    var rowPlatforms = (row.dataset.platforms || '').split(',').filter(Boolean);
-    var matches = rowPlatforms.indexOf(platform) !== -1;
-    row.style.display = matches ? '' : 'none';
-    if(matches && row.dataset.ident === currentIdent) stillVisible = true;
+  // MyM : on affiche la liste des CREATEURS MyPuls (data-rowsource=mypuls) ;
+  // OF/autres : les identites classiques filtrees par plateforme.
+  document.querySelectorAll('.sfs-ident-row').forEach(function(row){{
+    if(row.classList.contains('sfs-ident-all')){{ row.style.display='flex'; return; }}
+    var src = row.dataset.rowsource || 'ident';
+    var show;
+    if(platform === 'MYM'){{ show = (src === 'mypuls'); }}
+    else if(src === 'mypuls'){{ show = false; }}
+    else {{ var rp=(row.dataset.platforms||'').split(',').filter(Boolean); show = rp.indexOf(platform)!==-1; }}
+    row.style.display = show ? 'flex' : 'none';
+    if(show && row.dataset.ident === currentIdent) stillVisible = true;
   }});
   // Si l'identité sélectionnée n'est pas sur cette plateforme, repasser à "All creators"
   if(currentIdent && !stillVisible){{
