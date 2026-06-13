@@ -10395,6 +10395,22 @@ window.addEventListener('DOMContentLoaded', function(){{
 </div>
 """)
 
+    # Relooking moderne de la modale SFS (scopé #sfs-modal)
+    rows.append(
+        "<style>"
+        "#sfs-modal .confirm-box{background:#141414;border:1px solid #262626;border-radius:16px;padding:22px 24px;box-shadow:0 24px 60px rgba(0,0,0,.55)}"
+        "#sfs-modal #sfs-modal-title{font-size:16px;font-weight:800;letter-spacing:.2px}"
+        "#sfs-modal label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#8a8a8a;margin:0 0 5px}"
+        "#sfs-modal input[type=text],#sfs-modal input[type=time],#sfs-modal select{width:100%;box-sizing:border-box;background:#0e0e0e;border:1px solid #2c2c2c;color:#fff;padding:10px 12px;border-radius:10px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}"
+        "#sfs-modal input[type=text]:focus,#sfs-modal input[type=time]:focus,#sfs-modal select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.18)}"
+        "#sfs-modal h4{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#a855f7;font-weight:800;margin:18px 0 10px;display:flex;align-items:center;gap:6px}"
+        "#sfs-modal .confirm-box > div:first-child{border-bottom:1px solid #232323;padding-bottom:12px;margin-bottom:4px}"
+        "#sfs-modal #sfs-modal-submit{box-shadow:0 6px 18px rgba(59,130,246,.35);padding:11px 26px;border-radius:10px}"
+        "#sfs-modal .btn-cancel{background:#222!important;border-radius:10px!important;padding:11px 22px!important}"
+        "#sfs-modal form > div[style*=grid]{gap:14px!important}"
+        "</style>"
+    )
+
     # === LISTE DES SFS (filtré par platform aussi) ===
     if items:
         rows.append("<div class='box'><h4 style='margin-top:0'>📋 Tous les SFS</h4>")
