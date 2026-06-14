@@ -18570,6 +18570,7 @@ def _render_chatplanning_html() -> str:
             break
     if not active_edt:
         active_edt = edts[0]
+    is_mgr = active_edt.get("kind") == "manager"  # board managers = horaire libre
 
     # Couleurs statuts (matche le xlsx)
     statut_colors = {
@@ -18653,6 +18654,14 @@ def _render_chatplanning_html() -> str:
             "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
             "<input type='hidden' name='preset' value='mym'>"
             f"<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px'>{_MYPULS_LOGO} + EDT MYM</button>"
+            "</form>"
+        )
+    has_mgr = any(e.get("kind") == "manager" for e in edts)
+    if not has_mgr:
+        quick_btns += (
+            "<form method='POST' action='/chatting/create_preset' style='margin:0;display:inline'>"
+            "<input type='hidden' name='preset' value='manager'>"
+            "<button type='submit' style='padding:9px 14px;background:linear-gradient(135deg,#f59e0b,#b45309);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px'>👔 + Managers</button>"
             "</form>"
         )
     add_tab = quick_btns + (
@@ -18764,7 +18773,78 @@ def _render_chatplanning_html() -> str:
     body_rows = []
     # Ordre de tri par statut : Ancien (N1) -> Nouveau (N2) -> Support (N3)
     _STATUT_ORDER = {"Ancien": 0, "Nouveau": 1, "Support": 2}
-    for creneau in chatting.CRENEAUX:
+
+    def _row_cells_html(r, counts, pres_for_row):
+        """Cellules d'une ligne APRES la 1re colonne (créneau OU horaire) —
+        identiques pour chatteurs et managers."""
+        pseudo_cell = f"<td style='padding:4px 6px'>{_input_cell(r['id'], 'pseudo', r.get('pseudo', ''), 'Pseudo')}</td>"
+        sc = statut_colors.get(r.get("statut", "Nouveau"), statut_colors["Nouveau"])
+        statut_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'statut', r.get('statut', 'Nouveau'), statut_opts(r.get('statut', 'Nouveau')), sc['bg'], sc['fg'], 90)}</td>"
+        current_mod = r.get('modele', '')
+        current_set = set([m.strip() for m in current_mod.split('+') if m.strip()])
+        chips_html = ""
+        for m in available_modeles:
+            checked = m in current_set
+            chips_html += (
+                f"<label style='display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#ccc' onmouseover=\"this.style.background='#222'\" onmouseout=\"this.style.background='transparent'\">"
+                f"<input type='checkbox' value='{m}' {'checked' if checked else ''} onchange='modelToggle(this, \"{r['id']}\")' style='accent-color:#3b82f6'>"
+                f"<span>{m}</span></label>"
+            )
+        display = current_mod if current_mod else "—"
+        modele_cell = (
+            f"<td style='padding:4px 6px;position:relative'>"
+            f"<button type='button' class='mod-trigger' data-row='{r['id']}' onclick='modelOpen(this)' "
+            f"style='width:150px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:6px 10px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+            f"{display} ▾</button>"
+            f"<div class='mod-pop' style='display:none;position:absolute;top:100%;left:6px;z-index:60;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:4px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);margin-top:4px'>"
+            f"{chips_html}"
+            f"</div>"
+            f"</td>"
+        )
+        off_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'off', r.get('off', ''), off_opts(r.get('off', '')), '#1a1a1a', '#aaa', 110)}</td>"
+        day_cells = ""
+        for dk in chatting.DAYS:
+            pv = pres_for_row.get(dk, "Present")
+            day_cells += _day_cell(r['id'], dk, pv)
+        retards_cell = f"<td id='retards-{r['id']}' style='text-align:center;color:{'#fb923c' if counts['retards'] else '#666'};font-weight:700;padding:6px'>{counts['retards']}</td>"
+        absences_cell = f"<td id='absences-{r['id']}' style='text-align:center;color:{'#ef4444' if counts['absences'] else '#666'};font-weight:700;padding:6px'>{counts['absences']}</td>"
+        del_btn = (
+            f"<td style='text-align:center;white-space:nowrap'>"
+            f"<button type='button' onclick='chatFillOpen(event,this,\"{r['id']}\")' title='Remplir toute la ligne (les 7 jours)' "
+            f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>⚡</button>"
+            f"<button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 6px'>×</button>"
+            f"</td>"
+        )
+        return pseudo_cell + statut_cell + modele_cell + off_cell + day_cells + retards_cell + absences_cell + del_btn
+
+    # === Board MANAGERS : liste plate, 1re colonne = HORAIRE libre (texte) ===
+    if is_mgr:
+        mgr_rows = sorted(active_edt.get("rows", []),
+                          key=lambda r: _STATUT_ORDER.get((r.get("statut") or "").strip(), 9))
+        if not mgr_rows:
+            body_rows.append(
+                "<tr><td colspan='14' style='padding:18px;color:#444;text-align:center;font-size:12px;font-style:italic'>"
+                "aucun manager — clique ci-dessous pour ajouter</td></tr>"
+            )
+        for r in mgr_rows:
+            counts = chatting.row_counts(r, active_week)
+            pres_for_row = chatting.row_presence(r, active_week)
+            horaire_cell = (
+                f"<td style='padding:4px 8px;background:#161616;border-right:2px solid #0a0a0a'>"
+                f"{_input_cell(r['id'], 'creneau', r.get('creneau', ''), 'ex 9h-18h')}</td>"
+            )
+            body_rows.append(
+                f"<tr data-rowid='{r['id']}' data-statut='{html_escape((r.get('statut') or '').strip())}'>"
+                f"{horaire_cell}{_row_cells_html(r, counts, pres_for_row)}</tr>"
+            )
+        body_rows.append(
+            "<tr id='addrow-'><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
+            "<button type='button' onclick='addChatRow(\"\")' "
+            "style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%;font-family:inherit'>"
+            "+ ajouter un manager</button></td></tr>"
+        )
+
+    for creneau in ([] if is_mgr else chatting.CRENEAUX):
         rows_in = rows_by_cre.get(creneau, [])
         # Tri stable par statut (les memes statuts gardent leur ordre d'origine)
         rows_in = sorted(rows_in, key=lambda r: _STATUT_ORDER.get((r.get("statut") or "").strip(), 9))
@@ -18866,7 +18946,7 @@ def _render_chatplanning_html() -> str:
     )
     header = (
         "<thead><tr>"
-        "<th style='background:#0a0a0a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px;border-right:2px solid #0a0a0a;width:80px'>Creneau</th>"
+        f"<th style='background:#0a0a0a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px;border-right:2px solid #0a0a0a;width:80px'>{'Horaire' if is_mgr else 'Creneau'}</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Pseudo</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Statut</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Modele</th>"
@@ -19373,6 +19453,7 @@ async function addChatRow(creneau){
   const r = await fetch('/chatting/add_row', {method:'POST', body:fd});
   const j = await r.json();
   if(!j.ok){ alert('Erreur: '+(j.error||'?')); return; }
+  if(""" + ('true' if is_mgr else 'false') + """){ location.reload(); return; }
   const rid = j.row_id;
   // Si une row placeholder 'aucune ligne' existait, on la vire
   const placeholder = document.querySelector('tr.chat-empty-placeholder[data-creneau=\"'+creneau+'\"]');
@@ -27248,19 +27329,26 @@ def create_app():
             return redirect("/")
         import chatting
         preset = (request.form.get("preset") or "").strip().lower()
+        kind = "chatter"
         if preset == "of":
             name = "EDT OnlyFans"
         elif preset == "mym":
             name = "EDT MYM"
+        elif preset == "manager":
+            name = "Planning Managers"
+            kind = "manager"
         else:
             return _error("❌ Preset invalide", tab="chatplanning")
         # Verifier qu il n existe pas deja
         for e in chatting.list_edts():
             if e.get("name", "").lower() == name.lower():
                 return redirect(f"/?tab=chatplanning&edt_id={e['id']}")
-        edt = chatting.create_edt(name)
-        for cre in chatting.CRENEAUX:
-            chatting.add_row(edt["id"], cre)
+        edt = chatting.create_edt(name, kind=kind)
+        if kind == "manager":
+            chatting.add_row(edt["id"], "")  # 1 ligne vide, horaire à remplir
+        else:
+            for cre in chatting.CRENEAUX:
+                chatting.add_row(edt["id"], cre)
         return redirect(f"/?tab=chatplanning&edt_id={edt['id']}")
 
     @app.route("/chatting/rename_edt", methods=["POST"])
@@ -27290,11 +27378,12 @@ def create_app():
         import chatting
         from flask import jsonify
         edt_id = (request.form.get("edt_id") or "").strip()
-        cre = (request.form.get("creneau") or "02h-08h").strip()
+        # On ne force PAS "02h-08h" ici : add_row gère le défaut selon le type de board
+        cre = (request.form.get("creneau") or "").strip()
         row = chatting.add_row(edt_id, cre)
         if not row:
             return jsonify({"ok": False, "error": "EDT introuvable"})
-        return jsonify({"ok": True, "row_id": row["id"], "creneau": cre})
+        return jsonify({"ok": True, "row_id": row["id"], "creneau": row.get("creneau", "")})
 
     @app.route("/chatting/delete_row", methods=["POST"])
     def chatting_delete_row():

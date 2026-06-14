@@ -189,10 +189,11 @@ def get_edt(edt_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def create_edt(name: str) -> Dict[str, Any]:
+def create_edt(name: str, kind: str = "chatter") -> Dict[str, Any]:
+    """kind = 'chatter' (créneaux fixes) ou 'manager' (horaire libre par ligne)."""
     name = (name or "").strip() or "EDT sans nom"
     data = _load()
-    edt = {"id": f"edt_{uuid.uuid4().hex[:10]}", "name": name, "rows": []}
+    edt = {"id": f"edt_{uuid.uuid4().hex[:10]}", "name": name, "kind": kind, "rows": []}
     data["edts"].append(edt)
     _save(data)
     return edt
@@ -225,14 +226,17 @@ def _empty_presence() -> Dict[str, str]:
 
 
 def add_row(edt_id: str, creneau: str = "02h-08h") -> Optional[Dict[str, Any]]:
-    if creneau not in CRENEAUX:
-        creneau = "02h-08h"
     data = _load()
     for e in data["edts"]:
         if e["id"] == edt_id:
+            # Board manager = horaire LIBRE (texte) ; chatteur = créneau fixe
+            if e.get("kind") == "manager":
+                cre = (creneau or "").strip()
+            else:
+                cre = creneau if creneau in CRENEAUX else "02h-08h"
             row = {
                 "id": f"row_{uuid.uuid4().hex[:10]}",
-                "creneau": creneau,
+                "creneau": cre,
                 "pseudo": "",
                 "statut": "Nouveau",
                 "modele": "",
