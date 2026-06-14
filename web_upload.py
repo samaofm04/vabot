@@ -3030,7 +3030,11 @@ window.upClearPrefill = function(utab){
 <label class="up-drop up-drop-small">
 <input type="file" data-name="example" accept="video/*" class="up-file-example">
 <div class="up-drop-inner-small"><div class="up-plus">+</div><div class="up-plus-lbl">Ajouter exemple</div></div>
+<div class="up-drop-hint" style="margin-top:6px"></div>
 </label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+</div>
 </div>
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Textes</h3></div>
