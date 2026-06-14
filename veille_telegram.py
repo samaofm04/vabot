@@ -110,6 +110,102 @@ _IG_HEADERS = {
 }
 
 
+def _find_ig_cookies() -> Optional[str]:
+    """Cherche un cookies.txt Instagram (format Netscape) a des emplacements
+    connus. Permet a yt-dlp de telecharger les reels qui demandent une connexion.
+    """
+    from pathlib import Path as _P
+    here = _P(__file__).resolve().parent
+    candidates = [
+        _P("data/insta/cookies.txt"),               # chemin VPS (gitignore)
+        here / "data" / "insta" / "cookies.txt",
+        here.parent / "ig-downloader" / "cookies.txt",  # dev local
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and c.stat().st_size > 50:
+                return str(c)
+        except Exception:
+            pass
+    return None
+
+
+def download_via_ytdlp(post_url: str, timeout: int = 90,
+                       info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
+    """Telecharge la video d'un permalink IG via yt-dlp (comme le bot ig-downloader).
+
+    C'est la methode la PLUS FIABLE : yt-dlp gere l'extraction + l'auth via les
+    cookies IG (data/insta/cookies.txt) -> recupere meme les reels que le scrape
+    public ne voit pas. Retourne les bytes (<50MB) ou None ; info['reason'] est
+    rempli en cas d'echec ('ytdlp_absent', 'audience_restreinte',
+    'login_requis_cookies', 'trop_gros_50mb', ...).
+    """
+    def _set(reason: str):
+        if info is not None:
+            info["reason"] = reason
+    if not post_url:
+        _set("url_vide")
+        return None
+    try:
+        import yt_dlp
+    except Exception:
+        _set("ytdlp_absent")
+        return None
+    import tempfile
+    import os
+    import glob
+    import shutil
+    tmpdir = tempfile.mkdtemp(prefix="veille_yt_")
+    opts = {
+        "outtmpl": os.path.join(tmpdir, "v.%(ext)s"),
+        "format": "mp4/bestvideo*+bestaudio/best",
+        "merge_output_format": "mp4",
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "retries": 3,
+        "socket_timeout": timeout,
+        "max_filesize": 50 * 1024 * 1024,  # Telegram cap : yt-dlp skip si >50MB
+    }
+    cookies = _find_ig_cookies()
+    if cookies:
+        opts["cookiefile"] = cookies
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(post_url, download=True)
+        files = [f for f in glob.glob(os.path.join(tmpdir, "v.*")) if os.path.isfile(f)]
+        if not files:
+            _set("trop_gros_50mb" if cookies is not None else "ytdlp_pas_de_fichier")
+            return None
+        path = max(files, key=lambda f: os.path.getsize(f))
+        size = os.path.getsize(path)
+        if size <= 0:
+            _set("ytdlp_fichier_vide")
+            return None
+        if size > 50 * 1024 * 1024:
+            _set("trop_gros_50mb")
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+    except Exception as e:
+        low = str(e).lower()
+        if "available to everyone" in low or "certain audiences" in low:
+            _set("audience_restreinte")
+        elif "login required" in low or "rate-limit" in low or "login" in low or "cookies" in low:
+            _set("login_requis_cookies")
+        elif "max_filesize" in low or "larger than" in low:
+            _set("trop_gros_50mb")
+        else:
+            _set("ytdlp_err:" + str(e)[:90])
+        return None
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 def download_video_bytes(video_url: str, timeout: int = 25,
                          info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
     """Telecharge une video depuis un CDN Instagram.
@@ -348,38 +444,48 @@ def send_video_from_url(video_url: str, caption: str = "",
         "url_vide": "aucun lien video stocke",
         "trop_gros_50mb": "video > 50 Mo (limite Telegram, impossible a envoyer)",
         "corps_vide": "le CDN a renvoye un fichier vide",
+        "audience_restreinte": "reel a audience restreinte (Instagram bloque le telechargement, meme avec cookies)",
+        "login_requis_cookies": "Instagram demande une connexion (ajoute des cookies IG : reglages > Instagram)",
     }
-    # 1) Telecharge la video depuis l URL IG
-    dl_info: Dict[str, Any] = {}
-    video_bytes = download_video_bytes(video_url, info=dl_info)
     last_err = ""
+    # 0) yt-dlp depuis le permalink = methode la PLUS FIABLE (comme ig-downloader,
+    #    auth via cookies). On la tente en premier.
+    yt_info: Dict[str, Any] = {}
+    video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
+    yt_reason = yt_info.get("reason", "")
+    # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien direct
+    if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
+        return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
+
+    # 1) Fallback : URL CDN directe stockee
     if not video_bytes:
-        last_err = _readable.get(dl_info.get("reason", ""), "URL video manquante / expiree")
-        # Si c'est juste trop gros, inutile de re-resoudre : ce sera toujours trop gros
-        if dl_info.get("reason") == "trop_gros_50mb":
-            return _fallback("Telechargement impossible : " + last_err)
-        # Retry : re-resout un video_url FRAIS (reels du compte -> post-unique -> page)
+        dl_info: Dict[str, Any] = {}
+        video_bytes = download_video_bytes(video_url, info=dl_info)
+        if not video_bytes and dl_info.get("reason") == "trop_gros_50mb":
+            return _fallback("Telechargement impossible : " + _readable["trop_gros_50mb"])
+
+    # 2) Fallback : re-resout un video_url FRAIS (reels du compte -> post-unique -> page)
+    if not video_bytes:
         refreshed = refresh_post_data(fallback_url, owner=owner) if fallback_url else {}
         fresh = refreshed.get("video_url") or ""
         if fresh and fresh != video_url:
             dl_info2: Dict[str, Any] = {}
             video_bytes = download_video_bytes(fresh, info=dl_info2)
-            if video_bytes:
-                last_err = ""
-            else:
+            if not video_bytes:
                 last_err = _readable.get(
                     dl_info2.get("reason", ""),
                     f"URL fraiche OK mais le CDN refuse le download ({dl_info2.get('reason','?')})",
                 )
-        else:
-            # Pas de video_url frais -> on remonte la trace de resolution
-            dbg = (refreshed.get("_debug") or "").strip()
-            if dbg:
-                last_err = f"video introuvable via l'API ({dbg})"
+        if not video_bytes and not last_err:
+            # Message d'echec : on privilegie la raison yt-dlp (plus parlante)
+            if yt_reason in _readable:
+                last_err = _readable[yt_reason]
             else:
-                last_err = "video introuvable via l'API (cle RapidAPI non configuree ?)"
+                dbg = (refreshed.get("_debug") or "").strip()
+                suffix = f" [yt-dlp:{yt_reason}]" if yt_reason else ""
+                last_err = (f"video introuvable ({dbg})" if dbg else "video introuvable") + suffix
     if not video_bytes:
-        return _fallback(f"Telechargement impossible : {last_err}")
+        return _fallback(f"Telechargement impossible : {last_err or yt_reason or '?'}")
 
     # 2) Upload via sendVideo (multipart, fichier en memoire)
     try:

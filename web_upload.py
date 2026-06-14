@@ -3345,8 +3345,8 @@ document.addEventListener('keydown', function(e){
 
 <!-- Import depuis fichier cookies.txt -->
 <form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #3b82f6">
-<h3 style="margin-top:0">⚡ Import rapide depuis fichier cookies.txt</h3>
-<small>Méthode la plus simple : uploade le fichier cookies.txt téléchargé via l'extension <b>"Get cookies.txt"</b> de Chrome.</small>
+<h3 style="margin-top:0">⚡ Import cookies.txt <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">+ TÉLÉCHARGE LES REELS</span></h3>
+<small>Uploade le cookies.txt (extension <b>"Get cookies.txt LOCALLY"</b> de Chrome, en étant connecté à Instagram). Sert au scraping <b>ET</b> au téléchargement des vidéos de la Veille (yt-dlp) — y compris les reels que le scrape public ne voit pas.</small>
 <label style="margin-top:14px">Fichier cookies.txt</label>
 <input type="file" name="cookies_file" accept=".txt,text/plain" required>
 <small>Format Netscape (par défaut dans l'extension)</small>
@@ -27806,8 +27806,19 @@ def create_app():
             "csrftoken": wanted["csrftoken"] or "",
             "username": "",
         })
+        # Sauve AUSSI le fichier brut (format Netscape) : yt-dlp l'utilise pour
+        # telecharger les reels de la Veille (data/insta/cookies.txt).
+        ytdlp_ok = False
+        try:
+            from insta_scraper import INSTA_DIR
+            INSTA_DIR.mkdir(parents=True, exist_ok=True)
+            (INSTA_DIR / "cookies.txt").write_text(content, encoding="utf-8")
+            ytdlp_ok = True
+        except Exception:
+            pass
         found = [k for k, v in wanted.items() if v]
-        return _success(f"✅ Cookies importés ({', '.join(found)}). Tu peux maintenant ajouter des comptes à scraper.")
+        extra = " + activé le téléchargement des vidéos Veille (yt-dlp)" if ytdlp_ok else ""
+        return _success(f"✅ Cookies importés ({', '.join(found)}){extra}. Tu peux maintenant ajouter des comptes à scraper.")
 
     @app.route("/settings/insta_auth", methods=["POST"])
     def settings_insta_auth():
