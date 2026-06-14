@@ -1855,6 +1855,30 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
+// ⭐ Envoie une vidéo de la Bibliothèque dans le salon banger-{identité} (Discord).
+// L'identité est déjà connue (1er segment du file_id "identite|subdir|fichier").
+async function sendLibToBanger(fileId, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.innerHTML = "<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><circle cx='12' cy='12' r='10' opacity='.3'/><path d='M12 2a10 10 0 0 1 10 10'/></svg>";
+  try {
+    const fd = new FormData(); fd.set('file_id', fileId);
+    const r = await fetch('/cloud/send_banger', { method:'POST', body: fd });
+    const j = await r.json();
+    if(j.ok){
+      btn.innerHTML = '✅';
+      btn.title = 'Envoyé dans ' + (j.channel || ('banger-' + (j.identity||'')));
+      setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1'; }, 2800);
+    } else {
+      btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1';
+      alert('❌ Pas envoyé : ' + (j.error || '?'));
+    }
+  } catch(e){
+    btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1';
+    alert('Erreur réseau : ' + e);
+  }
+}
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
 var lbGallery = [];   // {url, isVideo, name, fileId}
 var lbIndex = 0;
@@ -7958,6 +7982,15 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     show_edit = "|videos|" in (file_id or "")
     actions_html = ""
     if file_id:
+        # ⭐ Banger : envoie cette video dans le salon banger-{identite} (videos uniquement)
+        banger_btn = ""
+        if is_video:
+            banger_btn = (
+                f"<button class='card-edit-btn' onclick='event.stopPropagation();sendLibToBanger(\"{fid_safe}\", this)' "
+                f"title='⭐ Envoyer dans le salon banger de cette identité (meilleur reel)' style='color:#ffd54a'>"
+                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
+                f"</button>"
+            )
         edit_btn = ""
         if show_edit:
             edit_btn = (
@@ -7968,6 +8001,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             )
         actions_html = (
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
+            f"{banger_btn}"
             f"{edit_btn}"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
@@ -24079,6 +24113,45 @@ def create_app():
             return "Not found", 404
         from flask import send_file
         return send_file(str(path))
+
+    @app.route("/cloud/send_banger", methods=["POST"])
+    def cloud_send_banger():
+        """Envoie une video de la Bibliothèque dans le salon banger-{identite}.
+
+        L'identite est le 1er segment du file_id ('identite|subdir|fichier'), donc
+        pas de selection a faire : ⭐ -> direct dans le bon salon Discord.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        file_id = (request.form.get("file_id") or "").strip()
+        parts = file_id.split("|", 2)
+        if len(parts) != 3:
+            return jsonify({"ok": False, "error": "file_id invalide"})
+        identity, subdir, filename = parts
+        identity = identity.lower().strip()
+        # Securite (meme regles que cloud_serve_file / cloud_delete)
+        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+            return jsonify({"ok": False, "error": "dossier invalide"})
+        if identity not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if not filename or "/" in filename or "\\" in filename or ".." in filename:
+            return jsonify({"ok": False, "error": "nom de fichier invalide"})
+        path = IDENTITIES_DIR / identity / subdir / filename
+        if not path.exists() or not path.is_file():
+            return jsonify({"ok": False, "error": "fichier introuvable"})
+        try:
+            data = path.read_bytes()
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"lecture: {e}"})
+        if not data:
+            return jsonify({"ok": False, "error": "fichier vide"})
+        ok, msg = _send_video_to_banger_channel(
+            identity, data, filename=filename, caption=""
+        )
+        if ok:
+            return jsonify({"ok": True, "channel": msg, "identity": identity})
+        return jsonify({"ok": False, "error": msg})
 
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
