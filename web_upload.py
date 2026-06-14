@@ -2065,11 +2065,57 @@ function _setBangerStar(btn, on){
     svg.setAttribute('stroke-width', on ? '0' : '2');
   }
 }
+// Jolie pop-up de confirmation (remplace le confirm() natif moche du navigateur)
+function uiConfirm(message, opts){
+  opts = opts || {};
+  return new Promise(function(resolve){
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.62);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#161616;border:1px solid #2f2f2f;border-radius:16px;padding:22px;max-width:390px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,.65);transform:scale(.96);transition:transform .12s';
+    var title = document.createElement('div');
+    title.textContent = opts.title || 'Confirmer';
+    title.style.cssText = 'font-size:16px;font-weight:800;color:#fff;margin-bottom:8px';
+    var msg = document.createElement('div');
+    msg.textContent = message || '';
+    msg.style.cssText = 'font-size:13.5px;color:#bbb;line-height:1.5;margin-bottom:20px';
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = opts.cancelText || 'Annuler';
+    cancel.style.cssText = 'padding:9px 18px;border-radius:10px;border:1px solid #3a3a3a;background:#222;color:#ddd;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit';
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.textContent = opts.okText || 'Confirmer';
+    ok.style.cssText = 'padding:9px 18px;border-radius:10px;border:0;color:#fff;font-weight:700;cursor:pointer;font-size:13px;font-family:inherit;background:' + (opts.danger ? 'linear-gradient(135deg,#ef4444,#dc2626)' : 'linear-gradient(135deg,#3b82f6,#2563eb)');
+    function close(val){
+      ov.style.opacity = '0'; card.style.transform = 'scale(.96)';
+      document.removeEventListener('keydown', onKey);
+      setTimeout(function(){ try{ document.body.removeChild(ov); }catch(e){} }, 130);
+      resolve(val);
+    }
+    function onKey(e){ if(e.key === 'Escape') close(false); else if(e.key === 'Enter') close(true); }
+    cancel.onclick = function(){ close(false); };
+    ok.onclick = function(){ close(true); };
+    ov.onclick = function(e){ if(e.target === ov) close(false); };
+    document.addEventListener('keydown', onKey);
+    row.appendChild(cancel); row.appendChild(ok);
+    card.appendChild(title); card.appendChild(msg); card.appendChild(row);
+    ov.appendChild(card); document.body.appendChild(ov);
+    requestAnimationFrame(function(){ ov.style.opacity = '1'; card.style.transform = 'scale(1)'; });
+    ok.focus();
+  });
+}
 async function toggleBanger(btn, fileId){
   const isOn = btn.classList.contains('is-banger');
   if(isOn){
     // Dé-cocher = supprimer le(s) message(s) du salon banger Discord -> on confirme
-    if(!confirm('Retirer ce reel des bangers ? Le(s) message(s) seront SUPPRIMÉS du salon banger Discord.')) return;
+    const _go = await uiConfirm(
+      'Le(s) message(s) de ce reel seront supprimés du salon banger Discord.',
+      { title: '⭐ Retirer ce reel des bangers ?', okText: 'Retirer', cancelText: 'Annuler', danger: true }
+    );
+    if(!_go) return;
   }
   btn.disabled = true;
   btn.style.opacity = '0.55';
