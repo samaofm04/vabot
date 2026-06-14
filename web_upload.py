@@ -1286,6 +1286,15 @@ window.addEventListener('DOMContentLoaded', function(){
   var tabName = params.get('tab');
   if(tabName){
     var btn = document.getElementById('tab-' + tabName);
+    if(!btn){
+      // Fallback : certains boutons (ex Reels) n'ont pas d'id -> on cherche
+      // celui dont le onclick reference ce tab (showTab('grp','<tab>',...)).
+      var _items = document.querySelectorAll('.item[onclick]');
+      for(var _i=0; _i<_items.length; _i++){
+        var _oc = _items[_i].getAttribute('onclick') || '';
+        if(_oc.indexOf("'" + tabName + "'") !== -1){ btn = _items[_i]; break; }
+      }
+    }
     if(btn) btn.click();  // Synchrone (pas de setTimeout pour éviter flicker)
   }
 });
@@ -8831,9 +8840,11 @@ async function pushAllReels(form){
       submitBtn.style.background = '';
     }
   }, 3500);
-  // Refresh auto : les nouveaux reels apparaissent dans la galerie sans F5 manuel
+  // Refresh auto : on retourne direct sur la galerie REELS de l'identité (pas le Dashboard)
   if(done > 0){
-    setTimeout(function(){ window.location.reload(); }, 1200);
+    setTimeout(function(){
+      window.location.href = '?tab=cloudreels&cloud_videos_ident=' + encodeURIComponent(identity);
+    }, 1000);
   }
 }
 
@@ -8907,9 +8918,20 @@ document.addEventListener('submit', function(e){
       mainInput.value = '';
       _upRefreshTable(mainInput);
     }, 2500);
-    // Refresh auto : la galerie se met à jour sans recharger à la main
+    // Refresh auto : on retourne direct sur la galerie du bon type (pas le Dashboard)
     if(done > 0){
-      setTimeout(function(){ window.location.reload(); }, 1300);
+      var _gmap = {
+        reel: ['cloudreels','cloud_videos_ident'],
+        post: ['cloudposts','cloud_posts_ident'],
+        story: ['cloudstories','cloud_stories_ident'],
+        storycta: ['cloudstoryctas','cloud_storyctas_ident']
+      };
+      var _g = _gmap[form.dataset.utype];
+      var _id = nonFileFields['identity'] || '';
+      setTimeout(function(){
+        if(_g){ window.location.href = '?tab=' + _g[0] + '&' + _g[1] + '=' + encodeURIComponent(_id); }
+        else { window.location.reload(); }
+      }, 1100);
     }
   })();
 }, true);
