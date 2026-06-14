@@ -112,7 +112,11 @@ STEPS = [
             "• Poste **1 story** quotidienne → clique sur **Story**\n"
             "• 🎬 **Publie 2 reels entre 18h et 21h** → clique sur **Reel**\n"
             "• **Repost les 2 reels de la veille en story** avec un texte **CTA** → clique sur **Story CTA**\n"
-            "• 📲 **Story CTA + liens de redirection** + crée une **bulle à la une « LINKS »** pour stocker les CTA\n\n"
+            "• 📲 **Story CTA + liens de redirection** + crée une **bulle à la une « LINKS »** pour stocker les CTA\n"
+            "   🖼️ **Couverture de la bulle « LINKS »** : prends la **photo de couverture dédiée** "
+            "(le fichier dont le nom **commence par « w »**), **enregistre-la dans ta pellicule**, "
+            "puis mets-la en **couverture** de la bulle à la une.\n"
+            "   ⚠️ Cette photo **n'est PAS une story** à publier — c'est **uniquement la couverture** du highlight.\n\n"
             "🎉 **Le warm-up est terminé** — c'est ta routine de tous les jours. Bon courage 💪"
         ),
     },
