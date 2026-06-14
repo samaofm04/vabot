@@ -300,6 +300,109 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
         return False, f"timeout / erreur: {e}"
 
 
+def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
+    """Envoie un REEL de la Bibliothèque dans banger-{identity} au FORMAT COMPLET
+    (identique au bot quand il envoie un reel a un VA) : vidéo CLEAN + EXEMPLE
+    + message CAPTION + message DESCRIPTION.
+
+    `video_path` = chemin du fichier video CLEAN. caption/description/exemple sont
+    deduits par convention de nommage (meme que cogs/autopost.random_reel_data) :
+    <stem>.txt, <stem>.desc.txt, <stem>.example.<ext>. Retourne (ok, info).
+    """
+    import asyncio
+    from pathlib import Path as _P
+    if _BOT_REF is None:
+        return False, "bot pas initialise"
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, "loop bot non actif"
+    ident = (identity or "").strip()
+    if not ident:
+        return False, "identite vide"
+    video_path = _P(video_path)
+    if not video_path.exists() or not video_path.is_file():
+        return False, "fichier introuvable"
+
+    def _unesc(s):
+        return s.replace("\\n", "\n") if s else s
+    caption = ""
+    description = ""
+    try:
+        cap_p = video_path.with_suffix(".txt")
+        if cap_p.exists():
+            caption = _unesc(cap_p.read_text(encoding="utf-8").strip())
+    except Exception:
+        pass
+    try:
+        desc_p = video_path.with_suffix(".desc.txt")
+        if desc_p.exists():
+            description = _unesc(desc_p.read_text(encoding="utf-8").strip())
+    except Exception:
+        pass
+    example = None
+    for ext in VIDEO_EXTS:
+        c = video_path.parent / f"{video_path.stem}.example{ext}"
+        if c.exists():
+            example = c
+            break
+
+    async def _do_send():
+        import discord
+        ident_low = ident.lower()
+        found_category = False
+        for guild in _BOT_REF.guilds:
+            cat = _find_identity_category(guild, ident)
+            if cat is None:
+                continue
+            found_category = True
+            cands = [c for c in cat.channels
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+            if not cands:
+                return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+            banger = None
+            for c in cands:
+                n = c.name.lower()
+                if n.endswith("banger-" + ident_low) or n.endswith("-" + ident_low) or n == "banger-" + ident_low:
+                    banger = c
+                    break
+            banger = banger or cands[0]
+            limit = getattr(guild, "filesize_limit", 26214400) or 26214400
+            if video_path.stat().st_size > limit:
+                return (False, f"video {video_path.stat().st_size//(1024*1024)} Mo > limite Discord "
+                               f"({limit//(1024*1024)} Mo) — serveur non boost ?")
+            intro = f"🎬 **REEL — identité `{ident}`**\n📥 Télécharge la vidéo CLEAN."
+            if example:
+                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
+            files = [discord.File(str(video_path), filename=video_path.name)]
+            if example:
+                files.append(discord.File(str(example), filename=f"EXEMPLE_{example.name}"))
+            try:
+                await banger.send(content=intro, files=files)
+            except discord.HTTPException:
+                try:
+                    await banger.send(content=intro, file=discord.File(str(video_path), filename=video_path.name))
+                except discord.HTTPException as e:
+                    return False, f"erreur envoi Discord: {e}"
+            if caption:
+                await banger.send("📝 **CAPTION** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
+                await banger.send(caption[:1990])
+            if description:
+                await banger.send("📄 **DESCRIPTION** (à coller dans le **champ légende** du post) :")
+                # Discord cap 2000 car/message -> on decoupe les longues descriptions
+                for i in range(0, len(description), 1990):
+                    await banger.send(description[i:i + 1990])
+            return True, f"#{banger.name}"
+        if not found_category:
+            return False, f"pas de catégorie nommée '{ident}' sur le serveur Discord"
+        return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_do_send(), loop)
+        return fut.result(timeout=120)
+    except Exception as e:
+        return False, f"timeout / erreur: {e}"
+
+
 def _read_env_lines():
     """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
     if not ENV_FILE.exists():
@@ -24140,15 +24243,9 @@ def create_app():
         path = IDENTITIES_DIR / identity / subdir / filename
         if not path.exists() or not path.is_file():
             return jsonify({"ok": False, "error": "fichier introuvable"})
-        try:
-            data = path.read_bytes()
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"lecture: {e}"})
-        if not data:
-            return jsonify({"ok": False, "error": "fichier vide"})
-        ok, msg = _send_video_to_banger_channel(
-            identity, data, filename=filename, caption=""
-        )
+        # Format COMPLET (REEL — identité + CLEAN + EXEMPLE + CAPTION + DESCRIPTION),
+        # comme quand le bot envoie un reel a un VA.
+        ok, msg = _send_reel_to_banger_channel(identity, path)
         if ok:
             return jsonify({"ok": True, "channel": msg, "identity": identity})
         return jsonify({"ok": False, "error": msg})
