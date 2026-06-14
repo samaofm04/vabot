@@ -233,6 +233,73 @@ def _move_channel_to_identity(channel_id: int, new_identity: str):
         return False, f"timeout / erreur: {e}"
 
 
+def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
+                                  filename: str = "banger.mp4",
+                                  caption: str = "") -> tuple:
+    """Envoie une video (bytes) dans le salon 'banger-{identity}' via le bot.
+
+    Cherche, dans la categorie de l'identite, un salon texte dont le nom contient
+    'banger' (priorite a celui qui contient aussi le nom de l'identite). Tourne
+    dans le thread Flask -> l'action Discord passe par le loop asyncio du bot.
+    Retourne (success: bool, info: str).
+    """
+    import asyncio
+    import io
+    if _BOT_REF is None:
+        return False, "bot pas initialise"
+    if not video_bytes:
+        return False, "video vide"
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, "loop bot non actif"
+    ident = (identity or "").strip()
+    if not ident:
+        return False, "identite vide"
+
+    async def _do_send():
+        import discord
+        ident_low = ident.lower()
+        found_category = False
+        for guild in _BOT_REF.guilds:
+            cat = _find_identity_category(guild, ident)
+            if cat is None:
+                continue  # pas de categorie pour cette identite sur ce serveur
+            found_category = True
+            # On cherche UNIQUEMENT dans la categorie de l'identite -> jamais le
+            # mauvais salon banger d'une autre identite.
+            cands = [c for c in cat.channels
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+            if not cands:
+                return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+            # Priorite au salon qui se termine par '-{identite}' (ex '💥・banger-amelia')
+            banger = None
+            for c in cands:
+                n = c.name.lower()
+                if n.endswith("banger-" + ident_low) or n.endswith("-" + ident_low) or n == "banger-" + ident_low:
+                    banger = c
+                    break
+            banger = banger or cands[0]
+            limit = getattr(guild, "filesize_limit", 26214400) or 26214400
+            if len(video_bytes) > limit:
+                return (False, f"video {len(video_bytes)//(1024*1024)} Mo > limite Discord "
+                               f"({limit//(1024*1024)} Mo) — serveur non boost ?")
+            try:
+                f = discord.File(io.BytesIO(video_bytes), filename=filename or "banger.mp4")
+                await banger.send(content=(caption or "")[:1900], file=f)
+                return True, f"#{banger.name}"
+            except Exception as e:
+                return False, f"erreur envoi Discord: {e}"
+        if not found_category:
+            return False, f"pas de catégorie nommée '{ident}' sur le serveur Discord"
+        return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_do_send(), loop)
+        return fut.result(timeout=90)
+    except Exception as e:
+        return False, f"timeout / erreur: {e}"
+
+
 def _read_env_lines():
     """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
     if not ENV_FILE.exists():
@@ -16802,6 +16869,9 @@ def _render_veille_feed_html() -> str:
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
+      <button onclick='starReelMenu(this, "{rid}")' title="⭐ Envoyer en banger (meilleur reel) vers une identité" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#ffd54a;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
       <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
@@ -16923,6 +16993,86 @@ function veilleJumpToDate(day){
   // Fallback : trouve via la card (peut etre sent, sans checkbox)
   var card = document.querySelector('.veille-card[data-day="' + day + '"]');
   if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+}
+// ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
+window.__bangerIdentities = null;
+async function _loadBangerIdentities(){
+  if(window.__bangerIdentities) return window.__bangerIdentities;
+  try {
+    const r = await fetch('/veille/identities');
+    const j = await r.json();
+    window.__bangerIdentities = (j.ok && j.identities) ? j.identities : [];
+  } catch(e){ window.__bangerIdentities = []; }
+  return window.__bangerIdentities;
+}
+async function starReelMenu(btn, rid){
+  // Ferme tout menu deja ouvert
+  document.querySelectorAll('.banger-menu').forEach(function(m){ m.remove(); });
+  const idents = await _loadBangerIdentities();
+  if(!idents.length){ alert("Aucune identité trouvée. Crée une identité d'abord."); return; }
+  const menu = document.createElement('div');
+  menu.className = 'banger-menu';
+  // position:fixed + append au body -> JAMAIS rogne par l'overflow:hidden des cartes
+  menu.style.cssText = 'position:fixed;z-index:9999;background:#161616;border:1px solid #3a3a3a;border-radius:10px;padding:6px;min-width:180px;max-height:300px;overflow:auto;box-shadow:0 12px 34px rgba(0,0,0,.7)';
+  const title = document.createElement('div');
+  title.textContent = '⭐ Meilleur reel → banger';
+  title.style.cssText = 'font-size:11px;color:#888;padding:5px 8px;font-weight:600';
+  menu.appendChild(title);
+  function cleanup(){
+    menu.remove();
+    document.removeEventListener('mousedown', onDoc, true);
+    window.removeEventListener('scroll', cleanup, true);
+    window.removeEventListener('resize', cleanup, true);
+  }
+  function onDoc(ev){ if(!menu.contains(ev.target) && ev.target !== btn){ cleanup(); } }
+  idents.forEach(function(id){
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.textContent = '💥 banger-' + id;
+    item.style.cssText = 'display:block;width:100%;text-align:left;background:none;border:0;color:#eee;padding:8px 9px;border-radius:6px;cursor:pointer;font-size:13px';
+    item.onmouseenter = function(){ item.style.background = '#2a2a2a'; };
+    item.onmouseleave = function(){ item.style.background = 'none'; };
+    item.onclick = function(ev){ ev.stopPropagation(); cleanup(); sendReelToBanger(rid, id, btn); };
+    menu.appendChild(item);
+  });
+  document.body.appendChild(menu);
+  // Positionne sous le bouton (coords viewport), aligne a droite, sans deborder l'ecran
+  const r = btn.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = Math.max(6, r.right - mw);
+  let top = r.bottom + 4;
+  if(top + mh > window.innerHeight - 6) top = Math.max(6, r.top - mh - 4);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  // Clic ailleurs / scroll / resize -> ferme
+  setTimeout(function(){
+    document.addEventListener('mousedown', onDoc, true);
+    window.addEventListener('scroll', cleanup, true);
+    window.addEventListener('resize', cleanup, true);
+  }, 0);
+}
+async function sendReelToBanger(rid, identity, btn){
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳';
+  btn.disabled = true;
+  try {
+    const fd = new FormData(); fd.set('reel_id', rid); fd.set('identity', identity);
+    const r = await fetch('/veille/send_banger', { method:'POST', body: fd });
+    const j = await r.json();
+    if(j.ok){
+      btn.innerHTML = '✅';
+      btn.title = 'Envoyé dans ' + (j.channel || ('banger-' + identity));
+    } else {
+      btn.innerHTML = orig;
+      alert('❌ Pas envoyé : ' + (j.error || '?'));
+    }
+  } catch(e){
+    btn.innerHTML = orig;
+    alert('Erreur réseau : ' + e);
+  } finally {
+    btn.disabled = false;
+    setTimeout(function(){ if(btn.innerHTML === '✅') btn.innerHTML = orig; }, 3000);
+  }
 }
 async function sendSelectedVeille(){
   const cbs = document.querySelectorAll('.veille-cb:checked');
@@ -26349,6 +26499,56 @@ def create_app():
         if res.get("ok"):
             veille.mark_sent(rid)
         return jsonify(res)
+
+    @app.route("/veille/identities", methods=["GET"])
+    def veille_identities():
+        """Liste des identites (pour le menu '⭐ banger')."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify({"ok": True, "identities": _list_identities()})
+
+    @app.route("/veille/send_banger", methods=["POST"])
+    def veille_send_banger():
+        """Envoie un reel (en VIDEO) dans le salon banger-{identity} Discord.
+
+        Sert a stocker les MEILLEURS reels par identite. Telecharge via yt-dlp
+        (methode primaire), puis poste le fichier dans le salon banger associe.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille
+            import veille_telegram
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        identity = (request.form.get("identity") or "").strip()
+        if not rid or not identity:
+            return jsonify({"ok": False, "error": "reel_id + identity requis"})
+        reel = veille.get_reel(rid)
+        if not reel:
+            return jsonify({"ok": False, "error": "Reel introuvable"})
+        url = (reel.get("url") or "").strip()
+        # 1) Download : yt-dlp d'abord (le plus fiable), puis la chaine de secours
+        info = {}
+        video_bytes = veille_telegram.download_via_ytdlp(url, info=info) if url else None
+        if not video_bytes and info.get("reason") not in ("audience_restreinte", "trop_gros_50mb"):
+            fresh = veille_telegram.refresh_post_data(url, owner=reel.get("owner", "")) if url else {}
+            vu = (fresh.get("video_url") or reel.get("video_url") or "").strip()
+            if vu:
+                video_bytes = veille_telegram.download_video_bytes(vu, info=info)
+        if not video_bytes:
+            reason = info.get("reason") or "video indisponible"
+            return jsonify({"ok": False, "error": f"Telechargement impossible ({reason})"})
+        caption = (reel.get("caption") or "").strip()
+        ok, msg = _send_video_to_banger_channel(
+            identity, video_bytes, filename=f"banger_{rid}.mp4", caption=caption
+        )
+        if ok:
+            return jsonify({"ok": True, "channel": msg, "identity": identity})
+        return jsonify({"ok": False, "error": msg})
 
     @app.route("/veille/send_day", methods=["POST"])
     def veille_send_day():
