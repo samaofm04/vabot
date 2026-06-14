@@ -21,6 +21,7 @@ IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
 USERS_FILE = DATA_DIR / "users.json"
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
+BANGER_MARKS_FILE = DATA_DIR / "banger_marks.json"  # file_ids marqués "banger" (etoile jaune)
 THUMB_DIR = DATA_DIR / "thumbnails"
 THUMB_SIZE = 360  # largeur max du thumbnail
 THUMB_QUALITY = 72  # qualité JPEG (compromis taille/vitesse)
@@ -401,6 +402,40 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
         return fut.result(timeout=120)
     except Exception as e:
         return False, f"timeout / erreur: {e}"
+
+
+# ===== Marquage "banger" (etoile jaune) : persistance des file_ids =====
+def _load_banger_marks() -> set:
+    try:
+        if BANGER_MARKS_FILE.exists():
+            data = json.loads(BANGER_MARKS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return set(data)
+    except Exception:
+        pass
+    return set()
+
+
+def _save_banger_marks(marks) -> None:
+    try:
+        BANGER_MARKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BANGER_MARKS_FILE.write_text(json.dumps(sorted(marks), ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _add_banger_mark(file_id: str) -> None:
+    m = _load_banger_marks()
+    if file_id not in m:
+        m.add(file_id)
+        _save_banger_marks(m)
+
+
+def _remove_banger_mark(file_id: str) -> None:
+    m = _load_banger_marks()
+    if file_id in m:
+        m.discard(file_id)
+        _save_banger_marks(m)
 
 
 def _read_env_lines():
@@ -1958,28 +1993,42 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
-// ⭐ Envoie une vidéo de la Bibliothèque dans le salon banger-{identité} (Discord).
+// ⭐ Étoile banger : grise par défaut -> jaune au clic (= envoyé dans banger-{identité}).
 // L'identité est déjà connue (1er segment du file_id "identite|subdir|fichier").
-async function sendLibToBanger(fileId, btn){
-  const orig = btn.innerHTML;
+function _setBangerStar(btn, on){
+  btn.classList.toggle('is-banger', on);
+  btn.style.color = on ? '#ffd54a' : '#9aa0a6';
+  var svg = btn.querySelector('svg');
+  if(svg){
+    svg.setAttribute('fill', on ? '#ffd54a' : 'none');
+    svg.setAttribute('stroke', on ? 'none' : '#9aa0a6');
+    svg.setAttribute('stroke-width', on ? '0' : '2');
+  }
+}
+async function toggleBanger(btn, fileId){
+  const isOn = btn.classList.contains('is-banger');
   btn.disabled = true;
-  btn.style.opacity = '0.6';
-  btn.innerHTML = "<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><circle cx='12' cy='12' r='10' opacity='.3'/><path d='M12 2a10 10 0 0 1 10 10'/></svg>";
+  btn.style.opacity = '0.55';
   try {
     const fd = new FormData(); fd.set('file_id', fileId);
-    const r = await fetch('/cloud/send_banger', { method:'POST', body: fd });
-    const j = await r.json();
-    if(j.ok){
-      btn.innerHTML = '✅';
-      btn.title = 'Envoyé dans ' + (j.channel || ('banger-' + (j.identity||'')));
-      setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1'; }, 2800);
+    if(isOn){
+      // Jaune -> gris : retire juste le marquage (n'efface rien sur Discord)
+      const r = await fetch('/cloud/banger_unmark', { method:'POST', body: fd });
+      const j = await r.json();
+      if(j.ok){ _setBangerStar(btn, false); }
+      else { alert('❌ ' + (j.error || '?')); }
     } else {
-      btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1';
-      alert('❌ Pas envoyé : ' + (j.error || '?'));
+      // Gris -> jaune : envoie le reel dans le salon banger + marque l'étoile
+      const r = await fetch('/cloud/send_banger', { method:'POST', body: fd });
+      const j = await r.json();
+      if(j.ok){ _setBangerStar(btn, true); }
+      else { alert('❌ Pas envoyé : ' + (j.error || '?')); }
     }
   } catch(e){
-    btn.innerHTML = orig; btn.disabled = false; btn.style.opacity = '1';
     alert('Erreur réseau : ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '1';
   }
 }
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
@@ -8014,7 +8063,7 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -8088,10 +8137,16 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         # ⭐ Banger : envoie cette video dans le salon banger-{identite} (videos uniquement)
         banger_btn = ""
         if is_video:
+            _on = bool(is_banger)
+            _scol = "#ffd54a" if _on else "#9aa0a6"        # jaune si marqué, gris sinon
+            _sfill = "#ffd54a" if _on else "none"          # rempli si marqué, contour sinon
+            _sstroke = "none" if _on else "#9aa0a6"
+            _sw = "0" if _on else "2"
+            _cls = "card-edit-btn banger-star" + (" is-banger" if _on else "")
             banger_btn = (
-                f"<button class='card-edit-btn' onclick='event.stopPropagation();sendLibToBanger(\"{fid_safe}\", this)' "
-                f"title='⭐ Envoyer dans le salon banger de cette identité (meilleur reel)' style='color:#ffd54a'>"
-                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
+                f"<button class='{_cls}' onclick='event.stopPropagation();toggleBanger(this, \"{fid_safe}\")' "
+                f"title='Marquer comme banger — envoie le reel dans le salon banger de l identité' style='color:{_scol}'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_sfill}' stroke='{_sstroke}' stroke-width='{_sw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
         edit_btn = ""
@@ -8428,6 +8483,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                     example_by_stem[base_stem] = pe.name
 
         total_files = len(files)
+        _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
             clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
@@ -8442,7 +8498,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks)))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px' id='vault-grid'>"
@@ -24247,8 +24303,22 @@ def create_app():
         # comme quand le bot envoie un reel a un VA.
         ok, msg = _send_reel_to_banger_channel(identity, path)
         if ok:
+            _add_banger_mark(file_id)  # etoile devient jaune (persiste)
             return jsonify({"ok": True, "channel": msg, "identity": identity})
         return jsonify({"ok": False, "error": msg})
+
+    @app.route("/cloud/banger_unmark", methods=["POST"])
+    def cloud_banger_unmark():
+        """Retire le marquage 'banger' (etoile jaune -> grise). N'efface RIEN sur
+        Discord, c'est juste un marqueur visuel cote site."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        file_id = (request.form.get("file_id") or "").strip()
+        if not file_id:
+            return jsonify({"ok": False, "error": "file_id manquant"})
+        _remove_banger_mark(file_id)
+        return jsonify({"ok": True})
 
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
