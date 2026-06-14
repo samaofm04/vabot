@@ -489,6 +489,78 @@ def _delete_banger_messages(info: dict) -> tuple:
         return False, f"timeout / erreur: {e}"
 
 
+def _clear_banger_marks_for_identity(identity: str) -> None:
+    """Retire tous les marquages banger d'une identité (file_id 'identite|...')."""
+    ident = (identity or "").strip().lower()
+    if not ident:
+        return
+    m = _load_banger_marks()
+    keys = [k for k in list(m.keys()) if k.split("|", 1)[0].lower() == ident]
+    if keys:
+        for k in keys:
+            m.pop(k, None)
+        _save_banger_marks(m)
+
+
+def _purge_banger_channel(identity: str) -> tuple:
+    """Supprime TOUS les messages postés par le bot dans le salon banger-{identity}.
+    Suppression individuelle (message.delete) -> pas besoin de Manage Messages pour
+    ses propres messages. Retourne (ok, info, count)."""
+    import asyncio
+    if _BOT_REF is None:
+        return False, "bot pas initialise", 0
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, "loop bot non actif", 0
+    ident = (identity or "").strip()
+    if not ident:
+        return False, "identite vide", 0
+
+    async def _do_purge():
+        import discord
+        ident_low = ident.lower()
+        me_id = _BOT_REF.user.id if _BOT_REF.user else None
+        if me_id is None:
+            # Sécurité : sans identité du bot on NE supprime RIEN (sinon on risquerait
+            # d'effacer les messages d'autres utilisateurs).
+            return False, "bot non identifié (réessaie dans quelques secondes)", 0
+        for guild in _BOT_REF.guilds:
+            cat = _find_identity_category(guild, ident)
+            if cat is None:
+                continue
+            cands = [c for c in cat.channels
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+            if not cands:
+                return False, f"pas de salon 'banger' dans la categorie '{ident}'", 0
+            banger = None
+            for c in cands:
+                n = c.name.lower()
+                if n.endswith("banger-" + ident_low) or n.endswith("-" + ident_low) or n == "banger-" + ident_low:
+                    banger = c
+                    break
+            banger = banger or cands[0]
+            deleted = 0
+            try:
+                async for msg in banger.history(limit=1000):
+                    # UNIQUEMENT les messages du bot (jamais ceux d'autres users)
+                    if msg.author and msg.author.id == me_id:
+                        try:
+                            await msg.delete()
+                            deleted += 1
+                        except Exception:
+                            pass
+            except Exception as e:
+                return False, f"erreur lecture historique: {e}", deleted
+            return True, f"#{banger.name}", deleted
+        return False, f"pas de catégorie nommée '{ident}' sur le serveur Discord", 0
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_do_purge(), loop)
+        return fut.result(timeout=180)
+    except Exception as e:
+        return False, f"timeout / erreur: {e}", 0
+
+
 def _read_env_lines():
     """Lit .env en preservant les lignes (vide si fichier n'existe pas)."""
     if not ENV_FILE.exists():
@@ -2106,6 +2178,29 @@ function toggleBangerFilter(btn){
     }
   }
   applyBangerFilter();
+}
+// 🗑 Vide le salon banger-{identite} (supprime les messages du bot + etoiles -> gris)
+async function purgeBanger(identity, btn){
+  if(btn){ var s = btn.closest('.vault-sort'); if(s) s.classList.remove('open'); }
+  var go = await uiConfirm(
+    'Tous les messages postés par le bot dans banger-' + identity + ' seront supprimés, et les étoiles repassent en gris. (Les vidéos de la Bibliothèque ne sont PAS touchées.)',
+    { title: '🗑 Vider le salon banger-' + identity + ' ?', okText: 'Vider', cancelText: 'Annuler', danger: true }
+  );
+  if(!go) return;
+  try {
+    var fd = new FormData(); fd.set('identity', identity);
+    var r = await fetch('/cloud/banger_purge', { method:'POST', body: fd });
+    var j = await r.json();
+    if(j.ok){
+      document.querySelectorAll('.banger-star.is-banger').forEach(function(b){ _setBangerStar(b, false); });
+      await uiConfirm((j.deleted || 0) + ' message(s) supprimé(s) de ' + (j.channel || ('banger-' + identity)) + '.',
+        { title: '✅ Salon vidé', okText: 'OK', cancelText: 'OK' });
+    } else {
+      await uiConfirm(j.error || '?', { title: '❌ Échec', okText: 'OK', cancelText: 'OK' });
+    }
+  } catch(e){
+    await uiConfirm('Erreur réseau : ' + e, { title: '❌ Erreur', okText: 'OK', cancelText: 'OK' });
+  }
 }
 // Jolie pop-up de confirmation (remplace le confirm() natif moche du navigateur)
 function uiConfirm(message, opts){
@@ -8547,10 +8642,14 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "<span class='vault-radio'></span>Croissant</a>"
         f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
         "<span class='vault-radio'></span>Décroissant</a>"
-        + ("<div class='vault-sort-sep'></div>"
-           "<button type='button' class='vault-sort-item' id='banger-filter-item' "
-           "onclick='toggleBangerFilter(this)' style='width:100%;background:none;border:0;text-align:left;font-family:inherit'>"
-           "<span class='vault-radio'></span>⭐ Bangers seulement</button>"
+        + (("<div class='vault-sort-sep'></div>"
+            "<button type='button' class='vault-sort-item' id='banger-filter-item' "
+            "onclick='toggleBangerFilter(this)' style='width:100%;background:none;border:0;text-align:left;font-family:inherit'>"
+            "<span class='vault-radio'></span>⭐ Bangers seulement</button>"
+            "<button type='button' class='vault-sort-item' "
+            f"onclick='purgeBanger(\"{selected}\", this)' "
+            "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
+            "<span class='vault-radio'></span>🗑 Vider le salon banger</button>")
            if is_video else "")
         + "</div>"
         "</div>"
@@ -24507,6 +24606,22 @@ def create_app():
         info = _pop_banger_mark(file_id)  # retire le marquage + recupere les infos d'envoi
         ok_del, del_msg = _delete_banger_messages(info)
         return jsonify({"ok": True, "deleted": del_msg, "delete_ok": ok_del})
+
+    @app.route("/cloud/banger_purge", methods=["POST"])
+    def cloud_banger_purge():
+        """Vide le salon banger-{identity} : supprime tous les messages du bot +
+        retire les marquages banger de cette identité (etoiles -> grises)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip().lower()
+        if not identity or identity not in _list_identities():
+            return jsonify({"ok": False, "error": "identité invalide"})
+        ok, info, count = _purge_banger_channel(identity)
+        if ok:
+            _clear_banger_marks_for_identity(identity)
+            return jsonify({"ok": True, "channel": info, "deleted": count})
+        return jsonify({"ok": False, "error": info})
 
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
