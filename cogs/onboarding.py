@@ -116,7 +116,9 @@ STEPS = [
             "   🖼️ **Couverture de la bulle « LINKS »** : prends la **photo de couverture dédiée** "
             "(le fichier dont le nom **commence par « w »**), **enregistre-la dans ta pellicule**, "
             "puis mets-la en **couverture** de la bulle à la une.\n"
-            "   ⚠️ Cette photo **n'est PAS une story** à publier — c'est **uniquement la couverture** du highlight.\n\n"
+            "   ⚠️ Cette photo **n'est PAS une story** à publier — c'est **uniquement la couverture** du highlight.\n"
+            "📸 **Vise ce rendu** (voir les exemples joints) : ton profil doit ressembler à ça — "
+            "bulles à la une **Me / Life / Travel / 🔗 LINKS** + une **story avec le lien** (type WhatsApp).\n\n"
             "🎉 **Le warm-up est terminé** — c'est ta routine de tous les jours. Bon courage 💪"
         ),
     },
