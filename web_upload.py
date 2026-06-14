@@ -22559,7 +22559,7 @@ def _render_employees_table_html() -> str:
         table.append(
             f"<tr class='emp-row' data-emp-name='{uname.lower()}' data-emp-role='{role_key}' data-emp-status='{_status_attr}' data-emp-creators='{assigned_csv}' style='border-top:1px solid #232323'>"
             f"<td style='padding:14px 16px;width:36px'>"
-            f"<input type='checkbox' class='emp-check' data-emp='{uname}' onchange='updateEmpBatch()' style='accent-color:#3b82f6'></td>"
+            f"<input type='checkbox' class='emp-check' data-emp='{html_escape(uname, quote=True)}' onchange='updateEmpBatch()' style='accent-color:#3b82f6'></td>"
             f"<td style='padding:14px 16px'>"
             f"<div style='display:flex;align-items:center;gap:10px'>"
             f"<div style='width:30px;height:30px;border-radius:50%;background:hsl({ah},60%,45%);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;flex-shrink:0'>{avatar_letter}</div>"
@@ -22702,7 +22702,9 @@ function batchEmpAction(action){
   if(!confirm(label + ' ' + names.length + ' employee(s)?')) return;
   var f = document.createElement('form');
   f.method='POST'; f.action='/settings/role/batch'; f.style.display='none';
-  f.innerHTML = '<input name=action value="'+action+'"><input name=usernames value="'+names.join(',')+'">';
+  // createElement + .value (pas d'innerHTML) -> aucune injection HTML possible via un username
+  var ia=document.createElement('input'); ia.type='hidden'; ia.name='action'; ia.value=action; f.appendChild(ia);
+  var iu=document.createElement('input'); iu.type='hidden'; iu.name='usernames'; iu.value=names.join(','); f.appendChild(iu);
   document.body.appendChild(f); f.submit();
 }
 </script>"""
@@ -22957,14 +22959,14 @@ function openPermissions(key, name){
         html += '<tr style="background:#1a1a1a"><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Menus</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Permissions</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Data scope</th></tr>';
         section.items.forEach(function(item){
           var menuPerms = perms[item.key] || {};
-          var enabled = menuPerms.enabled !== false;
+          var enabled = menuPerms.enabled === true;  // fail-closed : décoché par défaut (sinon un rôle vierge voyait TOUT au save)
           var scope = menuPerms.scope || 'self';
           html += '<tr style="border-top:1px solid #1a1a1a">';
           html += '<td style="padding:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="enabled" onchange="toggleMenuRow(this)" ' + (enabled ? 'checked' : '') + ' style="accent-color:#3b82f6;width:18px;height:18px"> ' + item.name + '</label></td>';
           // Function perms
           var fnHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
           (item.perms || []).forEach(function(p){
-            var checked = (menuPerms.perms || []).indexOf(p) !== -1 || enabled;
+            var checked = (menuPerms.perms || []).indexOf(p) !== -1;  // coché seulement si explicitement accordé
             fnHtml += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="perm" data-perm="' + p + '" ' + (checked ? 'checked' : '') + ' style="accent-color:#3b82f6"> ' + p + '</label>';
           });
           fnHtml += '</div>';
@@ -23021,7 +23023,7 @@ function savePermissions(){
   document.querySelectorAll('#perm-content [data-menu]').forEach(function(input){
     var menu = input.dataset.menu;
     var field = input.dataset.field;
-    if(!perms[menu]) perms[menu] = {enabled: true, perms: [], scope: 'self'};
+    if(!perms[menu]) perms[menu] = {enabled: false, perms: [], scope: 'self'};
     if(field === 'enabled') perms[menu].enabled = input.checked;
     else if(field === 'perm' && input.checked) perms[menu].perms.push(input.dataset.perm);
     else if(field === 'scope' && input.checked) perms[menu].scope = input.value;
@@ -26320,7 +26322,7 @@ def create_app():
         # (les caption sont souvent vides depuis le scraping initial des trends)
         needs_refresh = not (reel.get("caption") or "").strip() or not (reel.get("video_url") or "").strip()
         if needs_refresh and url:
-            fresh = veille_telegram.refresh_post_data(url)
+            fresh = veille_telegram.refresh_post_data(url, owner=reel.get("owner", ""))
             updated_fields = {}
             if fresh.get("caption") and not (reel.get("caption") or "").strip():
                 reel["caption"] = fresh["caption"]
@@ -26335,11 +26337,14 @@ def create_app():
         description = (reel.get("caption") or "").strip()
         # 1) Tente download + sendVideo, fallback sur lien si echec
         #    + followup texte avec la description IG si elle existe
+        #    owner = @compte source -> permet de re-resoudre le video_url via
+        #    les reels du compte si l'URL stockee a expire.
         res = veille_telegram.send_video_from_url(
             reel.get("video_url", ""),
             caption=caption,
             fallback_url=url,
             followup_text=description,
+            owner=reel.get("owner", ""),
         )
         if res.get("ok"):
             veille.mark_sent(rid)
@@ -26370,7 +26375,7 @@ def create_app():
             url = (r.get("url") or "").strip()
             # Refresh caption/video_url si manquants
             if url and (not (r.get("caption") or "").strip() or not (r.get("video_url") or "").strip()):
-                fresh = veille_telegram.refresh_post_data(url)
+                fresh = veille_telegram.refresh_post_data(url, owner=r.get("owner", ""))
                 if fresh.get("caption") and not (r.get("caption") or "").strip():
                     r["caption"] = fresh["caption"]
                     veille.update_reel(r["id"], caption=fresh["caption"])
@@ -26383,6 +26388,7 @@ def create_app():
                 caption=caption,
                 fallback_url=url,
                 followup_text=description,
+                owner=r.get("owner", ""),
             )
             if res.get("ok"):
                 veille.mark_sent(r["id"])

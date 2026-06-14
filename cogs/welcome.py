@@ -492,7 +492,12 @@ async def setup_va_ticket(guild, member, bot=None):
 
     # Envoyer le message intro (avec photos optionnelles)
     cfg = load_welcome_config()
-    intro_text = cfg["ticket_intro_message"].replace("\\n", "\n").format(mention=member.mention)
+    _raw_intro = cfg["ticket_intro_message"].replace("\\n", "\n")
+    try:
+        intro_text = _raw_intro.format(mention=member.mention)
+    except (KeyError, ValueError, IndexError):
+        # Message avec accolades parasites -> on évite le crash, on remplace juste {mention}
+        intro_text = _raw_intro.replace("{mention}", member.mention)
     files = build_intro_files()
     try:
         await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
@@ -661,7 +666,11 @@ class Welcome(commands.Cog):
         except Exception:
             pass
         try:
-            text = cfg["welcome_public_message"].replace("\\n", "\n").format(mention=member.mention)
+            _raw_pub = cfg["welcome_public_message"].replace("\\n", "\n")
+            try:
+                text = _raw_pub.format(mention=member.mention)
+            except (KeyError, ValueError, IndexError):
+                text = _raw_pub.replace("{mention}", member.mention)
             await channel.send(content=text, view=WelcomeContinueView())
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")

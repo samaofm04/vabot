@@ -258,6 +258,137 @@ def _scrape_via_rapidapi_single_post(shortcode: str) -> dict:
     return {}
 
 
+def _scrape_ig_page_for_video(shortcode: str) -> str:
+    """Fallback SANS API ni owner : scrape les pages /p/ et /embed/ pour un
+    video_url (plusieurs User-Agents + regex). Retourne "" si rien trouve.
+    (Copie self-contained du helper de web_upload pour rester utilisable ici.)
+    """
+    if not shortcode:
+        return ""
+    import requests as _rq
+    import re as _re
+    urls_to_try = [
+        f"https://www.instagram.com/p/{shortcode}/embed/captioned/",
+        f"https://www.instagram.com/p/{shortcode}/embed/",
+        f"https://www.instagram.com/reel/{shortcode}/embed/",
+        f"https://www.instagram.com/p/{shortcode}/",
+        f"https://www.instagram.com/reel/{shortcode}/",
+    ]
+    user_agents = [
+        "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Mozilla/5.0 (compatible; Twitterbot/1.0)",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+    patterns = [
+        r'"video_url"\s*:\s*"([^"]+)"',
+        r'"playable_url"\s*:\s*"([^"]+)"',
+        r'"playable_url_quality_hd"\s*:\s*"([^"]+)"',
+        r'"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"([^"]+)"',
+        r'<meta\s+property="og:video"\s+content="([^"]+)"',
+        r'<meta\s+property="og:video:secure_url"\s+content="([^"]+)"',
+        r'<meta\s+name="twitter:player:stream"\s+content="([^"]+)"',
+        r'src=\"(https://[^\"]*\.mp4[^\"]*)\"',
+        r'"contentUrl"\s*:\s*"([^"]+\.mp4[^"]*)"',
+    ]
+    for url in urls_to_try:
+        for ua in user_agents:
+            try:
+                r = _rq.get(
+                    url,
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "en-US,en;q=0.9",
+                    },
+                    timeout=10,
+                )
+                if r.status_code != 200:
+                    continue
+                html = r.text
+                for pat in patterns:
+                    for m in _re.finditer(pat, html):
+                        u = m.group(1)
+                        try:
+                            u = u.encode().decode("unicode_escape")
+                        except Exception:
+                            pass
+                        u = u.replace("&amp;", "&").replace("\\/", "/")
+                        if not u.startswith("http"):
+                            continue
+                        u_low = u.lower()
+                        if ".m3u8" in u_low or ".mpd" in u_low:
+                            continue
+                        if any(ext in u_low for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                            continue
+                        if ".mp4" in u_low or "fcdn.net/v/" in u_low or "cdninstagram.com/v/" in u_low:
+                            return u
+            except Exception:
+                continue
+    return ""
+
+
+def get_video_url_for_shortcode(shortcode: str, owner_username: str = "") -> dict:
+    """Resout un video_url FRAIS pour un reel/post a partir de son shortcode.
+
+    Cascade IDENTIQUE a celle (eprouvee) de /insta/proxy_video, la 1ere qui
+    rend une video gagne :
+      1) **Reels du proprietaire** via scrape_profile(owner, limit=500) —
+         l'endpoint /get_ig_user_reels.php alimente les stats tous les jours
+         donc CONFIRME fiable. limit=500 pour couvrir aussi les vieux reels.
+      2) Endpoint RapidAPI "post unique" (rapide mais fragile, souvent vide).
+      3) Scrape direct de la page IG /p/ et /embed/ (SANS API ni owner).
+
+    `owner_username` = le @compte source (stocke dans chaque reel de veille).
+    Retourne {"video_url": str, "source": str, "trace": [str, ...]} ; video_url
+    vide si rien trouve. La trace sert au diagnostic (remontee dans l'alerte UI).
+    """
+    trace = []
+    sc = (shortcode or "").strip()
+    if not sc:
+        return {"video_url": "", "source": "", "trace": ["pas_de_shortcode"]}
+    # 1) Reels du proprietaire (endpoint fiable) -> matche le shortcode
+    owner = (owner_username or "").lstrip("@").strip()
+    if owner:
+        try:
+            data = scrape_profile(owner, limit=500)
+            if isinstance(data, dict) and not data.get("error"):
+                reels = data.get("reels") or []
+                for r in reels:
+                    if (r.get("shortcode") or "") == sc and (r.get("video_url") or "").strip():
+                        return {"video_url": r["video_url"], "source": "owner_reels",
+                                "trace": trace + [f"owner_reels:match({len(reels)})"]}
+                trace.append(f"owner_reels:pas_de_match({len(reels)})")
+            else:
+                err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+                trace.append("owner_reels:err:" + str(err)[:90])
+        except Exception as e:
+            trace.append(f"owner_reels:exc:{type(e).__name__}:{str(e)[:70]}")
+    else:
+        trace.append("owner_reels:pas_de_owner")
+    # 2) Endpoint post-unique (best effort)
+    try:
+        rp = _scrape_via_rapidapi_single_post(sc)
+        if rp.get("video_url"):
+            return {"video_url": rp["video_url"], "source": "single_post",
+                    "trace": trace + ["single_post:ok"]}
+        trace.append("single_post:vide")
+    except Exception as e:
+        trace.append(f"single_post:exc:{type(e).__name__}")
+    # 3) Scrape direct de la page IG (no-API, no-owner)
+    try:
+        u = _scrape_ig_page_for_video(sc)
+        if u:
+            return {"video_url": u, "source": "page_scrape",
+                    "trace": trace + ["page_scrape:ok"]}
+        trace.append("page_scrape:vide")
+    except Exception as e:
+        trace.append(f"page_scrape:exc:{type(e).__name__}")
+    return {"video_url": "", "source": "", "trace": trace}
+
+
 def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     """Scrape via RapidAPI : Instagram Scraper Stable API.
 

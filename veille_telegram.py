@@ -110,37 +110,73 @@ _IG_HEADERS = {
 }
 
 
-def download_video_bytes(video_url: str, timeout: int = 25) -> Optional[bytes]:
+def download_video_bytes(video_url: str, timeout: int = 25,
+                         info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
     """Telecharge une video depuis un CDN Instagram.
 
     Retourne les bytes (ou None si erreur / >50 MB / timeout).
     - timeout = 25s (un reel 10-30s pese 2-15 MB, doit downloader en ~5s)
     - 50 MB max (limite Telegram bot upload)
+    - `info` : dict optionnel ; si fourni, on y ecrit info['reason'] = la raison
+      precise de l'echec ('url_vide', 'trop_gros_50mb', 'http_403', 'corps_vide',
+      'exception') -> permet un message d'erreur clair cote appelant.
     """
+    def _set(reason: str):
+        if info is not None:
+            info["reason"] = reason
     if not video_url:
+        _set("url_vide")
         return None
-    try:
-        r = requests.get(video_url, headers=_IG_HEADERS, timeout=timeout, stream=True)
-        if r.status_code not in (200, 206):
-            return None
-        max_size = 50 * 1024 * 1024  # 50 MB
-        chunks = []
-        total = 0
-        for chunk in r.iter_content(chunk_size=64 * 1024):
-            if not chunk:
-                continue
-            chunks.append(chunk)
-            total += len(chunk)
-            if total > max_size:
-                return None  # Trop gros, abandon
-        return b"".join(chunks)
-    except Exception:
-        return None
+    # On essaie 2 jeux de headers : l'app Instagram, puis un navigateur classique
+    # avec Referer (certains noeuds CDN scontent renvoient 403 selon le User-Agent).
+    header_variants = [
+        _IG_HEADERS,
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+            "Referer": "https://www.instagram.com/",
+            "Range": "bytes=0-",
+        },
+    ]
+    max_size = 50 * 1024 * 1024  # 50 MB (limite upload bot Telegram)
+    last_reason = "echec_inconnu"
+    for headers in header_variants:
+        try:
+            r = requests.get(video_url, headers=headers, timeout=timeout, stream=True)
+            if r.status_code not in (200, 206):
+                last_reason = f"http_{r.status_code}"
+                continue  # 403/410/... -> on tente le jeu de headers suivant
+            chunks = []
+            total = 0
+            too_big = False
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > max_size:
+                    too_big = True
+                    break  # Trop gros, abandon (inutile de retenter)
+            if too_big:
+                _set("trop_gros_50mb")
+                return None  # >50MB : Telegram refuse, inutile de retenter
+            if chunks:
+                return b"".join(chunks)
+            last_reason = "corps_vide"  # 200 mais 0 octet -> tente variante suivante
+        except Exception as e:
+            last_reason = f"exception_{type(e).__name__}"
+            continue
+    _set(last_reason)
+    return None
 
 
-def _refresh_video_url(post_url: str) -> Optional[str]:
+def _refresh_video_url(post_url: str, owner: str = "") -> Optional[str]:
     """Compat : wrapper qui retourne juste le video_url frais."""
-    data = refresh_post_data(post_url)
+    data = refresh_post_data(post_url, owner=owner)
     return data.get("video_url") or None
 
 
@@ -193,14 +229,18 @@ def _scrape_og_caption(post_url: str) -> str:
     return ""
 
 
-def refresh_post_data(post_url: str) -> Dict[str, str]:
+def refresh_post_data(post_url: str, owner: str = "") -> Dict[str, str]:
     """Re-scrape video_url ET caption depuis le permalink IG.
 
-    Strategie multi-source :
-    - instaloader (si configure) : video_url + caption en une passe
-    - fallback no-auth : og:description meta tag pour le caption seulement
+    Strategie multi-source pour le video_url (cascade) :
+    - RapidAPI post-unique (rapide mais fragile) PUIS reels du proprietaire
+      via l'endpoint /get_ig_user_reels.php (celui qui marche pour les stats).
+    - instaloader (si configure) : complete video_url + caption.
+    - fallback no-auth : og:description meta tag pour le caption seulement.
 
-    Retourne {video_url, caption}. Tous les champs vides si tout echoue.
+    `owner` = le @compte source du reel (permet le fallback "reels du compte").
+    Retourne {video_url, caption, _debug}. Champs vides si tout echoue ;
+    _debug contient la trace de resolution (utile pour diagnostiquer).
     """
     import re as _re
     out: Dict[str, str] = {"video_url": "", "caption": "", "_debug": ""}
@@ -212,23 +252,19 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
         out["_debug"] = "url_sans_shortcode"
         return out
     shortcode = m.group(1)
-    # 1) RapidAPI (endpoint post unique) : le plus FIABLE pour le video_url.
-    #    instaloader anonyme/legacy se fait rate-limit/bloquer -> on essaie RapidAPI d'abord.
+    # 1) Resolution video_url en cascade : reels-du-proprietaire -> post-unique
+    #    -> scrape-page. La tier 3 (scrape page) marche meme SANS cle RapidAPI,
+    #    donc on appelle toujours le resolver (pas de gate sur la cle).
     try:
         import insta_scraper
-        if (insta_scraper.load_auth().get("rapidapi_key") or "").strip():
-            try:
-                rp = insta_scraper._scrape_via_rapidapi_single_post(shortcode)
-                if rp.get("video_url"):
-                    out["video_url"] = rp["video_url"]
-                else:
-                    out["_debug"] = "rapidapi_pas_de_video_url"
-            except Exception as ee:
-                out["_debug"] = f"rapidapi_error: {type(ee).__name__}: {str(ee)[:150]}"
+        rp = insta_scraper.get_video_url_for_shortcode(shortcode, owner_username=owner)
+        if rp.get("video_url"):
+            out["video_url"] = rp["video_url"]
+            out["_debug"] = f"video_ok[{rp.get('source','')}]"
         else:
-            out["_debug"] = "rapidapi_pas_configure"
+            out["_debug"] = "video_url_introuvable | " + " ; ".join(rp.get("trace", []))[:240]
     except Exception as e:
-        out["_debug"] = f"rapidapi_top: {type(e).__name__}: {str(e)[:150]}"
+        out["_debug"] = f"resolver_error: {type(e).__name__}: {str(e)[:150]}"
     # 2) instaloader (si dispo) : complète le video_url manquant + le caption
     if (not out["video_url"]) or (not out["caption"]):
         try:
@@ -256,7 +292,8 @@ def refresh_post_data(post_url: str) -> Dict[str, str]:
 
 def send_video_from_url(video_url: str, caption: str = "",
                         fallback_url: str = "",
-                        followup_text: str = "") -> Dict[str, Any]:
+                        followup_text: str = "",
+                        owner: str = "") -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
 
     Comportement comme un bot downloader Discord/Telegram :
@@ -307,19 +344,40 @@ def send_video_from_url(video_url: str, caption: str = "",
                     pass
         return res
 
+    _readable = {
+        "url_vide": "aucun lien video stocke",
+        "trop_gros_50mb": "video > 50 Mo (limite Telegram, impossible a envoyer)",
+        "corps_vide": "le CDN a renvoye un fichier vide",
+    }
     # 1) Telecharge la video depuis l URL IG
-    video_bytes = download_video_bytes(video_url)
+    dl_info: Dict[str, Any] = {}
+    video_bytes = download_video_bytes(video_url, info=dl_info)
     last_err = ""
     if not video_bytes:
-        last_err = "URL video manquante / expiree / >50MB"
-        # Retry : re-scrape un video_url frais depuis le permalink IG
-        fresh = _refresh_video_url(fallback_url)
+        last_err = _readable.get(dl_info.get("reason", ""), "URL video manquante / expiree")
+        # Si c'est juste trop gros, inutile de re-resoudre : ce sera toujours trop gros
+        if dl_info.get("reason") == "trop_gros_50mb":
+            return _fallback("Telechargement impossible : " + last_err)
+        # Retry : re-resout un video_url FRAIS (reels du compte -> post-unique -> page)
+        refreshed = refresh_post_data(fallback_url, owner=owner) if fallback_url else {}
+        fresh = refreshed.get("video_url") or ""
         if fresh and fresh != video_url:
-            video_bytes = download_video_bytes(fresh)
+            dl_info2: Dict[str, Any] = {}
+            video_bytes = download_video_bytes(fresh, info=dl_info2)
             if video_bytes:
                 last_err = ""
             else:
-                last_err = "URL refresh OK mais download IG echoue"
+                last_err = _readable.get(
+                    dl_info2.get("reason", ""),
+                    f"URL fraiche OK mais le CDN refuse le download ({dl_info2.get('reason','?')})",
+                )
+        else:
+            # Pas de video_url frais -> on remonte la trace de resolution
+            dbg = (refreshed.get("_debug") or "").strip()
+            if dbg:
+                last_err = f"video introuvable via l'API ({dbg})"
+            else:
+                last_err = "video introuvable via l'API (cle RapidAPI non configuree ?)"
     if not video_bytes:
         return _fallback(f"Telechargement impossible : {last_err}")
 
