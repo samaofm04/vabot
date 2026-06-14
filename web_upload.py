@@ -8604,7 +8604,7 @@ body.light .up-edit-head{background:#f9fafb;border-bottom-color:#e5e7eb}
 .up-edit-row:last-child{border-bottom:0}
 .up-edit-name{font-size:13px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body.light .up-edit-name{color:#111}
-.up-edit-thumb{display:inline-block;width:42px;height:42px;border-radius:8px;background:#262626;margin-right:10px;vertical-align:middle;object-fit:cover}
+.up-edit-thumb{display:inline-block;width:50px;height:50px;border-radius:8px;background:#262626;margin-right:10px;vertical-align:middle;object-fit:cover}
 .up-rm{background:transparent;border:0;color:#ef4444;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:.15s}
 .up-rm:hover{background:rgba(239,68,68,.15)}
 
@@ -8665,7 +8665,11 @@ function _upRowThumb(file){
     const url = URL.createObjectURL(file);
     return '<img class=up-edit-thumb src="'+url+'">';
   } else if(file.type && file.type.startsWith('video/')){
-    return '<span class=up-edit-thumb style="display:inline-flex;align-items:center;justify-content:center;color:#aaa;font-size:18px">🎬</span>';
+    // Aperçu RÉEL de la vidéo (1re image) -> on voit le contenu, pas juste 🎬
+    const url = URL.createObjectURL(file);
+    return '<video class=up-edit-thumb src="'+url+'" muted playsinline preload=metadata '
+         + 'onloadeddata="try{this.currentTime=0.1}catch(e){}" '
+         + 'style="object-fit:cover;background:#000"></video>';
   }
   return '<span class=up-edit-thumb></span>';
 }
@@ -8823,6 +8827,10 @@ async function pushAllReels(form){
       submitBtn.style.background = '';
     }
   }, 3500);
+  // Refresh auto : les nouveaux reels apparaissent dans la galerie sans F5 manuel
+  if(done > 0){
+    setTimeout(function(){ window.location.reload(); }, 1200);
+  }
 }
 
 // === BULK UPLOAD : intercepte submit, envoie chaque file separement ===
@@ -8895,6 +8903,10 @@ document.addEventListener('submit', function(e){
       mainInput.value = '';
       _upRefreshTable(mainInput);
     }, 2500);
+    // Refresh auto : la galerie se met à jour sans recharger à la main
+    if(done > 0){
+      setTimeout(function(){ window.location.reload(); }, 1300);
+    }
   })();
 }, true);
 document.addEventListener('dragover', function(e){
