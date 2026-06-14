@@ -2064,6 +2064,48 @@ function _setBangerStar(btn, on){
     svg.setAttribute('stroke', on ? 'none' : '#9aa0a6');
     svg.setAttribute('stroke-width', on ? '0' : '2');
   }
+  if(typeof applyBangerFilter === 'function') applyBangerFilter();  // garde le filtre cohérent
+}
+// === Filtre "⭐ Bangers seulement" (client, instantané) ===
+var bangerFilterOn = false;
+function applyBangerFilter(){
+  var grid = document.getElementById('vault-grid');
+  if(!grid) return;
+  var cards = grid.querySelectorAll('.cloud-card');
+  var shown = 0;
+  cards.forEach(function(c){
+    if(!bangerFilterOn){ c.style.display = ''; return; }
+    var on = c.querySelector('.banger-star.is-banger');
+    c.style.display = on ? '' : 'none';
+    if(on) shown++;
+  });
+  var empty = document.getElementById('banger-empty-note');
+  if(bangerFilterOn && shown === 0){
+    if(!empty){
+      empty = document.createElement('div');
+      empty.id = 'banger-empty-note';
+      empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
+      empty.textContent = 'Aucun reel marqué ⭐ banger pour cette identité.';
+      grid.appendChild(empty);
+    }
+    empty.style.display = '';
+  } else if(empty){ empty.style.display = 'none'; }
+}
+function toggleBangerFilter(btn){
+  bangerFilterOn = !bangerFilterOn;
+  if(btn){
+    btn.classList.toggle('vault-sort-active', bangerFilterOn);
+    var sort = btn.closest('.vault-sort');
+    if(sort){
+      sort.classList.remove('open');  // ferme le menu
+      var lbl = sort.querySelector('.vault-sort-btn span');
+      if(lbl){
+        if(bangerFilterOn){ if(!lbl.dataset.orig) lbl.dataset.orig = lbl.textContent; lbl.textContent = '⭐ Bangers'; }
+        else if(lbl.dataset.orig){ lbl.textContent = lbl.dataset.orig; }
+      }
+    }
+  }
+  applyBangerFilter();
 }
 // Jolie pop-up de confirmation (remplace le confirm() natif moche du navigateur)
 function uiConfirm(message, opts){
@@ -8505,7 +8547,12 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "<span class='vault-radio'></span>Croissant</a>"
         f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
         "<span class='vault-radio'></span>Décroissant</a>"
-        "</div>"
+        + ("<div class='vault-sort-sep'></div>"
+           "<button type='button' class='vault-sort-item' id='banger-filter-item' "
+           "onclick='toggleBangerFilter(this)' style='width:100%;background:none;border:0;text-align:left;font-family:inherit'>"
+           "<span class='vault-radio'></span>⭐ Bangers seulement</button>"
+           if is_video else "")
+        + "</div>"
         "</div>"
     )
 
