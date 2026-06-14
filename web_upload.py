@@ -308,21 +308,22 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
 
     `video_path` = chemin du fichier video CLEAN. caption/description/exemple sont
     deduits par convention de nommage (meme que cogs/autopost.random_reel_data) :
-    <stem>.txt, <stem>.desc.txt, <stem>.example.<ext>. Retourne (ok, info).
+    <stem>.txt, <stem>.desc.txt, <stem>.example.<ext>.
+    Retourne (ok, info_str, meta) ; meta={guild_id,channel_id,message_ids} ou None.
     """
     import asyncio
     from pathlib import Path as _P
     if _BOT_REF is None:
-        return False, "bot pas initialise"
+        return False, "bot pas initialise", None
     loop = getattr(_BOT_REF, "loop", None)
     if loop is None or not loop.is_running():
-        return False, "loop bot non actif"
+        return False, "loop bot non actif", None
     ident = (identity or "").strip()
     if not ident:
-        return False, "identite vide"
+        return False, "identite vide", None
     video_path = _P(video_path)
     if not video_path.exists() or not video_path.is_file():
-        return False, "fichier introuvable"
+        return False, "fichier introuvable", None
 
     def _unesc(s):
         return s.replace("\\n", "\n") if s else s
@@ -359,7 +360,7 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
             cands = [c for c in cat.channels
                      if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
             if not cands:
-                return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+                return False, f"pas de salon 'banger' dans la categorie '{ident}'", None
             banger = None
             for c in cands:
                 n = c.name.lower()
@@ -370,72 +371,122 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
             limit = getattr(guild, "filesize_limit", 26214400) or 26214400
             if video_path.stat().st_size > limit:
                 return (False, f"video {video_path.stat().st_size//(1024*1024)} Mo > limite Discord "
-                               f"({limit//(1024*1024)} Mo) — serveur non boost ?")
+                               f"({limit//(1024*1024)} Mo) — serveur non boost ?", None)
             intro = f"🎬 **REEL — identité `{ident}`**\n📥 Télécharge la vidéo CLEAN."
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
             files = [discord.File(str(video_path), filename=video_path.name)]
             if example:
                 files.append(discord.File(str(example), filename=f"EXEMPLE_{example.name}"))
+            sent_ids = []  # on garde tous les message_id pour pouvoir les supprimer plus tard
             try:
-                await banger.send(content=intro, files=files)
+                m = await banger.send(content=intro, files=files)
+                sent_ids.append(m.id)
             except discord.HTTPException:
                 try:
-                    await banger.send(content=intro, file=discord.File(str(video_path), filename=video_path.name))
+                    m = await banger.send(content=intro, file=discord.File(str(video_path), filename=video_path.name))
+                    sent_ids.append(m.id)
                 except discord.HTTPException as e:
-                    return False, f"erreur envoi Discord: {e}"
+                    return False, f"erreur envoi Discord: {e}", None
             if caption:
-                await banger.send("📝 **CAPTION** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
-                await banger.send(caption[:1990])
+                m = await banger.send("📝 **CAPTION** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
+                sent_ids.append(m.id)
+                m = await banger.send(caption[:1990])
+                sent_ids.append(m.id)
             if description:
-                await banger.send("📄 **DESCRIPTION** (à coller dans le **champ légende** du post) :")
+                m = await banger.send("📄 **DESCRIPTION** (à coller dans le **champ légende** du post) :")
+                sent_ids.append(m.id)
                 # Discord cap 2000 car/message -> on decoupe les longues descriptions
                 for i in range(0, len(description), 1990):
-                    await banger.send(description[i:i + 1990])
-            return True, f"#{banger.name}"
+                    m = await banger.send(description[i:i + 1990])
+                    sent_ids.append(m.id)
+            meta = {"guild_id": guild.id, "channel_id": banger.id, "message_ids": sent_ids}
+            return True, f"#{banger.name}", meta
         if not found_category:
-            return False, f"pas de catégorie nommée '{ident}' sur le serveur Discord"
-        return False, f"pas de salon 'banger' dans la categorie '{ident}'"
+            return False, f"pas de catégorie nommée '{ident}' sur le serveur Discord", None
+        return False, f"pas de salon 'banger' dans la categorie '{ident}'", None
 
     try:
         fut = asyncio.run_coroutine_threadsafe(_do_send(), loop)
         return fut.result(timeout=120)
     except Exception as e:
-        return False, f"timeout / erreur: {e}"
+        return False, f"timeout / erreur: {e}", None
 
 
-# ===== Marquage "banger" (etoile jaune) : persistance des file_ids =====
-def _load_banger_marks() -> set:
+# ===== Marquage "banger" (etoile jaune) : persiste file_id -> infos d'envoi =====
+# Format : { file_id: {"guild_id": int, "channel_id": int, "message_ids": [int,...]} }
+# (ancien format = simple liste de file_ids -> migré automatiquement en dict).
+# La membership `file_id in marks` marche pareil (clés du dict).
+def _load_banger_marks() -> dict:
     try:
         if BANGER_MARKS_FILE.exists():
             data = json.loads(BANGER_MARKS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
             if isinstance(data, list):
-                return set(data)
+                return {fid: {} for fid in data}
     except Exception:
         pass
-    return set()
+    return {}
 
 
-def _save_banger_marks(marks) -> None:
+def _save_banger_marks(marks: dict) -> None:
     try:
         BANGER_MARKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        BANGER_MARKS_FILE.write_text(json.dumps(sorted(marks), ensure_ascii=False), encoding="utf-8")
+        BANGER_MARKS_FILE.write_text(json.dumps(marks, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
 
 
-def _add_banger_mark(file_id: str) -> None:
+def _set_banger_mark(file_id: str, info: dict) -> None:
     m = _load_banger_marks()
-    if file_id not in m:
-        m.add(file_id)
-        _save_banger_marks(m)
+    m[file_id] = info or {}
+    _save_banger_marks(m)
 
 
-def _remove_banger_mark(file_id: str) -> None:
+def _pop_banger_mark(file_id: str) -> dict:
+    """Retire le marquage et retourne ses infos d'envoi ({} si aucune)."""
     m = _load_banger_marks()
-    if file_id in m:
-        m.discard(file_id)
+    info = m.pop(file_id, None)
+    if info is not None:
         _save_banger_marks(m)
+    return info or {}
+
+
+def _delete_banger_messages(info: dict) -> tuple:
+    """Supprime du salon Discord les messages envoyés pour ce reel (via le bot)."""
+    import asyncio
+    if not isinstance(info, dict):
+        return True, "rien à supprimer"
+    channel_id = info.get("channel_id")
+    msg_ids = info.get("message_ids") or []
+    if not channel_id or not msg_ids:
+        return True, "rien à supprimer"
+    if _BOT_REF is None:
+        return False, "bot pas initialise"
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, "loop bot non actif"
+
+    async def _do_del():
+        chan = _BOT_REF.get_channel(int(channel_id))
+        if chan is None:
+            return False, "salon Discord introuvable"
+        deleted = 0
+        for mid in msg_ids:
+            try:
+                m = await chan.fetch_message(int(mid))
+                await m.delete()
+                deleted += 1
+            except Exception:
+                pass  # deja supprime / introuvable -> on continue
+        return True, f"{deleted} message(s) supprimé(s)"
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_do_del(), loop)
+        return fut.result(timeout=60)
+    except Exception as e:
+        return False, f"timeout / erreur: {e}"
 
 
 def _read_env_lines():
@@ -2016,12 +2067,16 @@ function _setBangerStar(btn, on){
 }
 async function toggleBanger(btn, fileId){
   const isOn = btn.classList.contains('is-banger');
+  if(isOn){
+    // Dé-cocher = supprimer le(s) message(s) du salon banger Discord -> on confirme
+    if(!confirm('Retirer ce reel des bangers ? Le(s) message(s) seront SUPPRIMÉS du salon banger Discord.')) return;
+  }
   btn.disabled = true;
   btn.style.opacity = '0.55';
   try {
     const fd = new FormData(); fd.set('file_id', fileId);
     if(isOn){
-      // Jaune -> gris : retire juste le marquage (n'efface rien sur Discord)
+      // Jaune -> gris : retire le marquage ET supprime les messages Discord
       const r = await fetch('/cloud/banger_unmark', { method:'POST', body: fd });
       const j = await r.json();
       if(j.ok){ _setBangerStar(btn, false); }
@@ -24339,24 +24394,26 @@ def create_app():
             return jsonify({"ok": False, "error": "fichier introuvable"})
         # Format COMPLET (REEL — identité + CLEAN + EXEMPLE + CAPTION + DESCRIPTION),
         # comme quand le bot envoie un reel a un VA.
-        ok, msg = _send_reel_to_banger_channel(identity, path)
+        ok, msg, meta = _send_reel_to_banger_channel(identity, path)
         if ok:
-            _add_banger_mark(file_id)  # etoile devient jaune (persiste)
+            # etoile jaune + on memorise les message_id pour pouvoir les supprimer
+            _set_banger_mark(file_id, meta or {})
             return jsonify({"ok": True, "channel": msg, "identity": identity})
         return jsonify({"ok": False, "error": msg})
 
     @app.route("/cloud/banger_unmark", methods=["POST"])
     def cloud_banger_unmark():
-        """Retire le marquage 'banger' (etoile jaune -> grise). N'efface RIEN sur
-        Discord, c'est juste un marqueur visuel cote site."""
+        """Retire le marquage 'banger' (etoile jaune -> grise) ET supprime les
+        messages correspondants dans le salon banger Discord."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         file_id = (request.form.get("file_id") or "").strip()
         if not file_id:
             return jsonify({"ok": False, "error": "file_id manquant"})
-        _remove_banger_mark(file_id)
-        return jsonify({"ok": True})
+        info = _pop_banger_mark(file_id)  # retire le marquage + recupere les infos d'envoi
+        ok_del, del_msg = _delete_banger_messages(info)
+        return jsonify({"ok": True, "deleted": del_msg, "delete_ok": ok_del})
 
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
