@@ -2562,11 +2562,15 @@ function nxMSetTime(which){
   var info=document.getElementById('nx-m-timeinfo');
   if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t.toFixed(2)+'s';
 }
-async function nxMontageOpen(fid){
+async function nxMontageOpen(fid, exampleUrl){
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var vid=document.getElementById('nx-m-video');
   if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; }
+  // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
+  var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
+  if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
+  else { if(exV) exV.src=''; if(exWrap) exWrap.style.display='none'; }
   var vf=document.getElementById('nx-m-vfolders'); vf.innerHTML='';
   for(var i=1;i<=10;i++){ var v='V'+i; var ck=(i<=3)?'checked':'';
     vf.innerHTML+='<label style="display:inline-flex;align-items:center;gap:4px;background:#1a1a1a;border:1px solid #2a2a2a;padding:5px 9px;border-radius:7px;font-size:12px;cursor:pointer"><input type="checkbox" class="nx-m-vf" value="'+v+'" '+ck+' style="accent-color:#a855f7"> '+v+'</label>'; }
@@ -2583,7 +2587,7 @@ async function nxMontageOpen(fid){
   nxMRenderCaps();
   document.getElementById('nx-montage-modal').style.display='flex';
 }
-function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
+function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
   var folders=Array.from(document.querySelectorAll('.nx-m-vf:checked')).map(function(c){return c.value;});
   if(!folders.length){ alert('Coche au moins une variation'); return; }
@@ -4183,7 +4187,16 @@ body.light .action-icon{color:#666}
       <div style="font-size:17px;font-weight:800;color:#fff">🎬 Montage du reel</div>
       <button onclick="nxMontageClose()" style="background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1">×</button>
     </div>
-    <video id="nx-m-video" controls muted playsinline style="width:150px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;float:right;margin:0 0 12px 14px"></video>
+    <div style="float:right;margin:0 0 12px 14px;display:flex;gap:8px;align-items:flex-start">
+      <div id="nx-m-example-wrap" style="display:none;text-align:center">
+        <video id="nx-m-example" controls muted loop playsinline style="width:116px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;border:1px solid #fbbf24"></video>
+        <div style="font-size:10px;color:#fbbf24;margin-top:3px;line-height:1.2">📋 Exemple<br>(à recopier)</div>
+      </div>
+      <div style="text-align:center">
+        <video id="nx-m-video" controls muted playsinline style="width:116px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000"></video>
+        <div style="font-size:10px;color:#888;margin-top:3px">Ton reel</div>
+      </div>
+    </div>
     <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Captions — tu peux en mettre plusieurs à des moments différents :</div>
     <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" style="width:100%;min-height:54px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
@@ -8593,6 +8606,8 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
+    # Pour le montage : URL de la vidéo EXEMPLE (media_url = l'exemple quand un exemple existe)
+    montage_ex_safe = media_url.replace("'", "\\'") if example_url else ""
     # Skeleton placeholder + lazy image fade-in
     if deferred:
         img_tag = (
@@ -8638,7 +8653,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         montage_btn = ""
         if is_video:
             montage_btn = (
-                f"<button class='card-edit-btn' onclick='event.stopPropagation();nxMontageOpen(\"{fid_safe}\")' "
+                f"<button class='card-edit-btn' onclick='event.stopPropagation();nxMontageOpen(\"{fid_safe}\", \"{montage_ex_safe}\")' "
                 f"title='🎬 Montage : générer des variations de ce reel' style='color:#a855f7'>"
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg>"
                 f"</button>"
