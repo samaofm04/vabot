@@ -2589,11 +2589,16 @@ function nxMRenderCaps(){
   if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
   var W=wrap.clientWidth||480, pps=W/dur;
   nxMState.dur=dur; nxMState.pps=pps;
-  var La=nxMLanes(), nLanes=La.n, laneH=26, gap=5, rulerH=18;
+  var La=nxMLanes(), nLanes=La.n, laneH=26, gap=5, rulerH=22;
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+4;
   var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
-  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), ruler='';
-  for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps; ruler+='<div style="position:absolute;left:'+x+'px;top:0;bottom:0;width:1px;background:#2a2a2a"></div><div style="position:absolute;left:'+(x+3)+'px;top:1px;font-size:9px;color:#777">'+Math.round(s)+'s</div>'; }
+  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels='';
+  for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
+    grid+='<div style="position:absolute;left:'+x+'px;top:0;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
+    rlabels+='<div style="position:absolute;left:'+(x+3)+'px;top:5px;font-size:9px;color:#bbb;pointer-events:none">'+Math.round(s)+'s</div>';
+  }
+  // réglette de lecture cliquable/scrubbable (bande dédiée en haut)
+  var rulerStrip='<div id="nx-m-ruler" title="Clique ou glisse ici pour déplacer la lecture de la vidéo" style="position:absolute;left:0;right:0;top:0;height:'+rulerH+'px;background:#1c1c1c;border-bottom:1px solid #2e2e2e;cursor:pointer;z-index:4;touch-action:none">'+rlabels+'</div>';
   var blocks='';
   caps.forEach(function(c,i){
     var perm=(c.start==null), bs=perm?0:c.start, be=perm?dur:c.end;
@@ -2607,14 +2612,25 @@ function nxMRenderCaps(){
       +'<div class="nxm-h" data-i="'+i+'" data-mode="right" style="position:absolute;right:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:0 6px 6px 0;touch-action:none"></div>'
       +'</div>';
   });
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse les blocs, tire les bords pour la durée</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique la règle ▸ pour la lecture · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
-    + ruler
+    + grid + rulerStrip
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
   var tl=document.getElementById('nx-m-timeline');
-  tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')) return; var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(e.clientX-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); });
+  function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
+  // clic sur le fond (hors blocs) = déplace la lecture
+  tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')||e.target.closest('#nx-m-ruler')) return; nxMSeekAt(e.clientX); });
+  // règle dédiée : clic + glisser pour scrubber la vidéo
+  var ruler=document.getElementById('nx-m-ruler');
+  if(ruler){ ruler.addEventListener('pointerdown',function(e){
+    e.preventDefault(); e.stopPropagation(); try{ ruler.setPointerCapture(e.pointerId); }catch(_){}
+    nxMSeekAt(e.clientX);
+    function m(ev){ nxMSeekAt(ev.clientX); }
+    function u(){ try{ ruler.releasePointerCapture(e.pointerId); }catch(_){} ruler.removeEventListener('pointermove',m); ruler.removeEventListener('pointerup',u); ruler.removeEventListener('pointercancel',u); }
+    ruler.addEventListener('pointermove',m); ruler.addEventListener('pointerup',u); ruler.addEventListener('pointercancel',u);
+  }); }
   tl.querySelectorAll('.nxm-h').forEach(function(el){ el.addEventListener('pointerdown',function(ev){ nxMBeginDrag(ev, parseInt(el.getAttribute('data-i'),10), el.getAttribute('data-mode')); }); });
   nxMSyncPlayhead(); nxMUpdatePreview();
 }
