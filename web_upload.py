@@ -2522,9 +2522,12 @@ async function nxMontageResults(){
       html+='<div style="width:120px"><video src="'+url+'#t=0.1" controls muted playsinline preload="metadata" style="width:120px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video>'
         +'<div style="font-size:10px;color:#a855f7;text-align:center">'+v+'</div>'
         +'<div style="display:flex;gap:4px;margin-top:2px"><a href="'+url+'?dl=1" download="'+f+'" style="flex:1;text-align:center;color:#8ef;font-size:10px;text-decoration:none;line-height:20px">⬇</a>'
-        +'<button onclick="nxMontageSend(\''+v+'\',\''+f+'\',this)" style="flex:2;background:#5865f2;border:0;color:#fff;font-size:10px;border-radius:5px;cursor:pointer;padding:3px">📤 Discord</button></div></div>';
+        +'<button class="nxm-send" data-vf="'+v+'" data-file="'+f+'" style="flex:2;background:#5865f2;border:0;color:#fff;font-size:10px;border-radius:5px;cursor:pointer;padding:3px">📤 Discord</button></div></div>';
     }); });
     html+='</div>'; wrap.innerHTML=html;
+    wrap.querySelectorAll('.nxm-send').forEach(function(b){
+      b.addEventListener('click', function(){ nxMontageSend(b.getAttribute('data-vf'), b.getAttribute('data-file'), b); });
+    });
   }catch(e){ wrap.textContent='Erreur chargement résultats'; }
 }
 async function nxMontageSend(vf,file,btn){
