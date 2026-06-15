@@ -15,6 +15,10 @@ __pycache__/
 .venv/
 venv/
 
+# Node (pipeline Noctus) — on commit le code + fonts, PAS les deps natives
+noctus/node_modules/
+noctus/_test/
+
 # Scripts de deploiement (legacy)
 install_on_vps.sh
 deploy_v2.sh

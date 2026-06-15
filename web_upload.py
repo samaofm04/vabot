@@ -2946,6 +2946,12 @@ window.upClearPrefill = function(utab){
   </div>
 </div>
 
+<div class="section-label">Création</div>
+<button class="item solo-item" id="tab-videocrea" onclick="showTab('cloud','videocrea','Création de vidéos','Génère V1 → V10 avec captions + anti-fingerprint')">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+  🎞️ Création de vidéos
+</button>
+
 <div class="section-label">Management</div>
 
 <div class="group" id="grp-va">
@@ -3793,6 +3799,11 @@ document.addEventListener('keydown', function(e){
 <!-- CHATTING - EMPLOI DU TEMPS -->
 <div class="form-section" id="form-chatplanning" style="display:none">
 {chatplanning_html}
+</div>
+
+<!-- CRÉATION DE VIDÉOS (pipeline Noctus) -->
+<div class="form-section" id="form-videocrea" style="display:none">
+{videocrea_html}
 </div>
 
 <!-- SETTINGS - INSTAGRAM COOKIES -->
@@ -18501,6 +18512,15 @@ def _render_schedule_html() -> str:
     )
 
 
+def _render_videocrea_html() -> str:
+    """Page Création de vidéos (pipeline Node Noctus). Isolé dans noctus_web.py."""
+    try:
+        import noctus_web
+        return noctus_web.render_page()
+    except Exception as e:
+        return f"<div style='padding:24px;color:#f99'>Module « Création de vidéos » indisponible : {type(e).__name__}: {e}</div>"
+
+
 def _render_chatplanning_html() -> str:
     """Emploi du temps chatteurs - tableau Excel-style multi-EDT multi-semaines."""
     try:
@@ -24000,6 +24020,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
+        .replace("{videocrea_html}", _g("videocrea", _render_videocrea_html))
         .replace("{bilan_html}", _g("bilan", _render_bilan_html))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
@@ -29628,6 +29649,13 @@ def create_app():
 
         return _success(f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
             f"<code>{new_identity}</code>.{moved_msg}")
+
+    # Page « Création de vidéos » : routes du pipeline Node (noctus_web.py)
+    try:
+        import noctus_web
+        noctus_web.register(app, is_auth, _error, _success)
+    except Exception as _nx_e:
+        log.error(f"noctus_web register échoué: {_nx_e}")
 
     return app
 

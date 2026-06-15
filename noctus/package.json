@@ -1,0 +1,13 @@
+{
+  "name": "noctus-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pipeline de génération vidéo (V1-V10, captions + anti-fingerprint) — appelé par le bot Flask via subprocess (node noctus_runner.js)",
+  "main": "pipeline-core.js",
+  "scripts": {
+    "run-model": "node noctus_runner.js"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.0"
+  }
+}
