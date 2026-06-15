@@ -2465,6 +2465,16 @@ function nxMTimeToggle(){
   var a=document.getElementById('nx-m-start'), b=document.getElementById('nx-m-end');
   if(a) a.disabled=!range; if(b) b.disabled=!range;
 }
+function nxMSetTime(which){
+  var v=document.getElementById('nx-m-video');
+  if(!v || isNaN(v.currentTime)){ return; }
+  var t=Math.max(0, Math.round(v.currentTime*10)/10);
+  var rr=document.querySelector('input[name=nxmtime][value="range"]');
+  if(rr){ rr.checked=true; nxMTimeToggle(); }
+  document.getElementById('nx-m-'+(which==='start'?'start':'end')).value=t;
+  var info=document.getElementById('nx-m-timeinfo');
+  if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t+'s';
+}
 async function nxMontageOpen(fid){
   nxMState.fid=fid; nxMState.model='';
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
@@ -4092,6 +4102,12 @@ body.light .action-icon{color:#666}
       <input id="nx-m-start" type="number" min="0" step="0.5" value="0" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
       <span>à</span>
       <input id="nx-m-end" type="number" min="0" step="0.5" value="3" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px"><span>s</span>
+    </div>
+    <div style="font-size:11px;color:#888;margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>▶ joue la vidéo et mets pause au bon moment, puis :</span>
+      <button type="button" onclick="nxMSetTime('start')" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#a855f7;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer">📍 début ici</button>
+      <button type="button" onclick="nxMSetTime('end')" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fbbf24;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer">📍 fin ici (cut)</button>
+      <span id="nx-m-timeinfo" style="color:#666"></span>
     </div>
     <div style="font-size:12px;color:#888;margin:12px 0 6px">Variations à générer :</div>
     <div id="nx-m-vfolders" style="display:flex;flex-wrap:wrap;gap:6px"></div>
