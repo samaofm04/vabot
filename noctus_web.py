@@ -361,12 +361,29 @@ def render_page() -> str:
     if not model_opts:
         model_opts = "<option value=''>(aucun modèle — crée-en un)</option>"
 
-    cap_checks = "".join(
-        f"<label style='display:inline-flex;align-items:center;gap:6px;background:#1a1a1a;border:1px solid #2a2a2a;"
-        f"padding:6px 11px;border-radius:8px;font-size:12px;cursor:pointer'>"
-        f"<input type='checkbox' class='nx-cap' value='{esc(l)}' checked style='accent-color:#a855f7'> {esc(l)}</label>"
-        for l in cap_labels
-    ) or "<span style='color:#666;font-size:12px'>aucune version de caption — édite-les ci-dessous</span>"
+    FONTS = ["Inter", "Poppins", "Montserrat", "BebasNeue", "Anton", "TikTokSans"]
+    font_opts = "".join(f"<option>{f}</option>" for f in FONTS)
+
+    cap_rows = ""
+    for c in caps:
+        if not isinstance(c, dict):
+            continue
+        lbl = c.get("label", "")
+        font = c.get("font", "Inter") or "Inter"
+        txt = "  ·  ".join(
+            (seg.get("text", "") or "").replace("\n", " ")
+            for seg in c.get("captions", []) if isinstance(seg, dict)
+        )
+        cap_rows += (
+            f"<label style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 12px'>"
+            f"<input type='checkbox' class='nx-cap' value='{esc(lbl)}' checked style='accent-color:#a855f7'>"
+            f"<span style='font-size:11px;color:#a855f7;font-weight:700;min-width:78px'>{esc(font)}</span>"
+            f"<span style='flex:1;font-size:13px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{esc(txt) or '(vide)'}</span>"
+            f"<button onclick='event.preventDefault();nxDelCaption(\"{esc(lbl)}\")' title='Supprimer' style='background:none;border:0;color:#666;cursor:pointer;font-size:15px'>🗑</button>"
+            f"</label>"
+        )
+    if not cap_rows:
+        cap_rows = "<span style='color:#666;font-size:12px'>aucune caption pour l'instant — écris-en une juste en dessous ⤵</span>"
 
     v_checks = "".join(
         f"<label style='display:inline-flex;align-items:center;gap:5px;background:#1a1a1a;border:1px solid #2a2a2a;"
@@ -419,8 +436,14 @@ def render_page() -> str:
     <div style="font-size:12px;color:#888;margin-bottom:6px">Variations à générer :</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">{v_checks}</div>
     <button onclick="nxToggleAllV(this)" style="background:none;border:0;color:#a855f7;font-size:12px;cursor:pointer;padding:0">tout cocher / décocher</button>
-    <div style="font-size:12px;color:#888;margin:14px 0 6px">Versions de captions :</div>
-    <div id="nx-caps" style="display:flex;flex-wrap:wrap;gap:8px">{cap_checks}</div>
+    <div style="font-size:12px;color:#888;margin:14px 0 6px">Captions (texte incrusté sur la vidéo) — coche celles à appliquer :</div>
+    <div id="nx-caps" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">{cap_rows}</div>
+    <div style="display:flex;gap:8px;align-items:flex-start;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:10px">
+      <textarea id="nx-captext" placeholder="✍️ Écris ta caption ici (le texte affiché sur la vidéo)…" style="flex:1;min-height:46px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:8px 10px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+      <select id="nx-capfont" title="Police" style="background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:9px;font-size:13px;font-family:inherit">{font_opts}</select>
+      <button onclick="nxAddCaption()" style="padding:10px 16px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap">+ Ajouter</button>
+    </div>
+    <div style="font-size:11px;color:#666;margin-top:5px">Chaque caption ajoutée devient une version (s'affiche sur toute la vidéo). Coche celles à incruster quand tu génères.</div>
   </div>
 
   <!-- Run -->
@@ -547,6 +570,20 @@ async function nxRefreshOutputs(){{
   }});
   wrap.innerHTML=html;
 }}
+async function nxAddCaption(){{
+  const ta=document.getElementById('nx-captext'); const text=(ta.value||'').trim();
+  if(!text){{ alert('Écris un texte'); return; }}
+  const font=document.getElementById('nx-capfont').value;
+  const fd=new FormData(); fd.set('text',text); fd.set('font',font);
+  const r=await fetch('/noctus/add_caption',{{method:'POST',body:fd}}); const j=await r.json();
+  if(j.ok){{ location.reload(); }} else {{ alert('❌ '+(j.error||'?')); }}
+}}
+async function nxDelCaption(label){{
+  if(!confirm('Supprimer cette caption ?')) return;
+  const fd=new FormData(); fd.set('label',label);
+  const r=await fetch('/noctus/del_caption',{{method:'POST',body:fd}}); const j=await r.json();
+  if(j.ok){{ location.reload(); }} else {{ alert('❌ '+(j.error||'?')); }}
+}}
 async function nxSaveCaptions(){{
   const ta=document.getElementById('nx-capsjson'); const msg=document.getElementById('nx-capsmsg');
   let data; try {{ data=JSON.parse(ta.value); }} catch(e){{ msg.style.color='#ef4444'; msg.textContent='JSON invalide'; return; }}
@@ -666,6 +703,37 @@ def register(app, is_auth, error_fn, success_fn):
         if write_captions(data):
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": "écriture échouée (doit être une liste)"})
+
+    @app.route("/noctus/add_caption", methods=["POST"])
+    def noctus_add_caption():
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        text = (request.form.get("text") or "").strip()
+        if not text:
+            return jsonify({"ok": False, "error": "texte vide"})
+        font = (request.form.get("font") or "Inter").strip() or "Inter"
+        start = (request.form.get("start") or "00:00:00").strip() or "00:00:00"
+        end = (request.form.get("end") or "99:99:99").strip() or "99:99:99"
+        caps = read_captions()
+        existing = {c.get("label") for c in caps if isinstance(c, dict)}
+        i = 1
+        while f"v{i}" in existing:
+            i += 1
+        label = f"v{i}"
+        caps.append({"label": label, "font": font,
+                     "captions": [{"start": start, "end": end, "text": text}]})
+        if write_captions(caps):
+            return jsonify({"ok": True, "label": label})
+        return jsonify({"ok": False, "error": "écriture échouée"})
+
+    @app.route("/noctus/del_caption", methods=["POST"])
+    def noctus_del_caption():
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        label = (request.form.get("label") or "").strip()
+        caps = [c for c in read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
+        write_captions(caps)
+        return jsonify({"ok": True})
 
     @app.route("/noctus/setup", methods=["POST"])
     def noctus_setup():
