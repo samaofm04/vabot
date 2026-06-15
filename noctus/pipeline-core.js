@@ -396,15 +396,42 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     if (!raw) continue;
     const emojiSize = Math.round(BASE * 1.15);
     ctx.font = FONT(BASE);
-    // Respecte les sauts de ligne manuels (\n) saisis dans l'editeur
-    const manualLines = raw.split(/\r?\n/);
-    for (const manualLine of manualLines) {
-      const seg = manualLine.trim();
-      if (!seg) {
-        // Ligne vide = espacement (fontSize neutre, pas de texte a dessiner)
-        finalLines.push({ text: '', fontSize: BASE });
-        continue;
+    // Respecte les sauts de ligne manuels (\n) saisis dans l'editeur.
+    const manualLines = raw.split(/\r?\n/).map(l => l.trim());
+    const hasManualBreaks = manualLines.length > 1;
+
+    if (hasManualBreaks) {
+      // L'utilisateur a choisi SES lignes -> on reste FIDELE : on ne re-decoupe
+      // pas par largeur. On reduit juste la taille (uniforme pour toutes les
+      // lignes) pour que la plus large tienne dans le cadre. Wrap seulement en
+      // tout dernier recours (ligne vraiment trop longue meme a la taille mini).
+      let size = BASE;
+      const widest = () => {
+        ctx.font = FONT(size);
+        const ws = manualLines.filter(l => l).map(
+          l => _measureLine(ctx, l, Math.round(size * 1.15)));
+        return ws.length ? Math.max(...ws) : 0;
+      };
+      while (widest() > maxW && size > 24) size -= 2;
+      for (const ml of manualLines) {
+        if (!ml) {
+          // Ligne vide = espacement (pas de texte a dessiner)
+          finalLines.push({ text: '', fontSize: size });
+          continue;
+        }
+        ctx.font = FONT(size);
+        if (_measureLine(ctx, ml, Math.round(size * 1.15)) > maxW) {
+          // dernier recours : trop long meme a la taille mini -> on wrap cette ligne
+          for (const w of wrapText(ctx, ml, maxW, Math.round(size * 1.15)))
+            finalLines.push({ text: w, fontSize: size });
+        } else {
+          finalLines.push({ text: ml, fontSize: size });
+        }
       }
+    } else {
+      // Pas de saut manuel -> comportement d'origine : wrap auto par largeur.
+      const seg = manualLines[0] || '';
+      if (!seg) continue;
       const wrapped = wrapText(ctx, seg, maxW, emojiSize);
       for (const line of wrapped) {
         let size = BASE;
