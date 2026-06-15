@@ -441,12 +441,16 @@ def render_page() -> str:
     <button onclick="nxToggleAllV(this)" style="background:none;border:0;color:#a855f7;font-size:12px;cursor:pointer;padding:0">tout cocher / décocher</button>
     <div style="font-size:12px;color:#888;margin:14px 0 6px">Captions (texte incrusté sur la vidéo) — coche celles à appliquer :</div>
     <div id="nx-caps" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">{cap_rows}</div>
-    <div style="display:flex;gap:8px;align-items:flex-start;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:10px">
-      <textarea id="nx-captext" placeholder="✍️ Écris ta caption ici (le texte affiché sur la vidéo)…" style="flex:1;min-height:46px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:8px 10px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
-      <select id="nx-capfont" title="Police" style="background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:9px;font-size:13px;font-family:inherit">{font_opts}</select>
-      <button onclick="nxAddCaption()" style="padding:10px 16px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap">+ Ajouter</button>
+    <div style="background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:14px">
+      <div style="font-size:13px;color:#a855f7;font-weight:800;margin-bottom:8px">✍️ Écris ta caption ici :</div>
+      <textarea id="nx-captext" placeholder="Le texte qui s'affichera sur la vidéo… (ex : Pov : quand tu rentres et que…)" style="width:100%;min-height:72px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:11px 13px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;display:block"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <span style="font-size:12px;color:#888">Police :</span>
+        <select id="nx-capfont" title="Police" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit">{font_opts}</select>
+        <button onclick="nxAddCaption()" style="margin-left:auto;padding:11px 20px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px;white-space:nowrap">+ Ajouter la caption</button>
+      </div>
     </div>
-    <div style="font-size:11px;color:#666;margin-top:5px">Chaque caption ajoutée devient une version (s'affiche sur toute la vidéo). Coche celles à incruster quand tu génères.</div>
+    <div style="font-size:12px;color:#888;margin-top:8px;line-height:1.5">💡 Pas obligé d'ajouter une caption : tu peux cliquer <b>▶ Générer</b> direct, ça fait les variations <b>sans texte</b>. Pour un test rapide : coche juste <b>V1</b> et génère.</div>
   </div>
 
   <!-- Run -->
