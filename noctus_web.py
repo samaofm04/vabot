@@ -285,6 +285,52 @@ def run(model_id: str, folders=None, captions=None, targets=None):
     return proc
 
 
+def gen_from_path(src_path, caption="", font="Inter", folders=None,
+                  start="00:00:00", end="99:99:99", model=None):
+    """Prépare un modèle à partir d'UNE vidéo + lance la génération.
+    Retourne le model_id (à poller via status()) ou None. Réutilisé par /reeltest."""
+    import shutil as _sh
+    import re as _re
+    src = Path(src_path)
+    if not src.exists() or not src.is_file():
+        return None
+    model = model or _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reeltest-{src.stem}")[:40]
+    inp = _models_dir() / model / "input"
+    inp.mkdir(parents=True, exist_ok=True)
+    for f in inp.glob("*"):
+        try:
+            f.unlink()
+        except Exception:
+            pass
+    _sh.copy(str(src), str(inp / src.name))
+    folders = folders or ["V1"]
+    label = ("rt_" + model)[:40]
+    caps = [c for c in read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
+    if caption:
+        caps.append({"label": label, "font": font or "Inter",
+                     "captions": [{"start": start, "end": end, "text": caption}]})
+        sel = [label]
+    else:
+        if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+            caps.append({"label": "sans_texte", "font": None, "captions": []})
+        sel = ["sans_texte"]
+    write_captions(caps)
+    proc = run(model, folders, sel, targets=[src.name])
+    return model if proc else None
+
+
+def output_paths(model_id):
+    """Liste des chemins absolus des mp4 générés pour un modèle."""
+    out = []
+    base = _models_dir() / _safe(model_id) / "output"
+    if base.exists():
+        for vf in V_FOLDERS:
+            d = base / vf
+            if d.exists():
+                out.extend(sorted(d.glob("*.mp4")))
+    return out
+
+
 def stop(model_id: str) -> bool:
     mid = _safe(model_id)
     proc = _PROCS.get(mid)
