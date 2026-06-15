@@ -571,7 +571,7 @@ async function nxRefreshOutputs(){{
     html+='<div style="margin-bottom:12px"><div style="font-weight:700;color:#a855f7;font-size:12px;margin-bottom:6px">'+v+'</div><div style="display:flex;flex-wrap:wrap;gap:10px">';
     o[v].forEach(f=>{{
       const url='/noctus/file/'+encodeURIComponent(m)+'/'+v+'/'+encodeURIComponent(f);
-      html+='<div style="width:120px"><video src="'+url+'" muted playsinline preload=metadata onloadeddata="try{{this.currentTime=0.1}}catch(e){{}}" style="width:120px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video><a href="'+url+'" download style="display:block;text-align:center;color:#8ef;font-size:11px;margin-top:3px;text-decoration:none">⬇ télécharger</a></div>';
+      html+='<div style="width:130px"><video src="'+url+'#t=0.1" controls muted playsinline preload="metadata" style="width:130px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video><a href="'+url+'?dl=1" download="'+f+'" style="display:block;text-align:center;color:#8ef;font-size:11px;margin-top:3px;text-decoration:none">⬇ télécharger</a></div>';
     }});
     html+='</div></div>';
   }});
@@ -704,7 +704,9 @@ def register(app, is_auth, error_fn, success_fn):
         p = _models_dir() / mid / "output" / vf / name
         if not p.exists() or not p.is_file():
             return "Not found", 404
-        return send_file(str(p))
+        dl = request.args.get("dl") == "1"   # ?dl=1 -> force le téléchargement
+        return send_file(str(p), mimetype="video/mp4",
+                         as_attachment=dl, download_name=name, conditional=True)
 
     @app.route("/noctus/captions", methods=["GET", "POST"])
     def noctus_captions():
