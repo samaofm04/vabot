@@ -489,8 +489,8 @@ function buildVideoFilter(variation, brightJitter = 0, contrastJitter = 0, outW 
   // Hue : décalage aléatoire -0.03..+0.03, jamais exactement 0
   let hueShift = variation.hue + randFloat(-0.03, 0.03);
   if (Math.abs(hueShift) < 0.005) hueShift = randFloat(0.008, 0.015);
-  // hflip : 1 vidéo sur 3
-  const doHflip = Math.random() < (1 / 3);
+  // hflip (effet miroir) : DÉSACTIVÉ (le boss n'en veut plus — ça inversait texte/visage)
+  const doHflip = false;
   const filters = [
     `scale=${W}:${H}:force_original_aspect_ratio=increase`,
     `crop=${W}:${H}`,
