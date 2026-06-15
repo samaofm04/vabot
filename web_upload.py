@@ -2468,12 +2468,12 @@ function nxMTimeToggle(){
 function nxMSetTime(which){
   var v=document.getElementById('nx-m-video');
   if(!v || isNaN(v.currentTime)){ return; }
-  var t=Math.max(0, Math.round(v.currentTime*10)/10);
+  var t=Math.max(0, Math.round(v.currentTime*100)/100);
   var rr=document.querySelector('input[name=nxmtime][value="range"]');
   if(rr){ rr.checked=true; nxMTimeToggle(); }
   document.getElementById('nx-m-'+(which==='start'?'start':'end')).value=t;
   var info=document.getElementById('nx-m-timeinfo');
-  if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t+'s';
+  if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t.toFixed(2)+'s';
 }
 async function nxMontageOpen(fid){
   nxMState.fid=fid; nxMState.model='';
@@ -4099,9 +4099,9 @@ body.light .action-icon{color:#666}
       <span style="margin-left:6px">⏱</span>
       <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
       <label style="cursor:pointer"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
-      <input id="nx-m-start" type="number" min="0" step="0.5" value="0" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
+      <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled style="width:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
       <span>à</span>
-      <input id="nx-m-end" type="number" min="0" step="0.5" value="3" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px"><span>s</span>
+      <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled style="width:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px"><span>s</span>
     </div>
     <div style="font-size:11px;color:#888;margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span>▶ joue la vidéo et mets pause au bon moment, puis :</span>
@@ -25032,11 +25032,15 @@ def create_app():
         caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
         if caption:
             def _hms(v):
+                # garde les décimales (millisecondes) -> timing précis au centième
                 try:
-                    s = max(0, int(round(float(v))))
+                    sec = max(0.0, float(v))
                 except Exception:
-                    s = 0
-                return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+                    sec = 0.0
+                h = int(sec // 3600)
+                m = int((sec % 3600) // 60)
+                s = sec - h * 3600 - m * 60
+                return f"{h:02d}:{m:02d}:{s:06.3f}"
             s_s = request.form.get("start_s")
             e_s = request.form.get("end_s")
             if s_s is not None and e_s is not None:

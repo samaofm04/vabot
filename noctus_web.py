@@ -514,9 +514,9 @@ def render_page() -> str:
         <span style="color:#888">⏱ Affiché :</span>
         <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="nxcaptime" value="perm" checked onchange="nxTimeToggle()" style="accent-color:#a855f7"> toute la vidéo</label>
         <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="nxcaptime" value="range" onchange="nxTimeToggle()" style="accent-color:#a855f7"> de</label>
-        <input id="nx-capstart" type="number" min="0" step="0.5" value="0" disabled style="width:58px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
+        <input id="nx-capstart" type="number" min="0" step="0.01" value="0" disabled style="width:64px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
         <span>s à</span>
-        <input id="nx-capend" type="number" min="0" step="0.5" value="3" disabled style="width:58px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
+        <input id="nx-capend" type="number" min="0" step="0.01" value="3" disabled style="width:64px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
         <span>s (le texte disparaît après)</span>
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
@@ -819,11 +819,15 @@ def register(app, is_auth, error_fn, success_fn):
         font = (request.form.get("font") or "Inter").strip() or "Inter"
 
         def _sec_to_hms(v):
+            # garde les décimales (millisecondes) -> timing précis au centième
             try:
-                s = max(0, int(round(float(v))))
+                sec = max(0.0, float(v))
             except Exception:
-                s = 0
-            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+                sec = 0.0
+            h = int(sec // 3600)
+            m = int((sec % 3600) // 60)
+            s = sec - h * 3600 - m * 60
+            return f"{h:02d}:{m:02d}:{s:06.3f}"
 
         # Timing : si start_s/end_s fournis (secondes) -> texte chronométré, sinon permanent
         start_s = request.form.get("start_s")
