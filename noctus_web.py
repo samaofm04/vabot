@@ -374,11 +374,14 @@ def render_page() -> str:
             (seg.get("text", "") or "").replace("\n", " ")
             for seg in c.get("captions", []) if isinstance(seg, dict)
         )
+        is_notext = (not txt) or lbl == "sans_texte"
+        txt_disp = "<i style='color:#888'>— sans texte (juste les variations) —</i>" if is_notext else esc(txt)
+        font_disp = "—" if is_notext else esc(font)
         cap_rows += (
             f"<label style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 12px'>"
             f"<input type='checkbox' class='nx-cap' value='{esc(lbl)}' checked style='accent-color:#a855f7'>"
-            f"<span style='font-size:11px;color:#a855f7;font-weight:700;min-width:78px'>{esc(font)}</span>"
-            f"<span style='flex:1;font-size:13px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{esc(txt) or '(vide)'}</span>"
+            f"<span style='font-size:11px;color:#a855f7;font-weight:700;min-width:78px'>{font_disp}</span>"
+            f"<span style='flex:1;font-size:13px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{txt_disp}</span>"
             f"<button onclick='event.preventDefault();nxDelCaption(\"{esc(lbl)}\")' title='Supprimer' style='background:none;border:0;color:#666;cursor:pointer;font-size:15px'>🗑</button>"
             f"</label>"
         )
@@ -653,8 +656,17 @@ def register(app, is_auth, error_fn, success_fn):
         if not mid or not (_models_dir() / mid / "input").exists():
             return jsonify({"ok": False, "error": "modèle introuvable"})
         folders = [f for f in (request.form.get("folders") or "").split(",") if f in V_FOLDERS]
+        if not folders:
+            return jsonify({"ok": False, "error": "coche au moins une variation (V1…)"})
         captions = [c for c in (request.form.get("captions") or "").split(",") if c.strip()]
-        proc = run(mid, folders or None, captions or None)
+        if not captions:
+            # Aucune caption -> on génère quand même, SANS texte (juste les variations).
+            caps = read_captions()
+            if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+                caps.append({"label": "sans_texte", "font": None, "captions": []})
+                write_captions(caps)
+            captions = ["sans_texte"]
+        proc = run(mid, folders, captions)
         if not proc:
             return jsonify({"ok": False, "error": "lancement impossible"})
         return jsonify({"ok": True})
