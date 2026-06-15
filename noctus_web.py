@@ -741,8 +741,9 @@ def register(app, is_auth, error_fn, success_fn):
         mid = _safe(model)
         if vf not in V_FOLDERS or "/" in name or "\\" in name or ".." in name:
             return "Not found", 404
-        p = _models_dir() / mid / "output" / vf / name
-        if not p.exists() or not p.is_file():
+        base = (_models_dir() / mid / "output" / vf).resolve()
+        p = (base / name).resolve()
+        if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
             return "Not found", 404
         dl = request.args.get("dl") == "1"   # ?dl=1 -> force le téléchargement
         return send_file(str(p), mimetype="video/mp4",

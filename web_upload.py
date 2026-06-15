@@ -2458,6 +2458,82 @@ function lbKeyboard(e){
   if(e.key === 'ArrowLeft'){ lbPrev(); e.preventDefault(); return; }
   if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
 }
+// ===== 🎬 Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
+var nxMState = {fid:'', identity:'', model:''};
+function nxMTimeToggle(){
+  var sel=document.querySelector('input[name=nxmtime]:checked'); var range=sel&&sel.value==='range';
+  var a=document.getElementById('nx-m-start'), b=document.getElementById('nx-m-end');
+  if(a) a.disabled=!range; if(b) b.disabled=!range;
+}
+async function nxMontageOpen(fid){
+  nxMState.fid=fid; nxMState.model='';
+  var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
+  var vid=document.getElementById('nx-m-video');
+  if(vid) vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name);
+  var vf=document.getElementById('nx-m-vfolders'); vf.innerHTML='';
+  for(var i=1;i<=10;i++){ var v='V'+i; var ck=(i<=3)?'checked':'';
+    vf.innerHTML+='<label style="display:inline-flex;align-items:center;gap:4px;background:#1a1a1a;border:1px solid #2a2a2a;padding:5px 9px;border-radius:7px;font-size:12px;cursor:pointer"><input type="checkbox" class="nx-m-vf" value="'+v+'" '+ck+' style="accent-color:#a855f7"> '+v+'</label>'; }
+  document.getElementById('nx-m-results').innerHTML='';
+  document.getElementById('nx-m-prog').textContent='';
+  document.getElementById('nx-m-gen').disabled=false;
+  document.getElementById('nx-m-caption').value='';
+  try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ document.getElementById('nx-m-caption').value=(j.caption||'').trim(); } }catch(e){}
+  document.getElementById('nx-montage-modal').style.display='flex';
+}
+function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
+async function nxMontageGen(){
+  var folders=Array.from(document.querySelectorAll('.nx-m-vf:checked')).map(function(c){return c.value;});
+  if(!folders.length){ alert('Coche au moins une variation'); return; }
+  var fd=new FormData();
+  fd.set('file_id', nxMState.fid);
+  fd.set('caption', document.getElementById('nx-m-caption').value||'');
+  fd.set('font', document.getElementById('nx-m-font').value);
+  fd.set('folders', folders.join(','));
+  var sel=document.querySelector('input[name=nxmtime]:checked');
+  if(sel&&sel.value==='range'){ fd.set('start_s', document.getElementById('nx-m-start').value||'0'); fd.set('end_s', document.getElementById('nx-m-end').value||'999'); }
+  document.getElementById('nx-m-gen').disabled=true;
+  document.getElementById('nx-m-prog').textContent='⏳ génération…';
+  try{
+    var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
+    if(!j.ok){ document.getElementById('nx-m-gen').disabled=false; document.getElementById('nx-m-prog').textContent=''; alert('❌ '+(j.error||'?')); return; }
+    nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMontagePoll();
+  }catch(e){ document.getElementById('nx-m-gen').disabled=false; alert('Erreur: '+e); }
+}
+async function nxMontagePoll(){
+  if(!nxMState.model) return;
+  try{
+    var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
+    var p=document.getElementById('nx-m-prog');
+    if(s.state==='running'){ p.textContent='⏳ '+(s.pct||0)+'%'; setTimeout(nxMontagePoll,1500); }
+    else if(s.state==='done'){ p.textContent='✅ Terminé'; document.getElementById('nx-m-gen').disabled=false; nxMontageResults(); }
+    else if(s.state==='error'){ p.textContent='❌ '+(s.error||'erreur'); document.getElementById('nx-m-gen').disabled=false; }
+    else { setTimeout(nxMontagePoll,1500); }
+  }catch(e){ setTimeout(nxMontagePoll,2500); }
+}
+async function nxMontageResults(){
+  var wrap=document.getElementById('nx-m-results');
+  try{
+    var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
+    var o=j.outputs||{}; var keys=Object.keys(o);
+    if(!keys.length){ wrap.innerHTML='<span style="color:#666;font-size:12px">aucun résultat</span>'; return; }
+    var html='<div style="font-size:12px;color:#888;margin-bottom:6px">Variations générées (📤 = envoyer dans banger-'+nxMState.identity+') :</div><div style="display:flex;flex-wrap:wrap;gap:10px">';
+    keys.forEach(function(v){ o[v].forEach(function(f){
+      var url='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f);
+      html+='<div style="width:120px"><video src="'+url+'#t=0.1" controls muted playsinline preload="metadata" style="width:120px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video>'
+        +'<div style="font-size:10px;color:#a855f7;text-align:center">'+v+'</div>'
+        +'<div style="display:flex;gap:4px;margin-top:2px"><a href="'+url+'?dl=1" download="'+f+'" style="flex:1;text-align:center;color:#8ef;font-size:10px;text-decoration:none;line-height:20px">⬇</a>'
+        +'<button onclick="nxMontageSend(\''+v+'\',\''+f+'\',this)" style="flex:2;background:#5865f2;border:0;color:#fff;font-size:10px;border-radius:5px;cursor:pointer;padding:3px">📤 Discord</button></div></div>';
+    }); });
+    html+='</div>'; wrap.innerHTML=html;
+  }catch(e){ wrap.textContent='Erreur chargement résultats'; }
+}
+async function nxMontageSend(vf,file,btn){
+  btn.disabled=true; btn.textContent='⏳';
+  var fd=new FormData(); fd.set('identity',nxMState.identity); fd.set('model',nxMState.model); fd.set('vf',vf); fd.set('file',file);
+  try{ var r=await fetch('/noctus/montage_send',{method:'POST',body:fd}); var j=await r.json();
+    if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
+  }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
+}
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
   showConfirm(
@@ -3993,6 +4069,36 @@ body.light .action-close:hover{background:#f3f4f6;color:#111}
 body.light .action-count{color:#111}
 body.light .action-icon{color:#666}
 </style>
+
+<!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
+<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px">
+  <div onclick="event.stopPropagation()" style="background:#121212;border:1px solid #2f2f2f;border-radius:16px;max-width:580px;width:100%;max-height:90vh;overflow:auto;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:17px;font-weight:800;color:#fff">🎬 Montage du reel</div>
+      <button onclick="nxMontageClose()" style="background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <video id="nx-m-video" controls muted playsinline style="width:150px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;float:right;margin:0 0 12px 14px"></video>
+    <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Texte (repris de ton reel, modifiable) :</div>
+    <textarea id="nx-m-caption" placeholder="Laisse vide pour des variations sans texte" style="width:100%;min-height:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
+      <span>Police :</span>
+      <select id="nx-m-font" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option><option>TikTokSans</option></select>
+      <span style="margin-left:6px">⏱</span>
+      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
+      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
+      <input id="nx-m-start" type="number" min="0" step="0.5" value="0" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
+      <span>à</span>
+      <input id="nx-m-end" type="number" min="0" step="0.5" value="3" disabled style="width:50px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px"><span>s</span>
+    </div>
+    <div style="font-size:12px;color:#888;margin:12px 0 6px">Variations à générer :</div>
+    <div id="nx-m-vfolders" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:14px;clear:both">
+      <button id="nx-m-gen" onclick="nxMontageGen()" style="padding:11px 24px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px">🎬 Générer</button>
+      <div id="nx-m-prog" style="flex:1;font-size:12px;color:#888"></div>
+    </div>
+    <div id="nx-m-results" style="margin-top:14px"></div>
+  </div>
+</div>
 
 <!-- Lightbox plein écran -->
 <!-- Lightbox style Infloww : backdrop semi-transparent + nav + panneau caption -->
@@ -8411,6 +8517,14 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_sfill}' stroke='{_sstroke}' stroke-width='{_sw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
+        montage_btn = ""
+        if is_video:
+            montage_btn = (
+                f"<button class='card-edit-btn' onclick='event.stopPropagation();nxMontageOpen(\"{fid_safe}\")' "
+                f"title='🎬 Montage : générer des variations de ce reel' style='color:#a855f7'>"
+                f"<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg>"
+                f"</button>"
+            )
         edit_btn = ""
         if show_edit:
             edit_btn = (
@@ -8422,6 +8536,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         actions_html = (
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"{banger_btn}"
+            f"{montage_btn}"
             f"{edit_btn}"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
@@ -24859,6 +24974,91 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
+
+    @app.route("/noctus/montage_gen", methods=["POST"])
+    def noctus_montage_gen():
+        """Génère les variations Noctus DIRECTEMENT depuis un reel de la Bibliothèque
+        (réutilise sa vidéo + sa caption). Génération à la demande."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import noctus_web
+        import shutil as _sh
+        import re as _re
+        if not noctus_web.setup_ok():
+            return jsonify({"ok": False, "error": "Setup vidéo incomplet (Node/ffmpeg) — va dans « Création de vidéos »"})
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "reel introuvable"})
+        target_dir, src = parsed
+        if src.suffix.lower() not in VIDEO_EXTS:
+            return jsonify({"ok": False, "error": "ce n'est pas une vidéo"})
+        identity = target_dir.parent.name  # IDENTITIES_DIR/<identity>/videos
+        if identity not in _list_identities():   # bloque tout file_id qui sortirait de IDENTITIES_DIR
+            return jsonify({"ok": False, "error": "identité invalide"})
+        stem = _re.sub(r"[^a-zA-Z0-9_\-]", "", src.stem)[:28]
+        model = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reel-{identity}-{stem}")[:40]
+        inp = noctus_web._models_dir() / model / "input"
+        inp.mkdir(parents=True, exist_ok=True)
+        for f in inp.glob("*"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        _sh.copy(str(src), str(inp / src.name))
+        caption = (request.form.get("caption") or "").strip()
+        font = (request.form.get("font") or "Inter").strip() or "Inter"
+        folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
+        label = ("m_" + model)[:40]
+        caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
+        if caption:
+            def _hms(v):
+                try:
+                    s = max(0, int(round(float(v))))
+                except Exception:
+                    s = 0
+                return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+            s_s = request.form.get("start_s")
+            e_s = request.form.get("end_s")
+            if s_s is not None and e_s is not None:
+                start, end = _hms(s_s), _hms(e_s)
+            else:
+                start, end = "00:00:00", "99:99:99"
+            caps.append({"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]})
+            sel = [label]
+        else:
+            if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+                caps.append({"label": "sans_texte", "font": None, "captions": []})
+            sel = ["sans_texte"]
+        noctus_web.write_captions(caps)
+        proc = noctus_web.run(model, folders, sel, targets=[src.name])
+        if not proc:
+            return jsonify({"ok": False, "error": "lancement impossible"})
+        return jsonify({"ok": True, "model": model, "identity": identity})
+
+    @app.route("/noctus/montage_send", methods=["POST"])
+    def noctus_montage_send():
+        """Envoie une variation générée vers Discord (salon banger-{identité})."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import noctus_web
+        identity = (request.form.get("identity") or "").strip().lower()
+        model = noctus_web._safe(request.form.get("model") or "")
+        vf = (request.form.get("vf") or "").strip()
+        name = (request.form.get("file") or "").strip()
+        if identity not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if vf not in noctus_web.V_FOLDERS or "/" in name or "\\" in name or ".." in name:
+            return jsonify({"ok": False, "error": "fichier invalide"})
+        base = (noctus_web._models_dir() / model / "output" / vf).resolve()
+        p = (base / name).resolve()
+        if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
+            return jsonify({"ok": False, "error": "fichier introuvable"})
+        ok, msg, _meta = _send_reel_to_banger_channel(identity, p)
+        if ok:
+            return jsonify({"ok": True, "channel": msg})
+        return jsonify({"ok": False, "error": msg})
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
