@@ -377,11 +377,31 @@ def render_page() -> str:
         is_notext = (not txt) or lbl == "sans_texte"
         txt_disp = "<i style='color:#888'>— sans texte (juste les variations) —</i>" if is_notext else esc(txt)
         font_disp = "—" if is_notext else esc(font)
+        # Badge timing (si chronométré)
+        timing_badge = ""
+        segs0 = c.get("captions", [])
+        if segs0 and isinstance(segs0[0], dict) and not is_notext:
+            en = (segs0[0].get("end", "") or "")
+            if en and not en.startswith("99") and en != "∞":
+                def _h2s(h):
+                    try:
+                        p = [int(x) for x in str(h).split(":")]
+                        while len(p) < 3:
+                            p = [0] + p
+                        return p[0] * 3600 + p[1] * 60 + p[2]
+                    except Exception:
+                        return 0
+                st = segs0[0].get("start", "00:00:00")
+                timing_badge = (
+                    f"<span style='font-size:10px;color:#fbbf24;background:#0a0a0a;border:1px solid #2a2a2a;"
+                    f"padding:2px 6px;border-radius:5px;white-space:nowrap'>⏱ {_h2s(st)}–{_h2s(en)}s</span>"
+                )
         cap_rows += (
             f"<label style='display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 12px'>"
             f"<input type='checkbox' class='nx-cap' value='{esc(lbl)}' checked style='accent-color:#a855f7'>"
             f"<span style='font-size:11px;color:#a855f7;font-weight:700;min-width:78px'>{font_disp}</span>"
             f"<span style='flex:1;font-size:13px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{txt_disp}</span>"
+            f"{timing_badge}"
             f"<button onclick='event.preventDefault();nxDelCaption(\"{esc(lbl)}\")' title='Supprimer' style='background:none;border:0;color:#666;cursor:pointer;font-size:15px'>🗑</button>"
             f"</label>"
         )
@@ -444,6 +464,15 @@ def render_page() -> str:
     <div style="background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:14px">
       <div style="font-size:13px;color:#a855f7;font-weight:800;margin-bottom:8px">✍️ Écris ta caption ici :</div>
       <textarea id="nx-captext" placeholder="Le texte qui s'affichera sur la vidéo… (ex : Pov : quand tu rentres et que…)" style="width:100%;min-height:72px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:11px 13px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;display:block"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
+        <span style="color:#888">⏱ Affiché :</span>
+        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="nxcaptime" value="perm" checked onchange="nxTimeToggle()" style="accent-color:#a855f7"> toute la vidéo</label>
+        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="nxcaptime" value="range" onchange="nxTimeToggle()" style="accent-color:#a855f7"> de</label>
+        <input id="nx-capstart" type="number" min="0" step="0.5" value="0" disabled style="width:58px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
+        <span>s à</span>
+        <input id="nx-capend" type="number" min="0" step="0.5" value="3" disabled style="width:58px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:5px 7px">
+        <span>s (le texte disparaît après)</span>
+      </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
         <span style="font-size:12px;color:#888">Police :</span>
         <select id="nx-capfont" title="Police" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit">{font_opts}</select>
@@ -577,11 +606,22 @@ async function nxRefreshOutputs(){{
   }});
   wrap.innerHTML=html;
 }}
+function nxTimeToggle(){{
+  const sel=document.querySelector('input[name=nxcaptime]:checked');
+  const range = sel && sel.value==='range';
+  const a=document.getElementById('nx-capstart'), b=document.getElementById('nx-capend');
+  if(a) a.disabled=!range; if(b) b.disabled=!range;
+}}
 async function nxAddCaption(){{
   const ta=document.getElementById('nx-captext'); const text=(ta.value||'').trim();
   if(!text){{ alert('Écris un texte'); return; }}
   const font=document.getElementById('nx-capfont').value;
   const fd=new FormData(); fd.set('text',text); fd.set('font',font);
+  const sel=document.querySelector('input[name=nxcaptime]:checked');
+  if(sel && sel.value==='range'){{
+    fd.set('start_s', document.getElementById('nx-capstart').value||'0');
+    fd.set('end_s', document.getElementById('nx-capend').value||'999');
+  }}
   const r=await fetch('/noctus/add_caption',{{method:'POST',body:fd}}); const j=await r.json();
   if(j.ok){{ location.reload(); }} else {{ alert('❌ '+(j.error||'?')); }}
 }}
@@ -730,8 +770,23 @@ def register(app, is_auth, error_fn, success_fn):
         if not text:
             return jsonify({"ok": False, "error": "texte vide"})
         font = (request.form.get("font") or "Inter").strip() or "Inter"
-        start = (request.form.get("start") or "00:00:00").strip() or "00:00:00"
-        end = (request.form.get("end") or "99:99:99").strip() or "99:99:99"
+
+        def _sec_to_hms(v):
+            try:
+                s = max(0, int(round(float(v))))
+            except Exception:
+                s = 0
+            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+        # Timing : si start_s/end_s fournis (secondes) -> texte chronométré, sinon permanent
+        start_s = request.form.get("start_s")
+        end_s = request.form.get("end_s")
+        if start_s is not None and end_s is not None:
+            start = _sec_to_hms(start_s)
+            end = _sec_to_hms(end_s)
+        else:
+            start = (request.form.get("start") or "00:00:00").strip() or "00:00:00"
+            end = (request.form.get("end") or "99:99:99").strip() or "99:99:99"
         caps = read_captions()
         existing = {c.get("label") for c in caps if isinstance(c, dict)}
         i = 1
