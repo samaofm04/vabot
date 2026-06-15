@@ -2501,6 +2501,8 @@ function nxMSnap(t, ex){
   var thr=10/pps, cands=[0,dur];
   var v=document.getElementById('nx-m-video'); if(v&&!isNaN(v.currentTime)) cands.push(v.currentTime);
   (nxMState.caps||[]).forEach(function(c,idx){ if(idx===ex||c.start==null) return; cands.push(c.start); cands.push(c.end); });
+  // graduations de la règle (les lignes visibles : 1s, 2s, 3s…) -> aimantation propre
+  var stp=nxMState.step||0; if(stp>0){ for(var g=0; g<=dur+0.001; g+=stp){ cands.push(Math.round(g*100)/100); } }
   var best=t, bd=thr, snapped=null;
   for(var k=0;k<cands.length;k++){ var d=Math.abs(cands[k]-t); if(d<bd){ bd=d; best=cands[k]; snapped=cands[k]; } }
   nxMState.snap=snapped; // position (en s) où un bord s'est aimanté, sinon null
@@ -2563,6 +2565,7 @@ function nxMBeginDrag(e,i,mode){
     if(blk){ blk.style.left=(ns*pps)+'px'; blk.style.width=Math.max(8,(ne-ns)*pps)+'px'; var tt=blk.querySelector('.nxm-bt'); if(tt) tt.textContent=nxMFmt(ns)+'→'+nxMFmt(ne)+'s'; }
     var sl=document.getElementById('nx-m-snapline');
     if(sl){ if(nxMState.snap!=null){ sl.style.left=(nxMState.snap*pps)+'px'; sl.style.display='block'; } else { sl.style.display='none'; } }
+    var pl=document.getElementById('nx-m-phlabel'); if(pl) pl.textContent=nxMFmt(ns)+' → '+nxMFmt(ne)+'s'+(nxMState.snap!=null?' 🧲':'');
     nxMUpdatePreview();
   }
   function up(){
@@ -2600,7 +2603,7 @@ function nxMRenderCaps(){
   var La=nxMLanes(), nLanes=La.n, laneH=26, gap=5, rulerH=22;
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+4;
   var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
-  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels='';
+  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
     grid+='<div style="position:absolute;left:'+x+'px;top:0;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
     rlabels+='<div style="position:absolute;left:'+(x+3)+'px;top:5px;font-size:9px;color:#bbb;pointer-events:none">'+Math.round(s)+'s</div>';
