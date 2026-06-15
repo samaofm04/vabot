@@ -90,7 +90,7 @@ class NoctusTest(commands.Cog):
         )
 
         model = await asyncio.to_thread(
-            noctus_web.gen_from_path, str(src), caption, "Inter", ["V1"]
+            noctus_web.gen_from_path, str(src), caption, "TikTokSans", ["V1"]
         )
         if not model:
             await interaction.followup.send("❌ Lancement de la génération impossible.")

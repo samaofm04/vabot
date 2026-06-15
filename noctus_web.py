@@ -285,7 +285,7 @@ def run(model_id: str, folders=None, captions=None, targets=None):
     return proc
 
 
-def gen_from_path(src_path, caption="", font="Inter", folders=None,
+def gen_from_path(src_path, caption="", font="TikTokSans", folders=None,
                   start="00:00:00", end="99:99:99", model=None):
     """Prépare un modèle à partir d'UNE vidéo + lance la génération.
     Retourne le model_id (à poller via status()) ou None. Réutilisé par /reeltest."""
@@ -307,7 +307,7 @@ def gen_from_path(src_path, caption="", font="Inter", folders=None,
     label = ("rt_" + model)[:40]
     caps = [c for c in read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
     if caption:
-        caps.append({"label": label, "font": font or "Inter",
+        caps.append({"label": label, "font": font or "TikTokSans",
                      "captions": [{"start": start, "end": end, "text": caption}]})
         sel = [label]
     else:
@@ -407,15 +407,16 @@ def render_page() -> str:
     if not model_opts:
         model_opts = "<option value=''>(aucun modèle — crée-en un)</option>"
 
-    FONTS = ["Inter", "Poppins", "Montserrat", "BebasNeue", "Anton", "TikTokSans"]
-    font_opts = "".join(f"<option>{f}</option>" for f in FONTS)
+    FONTS = ["TikTokSans", "Inter", "Poppins", "Montserrat", "BebasNeue", "Anton"]
+    # TikTokSans = police par défaut (1er + selected)
+    font_opts = "".join(f"<option{' selected' if f == 'TikTokSans' else ''}>{f}</option>" for f in FONTS)
 
     cap_rows = ""
     for c in caps:
         if not isinstance(c, dict):
             continue
         lbl = c.get("label", "")
-        font = c.get("font", "Inter") or "Inter"
+        font = c.get("font", "TikTokSans") or "TikTokSans"
         txt = "  ·  ".join(
             (seg.get("text", "") or "").replace("\n", " ")
             for seg in c.get("captions", []) if isinstance(seg, dict)
@@ -816,7 +817,7 @@ def register(app, is_auth, error_fn, success_fn):
         text = (request.form.get("text") or "").strip()
         if not text:
             return jsonify({"ok": False, "error": "texte vide"})
-        font = (request.form.get("font") or "Inter").strip() or "Inter"
+        font = (request.form.get("font") or "TikTokSans").strip() or "TikTokSans"
 
         def _sec_to_hms(v):
             # garde les décimales (millisecondes) -> timing précis au centième

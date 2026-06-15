@@ -4095,7 +4095,7 @@ body.light .action-icon{color:#666}
     <textarea id="nx-m-caption" placeholder="Laisse vide pour des variations sans texte" style="width:100%;min-height:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
       <span>Police :</span>
-      <select id="nx-m-font" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option><option>TikTokSans</option></select>
+      <select id="nx-m-font" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option selected>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
       <span style="margin-left:6px">⏱</span>
       <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
       <label style="cursor:pointer"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
@@ -25026,7 +25026,7 @@ def create_app():
                 pass
         _sh.copy(str(src), str(inp / src.name))
         caption = (request.form.get("caption") or "").strip()
-        font = (request.form.get("font") or "Inter").strip() or "Inter"
+        font = (request.form.get("font") or "TikTokSans").strip() or "TikTokSans"
         folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
         label = ("m_" + model)[:40]
         caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
