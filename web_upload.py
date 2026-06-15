@@ -2513,6 +2513,18 @@ function nxMSyncPlayhead(){
   if(ph&&v&&pps&&!isNaN(v.currentTime)) ph.style.left=(v.currentTime*pps)+'px';
   var lab=document.getElementById('nx-m-phlabel'); if(lab&&v&&!isNaN(v.currentTime)) lab.textContent=nxMFmt(v.currentTime)+'s';
 }
+function nxMUpdatePreview(){
+  // Overlay live du texte sur la vidéo (caption(s) active(s) à l'instant courant)
+  var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video');
+  if(!ov||!v) return;
+  var t=isNaN(v.currentTime)?0:v.currentTime;
+  var act=(nxMState.caps||[]).filter(function(c){ if(c.start==null) return true; return t>=c.start-0.001 && t<=c.end+0.001; });
+  if(!act.length){ ov.innerHTML=''; return; }
+  var lines=[];
+  act.forEach(function(c){ String(c.text||'').split(/\\r?\\n/).forEach(function(ln){ lines.push(ln); }); });
+  var inner=lines.map(function(ln){ return '<div style="color:#fff;font-weight:800;font-size:13px;line-height:1.25;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:pre-wrap;word-break:break-word">'+nxMEsc(ln)+'</div>'; }).join('');
+  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:58%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
+}
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
   var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
@@ -2539,6 +2551,7 @@ function nxMBeginDrag(e,i,mode){
     nxMDragLast=[ns,ne];
     var blk=document.querySelector('.nxm-block[data-i="'+i+'"]');
     if(blk){ blk.style.left=(ns*pps)+'px'; blk.style.width=Math.max(8,(ne-ns)*pps)+'px'; var tt=blk.querySelector('.nxm-bt'); if(tt) tt.textContent=nxMFmt(ns)+'→'+nxMFmt(ne)+'s'; }
+    nxMUpdatePreview();
   }
   function up(){
     el.removeEventListener('pointermove',mv); el.removeEventListener('pointerup',up); el.removeEventListener('pointercancel',up);
@@ -2597,7 +2610,7 @@ function nxMRenderCaps(){
   var tl=document.getElementById('nx-m-timeline');
   tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')) return; var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(e.clientX-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); });
   tl.querySelectorAll('.nxm-h').forEach(function(el){ el.addEventListener('pointerdown',function(ev){ nxMBeginDrag(ev, parseInt(el.getAttribute('data-i'),10), el.getAttribute('data-mode')); }); });
-  nxMSyncPlayhead();
+  nxMSyncPlayhead(); nxMUpdatePreview();
 }
 function nxMEditCap(i){
   var c=nxMState.caps[i]; if(!c) return;
@@ -2637,7 +2650,7 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var vid=document.getElementById('nx-m-video');
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); }; }
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
@@ -2658,7 +2671,7 @@ async function nxMontageOpen(fid, exampleUrl){
   document.getElementById('nx-montage-modal').style.display='flex';
   nxMRenderCaps();
 }
-function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
+function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; var ov=document.getElementById('nx-m-overlay'); if(ov) ov.innerHTML=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
   var folders=Array.from(document.querySelectorAll('.nx-m-vf:checked')).map(function(c){return c.value;});
   if(!folders.length){ alert('Coche au moins une variation'); return; }
@@ -4258,14 +4271,17 @@ body.light .action-icon{color:#666}
       <div style="font-size:17px;font-weight:800;color:#fff">🎬 Montage du reel</div>
       <button onclick="nxMontageClose()" style="background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1">×</button>
     </div>
-    <div style="float:right;margin:0 0 12px 14px;display:flex;gap:8px;align-items:flex-start">
-      <div id="nx-m-example-wrap" style="display:none;text-align:center">
-        <video id="nx-m-example" controls muted loop playsinline style="width:116px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;border:1px solid #fbbf24"></video>
-        <div style="font-size:10px;color:#fbbf24;margin-top:3px;line-height:1.2">📋 Exemple<br>(à recopier)</div>
-      </div>
+    <div style="display:flex;gap:12px;align-items:flex-start;justify-content:center;margin-bottom:12px;flex-wrap:wrap">
       <div style="text-align:center">
-        <video id="nx-m-video" controls muted playsinline style="width:116px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000"></video>
-        <div style="font-size:10px;color:#888;margin-top:3px">Ton reel</div>
+        <div style="position:relative;width:182px;aspect-ratio:9/16">
+          <video id="nx-m-video" controls muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;background:#000"></video>
+          <div id="nx-m-overlay" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:10px"></div>
+        </div>
+        <div style="font-size:10px;color:#a855f7;margin-top:3px;font-weight:700">Ton reel — aperçu live</div>
+      </div>
+      <div id="nx-m-example-wrap" style="display:none;text-align:center">
+        <video id="nx-m-example" controls muted loop playsinline style="width:124px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;border:1px solid #fbbf24"></video>
+        <div style="font-size:10px;color:#fbbf24;margin-top:3px;line-height:1.2">📋 Exemple<br>(à recopier)</div>
       </div>
     </div>
     <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Captions — tu peux en mettre plusieurs à des moments différents :</div>
