@@ -18,6 +18,8 @@ venv/
 # Node (pipeline Noctus) — on commit le code + fonts, PAS les deps natives
 noctus/node_modules/
 noctus/_test/
+noctus/.node/
+noctus/.setup_status.json
 
 # Scripts de deploiement (legacy)
 install_on_vps.sh

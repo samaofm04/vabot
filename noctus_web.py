@@ -23,10 +23,37 @@ V_FOLDERS = [f"V{i}" for i in range(1, 11)]
 
 _PROCS = {}  # model_id -> subprocess.Popen
 
+# Node "embarqué" téléchargé par le setup auto (si pas de node système)
+_NODE_HOME = NOCTUS_SRC / ".node"
+_SETUP_STATUS_FILE = NOCTUS_SRC / ".setup_status.json"
+_NODE_VERSION = "v20.18.1"  # LTS épinglée
+
 
 # ---------- helpers système ----------
+def _node_bin() -> str:
+    """Chemin vers node : système d'abord, sinon le node embarqué (.node/)."""
+    sysnode = shutil.which("node")
+    if sysnode:
+        return sysnode
+    if _NODE_HOME.exists():
+        for pat in ("**/bin/node", "**/node.exe"):
+            for c in _NODE_HOME.glob(pat):
+                if c.is_file():
+                    return str(c)
+    return ""
+
+
+def _npm_cli() -> str:
+    """Chemin du npm-cli.js du node embarqué (pour lancer npm sans PATH)."""
+    if _NODE_HOME.exists():
+        for c in _NODE_HOME.glob("**/npm-cli.js"):
+            if c.is_file():
+                return str(c)
+    return ""
+
+
 def node_available() -> bool:
-    return shutil.which("node") is not None
+    return bool(_node_bin())
 
 
 def deps_installed() -> bool:
@@ -39,6 +66,110 @@ def ffmpeg_available() -> bool:
 
 def setup_ok() -> bool:
     return node_available() and deps_installed() and ffmpeg_available()
+
+
+# ---------- setup auto (télécharge node + npm install, sans terminal) ----------
+def _setup_status() -> dict:
+    try:
+        if _SETUP_STATUS_FILE.exists():
+            return json.loads(_SETUP_STATUS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"state": "idle"}
+
+
+def _set_setup(state, msg=""):
+    try:
+        _SETUP_STATUS_FILE.write_text(json.dumps({"state": state, "msg": msg}), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _node_dist():
+    import platform
+    m = platform.machine().lower()
+    arch = "arm64" if m in ("aarch64", "arm64") else ("x64" if m in ("x86_64", "amd64") else m)
+    s = platform.system().lower()
+    if s == "linux":
+        return f"https://nodejs.org/dist/{_NODE_VERSION}/node-{_NODE_VERSION}-linux-{arch}.tar.xz", "tar.xz"
+    if s == "darwin":
+        return f"https://nodejs.org/dist/{_NODE_VERSION}/node-{_NODE_VERSION}-darwin-{arch}.tar.gz", "tar.gz"
+    if s in ("windows", "win32"):
+        return f"https://nodejs.org/dist/{_NODE_VERSION}/node-{_NODE_VERSION}-win-{arch}.zip", "zip"
+    return None, None
+
+
+def _do_setup():
+    """Télécharge un node portable (si pas de node système) puis npm install.
+    Tourne dans un thread ; l'avancement est dans .setup_status.json."""
+    import urllib.request
+    import tempfile
+    import tarfile
+    import zipfile
+    try:
+        if not ffmpeg_available():
+            _set_setup("error", "ffmpeg absent du serveur (besoin de l'admin : apt install ffmpeg)")
+            return
+        # 1) Node : système ? sinon on le télécharge dans .node/
+        if not shutil.which("node") and not _node_bin():
+            url, ext = _node_dist()
+            if not url:
+                _set_setup("error", "plateforme non supportée pour l'auto-install de Node")
+                return
+            _set_setup("downloading", f"Téléchargement de Node {_NODE_VERSION}…")
+            _NODE_HOME.mkdir(parents=True, exist_ok=True)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix="." + ext.split(".")[-1])
+            tmp.close()
+            with urllib.request.urlopen(url, timeout=120) as r, open(tmp.name, "wb") as f:
+                shutil.copyfileobj(r, f)
+            _set_setup("extracting", "Extraction de Node…")
+            if ext == "zip":
+                with zipfile.ZipFile(tmp.name) as z:
+                    z.extractall(_NODE_HOME)
+            else:
+                with tarfile.open(tmp.name) as t:
+                    t.extractall(_NODE_HOME)
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+            nb = _node_bin()
+            if nb and os.name != "nt":
+                try:
+                    os.chmod(nb, 0o755)
+                except Exception:
+                    pass
+        node_bin = _node_bin()
+        if not node_bin:
+            _set_setup("error", "Node introuvable après téléchargement")
+            return
+        # 2) npm install dans noctus/
+        _set_setup("installing", "npm install @napi-rs/canvas… (1-2 min)")
+        npm_cli = _npm_cli()
+        if npm_cli:
+            cmd = [node_bin, npm_cli, "install", "--no-audit", "--no-fund"]
+        elif shutil.which("npm"):
+            cmd = [shutil.which("npm"), "install", "--no-audit", "--no-fund"]
+        else:
+            cmd = [node_bin, "-e", "process.exit(1)"]
+        proc = subprocess.run(cmd, cwd=str(NOCTUS_SRC), capture_output=True, text=True, timeout=600)
+        if deps_installed():
+            _set_setup("done", "✅ Installé. Recharge la page.")
+        else:
+            tail = (proc.stderr or proc.stdout or "")[-400:]
+            _set_setup("error", f"npm install a échoué : {tail}")
+    except Exception as e:
+        _set_setup("error", f"{type(e).__name__}: {e}")
+
+
+def start_setup() -> bool:
+    st = _setup_status().get("state")
+    if st in ("downloading", "extracting", "installing"):
+        return False  # déjà en cours
+    import threading
+    _set_setup("downloading", "Démarrage…")
+    threading.Thread(target=_do_setup, daemon=True).start()
+    return True
 
 
 # ---------- helpers data ----------
@@ -142,8 +273,9 @@ def run(model_id: str, folders=None, captions=None, targets=None):
     kwargs = {}
     if os.name != "nt":
         kwargs["start_new_session"] = True  # groupe de process -> kill propre
+    node_bin = _node_bin() or "node"
     proc = subprocess.Popen(
-        ["node", "noctus_runner.js", json.dumps(payload)],
+        [node_bin, "noctus_runner.js", json.dumps(payload)],
         cwd=str(NOCTUS_SRC),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -192,15 +324,32 @@ def render_page() -> str:
             miss.append("ffmpeg")
         if node_available() and not deps_installed():
             miss.append("@napi-rs/canvas (npm install)")
+        ff_missing = not ffmpeg_available()
+        if ff_missing:
+            auto_block = (
+                "<div style='margin-top:10px;font-size:12px;color:#fca5a5'>"
+                "⚠️ <b>ffmpeg</b> manque et nécessite l'admin du VPS : "
+                "<code style='color:#8ef'>sudo apt install -y ffmpeg</code></div>"
+            )
+        else:
+            auto_block = (
+                "<div style='margin-top:12px'>"
+                "<button onclick='nxSetup(this)' style='padding:11px 20px;background:linear-gradient(135deg,#22c55e,#16a34a);"
+                "border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:13px'>⚙️ Installer automatiquement</button>"
+                "<span id='nx-setupmsg' style='margin-left:12px;font-size:12px;color:#aaa'></span>"
+                "<div style='font-size:11px;color:#888;margin-top:6px'>télécharge Node + les dépendances sur le serveur, sans terminal (~1-2 min)</div>"
+                "</div>"
+            )
         setup_banner = (
             "<div style='background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);"
             "border-radius:12px;padding:16px 18px;margin-bottom:18px;color:#fca5a5;font-size:13px;line-height:1.6'>"
-            "⚠️ <b>Setup incomplet sur ce serveur</b> — manque : <b>" + esc(", ".join(miss)) + "</b>.<br>"
-            "Lance une fois sur le VPS :<br>"
+            "⚠️ <b>Setup incomplet sur ce serveur</b> — manque : <b>" + esc(", ".join(miss)) + "</b>."
+            + auto_block +
+            "<details style='margin-top:10px'><summary style='cursor:pointer;font-size:12px;color:#888'>ou en ligne de commande sur le VPS</summary>"
             "<code style='display:block;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;"
             "padding:10px 12px;margin-top:8px;color:#8ef;white-space:pre-wrap'>"
-            "sudo apt update &amp;&amp; sudo apt install -y nodejs npm ffmpeg\n"
-            "cd /opt/va-bot/noctus &amp;&amp; npm install</code>"
+            "sudo apt install -y nodejs npm ffmpeg\n"
+            "cd /opt/va-bot/noctus &amp;&amp; npm install &amp;&amp; sudo systemctl restart va-bot</code></details>"
             "</div>"
         )
 
@@ -302,6 +451,24 @@ def render_page() -> str:
 
 <script>
 function nxModel(){{ const s=document.getElementById('nx-model'); return s? s.value : ''; }}
+async function nxSetup(btn){{
+  if(btn){{ btn.disabled=true; }}
+  const msg=document.getElementById('nx-setupmsg');
+  if(msg){{ msg.textContent='⏳ démarrage…'; }}
+  try {{ await fetch('/noctus/setup',{{method:'POST'}}); nxSetupPoll(); }}
+  catch(e){{ if(msg) msg.textContent='erreur: '+e; if(btn) btn.disabled=false; }}
+}}
+async function nxSetupPoll(){{
+  const msg=document.getElementById('nx-setupmsg');
+  const lbl={{downloading:'⏳ téléchargement de Node…',extracting:'⏳ extraction…',installing:'⏳ npm install (1-2 min)…',done:'✅ installé !',error:'❌ '}};
+  try {{
+    const r=await fetch('/noctus/setup_status'); const s=await r.json();
+    if(msg) msg.textContent = (lbl[s.state]||'') + (s.state==='error'? (s.msg||'erreur'):'');
+    if(s.state==='done'){{ setTimeout(function(){{ location.reload(); }}, 1200); return; }}
+    if(s.state==='error'){{ return; }}
+    setTimeout(nxSetupPoll, 2000);
+  }} catch(e){{ setTimeout(nxSetupPoll, 3000); }}
+}}
 async function nxCreateModel(){{
   const n=(document.getElementById('nx-newmodel').value||'').trim();
   if(!n){{ alert('Nom du modèle ?'); return; }}
@@ -499,3 +666,16 @@ def register(app, is_auth, error_fn, success_fn):
         if write_captions(data):
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": "écriture échouée (doit être une liste)"})
+
+    @app.route("/noctus/setup", methods=["POST"])
+    def noctus_setup():
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        started = start_setup()
+        return jsonify({"ok": True, "started": started})
+
+    @app.route("/noctus/setup_status", methods=["GET"])
+    def noctus_setup_status():
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify(_setup_status())
