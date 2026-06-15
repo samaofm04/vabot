@@ -2485,34 +2485,74 @@ function nxMAddCap(){
   nxMRenderCaps();
   return true;
 }
-function nxMRenderCaps(){
-  var dur=nxMDur();
-  var caps=nxMState.caps||[];
-  var frise=document.getElementById('nx-m-frise');
-  var list=document.getElementById('nx-m-caplist');
-  if(!frise||!list) return;
-  if(!caps.length){
-    frise.innerHTML='<div style="font-size:11px;color:#555;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">Aucune caption — la vidéo sera générée <b>sans texte</b>. Ajoute-en une ci-dessus ☝️</div>';
-    list.innerHTML='';
-    return;
-  }
-  var colors=['#c2603f','#3f7fc2','#3fc27a','#c23f9e','#c2a63f','#7a3fc2'];
-  var fh='<div style="font-size:11px;color:#888;margin-bottom:4px">Frise '+(dur?'('+nxMFmt(dur)+'s)':'(durée inconnue)')+' :</div>';
-  caps.forEach(function(c,i){
-    var col=colors[i%colors.length];
-    var leftPct, widPct;
-    if(c.start==null||!dur){ leftPct=0; widPct=100; }
-    else {
-      leftPct=Math.max(0,Math.min(96,c.start/dur*100)); // 96 max -> le bloc mini reste visible même si start ≈ fin
-      var raw=(c.end==null)?100:((c.end-c.start)/dur*100);
-      if(!(raw>0)) raw=4; // garde-fou NaN/0/négatif
-      widPct=Math.max(4,Math.min(100-leftPct,raw));
-    }
-    fh+='<div style="position:relative;height:24px;background:#161616;border-radius:5px;margin-bottom:4px;overflow:hidden">'
-      +'<div title="'+nxMEsc(c.text)+'" data-edit="'+i+'" style="position:absolute;top:0;bottom:0;left:'+leftPct+'%;width:'+widPct+'%;background:'+col+';border-radius:5px;display:flex;align-items:center;padding:0 7px;cursor:pointer;box-sizing:border-box;overflow:hidden">'
-      +'<span style="color:#fff;font-size:11px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">'+nxMEsc(c.text)+'</span></div></div>';
+// ---- Timeline type CapCut : helpers (px/seconde, snapping, lanes, playhead, drag) ----
+function nxMPxPerSec(){ return nxMState.pps||0; }
+function nxMSnap(t, ex){
+  var pps=nxMState.pps||0, dur=nxMState.dur||0; if(!pps) return t;
+  var thr=8/pps, cands=[0,dur];
+  var v=document.getElementById('nx-m-video'); if(v&&!isNaN(v.currentTime)) cands.push(v.currentTime);
+  (nxMState.caps||[]).forEach(function(c,idx){ if(idx===ex||c.start==null) return; cands.push(c.start); cands.push(c.end); });
+  var best=t, bd=thr;
+  for(var k=0;k<cands.length;k++){ var d=Math.abs(cands[k]-t); if(d<bd){ bd=d; best=cands[k]; } }
+  return best;
+}
+function nxMLanes(){
+  var caps=nxMState.caps||[], dur=nxMState.dur||1;
+  var items=caps.map(function(c,i){ return {i:i, s:(c.start==null?0:c.start), e:(c.start==null?dur:c.end)}; });
+  var order=items.slice().sort(function(a,b){ return (a.s-b.s)||(a.i-b.i); });
+  var laneEnds=[], laneOf={};
+  order.forEach(function(it){
+    var placed=false;
+    for(var L=0;L<laneEnds.length;L++){ if(it.s>=laneEnds[L]-0.001){ laneOf[it.i]=L; laneEnds[L]=it.e; placed=true; break; } }
+    if(!placed){ laneOf[it.i]=laneEnds.length; laneEnds.push(it.e); }
   });
-  frise.innerHTML=fh;
+  return {laneOf:laneOf, n:Math.max(1,laneEnds.length)};
+}
+function nxMSyncPlayhead(){
+  var ph=document.getElementById('nx-m-playhead'), v=document.getElementById('nx-m-video'), pps=nxMState.pps||0;
+  if(ph&&v&&pps&&!isNaN(v.currentTime)) ph.style.left=(v.currentTime*pps)+'px';
+  var lab=document.getElementById('nx-m-phlabel'); if(lab&&v&&!isNaN(v.currentTime)) lab.textContent=nxMFmt(v.currentTime)+'s';
+}
+function nxMBeginDrag(e,i,mode){
+  e.preventDefault(); e.stopPropagation();
+  var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
+  var c=nxMState.caps[i]; if(!c) return;
+  var os=(c.start==null?0:c.start), oe=(c.start==null?dur:c.end), len=oe-os;
+  var startX=e.clientX, el=e.currentTarget, MINW=0.2, nxMDragLast=null;
+  try{ el.setPointerCapture(e.pointerId); }catch(_){}
+  function mv(ev){
+    var dt=(ev.clientX-startX)/pps, ns=os, ne=oe;
+    if(mode==='move'){
+      ns=os+dt; if(ns<0)ns=0; if(ns+len>dur)ns=dur-len;
+      ns=nxMSnap(ns,i); ne=ns+len;
+      if(ne>dur){ ne=dur; ns=dur-len; } if(ns<0){ ns=0; ne=len; } // re-clamp post-snap
+    } else if(mode==='left'){
+      ns=os+dt; if(ns<0)ns=0; if(ns>oe-MINW)ns=oe-MINW;
+      ns=nxMSnap(ns,i); if(ns>oe-MINW)ns=oe-MINW; if(ns<0)ns=0; // re-clamp post-snap (anti-inversion)
+      ne=oe;
+    } else {
+      ne=oe+dt; if(ne>dur)ne=dur; if(ne<os+MINW)ne=os+MINW;
+      ne=nxMSnap(ne,i); if(ne<os+MINW)ne=os+MINW; if(ne>dur)ne=dur; // re-clamp post-snap
+      ns=os;
+    }
+    nxMState.caps[i].start=ns; nxMState.caps[i].end=ne; // valeurs brutes, arrondies au pointerup
+    nxMDragLast=[ns,ne];
+    var blk=document.querySelector('.nxm-block[data-i="'+i+'"]');
+    if(blk){ blk.style.left=(ns*pps)+'px'; blk.style.width=Math.max(8,(ne-ns)*pps)+'px'; var tt=blk.querySelector('.nxm-bt'); if(tt) tt.textContent=nxMFmt(ns)+'→'+nxMFmt(ne)+'s'; }
+  }
+  function up(){
+    el.removeEventListener('pointermove',mv); el.removeEventListener('pointerup',up); el.removeEventListener('pointercancel',up);
+    try{ el.releasePointerCapture(e.pointerId); }catch(_){}
+    if(nxMDragLast){ nxMState.caps[i].start=Math.round(nxMDragLast[0]*100)/100; nxMState.caps[i].end=Math.round(nxMDragLast[1]*100)/100; nxMDragLast=null; }
+    nxMRenderCaps();
+  }
+  el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
+}
+function nxMRenderCaps(){
+  var dur=nxMDur(), caps=nxMState.caps||[];
+  var wrap=document.getElementById('nx-m-frise'), list=document.getElementById('nx-m-caplist');
+  if(!wrap||!list) return;
+  // --- LISTE (texte + supprimer + éditer le texte) ---
   var lh='';
   caps.forEach(function(c,i){
     var t=(c.start==null)?'toute la vidéo':(nxMFmt(c.start)+'s → '+nxMFmt(c.end)+'s');
@@ -2520,13 +2560,44 @@ function nxMRenderCaps(){
       +'<span style="background:#2a2a2a;color:#aaa;font-size:10px;border-radius:4px;padding:1px 6px">'+(i+1)+'</span>'
       +'<span style="flex:1;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">« '+nxMEsc(c.text)+' »</span>'
       +'<span style="font-size:11px;color:#888;white-space:nowrap">'+t+'</span>'
-      +'<button type="button" data-edit="'+i+'" title="Modifier" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✏️</button>'
+      +'<button type="button" data-edit="'+i+'" title="Modifier le texte" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✏️</button>'
       +'<button type="button" data-del="'+i+'" title="Supprimer" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:13px;padding:0">🗑</button></div>';
   });
   list.innerHTML=lh;
-  frise.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
   list.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
   list.querySelectorAll('[data-del]').forEach(function(el){ el.addEventListener('click',function(){ nxMDelCap(parseInt(el.getAttribute('data-del'),10)); }); });
+  // --- TIMELINE ---
+  if(!caps.length){ wrap.innerHTML='<div style="font-size:11px;color:#555;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">Aucune caption — vidéo générée <b>sans texte</b>. Ajoute-en une ☝️</div>'; return; }
+  if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
+  var W=wrap.clientWidth||480, pps=W/dur;
+  nxMState.dur=dur; nxMState.pps=pps;
+  var La=nxMLanes(), nLanes=La.n, laneH=26, gap=5, rulerH=18;
+  var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+4;
+  var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
+  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), ruler='';
+  for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps; ruler+='<div style="position:absolute;left:'+x+'px;top:0;bottom:0;width:1px;background:#2a2a2a"></div><div style="position:absolute;left:'+(x+3)+'px;top:1px;font-size:9px;color:#777">'+Math.round(s)+'s</div>'; }
+  var blocks='';
+  caps.forEach(function(c,i){
+    var perm=(c.start==null), bs=perm?0:c.start, be=perm?dur:c.end;
+    var L=La.laneOf[i]||0, top=rulerH+(nLanes-1-L)*(laneH+gap);
+    var left=bs*pps, wpx=Math.max(8,(be-bs)*pps), col=colors[i%colors.length];
+    blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.4)">'
+      +'<div class="nxm-h" data-i="'+i+'" data-mode="left" style="position:absolute;left:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:6px 0 0 6px;touch-action:none"></div>'
+      +'<div class="nxm-h" data-i="'+i+'" data-mode="move" title="'+nxMEsc(c.text)+'" style="position:absolute;left:11px;right:11px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;padding:0 4px;cursor:grab;overflow:hidden;touch-action:none">'
+      +'<span style="color:#fff;font-size:11px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">'+nxMEsc(c.text)+'</span>'
+      +'<span class="nxm-bt" style="color:rgba(255,255,255,.7);font-size:8px;white-space:nowrap">'+(perm?'tout':(nxMFmt(bs)+'→'+nxMFmt(be)+'s'))+'</span></div>'
+      +'<div class="nxm-h" data-i="'+i+'" data-mode="right" style="position:absolute;right:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:0 6px 6px 0;touch-action:none"></div>'
+      +'</div>';
+  });
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse les blocs, tire les bords pour la durée</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
+    +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
+    + ruler
+    + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"></div>'
+    + blocks + '</div>';
+  var tl=document.getElementById('nx-m-timeline');
+  tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')) return; var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(e.clientX-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); });
+  tl.querySelectorAll('.nxm-h').forEach(function(el){ el.addEventListener('pointerdown',function(ev){ nxMBeginDrag(ev, parseInt(el.getAttribute('data-i'),10), el.getAttribute('data-mode')); }); });
+  nxMSyncPlayhead();
 }
 function nxMEditCap(i){
   var c=nxMState.caps[i]; if(!c) return;
@@ -2566,7 +2637,7 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var vid=document.getElementById('nx-m-video');
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; }
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); }; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
@@ -2584,8 +2655,8 @@ async function nxMontageOpen(fid, exampleUrl){
   var rp=document.querySelector('input[name=nxmtime][value="perm"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
-  nxMRenderCaps();
   document.getElementById('nx-montage-modal').style.display='flex';
+  nxMRenderCaps();
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
