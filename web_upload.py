@@ -2467,21 +2467,29 @@ function nxMAddCap(){
   var txt=(document.getElementById('nx-m-caption').value||'').trim();
   if(!txt){ alert("Écris le texte de la caption d'abord."); return false; }
   var sel=document.querySelector('input[name=nxmtime]:checked');
-  var perm=!(sel&&sel.value==='range');
+  var mode=(sel&&sel.value)||'cursor';
   var start=null, end=null;
-  if(!perm){
+  if(mode==='range'){
     start=parseFloat(document.getElementById('nx-m-start').value||'0')||0;
     end=parseFloat(document.getElementById('nx-m-end').value||'0')||0;
     if(end<=start){ alert("La fin doit être après le début."); return false; }
+  } else if(mode==='cursor'){
+    // place la caption LÀ OÙ EST LE CURSEUR (tête de lecture), durée 2s par défaut
+    var vc=document.getElementById('nx-m-video');
+    var cur=(vc&&!isNaN(vc.currentTime))?vc.currentTime:0;
+    var d=nxMState.dur||nxMDur()||0;
+    start=Math.round(cur*100)/100;
+    var e=cur+2; if(d) e=Math.min(d,e); if(e<=start) e=start+2;
+    end=Math.round(e*100)/100;
   }
-  var item={text:txt, start:perm?null:start, end:perm?null:end};
+  var item={text:txt, start:(mode==='perm'?null:start), end:(mode==='perm'?null:end)};
   if(nxMState.editIdx>=0){ nxMState.caps[nxMState.editIdx]=item; nxMState.editIdx=-1; }
   else { nxMState.caps.push(item); }
   document.getElementById('nx-m-caption').value='';
   document.getElementById('nx-m-timeinfo').textContent='';
   document.getElementById('nx-m-editnote').textContent='';
   document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
-  var rp=document.querySelector('input[name=nxmtime][value="perm"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
+  var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   nxMRenderCaps();
   return true;
 }
@@ -2672,7 +2680,7 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var vid=document.getElementById('nx-m-video');
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
@@ -2687,7 +2695,7 @@ async function nxMontageOpen(fid, exampleUrl){
   document.getElementById('nx-m-editnote').textContent='';
   document.getElementById('nx-m-timeinfo').textContent='';
   document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
-  var rp=document.querySelector('input[name=nxmtime][value="perm"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
+  var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
   document.getElementById('nx-montage-modal').style.display='flex';
@@ -4312,7 +4320,8 @@ body.light .action-icon{color:#666}
       <span>Police :</span>
       <select id="nx-m-font" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option selected>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
       <span style="margin-left:6px">⏱</span>
-      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
+      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> 📍 au curseur (2s)</label>
+      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
       <label style="cursor:pointer"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
       <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled style="width:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
       <span>à</span>
