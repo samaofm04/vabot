@@ -2488,12 +2488,14 @@ function nxMAddCap(){
 // ---- Timeline type CapCut : helpers (px/seconde, snapping, lanes, playhead, drag) ----
 function nxMPxPerSec(){ return nxMState.pps||0; }
 function nxMSnap(t, ex){
+  nxMState.snap=null;
   var pps=nxMState.pps||0, dur=nxMState.dur||0; if(!pps) return t;
-  var thr=8/pps, cands=[0,dur];
+  var thr=10/pps, cands=[0,dur];
   var v=document.getElementById('nx-m-video'); if(v&&!isNaN(v.currentTime)) cands.push(v.currentTime);
   (nxMState.caps||[]).forEach(function(c,idx){ if(idx===ex||c.start==null) return; cands.push(c.start); cands.push(c.end); });
-  var best=t, bd=thr;
-  for(var k=0;k<cands.length;k++){ var d=Math.abs(cands[k]-t); if(d<bd){ bd=d; best=cands[k]; } }
+  var best=t, bd=thr, snapped=null;
+  for(var k=0;k<cands.length;k++){ var d=Math.abs(cands[k]-t); if(d<bd){ bd=d; best=cands[k]; snapped=cands[k]; } }
+  nxMState.snap=snapped; // position (en s) où un bord s'est aimanté, sinon null
   return best;
 }
 function nxMLanes(){
@@ -2551,12 +2553,15 @@ function nxMBeginDrag(e,i,mode){
     nxMDragLast=[ns,ne];
     var blk=document.querySelector('.nxm-block[data-i="'+i+'"]');
     if(blk){ blk.style.left=(ns*pps)+'px'; blk.style.width=Math.max(8,(ne-ns)*pps)+'px'; var tt=blk.querySelector('.nxm-bt'); if(tt) tt.textContent=nxMFmt(ns)+'→'+nxMFmt(ne)+'s'; }
+    var sl=document.getElementById('nx-m-snapline');
+    if(sl){ if(nxMState.snap!=null){ sl.style.left=(nxMState.snap*pps)+'px'; sl.style.display='block'; } else { sl.style.display='none'; } }
     nxMUpdatePreview();
   }
   function up(){
     el.removeEventListener('pointermove',mv); el.removeEventListener('pointerup',up); el.removeEventListener('pointercancel',up);
     try{ el.releasePointerCapture(e.pointerId); }catch(_){}
     if(nxMDragLast){ nxMState.caps[i].start=Math.round(nxMDragLast[0]*100)/100; nxMState.caps[i].end=Math.round(nxMDragLast[1]*100)/100; nxMDragLast=null; }
+    nxMState.snap=null;
     nxMRenderCaps();
   }
   el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
@@ -2606,6 +2611,7 @@ function nxMRenderCaps(){
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
     + ruler
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"></div>'
+    + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
   var tl=document.getElementById('nx-m-timeline');
   tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')) return; var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(e.clientX-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); });

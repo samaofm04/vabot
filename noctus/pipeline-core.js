@@ -803,7 +803,9 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
               const startSec      = timeToSeconds(segment.start);
               const endSec        = timeToSeconds(segment.end);
               const currentOutput = `vid${inputIndex}`;
-              filterComplex += `;[${inputIndex}:v]format=rgba[ov${inputIndex}];[${lastOutput}][ov${inputIndex}]overlay=0:0:enable='between(t,${startSec},${endSec})'[${currentOutput}]`;
+              // fin EXCLUSIVE (gte/lt) au lieu de between() inclusif : 2 captions consécutives
+              // (A.end == B.start) ne se chevauchent plus sur la frame frontière (sinon 1 frame en double).
+              filterComplex += `;[${inputIndex}:v]format=rgba[ov${inputIndex}];[${lastOutput}][ov${inputIndex}]overlay=0:0:enable='gte(t,${startSec})*lt(t,${endSec})'[${currentOutput}]`;
               lastOutput = currentOutput;
             } catch (err) {
               log(`  ⚠️ PNG segment ${i} : ${err.message}`);
