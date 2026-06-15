@@ -2459,7 +2459,94 @@ function lbKeyboard(e){
   if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
 }
 // ===== 🎬 Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
-var nxMState = {fid:'', identity:'', model:''};
+var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1};
+function nxMEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function nxMDur(){ var v=document.getElementById('nx-m-video'); return (v&&!isNaN(v.duration)&&v.duration>0)?v.duration:0; }
+function nxMFmt(t){ return (Math.round(t*100)/100).toFixed(2); }
+function nxMAddCap(){
+  var txt=(document.getElementById('nx-m-caption').value||'').trim();
+  if(!txt){ alert("Écris le texte de la caption d'abord."); return false; }
+  var sel=document.querySelector('input[name=nxmtime]:checked');
+  var perm=!(sel&&sel.value==='range');
+  var start=null, end=null;
+  if(!perm){
+    start=parseFloat(document.getElementById('nx-m-start').value||'0')||0;
+    end=parseFloat(document.getElementById('nx-m-end').value||'0')||0;
+    if(end<=start){ alert("La fin doit être après le début."); return false; }
+  }
+  var item={text:txt, start:perm?null:start, end:perm?null:end};
+  if(nxMState.editIdx>=0){ nxMState.caps[nxMState.editIdx]=item; nxMState.editIdx=-1; }
+  else { nxMState.caps.push(item); }
+  document.getElementById('nx-m-caption').value='';
+  document.getElementById('nx-m-timeinfo').textContent='';
+  document.getElementById('nx-m-editnote').textContent='';
+  document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+  var rp=document.querySelector('input[name=nxmtime][value="perm"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
+  nxMRenderCaps();
+  return true;
+}
+function nxMRenderCaps(){
+  var dur=nxMDur();
+  var caps=nxMState.caps||[];
+  var frise=document.getElementById('nx-m-frise');
+  var list=document.getElementById('nx-m-caplist');
+  if(!frise||!list) return;
+  if(!caps.length){
+    frise.innerHTML='<div style="font-size:11px;color:#555;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">Aucune caption — la vidéo sera générée <b>sans texte</b>. Ajoute-en une ci-dessus ☝️</div>';
+    list.innerHTML='';
+    return;
+  }
+  var colors=['#c2603f','#3f7fc2','#3fc27a','#c23f9e','#c2a63f','#7a3fc2'];
+  var fh='<div style="font-size:11px;color:#888;margin-bottom:4px">Frise '+(dur?'('+nxMFmt(dur)+'s)':'(durée inconnue)')+' :</div>';
+  caps.forEach(function(c,i){
+    var col=colors[i%colors.length];
+    var leftPct, widPct;
+    if(c.start==null||!dur){ leftPct=0; widPct=100; }
+    else {
+      leftPct=Math.max(0,Math.min(96,c.start/dur*100)); // 96 max -> le bloc mini reste visible même si start ≈ fin
+      var raw=(c.end==null)?100:((c.end-c.start)/dur*100);
+      if(!(raw>0)) raw=4; // garde-fou NaN/0/négatif
+      widPct=Math.max(4,Math.min(100-leftPct,raw));
+    }
+    fh+='<div style="position:relative;height:24px;background:#161616;border-radius:5px;margin-bottom:4px;overflow:hidden">'
+      +'<div title="'+nxMEsc(c.text)+'" data-edit="'+i+'" style="position:absolute;top:0;bottom:0;left:'+leftPct+'%;width:'+widPct+'%;background:'+col+';border-radius:5px;display:flex;align-items:center;padding:0 7px;cursor:pointer;box-sizing:border-box;overflow:hidden">'
+      +'<span style="color:#fff;font-size:11px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">'+nxMEsc(c.text)+'</span></div></div>';
+  });
+  frise.innerHTML=fh;
+  var lh='';
+  caps.forEach(function(c,i){
+    var t=(c.start==null)?'toute la vidéo':(nxMFmt(c.start)+'s → '+nxMFmt(c.end)+'s');
+    lh+='<div style="display:flex;align-items:center;gap:8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:7px;padding:6px 9px;margin-bottom:5px">'
+      +'<span style="background:#2a2a2a;color:#aaa;font-size:10px;border-radius:4px;padding:1px 6px">'+(i+1)+'</span>'
+      +'<span style="flex:1;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">« '+nxMEsc(c.text)+' »</span>'
+      +'<span style="font-size:11px;color:#888;white-space:nowrap">'+t+'</span>'
+      +'<button type="button" data-edit="'+i+'" title="Modifier" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✏️</button>'
+      +'<button type="button" data-del="'+i+'" title="Supprimer" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:13px;padding:0">🗑</button></div>';
+  });
+  list.innerHTML=lh;
+  frise.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
+  list.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
+  list.querySelectorAll('[data-del]').forEach(function(el){ el.addEventListener('click',function(){ nxMDelCap(parseInt(el.getAttribute('data-del'),10)); }); });
+}
+function nxMEditCap(i){
+  var c=nxMState.caps[i]; if(!c) return;
+  document.getElementById('nx-m-caption').value=c.text;
+  var rPerm=document.querySelector('input[name=nxmtime][value="perm"]');
+  var rRange=document.querySelector('input[name=nxmtime][value="range"]');
+  if(c.start==null){ if(rPerm) rPerm.checked=true; }
+  else { if(rRange) rRange.checked=true; document.getElementById('nx-m-start').value=c.start; document.getElementById('nx-m-end').value=c.end; }
+  nxMTimeToggle();
+  nxMState.editIdx=i;
+  document.getElementById('nx-m-editnote').textContent='✏️ modif caption '+(i+1)+' — clique « Mettre à jour »';
+  document.getElementById('nx-m-addcap').textContent='✔ Mettre à jour';
+  try{ document.getElementById('nx-m-caption').focus(); }catch(e){}
+}
+function nxMDelCap(i){
+  nxMState.caps.splice(i,1);
+  if(nxMState.editIdx===i){ nxMState.editIdx=-1; document.getElementById('nx-m-editnote').textContent=''; document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption'; }
+  else if(nxMState.editIdx>i){ nxMState.editIdx--; }
+  nxMRenderCaps();
+}
 function nxMTimeToggle(){
   var sel=document.querySelector('input[name=nxmtime]:checked'); var range=sel&&sel.value==='range';
   var a=document.getElementById('nx-m-start'), b=document.getElementById('nx-m-end');
@@ -2476,10 +2563,10 @@ function nxMSetTime(which){
   if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t.toFixed(2)+'s';
 }
 async function nxMontageOpen(fid){
-  nxMState.fid=fid; nxMState.model='';
+  nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var vid=document.getElementById('nx-m-video');
-  if(vid) vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name);
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; }
   var vf=document.getElementById('nx-m-vfolders'); vf.innerHTML='';
   for(var i=1;i<=10;i++){ var v='V'+i; var ck=(i<=3)?'checked':'';
     vf.innerHTML+='<label style="display:inline-flex;align-items:center;gap:4px;background:#1a1a1a;border:1px solid #2a2a2a;padding:5px 9px;border-radius:7px;font-size:12px;cursor:pointer"><input type="checkbox" class="nx-m-vf" value="'+v+'" '+ck+' style="accent-color:#a855f7"> '+v+'</label>'; }
@@ -2487,20 +2574,26 @@ async function nxMontageOpen(fid){
   document.getElementById('nx-m-prog').textContent='';
   document.getElementById('nx-m-gen').disabled=false;
   document.getElementById('nx-m-caption').value='';
-  try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ document.getElementById('nx-m-caption').value=(j.caption||'').trim(); } }catch(e){}
+  document.getElementById('nx-m-editnote').textContent='';
+  document.getElementById('nx-m-timeinfo').textContent='';
+  document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+  var rp=document.querySelector('input[name=nxmtime][value="perm"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
+  // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
+  try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
+  nxMRenderCaps();
   document.getElementById('nx-montage-modal').style.display='flex';
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
   var folders=Array.from(document.querySelectorAll('.nx-m-vf:checked')).map(function(c){return c.value;});
   if(!folders.length){ alert('Coche au moins une variation'); return; }
+  // si une caption est en cours de saisie mais pas encore ajoutée, on l'ajoute
+  if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
   var fd=new FormData();
   fd.set('file_id', nxMState.fid);
-  fd.set('caption', document.getElementById('nx-m-caption').value||'');
   fd.set('font', document.getElementById('nx-m-font').value);
   fd.set('folders', folders.join(','));
-  var sel=document.querySelector('input[name=nxmtime]:checked');
-  if(sel&&sel.value==='range'){ fd.set('start_s', document.getElementById('nx-m-start').value||'0'); fd.set('end_s', document.getElementById('nx-m-end').value||'999'); }
+  fd.set('segments', JSON.stringify(nxMState.caps||[]));
   document.getElementById('nx-m-gen').disabled=true;
   document.getElementById('nx-m-prog').textContent='⏳ génération…';
   try{
@@ -4091,8 +4184,8 @@ body.light .action-icon{color:#666}
       <button onclick="nxMontageClose()" style="background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1">×</button>
     </div>
     <video id="nx-m-video" controls muted playsinline style="width:150px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;float:right;margin:0 0 12px 14px"></video>
-    <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Texte (repris de ton reel, modifiable) :</div>
-    <textarea id="nx-m-caption" placeholder="Laisse vide pour des variations sans texte" style="width:100%;min-height:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
+    <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Captions — tu peux en mettre plusieurs à des moments différents :</div>
+    <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" style="width:100%;min-height:54px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
       <span>Police :</span>
       <select id="nx-m-font" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option selected>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
@@ -4109,7 +4202,13 @@ body.light .action-icon{color:#666}
       <button type="button" onclick="nxMSetTime('end')" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fbbf24;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer">📍 fin ici (cut)</button>
       <span id="nx-m-timeinfo" style="color:#666"></span>
     </div>
-    <div style="font-size:12px;color:#888;margin:12px 0 6px">Variations à générer :</div>
+    <div style="margin-top:10px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+      <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" style="background:#a855f7;border:0;color:#fff;border-radius:8px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer">➕ Ajouter cette caption</button>
+      <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24"></span>
+    </div>
+    <div id="nx-m-frise" style="margin-top:12px"></div>
+    <div id="nx-m-caplist" style="margin-top:8px"></div>
+    <div style="font-size:12px;color:#888;margin:14px 0 6px">Variations à générer :</div>
     <div id="nx-m-vfolders" style="display:flex;flex-wrap:wrap;gap:6px"></div>
     <div style="display:flex;gap:12px;align-items:center;margin-top:14px;clear:both">
       <button id="nx-m-gen" onclick="nxMontageGen()" style="padding:11px 24px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px">🎬 Générer</button>
@@ -25025,34 +25124,66 @@ def create_app():
             except Exception:
                 pass
         _sh.copy(str(src), str(inp / src.name))
-        caption = (request.form.get("caption") or "").strip()
         font = (request.form.get("font") or "TikTokSans").strip() or "TikTokSans"
         folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
         label = ("m_" + model)[:40]
         caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
-        if caption:
-            def _hms(v):
-                # garde les décimales (millisecondes) -> timing précis au centième
-                try:
-                    sec = max(0.0, float(v))
-                except Exception:
-                    sec = 0.0
-                h = int(sec // 3600)
-                m = int((sec % 3600) // 60)
-                s = sec - h * 3600 - m * 60
-                return f"{h:02d}:{m:02d}:{s:06.3f}"
-            s_s = request.form.get("start_s")
-            e_s = request.form.get("end_s")
-            if s_s is not None and e_s is not None:
-                start, end = _hms(s_s), _hms(e_s)
-            else:
-                start, end = "00:00:00", "99:99:99"
-            caps.append({"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]})
+
+        def _hms(v):
+            # garde les décimales (millisecondes) -> timing précis au centième
+            try:
+                sec = max(0.0, float(v))
+            except Exception:
+                sec = 0.0
+            h = int(sec // 3600)
+            m = int((sec % 3600) // 60)
+            s = sec - h * 3600 - m * 60
+            return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+        # Plusieurs captions chronométrées (liste + frise) -> champ 'segments' JSON.
+        # Chaque segment = {text, start, end} en secondes (start/end null = toute la vidéo).
+        segments = []
+        seg_raw = request.form.get("segments")
+        if seg_raw:
+            import json as _json
+            try:
+                arr = _json.loads(seg_raw)
+            except Exception:
+                arr = []
+            if isinstance(arr, list):
+                for it in arr[:40]:  # garde-fou : 40 captions max
+                    if not isinstance(it, dict):
+                        continue
+                    txt = (it.get("text") or "").strip()
+                    if not txt:
+                        continue
+                    st = it.get("start")
+                    en = it.get("end")
+                    if st is None or en is None:
+                        start, end = "00:00:00", "99:99:99"
+                    else:
+                        start, end = _hms(st), _hms(en)
+                    segments.append({"start": start, "end": end, "text": txt})
+
+        if segments:
+            caps.append({"label": label, "font": font, "captions": segments})
             sel = [label]
         else:
-            if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
-                caps.append({"label": "sans_texte", "font": None, "captions": []})
-            sel = ["sans_texte"]
+            # rétro-compat : ancien champ 'caption' unique (+ start_s/end_s)
+            caption = (request.form.get("caption") or "").strip()
+            if caption:
+                s_s = request.form.get("start_s")
+                e_s = request.form.get("end_s")
+                if s_s is not None and e_s is not None:
+                    start, end = _hms(s_s), _hms(e_s)
+                else:
+                    start, end = "00:00:00", "99:99:99"
+                caps.append({"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]})
+                sel = [label]
+            else:
+                if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+                    caps.append({"label": "sans_texte", "font": None, "captions": []})
+                sel = ["sans_texte"]
         noctus_web.write_captions(caps)
         proc = noctus_web.run(model, folders, sel, targets=[src.name])
         if not proc:
