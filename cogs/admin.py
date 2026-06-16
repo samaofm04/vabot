@@ -556,7 +556,7 @@ class Admin(commands.Cog):
             return
         emb = discord.Embed(
             title="🔗 Lien GetMySocial généré",
-            description=f"**{res['va_name']}** · identité **{ident}**" + (f" · VA `{va_handle}`" if va_handle else ""),
+            description=f"**{res['va_name']}** · identité **{ident}**",
             color=discord.Color.blurple(),
         )
         emb.add_field(name="🔗 Lien", value=res["public_url"], inline=False)

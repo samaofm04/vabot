@@ -839,9 +839,8 @@ PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
 def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, Any]:
     """Genere un nouveau lien GMS pour une identite, a partir de son template :
     - duplique le template de l'identite (toute la config conservee)
-    - shortcode = pseudo Discord du VA + identite (ex: ozen28sarah) si va_handle
-      fourni, sinon 4 chars random + identite (retry si pris)
-    - nom auto 'VA N' (compteur atomique par groupe)
+    - shortcode = 4 chars random + identite (retry si pris)
+    - nom du lien = va_@<pseudo Discord du VA> si fourni, sinon 'VA N' (compteur)
     - assigne au groupe de l'identite dans le bon workspace
 
     Retourne {ok, shortcode, public_url, va_name, dest_url, group, error}.
@@ -865,25 +864,25 @@ def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, An
         pass
 
     folder_name = ident.capitalize()
-    try:
-        n = claim_next_va_number(team_id, folder_name)
-    except Exception:
-        n = 1
-    new_name = f"VA {n}"
-
-    # Base du shortcode = pseudo Discord du VA (nettoye) si fourni, sinon random.
-    # L'identite reste TOUJOURS dans le shortcode (necessaire pour le groupement).
+    # Nom du lien : pseudo Discord du VA (va_@handle) si fourni, sinon compteur "VA N"
     import re as _re
-    base = _re.sub(r"[^a-z0-9]", "", (va_handle or "").lower())[:20]
+    handle = _re.sub(r"[^a-zA-Z0-9_.]", "", (va_handle or "").strip().lstrip("@"))[:32]
+    if handle:
+        new_name = f"va_@{handle}"
+    else:
+        try:
+            n = claim_next_va_number(team_id, folder_name)
+        except Exception:
+            n = 1
+        new_name = f"VA {n}"
+
+    # Shortcode = 4 chars random + identite (l'identite reste dans le shortcode
+    # pour le groupement/categorize_link). Retry si pris.
     last_err = ""
     dup_res: Dict[str, Any] = {}
     new_shortcode = ""
-    for attempt in range(6):
-        if base:
-            suffix = "" if attempt == 0 else generate_random_prefix(2)
-            new_shortcode = base + ident + suffix
-        else:
-            new_shortcode = generate_random_prefix(4) + ident
+    for _ in range(5):
+        new_shortcode = generate_random_prefix(4) + ident
         dup_res = duplicate_link(tpl_id, new_shortcode, new_name, team_id=team_id)
         if dup_res.get("ok"):
             break
