@@ -311,6 +311,51 @@ def get_analytics_overview(start_date: str = "", end_date: str = "",
     return res
 
 
+def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[int]:
+    """Nombre de clics d'UN lien sur une periode (YYYY-MM-DD inclusif).
+    Retourne None si l'appel echoue, sinon un int (0 si pas de clics)."""
+    if not link_id:
+        return None
+    res = get_analytics_overview(start_date, end_date, link_ids=[link_id])
+    if not res.get("ok"):
+        return None
+    d = res.get("data")
+    if not isinstance(d, dict):
+        d = res
+    try:
+        return int(d.get("total_clicks") or 0)
+    except Exception:
+        return 0
+
+
+def _norm_handle(s: str) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def find_link_for_handle(handle: str, links: List[dict]) -> Optional[dict]:
+    """Retrouve le lien GMS d'un VA a partir de son pseudo Discord (handle).
+    Les liens crees recemment ont display_name = 'va_@<handle>'. Match :
+      1) display_name normalise == 'va' + handle   (ex: va_@ozen28 -> vaozen28)
+      2) le handle apparait dans le display_name ou le shortcode
+    Retourne le 1er lien correspondant, sinon None."""
+    h = _norm_handle(handle)
+    if not h or not links:
+        return None
+    target = "va" + h
+    for l in links:
+        if _norm_handle(l.get("display_name")) == target:
+            return l
+    for l in links:
+        dn = _norm_handle(l.get("display_name"))
+        if dn and h in dn and dn.startswith("va"):
+            return l
+    for l in links:
+        if h in _norm_handle(l.get("shortcode")):
+            return l
+    return None
+
+
 _GROUPED_CACHE: Dict[str, Any] = {"ts": 0, "data": None}
 _GROUPED_TTL = 300  # 5 min
 
