@@ -189,8 +189,11 @@ class ClickRecap(commands.Cog):
         name="recapclics",
         description="[OWNER] Poste le récap des clics dans CE salon (test), ou partout",
     )
-    @app_commands.describe(partout="true = lance le récap dans TOUS les salons va- (comme le cron de minuit)")
-    async def recapclics(self, interaction: discord.Interaction, partout: bool = False):
+    @app_commands.describe(
+        va="Pseudo d'un VA précis → APERÇU privé de son récap (ne poste rien dans son salon)",
+        partout="true = lance le récap dans TOUS les salons va- (comme le cron de minuit)",
+    )
+    async def recapclics(self, interaction: discord.Interaction, va: str = None, partout: bool = False):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -199,6 +202,22 @@ class ClickRecap(commands.Cog):
             import gms
         except Exception as e:
             await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        # Aperçu CIBLÉ d'un VA précis : montré en privé, rien posté chez le VA
+        if va:
+            handle = va.strip().lstrip("@")
+            if handle.lower().startswith("va-"):
+                handle = handle[3:]
+            links = await self._links()
+            link = gms.find_link_for_handle(handle, links)
+            today = _paris_now().date()
+            yest = today - datetime.timedelta(days=1)
+            content, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
+            header = f"👁️ Aperçu récap pour **va-{handle}** (test — non posté chez le VA) :"
+            if emb is not None:
+                await interaction.followup.send(content=header, embed=emb, ephemeral=True)
+            else:
+                await interaction.followup.send(f"{header}\n{content}", ephemeral=True)
             return
         if partout:
             sent, nolink = await self._run_all()
