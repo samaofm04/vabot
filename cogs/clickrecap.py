@@ -190,10 +190,12 @@ class ClickRecap(commands.Cog):
         description="[OWNER] Poste le récap des clics dans CE salon (test), ou partout",
     )
     @app_commands.describe(
-        va="Pseudo d'un VA précis → APERÇU privé de son récap (ne poste rien dans son salon)",
+        salon="Salon va-… du VA → APERÇU privé de son récap (recommandé : choisis le salon directement)",
+        va="OU le pseudo exact (ce qui suit « va- » dans le nom du salon — PAS le nom affiché Discord)",
         partout="true = lance le récap dans TOUS les salons va- (comme le cron de minuit)",
     )
-    async def recapclics(self, interaction: discord.Interaction, va: str = None, partout: bool = False):
+    async def recapclics(self, interaction: discord.Interaction,
+                          salon: discord.TextChannel = None, va: str = None, partout: bool = False):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -203,21 +205,36 @@ class ClickRecap(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
             return
-        # Aperçu CIBLÉ d'un VA précis : montré en privé, rien posté chez le VA
-        if va:
-            handle = va.strip().lstrip("@")
-            if handle.lower().startswith("va-"):
-                handle = handle[3:]
+        # Aperçu CIBLÉ (par salon précis, ou pseudo) — montré en privé, rien posté chez le VA
+        target_handle = None
+        if salon is not None and (getattr(salon, "name", "") or "").lower().startswith("va-"):
+            target_handle = salon.name[3:]
+        elif va:
+            h = va.strip().lstrip("@")
+            if h.lower().startswith("va-"):
+                h = h[3:]
+            target_handle = h
+        if target_handle:
             links = await self._links()
-            link = gms.find_link_for_handle(handle, links)
+            link = gms.find_link_for_handle(target_handle, links)
             today = _paris_now().date()
             yest = today - datetime.timedelta(days=1)
-            content, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
-            header = f"👁️ Aperçu récap pour **va-{handle}** (test — non posté chez le VA) :"
-            if emb is not None:
-                await interaction.followup.send(content=header, embed=emb, ephemeral=True)
+            if link:
+                _c, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
+                await interaction.followup.send(
+                    content=f"👁️ Aperçu — **va-{target_handle}** (test, non posté chez le VA) :",
+                    embed=emb, ephemeral=True)
             else:
-                await interaction.followup.send(f"{header}\n{content}", ephemeral=True)
+                va_names = sorted({(l.get("display_name") or "") for l in links
+                                   if (l.get("display_name") or "").lower().startswith("va_@")})
+                hint = ("\n\n**Liens `va_@…` existants sur GMS :**\n" + "\n".join("• `" + n + "`" for n in va_names[:25])) \
+                    if va_names else "\n\n(aucun lien nommé `va_@…` sur GMS pour l'instant)"
+                await interaction.followup.send(
+                    f"👁️ **va-{target_handle}** : ❌ aucun lien `va_@{target_handle}` trouvé sur GMS.\n"
+                    f"💡 Le récap relie le VA à son lien par le **nom du lien** `va_@<pseudo>` "
+                    f"(le pseudo = ce qui suit `va-` dans le salon, **pas** le nom affiché Discord). "
+                    f"Si son lien existe sous un autre nom, régénère-le via `/gmslink` **dans son salon** pour qu'il soit renommé `va_@{target_handle}`.{hint}",
+                    ephemeral=True)
             return
         if partout:
             sent, nolink = await self._run_all()
