@@ -12695,16 +12695,18 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"</form>"
             # Colonne droite : screenshot + actions
             f"<div style='display:flex;flex-direction:column;gap:10px'>"
+            + f"<div id='mp-shot-{i}'>"
             + (
                 f"<div style='position:relative'><img src='/mypuls/chatter/crypto/{name_url_safe}?t=now' style='width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000'></div>"
                 if has_screenshot else
                 "<div style='border:2px dashed #2a2a2a;border-radius:8px;padding:40px 20px;text-align:center;color:#666;font-size:12px'>Pas de screenshot</div>"
             )
+            + "</div>"
             + f"<form method='POST' action='/mypuls/chatter/upload_crypto' enctype='multipart/form-data' style='margin:0'>"
             f"<input type='hidden' name='name' value='{name_esc}'>"
             f"<label style='display:block;background:transparent;border:1px dashed #2a2a2a;color:#888;padding:8px;border-radius:6px;cursor:pointer;text-align:center;font-size:12px'>📷 "
             + ("Changer le screenshot" if has_screenshot else "Upload un screenshot")
-            + f"<input type='file' name='file' accept='image/*' onchange='this.form.submit()' style='display:none'></label>"
+            + f"<input type='file' name='file' accept='image/*' onchange='mpUploadCryptoShot(this,{i})' style='display:none'></label>"
             f"</form>"
             + (
                 f"<form method='POST' action='/mypuls/chatter/delete_crypto' style='margin:0'>"
@@ -13036,6 +13038,25 @@ function mpRecompute(){
 function mpShowPeriodLoader(){
   var ov = document.getElementById('mp-loading');
   if(ov) ov.classList.add('show');
+}
+async function mpUploadCryptoShot(input, rowIdx){
+  // Upload du screenshot crypto SANS recharger la page (maj de l'aperçu sur place)
+  if(!input || !input.files || !input.files[0]) return;
+  var form = input.form;
+  var nameEl = form ? form.querySelector('input[name=name]') : null;
+  var name = nameEl ? nameEl.value : '';
+  var lbl = input.parentElement;
+  if(lbl) lbl.style.opacity = '0.5';
+  var fd = new FormData(form); fd.set('ajax', '1');
+  try{
+    var r = await fetch('/mypuls/chatter/upload_crypto', {method:'POST', body:fd});
+    var j = await r.json();
+    if(!j.ok){ if(typeof showToast==='function') showToast('❌ '+(j.error||'Upload échoué'),'error'); else alert('❌ '+(j.error||'?')); return; }
+    var box = document.getElementById('mp-shot-'+rowIdx);
+    if(box){ box.innerHTML = '<div style="position:relative"><img src="/mypuls/chatter/crypto/'+encodeURIComponent(name)+'?t='+Date.now()+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000"></div>'; }
+    if(typeof showToast==='function') showToast('✅ Screenshot enregistré','success');
+  }catch(e){ if(typeof showToast==='function') showToast('❌ '+e,'error'); else alert('Erreur: '+e); }
+  finally{ if(lbl) lbl.style.opacity='1'; input.value=''; }
 }
 function mpCopyAddr(addr, btn){
   if(!navigator.clipboard){
@@ -26512,27 +26533,35 @@ def create_app():
     def mypuls_chatter_upload_crypto():
         if not is_auth():
             return redirect("/")
+        from flask import jsonify
+        ajax = (request.form.get("ajax") == "1")
+
+        def _fail(m):
+            return jsonify({"ok": False, "error": m}) if ajax else _error("❌ " + m)
+
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _fail(f"Module mypuls indispo : {e}")
         name = (request.form.get("name") or "").strip()
         if not name:
-            return _error("❌ Nom du chatteur manquant")
+            return _fail("Nom du chatteur manquant")
         f = request.files.get("file")
         if not f or not f.filename:
-            return _error("❌ Fichier manquant")
+            return _fail("Fichier manquant")
         # Limiter à 5MB
         f.seek(0, 2)
         size = f.tell()
         f.seek(0)
         if size > 5 * 1024 * 1024:
-            return _error("❌ Fichier trop gros (max 5MB)")
+            return _fail("Fichier trop gros (max 5MB)")
         try:
             data = f.read()
             mypuls.save_crypto_screenshot(name, data, f.filename)
         except Exception as e:
-            return _error(f"❌ Erreur upload : {e}")
+            return _fail(f"Erreur upload : {e}")
+        if ajax:
+            return jsonify({"ok": True})
         return _success(f"✅ Screenshot crypto enregistré pour <code>{name}</code>")
 
     @app.route("/mypuls/chatter/crypto/<path:name>")
