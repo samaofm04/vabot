@@ -515,14 +515,23 @@ class Admin(commands.Cog):
     # ---------- GMS (GetMySocial) ----------
 
     @app_commands.command(name="gmslink", description="[BOSS] Génère un lien GetMySocial pour une identité")
-    @app_commands.describe(identite="Le modèle / identité (ex: amelia)")
+    @app_commands.describe(
+        identite="Le modèle / identité (ex: amelia)",
+        va="Pseudo Discord du VA (auto depuis le salon va-… si laissé vide)",
+    )
     @app_commands.autocomplete(identite=identity_autocomplete)
-    async def gmslink(self, interaction: discord.Interaction, identite: str):
+    async def gmslink(self, interaction: discord.Interaction, identite: str, va: str = None):
         # Boss-only (owner + whitelist admin)
         if not await self.require_admin(interaction):
             return
         await interaction.response.defer(ephemeral=True)
         ident = (identite or "").strip().lower()
+        # Handle du VA pour nommer le shortcode : param explicite, sinon le salon va-<handle>
+        va_handle = (va or "").strip().lstrip("@")
+        if not va_handle:
+            cname = getattr(interaction.channel, "name", "") or ""
+            if cname.lower().startswith("va-"):
+                va_handle = cname[3:]
         valids = [n.lower() for n in list_identities()]
         if ident not in valids:
             await interaction.followup.send(
@@ -538,7 +547,7 @@ class Admin(commands.Cog):
         import asyncio
         # Appels API GMS bloquants -> thread pour ne pas figer le bot
         try:
-            res = await asyncio.to_thread(gms.quick_generate_for_identity, ident)
+            res = await asyncio.to_thread(gms.quick_generate_for_identity, ident, va_handle)
         except Exception as e:
             await interaction.followup.send(f"❌ Erreur GMS : {e}", ephemeral=True)
             return
@@ -547,7 +556,7 @@ class Admin(commands.Cog):
             return
         emb = discord.Embed(
             title="🔗 Lien GetMySocial généré",
-            description=f"**{res['va_name']}** · identité **{ident}**",
+            description=f"**{res['va_name']}** · identité **{ident}**" + (f" · VA `{va_handle}`" if va_handle else ""),
             color=discord.Color.blurple(),
         )
         emb.add_field(name="🔗 Lien", value=res["public_url"], inline=False)

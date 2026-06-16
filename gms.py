@@ -836,10 +836,11 @@ MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
 PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
 
 
-def quick_generate_for_identity(ident: str) -> Dict[str, Any]:
+def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, Any]:
     """Genere un nouveau lien GMS pour une identite, a partir de son template :
     - duplique le template de l'identite (toute la config conservee)
-    - shortcode = 4 chars random + identite (retry si pris)
+    - shortcode = pseudo Discord du VA + identite (ex: ozen28sarah) si va_handle
+      fourni, sinon 4 chars random + identite (retry si pris)
     - nom auto 'VA N' (compteur atomique par groupe)
     - assigne au groupe de l'identite dans le bon workspace
 
@@ -870,11 +871,19 @@ def quick_generate_for_identity(ident: str) -> Dict[str, Any]:
         n = 1
     new_name = f"VA {n}"
 
+    # Base du shortcode = pseudo Discord du VA (nettoye) si fourni, sinon random.
+    # L'identite reste TOUJOURS dans le shortcode (necessaire pour le groupement).
+    import re as _re
+    base = _re.sub(r"[^a-z0-9]", "", (va_handle or "").lower())[:20]
     last_err = ""
     dup_res: Dict[str, Any] = {}
     new_shortcode = ""
-    for _ in range(5):
-        new_shortcode = generate_random_prefix(4) + ident
+    for attempt in range(6):
+        if base:
+            suffix = "" if attempt == 0 else generate_random_prefix(2)
+            new_shortcode = base + ident + suffix
+        else:
+            new_shortcode = generate_random_prefix(4) + ident
         dup_res = duplicate_link(tpl_id, new_shortcode, new_name, team_id=team_id)
         if dup_res.get("ok"):
             break
