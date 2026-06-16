@@ -2783,6 +2783,16 @@ function deleteSelected(){
   );
 }
 function showTab(group,name,title,subtitle){
+  // Revenus chatteurs : si on arrive sans tranche dans l'URL mais qu'une est mémorisée, on la restaure
+  if(name === 'revenus'){
+    try{
+      var _p = new URLSearchParams(location.search);
+      if(!_p.get('mp_start')){
+        var _sv = (localStorage.getItem('mpRevenusPeriod') || '').split('|');
+        if(_sv[0] && _sv[1]){ location.replace('?tab=revenus&mp_start=' + encodeURIComponent(_sv[0]) + '&mp_end=' + encodeURIComponent(_sv[1])); return; }
+      }
+    }catch(_e){}
+  }
   // Retirer le style initial injecté en HEAD (pour le pre-paint)
   var initStyle = document.getElementById('__initial-tab-css');
   if(initStyle) initStyle.remove();
@@ -3185,6 +3195,16 @@ window.upClearPrefill = function(utab){
   try{
     var params = new URLSearchParams(window.location.search);
     var t = params.get('tab');
+    // Revenus chatteurs : mémorise la tranche de dates choisie et la restaure si un reload l'a perdue
+    if(t === 'revenus'){
+      if(params.get('mp_start') && params.get('mp_end')){
+        try{ localStorage.setItem('mpRevenusPeriod', params.get('mp_start') + '|' + params.get('mp_end')); }catch(_e){}
+      } else {
+        var _sv = ''; try{ _sv = localStorage.getItem('mpRevenusPeriod') || ''; }catch(_e){}
+        var _ab = _sv.split('|');
+        if(_ab[0] && _ab[1]){ location.replace('?tab=revenus&mp_start=' + encodeURIComponent(_ab[0]) + '&mp_end=' + encodeURIComponent(_ab[1])); return; }
+      }
+    }
     if(t && t !== 'home' && /^[a-zA-Z0-9_]{1,30}$/.test(t)){
       var s = document.createElement('style');
       s.id = '__initial-tab-css';
