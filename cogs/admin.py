@@ -554,6 +554,23 @@ class Admin(commands.Cog):
         if not res.get("ok"):
             await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
             return
+        # Mémorise handle -> shortcode pour le récap clics (résolution instantanée, sans scan ni intent)
+        if va_handle:
+            try:
+                import json as _json
+                import pathlib as _pl
+                _cf = _pl.Path(__file__).resolve().parent.parent / "data" / "clickrecap_links.json"
+                _d = {}
+                if _cf.exists():
+                    try:
+                        _d = _json.loads(_cf.read_text(encoding="utf-8"))
+                    except Exception:
+                        _d = {}
+                _d[va_handle.strip().lstrip("@").lower()] = (res.get("shortcode") or "").lower()
+                _cf.parent.mkdir(parents=True, exist_ok=True)
+                _cf.write_text(_json.dumps(_d, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
         emb = discord.Embed(
             title="🔗 Lien GetMySocial généré",
             description=f"**{res['va_name']}** · identité **{ident}**",

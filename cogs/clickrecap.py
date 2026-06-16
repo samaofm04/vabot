@@ -11,6 +11,7 @@ import calendar
 import datetime
 import json
 import pathlib
+import re
 
 import discord
 from discord import app_commands
@@ -34,6 +35,37 @@ def _set_auto(v: bool):
         _CFG_FILE.write_text(json.dumps({"auto": bool(v)}), encoding="utf-8")
     except Exception:
         pass
+
+
+# Détection auto du lien d'un VA en scannant l'historique de son salon va-<handle>
+# (cherche une URL getmysocial.com/<shortcode> postée par le bot/manager/boss).
+_GMS_LINK_RE = re.compile(r"getmysocial\.com/([A-Za-z0-9_\-]+)", re.I)
+_LINKCACHE_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap_links.json"
+
+
+def _load_linkcache() -> dict:
+    try:
+        return json.loads(_LINKCACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_linkcache(d: dict):
+    try:
+        _LINKCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _LINKCACHE_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _match_shortcode(sc, links):
+    sc = (sc or "").lower()
+    if not sc:
+        return None
+    for l in links:
+        if (l.get("shortcode") or "").lower() == sc:
+            return l
+    return None
 
 GMS_DOMAIN = "https://getmysocial.com"
 FR_MONTHS = ["", "janv.", "févr.", "mars", "avr.", "mai", "juin",
@@ -117,6 +149,47 @@ class ClickRecap(commands.Cog):
         res = await asyncio.to_thread(gms.list_all_links)
         return (res.get("links") or []) if res.get("ok") else []
 
+    async def _resolve_link(self, ch, links):
+        """Trouve le lien GMS d'un VA pour son salon va-<handle> :
+        1) cache  2) nom du lien va_@handle  3) SCAN de l'historique du salon
+        (1re URL getmysocial.com/<shortcode> qui correspond à un vrai lien)."""
+        import gms
+        name = (getattr(ch, "name", "") or "").lower()
+        if not name.startswith("va-"):
+            return None
+        handle = name[3:]
+        cache = _load_linkcache()
+        # 1) cache
+        sc = cache.get(handle)
+        if sc:
+            l = _match_shortcode(sc, links)
+            if l:
+                return l
+        # 2) nom du lien va_@handle
+        l = gms.find_link_for_handle(handle, links)
+        if l:
+            cache[handle] = (l.get("shortcode") or "").lower()
+            _save_linkcache(cache)
+            return l
+        # 3) scan de l'historique du salon
+        try:
+            async for msg in ch.history(limit=400):
+                blobs = [msg.content or ""]
+                for emb in msg.embeds:
+                    blobs += [emb.title or "", emb.description or "", emb.url or ""]
+                    for f in emb.fields:
+                        blobs.append(f.value or "")
+                for b in blobs:
+                    for m in _GMS_LINK_RE.finditer(b or ""):
+                        hit = _match_shortcode(m.group(1), links)
+                        if hit:
+                            cache[handle] = (hit.get("shortcode") or "").lower()
+                            _save_linkcache(cache)
+                            return hit
+        except Exception as e:
+            print(f"[clickrecap] scan historique #{name} : {e}")
+        return None
+
     def _build_message(self, link, gms, ref_yesterday, today):
         """(content, embed) pour un VA. link=None -> message 'pas de lien' (sans réseau)."""
         if not link:
@@ -151,7 +224,7 @@ class ClickRecap(commands.Cog):
         handle = ch.name[3:] if ch.name.lower().startswith("va-") else ""
         if not handle:
             return "skip"
-        link = gms.find_link_for_handle(handle, links)
+        link = await self._resolve_link(ch, links)  # nom va_@ OU scan historique du salon
         content, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
         try:
             if emb is not None:
@@ -216,13 +289,24 @@ class ClickRecap(commands.Cog):
             target_handle = h
         if target_handle:
             links = await self._links()
-            link = gms.find_link_for_handle(target_handle, links)
+            # retrouve le salon va-<handle> pour pouvoir scanner son historique
+            tch = salon
+            if tch is None:
+                for g in self.bot.guilds:
+                    tch = discord.utils.get(g.text_channels, name="va-" + target_handle)
+                    if tch is not None:
+                        break
+            if tch is not None:
+                link = await self._resolve_link(tch, links)
+            else:
+                link = gms.find_link_for_handle(target_handle, links)
             today = _paris_now().date()
             yest = today - datetime.timedelta(days=1)
             if link:
                 _c, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
+                via = " · 🔎 lien détecté dans l'historique du salon" if not gms.find_link_for_handle(target_handle, links) else ""
                 await interaction.followup.send(
-                    content=f"👁️ Aperçu — **va-{target_handle}** (test, non posté chez le VA) :",
+                    content=f"👁️ Aperçu — **va-{target_handle}** (test, non posté chez le VA){via} :",
                     embed=emb, ephemeral=True)
             else:
                 va_names = sorted({(l.get("display_name") or "") for l in links
