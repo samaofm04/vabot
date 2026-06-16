@@ -9,10 +9,31 @@ de Paris à la main (DST inclus), pour lancer une seule fois après minuit Paris
 import asyncio
 import calendar
 import datetime
+import json
+import pathlib
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+# Flag persistant (data/ gitignore -> état runtime VPS). Cron OFF par défaut :
+# on ne veut pas spammer « pas de lien » tant que les liens ne sont pas en va_@.
+_CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap.json"
+
+
+def _auto_enabled() -> bool:
+    try:
+        return bool(json.loads(_CFG_FILE.read_text(encoding="utf-8")).get("auto"))
+    except Exception:
+        return False
+
+
+def _set_auto(v: bool):
+    try:
+        _CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CFG_FILE.write_text(json.dumps({"auto": bool(v)}), encoding="utf-8")
+    except Exception:
+        pass
 
 GMS_DOMAIN = "https://getmysocial.com"
 FR_MONTHS = ["", "janv.", "févr.", "mars", "avr.", "mai", "juin",
@@ -61,10 +82,12 @@ class ClickRecap(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self._last_run = None  # date ISO du dernier récap auto (anti-doublon)
-        self.daily_recap.start()
+        if _auto_enabled():
+            self.daily_recap.start()
 
     def cog_unload(self):
-        self.daily_recap.cancel()
+        if self.daily_recap.is_running():
+            self.daily_recap.cancel()
 
     async def _is_owner(self, uid):
         if self._owner_id is None:
@@ -198,6 +221,27 @@ class ClickRecap(commands.Cog):
         msg = {"sent": "✅ Récap posté ici.", "nolink": "✅ Posté (ce VA n'a pas de lien).",
                "skip": "⚠️ Impossible de poster ici."}.get(r, "?")
         await interaction.followup.send(msg, ephemeral=True)
+
+    @app_commands.command(
+        name="recapclics_auto",
+        description="[OWNER] Active/désactive le récap clics AUTOMATIQUE de chaque nuit",
+    )
+    @app_commands.describe(actif="true = récap auto chaque nuit dans tous les salons va- · false = manuel seulement")
+    async def recapclics_auto(self, interaction: discord.Interaction, actif: bool):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        _set_auto(actif)
+        if actif and not self.daily_recap.is_running():
+            self.daily_recap.start()
+        elif not actif and self.daily_recap.is_running():
+            self.daily_recap.cancel()
+        await interaction.response.send_message(
+            ("✅ Récap clics **automatique activé** (chaque nuit ~minuit, dans tous les salons va-)."
+             if actif else
+             "🛑 Récap clics automatique **désactivé**. Utilise `/recapclics` pour tester à la main."),
+            ephemeral=True,
+        )
 
 
 async def setup(bot):
