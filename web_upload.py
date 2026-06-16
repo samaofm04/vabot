@@ -10815,6 +10815,9 @@ def _render_sfs_html() -> str:
         "<h3 id='sfs-pushs-title' style='margin:0;font-size:15px;font-weight:800'>📨 Mes push (MyPuls)</h3>"
         "<button type='button' id='sfs-mym-sync' onclick='loadSfsPushes()' "
         "style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>🔄 Sync MyPuls</button>"
+        "<button type='button' id='sfs-mym-har' onclick='mypulsHarPick()' title='Rafraîchir les cookies MyPuls depuis un HAR (DevTools → Network → Export HAR)' "
+        "style='background:#16a34a;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px'>🍪 Refresh cookies (HAR)</button>"
+        "<input type='file' id='sfs-mym-har-file' accept='.har,application/json' style='display:none' onchange='importMypulsHar(this)'>"
         "<button type='button' id='sfs-of-import' onclick='ofHarPick()' "
         "style='display:none;background:#0099ff;color:#fff;border:0;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:700;font-size:13px;margin-left:auto'>📥 Importer HAR OnlyFans</button>"
         "<input type='file' id='sfs-of-har' accept='.har,application/json' style='display:none' onchange='importOfHar(this)'>"
@@ -10947,6 +10950,19 @@ def _render_sfs_html() -> str:
         "    if(!ps.length && j.note){ box.innerHTML=prefix+j.note; }"
         "    else if(prefix){ box.innerHTML=prefix+box.innerHTML; }"
         "  }catch(err){ box.innerHTML='❌ '+err; }"
+        "}"
+        "function mypulsHarPick(){ var el=document.getElementById('sfs-mym-har-file'); if(el) el.click(); }"
+        "async function importMypulsHar(input){"
+        "  if(!input||!input.files||!input.files[0]) return;"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box) box.innerHTML='⏳ Import du HAR MyPuls (cookies)…';"
+        "  var fd=new FormData(); fd.append('har', input.files[0]);"
+        "  try{"
+        "    var r=await fetch('/mypuls/import_har',{method:'POST',body:fd}); var j=await r.json();"
+        "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); input.value=''; return; }"
+        "    if(box) box.innerHTML='✅ Cookies MyPuls à jour ('+(j.email||'?')+').'+(j.note||'')+' Synchro en cours…';"
+        "    setTimeout(loadSfsPushes, 600);"
+        "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
+        "  input.value='';"
         "}"
         "function ofHarPick(){ var el=document.getElementById('sfs-of-har'); if(el) el.click(); }"
         "async function importOfHar(input){"
@@ -26242,6 +26258,62 @@ def create_app():
         if res.get("ok"):
             return _success(f"✅ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"⚠ Cookies enregistrés mais ping échoué : {res.get('error', '?')}")
+
+    @app.route("/mypuls/import_har", methods=["POST"])
+    def mypuls_import_har():
+        """Importe les cookies MyPuls (PHPSESSID + REMEMBERME) depuis un HAR
+        exporté du navigateur (DevTools → Network → Export HAR), pour rafraîchir
+        l'auth sans copier-coller à la main."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls
+            import json as _json
+            import re as _re
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module: {e}"})
+        f = request.files.get("har")
+        if not f or not f.filename:
+            return jsonify({"ok": False, "error": "Aucun fichier HAR"})
+        try:
+            har = _json.loads(f.read().decode("utf-8", "replace"))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"HAR illisible : {e}"})
+        php = ""
+        rem = ""
+        for ent in har.get("log", {}).get("entries", []):
+            if "mypuls.app" not in (ent.get("request", {}).get("url", "") or ""):
+                continue
+            for h in ent.get("request", {}).get("headers", []):
+                if (h.get("name", "") or "").lower() == "cookie":
+                    for part in (h.get("value", "") or "").split(";"):
+                        if "=" in part:
+                            k, v = part.strip().split("=", 1)
+                            k = k.strip(); v = v.strip()
+                            if k == "PHPSESSID" and v:
+                                php = v
+                            elif k == "REMEMBERME" and v:
+                                rem = v
+            for h in ent.get("response", {}).get("headers", []):
+                if (h.get("name", "") or "").lower() == "set-cookie":
+                    val = h.get("value", "") or ""
+                    m = _re.search(r"REMEMBERME=([^;]+)", val)
+                    if m:
+                        rem = m.group(1)
+                    m = _re.search(r"PHPSESSID=([^;]+)", val)
+                    if m:
+                        php = m.group(1)
+        if not php or len(php) < 16:
+            return jsonify({"ok": False, "error": "PHPSESSID introuvable dans ce HAR. Connecte-toi sur mypuls.app, ouvre DevTools → Network, recharge la page, puis Export HAR."})
+        mypuls.save_cookies(php, rem)
+        res = mypuls.ping()
+        note = ""
+        if not rem:
+            note = " ⚠️ Aucun REMEMBERME dans ce HAR : l'auto-refresh ne pourra PAS garder la session vivante (elle expirera). Reconnecte-toi sur mypuls.app en cochant « rester connecté / remember me », puis ré-exporte le HAR."
+        if res.get("ok"):
+            return jsonify({"ok": True, "email": res.get("email", "?"), "rememberme": bool(rem), "note": note})
+        return jsonify({"ok": False, "error": f"Cookies enregistrés mais ping échoué : {res.get('error', '?')}"})
 
     @app.route("/mypuls/clear_cookies", methods=["POST"])
     def mypuls_clear_cookies():
