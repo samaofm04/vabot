@@ -12392,6 +12392,14 @@ body.light .mypuls-bar{background:#e5e7eb}
         + f"<input type='date' name='mp_end' value='{end_str}' style='font-size:12px;padding:4px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto'>"
         + "<button type='submit' class='mypuls-period-btn'>Filtrer</button>"
         + "</form>"
+        + "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin:0 6px 0 14px'>Shift :</span>"
+        + "<select id='mp-shift-select' onchange='mpSetShift(this.value)' title='Ventes réalisées pendant ce créneau (paie manager)' style='font-size:12px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto;cursor:pointer'>"
+        + "<option value=''>Tous</option>"
+        + "<option value='2-8'>2h → 8h</option>"
+        + "<option value='8-14'>8h → 14h</option>"
+        + "<option value='14-20'>14h → 20h</option>"
+        + "<option value='20-2'>20h → 2h</option>"
+        + "</select>"
         + "</div>"
     )
 
@@ -12803,8 +12811,15 @@ body.light .mypuls-bar{background:#e5e7eb}
     crypto_data_json = _json_mod.dumps(crypto_data_js, ensure_ascii=False)
 
     # Exposer les transactions à JS pour le filtre client-side par modèle
+    def _tx_hour(ds):
+        # "29/05/2026 05:36" -> 5 (heure, pour le filtre par shift)
+        try:
+            _, _, tm = (ds or "").partition(" ")
+            return int(tm.split(":")[0])
+        except Exception:
+            return -1
     transactions_js = _json_mod.dumps(
-        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"]} for t in transactions],
+        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"], "t": _tx_hour(t.get("date", ""))} for t in transactions],
         ensure_ascii=False,
     )
     # Liste des chatteurs avec leur présence/réactivité (stats non-recalculables côté client)
@@ -12916,6 +12931,24 @@ function mpToggleEdit(chatterName){
   });
 }
 window.__mpExcluded = window.__mpExcluded || new Set();
+window.__mpShift = window.__mpShift || null;
+function mpSetShift(val){
+  if(!val){ window.__mpShift = null; }
+  else { var p = val.split('-'); window.__mpShift = [parseInt(p[0],10), parseInt(p[1],10)]; }
+  try{ localStorage.setItem('mpShiftSel', val || ''); }catch(_e){}
+  if(typeof mpRecompute === 'function') mpRecompute();
+}
+// Restaure le shift mémorisé au chargement (après que les transactions soient en place)
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var sv = localStorage.getItem('mpShiftSel') || '';
+    if(!sv) return;
+    var sel = document.getElementById('mp-shift-select');
+    if(sel) sel.value = sv;
+    var p = sv.split('-'); window.__mpShift = [parseInt(p[0],10), parseInt(p[1],10)];
+    if(typeof mpRecompute === 'function') mpRecompute();
+  }catch(_e){}
+});
 
 function mpToggleCreator(name){
   if(window.__mpExcluded.has(name)) window.__mpExcluded.delete(name);
@@ -12941,8 +12974,18 @@ function mpRecompute(){
   var excluded = window.__mpExcluded;
   var txs = window.__mpTransactions || [];
   var rate = window.__mpEurToUsd || 1;
-  // Filtrer les transactions
-  var filtered = txs.filter(function(t){ return !excluded.has(t.c); });
+  // Filtrer les transactions (créateurs exclus + shift horaire si choisi)
+  var sh = window.__mpShift || null;
+  var filtered = txs.filter(function(t){
+    if(excluded.has(t.c)) return false;
+    if(sh){
+      var h = (typeof t.t === 'number') ? t.t : -1;
+      if(h < 0) return false;
+      if(sh[0] <= sh[1]){ if(!(h >= sh[0] && h < sh[1])) return false; }
+      else { if(!(h >= sh[0] || h < sh[1])) return false; }  // shift qui passe minuit (20→2)
+    }
+    return true;
+  });
   // Agréger par chatteur
   var byChat = {};
   var totals = {ca_total: 0, ca_ppv: 0, ca_tips: 0, nb_tx: filtered.length};
