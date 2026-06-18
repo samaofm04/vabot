@@ -530,8 +530,11 @@ class Admin(commands.Cog):
         va_handle = (va or "").strip().lstrip("@")
         if not va_handle:
             cname = getattr(interaction.channel, "name", "") or ""
-            if cname.lower().startswith("va-"):
-                va_handle = cname[3:]
+            import re as _re_va
+            # tolère un rond 🟢/🟠/🔴 en préfixe du salon (va-handle ou 🟢-va-handle)
+            _m = _re_va.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", cname.lower())
+            if _m:
+                va_handle = _m.group(1)
         valids = [n.lower() for n in list_identities()]
         if ident not in valids:
             await interaction.followup.send(

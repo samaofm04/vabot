@@ -40,6 +40,13 @@ def _set_auto(v: bool):
 # Détection auto du lien d'un VA en scannant l'historique de son salon va-<handle>
 # (cherche une URL getmysocial.com/<shortcode> postée par le bot/manager/boss).
 _GMS_LINK_RE = re.compile(r"getmysocial\.com/([A-Za-z0-9_\-]+)", re.I)
+# Détection robuste d'un salon VA, tolérante à un rond 🟢/🟠/🔴 en préfixe
+_VA_CH_RE = re.compile(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$")
+
+
+def _ch_handle(name):
+    m = _VA_CH_RE.search((name or "").lower())
+    return m.group(1) if m else None
 _LINKCACHE_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap_links.json"
 
 
@@ -154,10 +161,9 @@ class ClickRecap(commands.Cog):
         1) cache  2) nom du lien va_@handle  3) SCAN de l'historique du salon
         (1re URL getmysocial.com/<shortcode> qui correspond à un vrai lien)."""
         import gms
-        name = (getattr(ch, "name", "") or "").lower()
-        if not name.startswith("va-"):
+        handle = _ch_handle(getattr(ch, "name", ""))
+        if not handle:
             return None
-        handle = name[3:]
         cache = _load_linkcache()
         # 1) cache
         sc = cache.get(handle)
@@ -221,7 +227,7 @@ class ClickRecap(commands.Cog):
 
     async def _recap_channel(self, ch, links, gms, today, yest):
         """Poste le récap dans un salon va-<handle>. Retourne 'sent'|'nolink'|'skip'."""
-        handle = ch.name[3:] if ch.name.lower().startswith("va-") else ""
+        handle = _ch_handle(ch.name) or ""
         if not handle:
             return "skip"
         link = await self._resolve_link(ch, links)  # nom va_@ OU scan historique du salon
@@ -246,7 +252,7 @@ class ClickRecap(commands.Cog):
         sent = nolink = 0
         for guild in self.bot.guilds:
             for ch in guild.text_channels:
-                if not ch.name.lower().startswith("va-"):
+                if not _ch_handle(ch.name):
                     continue
                 r = await self._recap_channel(ch, links, gms, today, yest)
                 if r == "sent":
@@ -280,8 +286,8 @@ class ClickRecap(commands.Cog):
             return
         # Aperçu CIBLÉ (par salon précis, ou pseudo) — montré en privé, rien posté chez le VA
         target_handle = None
-        if salon is not None and (getattr(salon, "name", "") or "").lower().startswith("va-"):
-            target_handle = salon.name[3:]
+        if salon is not None and _ch_handle(getattr(salon, "name", "")):
+            target_handle = _ch_handle(salon.name)
         elif va:
             h = va.strip().lstrip("@")
             if h.lower().startswith("va-"):
@@ -293,7 +299,7 @@ class ClickRecap(commands.Cog):
             tch = salon
             if tch is None:
                 for g in self.bot.guilds:
-                    tch = discord.utils.get(g.text_channels, name="va-" + target_handle)
+                    tch = discord.utils.find(lambda c: _ch_handle(c.name) == target_handle, g.text_channels)
                     if tch is not None:
                         break
             if tch is not None:
@@ -328,7 +334,7 @@ class ClickRecap(commands.Cog):
             )
             return
         ch = interaction.channel
-        if not getattr(ch, "name", "").lower().startswith("va-"):
+        if not _ch_handle(getattr(ch, "name", "")):
             await interaction.followup.send(
                 "Lance cette commande dans un salon `va-<pseudo>` (ou `/recapclics partout:true`).",
                 ephemeral=True,
