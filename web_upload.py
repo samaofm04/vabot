@@ -453,6 +453,39 @@ def _pop_banger_mark(file_id: str) -> dict:
     return info or {}
 
 
+# ---- Reels désactivés (grisés pour montrer qu'ils ne sont plus à utiliser) ----
+DISABLED_REELS_FILE = DATA_DIR / "disabled_reels.json"
+
+
+def _load_disabled_reels() -> set:
+    try:
+        if DISABLED_REELS_FILE.exists():
+            data = json.loads(DISABLED_REELS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return set(data)
+            if isinstance(data, dict):
+                return set(data.keys())
+    except Exception:
+        pass
+    return set()
+
+
+def _toggle_disabled_reel(file_id: str) -> bool:
+    """Bascule l'état désactivé d'un reel. Retourne True si désormais désactivé."""
+    s = _load_disabled_reels()
+    now_off = file_id not in s
+    if now_off:
+        s.add(file_id)
+    else:
+        s.discard(file_id)
+    try:
+        DISABLED_REELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DISABLED_REELS_FILE.write_text(json.dumps(sorted(s), ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return now_off
+
+
 def _delete_banger_messages(info: dict) -> tuple:
     """Supprime du salon Discord les messages envoyés pour ce reel (via le bot)."""
     import asyncio
@@ -823,6 +856,10 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 /* Cards de preview - hover scale et shadow */
 .cloud-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
 .cloud-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4);border-color:#444!important}
+/* Reel désactivé : grisé (l'utilisateur voit qu'il n'est plus à utiliser). Les boutons d'action restent cliquables. */
+.cloud-card.is-reel-off{opacity:.4;filter:grayscale(1);transition:opacity .2s ease,filter .2s ease}
+.cloud-card.is-reel-off:hover{opacity:.6}
+.cloud-card.is-reel-off .card-actions{opacity:1;filter:none}
 
 /* Pop quand checkbox sélectionnée */
 .sel-cb:checked{animation:pop .25s ease}
@@ -2277,6 +2314,23 @@ async function toggleBanger(btn, fileId){
     btn.disabled = false;
     btn.style.opacity = '1';
   }
+}
+async function toggleReelDisabled(btn, fileId){
+  // Désactive/réactive un reel : grise la carte + état persisté serveur
+  var card = btn.closest('.cloud-card');
+  btn.disabled = true; btn.style.opacity = '0.55';
+  try{
+    var fd = new FormData(); fd.set('file_id', fileId);
+    var r = await fetch('/reel/toggle_disabled', { method:'POST', body: fd });
+    var j = await r.json();
+    if(!j.ok){ alert('❌ ' + (j.error || '?')); return; }
+    var off = !!j.disabled;
+    if(card) card.classList.toggle('is-reel-off', off);
+    btn.classList.toggle('is-off', off);
+    btn.style.color = off ? '#ef4444' : '#9aa0a6';
+    if(typeof showToast === 'function') showToast(off ? '🚫 Reel désactivé' : '✅ Reel réactivé', off ? 'warning' : 'success');
+  }catch(e){ alert('Erreur réseau : ' + e); }
+  finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
 var lbGallery = [];   // {url, isVideo, name, fileId}
@@ -8703,7 +8757,7 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -8807,11 +8861,22 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
                 f"</button>"
             )
+        # 🚫 Désactiver : grise le reel pour montrer qu'il n'est plus à utiliser
+        _doff = bool(is_disabled)
+        _dcol = "#ef4444" if _doff else "#9aa0a6"
+        disable_btn = (
+            f"<button class='card-edit-btn reel-disable{(' is-off' if _doff else '')}' "
+            f"onclick='event.stopPropagation();toggleReelDisabled(this, \"{fid_safe}\")' "
+            f"title='Désactiver / réactiver ce reel (grise pour montrer qu il est désactivé)' style='color:{_dcol}'>"
+            f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><circle cx='12' cy='12' r='9'/><line x1='5.6' y1='5.6' x2='18.4' y2='18.4'/></svg>"
+            f"</button>"
+        )
         actions_html = (
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"{banger_btn}"
             f"{montage_btn}"
             f"{edit_btn}"
+            f"{disable_btn}"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
             f"onchange='toggleSelect(\"{file_id}\", this.checked)' "
@@ -8822,7 +8887,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
 
     return (
-        f"<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
+        f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}' style='background:transparent;border:0;border-radius:10px;position:relative'>"
         f"{actions_html}"
         f"{media_html}"
         f"</div>"
@@ -9144,6 +9209,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
 
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
+        _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
         for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
             clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
@@ -9158,7 +9224,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks)))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels)))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px' id='vault-grid'>"
@@ -25177,6 +25243,19 @@ def create_app():
         info = _pop_banger_mark(file_id)  # retire le marquage + recupere les infos d'envoi
         ok_del, del_msg = _delete_banger_messages(info)
         return jsonify({"ok": True, "deleted": del_msg, "delete_ok": ok_del})
+
+    @app.route("/reel/toggle_disabled", methods=["POST"])
+    def reel_toggle_disabled():
+        """Active/désactive un reel (grise visuellement pour montrer qu'il n'est
+        plus à utiliser). État persisté dans data/disabled_reels.json."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        file_id = (request.form.get("file_id") or "").strip()
+        if not file_id:
+            return jsonify({"ok": False, "error": "file_id manquant"})
+        now_off = _toggle_disabled_reel(file_id)
+        return jsonify({"ok": True, "disabled": now_off})
 
     @app.route("/cloud/banger_purge", methods=["POST"])
     def cloud_banger_purge():
