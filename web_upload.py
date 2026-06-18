@@ -9227,7 +9227,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
             cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels)))
         gallery = (
             gallery_header
-            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px' id='vault-grid'>"
+            + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
             + "".join(cards_html)
             + "</div>"
         )
