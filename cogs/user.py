@@ -1174,6 +1174,50 @@ class UserCog(commands.Cog):
         )
 
     @app_commands.command(
+        name="menupin",
+        description="[ADMIN] Épingle un menu PERMANENT (h24) dans le salon de chaque VA",
+    )
+    async def menupin(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        users = load_json(USERS_FILE, {})
+        pinned = 0
+        for uid, data in users.items():
+            ch_id = data.get("channel_id") if isinstance(data, dict) else None
+            ident = (data.get("identity") if isinstance(data, dict)
+                     else (data if isinstance(data, str) else None))
+            if not ch_id or not ident:
+                continue
+            ch = self.bot.get_channel(ch_id)
+            if ch is None:
+                continue
+            try:
+                # dépingle l'ancien menu permanent du bot (évite les doublons)
+                try:
+                    for pm in await ch.pins():
+                        if (pm.author and pm.author.id == self.bot.user.id and pm.embeds
+                                and "contenu du jour" in ((pm.embeds[0].title or "").lower())):
+                            await pm.unpin(reason="remplacement menu permanent")
+                except Exception:
+                    pass
+                msg = await ch.send(embed=_build_menu_embed(ident), view=ContentMenuView(self))
+                await msg.pin(reason="Menu permanent VA (h24)")
+                pinned += 1
+                await asyncio.sleep(1.2)
+            except discord.Forbidden:
+                pass
+            except Exception as e:
+                print(f"[menupin] salon {ch_id} : {e}")
+        await interaction.followup.send(
+            f"📌 Menu permanent épinglé dans **{pinned}** salon(s) VA.\n"
+            "→ Chaque VA a le menu en **message épinglé** en haut de son salon : il clique, le contenu arrive dans son salon (autant de fois qu'il veut).\n"
+            "⚠️ Le bot a besoin de **Gérer les messages** pour épingler.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="setliensalon",
         description="[ADMIN] Définit le salon où arrivent les demandes de lien",
     )
