@@ -155,6 +155,19 @@ def _web_steps():
         return None
 
 
+def _web_media(index: int) -> list:
+    """Médias ajoutés via le SITE WEB pour l'étape <index> (data/onboarding.json).
+    Items : {kind, name, path (fichier), url (lien)}. [] si rien/erreur."""
+    try:
+        import onboarding as _web_ob  # module racine bot/onboarding.py
+        steps = _web_ob.list_steps()
+        if steps and 0 <= index < len(steps):
+            return [m for m in (steps[index].get("media") or []) if isinstance(m, dict)]
+    except Exception:
+        pass
+    return []
+
+
 def step_embed(index: int) -> discord.Embed:
     # Structure canonique = STEPS hardcodees (compte, indexation des medias).
     # On override UNIQUEMENT le texte (titre/description) depuis les modifs
@@ -273,6 +286,40 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
         except Exception as e:
             log.error(f"Erreur inattendue envoi media {p}: {e}")
             await channel.send(f"⚠️ Erreur inattendue sur `{p.name}` : {str(e)[:200]}")
+
+    # 1.5) Médias ajoutés via le SITE WEB (data/onboarding.json) : fichiers + liens URL
+    for m in _web_media(index):
+        kind = (m.get("kind") or "").lower()
+        if kind == "note":
+            continue
+        if kind == "link":
+            url = (m.get("url") or "").strip()
+            if url:
+                try:
+                    await channel.send(url)
+                except Exception as e:
+                    log.error(f"Erreur envoi lien web onboarding: {e}")
+            continue
+        path = (m.get("path") or "").strip()
+        if not path:
+            continue
+        p = Path(path)
+        if not p.exists():
+            continue
+        try:
+            size = p.stat().st_size
+        except Exception:
+            continue
+        if size > MAX_SIZE:
+            await channel.send(
+                f"⚠️ `{p.name}` ({size / (1024*1024):.1f} Mo) dépasse la limite Discord — "
+                f"mets-le plutôt en **lien** sur le site."
+            )
+            continue
+        try:
+            await channel.send(file=discord.File(str(p), filename=p.name))
+        except Exception as e:
+            await channel.send(f"⚠️ Échec envoi `{p.name}` : {str(e)[:150]}")
 
     # 2) Liens vers des messages Discord
     links = load_step_links(index)
