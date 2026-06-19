@@ -1,9 +1,10 @@
 """Score d'activité des VAs (/100) + rond 🟢/🟠/🔴 devant le nom du salon va-<handle>.
 
-Activité comptée (fenêtre 14 jours glissants, « jours actifs ») :
+Activité comptée :
 - clics sur les boutons (contenu / onboarding / demander un lien) -> on_interaction
 - messages écrits dans les salons va-… et général-… -> on_message
-Score = (jours actifs sur 14) / 14 * 100. 🟢 >=60 · 🟠 >=30 · 🔴 <30.
+Score /100 (info, fenêtre 14 j) = (jours actifs sur 14) / 14 * 100.
+Rond du salon (récence) : 🟢 actif aujourd'hui · 🟠 1-2 j sans rien · 🔴 ≥3 j sans rien.
 
 L'auto-renommage des salons est OFF par défaut (data/vaactivity.json -> "auto").
 Le bot a besoin de « Gérer les salons » + ne renomme que si le rond change
@@ -148,17 +149,19 @@ class VAActivity(commands.Cog):
         return round(active / WINDOW * 100)
 
     def _dot(self, user_id) -> str:
-        """Couleur du rond (recency) :
-        🔴 rien depuis 3 jours · 🟠 au moins une interaction récente · 🟢 très actif (>=5 des 7 derniers jours)."""
+        """Couleur du rond selon la dernière activité :
+        🟢 actif aujourd'hui · 🟠 1-2 jours sans rien · 🔴 ≥3 jours sans rien (ou jamais).
+        Dès qu'un VA refait une interaction, il repasse 🟢."""
         u = self._act.get(str(user_id), {})
         today = _paris_now().date()
 
         def act(i):
             return u.get((today - datetime.timedelta(days=i)).isoformat(), 0) > 0
-        if not any(act(i) for i in range(3)):   # 3 jours sans rien
-            return "🔴"
-        active7 = sum(1 for i in range(7) if act(i))
-        return "🟢" if active7 >= 5 else "🟠"
+        if act(0):
+            return "🟢"          # une interaction aujourd'hui
+        if act(1) or act(2):
+            return "🟠"          # rien aujourd'hui mais actif il y a 1 ou 2 jours
+        return "🔴"              # ≥3 jours sans rien (ou aucune activité connue)
 
     def _member_for_handle(self, guild, handle):
         h = (handle or "").lower()
@@ -246,14 +249,14 @@ class VAActivity(commands.Cog):
 
     @tasks.loop(minutes=30)
     async def daily(self):
-        now = _paris_now()
-        dstr = now.date().isoformat()
-        if now.hour == 0 and self._last_run != dstr:
-            self._last_run = dstr
-            try:
-                await self._apply_all()
-            except Exception as e:
-                print(f"[vaactivity] loop : {e}")
+        # Rafraîchit les ronds en continu : un VA qui interagit repasse 🟢 dans
+        # les ~30 min (au lieu d'attendre minuit). _apply_all ne renomme que les
+        # salons dont la couleur a CHANGÉ -> quasi aucun rename en régime stable
+        # (anti rate-limit Discord).
+        try:
+            await self._apply_all()
+        except Exception as e:
+            print(f"[vaactivity] loop : {e}")
 
     @daily.before_loop
     async def _before(self):
@@ -282,8 +285,8 @@ class VAActivity(commands.Cog):
                 return
             rows.sort(key=lambda x: x[0])  # du moins actif au plus actif
             auto = bool(_load(CFG_FILE, {}).get("auto"))
-            head = (f"📊 **Activité VA** ({WINDOW}j · auto {'ON' if auto else 'OFF'})\n"
-                    "🔴 rien depuis 3j · 🟠 actif récemment · 🟢 très actif (≥5/7j)\n\n")
+            head = (f"📊 **Activité VA** (score {WINDOW}j · auto {'ON' if auto else 'OFF'})\n"
+                    "Rond : 🟢 actif aujourd'hui · 🟠 1-2 j sans rien · 🔴 ≥3 j sans rien\n\n")
             # cap à <2000 caractères (limite Discord) sinon l'envoi échoue (= ça tourne dans le vide)
             lines, total, shown = [], len(head), 0
             for _s, line in rows:
@@ -302,7 +305,7 @@ class VAActivity(commands.Cog):
                 pass
 
     @app_commands.command(name="vascore_auto", description="[OWNER] Active/désactive le renommage auto des salons va- avec le rond")
-    @app_commands.describe(actif="true = renomme les salons va- avec 🟢/🟠/🔴 chaque nuit + applique maintenant")
+    @app_commands.describe(actif="true = renomme les salons va- avec 🟢/🟠/🔴 en continu (~30 min) + applique maintenant")
     async def vascore_auto(self, interaction: discord.Interaction, actif: bool):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
@@ -317,7 +320,7 @@ class VAActivity(commands.Cog):
             # Importe d'abord l'activité réelle depuis l'historique (sinon tout le monde est 🔴)
             n_msgs, n_users, n_chan = await self._backfill_history()
             st = await self._apply_all()
-            msg = (f"✅ Auto-renommage **activé** (chaque nuit).\n"
+            msg = (f"✅ Auto-renommage **activé** (rafraîchi en continu, ~30 min).\n"
                    f"• Historique scanné : **{n_msgs}** messages de **{n_users}** membres ({n_chan} salons)\n"
                    f"• Salons `va-…` détectés : **{st['found']}**\n"
                    f"• Renommés : **{st['renamed']}** · déjà à jour : {st['skipped']}\n")
