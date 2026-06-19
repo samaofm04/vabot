@@ -170,26 +170,30 @@ class VAActivity(commands.Cog):
 
     # ---------- Auto-renommage ----------
     async def _apply_all(self):
-        renamed = 0
+        """Renomme les salons va- avec le rond. Retourne un compteur de diagnostic."""
+        st = {"found": 0, "renamed": 0, "skipped": 0, "forbidden": 0, "errored": 0}
         for guild in self.bot.guilds:
             for ch, h in self._va_channels(guild):
+                st["found"] += 1
                 member = self._member_for_handle(guild, h)
                 dot = self._dot(member.id) if member else "🔴"
                 cur = (ch.name or "").strip()
                 cur_dot = cur[0] if cur[:1] in DOTS else ""
                 if cur_dot == dot:
+                    st["skipped"] += 1
                     continue  # déjà le bon rond -> pas de rename (anti rate-limit)
                 target = f"{dot}-va-{h}"
                 try:
                     await ch.edit(name=target, reason="VA activity score")
-                    renamed += 1
+                    st["renamed"] += 1
                     await asyncio.sleep(2)
                 except discord.Forbidden:
-                    pass
+                    st["forbidden"] += 1
                 except Exception as e:
+                    st["errored"] += 1
                     print(f"[vaactivity] rename #{ch.name} : {e}")
-        print(f"[vaactivity] {renamed} salon(s) renommé(s)")
-        return renamed
+        print(f"[vaactivity] {st}")
+        return st
 
     @tasks.loop(minutes=30)
     async def daily(self):
@@ -261,12 +265,18 @@ class VAActivity(commands.Cog):
             self.daily.cancel()
         await interaction.response.defer(ephemeral=True, thinking=True)
         if actif:
-            n = await self._apply_all()
-            await interaction.followup.send(
-                f"✅ Auto-renommage **activé** (chaque nuit). {n} salon(s) mis à jour maintenant.\n"
-                "⚠️ Si rien ne change : le bot a besoin de la perm **Gérer les salons** et d'un rôle au-dessus.",
-                ephemeral=True,
-            )
+            st = await self._apply_all()
+            msg = (f"✅ Auto-renommage **activé** (chaque nuit).\n"
+                   f"• Salons `va-…` détectés : **{st['found']}**\n"
+                   f"• Renommés : **{st['renamed']}** · déjà à jour : {st['skipped']}\n")
+            if st["found"] == 0:
+                msg += "\n⚠️ **Aucun salon `va-…` détecté.** Vérifie que les salons s'appellent bien `va-<pseudo>` et que le bot peut les voir."
+            elif st["forbidden"] > 0 and st["renamed"] == 0:
+                msg += (f"\n🚫 **{st['forbidden']} renommage(s) refusé(s) (permission).** Le bot n'a pas le droit de renommer ces salons.\n"
+                        "→ Donne-lui la permission **Gérer les salons** ET place son rôle **au-dessus** dans Paramètres serveur → Rôles.")
+            elif st["errored"] > 0:
+                msg += f"\n⚠️ {st['errored']} erreur(s) — voir les logs."
+            await interaction.followup.send(msg, ephemeral=True)
         else:
             await interaction.followup.send("🛑 Auto-renommage **désactivé** (les ronds restent en place jusqu'au prochain rename).", ephemeral=True)
 
