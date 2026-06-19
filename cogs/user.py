@@ -41,7 +41,7 @@ def _build_menu_embed(identity):
     emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
     emb.add_field(name="💬 Bio", value="Des bios Insta de ton identité", inline=True)
     emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
-    emb.add_field(name="🔗 Demander un lien", value="Prévient les managers → ils t'envoient ton lien", inline=True)
+    emb.add_field(name="🔗 Demander un lien", value="Affiche ton lien si tu en as un, sinon prévient les managers", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -1445,23 +1445,72 @@ class UserCog(commands.Cog):
                 pass
 
     async def request_link(self, interaction: discord.Interaction):
-        """Le VA demande son lien → confirmation au VA + notif aux managers."""
-        identity = get_user_identity(interaction.user.id)
+        """Bouton "Demander un lien" du menu VA.
+        - Si le VA a DÉJÀ un lien -> on lui affiche directement son lien.
+        - Sinon -> demande envoyée aux managers."""
+        uid = interaction.user.id
+        identity = get_user_identity(uid)
         if not identity:
             await interaction.response.send_message(
                 "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
             )
             return
-        # Anti-spam : si une demande est déjà en attente, on ne reposte rien
-        if _lr_is_pending(interaction.user.id):
-            await interaction.response.send_message(
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        # 1) Lien déjà connu en local -> on l'affiche tout de suite (rapide, sans réseau).
+        _ex = _lr_existing(uid)
+        if _ex and _ex.get("url"):
+            await interaction.followup.send(
+                f"🔗 **Voici ton lien :**\n{_ex['url']}\n\n📲 Mets-le dans la bio de tes comptes Instagram.",
+                ephemeral=True,
+            )
+            return
+
+        # 2) Demande déjà en attente -> on évite de re-spammer (et d'interroger GMS).
+        if _lr_is_pending(uid):
+            await interaction.followup.send(
                 "⏳ **Ta demande est déjà en attente** — un manager va t'envoyer ton lien. "
                 "Pas besoin de re-cliquer 🙂",
                 ephemeral=True,
             )
             return
-        _lr_mark_pending(interaction.user.id)
-        await interaction.response.send_message(
+
+        # 3) Sinon, le lien existe peut-être sur GMS (ex: créé via le site) -> on le cherche.
+        url = ""
+        users = load_json(USERS_FILE, {})
+        data = users.get(str(uid), {})
+        ch_id = data.get("channel_id") if isinstance(data, dict) else None
+        va_ch = interaction.client.get_channel(ch_id) if ch_id else None
+        handle = ""
+        if va_ch:
+            m = re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (va_ch.name or "").lower())
+            handle = m.group(1) if m else ""
+        if not handle:
+            handle = (getattr(interaction.user, "name", "") or "").lower()
+        if handle:
+            try:
+                import gms
+                _all = await asyncio.to_thread(gms.list_all_links)
+                if _all.get("ok"):
+                    _hit = _gms_exact_link(handle, _all.get("links") or [])
+                    if _hit:
+                        _sc = _hit.get("shortcode", "")
+                        url = f"{gms.PUBLIC_LINK_DOMAIN}/{_sc}" if _sc else ""
+                        if url:
+                            _lr_mark_generated(uid, url, _hit.get("display_name", ""))
+            except Exception:
+                pass  # GMS indispo -> on retombe sur la demande normale
+
+        if url:
+            await interaction.followup.send(
+                f"🔗 **Voici ton lien :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram.",
+                ephemeral=True,
+            )
+            return
+
+        # 4) Vraiment pas de lien -> demande aux managers (anti-spam : 1 en attente)
+        _lr_mark_pending(uid)
+        await interaction.followup.send(
             "✅ **Demande envoyée aux managers !** Tu vas recevoir ton lien bientôt 🔗",
             ephemeral=True,
         )
