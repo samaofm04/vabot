@@ -63,9 +63,25 @@ def load_json(path, default):
 
 
 def save_json(path, data):
+    # Écriture atomique : on écrit dans un fichier temporaire puis os.replace.
+    # Évite qu'un kill/crash en plein flush laisse un JSON tronqué (ce qui
+    # réinitialiserait silencieusement l'état, ex. les blocs anti-doublon).
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+            raise
         return True
     except Exception:
         return False
@@ -77,10 +93,28 @@ def _is_staff_member(member):
     return bool(p and (p.administrator or p.manage_guild or p.manage_channels))
 
 
-# ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 lien / VA) ----
-LINK_STATE_FILE = DATA_DIR / "link_request_state.json"  # {uid: {"p": ts_demande, "g": ts_genere}}
+# ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 SEUL lien / VA) ----
+# Bloc DUR : dès qu'un VA a un lien, on refuse d'en regénérer un (sauf future commande dédiée).
+LINK_STATE_FILE = DATA_DIR / "link_request_state.json"  # {uid: {"p": ts_demande, "g": ts_genere, "url": ..., "name": ...}}
 _REQ_PENDING_TTL = 24 * 3600   # une demande en attente expire après 24h
-_GEN_GUARD_SEC = 30 * 60        # on bloque une 2e génération pour le même VA pendant 30 min
+
+# Verrou en mémoire : empêche un double-clic / 2 managers de générer 2 liens
+# pendant que la 1re génération (lente, réseau) est encore en cours.
+_LINK_GEN_INFLIGHT = set()
+
+
+def _gms_exact_link(handle: str, links) -> "dict | None":
+    """Match STRICT pour le bloc dur : display_name normalisé == 'va' + handle.
+    Volontairement PAS de substring (gms.find_link_for_handle bloquerait à tort
+    un VA différent dont le pseudo est inclus dans un autre, ex: @mia vs @mialee)."""
+    h = re.sub(r"[^a-z0-9]", "", (handle or "").lower())
+    if len(h) < 3 or not links:
+        return None
+    target = "va" + h
+    for l in links:
+        if re.sub(r"[^a-z0-9]", "", (l.get("display_name") or "").lower()) == target:
+            return l
+    return None
 
 
 def _lr_load():
@@ -100,21 +134,48 @@ def _lr_mark_pending(uid):
     save_json(LINK_STATE_FILE, d)
 
 
-def _lr_recent_gen_minutes(uid) -> int:
-    """Minutes restantes du garde-fou si un lien a été généré récemment, sinon 0."""
+def _lr_existing(uid):
+    """Renvoie l'entrée {g, url, name} si un lien a DÉJÀ été généré pour ce VA, sinon None.
+    Sert de bloc dur : une fois qu'un VA a un lien, plus de génération auto."""
     e = _lr_load().get(str(uid)) or {}
-    g = e.get("g")
-    if g and (time.time() - g) < _GEN_GUARD_SEC:
-        return int((_GEN_GUARD_SEC - (time.time() - g)) / 60) + 1
-    return 0
+    return e if e.get("g") else None
 
 
-def _lr_mark_generated(uid):
+def _lr_mark_generated(uid, url: str = "", name: str = ""):
     d = _lr_load()
     e = d.setdefault(str(uid), {})
     e["g"] = time.time()
+    if url:
+        e["url"] = url
+    if name:
+        e["name"] = name
     e.pop("p", None)  # la demande est traitée
     save_json(LINK_STATE_FILE, d)
+
+
+async def _lr_send_blocked(interaction, uid, url: str = "", source: str = ""):
+    """Réponse standard quand un VA a déjà un lien : éphémère + on retire le bouton."""
+    where = " (trouvé sur GetMySocial)" if source == "gms" else ""
+    try:
+        await interaction.followup.send(
+            f"🔒 **Ce VA a déjà un lien**{where} — génération bloquée pour éviter les doublons."
+            + (f"\n🔗 Lien existant : {url}" if url else "")
+            + "\n\n_Pour en recréer un, il faudra une commande dédiée (pas encore dispo)._",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
+    msg = getattr(interaction, "message", None)
+    if msg is not None:
+        try:
+            await msg.edit(
+                content=f"🔒 {interaction.user.mention} — ce VA a déjà un lien"
+                + (f" : {url}" if url else "")
+                + " (génération bloquée, anti-doublon).",
+                view=None,
+            )
+        except Exception:
+            pass
 
 
 def unescape_newlines(text):
@@ -611,62 +672,103 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         uid = self.user_id
-        # Anti-doublon : un lien vient déjà d'être généré pour ce VA -> on bloque
-        _mins = _lr_recent_gen_minutes(uid)
-        if _mins:
-            await interaction.followup.send(
-                f"⚠️ Un lien vient déjà d'être généré pour ce VA. "
-                f"Attends ~{_mins} min avant d'en refaire un (évite les doublons), "
-                f"ou utilise `/panellien` si tu veux vraiment forcer.",
-                ephemeral=True,
-            )
+        # Bloc DUR anti-doublon (couche 1, locale) : ce VA a déjà eu un lien -> on refuse.
+        _ex = _lr_existing(uid)
+        if _ex:
+            await _lr_send_blocked(interaction, uid, _ex.get("url", ""))
             return
-        identity = get_user_identity(uid)
-        if not identity:
-            await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
-            return
-        # Salon perso + handle du VA
-        users = load_json(USERS_FILE, {})
-        data = users.get(str(uid), {})
-        ch_id = data.get("channel_id") if isinstance(data, dict) else None
-        va_ch = interaction.client.get_channel(ch_id) if ch_id else None
-        handle = ""
-        if va_ch:
-            m = re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (va_ch.name or "").lower())
-            handle = m.group(1) if m else ""
-        if not handle:
-            member = interaction.guild.get_member(uid) if interaction.guild else None
-            handle = (getattr(member, "name", "") or "").lower()
-        try:
-            import gms
-            res = await asyncio.to_thread(gms.quick_generate_for_identity, identity, handle)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
-            return
-        if not res.get("ok"):
-            await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
-            return
-        url = res.get("public_url", "")
-        _lr_mark_generated(uid)  # garde-fou anti-doublon + clôt la demande en attente
-        if va_ch:
+        # Verrou anti double-clic : la génération est lente (réseau) ; on empêche
+        # une 2e génération concurrente pour le même VA tant que celle-ci tourne.
+        # (check + add sans await entre les deux -> atomique côté asyncio)
+        if uid in _LINK_GEN_INFLIGHT:
             try:
-                await va_ch.send(
-                    f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram."
+                await interaction.followup.send(
+                    "⏳ Une génération est déjà en cours pour ce VA — patiente quelques secondes.",
+                    ephemeral=True,
                 )
             except Exception:
                 pass
-        # Marque la demande comme traitée (retire le bouton)
+            return
+        _LINK_GEN_INFLIGHT.add(uid)
         try:
-            await interaction.message.edit(
-                content=f"✅ Lien généré par {interaction.user.mention} : {url}", view=None
-            )
-        except Exception:
-            pass
-        await interaction.followup.send(
-            f"✅ Lien généré pour <@{uid}> (`{identity}`) : {url}"
-            + (f"\n→ envoyé dans {va_ch.mention}" if va_ch else " (⚠️ salon VA introuvable — copie-le manuellement)"),
-            ephemeral=True,
-        )
+            identity = get_user_identity(uid)
+            if not identity:
+                await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
+                return
+            # Salon perso + handle du VA
+            users = load_json(USERS_FILE, {})
+            data = users.get(str(uid), {})
+            ch_id = data.get("channel_id") if isinstance(data, dict) else None
+            va_ch = interaction.client.get_channel(ch_id) if ch_id else None
+            handle = ""
+            if va_ch:
+                m = re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (va_ch.name or "").lower())
+                handle = m.group(1) if m else ""
+            if not handle:
+                member = interaction.guild.get_member(uid) if interaction.guild else None
+                handle = (getattr(member, "name", "") or "").lower()
+            try:
+                import gms
+            except Exception as e:
+                await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+                return
+            # Bloc DUR anti-doublon (couche 2, GMS) : un lien va_@<handle> existe déjà
+            # côté GetMySocial (ex: créé via le site). On utilise un match STRICT
+            # (pas de substring) pour ne jamais bloquer un VA différent par erreur.
+            if handle:
+                try:
+                    _all = await asyncio.to_thread(gms.list_all_links)
+                except Exception:
+                    _all = {"ok": False}
+                # Fail-closed : si on ne peut pas vérifier, on n'invente pas un lien.
+                if not _all.get("ok"):
+                    await interaction.followup.send(
+                        "⚠️ Impossible de vérifier sur GetMySocial pour l'instant (API indispo). "
+                        "Génération annulée par sécurité (anti-doublon) — réessaie dans un instant.",
+                        ephemeral=True,
+                    )
+                    return
+                _hit = _gms_exact_link(handle, _all.get("links") or [])
+                if _hit:
+                    _sc = _hit.get("shortcode", "")
+                    _u = f"{gms.PUBLIC_LINK_DOMAIN}/{_sc}" if _sc else ""
+                    _lr_mark_generated(uid, _u, _hit.get("display_name", ""))
+                    await _lr_send_blocked(interaction, uid, _u, source="gms")
+                    return
+            try:
+                res = await asyncio.to_thread(gms.quick_generate_for_identity, identity, handle)
+            except Exception as e:
+                await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+                return
+            if not res.get("ok"):
+                await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
+                return
+            url = res.get("public_url", "")
+            _lr_mark_generated(uid, url, res.get("va_name", ""))  # bloc dur + clôt la demande
+            if va_ch:
+                try:
+                    await va_ch.send(
+                        f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram."
+                    )
+                except Exception:
+                    pass
+            # Marque la demande comme traitée (retire le bouton)
+            try:
+                await interaction.message.edit(
+                    content=f"✅ Lien généré par {interaction.user.mention} : {url}", view=None
+                )
+            except Exception:
+                pass
+            try:
+                await interaction.followup.send(
+                    f"✅ Lien généré pour <@{uid}> (`{identity}`) : {url}"
+                    + (f"\n→ envoyé dans {va_ch.mention}" if va_ch else " (⚠️ salon VA introuvable — copie-le manuellement)"),
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+        finally:
+            _LINK_GEN_INFLIGHT.discard(uid)
 
 
 class _SendProxy:
@@ -1656,6 +1758,35 @@ class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial")
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        # Bloc DUR anti-doublon : si ce pseudo a déjà un lien va_@<handle>, on refuse.
+        # Match STRICT (pas de substring) pour ne pas bloquer un pseudo voisin.
+        if handle:
+            try:
+                _all = await asyncio.to_thread(gms.list_all_links)
+            except Exception:
+                _all = {"ok": False}
+            if not _all.get("ok"):
+                await interaction.followup.send(
+                    "⚠️ Impossible de vérifier sur GetMySocial pour l'instant (API indispo). "
+                    "Génération annulée par sécurité (anti-doublon) — réessaie dans un instant.",
+                    ephemeral=True,
+                )
+                return
+            _hit = _gms_exact_link(handle, _all.get("links") or [])
+            if _hit:
+                _sc = _hit.get("shortcode", "")
+                _u = f"{gms.PUBLIC_LINK_DOMAIN}/{_sc}" if _sc else ""
+                await interaction.followup.send(
+                    f"🔒 **`@{handle}` a déjà un lien** — génération bloquée (anti-doublon)."
+                    + (f"\n🔗 {_u}" if _u else "")
+                    + "\n\n_Pour en recréer un, il faudra une commande dédiée (pas encore dispo)._",
+                    ephemeral=True,
+                )
+                return
+        try:
             res = await asyncio.to_thread(gms.quick_generate_for_identity, ident, handle)
         except Exception as e:
             await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
