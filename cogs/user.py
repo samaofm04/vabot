@@ -544,9 +544,78 @@ def get_user_identity(user_id):
     return None
 
 
+class _SendProxy:
+    """Imite interaction.response ET interaction.followup mais envoie dans un salon cible.
+    Permet de réutiliser les commandes telles quelles en redirigeant leur sortie."""
+    _OK = ("embed", "embeds", "file", "files", "view", "allowed_mentions", "tts")
+
+    def __init__(self, channel):
+        self._ch = channel
+
+    def _clean(self, kw):
+        return {k: v for k, v in kw.items() if k in self._OK}
+
+    async def send(self, content=None, **kw):
+        return await self._ch.send(content=content, **self._clean(kw))
+
+    async def send_message(self, content=None, **kw):
+        return await self._ch.send(content=content, **self._clean(kw))
+
+    async def defer(self, *a, **k):
+        return None
+
+    def is_done(self):
+        return True
+
+
+class _ChannelProxy:
+    """Faux 'interaction' qui route les sends d'une commande vers `channel`."""
+    def __init__(self, real_interaction, channel):
+        self._real = real_interaction
+        self.channel = channel
+        self.channel_id = channel.id
+        self.user = real_interaction.user
+        self.guild = getattr(real_interaction, "guild", None)
+        self.client = getattr(real_interaction, "client", None)
+        self.response = _SendProxy(channel)
+        self.followup = _SendProxy(channel)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 class UserCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    def _va_channel(self, user_id):
+        """Salon va- d'un VA depuis users.json (None si pas configuré)."""
+        users = load_json(USERS_FILE, {})
+        data = users.get(str(user_id))
+        ch_id = data.get("channel_id") if isinstance(data, dict) else None
+        return self.bot.get_channel(ch_id) if ch_id else None
+
+    async def _central_run(self, interaction, cmd):
+        """Bouton du menu CENTRAL : exécute la commande mais la sortie va dans le salon du VA."""
+        identity = get_user_identity(interaction.user.id)
+        target = self._va_channel(interaction.user.id)
+        if not identity or target is None:
+            await interaction.response.send_message(
+                "⚠️ Tu n'as pas de salon perso configuré. Demande à un admin de faire `/adduser` sur toi.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"✅ C'est parti — ton contenu arrive dans {target.mention} 👇", ephemeral=True
+        )
+        proxy = _ChannelProxy(interaction, target)
+        try:
+            await cmd.callback(self, proxy)
+        except Exception as e:
+            try:
+                await interaction.followup.send(f"❌ Erreur : {e}", ephemeral=True)
+            except Exception:
+                pass
 
     @app_commands.command(name="username", description="Génère des pseudos Instagram VRAIMENT dispo basés sur ton identité")
     async def username(self, interaction: discord.Interaction):
@@ -1020,6 +1089,7 @@ class UserCog(commands.Cog):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
         try:
             self.bot.add_view(ContentMenuView(self))
+            self.bot.add_view(CentralMenuView(self))
         except Exception:
             pass
         if not self.daily_menu.is_running():
@@ -1172,6 +1242,28 @@ class UserCog(commands.Cog):
             f"✅ Menu poussé à **{sent}** VA(s) (chacun @pingé dans son salon).",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="menucentral",
+        description="[ADMIN] Poste ICI un menu central : chaque VA clique, le contenu arrive dans SON salon",
+    )
+    async def menucentral(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        emb = discord.Embed(
+            title="🎛️ Menu contenu — clique, ça arrive dans TON salon",
+            description=(
+                "Clique un bouton ci-dessous : ton contenu est envoyé **dans ton salon perso `va-…`** "
+                "(pas ici). Tu peux cliquer **autant de fois que tu veux**.\n\n"
+                "🎬 **Reel** · 📖 **Story** · 🖼️ **Post** · 📲 **Story CTA**\n"
+                "👤 **Pseudo** · 📝 **Name** · 💬 **Bio** · 🖼 **PP** · 🔗 **Demander un lien**\n\n"
+                "⚠️ **Règles :** 1 reel différent par compte (jamais le même sur 2 comptes) · "
+                "Story CTA **entre 19h et 23h** · suis ton onboarding (jour 0 → 6+)."
+            ),
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=emb, view=CentralMenuView(self))
 
     @app_commands.command(
         name="menupin",
@@ -1329,6 +1421,51 @@ class ContentMenuView(discord.ui.View):
         await self.cog.profilepic.callback(self.cog, interaction)
 
     @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=2)
+    async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.request_link(interaction)
+
+
+class CentralMenuView(discord.ui.View):
+    """Menu CENTRAL (salon partagé type #commande-va) : chaque bouton envoie le
+    contenu dans le SALON PERSO du VA qui clique (via _central_run). Persistant."""
+
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Reel", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu2:reel", row=0)
+    async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.reel)
+
+    @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="cmenu2:story", row=0)
+    async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.story)
+
+    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="cmenu2:post", row=0)
+    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.post)
+
+    @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu2:storycta", row=0)
+    async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.storycta)
+
+    @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu2:pseudo", row=1)
+    async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.username)
+
+    @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.secondary, custom_id="cmenu2:name", row=1)
+    async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.name)
+
+    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu2:bio", row=1)
+    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.bio)
+
+    @discord.ui.button(label="PP", emoji="🖼", style=discord.ButtonStyle.secondary, custom_id="cmenu2:pp", row=1)
+    async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.profilepic)
+
+    @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu2:lien", row=2)
     async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.request_link(interaction)
 
