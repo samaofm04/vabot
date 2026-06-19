@@ -4,7 +4,7 @@ Activité comptée :
 - clics sur les boutons (contenu / onboarding / demander un lien) -> on_interaction
 - messages écrits dans les salons va-… et général-… -> on_message
 Score /100 (info, fenêtre 14 j) = (jours actifs sur 14) / 14 * 100.
-Rond du salon (récence) : 🟢 actif aujourd'hui · 🟠 1-2 j sans rien · 🔴 ≥3 j sans rien.
+Rond du salon (récence, en heures) : 🟢 < 24 h · 🟠 1 à 3 j · 🔴 ≥ 3 j sans rien.
 
 L'auto-renommage des salons est OFF par défaut (data/vaactivity.json -> "auto").
 Le bot a besoin de « Gérer les salons » + ne renomme que si le rond change
@@ -106,13 +106,15 @@ class VAActivity(commands.Cog):
 
     # ---------- Enregistrement de l'activité ----------
     def _record(self, user_id):
-        d = _paris_now().date().isoformat()
+        now = _paris_now()
+        d = now.date().isoformat()
         uid = str(user_id)
         u = self._act.setdefault(uid, {})
         u[d] = u.get(d, 0) + 1
-        # purge des vieux jours
-        cutoff = (_paris_now().date() - datetime.timedelta(days=KEEP_DAYS)).isoformat()
-        for k in [k for k in u if k < cutoff]:
+        u["_last"] = now.isoformat()   # horodatage précis de la dernière activité
+        # purge des vieux jours (garde "_last" : "_" > chiffres en ASCII)
+        cutoff = (now.date() - datetime.timedelta(days=KEEP_DAYS)).isoformat()
+        for k in [k for k in u if k != "_last" and k < cutoff]:
             u.pop(k, None)
         _save(ACT_FILE, self._act)
 
@@ -149,19 +151,38 @@ class VAActivity(commands.Cog):
         return round(active / WINDOW * 100)
 
     def _dot(self, user_id) -> str:
-        """Couleur du rond selon la dernière activité :
-        🟢 actif aujourd'hui · 🟠 1-2 jours sans rien · 🔴 ≥3 jours sans rien (ou jamais).
-        Dès qu'un VA refait une interaction, il repasse 🟢."""
+        """Couleur du rond selon le TEMPS écoulé depuis la dernière activité :
+        🟢 < 24 h · 🟠 entre 1 et 3 jours · 🔴 ≥ 3 jours (ou jamais).
+        Basé sur l'heure réelle (pas le jour calendaire) -> un VA actif hier soir
+        reste 🟢 même à 1 h du matin. Dès qu'il refait une action -> 🟢."""
         u = self._act.get(str(user_id), {})
-        today = _paris_now().date()
-
-        def act(i):
-            return u.get((today - datetime.timedelta(days=i)).isoformat(), 0) > 0
-        if act(0):
-            return "🟢"          # une interaction aujourd'hui
-        if act(1) or act(2):
-            return "🟠"          # rien aujourd'hui mais actif il y a 1 ou 2 jours
-        return "🔴"              # ≥3 jours sans rien (ou aucune activité connue)
+        if not u:
+            return "🔴"
+        now = _paris_now()
+        last_dt = None
+        ls = u.get("_last")
+        if ls:
+            try:
+                last_dt = datetime.datetime.fromisoformat(ls)
+            except Exception:
+                last_dt = None
+        if last_dt is None:
+            # compat anciens enregistrements sans horodatage : dernier jour actif (fin de journée)
+            days = [k for k in u if k != "_last" and u.get(k)]
+            if days:
+                try:
+                    d = datetime.date.fromisoformat(max(days))
+                    last_dt = datetime.datetime.combine(d, datetime.time(23, 59))
+                except Exception:
+                    last_dt = None
+        if last_dt is None:
+            return "🔴"
+        hours = (now - last_dt).total_seconds() / 3600.0
+        if hours < 24:
+            return "🟢"
+        if hours < 72:
+            return "🟠"
+        return "🔴"
 
     def _member_for_handle(self, guild, handle):
         h = (handle or "").lower()
@@ -189,6 +210,7 @@ class VAActivity(commands.Cog):
         pas, garde les clics live). Retourne (messages, nb_users, nb_salons)."""
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days + 1)
         fresh = {}
+        fresh_last = {}   # {uid: dernier horodatage Paris ISO trouvé dans l'historique}
         n_msgs = 0
         chans = 0
         for guild in self.bot.guilds:
@@ -201,11 +223,17 @@ class VAActivity(commands.Cog):
                         if msg.author.bot:
                             continue
                         try:
-                            day = _utc_to_paris_date(msg.created_at.replace(tzinfo=None))
+                            mu = msg.created_at.replace(tzinfo=None)
+                            pdt = mu + datetime.timedelta(hours=_utc_offset(mu))  # heure Paris
+                            day = pdt.date().isoformat()
                         except Exception:
                             continue
-                        u = fresh.setdefault(str(msg.author.id), {})
+                        uid = str(msg.author.id)
+                        u = fresh.setdefault(uid, {})
                         u[day] = u.get(day, 0) + 1
+                        iso = pdt.isoformat()
+                        if iso > fresh_last.get(uid, ""):
+                            fresh_last[uid] = iso
                         n_msgs += 1
                 except discord.Forbidden:
                     pass
@@ -217,6 +245,11 @@ class VAActivity(commands.Cog):
             ex = self._act.setdefault(uid, {})
             for d, c in dmap.items():
                 ex[d] = max(ex.get(d, 0), c)
+        # fusion du dernier horodatage (garde le plus récent entre live et historique)
+        for uid, iso in fresh_last.items():
+            ex = self._act.setdefault(uid, {})
+            if iso > ex.get("_last", ""):
+                ex["_last"] = iso
         _save(ACT_FILE, self._act)
         return n_msgs, len(fresh), chans
 
@@ -286,7 +319,7 @@ class VAActivity(commands.Cog):
             rows.sort(key=lambda x: x[0])  # du moins actif au plus actif
             auto = bool(_load(CFG_FILE, {}).get("auto"))
             head = (f"📊 **Activité VA** (score {WINDOW}j · auto {'ON' if auto else 'OFF'})\n"
-                    "Rond : 🟢 actif aujourd'hui · 🟠 1-2 j sans rien · 🔴 ≥3 j sans rien\n\n")
+                    "Rond : 🟢 actif <24h · 🟠 entre 1 et 3 j · 🔴 ≥3 j sans rien\n\n")
             # cap à <2000 caractères (limite Discord) sinon l'envoi échoue (= ça tourne dans le vide)
             lines, total, shown = [], len(head), 0
             for _s, line in rows:
