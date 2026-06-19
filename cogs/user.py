@@ -1163,6 +1163,7 @@ class UserCog(commands.Cog):
         try:
             self.bot.add_view(ContentMenuView(self))
             self.bot.add_view(CentralMenuView(self))
+            self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
             self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
         except Exception:
             pass
@@ -1322,6 +1323,25 @@ class UserCog(commands.Cog):
             f"✅ Menu poussé à **{sent}** VA(s) (chacun @pingé dans son salon).",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="panellien",
+        description="[ADMIN] Poste ICI un panneau pour générer un lien GetMySocial en 1 clic",
+    )
+    async def panellien(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        emb = discord.Embed(
+            title="🔗 Générateur de lien GetMySocial",
+            description=(
+                "Clique sur le bouton, entre l'**identité** (le modèle) et le **pseudo du VA**, "
+                "et le lien est généré en 1 clic.\n"
+                "Le lien est nommé `va_@pseudo`, et s'il existe un salon `va-pseudo`, il y est aussi envoyé."
+            ),
+            color=discord.Color.green(),
+        )
+        await interaction.response.send_message(embed=emb, view=LinkPanelView())
 
     @app_commands.command(
         name="menucentral",
@@ -1548,6 +1568,71 @@ class CentralMenuView(discord.ui.View):
     @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu2:lien", row=2)
     async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.request_link(interaction)
+
+
+class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):
+    identite = discord.ui.TextInput(
+        label="Identité (modèle)", placeholder="ex: sarah, amelia, julia…",
+        required=True, max_length=40,
+    )
+    pseudo = discord.ui.TextInput(
+        label="Pseudo du VA (pour nommer le lien)", placeholder="ex: ozen28 (optionnel)",
+        required=False, max_length=40,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        ident = str(self.identite.value or "").strip().lower()
+        handle = str(self.pseudo.value or "").strip().lstrip("@")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms
+            res = await asyncio.to_thread(gms.quick_generate_for_identity, ident, handle)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        if not res.get("ok"):
+            await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
+            return
+        url = res.get("public_url", "")
+        # Si un salon va-<pseudo> existe, on y dépose aussi le lien
+        posted = ""
+        if handle:
+            import re as _re_h
+            for g in interaction.client.guilds:
+                vch = discord.utils.find(
+                    lambda c: _re_h.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (c.name or "").lower())
+                    and _re_h.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (c.name or "").lower()).group(1) == handle.lower(),
+                    g.text_channels,
+                )
+                if vch:
+                    try:
+                        await vch.send(f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram.")
+                        posted = f"\n→ envoyé dans {vch.mention}"
+                    except Exception:
+                        pass
+                    break
+        await interaction.followup.send(
+            f"✅ **Lien généré** — {res.get('va_name', '')} · identité `{ident}`\n"
+            f"🔗 {url}\nShortcode `/{res.get('shortcode', '')}`{posted}",
+            ephemeral=True,
+        )
+
+
+class LinkPanelView(discord.ui.View):
+    """Panneau permanent : un bouton 'Générer un lien' qui ouvre le mini-formulaire."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Générer un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="linkpanel:gen")
+    async def gen(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        await interaction.response.send_modal(GenLinkModal())
 
 
 async def setup(bot):
