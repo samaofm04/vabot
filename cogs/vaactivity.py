@@ -37,19 +37,27 @@ def va_handle(channel_name: str):
     return m.group(1) if m else None
 
 
+def _last_sunday(y, mo):
+    for w in reversed(calendar.monthcalendar(y, mo)):
+        if w[6]:
+            return w[6]
+    return 28
+
+
+def _utc_offset(dt_naive_utc):
+    y = dt_naive_utc.year
+    ds = datetime.datetime(y, 3, _last_sunday(y, 3), 1)
+    de = datetime.datetime(y, 10, _last_sunday(y, 10), 1)
+    return 2 if (ds <= dt_naive_utc < de) else 1
+
+
 def _paris_now():
     u = datetime.datetime.utcnow()
-    y = u.year
+    return u + datetime.timedelta(hours=_utc_offset(u))
 
-    def last_sun(mo):
-        for w in reversed(calendar.monthcalendar(y, mo)):
-            if w[6]:
-                return w[6]
-        return 28
-    dst_start = datetime.datetime(y, 3, last_sun(3), 1)
-    dst_end = datetime.datetime(y, 10, last_sun(10), 1)
-    off = 2 if (dst_start <= u < dst_end) else 1
-    return u + datetime.timedelta(hours=off)
+
+def _utc_to_paris_date(dt_naive_utc):
+    return (dt_naive_utc + datetime.timedelta(hours=_utc_offset(dt_naive_utc))).date().isoformat()
 
 
 def _load(path, default):
@@ -112,8 +120,7 @@ class VAActivity(commands.Cog):
         try:
             if message.author.bot or not message.guild:
                 return
-            nm = (getattr(message.channel, "name", "") or "").lower()
-            if va_handle(nm) or nm.startswith("général") or nm.startswith("general") or "general-" in nm or "général-" in nm:
+            if self._is_va_channel(message.channel):
                 self._record(message.author.id)
         except Exception:
             pass
@@ -167,6 +174,48 @@ class VAActivity(commands.Cog):
             if h:
                 out.append((ch, h))
         return out
+
+    def _is_va_channel(self, ch):
+        nm = (getattr(ch, "name", "") or "").lower()
+        return bool(va_handle(nm) or nm.startswith("général") or nm.startswith("general")
+                    or "general-" in nm or "général-" in nm)
+
+    async def _backfill_history(self, days=WINDOW):
+        """Importe l'activité réelle depuis l'historique des messages (va-/général-)
+        des `days` derniers jours. Fusion par MAX/jour (re-scan idempotent, ne double
+        pas, garde les clics live). Retourne (messages, nb_users, nb_salons)."""
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days + 1)
+        fresh = {}
+        n_msgs = 0
+        chans = 0
+        for guild in self.bot.guilds:
+            for ch in guild.text_channels:
+                if not self._is_va_channel(ch):
+                    continue
+                chans += 1
+                try:
+                    async for msg in ch.history(limit=4000, after=cutoff):
+                        if msg.author.bot:
+                            continue
+                        try:
+                            day = _utc_to_paris_date(msg.created_at.replace(tzinfo=None))
+                        except Exception:
+                            continue
+                        u = fresh.setdefault(str(msg.author.id), {})
+                        u[day] = u.get(day, 0) + 1
+                        n_msgs += 1
+                except discord.Forbidden:
+                    pass
+                except Exception as e:
+                    print(f"[vaactivity] scan #{getattr(ch,'name','?')} : {e}")
+                await asyncio.sleep(0.25)
+        # fusion : max par jour (garde le plus grand entre clics live et messages historiques)
+        for uid, dmap in fresh.items():
+            ex = self._act.setdefault(uid, {})
+            for d, c in dmap.items():
+                ex[d] = max(ex.get(d, 0), c)
+        _save(ACT_FILE, self._act)
+        return n_msgs, len(fresh), chans
 
     # ---------- Auto-renommage ----------
     async def _apply_all(self):
@@ -265,8 +314,11 @@ class VAActivity(commands.Cog):
             self.daily.cancel()
         await interaction.response.defer(ephemeral=True, thinking=True)
         if actif:
+            # Importe d'abord l'activité réelle depuis l'historique (sinon tout le monde est 🔴)
+            n_msgs, n_users, n_chan = await self._backfill_history()
             st = await self._apply_all()
             msg = (f"✅ Auto-renommage **activé** (chaque nuit).\n"
+                   f"• Historique scanné : **{n_msgs}** messages de **{n_users}** membres ({n_chan} salons)\n"
                    f"• Salons `va-…` détectés : **{st['found']}**\n"
                    f"• Renommés : **{st['renamed']}** · déjà à jour : {st['skipped']}\n")
             if st["found"] == 0:
@@ -279,6 +331,27 @@ class VAActivity(commands.Cog):
             await interaction.followup.send(msg, ephemeral=True)
         else:
             await interaction.followup.send("🛑 Auto-renommage **désactivé** (les ronds restent en place jusqu'au prochain rename).", ephemeral=True)
+
+    @app_commands.command(name="vascore_scan", description="[OWNER] Importe l'activité réelle depuis l'historique (met les scores à jour)")
+    @app_commands.describe(jours="Nombre de jours d'historique à scanner (défaut 14)")
+    async def vascore_scan(self, interaction: discord.Interaction, jours: int = WINDOW):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            jours = max(1, min(30, int(jours)))
+            n_msgs, n_users, n_chan = await self._backfill_history(days=jours)
+            await interaction.followup.send(
+                f"✅ Historique importé ({jours}j) : **{n_msgs}** messages de **{n_users}** membres sur **{n_chan}** salons.\n"
+                "Fais **/vascore** pour voir les scores, puis **/vascore_auto actif:true** pour appliquer les ronds.",
+                ephemeral=True,
+            )
+        except Exception as e:
+            try:
+                await interaction.followup.send(f"❌ Erreur scan : {e}", ephemeral=True)
+            except Exception:
+                pass
 
 
 async def setup(bot):
