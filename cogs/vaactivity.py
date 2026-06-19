@@ -140,6 +140,19 @@ class VAActivity(commands.Cog):
                 active += 1
         return round(active / WINDOW * 100)
 
+    def _dot(self, user_id) -> str:
+        """Couleur du rond (recency) :
+        🔴 rien depuis 3 jours · 🟠 au moins une interaction récente · 🟢 très actif (>=5 des 7 derniers jours)."""
+        u = self._act.get(str(user_id), {})
+        today = _paris_now().date()
+
+        def act(i):
+            return u.get((today - datetime.timedelta(days=i)).isoformat(), 0) > 0
+        if not any(act(i) for i in range(3)):   # 3 jours sans rien
+            return "🔴"
+        active7 = sum(1 for i in range(7) if act(i))
+        return "🟢" if active7 >= 5 else "🟠"
+
     def _member_for_handle(self, guild, handle):
         h = (handle or "").lower()
         for m in guild.members:
@@ -161,8 +174,7 @@ class VAActivity(commands.Cog):
         for guild in self.bot.guilds:
             for ch, h in self._va_channels(guild):
                 member = self._member_for_handle(guild, h)
-                score = self._score(member.id) if member else 0
-                dot = _emoji_for(score)
+                dot = self._dot(member.id) if member else "🔴"
                 cur = (ch.name or "").strip()
                 cur_dot = cur[0] if cur[:1] in DOTS else ""
                 if cur_dot == dot:
@@ -201,23 +213,40 @@ class VAActivity(commands.Cog):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        guild = interaction.guild
-        if not guild:
-            await interaction.followup.send("À utiliser dans le serveur.", ephemeral=True)
-            return
-        rows = []
-        for ch, h in sorted(self._va_channels(guild), key=lambda x: x[1]):
-            member = self._member_for_handle(guild, h)
-            score = self._score(member.id) if member else 0
-            rows.append((score, f"{_emoji_for(score)} `va-{h}` — **{score}/100**" + ("" if member else " ⚠️ membre introuvable")))
-        if not rows:
-            await interaction.followup.send("Aucun salon `va-…` trouvé.", ephemeral=True)
-            return
-        rows.sort(key=lambda x: x[0])  # du moins actif au plus actif
-        auto = bool(_load(CFG_FILE, {}).get("auto"))
-        head = f"📊 **Scores d'activité VA** (fenêtre {WINDOW}j · auto-renommage {'ON' if auto else 'OFF'})\n"
-        body = "\n".join(r[1] for r in rows[:60])
-        await interaction.followup.send(head + body, ephemeral=True)
+        try:
+            guild = interaction.guild
+            if not guild:
+                await interaction.followup.send("À utiliser dans le serveur.", ephemeral=True)
+                return
+            rows = []
+            for ch, h in self._va_channels(guild):
+                member = self._member_for_handle(guild, h)
+                score = self._score(member.id) if member else 0
+                dot = self._dot(member.id) if member else "🔴"
+                rows.append((score, f"{dot} `va-{h}` — **{score}/100**" + ("" if member else " ⚠️ membre introuvable")))
+            if not rows:
+                await interaction.followup.send("Aucun salon `va-…` trouvé.", ephemeral=True)
+                return
+            rows.sort(key=lambda x: x[0])  # du moins actif au plus actif
+            auto = bool(_load(CFG_FILE, {}).get("auto"))
+            head = (f"📊 **Activité VA** ({WINDOW}j · auto {'ON' if auto else 'OFF'})\n"
+                    "🔴 rien depuis 3j · 🟠 actif récemment · 🟢 très actif (≥5/7j)\n\n")
+            # cap à <2000 caractères (limite Discord) sinon l'envoi échoue (= ça tourne dans le vide)
+            lines, total, shown = [], len(head), 0
+            for _s, line in rows:
+                if total + len(line) + 1 > 1900:
+                    break
+                lines.append(line); total += len(line) + 1; shown += 1
+            body = "\n".join(lines)
+            extra = len(rows) - shown
+            if extra > 0:
+                body += f"\n… +{extra} autre(s) (trop pour un message)"
+            await interaction.followup.send(head + body, ephemeral=True)
+        except Exception as e:
+            try:
+                await interaction.followup.send(f"❌ Erreur vascore : {e}", ephemeral=True)
+            except Exception:
+                pass
 
     @app_commands.command(name="vascore_auto", description="[OWNER] Active/désactive le renommage auto des salons va- avec le rond")
     @app_commands.describe(actif="true = renomme les salons va- avec 🟢/🟠/🔴 chaque nuit + applique maintenant")
