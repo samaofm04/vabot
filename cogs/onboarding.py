@@ -294,11 +294,26 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
             continue
         if kind == "link":
             url = (m.get("url") or "").strip()
-            if url:
+            if not url:
+                continue
+            # Si c'est un LIEN DE MESSAGE Discord -> fetch + re-poste les attachements
+            # (URL CDN fraîche, AUCUNE limite 10 Mo — comme le warm-up).
+            dm = re.search(r"discord(?:app)?\.com/channels/\d+/(\d+)/(\d+)", url)
+            if dm and bot is not None:
                 try:
-                    await channel.send(url)
+                    cid, mid = int(dm.group(1)), int(dm.group(2))
+                    srcc = bot.get_channel(cid) or await bot.fetch_channel(cid)
+                    msg = await srcc.fetch_message(mid)
+                    if msg.attachments:
+                        for att in msg.attachments:
+                            await channel.send(att.url)
+                        continue
                 except Exception as e:
-                    log.error(f"Erreur envoi lien web onboarding: {e}")
+                    log.error(f"Erreur fetch lien message onboarding web: {e}")
+            try:
+                await channel.send(url)
+            except Exception as e:
+                log.error(f"Erreur envoi lien web onboarding: {e}")
             continue
         path = (m.get("path") or "").strip()
         if not path:
