@@ -249,6 +249,32 @@ def parse_message_link(link: str):
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
+async def _post_attachment_playable(channel, att):
+    """Affiche une vidéo/image de façon FIABLE pour le VA.
+
+    Problème : poster juste l'URL CDN d'un attachement ne donne PAS toujours un
+    lecteur — Discord se base sur l'extension de l'URL et `.MP4` (majuscules)
+    n'est souvent pas reconnu comme vidéo -> ça s'affiche en simple lien.
+    Solution : si le fichier passe sous la limite d'upload du serveur, on le
+    ré-héberge en pièce jointe NATIVE (vrai lecteur, insensible à la casse).
+    Sinon (trop lourd) on retombe sur l'URL.
+    """
+    limit = getattr(getattr(channel, "guild", None), "filesize_limit", 0) or (10 * 1024 * 1024)
+    size = getattr(att, "size", 0) or 0
+    if size and size <= limit:
+        try:
+            f = await att.to_file()  # télécharge puis ré-upload -> attachement natif
+            await channel.send(file=f)
+            return
+        except Exception as e:
+            log.error(f"Re-upload attachement onboarding echoue ({att.filename}): {e}")
+    # Fallback : fichier trop lourd ou ré-upload KO -> on poste l'URL brute
+    try:
+        await channel.send(att.url)
+    except Exception as e:
+        log.error(f"Envoi URL attachement onboarding echoue: {e}")
+
+
 async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None):
     """Envoie les médias attachés à l'étape <index> dans le salon.
 
@@ -257,8 +283,10 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
     - liens vers des messages Discord (stockes via /setonboardingmedia lien:...)
       -> on re-fetch le message pour obtenir une URL CDN fraiche, Discord auto-embed
     """
-    # Limite Discord serveur non-boost : 10 Mo en pratique (ex 25 Mo officiel)
-    MAX_SIZE = 10 * 1024 * 1024
+    # Limite d'upload RÉELLE du serveur (varie selon le niveau de boost :
+    # 25 Mo non-boosté, 50/100 Mo boosté). On lit la vraie valeur au lieu de
+    # supposer 10 Mo — sinon on refuse à tort des vidéos que le serveur accepte.
+    MAX_SIZE = getattr(getattr(channel, "guild", None), "filesize_limit", 0) or (25 * 1024 * 1024)
 
     # 1) Fichiers locaux
     files = list_step_media(index)
@@ -306,7 +334,7 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
                     msg = await srcc.fetch_message(mid)
                     if msg.attachments:
                         for att in msg.attachments:
-                            await channel.send(att.url)
+                            await _post_attachment_playable(channel, att)
                         continue
                 except Exception as e:
                     log.error(f"Erreur fetch lien message onboarding web: {e}")
@@ -375,12 +403,10 @@ async def send_step_media(channel: discord.abc.Messageable, index: int, bot=None
                 "⚠️ Le message lie ne contient plus de piece jointe."
             )
             continue
-        # Re-poster chaque URL d'attachement (Discord auto-embed les videos/images)
+        # Ré-héberge chaque attachement en pièce jointe native (lecteur fiable),
+        # fallback URL si trop lourd.
         for att in msg.attachments:
-            try:
-                await channel.send(att.url)
-            except Exception as e:
-                log.error(f"Erreur envoi URL attachement: {e}")
+            await _post_attachment_playable(channel, att)
 
 
 # Commandes qui acceptent un paramètre `nombre` (pour donner N items au warm-up)
