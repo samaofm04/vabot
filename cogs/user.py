@@ -748,7 +748,7 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             if va_ch:
                 try:
                     await va_ch.send(
-                        f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram."
+                        f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !"
                     )
                 except Exception:
                     pass
@@ -1461,7 +1461,7 @@ class UserCog(commands.Cog):
         _ex = _lr_existing(uid)
         if _ex and _ex.get("url"):
             await interaction.followup.send(
-                f"🔗 **Voici ton lien :**\n{_ex['url']}\n\n📲 Mets-le dans la bio de tes comptes Instagram.",
+                f"🔗 **Voici ton lien :**\n{_ex['url']}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !",
                 ephemeral=True,
             )
             return
@@ -1503,7 +1503,7 @@ class UserCog(commands.Cog):
 
         if url:
             await interaction.followup.send(
-                f"🔗 **Voici ton lien :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram.",
+                f"🔗 **Voici ton lien :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !",
                 ephemeral=True,
             )
             return
@@ -1856,7 +1856,7 @@ class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial")
                 )
                 if vch:
                     try:
-                        await vch.send(f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram.")
+                        await vch.send(f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !")
                         posted = f"\n→ envoyé dans {vch.mention}"
                     except Exception:
                         pass
