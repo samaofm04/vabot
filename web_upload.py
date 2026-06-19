@@ -2837,16 +2837,8 @@ function deleteSelected(){
   );
 }
 function showTab(group,name,title,subtitle){
-  // Revenus chatteurs : si on arrive sans tranche dans l'URL mais qu'une est mémorisée, on la restaure
-  if(name === 'revenus'){
-    try{
-      var _p = new URLSearchParams(location.search);
-      if(!_p.get('mp_start')){
-        var _sv = (localStorage.getItem('mpRevenusPeriod') || '').split('|');
-        if(_sv[0] && _sv[1]){ location.replace('?tab=revenus&mp_start=' + encodeURIComponent(_sv[0]) + '&mp_end=' + encodeURIComponent(_sv[1])); return; }
-      }
-    }catch(_e){}
-  }
+  // (Revenus chatteurs : pas de rechargement au clic d'onglet -> ouverture instantanée.
+  //  La tranche de dates est restaurée seulement après un VRAI reload, via le script HEAD.)
   // Retirer le style initial injecté en HEAD (pour le pre-paint)
   var initStyle = document.getElementById('__initial-tab-css');
   if(initStyle) initStyle.remove();
@@ -12301,7 +12293,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     )
 
 
-@_arg_cached(seconds=60, key_args=("mp_start", "mp_end"))
+@_arg_cached(seconds=180, key_args=("mp_start", "mp_end"))
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
 
