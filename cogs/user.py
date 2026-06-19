@@ -3,6 +3,7 @@ import datetime as _dt
 import json
 import os
 import random
+import re
 import tempfile
 from pathlib import Path
 import discord
@@ -542,6 +543,78 @@ def get_user_identity(user_id):
     if isinstance(data, dict):
         return data.get("identity")
     return None
+
+
+class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
+    """Bouton « Générer le lien » sur une demande de lien. L'ID du VA est dans le
+    custom_id -> persistant (marche même après un redémarrage du bot). Réservé staff.
+    Au clic : génère le lien GMS et l'envoie dans le salon perso du VA."""
+
+    def __init__(self, user_id: int):
+        self.user_id = int(user_id)
+        super().__init__(
+            discord.ui.Button(
+                label="Générer le lien", emoji="🔗",
+                style=discord.ButtonStyle.success,
+                custom_id=f"genlink:{int(user_id)}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["uid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        uid = self.user_id
+        identity = get_user_identity(uid)
+        if not identity:
+            await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
+            return
+        # Salon perso + handle du VA
+        users = load_json(USERS_FILE, {})
+        data = users.get(str(uid), {})
+        ch_id = data.get("channel_id") if isinstance(data, dict) else None
+        va_ch = interaction.client.get_channel(ch_id) if ch_id else None
+        handle = ""
+        if va_ch:
+            m = re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (va_ch.name or "").lower())
+            handle = m.group(1) if m else ""
+        if not handle:
+            member = interaction.guild.get_member(uid) if interaction.guild else None
+            handle = (getattr(member, "name", "") or "").lower()
+        try:
+            import gms
+            res = await asyncio.to_thread(gms.quick_generate_for_identity, identity, handle)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        if not res.get("ok"):
+            await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
+            return
+        url = res.get("public_url", "")
+        if va_ch:
+            try:
+                await va_ch.send(
+                    f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Mets-le dans la bio de tes comptes Instagram."
+                )
+            except Exception:
+                pass
+        # Marque la demande comme traitée (retire le bouton)
+        try:
+            await interaction.message.edit(
+                content=f"✅ Lien généré par {interaction.user.mention} : {url}", view=None
+            )
+        except Exception:
+            pass
+        await interaction.followup.send(
+            f"✅ Lien généré pour <@{uid}> (`{identity}`) : {url}"
+            + (f"\n→ envoyé dans {va_ch.mention}" if va_ch else " (⚠️ salon VA introuvable — copie-le manuellement)"),
+            ephemeral=True,
+        )
 
 
 class _SendProxy:
@@ -1090,6 +1163,7 @@ class UserCog(commands.Cog):
         try:
             self.bot.add_view(ContentMenuView(self))
             self.bot.add_view(CentralMenuView(self))
+            self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
         except Exception:
             pass
         if not self.daily_menu.is_running():
@@ -1185,10 +1259,16 @@ class UserCog(commands.Cog):
         ch = guild.get_channel(ch_id) if (guild and ch_id) else None
         if ch is not None:
             ping = f"<@&{role_id}> " if role_id else ""
+            view = discord.ui.View(timeout=None)
+            try:
+                view.add_item(GenLinkButton(member.id))
+            except Exception:
+                view = None
             try:
                 await ch.send(
                     content=(ping + "nouvelle demande de lien").strip(),
                     embed=emb,
+                    view=view,
                     allowed_mentions=discord.AllowedMentions(roles=True),
                 )
             except Exception:
