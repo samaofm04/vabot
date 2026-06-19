@@ -5,6 +5,7 @@ import os
 import random
 import re
 import tempfile
+import time
 from pathlib import Path
 import discord
 from discord import app_commands
@@ -74,6 +75,46 @@ def _is_staff_member(member):
     """True si le membre a des permissions de staff/manager (admin / gerer serveur / gerer salons)."""
     p = getattr(member, "guild_permissions", None)
     return bool(p and (p.administrator or p.manage_guild or p.manage_channels))
+
+
+# ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 lien / VA) ----
+LINK_STATE_FILE = DATA_DIR / "link_request_state.json"  # {uid: {"p": ts_demande, "g": ts_genere}}
+_REQ_PENDING_TTL = 24 * 3600   # une demande en attente expire après 24h
+_GEN_GUARD_SEC = 30 * 60        # on bloque une 2e génération pour le même VA pendant 30 min
+
+
+def _lr_load():
+    d = load_json(LINK_STATE_FILE, {})
+    return d if isinstance(d, dict) else {}
+
+
+def _lr_is_pending(uid) -> bool:
+    e = _lr_load().get(str(uid)) or {}
+    p = e.get("p")
+    return bool(p and (time.time() - p) < _REQ_PENDING_TTL)
+
+
+def _lr_mark_pending(uid):
+    d = _lr_load()
+    d.setdefault(str(uid), {})["p"] = time.time()
+    save_json(LINK_STATE_FILE, d)
+
+
+def _lr_recent_gen_minutes(uid) -> int:
+    """Minutes restantes du garde-fou si un lien a été généré récemment, sinon 0."""
+    e = _lr_load().get(str(uid)) or {}
+    g = e.get("g")
+    if g and (time.time() - g) < _GEN_GUARD_SEC:
+        return int((_GEN_GUARD_SEC - (time.time() - g)) / 60) + 1
+    return 0
+
+
+def _lr_mark_generated(uid):
+    d = _lr_load()
+    e = d.setdefault(str(uid), {})
+    e["g"] = time.time()
+    e.pop("p", None)  # la demande est traitée
+    save_json(LINK_STATE_FILE, d)
 
 
 def unescape_newlines(text):
@@ -570,6 +611,16 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         uid = self.user_id
+        # Anti-doublon : un lien vient déjà d'être généré pour ce VA -> on bloque
+        _mins = _lr_recent_gen_minutes(uid)
+        if _mins:
+            await interaction.followup.send(
+                f"⚠️ Un lien vient déjà d'être généré pour ce VA. "
+                f"Attends ~{_mins} min avant d'en refaire un (évite les doublons), "
+                f"ou utilise `/panellien` si tu veux vraiment forcer.",
+                ephemeral=True,
+            )
+            return
         identity = get_user_identity(uid)
         if not identity:
             await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
@@ -596,6 +647,7 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             await interaction.followup.send(f"❌ {res.get('error', 'Génération échouée')}", ephemeral=True)
             return
         url = res.get("public_url", "")
+        _lr_mark_generated(uid)  # garde-fou anti-doublon + clôt la demande en attente
         if va_ch:
             try:
                 await va_ch.send(
@@ -1298,6 +1350,15 @@ class UserCog(commands.Cog):
                 "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
             )
             return
+        # Anti-spam : si une demande est déjà en attente, on ne reposte rien
+        if _lr_is_pending(interaction.user.id):
+            await interaction.response.send_message(
+                "⏳ **Ta demande est déjà en attente** — un manager va t'envoyer ton lien. "
+                "Pas besoin de re-cliquer 🙂",
+                ephemeral=True,
+            )
+            return
+        _lr_mark_pending(interaction.user.id)
         await interaction.response.send_message(
             "✅ **Demande envoyée aux managers !** Tu vas recevoir ton lien bientôt 🔗",
             ephemeral=True,
