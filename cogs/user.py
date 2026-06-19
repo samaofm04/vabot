@@ -1258,6 +1258,12 @@ class UserCog(commands.Cog):
 
         # 1) Salon manager (+ ping rôle si configuré)
         ch = guild.get_channel(ch_id) if (guild and ch_id) else None
+        if ch is None and guild:
+            # Fallback : si pas configuré (/setliensalon), trouve un salon "demande-...-lien"
+            ch = discord.utils.find(
+                lambda c: "demande" in (c.name or "").lower() and "lien" in (c.name or "").lower(),
+                guild.text_channels,
+            )
         if ch is not None:
             ping = f"<@&{role_id}> " if role_id else ""
             view = discord.ui.View(timeout=None)
