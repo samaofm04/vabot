@@ -1974,6 +1974,64 @@ class UserCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="setvacategory",
+        description="[OWNER] Catégorie d'accueil des nouveaux VAs sur CE serveur (ex: Equipe 1)",
+    )
+    @app_commands.describe(
+        categorie="La catégorie où placer les nouveaux salons va- (ex: Equipe 1)",
+        deplacer_existants="true = déplace aussi les salons va- déjà présents dans cette catégorie",
+        reset="true = enlève la catégorie d'accueil (retour au classement par identité)",
+    )
+    async def setvacategory(
+        self, interaction: discord.Interaction,
+        categorie: discord.CategoryChannel = None,
+        deplacer_existants: bool = False, reset: bool = False,
+    ):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+        if reset:
+            gf.set_va_category(interaction.guild, None)
+            await interaction.response.send_message(
+                "✅ Catégorie d'accueil retirée — les nouveaux VAs sont à nouveau classés par identité.",
+                ephemeral=True)
+            return
+        if categorie is None:
+            cid = gf.get_va_category_id(interaction.guild)
+            cur = interaction.guild.get_channel(cid) if cid else None
+            await interaction.response.send_message(
+                (f"📂 Catégorie d'accueil actuelle : **{cur.name}**" if cur
+                 else "📂 Aucune catégorie d'accueil définie (classement par identité).")
+                + "\n_Choisis-en une avec `categorie:` (option `deplacer_existants:true` pour ranger les VAs déjà là), ou `reset:true`._",
+                ephemeral=True)
+            return
+        gf.set_va_category(interaction.guild, categorie.id)
+        if not deplacer_existants:
+            await interaction.response.send_message(
+                f"✅ Les nouveaux VAs de **{interaction.guild.name}** iront dans **{categorie.name}**.",
+                ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        moved = failed = 0
+        for ch in interaction.guild.text_channels:
+            if _ch_handle_va(ch.name) and ch.category_id != categorie.id:
+                try:
+                    await ch.edit(category=categorie, reason="setvacategory")
+                    moved += 1
+                except Exception:
+                    failed += 1
+                await asyncio.sleep(0.5)
+        await interaction.followup.send(
+            f"✅ Nouveaux VAs → **{categorie.name}**. **{moved}** salon(s) existant(s) déplacé(s)"
+            + (f" · ⚠️ {failed} échec(s) (catégorie pleine ? 50 max)." if failed else "."),
+            ephemeral=True)
+
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(

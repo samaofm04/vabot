@@ -370,13 +370,33 @@ async def create_va_channel(guild, member, identity):
         ),
     }
     base_name = f"va-{member.name}".lower().replace(" ", "-")[:90]
-    category = find_identity_category(guild, identity)
+    # Catégorie : si le serveur a une catégorie d'accueil dédiée (ex: "Equipe 1"),
+    # on y met TOUS les nouveaux VAs. Sinon, catégorie par identité (comportement
+    # historique du serveur principal).
+    category = None
+    try:
+        import guild_features as gf
+        _cid = gf.get_va_category_id(guild)
+        if _cid:
+            _c = guild.get_channel(_cid)
+            if isinstance(_c, discord.CategoryChannel):
+                category = _c
+    except Exception:
+        category = None
+    if category is None:
+        category = find_identity_category(guild, identity)
     try:
         return await guild.create_text_channel(
             name=base_name, overwrites=overwrites, category=category
         )
     except discord.Forbidden:
         return None
+    except discord.HTTPException:
+        # Catégorie pleine (limite Discord 50 salons) ou autre -> on crée sans catégorie
+        try:
+            return await guild.create_text_channel(name=base_name, overwrites=overwrites)
+        except Exception:
+            return None
 
 
 async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):

@@ -134,3 +134,45 @@ def set_threads(guild_or_id, on: bool) -> bool:
     except Exception:
         return False
     return bool(on)
+
+
+# ---- Catégorie d'accueil des nouveaux VAs (par serveur) ----
+# Si définie, les nouveaux salons va- d'un serveur vont dans CETTE catégorie
+# (ex: "Equipe 1") au lieu d'une catégorie par identité.
+_VACAT_FILE = pathlib.Path(__file__).resolve().parent / "data" / "va_category.json"
+
+
+def _load_vacat() -> dict:
+    try:
+        d = json.loads(_VACAT_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def get_va_category_id(guild_or_id):
+    """ID de la catégorie où placer les nouveaux salons va- de ce serveur, ou None."""
+    gid = _gid(guild_or_id)
+    if gid is None:
+        return None
+    try:
+        return int(_load_vacat().get(gid)) if _load_vacat().get(gid) else None
+    except Exception:
+        return None
+
+
+def set_va_category(guild_or_id, category_id) -> bool:
+    gid = _gid(guild_or_id)
+    if gid is None:
+        return False
+    d = _load_vacat()
+    if category_id:
+        d[gid] = int(category_id)
+    else:
+        d.pop(gid, None)
+    try:
+        _VACAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _VACAT_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        return False
+    return True
