@@ -1,7 +1,8 @@
 """Récap quotidien des clics GetMySocial, posté chaque nuit dans le salon
-va-<handle> de CHAQUE VA — avec SES clics (aujourd'hui / hier / la quinzaine
-de paie en cours : 1–15 ou 16–fin de mois). Si le VA n'a pas de lien :
-message « pas de lien, demande à un manager ou au boss ».
+va-<handle> de CHAQUE VA QUI A UN LIEN — avec SES clics (aujourd'hui / hier /
+la quinzaine de paie en cours : 1–15 ou 16–fin de mois). En auto, les salons
+sans lien sont ignorés (pas de spam). En test manuel sur un salon précis, on
+affiche quand même le message « pas de lien » pour voir l'état.
 
 Timing robuste sans zoneinfo : on poll toutes les 30 min et on calcule l'heure
 de Paris à la main (DST inclus), pour lancer une seule fois après minuit Paris.
@@ -17,16 +18,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-# Flag persistant (data/ gitignore -> état runtime VPS). Cron OFF par défaut :
-# on ne veut pas spammer « pas de lien » tant que les liens ne sont pas en va_@.
+# Flag persistant (data/ gitignore -> état runtime VPS). Cron ON par défaut
+# (opt-out) : le récap auto ne poste QUE dans les salons qui ont un lien, donc
+# pas de spam « pas de lien ». On peut le couper via /recapclics_auto actif:false.
 _CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap.json"
 
 
 def _auto_enabled() -> bool:
     try:
-        return bool(json.loads(_CFG_FILE.read_text(encoding="utf-8")).get("auto"))
+        return bool(json.loads(_CFG_FILE.read_text(encoding="utf-8")).get("auto", True))
     except Exception:
-        return False
+        return True
 
 
 def _set_auto(v: bool):
@@ -193,7 +195,7 @@ class ClickRecap(commands.Cog):
                             _save_linkcache(cache)
                             return hit
         except Exception as e:
-            print(f"[clickrecap] scan historique #{name} : {e}")
+            print(f"[clickrecap] scan historique #{getattr(ch, 'name', '?')} : {e}")
         return None
 
     def _build_message(self, link, gms, ref_yesterday, today):
@@ -225,12 +227,16 @@ class ClickRecap(commands.Cog):
         emb.set_footer(text="Récap automatique chaque nuit · GetMySocial")
         return (None, emb)
 
-    async def _recap_channel(self, ch, links, gms, today, yest):
-        """Poste le récap dans un salon va-<handle>. Retourne 'sent'|'nolink'|'skip'."""
+    async def _recap_channel(self, ch, links, gms, today, yest, skip_if_no_link=False):
+        """Poste le récap dans un salon va-<handle>. Retourne 'sent'|'nolink'|'skip'.
+        skip_if_no_link=True -> on ne poste RIEN si le salon n'a pas de lien
+        (utilisé par le cron auto : on ne reporte que là où il y a un lien)."""
         handle = _ch_handle(ch.name) or ""
         if not handle:
             return "skip"
         link = await self._resolve_link(ch, links)  # nom va_@ OU scan historique du salon
+        if link is None and skip_if_no_link:
+            return "skip"  # pas de lien -> pas de message (anti-spam)
         content, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
         try:
             if emb is not None:
@@ -254,7 +260,8 @@ class ClickRecap(commands.Cog):
             for ch in guild.text_channels:
                 if not _ch_handle(ch.name):
                     continue
-                r = await self._recap_channel(ch, links, gms, today, yest)
+                # Auto : on ne poste QUE dans les salons qui ont un lien (pas de spam).
+                r = await self._recap_channel(ch, links, gms, today, yest, skip_if_no_link=True)
                 if r == "sent":
                     sent += 1
                 elif r == "nolink":
@@ -363,7 +370,7 @@ class ClickRecap(commands.Cog):
         elif not actif and self.daily_recap.is_running():
             self.daily_recap.cancel()
         await interaction.response.send_message(
-            ("✅ Récap clics **automatique activé** (chaque nuit ~minuit, dans tous les salons va-)."
+            ("✅ Récap clics **automatique activé** (chaque nuit ~minuit, dans chaque salon va- **qui a un lien** — les autres sont ignorés)."
              if actif else
              "🛑 Récap clics automatique **désactivé**. Utilise `/recapclics` pour tester à la main."),
             ephemeral=True,
