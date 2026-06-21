@@ -1826,25 +1826,16 @@ class UserCog(commands.Cog):
         name="menupin",
         description="[ADMIN] Épingle un menu PERMANENT (h24) dans le salon de chaque VA",
     )
-    async def menupin(self, interaction: discord.Interaction):
-        if not _is_staff_member(interaction.user):
-            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
-            return
-        if interaction.guild is None:
-            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
+    async def _pin_menus_for_guild(self, guild) -> int:
+        """Remplace/épingle le menu (adapté au serveur) dans chaque salon va- du
+        serveur. Retourne le nombre de salons traités."""
         pinned = 0
-        # Scopé au serveur courant : seulement les salons va- de CE serveur.
         for ch, uid, ident in self._va_targets(guild):
             try:
-                # SUPPRIME les anciens menus du bot (épinglés ou non) pour ne pas
-                # laisser traîner l'ancien menu complet à côté du nouveau.
-                await self._delete_old_menus(ch)
+                await self._delete_old_menus(ch)  # vire l'ancien menu d'abord
                 _view = _filter_menu_view(ContentMenuView(self), guild)
                 if not _view.children:
-                    continue  # aucune fonction de menu activée ici
+                    continue
                 msg = await ch.send(embed=_build_menu_embed(ident, guild), view=_view)
                 await msg.pin(reason="Menu permanent VA (h24)")
                 pinned += 1
@@ -1853,10 +1844,48 @@ class UserCog(commands.Cog):
                 pass
             except Exception as e:
                 print(f"[menupin] salon {getattr(ch, 'id', '?')} : {e}")
+        return pinned
+
+    async def menupin(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        pinned = await self._pin_menus_for_guild(interaction.guild)
         await interaction.followup.send(
-            f"📌 Menu permanent épinglé dans **{pinned}** salon(s) VA de **{guild.name}**.\n"
+            f"📌 Menu permanent épinglé dans **{pinned}** salon(s) VA de **{interaction.guild.name}**.\n"
             "→ Chaque VA a le menu en **message épinglé** en haut de son salon.\n"
             "⚠️ Le bot a besoin de **Gérer les messages** pour épingler.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="menuthreads",
+        description="[ADMIN] Active le mode Threads sur CE serveur + pose le menu réduit (PP/Name/Pseudo/Clics/Lien/Comptes)",
+    )
+    async def menuthreads(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            import guild_features as gf
+            gf.set_threads(interaction.guild, True)  # 1) bascule le serveur en mode Threads
+        except Exception as e:
+            await interaction.followup.send(f"❌ Impossible d'activer le mode Threads : {e}", ephemeral=True)
+            return
+        pinned = await self._pin_menus_for_guild(interaction.guild)  # 2) (re)pose le menu Threads
+        await interaction.followup.send(
+            f"🧵 **Mode Threads activé** sur **{interaction.guild.name}**.\n"
+            f"📌 Menu Threads épinglé dans **{pinned}** salon(s) VA "
+            "(👤 Pseudo · 📝 Name · 🖼 PP · 📊 Mes clics · 🔗 Demander un lien · 📷 Mes comptes Threads).\n"
+            "_Pour revenir au menu complet : `/serverfeatures threads:false` puis `/menupin`._",
             ephemeral=True,
         )
 
