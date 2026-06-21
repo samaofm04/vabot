@@ -257,7 +257,10 @@ class VAActivity(commands.Cog):
     async def _apply_all(self):
         """Renomme les salons va- avec le rond. Retourne un compteur de diagnostic."""
         st = {"found": 0, "renamed": 0, "skipped": 0, "forbidden": 0, "errored": 0}
+        import guild_features as gf
         for guild in self.bot.guilds:
+            if not gf.enabled(guild, "statut"):
+                continue  # serveur bridé sans la fonction statut
             for ch, h in self._va_channels(guild):
                 st["found"] += 1
                 member = self._member_for_handle(guild, h)

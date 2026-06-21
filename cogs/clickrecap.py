@@ -324,6 +324,10 @@ class ClickRecap(commands.Cog):
         """Clic sur le bouton 'Mes clics' : calcule et montre en privé les clics
         du lien de CE salon va-, en temps réel."""
         await interaction.response.defer(ephemeral=True, thinking=True)
+        import guild_features as gf
+        if not gf.enabled(interaction.guild, "clics"):
+            await interaction.followup.send("⚠️ Fonction désactivée sur ce serveur.", ephemeral=True)
+            return
         try:
             import gms
         except Exception as e:
@@ -376,7 +380,10 @@ class ClickRecap(commands.Cog):
         today = _paris_now().date()
         yest = today - datetime.timedelta(days=1)
         sent = nolink = 0
+        import guild_features as gf
         for guild in self.bot.guilds:
+            if not gf.enabled(guild, "clics"):
+                continue  # serveur bridé sans la fonction clics
             for ch in guild.text_channels:
                 if not _ch_handle(ch.name):
                     continue

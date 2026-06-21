@@ -26,25 +26,69 @@ except Exception:
     _PARIS_TZ = _dt.timezone(_dt.timedelta(hours=1))  # fallback UTC+1
 
 
-def _build_menu_embed(identity):
-    """Embed clair et intuitif : chaque bouton est expliqué en une ligne."""
+# Quelle fonction (guild_features) commande chaque bouton/champ du menu.
+_MENU_BTN_FEATURE = {
+    "cmenu:reel": "contenu", "cmenu:story": "contenu", "cmenu:post": "contenu",
+    "cmenu:storycta": "contenu", "cmenu:pseudo": "contenu", "cmenu:name": "contenu",
+    "cmenu:bio": "contenu", "cmenu:pp": "contenu", "cmenu:comptes": "contenu",
+    "cmenu:addaccount": "onboarding",
+    "cmenu:lien": "liens", "cmenu:clics": "clics",
+}
+
+
+def _menu_feature_check(interaction, feature: str) -> bool:
+    """True si la fonction est active sur le serveur de l'interaction."""
+    try:
+        import guild_features as gf
+        return gf.enabled(getattr(interaction, "guild", None), feature)
+    except Exception:
+        return True
+
+
+def _filter_menu_view(view, guild):
+    """Retire les boutons dont la fonction est désactivée sur ce serveur."""
+    try:
+        import guild_features as gf
+        feats = gf.get_features(guild)
+    except Exception:
+        return view
+    for item in list(view.children):
+        need = _MENU_BTN_FEATURE.get(getattr(item, "custom_id", ""))
+        if need and need not in feats:
+            view.remove_item(item)
+    return view
+
+
+def _build_menu_embed(identity, guild=None):
+    """Embed clair et intuitif : chaque bouton est expliqué en une ligne.
+    Les champs des fonctions désactivées sur ce serveur sont masqués."""
+    try:
+        import guild_features as gf
+        feats = gf.get_features(guild)
+    except Exception:
+        feats = set(("contenu", "onboarding", "clics", "liens", "tickets", "statut"))
     emb = discord.Embed(
-        title="☀️ Ton contenu du jour",
-        description="Clique sur un bouton pour recevoir ton contenu **prêt à poster** 👇",
+        title="☀️ Ton menu",
+        description="Clique sur un bouton 👇",
         color=discord.Color.blurple(),
     )
-    emb.add_field(name="🎬 Reel", value="Vidéos + captions (1 par compte)", inline=True)
-    emb.add_field(name="📖 Story", value="Photo + texte pour ta story", inline=True)
-    emb.add_field(name="🖼️ Post", value="Photo + légende pour le feed", inline=True)
-    emb.add_field(name="📲 Story CTA", value="Photo CTA (à poster le soir)", inline=True)
-    emb.add_field(name="👤 Pseudo", value="Des pseudos Insta dispo", inline=True)
-    emb.add_field(name="📝 Name", value="Des noms d'affichage", inline=True)
-    emb.add_field(name="💬 Bio", value="Des bios Insta de ton identité", inline=True)
-    emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
-    emb.add_field(name="🔗 Demander un lien", value="Affiche ton lien si tu en as un, sinon prévient les managers", inline=True)
-    emb.add_field(name="📊 Mes clics", value="Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)", inline=True)
-    emb.add_field(name="➕ Ajouter un compte", value="Relance l'onboarding pour créer un nouveau compte", inline=True)
-    emb.add_field(name="📷 Mes comptes Insta", value="La liste de tes comptes Instagram (@pseudo)", inline=True)
+
+    def add(feat, name, value):
+        if feat is None or feat in feats:
+            emb.add_field(name=name, value=value, inline=True)
+
+    add("contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
+    add("contenu", "📖 Story", "Photo + texte pour ta story")
+    add("contenu", "🖼️ Post", "Photo + légende pour le feed")
+    add("contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
+    add("contenu", "👤 Pseudo", "Des pseudos Insta dispo")
+    add("contenu", "📝 Name", "Des noms d'affichage")
+    add("contenu", "💬 Bio", "Des bios Insta de ton identité")
+    add("contenu", "🖼 PP", "Des photos de profil prêtes")
+    add("liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
+    add("clics", "📊 Mes clics", "Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)")
+    add("onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
+    add("contenu", "📷 Mes comptes Insta", "La liste de tes comptes Instagram (@pseudo)")
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -686,6 +730,9 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
+        if not _menu_feature_check(interaction, "liens"):
+            await interaction.response.send_message("⚠️ Génération de lien désactivée sur ce serveur.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         uid = self.user_id
         # Bloc DUR anti-doublon (couche 1, locale) : ce VA a déjà eu un lien -> on refuse.
@@ -838,8 +885,25 @@ class UserCog(commands.Cog):
         ch_id = data.get("channel_id") if isinstance(data, dict) else None
         return self.bot.get_channel(ch_id) if ch_id else None
 
+    async def _gate_contenu(self, interaction) -> bool:
+        """True si la fonction 'contenu' est désactivée sur ce serveur (et a déjà
+        répondu en éphémère). Sert de garde en tête des commandes de contenu."""
+        if _menu_feature_check(interaction, "contenu"):
+            return False
+        try:
+            resp = getattr(interaction, "response", None)
+            if resp is not None and hasattr(resp, "is_done") and resp.is_done():
+                await interaction.followup.send("⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
+            else:
+                await interaction.response.send_message("⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
+        except Exception:
+            pass
+        return True
+
     async def _central_run(self, interaction, cmd):
         """Bouton du menu CENTRAL : exécute la commande mais la sortie va dans le salon du VA."""
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         target = self._va_channel(interaction.user.id)
         if not identity or target is None:
@@ -862,6 +926,8 @@ class UserCog(commands.Cog):
 
     @app_commands.command(name="username", description="Génère des pseudos Instagram VRAIMENT dispo basés sur ton identité")
     async def username(self, interaction: discord.Interaction):
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -904,6 +970,8 @@ class UserCog(commands.Cog):
 
     @app_commands.command(name="name", description="Donne 5 noms (display Instagram) variés avec nom de famille")
     async def name(self, interaction: discord.Interaction):
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -942,6 +1010,8 @@ class UserCog(commands.Cog):
         handle2: str = "",
         handle3: str = "",
     ):
+        if await self._gate_contenu(interaction):
+            return
         import re as _re_ig, json as _json_ig
         uid = str(interaction.user.id)
 
@@ -988,6 +1058,8 @@ class UserCog(commands.Cog):
     @app_commands.command(name="bio", description="Donne des bios Instagram de ton identité")
     @app_commands.describe(nombre="Combien de bios (1-10, défaut 3)")
     async def bio(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -1023,6 +1095,8 @@ class UserCog(commands.Cog):
     @app_commands.command(name="profilepic", description="Donne des photos de profil (transformées)")
     @app_commands.describe(nombre="Combien de photos (1-10, défaut 3)")
     async def profilepic(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
+        if await self._gate_contenu(interaction):
+            return
         pics, seen = [], set()
         for _ in range(nombre * 5):
             if len(pics) >= nombre:
@@ -1071,6 +1145,8 @@ class UserCog(commands.Cog):
 
     async def _send_image_content(self, interaction, kind_label, kind_target, random_fn, transform_cfg, count=3):
         """Generic handler pour /post et /story. Envoie `count` items DISTINCTS."""
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -1159,6 +1235,8 @@ class UserCog(commands.Cog):
     @app_commands.command(name="storycta", description="Génère des stories CTA: photo 1080x1920 + caption à écrire dessus")
     @app_commands.describe(nombre="Combien de stories CTA (1-10, défaut 3)")
     async def storycta(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -1234,6 +1312,8 @@ class UserCog(commands.Cog):
         interaction: discord.Interaction,
         nombre: app_commands.Range[int, 1, 10] = 3,
     ):
+        if await self._gate_contenu(interaction):
+            return
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
@@ -1347,13 +1427,18 @@ class UserCog(commands.Cog):
             pass
 
     async def _post_menu(self, channel, identity, mention_user_id=None):
-        """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni."""
-        content = f"<@{mention_user_id}> 👇 **Ton contenu du jour est prêt !**" if mention_user_id else None
+        """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni.
+        Filtre les boutons/champs selon les fonctions activées sur le serveur."""
+        guild = getattr(channel, "guild", None)
+        view = _filter_menu_view(ContentMenuView(self), guild)
+        if not view.children:
+            return False  # aucune fonction de menu activée sur ce serveur
+        content = f"<@{mention_user_id}> 👇 **Ton menu du jour est prêt !**" if mention_user_id else None
         try:
             await channel.send(
                 content=content,
-                embed=_build_menu_embed(identity),
-                view=ContentMenuView(self),
+                embed=_build_menu_embed(identity, guild),
+                view=view,
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
             return True
@@ -1464,6 +1549,9 @@ class UserCog(commands.Cog):
         """Bouton "Demander un lien" du menu VA.
         - Si le VA a DÉJÀ un lien -> on lui affiche directement son lien.
         - Sinon -> demande envoyée aux managers."""
+        if not _menu_feature_check(interaction, "liens"):
+            await interaction.response.send_message("⚠️ Fonction désactivée sur ce serveur.", ephemeral=True)
+            return
         uid = interaction.user.id
         identity = get_user_identity(uid)
         if not identity:
@@ -1566,6 +1654,9 @@ class UserCog(commands.Cog):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
+        if not _menu_feature_check(interaction, "liens"):
+            await interaction.response.send_message("⚠️ Génération de lien désactivée sur ce serveur.", ephemeral=True)
+            return
         emb = discord.Embed(
             title="🔗 Générateur de lien GetMySocial",
             description=(
@@ -1584,6 +1675,9 @@ class UserCog(commands.Cog):
     async def menucentral(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        if not _menu_feature_check(interaction, "contenu"):
+            await interaction.response.send_message("⚠️ Le menu contenu est désactivé sur ce serveur.", ephemeral=True)
             return
         emb = discord.Embed(
             title="🎛️ Menu contenu — clique, ça arrive dans TON salon",
@@ -1628,7 +1722,11 @@ class UserCog(commands.Cog):
                             await pm.unpin(reason="remplacement menu permanent")
                 except Exception:
                     pass
-                msg = await ch.send(embed=_build_menu_embed(ident), view=ContentMenuView(self))
+                _gv = getattr(ch, "guild", None)
+                _view = _filter_menu_view(ContentMenuView(self), _gv)
+                if not _view.children:
+                    continue  # aucune fonction de menu activée ici
+                msg = await ch.send(embed=_build_menu_embed(ident, _gv), view=_view)
                 await msg.pin(reason="Menu permanent VA (h24)")
                 pinned += 1
                 await asyncio.sleep(1.2)
@@ -1685,15 +1783,78 @@ class UserCog(commands.Cog):
         description="Menu contenu : reel / story / story CTA / pseudo / name en 1 clic",
     )
     async def menu(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        view = _filter_menu_view(ContentMenuView(self), guild)
+        if not view.children:
+            await interaction.response.send_message(
+                "⚠️ Aucune fonction de menu activée sur ce serveur.", ephemeral=True)
+            return
         identity = get_user_identity(interaction.user.id)
-        if not identity:
+        # L'identité n'est requise que si le menu contient du contenu (reel/story…).
+        if _menu_feature_check(interaction, "contenu") and not identity:
             await interaction.response.send_message(
                 "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
             )
             return
         await interaction.response.send_message(
-            embed=_build_menu_embed(identity), view=ContentMenuView(self)
+            embed=_build_menu_embed(identity, guild), view=view
         )
+
+    @app_commands.command(
+        name="serverfeatures",
+        description="[OWNER] Active/désactive les fonctions du bot sur CE serveur (multi-serveurs)",
+    )
+    @app_commands.describe(
+        contenu="Menu contenu (Reel/Story/Post/Pseudo/Name/Bio/PP)",
+        onboarding="Parcours d'onboarding + bouton Ajouter un compte",
+        clics="Bouton Mes clics + récap quotidien des clics",
+        liens="Demander un lien + Générer le lien",
+        tickets="Création automatique de ticket à l'arrivée",
+        statut="Ronds 🟢/🟠/🔴 d'activité sur les salons va-",
+        reset="true = enlève le bridage (ce serveur récupère TOUTES les fonctions)",
+    )
+    async def serverfeatures(
+        self, interaction: discord.Interaction,
+        contenu: bool = None, onboarding: bool = None, clics: bool = None,
+        liens: bool = None, tickets: bool = None, statut: bool = None,
+        reset: bool = False,
+    ):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+
+        def _recap(feats, restricted):
+            lines = "\n".join(f"{'✅' if f in feats else '❌'} {f}" for f in gf.ALL_FEATURES)
+            head = "🔒 **Serveur bridé**" if restricted else "🌐 **Serveur non bridé** (toutes les fonctions)"
+            return f"{head} — **{interaction.guild.name}**\n{lines}"
+
+        if reset:
+            gf.clear_guild(interaction.guild)
+            await interaction.response.send_message(
+                "✅ Bridage retiré.\n" + _recap(gf.get_features(interaction.guild), False),
+                ephemeral=True)
+            return
+        provided = {k: v for k, v in {
+            "contenu": contenu, "onboarding": onboarding, "clics": clics,
+            "liens": liens, "tickets": tickets, "statut": statut,
+        }.items() if v is not None}
+        if not provided:
+            await interaction.response.send_message(
+                _recap(gf.get_features(interaction.guild), gf.is_restricted(interaction.guild))
+                + "\n\n_Règle avec `contenu:false`, `clics:true`… ou `reset:true` pour tout réactiver._",
+                ephemeral=True)
+            return
+        new = set(gf.get_features(interaction.guild))
+        for f, v in provided.items():
+            new.add(f) if v else new.discard(f)
+        final = gf.set_features(interaction.guild, list(new))
+        await interaction.response.send_message(
+            "✅ Mis à jour.\n" + _recap(final, True), ephemeral=True)
 
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
@@ -1770,6 +1931,9 @@ class ContentMenuView(discord.ui.View):
 
     @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=3)
     async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _menu_feature_check(interaction, "onboarding"):
+            await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
+            return
         # Relance l'onboarding depuis l'étape 0 (mêmes vues que le 1er onboarding)
         try:
             from cogs.onboarding import step_embed, OnboardingView, send_step_media
@@ -1787,6 +1951,9 @@ class ContentMenuView(discord.ui.View):
 
     @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=3)
     async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _menu_feature_check(interaction, "contenu"):
+            await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             import jailbreak
@@ -1879,6 +2046,9 @@ class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial")
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
+        if not _menu_feature_check(interaction, "liens"):
+            await interaction.response.send_message("⚠️ Génération de lien désactivée sur ce serveur.", ephemeral=True)
+            return
         ident = str(self.identite.value or "").strip().lower()
         handle = str(self.pseudo.value or "").strip().lstrip("@")
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1955,6 +2125,9 @@ class LinkPanelView(discord.ui.View):
     async def gen(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        if not _menu_feature_check(interaction, "liens"):
+            await interaction.response.send_message("⚠️ Génération de lien désactivée sur ce serveur.", ephemeral=True)
             return
         await interaction.response.send_modal(GenLinkModal())
 

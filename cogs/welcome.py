@@ -499,8 +499,11 @@ async def setup_va_ticket(guild, member, bot=None):
         # Message avec accolades parasites -> on évite le crash, on remplace juste {mention}
         intro_text = _raw_intro.replace("{mention}", member.mention)
     files = build_intro_files()
+    # Bouton d'onboarding uniquement si la fonction onboarding est active ici.
+    import guild_features as gf
+    ob_view = StartOnboardingView() if gf.enabled(guild, "onboarding") else None
     try:
-        await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
+        await channel.send(content=intro_text, view=ob_view, files=files or None)
     except Exception as e:
         log.error(f"setup_va_ticket: erreur envoi intro: {e}")
 
@@ -531,6 +534,10 @@ class StartOnboardingView(discord.ui.View):
         custom_id="va_start_onboarding",
     )
     async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import guild_features as gf
+        if not gf.enabled(interaction.guild, "onboarding"):
+            await interaction.response.send_message("⚠️ Onboarding désactivé sur ce serveur.", ephemeral=True)
+            return
         # Verifier que c'est bien le VA proprietaire du salon qui clique
         from cogs.onboarding import step_embed, OnboardingView, send_step_media
         embed = step_embed(0)
@@ -638,6 +645,11 @@ class Welcome(commands.Cog):
             save_pending(pending)
             log.info(f"on_member_join: suppression annulee pour {member.id} (revenu sur le serveur)")
         cfg = load_welcome_config()
+
+        # Serveur bridé sans la fonction tickets -> pas de ticket / welcome auto.
+        import guild_features as gf
+        if not gf.enabled(member.guild, "tickets"):
+            return
 
         # Mode auto-ticket: cree direct le salon, sans passer par le welcome public
         if cfg.get("auto_create_ticket_on_join", True):

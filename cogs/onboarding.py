@@ -418,6 +418,10 @@ async def _invoke_user_cmd(interaction, cmd_name, count=None):
     depuis un bouton de menu warm-up. Si `count` est fourni et que la commande le supporte,
     on lui passe ce nombre (ex: 12 stories au jour 5, 2 reels au jour 4).
     Récupère le cog au moment du clic → la vue n'a pas besoin de référence au cog."""
+    import guild_features as gf
+    if not gf.enabled(interaction.guild, "onboarding"):
+        await interaction.response.send_message("⚠️ Onboarding désactivé sur ce serveur.", ephemeral=True)
+        return
     cog = interaction.client.get_cog("UserCog")
     if cog is None:
         await interaction.response.send_message("Module indisponible, réessaie.", ephemeral=True)
