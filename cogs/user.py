@@ -1510,6 +1510,24 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
+    async def _delete_old_menus(self, channel):
+        """Supprime les anciens messages de menu postés par le bot dans `channel`
+        (épinglés ou non), pour qu'un nouveau menu remplace proprement l'ancien."""
+        me = getattr(self.bot, "user", None)
+        if me is None:
+            return
+        try:
+            async for m in channel.history(limit=40):
+                if m.author and m.author.id == me.id and m.embeds:
+                    t = (m.embeds[0].title or "").lower()
+                    if "menu" in t or "contenu du jour" in t:
+                        try:
+                            await m.delete()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     async def _post_menu(self, channel, identity, mention_user_id=None):
         """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni.
         Filtre les boutons/champs selon les fonctions activées sur le serveur."""
@@ -1821,15 +1839,9 @@ class UserCog(commands.Cog):
         # Scopé au serveur courant : seulement les salons va- de CE serveur.
         for ch, uid, ident in self._va_targets(guild):
             try:
-                # dépingle l'ancien menu permanent du bot (évite les doublons)
-                try:
-                    for pm in await ch.pins():
-                        t = (pm.embeds[0].title or "").lower() if (pm.embeds) else ""
-                        if (pm.author and pm.author.id == self.bot.user.id
-                                and ("menu" in t or "contenu du jour" in t)):
-                            await pm.unpin(reason="remplacement menu permanent")
-                except Exception:
-                    pass
+                # SUPPRIME les anciens menus du bot (épinglés ou non) pour ne pas
+                # laisser traîner l'ancien menu complet à côté du nouveau.
+                await self._delete_old_menus(ch)
                 _view = _filter_menu_view(ContentMenuView(self), guild)
                 if not _view.children:
                     continue  # aucune fonction de menu activée ici
