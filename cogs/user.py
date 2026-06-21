@@ -1864,7 +1864,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(
         name="menuthreads",
-        description="[ADMIN] Active le mode Threads sur CE serveur + pose le menu réduit (PP/Name/Pseudo/Clics/Lien/Comptes)",
+        description="[ADMIN] Active le mode Threads + pose le menu réduit sur CE serveur",
     )
     async def menuthreads(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
