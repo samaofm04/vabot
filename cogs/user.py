@@ -42,6 +42,7 @@ def _build_menu_embed(identity):
     emb.add_field(name="💬 Bio", value="Des bios Insta de ton identité", inline=True)
     emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
     emb.add_field(name="🔗 Demander un lien", value="Affiche ton lien si tu en as un, sinon prévient les managers", inline=True)
+    emb.add_field(name="📊 Mes clics", value="Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -1754,6 +1755,16 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=2)
     async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.request_link(interaction)
+
+    @discord.ui.button(label="Mes clics", emoji="📊", style=discord.ButtonStyle.success, custom_id="cmenu:clics", row=2)
+    async def b_clics(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Délègue au cog clickrecap (logique des clics centralisée là-bas)
+        cog = interaction.client.get_cog("ClickRecap")
+        if cog is None or not hasattr(cog, "_handle_myclicks"):
+            await interaction.response.send_message(
+                "⚠️ Stats de clics indisponibles pour l'instant.", ephemeral=True)
+            return
+        await cog._handle_myclicks(interaction)
 
 
 class CentralMenuView(discord.ui.View):
