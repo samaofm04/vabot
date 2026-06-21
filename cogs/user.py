@@ -43,6 +43,8 @@ def _build_menu_embed(identity):
     emb.add_field(name="🖼 PP", value="Des photos de profil prêtes", inline=True)
     emb.add_field(name="🔗 Demander un lien", value="Affiche ton lien si tu en as un, sinon prévient les managers", inline=True)
     emb.add_field(name="📊 Mes clics", value="Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)", inline=True)
+    emb.add_field(name="➕ Ajouter un compte", value="Relance l'onboarding pour créer un nouveau compte", inline=True)
+    emb.add_field(name="📷 Mes comptes Insta", value="La liste de tes comptes Instagram (@pseudo)", inline=True)
     if identity:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -1765,6 +1767,57 @@ class ContentMenuView(discord.ui.View):
                 "⚠️ Stats de clics indisponibles pour l'instant.", ephemeral=True)
             return
         await cog._handle_myclicks(interaction)
+
+    @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=3)
+    async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Relance l'onboarding depuis l'étape 0 (mêmes vues que le 1er onboarding)
+        try:
+            from cogs.onboarding import step_embed, OnboardingView, send_step_media
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Onboarding indispo : {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            content=f"{interaction.user.mention} — on repart de zéro pour ajouter un compte 👇",
+            embed=step_embed(0), view=OnboardingView(),
+        )
+        try:
+            await send_step_media(interaction.channel, 0, bot=interaction.client)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=3)
+    async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import jailbreak
+            accts = jailbreak.accounts_for_discord_username(interaction.user.name)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Indispo : {e}", ephemeral=True)
+            return
+        usernames = []
+        for a in accts:
+            u = (a.get("username") or "").strip().lstrip("@")
+            if u and u not in usernames:
+                usernames.append(u)
+        if not usernames:
+            await interaction.followup.send(
+                "📷 **Aucun compte Instagram relié à ton Discord.**\n"
+                "Demande à un manager de mettre ton pseudo Discord sur ta fiche "
+                "et d'ajouter tes comptes.",
+                ephemeral=True,
+            )
+            return
+        shown = usernames[:50]  # garde-fou limite embed Discord (4096 car.)
+        desc = "\n".join(f"🔗 [@{u}](https://instagram.com/{u})" for u in shown)
+        if len(usernames) > len(shown):
+            desc += f"\n… +{len(usernames) - len(shown)} autre(s)"
+        emb = discord.Embed(
+            title="📷 Tes comptes Instagram",
+            description=desc,
+            color=discord.Color.blurple(),
+        )
+        emb.set_footer(text=f"{len(usernames)} compte(s) · clique pour ouvrir")
+        await interaction.followup.send(embed=emb, ephemeral=True)
 
 
 class CentralMenuView(discord.ui.View):

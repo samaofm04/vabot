@@ -137,6 +137,39 @@ def list_all() -> Dict[str, Dict[str, Any]]:
     return _load()
 
 
+def _norm_handle(s: str) -> str:
+    return (s or "").strip().lower().lstrip("@")
+
+
+def accounts_for_discord_username(discord_username: str) -> List[Dict[str, Any]]:
+    """Tous les comptes Insta reliés à un pseudo Discord.
+
+    On relie via le champ `discord_username` des VAs : on cherche dans TOUTES
+    les identités les VAs dont le discord_username == le pseudo donné, puis on
+    remonte les comptes dont le champ `va` correspond à ces VAs.
+    Retourne une liste de comptes (dicts), vide si rien."""
+    h = _norm_handle(discord_username)
+    if not h:
+        return []
+    data = _load()
+    out: List[Dict[str, Any]] = []
+    for entry in data.values():
+        if not isinstance(entry, dict):
+            continue
+        va_names = {
+            _va_name(v).lower()
+            for v in (entry.get("vas") or [])
+            if _norm_handle(v.get("discord_username") if isinstance(v, dict) else "") == h
+            and _va_name(v)
+        }
+        if not va_names:
+            continue
+        for a in (entry.get("accounts") or []):
+            if (a.get("va") or "").strip().lower() in va_names:
+                out.append(a)
+    return out
+
+
 def add_account(identity: str, username: str, password: str = "",
                 email: str = "", notes: str = "", two_fa: str = "",
                 va: str = "", two_fa_validated: bool = False) -> Dict[str, Any]:
