@@ -420,6 +420,11 @@ def invalidate_cache():
 
 # ============ Métadonnées par chatteur (commission % + screenshot crypto) ============
 
+# Commission par défaut (base) appliquée à un chatteur jamais configuré.
+# Les chatteurs avec un % explicitement enregistré gardent leur valeur.
+DEFAULT_COMMISSION_PCT = 14.0
+
+
 def _load_chatters() -> dict:
     if not CHATTERS_FILE.exists():
         return {}
@@ -440,7 +445,7 @@ def get_chatter_meta(name: str) -> dict:
     key = (name or "").strip().lower()
     meta = data.get(key, {})
     return {
-        "commission_pct": float(meta.get("commission_pct", 0)),
+        "commission_pct": float(meta.get("commission_pct", DEFAULT_COMMISSION_PCT)),
         "crypto_file": meta.get("crypto_file"),
         "crypto_type": meta.get("crypto_type", ""),  # USDC | ETH | SOL | TRX
         "crypto_network": meta.get("crypto_network", ""),  # ERC20 | TRC20 | SPL | etc.

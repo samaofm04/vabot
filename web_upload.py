@@ -26591,6 +26591,10 @@ def create_app():
         if not name or not period_id:
             return jsonify({"ok": False, "error": "name + period_id requis"})
         ok = mypuls.set_chatter_paid(name, period_id, paid)
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
         return jsonify({"ok": ok, "name": name, "period_id": period_id, "paid": paid})
 
     @app.route("/mypuls/refresh_rate", methods=["POST"])
@@ -26620,6 +26624,12 @@ def create_app():
         if not name:
             return _error("❌ Nom manquant")
         mypuls.set_commission_pct(name, pct)
+        # Le tableau Revenus est mis en cache 180 s -> sans ça, la nouvelle
+        # valeur ne s'affiche qu'après expiration ("rien ne se passe").
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
         return _success(f"✅ {name} → {pct:g}%")
 
     @app.route("/mypuls/chatter/set_crypto", methods=["POST"])
@@ -26639,6 +26649,10 @@ def create_app():
         if crypto_type and crypto_type not in mypuls.CRYPTO_TYPES:
             return _error(f"❌ Crypto inconnue ({crypto_type})")
         mypuls.set_crypto_address(name, crypto_type, network, address)
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
         if crypto_type:
             return _success(f"✅ {name} → {crypto_type} ({network or 'pas de réseau'})")
         return _success(f"✅ Infos crypto effacées pour {name}")
@@ -26674,6 +26688,10 @@ def create_app():
             mypuls.save_crypto_screenshot(name, data, f.filename)
         except Exception as e:
             return _fail(f"Erreur upload : {e}")
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
         if ajax:
             return jsonify({"ok": True})
         return _success(f"✅ Screenshot crypto enregistré pour <code>{name}</code>")
@@ -26706,6 +26724,10 @@ def create_app():
         if not name:
             return _error("❌ Nom manquant")
         ok = mypuls.delete_crypto_file(name)
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
         return _success(f"✅ Screenshot supprimé pour <code>{name}</code>") if ok else _error("❌ Pas de screenshot à supprimer")
 
     @app.route("/mypuls/avatar/<int:creator_id>")
