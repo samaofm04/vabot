@@ -13,6 +13,7 @@ import datetime
 import json
 import pathlib
 import re
+import time
 
 import discord
 from discord import app_commands
@@ -77,6 +78,10 @@ def _match_shortcode(sc, links):
     return None
 
 GMS_DOMAIN = "https://getmysocial.com"
+# Cache court des clics calculés pour le bouton 'Mes clics' : évite de re-taper
+# GetMySocial si un VA reclique rapidement (clé = (link_id, date du jour)).
+_CLICKS_CACHE: dict = {}
+_CLICKS_TTL = 60  # secondes
 FR_MONTHS = ["", "janv.", "févr.", "mars", "avr.", "mai", "juin",
              "juil.", "août", "sept.", "oct.", "nov.", "déc."]
 
@@ -118,6 +123,25 @@ NO_LINK_MSG = (
 )
 
 
+class MyClicksView(discord.ui.View):
+    """Bouton persistant '📊 Mes clics' posé dans chaque salon va-.
+    Au clic, le VA voit EN DIRECT ses clics (aujourd'hui / hier / semaine /
+    quinzaine) pour le lien de CE salon. Réponse éphémère (privée)."""
+
+    def __init__(self, cog=None):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Mes clics", emoji="📊",
+                       style=discord.ButtonStyle.primary, custom_id="myclicks:show")
+    async def b_clicks(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = self.cog or interaction.client.get_cog("ClickRecap")
+        if cog is None:
+            await interaction.response.send_message("⚠️ Module indispo.", ephemeral=True)
+            return
+        await cog._handle_myclicks(interaction)
+
+
 class ClickRecap(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -125,6 +149,13 @@ class ClickRecap(commands.Cog):
         self._last_run = None  # date ISO du dernier récap auto (anti-doublon)
         if _auto_enabled():
             self.daily_recap.start()
+
+    async def cog_load(self):
+        # Vue persistante : le bouton 'Mes clics' marche même après un restart.
+        try:
+            self.bot.add_view(MyClicksView(self))
+        except Exception as e:
+            print(f"[clickrecap] add_view échoué : {e}")
 
     def cog_unload(self):
         if self.daily_recap.is_running():
@@ -226,6 +257,95 @@ class ClickRecap(commands.Cog):
         )
         emb.set_footer(text="Récap automatique chaque nuit · GetMySocial")
         return (None, emb)
+
+    async def _fetch_myclicks(self, lid, gms, today):
+        """Récupère les 4 compteurs (aujourd'hui/hier/semaine/quinzaine) EN
+        PARALLÈLE (au lieu de 4 appels réseau en série) + cache court.
+        Retourne (c_today, c_yest, c_week, c_period) — chaque valeur int ou None."""
+        ck = (lid, today.isoformat())
+        cached = _CLICKS_CACHE.get(ck)
+        if cached and (time.time() - cached[0]) < _CLICKS_TTL:
+            return cached[1]
+        yest = today - datetime.timedelta(days=1)
+        week_start = today - datetime.timedelta(days=today.weekday())  # lundi
+        p_start, _p_end = _pay_period(today)
+        ranges = [
+            (today, today),            # aujourd'hui
+            (yest, yest),              # hier
+            (week_start, today),       # cette semaine
+            (p_start, today),          # quinzaine en cours
+        ]
+        vals = await asyncio.gather(*[
+            asyncio.to_thread(gms.clicks_for_link, lid, s.isoformat(), e.isoformat())
+            for (s, e) in ranges
+        ])
+        vals = tuple(vals)
+        # On ne met en cache que les résultats exploitables (pas un échec total).
+        if not all(v is None for v in vals):
+            _CLICKS_CACHE[ck] = (time.time(), vals)
+        return vals
+
+    def _myclicks_embed(self, link, today, counts):
+        """Construit l'embed à partir des compteurs déjà récupérés."""
+        shortcode = link.get("shortcode") or ""
+        week_start = today - datetime.timedelta(days=today.weekday())
+        p_start, p_end = _pay_period(today)
+        c_today, c_yest, c_week, c_period = counts
+        all_none = all(v is None for v in counts)
+
+        def fmt(v):
+            return "—" if v is None else f"**{v}**"
+
+        if all_none:
+            color = discord.Color.orange()
+        elif (c_today or 0) > 0 or (c_week or 0) > 0:
+            color = discord.Color.green()
+        else:
+            color = discord.Color.dark_grey()
+        emb = discord.Embed(
+            title="📊 Tes clics — en direct",
+            description=f"🔗 {GMS_DOMAIN}/{shortcode}",
+            color=color,
+        )
+        emb.add_field(name="🟢 Aujourd'hui", value=f"{fmt(c_today)} clic(s)", inline=True)
+        emb.add_field(name="📅 Hier", value=f"{fmt(c_yest)} clic(s)", inline=True)
+        emb.add_field(name=f"🗓️ Cette semaine (depuis {_fr(week_start)})",
+                      value=f"{fmt(c_week)} clic(s)", inline=False)
+        emb.add_field(name=f"💰 Quinzaine ({_fr(p_start)}–{_fr(p_end)})",
+                      value=f"{fmt(c_period)} clic(s)", inline=False)
+        if all_none:
+            emb.add_field(name="⚠️ Données indisponibles",
+                          value="GetMySocial ne répond pas pour l'instant — réessaie dans un instant.",
+                          inline=False)
+        emb.set_footer(text="Mis à jour à l'instant · GetMySocial")
+        return emb
+
+    async def _handle_myclicks(self, interaction: discord.Interaction):
+        """Clic sur le bouton 'Mes clics' : calcule et montre en privé les clics
+        du lien de CE salon va-, en temps réel."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        ch = interaction.channel
+        if not _ch_handle(getattr(ch, "name", "")):
+            await interaction.followup.send(
+                "⚠️ Ce bouton fonctionne dans ton salon `va-…`.", ephemeral=True)
+            return
+        links = await self._links()
+        link = await self._resolve_link(ch, links)
+        if not link:
+            await interaction.followup.send(NO_LINK_MSG, ephemeral=True)
+            return
+        today = _paris_now().date()
+        counts = await self._fetch_myclicks(link.get("id"), gms, today)
+        emb = self._myclicks_embed(link, today, counts)
+        try:
+            await interaction.followup.send(embed=emb, ephemeral=True)
+        except Exception as e:
+            print(f"[clickrecap] followup myclicks échoué : {e}")
 
     async def _recap_channel(self, ch, links, gms, today, yest, skip_if_no_link=False):
         """Poste le récap dans un salon va-<handle>. Retourne 'sent'|'nolink'|'skip'.
@@ -354,6 +474,74 @@ class ClickRecap(commands.Cog):
         msg = {"sent": "✅ Récap posté ici.", "nolink": "✅ Posté (ce VA n'a pas de lien).",
                "skip": "⚠️ Impossible de poster ici."}.get(r, "?")
         await interaction.followup.send(msg, ephemeral=True)
+
+    @app_commands.command(
+        name="clicsbouton",
+        description="[OWNER] Pose le bouton '📊 Mes clics' dans CE salon",
+    )
+    async def clicsbouton(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ch = interaction.channel
+        if not _ch_handle(getattr(ch, "name", "")):
+            await interaction.followup.send(
+                "Lance ça dans un salon `va-<pseudo>` (ou `/clicsboutontous` pour tous).",
+                ephemeral=True)
+            return
+        try:
+            msg = await ch.send(
+                "📊 **Tes clics en direct** — clique pour voir tes clics "
+                "(aujourd'hui, hier, cette semaine, quinzaine).",
+                view=MyClicksView(self),
+            )
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+            await interaction.followup.send("✅ Bouton « Mes clics » posé ici.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Échec : {e}", ephemeral=True)
+
+    @app_commands.command(
+        name="clicsboutontous",
+        description="[OWNER] Pose le bouton '📊 Mes clics' dans TOUS les salons va- (sans rien à remplir)",
+    )
+    async def clicsboutontous(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        n = 0
+        fails = []
+        for guild in self.bot.guilds:
+            for ch in guild.text_channels:
+                if not _ch_handle(ch.name):
+                    continue
+                try:
+                    msg = await ch.send(
+                        "📊 **Tes clics en direct** — clique pour voir tes clics "
+                        "(aujourd'hui, hier, cette semaine, quinzaine).",
+                        view=MyClicksView(self),
+                    )
+                    try:
+                        await msg.pin()
+                    except Exception:
+                        pass
+                    n += 1
+                except discord.Forbidden:
+                    fails.append(f"{ch.name} (pas la permission)")
+                except Exception as e:
+                    fails.append(f"{ch.name} ({type(e).__name__})")
+                    print(f"[clickrecap] bouton #{getattr(ch, 'name', '?')} : {e}")
+                await asyncio.sleep(1.0)  # rate-limit friendly (succès ET échec)
+        msg = f"✅ Bouton « Mes clics » posé dans **{n}** salon(s) va-."
+        if fails:
+            msg += f"\n⚠️ **{len(fails)}** échec(s) : " + ", ".join(fails[:10])
+            if len(fails) > 10:
+                msg += f" … (+{len(fails) - 10})"
+        await interaction.followup.send(msg[:1900], ephemeral=True)
 
     @app_commands.command(
         name="recapclicstous",
