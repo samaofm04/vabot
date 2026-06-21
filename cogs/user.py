@@ -1880,14 +1880,23 @@ class UserCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Impossible d'activer le mode Threads : {e}", ephemeral=True)
             return
-        pinned = await self._pin_menus_for_guild(interaction.guild)  # 2) (re)pose le menu Threads
+        # Réponse IMMÉDIATE (sinon "réfléchit…" tant que tous les salons ne sont pas faits)
+        n_targets = len(self._va_targets(interaction.guild))
         await interaction.followup.send(
             f"🧵 **Mode Threads activé** sur **{interaction.guild.name}**.\n"
-            f"📌 Menu Threads épinglé dans **{pinned}** salon(s) VA "
-            "(👤 Pseudo · 📝 Name · 🖼 PP · 📊 Mes clics · 🔗 Demander un lien · 📷 Mes comptes Threads).\n"
-            "_Pour revenir au menu complet : `/serverfeatures threads:false` puis `/menupin`._",
+            f"📌 Je (re)pose le menu Threads dans **{n_targets}** salon(s) VA… "
+            "(ça tourne en arrière-plan, ~1-2 min s'il y en a beaucoup).",
             ephemeral=True,
         )
+        pinned = await self._pin_menus_for_guild(interaction.guild)  # 2) (re)pose le menu Threads
+        try:
+            await interaction.followup.send(
+                f"✅ Menu Threads posé dans **{pinned}** salon(s) "
+                "(👤 Pseudo · 📝 Name · 🖼 PP · 📊 Mes clics · 🔗 Demander un lien · 📷 Mes comptes Threads).",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
     @app_commands.command(
         name="setliensalon",
