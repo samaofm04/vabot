@@ -36,6 +36,13 @@ _MENU_BTN_FEATURE = {
 }
 
 
+def _ch_handle_va(name) -> str:
+    """Renvoie le handle si `name` est un salon va-<handle> (tolère un rond en
+    préfixe), sinon ''. Sert à repérer les salons VA (ex: pour /cleanva)."""
+    m = re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (name or "").lower())
+    return m.group(1) if m else ""
+
+
 def _menu_feature_check(interaction, feature: str) -> bool:
     """True si la fonction est active sur le serveur de l'interaction."""
     try:
@@ -872,6 +879,45 @@ class _ChannelProxy:
 
     def __getattr__(self, name):
         return getattr(self._real, name)
+
+
+class ConfirmCleanVA(discord.ui.View):
+    """Confirmation avant suppression en masse des salons va- d'un serveur.
+    Éphémère, à usage unique, réservée à l'auteur de la commande."""
+
+    def __init__(self, channels, author_id):
+        super().__init__(timeout=120)
+        self.channels = channels
+        self.author_id = author_id
+
+    @discord.ui.button(label="Supprimer", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Réservé à la personne qui a lancé la commande.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content=f"🗑️ Suppression de **{len(self.channels)}** salons `va-…` en cours…", view=None)
+        deleted = failed = 0
+        for ch in self.channels:
+            try:
+                await ch.delete(reason="cleanva (purge des salons va-)")
+                deleted += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(0.7)  # rate-limit friendly
+        try:
+            await interaction.edit_original_response(
+                content=f"✅ Terminé : **{deleted}** salon(s) `va-` supprimé(s)"
+                + (f" · ⚠️ {failed} échec(s) (permissions ?)." if failed else "."))
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Réservé à la personne qui a lancé la commande.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="❌ Annulé — rien n'a été supprimé.", view=None)
 
 
 class UserCog(commands.Cog):
@@ -1855,6 +1901,35 @@ class UserCog(commands.Cog):
         final = gf.set_features(interaction.guild, list(new))
         await interaction.response.send_message(
             "✅ Mis à jour.\n" + _recap(final, True), ephemeral=True)
+
+    @app_commands.command(
+        name="cleanva",
+        description="[OWNER] Supprime TOUS les salons va- de CE serveur (avec confirmation)",
+    )
+    async def cleanva(self, interaction: discord.Interaction):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        chans = [ch for ch in interaction.guild.text_channels if _ch_handle_va(ch.name)]
+        if not chans:
+            await interaction.response.send_message(
+                "Aucun salon `va-…` trouvé sur ce serveur.", ephemeral=True)
+            return
+        sample = ", ".join(f"`{ch.name}`" for ch in chans[:6])
+        more = f" … (+{len(chans) - 6})" if len(chans) > 6 else ""
+        await interaction.response.send_message(
+            "⚠️ **Action irréversible.**\n"
+            f"Serveur : **{interaction.guild.name}**\n"
+            f"Ça va **supprimer {len(chans)} salon(s)** `va-…` : {sample}{more}\n"
+            "Les **catégories** et tous les autres salons (général-, boss-, équipes…) sont **conservés**.\n\n"
+            "Vérifie bien le **nom du serveur** ci-dessus, puis clique **Supprimer**.",
+            view=ConfirmCleanVA(chans, interaction.user.id),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
