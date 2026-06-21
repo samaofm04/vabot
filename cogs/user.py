@@ -87,10 +87,23 @@ def save_json(path, data):
         return False
 
 
+# Mots-clés de rôles considérés comme staff (en plus des permissions Discord) :
+# un VA avec le rôle "boss" ou "manager" peut gérer (ex: accepter les demandes de lien)
+# même sans la permission "gérer le serveur".
+_STAFF_ROLE_KEYWORDS = ("boss", "manager", "manageur", "manageuse", "admin", "staff")
+
+
 def _is_staff_member(member):
-    """True si le membre a des permissions de staff/manager (admin / gerer serveur / gerer salons)."""
+    """True si le membre est staff : permissions Discord (admin / gérer serveur /
+    gérer salons) OU porteur d'un rôle 'boss' / 'manager' / 'admin' / 'staff'."""
     p = getattr(member, "guild_permissions", None)
-    return bool(p and (p.administrator or p.manage_guild or p.manage_channels))
+    if p and (p.administrator or p.manage_guild or p.manage_channels):
+        return True
+    for r in (getattr(member, "roles", None) or []):
+        nm = (getattr(r, "name", "") or "").lower()
+        if any(k in nm for k in _STAFF_ROLE_KEYWORDS):
+            return True
+    return False
 
 
 # ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 SEUL lien / VA) ----
