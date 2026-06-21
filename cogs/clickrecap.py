@@ -356,6 +356,27 @@ class ClickRecap(commands.Cog):
         await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(
+        name="recapclicstous",
+        description="[OWNER] Envoie MAINTENANT le récap des clics dans TOUS les salons va- (sans rien à remplir)",
+    )
+    async def recapclicstous(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms  # noqa: F401  (vérifie juste que le module est dispo)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        sent, nolink = await self._run_all()
+        await interaction.followup.send(
+            f"✅ Récap des clics envoyé dans **{sent}** salon(s) (ceux qui ont un lien). "
+            f"Les salons sans lien sont ignorés.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="recapclics_auto",
         description="[OWNER] Active/désactive le récap clics AUTOMATIQUE de chaque nuit",
     )
