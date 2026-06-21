@@ -1529,21 +1529,44 @@ class UserCog(commands.Cog):
         except Exception:
             return False
 
-    async def _push_menu_to_all_vas(self):
-        """Poste le menu (avec @ping) dans le salon de chaque VA. Retourne le nb d'envois."""
+    def _va_targets(self, guild=None):
+        """Salons VA à qui pousser le menu, sous forme (channel, uid, identity).
+        - guild=None  -> TOUS les VAs de users.json (utilisé par le cron quotidien,
+          chaque salon reçoit le menu adapté à SON serveur).
+        - guild fourni -> UNIQUEMENT les salons va- de CE serveur (commandes
+          manuelles : on ne pousse pas vers les autres serveurs)."""
         users = load_json(USERS_FILE, {})
-        sent = 0
+        info = {}  # channel_id -> (uid, identity)
         for uid, data in users.items():
-            ch_id = data.get("channel_id") if isinstance(data, dict) else None
-            ident = (data.get("identity") if isinstance(data, dict)
-                     else (data if isinstance(data, str) else None))
-            if not ch_id or not ident:
+            if isinstance(data, dict):
+                cid, ident = data.get("channel_id"), data.get("identity")
+            elif isinstance(data, str):
+                cid, ident = None, data
+            else:
                 continue
-            ch = self.bot.get_channel(ch_id)
-            if ch is None:
-                continue
+            if cid:
+                info[cid] = (uid, ident)
+        out = []
+        if guild is not None:
+            for ch in guild.text_channels:
+                if not _ch_handle_va(ch.name):
+                    continue
+                uid, ident = info.get(ch.id, (None, None))
+                out.append((ch, uid, ident))
+        else:
+            for cid, (uid, ident) in info.items():
+                ch = self.bot.get_channel(cid)
+                if ch is not None:
+                    out.append((ch, uid, ident))
+        return out
+
+    async def _push_menu_to_all_vas(self, guild=None):
+        """Poste le menu (avec @ping) dans le salon de chaque VA. Retourne le nb d'envois.
+        Si `guild` est fourni, ne pousse QUE dans les salons va- de ce serveur."""
+        sent = 0
+        for ch, uid, ident in self._va_targets(guild):
             try:
-                uid_int = int(uid)
+                uid_int = int(uid) if uid is not None else None
             except (TypeError, ValueError):
                 uid_int = None
             if await self._post_menu(ch, ident, mention_user_id=uid_int):
@@ -1715,7 +1738,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(
         name="menuall",
-        description="[ADMIN] Pousse le menu contenu à TOUS les VAs maintenant (avec @ping)",
+        description="[ADMIN] Pousse le menu aux VAs de CE serveur maintenant (avec @ping)",
     )
     async def menuall(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
@@ -1723,10 +1746,14 @@ class UserCog(commands.Cog):
                 "Réservé aux managers/admins.", ephemeral=True
             )
             return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
-        sent = await self._push_menu_to_all_vas()
+        # Scopé au serveur courant : on ne pousse PAS vers les autres serveurs.
+        sent = await self._push_menu_to_all_vas(guild=interaction.guild)
         await interaction.followup.send(
-            f"✅ Menu poussé à **{sent}** VA(s) (chacun @pingé dans son salon).",
+            f"✅ Menu poussé à **{sent}** VA(s) de **{interaction.guild.name}** (chacun @pingé dans son salon).",
             ephemeral=True,
         )
 
@@ -1785,42 +1812,38 @@ class UserCog(commands.Cog):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
-        users = load_json(USERS_FILE, {})
+        guild = interaction.guild
         pinned = 0
-        for uid, data in users.items():
-            ch_id = data.get("channel_id") if isinstance(data, dict) else None
-            ident = (data.get("identity") if isinstance(data, dict)
-                     else (data if isinstance(data, str) else None))
-            if not ch_id or not ident:
-                continue
-            ch = self.bot.get_channel(ch_id)
-            if ch is None:
-                continue
+        # Scopé au serveur courant : seulement les salons va- de CE serveur.
+        for ch, uid, ident in self._va_targets(guild):
             try:
                 # dépingle l'ancien menu permanent du bot (évite les doublons)
                 try:
                     for pm in await ch.pins():
-                        if (pm.author and pm.author.id == self.bot.user.id and pm.embeds
-                                and "contenu du jour" in ((pm.embeds[0].title or "").lower())):
+                        t = (pm.embeds[0].title or "").lower() if (pm.embeds) else ""
+                        if (pm.author and pm.author.id == self.bot.user.id
+                                and ("menu" in t or "contenu du jour" in t)):
                             await pm.unpin(reason="remplacement menu permanent")
                 except Exception:
                     pass
-                _gv = getattr(ch, "guild", None)
-                _view = _filter_menu_view(ContentMenuView(self), _gv)
+                _view = _filter_menu_view(ContentMenuView(self), guild)
                 if not _view.children:
                     continue  # aucune fonction de menu activée ici
-                msg = await ch.send(embed=_build_menu_embed(ident, _gv), view=_view)
+                msg = await ch.send(embed=_build_menu_embed(ident, guild), view=_view)
                 await msg.pin(reason="Menu permanent VA (h24)")
                 pinned += 1
                 await asyncio.sleep(1.2)
             except discord.Forbidden:
                 pass
             except Exception as e:
-                print(f"[menupin] salon {ch_id} : {e}")
+                print(f"[menupin] salon {getattr(ch, 'id', '?')} : {e}")
         await interaction.followup.send(
-            f"📌 Menu permanent épinglé dans **{pinned}** salon(s) VA.\n"
-            "→ Chaque VA a le menu en **message épinglé** en haut de son salon : il clique, le contenu arrive dans son salon (autant de fois qu'il veut).\n"
+            f"📌 Menu permanent épinglé dans **{pinned}** salon(s) VA de **{guild.name}**.\n"
+            "→ Chaque VA a le menu en **message épinglé** en haut de son salon.\n"
             "⚠️ Le bot a besoin de **Gérer les messages** pour épingler.",
             ephemeral=True,
         )
