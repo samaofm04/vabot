@@ -97,3 +97,40 @@ def clear_guild(guild_or_id) -> bool:
         _save(d)
         return True
     return False
+
+
+# ---- Mode Threads (par serveur) : menu réduit + comptes Threads au lieu d'Instagram ----
+# Stocké à part pour ne pas toucher le format des fonctions. Défaut = OFF partout
+# (donc le serveur principal reste en mode Instagram normal).
+_THREADS_FILE = pathlib.Path(__file__).resolve().parent / "data" / "guild_threads.json"
+
+
+def _load_threads() -> dict:
+    try:
+        d = json.loads(_THREADS_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def threads_mode(guild_or_id) -> bool:
+    """True si le serveur est en mode Threads (menu réduit + comptes threads.net)."""
+    gid = _gid(guild_or_id)
+    return bool(gid is not None and _load_threads().get(gid))
+
+
+def set_threads(guild_or_id, on: bool) -> bool:
+    gid = _gid(guild_or_id)
+    if gid is None:
+        return False
+    d = _load_threads()
+    if on:
+        d[gid] = True
+    else:
+        d.pop(gid, None)
+    try:
+        _THREADS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _THREADS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        return False
+    return bool(on)

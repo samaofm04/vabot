@@ -35,6 +35,10 @@ _MENU_BTN_FEATURE = {
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
 
+# Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
+# Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
+_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes"}
+
 
 def _ch_handle_va(name) -> str:
     """Renvoie le handle si `name` est un salon va-<handle> (tolère un rond en
@@ -53,50 +57,71 @@ def _menu_feature_check(interaction, feature: str) -> bool:
 
 
 def _filter_menu_view(view, guild):
-    """Retire les boutons dont la fonction est désactivée sur ce serveur."""
+    """Retire les boutons désactivés sur ce serveur (fonctions + mode Threads).
+    En mode Threads, garde uniquement le set _THREADS_MENU et renomme le bouton
+    'Mes comptes Insta' en 'Mes comptes Threads'."""
     try:
         import guild_features as gf
         feats = gf.get_features(guild)
+        threads = gf.threads_mode(guild)
     except Exception:
         return view
     for item in list(view.children):
-        need = _MENU_BTN_FEATURE.get(getattr(item, "custom_id", ""))
+        cid = getattr(item, "custom_id", "")
+        need = _MENU_BTN_FEATURE.get(cid)
         if need and need not in feats:
             view.remove_item(item)
+            continue
+        if threads and cid not in _THREADS_MENU:
+            view.remove_item(item)
+            continue
+        if threads and cid == "cmenu:comptes":
+            try:
+                item.label = "Mes comptes Threads"
+            except Exception:
+                pass
     return view
 
 
 def _build_menu_embed(identity, guild=None):
     """Embed clair et intuitif : chaque bouton est expliqué en une ligne.
-    Les champs des fonctions désactivées sur ce serveur sont masqués."""
+    Masque les champs des fonctions désactivées ; en mode Threads, n'affiche que
+    le menu réduit et bascule les comptes en Threads."""
     try:
         import guild_features as gf
         feats = gf.get_features(guild)
+        threads = gf.threads_mode(guild)
     except Exception:
         feats = set(("contenu", "onboarding", "clics", "liens", "tickets", "statut"))
+        threads = False
     emb = discord.Embed(
-        title="☀️ Ton menu",
+        title="🧵 Ton menu Threads" if threads else "☀️ Ton menu",
         description="Clique sur un bouton 👇",
         color=discord.Color.blurple(),
     )
 
-    def add(feat, name, value):
-        if feat is None or feat in feats:
-            emb.add_field(name=name, value=value, inline=True)
+    def add(cid, feat, name, value):
+        if feat is not None and feat not in feats:
+            return
+        if threads and cid not in _THREADS_MENU:
+            return
+        emb.add_field(name=name, value=value, inline=True)
 
-    add("contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
-    add("contenu", "📖 Story", "Photo + texte pour ta story")
-    add("contenu", "🖼️ Post", "Photo + légende pour le feed")
-    add("contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
-    add("contenu", "👤 Pseudo", "Des pseudos Insta dispo")
-    add("contenu", "📝 Name", "Des noms d'affichage")
-    add("contenu", "💬 Bio", "Des bios Insta de ton identité")
-    add("contenu", "🖼 PP", "Des photos de profil prêtes")
-    add("liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
-    add("clics", "📊 Mes clics", "Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)")
-    add("onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
-    add("contenu", "📷 Mes comptes Insta", "La liste de tes comptes Instagram (@pseudo)")
-    if identity:
+    add("cmenu:reel", "contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
+    add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
+    add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
+    add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
+    add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
+    add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
+    add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
+    add("cmenu:pp", "contenu", "🖼 PP", "Des photos de profil prêtes")
+    add("cmenu:lien", "liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
+    add("cmenu:clics", "clics", "📊 Mes clics", "Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)")
+    add("cmenu:addaccount", "onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
+    add("cmenu:comptes", "contenu",
+        "📷 Mes comptes Threads" if threads else "📷 Mes comptes Insta",
+        "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
+    if identity and not threads:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
 USERS_FILE = DATA_DIR / "users.json"
@@ -931,17 +956,30 @@ class UserCog(commands.Cog):
         ch_id = data.get("channel_id") if isinstance(data, dict) else None
         return self.bot.get_channel(ch_id) if ch_id else None
 
-    async def _gate_contenu(self, interaction) -> bool:
-        """True si la fonction 'contenu' est désactivée sur ce serveur (et a déjà
-        répondu en éphémère). Sert de garde en tête des commandes de contenu."""
-        if _menu_feature_check(interaction, "contenu"):
+    async def _gate_contenu(self, interaction, threads_ok=False) -> bool:
+        """True si la commande de contenu est désactivée sur ce serveur (et a déjà
+        répondu en éphémère). Bloque si 'contenu' est off, OU si le serveur est en
+        mode Threads et que la commande n'en fait pas partie (threads_ok=False)."""
+        blocked = False
+        msg = "⚠️ Cette fonction est désactivée sur ce serveur."
+        if not _menu_feature_check(interaction, "contenu"):
+            blocked = True
+        else:
+            try:
+                import guild_features as gf
+                if gf.threads_mode(getattr(interaction, "guild", None)) and not threads_ok:
+                    blocked = True
+                    msg = "⚠️ Pas dispo en mode Threads (garde PP / Name / Pseudo)."
+            except Exception:
+                pass
+        if not blocked:
             return False
         try:
             resp = getattr(interaction, "response", None)
             if resp is not None and hasattr(resp, "is_done") and resp.is_done():
-                await interaction.followup.send("⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
+                await interaction.followup.send(msg, ephemeral=True)
             else:
-                await interaction.response.send_message("⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
+                await interaction.response.send_message(msg, ephemeral=True)
         except Exception:
             pass
         return True
@@ -972,7 +1010,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(name="username", description="Génère des pseudos Instagram VRAIMENT dispo basés sur ton identité")
     async def username(self, interaction: discord.Interaction):
-        if await self._gate_contenu(interaction):
+        if await self._gate_contenu(interaction, threads_ok=True):
             return
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -1016,7 +1054,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(name="name", description="Donne 5 noms (display Instagram) variés avec nom de famille")
     async def name(self, interaction: discord.Interaction):
-        if await self._gate_contenu(interaction):
+        if await self._gate_contenu(interaction, threads_ok=True):
             return
         identity = get_user_identity(interaction.user.id)
         if not identity:
@@ -1141,7 +1179,7 @@ class UserCog(commands.Cog):
     @app_commands.command(name="profilepic", description="Donne des photos de profil (transformées)")
     @app_commands.describe(nombre="Combien de photos (1-10, défaut 3)")
     async def profilepic(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
-        if await self._gate_contenu(interaction):
+        if await self._gate_contenu(interaction, threads_ok=True):
             return
         pics, seen = [], set()
         for _ in range(nombre * 5):
@@ -1857,13 +1895,14 @@ class UserCog(commands.Cog):
         liens="Demander un lien + Générer le lien",
         tickets="Création automatique de ticket à l'arrivée",
         statut="Ronds 🟢/🟠/🔴 d'activité sur les salons va-",
+        threads="Mode Threads : menu réduit (PP/Name/Pseudo/Clics/Lien/Comptes) + comptes threads.net",
         reset="true = enlève le bridage (ce serveur récupère TOUTES les fonctions)",
     )
     async def serverfeatures(
         self, interaction: discord.Interaction,
         contenu: bool = None, onboarding: bool = None, clics: bool = None,
         liens: bool = None, tickets: bool = None, statut: bool = None,
-        reset: bool = False,
+        threads: bool = None, reset: bool = False,
     ):
         app = await interaction.client.application_info()
         if interaction.user.id != app.owner.id:
@@ -1877,30 +1916,34 @@ class UserCog(commands.Cog):
         def _recap(feats, restricted):
             lines = "\n".join(f"{'✅' if f in feats else '❌'} {f}" for f in gf.ALL_FEATURES)
             head = "🔒 **Serveur bridé**" if restricted else "🌐 **Serveur non bridé** (toutes les fonctions)"
-            return f"{head} — **{interaction.guild.name}**\n{lines}"
+            tline = f"\n🧵 mode Threads : {'✅ ON' if gf.threads_mode(interaction.guild) else '❌ off'}"
+            return f"{head} — **{interaction.guild.name}**\n{lines}{tline}"
 
         if reset:
             gf.clear_guild(interaction.guild)
+            gf.set_threads(interaction.guild, False)
             await interaction.response.send_message(
                 "✅ Bridage retiré.\n" + _recap(gf.get_features(interaction.guild), False),
                 ephemeral=True)
             return
+        if threads is not None:
+            gf.set_threads(interaction.guild, threads)
         provided = {k: v for k, v in {
             "contenu": contenu, "onboarding": onboarding, "clics": clics,
             "liens": liens, "tickets": tickets, "statut": statut,
         }.items() if v is not None}
-        if not provided:
+        if not provided and threads is None:
             await interaction.response.send_message(
                 _recap(gf.get_features(interaction.guild), gf.is_restricted(interaction.guild))
-                + "\n\n_Règle avec `contenu:false`, `clics:true`… ou `reset:true` pour tout réactiver._",
+                + "\n\n_Règle avec `contenu:false`, `clics:true`, `threads:true`… ou `reset:true` pour tout réactiver._",
                 ephemeral=True)
             return
         new = set(gf.get_features(interaction.guild))
         for f, v in provided.items():
             new.add(f) if v else new.discard(f)
-        final = gf.set_features(interaction.guild, list(new))
+        final = gf.set_features(interaction.guild, list(new)) if provided else gf.get_features(interaction.guild)
         await interaction.response.send_message(
-            "✅ Mis à jour.\n" + _recap(final, True), ephemeral=True)
+            "✅ Mis à jour.\n" + _recap(final, gf.is_restricted(interaction.guild)), ephemeral=True)
 
     @app_commands.command(
         name="cleanva",
@@ -2031,6 +2074,13 @@ class ContentMenuView(discord.ui.View):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            import guild_features as gf
+            threads = gf.threads_mode(interaction.guild)
+        except Exception:
+            threads = False
+        reseau = "Threads" if threads else "Instagram"
+        base = "https://www.threads.net/@" if threads else "https://instagram.com/"
+        try:
             import jailbreak
             accts = jailbreak.accounts_for_discord_username(interaction.user.name)
         except Exception as e:
@@ -2043,18 +2093,18 @@ class ContentMenuView(discord.ui.View):
                 usernames.append(u)
         if not usernames:
             await interaction.followup.send(
-                "📷 **Aucun compte Instagram relié à ton Discord.**\n"
+                f"📷 **Aucun compte {reseau} relié à ton Discord.**\n"
                 "Demande à un manager de mettre ton pseudo Discord sur ta fiche "
                 "et d'ajouter tes comptes.",
                 ephemeral=True,
             )
             return
         shown = usernames[:50]  # garde-fou limite embed Discord (4096 car.)
-        desc = "\n".join(f"🔗 [@{u}](https://instagram.com/{u})" for u in shown)
+        desc = "\n".join(f"🔗 [@{u}]({base}{u})" for u in shown)
         if len(usernames) > len(shown):
             desc += f"\n… +{len(usernames) - len(shown)} autre(s)"
         emb = discord.Embed(
-            title="📷 Tes comptes Instagram",
+            title=f"📷 Tes comptes {reseau}",
             description=desc,
             color=discord.Color.blurple(),
         )
