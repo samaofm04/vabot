@@ -2071,15 +2071,21 @@ class UserCog(commands.Cog):
             save_json(LINK_STATE_FILE, d)
         who = f"<@{uid}>" if uid is not None else f"`{handle}`"
         msg = f"✅ Anti-doublon réinitialisé pour {who}" + ("" if cleared or uid is None else " (rien en local)") + "."
-        # 2) Optionnel : supprimer le lien sur GMS (sinon la couche 2 rebloque)
+        # 2) Optionnel : supprimer TOUS les liens va_@<handle> sur GMS (sinon la
+        #    couche 2 rebloque ou affiche un ancien lien d'une autre identité).
         if supprimer_gms and handle:
             try:
                 import gms
                 allr = await asyncio.to_thread(gms.list_all_links)
-                hit = _gms_exact_link(handle, allr.get("links") or []) if allr.get("ok") else None
-                if hit and hit.get("id"):
-                    res = await asyncio.to_thread(gms.delete_link, hit["id"])
-                    msg += "\n🗑️ Lien GetMySocial supprimé." if res.get("ok") else f"\n⚠️ Suppression GMS échouée : {res.get('error')}"
+                links = (allr.get("links") or []) if allr.get("ok") else []
+                targets = [l for l in links if l.get("id") and _gms_exact_link(handle, [l])]
+                deleted = 0
+                for l in targets:
+                    r = await asyncio.to_thread(gms.delete_link, l["id"])
+                    if r.get("ok"):
+                        deleted += 1
+                if deleted:
+                    msg += f"\n🗑️ **{deleted}** lien(s) GetMySocial `va_@{handle}` supprimé(s)."
                 else:
                     msg += "\n(aucun lien `va_@` trouvé sur GMS)"
             except Exception as e:
