@@ -126,7 +126,44 @@ def _build_menu_embed(identity, guild=None):
     return emb
 USERS_FILE = DATA_DIR / "users.json"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
-LINK_REQ_CONFIG = DATA_DIR / "link_request_config.json"  # {channel_id, role_id}
+# Config demandes de lien. Nouveau format PAR SERVEUR : {"<guild_id>": {channel_id, role_id}}.
+# Rétro-compat : ancien format global {channel_id, role_id} encore lu en fallback.
+LINK_REQ_CONFIG = DATA_DIR / "link_request_config.json"
+
+
+def _lr_cfg_for_guild(gid):
+    """(channel_id, role_id) du salon de demande de lien pour CE serveur.
+    Cherche d'abord la config du serveur, sinon retombe sur l'ancien format global."""
+    def _load():
+        try:
+            d = json.loads(LINK_REQ_CONFIG.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+    cfg = _load()
+    g = cfg.get(str(gid)) if gid else None
+    if isinstance(g, dict):
+        return g.get("channel_id"), g.get("role_id")
+    return cfg.get("channel_id"), cfg.get("role_id")  # legacy global
+
+
+def _lr_cfg_set_guild(gid, channel_id=None, role_id=None, set_role=False):
+    """Écrit la config demande-de-lien PAR SERVEUR (sans toucher aux autres serveurs)."""
+    try:
+        cfg = json.loads(LINK_REQ_CONFIG.read_text(encoding="utf-8"))
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except Exception:
+        cfg = {}
+    g = cfg.get(str(gid))
+    if not isinstance(g, dict):
+        g = {}
+    if channel_id is not None:
+        g["channel_id"] = channel_id
+    if set_role:
+        g["role_id"] = role_id
+    cfg[str(gid)] = g
+    save_json(LINK_REQ_CONFIG, cfg)
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -1622,10 +1659,10 @@ class UserCog(commands.Cog):
         return ids
 
     async def _notify_managers_link_request(self, member, identity, guild):
-        """Prévient les managers (salon + @rôle + DM) qu'un VA demande son lien."""
-        cfg = load_json(LINK_REQ_CONFIG, {})
-        ch_id = cfg.get("channel_id")
-        role_id = cfg.get("role_id")
+        """Prévient les managers (salon + @rôle + DM) qu'un VA demande son lien.
+        Posté DANS le serveur du VA (par serveur) + ping du rôle boss/manager."""
+        gid = getattr(guild, "id", None)
+        ch_id, role_id = _lr_cfg_for_guild(gid)
         name = getattr(member, "display_name", str(member))
         emb = discord.Embed(
             title="🔗 Demande de lien",
@@ -1636,16 +1673,22 @@ class UserCog(commands.Cog):
         emb.add_field(name="VA", value=member.mention, inline=True)
         emb.set_footer(text="Envoie-lui son lien GetMySocial.")
 
-        # 1) Salon manager (+ ping rôle si configuré)
+        # 1) Salon manager DU MÊME SERVEUR (config par serveur, sinon auto-détection)
         ch = guild.get_channel(ch_id) if (guild and ch_id) else None
         if ch is None and guild:
-            # Fallback : si pas configuré (/setliensalon), trouve un salon "demande-...-lien"
+            # Fallback : trouve un salon "demande-...-lien" DANS ce serveur
             ch = discord.utils.find(
                 lambda c: "demande" in (c.name or "").lower() and "lien" in (c.name or "").lower(),
                 guild.text_channels,
             )
         if ch is not None:
-            ping = f"<@&{role_id}> " if role_id else ""
+            # Ping : rôle configuré, sinon on ping les rôles boss/manager du serveur
+            if role_id:
+                ping = f"<@&{role_id}> "
+            else:
+                boss_roles = [r for r in getattr(guild, "roles", [])
+                              if any(k in (r.name or "").lower() for k in ("boss", "manager", "manageu"))]
+                ping = " ".join(r.mention for r in boss_roles[:3]) + (" " if boss_roles else "")
             view = discord.ui.View(timeout=None)
             try:
                 view.add_item(GenLinkButton(member.id))
@@ -1907,11 +1950,13 @@ class UserCog(commands.Cog):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
-        cfg = load_json(LINK_REQ_CONFIG, {})
-        cfg["channel_id"] = salon.id
-        save_json(LINK_REQ_CONFIG, cfg)
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        _lr_cfg_set_guild(interaction.guild.id, channel_id=salon.id)
         await interaction.response.send_message(
-            f"✅ Les demandes de lien arriveront dans {salon.mention}.", ephemeral=True
+            f"✅ Les demandes de lien de **{interaction.guild.name}** arriveront dans {salon.mention}.",
+            ephemeral=True
         )
 
     @app_commands.command(
@@ -1923,9 +1968,10 @@ class UserCog(commands.Cog):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
-        cfg = load_json(LINK_REQ_CONFIG, {})
-        cfg["role_id"] = role.id if role else None
-        save_json(LINK_REQ_CONFIG, cfg)
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        _lr_cfg_set_guild(interaction.guild.id, role_id=(role.id if role else None), set_role=True)
         if role:
             await interaction.response.send_message(
                 f"✅ Le rôle {role.mention} sera ping à chaque demande de lien.",
