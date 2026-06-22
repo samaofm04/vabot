@@ -1561,21 +1561,37 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
-    async def _delete_old_menus(self, channel):
+    async def _delete_old_menus(self, channel, also_onboarding=False):
         """Supprime les anciens messages de menu postés par le bot dans `channel`
-        (épinglés ou non), pour qu'un nouveau menu remplace proprement l'ancien."""
+        (épinglés ou non), pour qu'un nouveau menu remplace proprement l'ancien.
+        also_onboarding=True supprime AUSSI le message d'intro onboarding
+        (bouton « Commencer l'onboarding » + images de bonus) — pour le mode Threads."""
         me = getattr(self.bot, "user", None)
         if me is None:
             return
         try:
             async for m in channel.history(limit=40):
-                if m.author and m.author.id == me.id and m.embeds:
+                if not (m.author and m.author.id == me.id):
+                    continue
+                rm = False
+                if m.embeds:
                     t = (m.embeds[0].title or "").lower()
                     if "menu" in t or "contenu du jour" in t:
-                        try:
-                            await m.delete()
-                        except Exception:
-                            pass
+                        rm = True
+                if also_onboarding and not rm:
+                    # message d'intro onboarding = contient le bouton va_start_onboarding
+                    try:
+                        for row in (m.components or []):
+                            for comp in getattr(row, "children", []):
+                                if getattr(comp, "custom_id", "") == "va_start_onboarding":
+                                    rm = True
+                    except Exception:
+                        pass
+                if rm:
+                    try:
+                        await m.delete()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1891,17 +1907,14 @@ class UserCog(commands.Cog):
         )
         await interaction.response.send_message(embed=emb, view=CentralMenuView(self))
 
-    @app_commands.command(
-        name="menupin",
-        description="[ADMIN] Épingle un menu PERMANENT (h24) dans le salon de chaque VA",
-    )
-    async def _pin_menus_for_guild(self, guild) -> int:
+    async def _pin_menus_for_guild(self, guild, clean_onboarding=False) -> int:
         """Remplace/épingle le menu (adapté au serveur) dans chaque salon va- du
-        serveur. Retourne le nombre de salons traités."""
+        serveur. clean_onboarding=True supprime aussi l'intro d'onboarding (mode
+        Threads). Retourne le nombre de salons traités."""
         pinned = 0
         for ch, uid, ident in self._va_targets(guild):
             try:
-                await self._delete_old_menus(ch)  # vire l'ancien menu d'abord
+                await self._delete_old_menus(ch, also_onboarding=clean_onboarding)
                 _view = _filter_menu_view(ContentMenuView(self), guild)
                 if not _view.children:
                     continue
@@ -1915,6 +1928,10 @@ class UserCog(commands.Cog):
                 print(f"[menupin] salon {getattr(ch, 'id', '?')} : {e}")
         return pinned
 
+    @app_commands.command(
+        name="menupin",
+        description="[ADMIN] Épingle un menu PERMANENT (h24) dans le salon de chaque VA",
+    )
     async def menupin(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
@@ -1957,7 +1974,8 @@ class UserCog(commands.Cog):
             "(ça tourne en arrière-plan, ~1-2 min s'il y en a beaucoup).",
             ephemeral=True,
         )
-        pinned = await self._pin_menus_for_guild(interaction.guild)  # 2) (re)pose le menu Threads
+        # 2) (re)pose le menu Threads + supprime les anciennes intros onboarding
+        pinned = await self._pin_menus_for_guild(interaction.guild, clean_onboarding=True)
         try:
             await interaction.followup.send(
                 f"✅ Menu Threads posé dans **{pinned}** salon(s) "

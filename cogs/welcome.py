@@ -519,22 +519,36 @@ async def setup_va_ticket(guild, member, bot=None):
     }
     save_users(users)
 
-    # Envoyer le message intro (avec photos optionnelles)
-    cfg = load_welcome_config()
-    _raw_intro = cfg["ticket_intro_message"].replace("\\n", "\n")
-    try:
-        intro_text = _raw_intro.format(mention=member.mention)
-    except (KeyError, ValueError, IndexError):
-        # Message avec accolades parasites -> on évite le crash, on remplace juste {mention}
-        intro_text = _raw_intro.replace("{mention}", member.mention)
-    files = build_intro_files()
-    # Bouton d'onboarding uniquement si la fonction onboarding est active ici.
+    # Contenu d'accueil du ticket.
     import guild_features as gf
-    ob_view = StartOnboardingView() if gf.enabled(guild, "onboarding") else None
-    try:
-        await channel.send(content=intro_text, view=ob_view, files=files or None)
-    except Exception as e:
-        log.error(f"setup_va_ticket: erreur envoi intro: {e}")
+    if gf.threads_mode(guild) or not gf.enabled(guild, "onboarding"):
+        # Serveur Threads (ou onboarding off) : on ne montre RIEN d'autre que le
+        # menu (pas d'intro, pas d'images de bonus, pas de bouton onboarding).
+        posted = False
+        ucog = bot.get_cog("UserCog") if bot else None
+        if ucog is not None:
+            try:
+                posted = await ucog._post_menu(channel, identity, mention_user_id=member.id)
+            except Exception as e:
+                log.error(f"setup_va_ticket: menu Threads échoué: {e}")
+        if not posted:
+            try:
+                await channel.send(f"{member.mention} 👋 Bienvenue ! Ton menu arrive ici.")
+            except Exception:
+                pass
+    else:
+        # Flux classique (marché FR) : intro + images + bouton onboarding.
+        cfg = load_welcome_config()
+        _raw_intro = cfg["ticket_intro_message"].replace("\\n", "\n")
+        try:
+            intro_text = _raw_intro.format(mention=member.mention)
+        except (KeyError, ValueError, IndexError):
+            intro_text = _raw_intro.replace("{mention}", member.mention)
+        files = build_intro_files()
+        try:
+            await channel.send(content=intro_text, view=StartOnboardingView(), files=files or None)
+        except Exception as e:
+            log.error(f"setup_va_ticket: erreur envoi intro: {e}")
 
     # Isole le VA (cache tout sauf ticket + salons d'identité + salons d'aide)
     # et grant les salons d'aide.
