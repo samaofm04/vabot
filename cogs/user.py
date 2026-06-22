@@ -1813,8 +1813,7 @@ class UserCog(commands.Cog):
             )
             return
 
-        # 4) Vraiment pas de lien -> demande aux managers (anti-spam : 1 en attente)
-        _lr_mark_pending(uid)
+        # 4) Vraiment pas de lien -> demande aux managers.
         posted = None
         try:
             posted = await self._notify_managers_link_request(
@@ -1823,15 +1822,18 @@ class UserCog(commands.Cog):
         except Exception:
             posted = None
         if posted is not None:
+            # On marque "en attente" UNIQUEMENT si la notif est bien partie dans un
+            # salon (sinon le VA resterait bloqué "déjà en attente" sans rien reçu).
+            _lr_mark_pending(uid)
             await interaction.followup.send(
                 f"✅ **Demande envoyée aux managers !** (dans {posted.mention}) Tu vas recevoir ton lien bientôt 🔗",
                 ephemeral=True,
             )
         else:
             await interaction.followup.send(
-                "✅ Demande enregistrée — mais ⚠️ **aucun salon `demande-de-lien` joignable** sur ce serveur "
-                "(salon introuvable ou le bot ne peut pas y écrire). Un admin doit faire `/setliensalon` "
-                "et **donner au bot l'accès au salon** (ou le rôle Administrateur).",
+                "⚠️ **Aucun salon `demande-de-lien` joignable** sur ce serveur "
+                "(salon introuvable ou le bot ne peut pas y écrire). Recliquera plus tard, "
+                "ou un admin doit faire `/setliensalon` + **donner au bot l'accès au salon**.",
                 ephemeral=True,
             )
 
