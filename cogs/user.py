@@ -1674,6 +1674,7 @@ class UserCog(commands.Cog):
         emb.set_footer(text="Envoie-lui son lien GetMySocial.")
 
         # 1) Salon manager DU MÊME SERVEUR (config par serveur, sinon auto-détection)
+        posted = None  # le salon où la demande a été postée (None = échec/non trouvé)
         ch = guild.get_channel(ch_id) if (guild and ch_id) else None
         if ch is None and guild:
             # Fallback : trouve un salon "demande-...-lien" DANS ce serveur
@@ -1701,8 +1702,9 @@ class UserCog(commands.Cog):
                     view=view,
                     allowed_mentions=discord.AllowedMentions(roles=True),
                 )
-            except Exception:
-                pass
+                posted = ch  # succès : on a bien posté dans le salon
+            except Exception as e:
+                print(f"[lien] post #{getattr(ch,'name','?')} échoué : {e}")
 
         # 2) DM aux managers (owner + whitelist)
         for aid in await self._admin_ids():
@@ -1712,6 +1714,7 @@ class UserCog(commands.Cog):
                     await u.send(embed=emb)
             except Exception:
                 pass
+        return posted
 
     async def request_link(self, interaction: discord.Interaction):
         """Bouton "Demander un lien" du menu VA.
@@ -1782,16 +1785,25 @@ class UserCog(commands.Cog):
 
         # 4) Vraiment pas de lien -> demande aux managers (anti-spam : 1 en attente)
         _lr_mark_pending(uid)
-        await interaction.followup.send(
-            "✅ **Demande envoyée aux managers !** Tu vas recevoir ton lien bientôt 🔗",
-            ephemeral=True,
-        )
+        posted = None
         try:
-            await self._notify_managers_link_request(
+            posted = await self._notify_managers_link_request(
                 interaction.user, identity, interaction.guild
             )
         except Exception:
-            pass
+            posted = None
+        if posted is not None:
+            await interaction.followup.send(
+                f"✅ **Demande envoyée aux managers !** (dans {posted.mention}) Tu vas recevoir ton lien bientôt 🔗",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "✅ Demande enregistrée — mais ⚠️ **aucun salon `demande-de-lien` joignable** sur ce serveur "
+                "(salon introuvable ou le bot ne peut pas y écrire). Un admin doit faire `/setliensalon` "
+                "et **donner au bot l'accès au salon** (ou le rôle Administrateur).",
+                ephemeral=True,
+            )
 
     @app_commands.command(name="lien", description="Demande ton lien aux managers")
     async def lien(self, interaction: discord.Interaction):
