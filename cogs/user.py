@@ -1982,6 +1982,67 @@ class UserCog(commands.Cog):
             await interaction.response.send_message("✅ Ping de rôle désactivé.", ephemeral=True)
 
     @app_commands.command(
+        name="resetlien",
+        description="[OWNER] Réinitialise l'anti-doublon de lien d'un VA (pour re-tester)",
+    )
+    @app_commands.describe(
+        membre="Le VA à débloquer (sinon : le VA du salon où tu lances la commande)",
+        supprimer_gms="true = supprime aussi son lien sur GetMySocial (reset complet)",
+    )
+    async def resetlien(
+        self, interaction: discord.Interaction,
+        membre: discord.Member = None, supprimer_gms: bool = False,
+    ):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ch = interaction.channel
+        # Résout le VA : membre fourni, sinon via le salon courant (users.json), + le handle
+        uid = membre.id if membre else None
+        if uid is None:
+            users = load_json(USERS_FILE, {})
+            for k, data in users.items():
+                if isinstance(data, dict) and data.get("channel_id") == getattr(ch, "id", None):
+                    try:
+                        uid = int(k)
+                    except Exception:
+                        uid = None
+                    break
+        handle = _ch_handle_va(getattr(ch, "name", "")) or (getattr(membre, "name", "") or "").lower()
+        if uid is None and not handle:
+            await interaction.followup.send(
+                "⚠️ Lance la commande **dans le salon `va-` du VA**, ou précise `membre:`.",
+                ephemeral=True)
+            return
+        # 1) Reset de l'état local (pending + bloc dur)
+        cleared = False
+        if uid is not None:
+            d = _lr_load()
+            cleared = str(uid) in d
+            d.pop(str(uid), None)
+            save_json(LINK_STATE_FILE, d)
+        who = f"<@{uid}>" if uid is not None else f"`{handle}`"
+        msg = f"✅ Anti-doublon réinitialisé pour {who}" + ("" if cleared or uid is None else " (rien en local)") + "."
+        # 2) Optionnel : supprimer le lien sur GMS (sinon la couche 2 rebloque)
+        if supprimer_gms and handle:
+            try:
+                import gms
+                allr = await asyncio.to_thread(gms.list_all_links)
+                hit = _gms_exact_link(handle, allr.get("links") or []) if allr.get("ok") else None
+                if hit and hit.get("id"):
+                    res = await asyncio.to_thread(gms.delete_link, hit["id"])
+                    msg += "\n🗑️ Lien GetMySocial supprimé." if res.get("ok") else f"\n⚠️ Suppression GMS échouée : {res.get('error')}"
+                else:
+                    msg += "\n(aucun lien `va_@` trouvé sur GMS)"
+            except Exception as e:
+                msg += f"\n⚠️ GMS indispo : {e}"
+        else:
+            msg += "\n⚠️ S'il a déjà un lien `va_@<pseudo>` sur GMS, la vérif le rebloquera — relance avec `supprimer_gms:true` pour un reset complet."
+        await interaction.followup.send(msg, ephemeral=True)
+
+    @app_commands.command(
         name="menu",
         description="Menu contenu : reel / story / story CTA / pseudo / name en 1 clic",
     )
