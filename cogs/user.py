@@ -2314,6 +2314,48 @@ class UserCog(commands.Cog):
             f"+ **{changed}** VA(s) existant(s) réassigné(s).",
             ephemeral=True)
 
+    @app_commands.command(
+        name="gmsdebug",
+        description="[OWNER] Diagnostic GMS : outils API + team_id + recherche template",
+    )
+    @app_commands.describe(shortcode="Template à chercher (ex: templatethreads)")
+    async def gmsdebug(self, interaction: discord.Interaction, shortcode: str = ""):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ GMS indispo : {e}", ephemeral=True)
+            return
+        lines = []
+        # 1) Outils MCP exposés (pour voir s'il existe un list_teams/workspaces)
+        t = await asyncio.to_thread(gms.list_tools)
+        if t.get("ok"):
+            lines.append("**Outils GMS** : " + ", ".join(x["name"] for x in t["tools"])[:600])
+        else:
+            lines.append(f"⚠️ list_tools : {t.get('error')}")
+        # 2) Liens du workspace par défaut : team_id vus + recherche du template
+        allr = await asyncio.to_thread(gms.list_all_links)
+        if allr.get("ok"):
+            links = allr.get("links") or []
+            lines.append(f"**{len(links)} liens** (workspace par défaut).")
+            tids = sorted({str(l.get("team_id") or l.get("teamId") or "") for l in links if (l.get("team_id") or l.get("teamId"))})
+            if tids:
+                lines.append("**team_id vus** : " + ", ".join(f"`{x}`" for x in tids))
+            sc = (shortcode or "templatethread").lower()
+            hits = [l for l in links if sc in (str(l.get("shortcode") or "") + " " + str(l.get("display_name") or "")).lower()]
+            if hits:
+                for h in hits[:4]:
+                    lines.append(f"🔎 `{h.get('shortcode')}` · id=`{h.get('id')}` · team=`{h.get('team_id') or h.get('teamId') or '(perso)'}`")
+            else:
+                lines.append(f"❌ aucun lien `{sc}` dans le workspace par défaut (sûrement dans Threads US).")
+        else:
+            lines.append(f"⚠️ list_links : {allr.get('error')}")
+        await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
+
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(

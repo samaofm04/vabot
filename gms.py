@@ -103,6 +103,26 @@ def _initialize(s: requests.Session) -> bool:
         return False
 
 
+def list_tools() -> Dict[str, Any]:
+    """Liste les outils MCP exposés par GetMySocial (découverte : teams, etc.)."""
+    api_key = get_api_key()
+    if not api_key:
+        return {"ok": False, "error": "Clé API GetMySocial non configurée"}
+    s = _make_session(api_key)
+    if not _initialize(s):
+        return {"ok": False, "error": "Impossible d'initialiser la session MCP"}
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+    try:
+        r = s.post(MCP_URL, json=body, timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:200]}"}
+    data = _parse_sse(r.text)
+    tools = ((data or {}).get("result") or {}).get("tools") or []
+    return {"ok": True, "tools": [{"name": t.get("name"), "desc": (t.get("description") or "")[:80]} for t in tools]}
+
+
 def _call_tool(tool_name: str, args: Optional[dict] = None) -> Dict[str, Any]:
     """Appelle un outil MCP. Retourne {'ok': bool, 'data': ..., 'error': ...}."""
     api_key = get_api_key()
