@@ -705,7 +705,20 @@ def random_reel_for(identity):
     return video, caption, description, example
 
 
-def random_profile_pic():
+def _identity_pp_dir(identity):
+    """Dossier des PP propres à une identité (ex: jessye marché US)."""
+    return IDENTITIES_DIR / (identity or "").strip().lower() / "profile_pics"
+
+
+def random_profile_pic(identity=None):
+    """PP au hasard : si l'identité a ses PROPRES PP (data/identities/<id>/profile_pics/)
+    on pioche dedans ; sinon on retombe sur le pool partagé (marché FR)."""
+    if identity:
+        d = _identity_pp_dir(identity)
+        if d.exists():
+            own = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+            if own:
+                return random.choice(own)
     if not PROFILE_PICS_DIR.exists():
         return None
     pics = [p for p in PROFILE_PICS_DIR.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
@@ -1218,11 +1231,12 @@ class UserCog(commands.Cog):
     async def profilepic(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         if await self._gate_contenu(interaction, threads_ok=True):
             return
+        identity = get_user_identity(interaction.user.id)  # PP propres si dispo, sinon pool partagé
         pics, seen = [], set()
         for _ in range(nombre * 5):
             if len(pics) >= nombre:
                 break
-            p = random_profile_pic()
+            p = random_profile_pic(identity)
             if not p:
                 break
             if str(p) in seen:

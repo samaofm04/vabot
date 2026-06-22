@@ -3742,7 +3742,8 @@ window.upClearPrefill = function(utab){
 <form method="POST" action="/upload/pp" enctype="multipart/form-data" class="up-form" data-utype="pp" data-accept="image/*">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Photo de profil</h3></div>
-<small style="color:#888;margin-bottom:10px;display:block">Pool partagé entre toutes les identités</small>
+<small style="color:#888;margin-bottom:10px;display:block">Choisis l'identité (ou « Partagé » = pool commun à toutes)</small>
+<select name="identity" class="up-input" style="margin-bottom:12px">{pp_ident_opts}</select>
 <label class="up-drop">
 <input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
@@ -8886,13 +8887,20 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     )
 
 
-def _render_cloud_content_html(subdir: str, exts) -> str:
+def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> str:
     """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
     (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
     Pas de navigation back/forward, tout dans la même page.
+
+    include_jb=True ajoute les identités jailbreak-only (ex: jessye) — utilisé
+    UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
     """
     from flask import request as _req
     identities = _list_content_identities()  # masque les identités Jailbreak-only
+    if include_jb:
+        for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+            if _jb not in identities:
+                identities.append(_jb)
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
     is_video = subdir == "videos"
@@ -8951,7 +8959,8 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
                 selected = identities[0]
 
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
-                "stories": "cloudstories", "storyctas": "cloudstoryctas"}.get(subdir, "cloudoverview")
+                "stories": "cloudstories", "storyctas": "cloudstoryctas",
+                "profile_pics": "cloudpps"}.get(subdir, "cloudoverview")
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
@@ -9141,6 +9150,7 @@ def _render_cloud_content_html(subdir: str, exts) -> str:
         "posts": ("post", "Upload Post", "Photo simple pour le feed"),
         "stories": ("story", "Upload Story", "Photo simple pour story"),
         "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien"),
+        "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité"),
     }
     add_media_btn = ""
     if subdir in upload_tab_map:
@@ -9873,6 +9883,19 @@ document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(fu
         + f"<div class='vault-gallery'>{gallery}</div>"
         + "</div>"
     )
+
+
+def _render_cloud_pps_page() -> str:
+    """Page Photos de profil : vault PAR IDENTITÉ (avec jessye, PP-only) en haut,
+    puis le pool partagé (commun, marché FR) en dessous."""
+    vault = _render_cloud_content_html("profile_pics", IMAGE_EXTS, include_jb=True)
+    divider = (
+        "<div style='margin:28px 0 12px;padding-top:18px;border-top:1px solid #232323'>"
+        "<div style='font-weight:700;font-size:15px'>📁 Pool partagé (commun)</div>"
+        "<div style='font-size:12px;color:#888;margin-top:2px'>"
+        "PP communes, utilisées par les identités qui n'ont pas leurs propres PP (marché FR).</div></div>"
+    )
+    return vault + divider + _render_cloud_pps_html()
 
 
 def _render_cloud_pps_html() -> str:
@@ -24461,6 +24484,13 @@ def _render_upload_inner(msg=None, error=None):
     opts = "".join(f'<option value="{i}">{i}</option>' for i in identities)
     if not opts:
         opts = '<option value="">(aucune identité - crée-en sur Discord)</option>'
+    # Options du sélecteur PP : Partagé (pool commun) + identités + jessye (PP-only, marché US)
+    _pp_idents = list(identities)
+    for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+        if _jb not in _pp_idents:
+            _pp_idents.append(_jb)
+    pp_opts = ('<option value="">📁 Partagé (pool commun)</option>'
+               + "".join(f'<option value="{i}">{i}</option>' for i in _pp_idents))
     msg_html = ""
     if msg:
         # Stocker comme attribut data-* sur un élément invisible, le JS l'animera comme toast
@@ -24511,6 +24541,7 @@ def _render_upload_inner(msg=None, error=None):
     html = (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
+        .replace("{pp_ident_opts}", pp_opts)
         .replace("{msg_html}", msg_html)
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
@@ -24528,7 +24559,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_posts_html}", _g("cloudposts", lambda: _render_cloud_content_html("posts", IMAGE_EXTS)))
         .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
         .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
-        .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_html))
+        .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
         .replace("{depenses_html}", _g("depenses", _render_depenses_html))
@@ -25123,7 +25154,7 @@ def create_app():
     def cloud_thumb_file(identity, subdir, filename):
         if not is_auth():
             return redirect("/")
-        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics"}:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -25173,7 +25204,7 @@ def create_app():
         if not is_auth():
             return redirect("/")
         # Sécurité : restreindre aux dossiers valides
-        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics"}:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -25204,7 +25235,7 @@ def create_app():
         identity, subdir, filename = parts
         identity = identity.lower().strip()
         # Securite (meme regles que cloud_serve_file / cloud_delete)
-        if subdir not in {"videos", "posts", "stories", "storyctas"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics"}:
             return jsonify({"ok": False, "error": "dossier invalide"})
         if identity not in _list_identities():
             return jsonify({"ok": False, "error": "identité inconnue"})
@@ -25275,7 +25306,7 @@ def create_app():
         deleted = []
         failed = []
         identities_list = _list_identities()
-        valid_subdirs = {"videos", "posts", "stories", "storyctas"}
+        valid_subdirs = {"videos", "posts", "stories", "storyctas", "profile_pics"}
         for fid in files:
             try:
                 parts = fid.split("|", 2)
@@ -25349,7 +25380,7 @@ def create_app():
         ident, subdir, name = parts
         if ".." in name or "/" in name or "\\" in name:
             return None
-        if subdir not in ("videos", "posts", "stories", "storyctas"):
+        if subdir not in ("videos", "posts", "stories", "storyctas", "profile_pics"):
             return None
         target_dir = IDENTITIES_DIR / ident / subdir
         target = target_dir / name
@@ -25525,17 +25556,39 @@ def create_app():
     def upload_pp():
         if not is_auth():
             return redirect("/")
-        photo = request.files.get("photo")
-        if not photo or not photo.filename:
+        photos = [p for p in request.files.getlist("photo") if p and p.filename]
+        if not photos:
             return _error("Photo manquante")
-        ext = os.path.splitext(photo.filename)[1].lower()
-        if ext not in IMAGE_EXTS:
-            return _error(f"Format non supporté ({ext})")
-        PROFILE_PICS_DIR.mkdir(parents=True, exist_ok=True)
-        existing = list(PROFILE_PICS_DIR.glob("*"))
-        target = PROFILE_PICS_DIR / f"pp_{len(existing) + 1}{ext}"
-        photo.save(str(target))
-        return _success(f"✅ Photo de profil ajoutée ({target.name})")
+        # Cible : une identité (PP propres, ex: jessye) ou le pool partagé (Partagé / vide).
+        ident = (request.form.get("identity") or "").strip().lower()
+        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        if ident and ident in valid:
+            target_dir = IDENTITIES_DIR / ident / "profile_pics"
+            label = ident
+        else:
+            target_dir = PROFILE_PICS_DIR  # pool partagé / commun
+            label, ident = "Partagé", ""
+        target_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for photo in photos:
+            ext = os.path.splitext(photo.filename)[1].lower()
+            if ext not in IMAGE_EXTS:
+                continue
+            # Nom unique anti-écrasement (les gaps après suppression sont normaux).
+            n = len(list(target_dir.glob("*"))) + 1
+            target = target_dir / f"pp_{n}{ext}"
+            while target.exists():
+                n += 1
+                target = target_dir / f"pp_{n}{ext}"
+            photo.save(str(target))
+            saved += 1
+        if saved == 0:
+            return _error("Aucune image valide (formats : jpg / png / webp)")
+        try:
+            session["last_upload_identity"] = ident
+        except Exception:
+            pass
+        return _success(f"✅ {saved} photo(s) de profil ajoutée(s) → {label}")
 
     # ============ BUSINESS ROUTES ============
     @app.route("/business/sfs/add", methods=["POST"])
