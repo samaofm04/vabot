@@ -41,6 +41,17 @@ from discord.ext import commands, tasks
 
 log = logging.getLogger("vabot.cta_reminder")
 
+
+def _reminders_on(guild) -> bool:
+    """False si les rappels/suivi sont désactivés sur ce serveur (ex: mode
+    Threads -> pas de rappels Insta). True par défaut."""
+    try:
+        import guild_features as gf
+        return gf.reminders_enabled(guild)
+    except Exception:
+        return True
+
+
 DATA_DIR = Path("data")
 USERS_FILE = DATA_DIR / "users.json"
 STATE_FILE = DATA_DIR / "cta_reminder_state.json"
@@ -491,6 +502,8 @@ class CTAReminderCog(commands.Cog):
                             channel = await self.bot.fetch_channel(int(channel_id))
                         except Exception:
                             continue
+                    if not _reminders_on(getattr(channel, "guild", None)):
+                        continue  # serveur Threads / rappels off -> pas de rappel
                     body = cfg["messages"][msg_key]
                     full_msg = f"{cfg['emoji']} <@{uid}> {body}"
                     # 1er rappel du jour pour ce type : ajout limite + prerequisites
@@ -527,6 +540,8 @@ class CTAReminderCog(commands.Cog):
                             channel = await self.bot.fetch_channel(int(channel_id))
                         except Exception:
                             continue
+                    if not _reminders_on(getattr(channel, "guild", None)):
+                        continue  # serveur Threads / rappels off -> pas de suivi
                     msg = (
                         f"📊 <@{uid}> **Suivi de tes comptes — {day_label_fr} {date_str}**\n"
                         f"\nPour chacun de tes **{NB_COMPTES} comptes**, "

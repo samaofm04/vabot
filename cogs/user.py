@@ -2101,6 +2101,7 @@ class UserCog(commands.Cog):
         liens="Demander un lien + Générer le lien",
         tickets="Création automatique de ticket à l'arrivée",
         statut="Ronds 🟢/🟠/🔴 d'activité sur les salons va-",
+        rappels="Rappels quotidiens (Story/Reel/CTA) + suivi des comptes",
         threads="Mode Threads : menu réduit (PP/Name/Pseudo/Clics/Lien/Comptes) + comptes threads.net",
         reset="true = enlève le bridage (ce serveur récupère TOUTES les fonctions)",
     )
@@ -2108,7 +2109,7 @@ class UserCog(commands.Cog):
         self, interaction: discord.Interaction,
         contenu: bool = None, onboarding: bool = None, clics: bool = None,
         liens: bool = None, tickets: bool = None, statut: bool = None,
-        threads: bool = None, reset: bool = False,
+        rappels: bool = None, threads: bool = None, reset: bool = False,
     ):
         app = await interaction.client.application_info()
         if interaction.user.id != app.owner.id:
@@ -2136,7 +2137,7 @@ class UserCog(commands.Cog):
             gf.set_threads(interaction.guild, threads)
         provided = {k: v for k, v in {
             "contenu": contenu, "onboarding": onboarding, "clics": clics,
-            "liens": liens, "tickets": tickets, "statut": statut,
+            "liens": liens, "tickets": tickets, "statut": statut, "rappels": rappels,
         }.items() if v is not None}
         if not provided and threads is None:
             await interaction.response.send_message(

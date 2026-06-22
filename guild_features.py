@@ -19,7 +19,7 @@ import pathlib
 
 _FILE = pathlib.Path(__file__).resolve().parent / "data" / "guild_features.json"
 
-ALL_FEATURES = ("contenu", "onboarding", "clics", "liens", "tickets", "statut")
+ALL_FEATURES = ("contenu", "onboarding", "clics", "liens", "tickets", "statut", "rappels")
 
 
 def _load() -> dict:
@@ -67,6 +67,13 @@ def get_features(guild_or_id) -> set:
 def enabled(guild_or_id, feature: str) -> bool:
     """True si `feature` est active sur ce serveur (toujours True si non bridé)."""
     return feature in get_features(guild_or_id)
+
+
+def reminders_enabled(guild_or_id) -> bool:
+    """True si les rappels/suivi (Story du jour, Reel, Suivi des comptes…) sont
+    actifs sur ce serveur. OFF automatiquement en mode Threads (c'est Threads,
+    pas Insta), et désactivable via la fonction 'rappels'."""
+    return enabled(guild_or_id, "rappels") and not threads_mode(guild_or_id)
 
 
 def is_restricted(guild_or_id) -> bool:
