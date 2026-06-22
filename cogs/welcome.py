@@ -493,7 +493,16 @@ async def setup_va_ticket(guild, member, bot=None):
     elif isinstance(existing, str):
         identity = existing
     else:
-        identity = pick_next_identity()
+        # Si le serveur a une identité dédiée (ex: jessye pour le marché US),
+        # on l'utilise directement (sinon rotation normale du marché français).
+        identity = None
+        try:
+            import guild_features as gf
+            identity = gf.get_server_identity(guild)
+        except Exception:
+            identity = None
+        if not identity:
+            identity = pick_next_identity()
         if not identity:
             return None, "Aucune identité disponible. Préviens un admin."
 

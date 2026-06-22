@@ -2224,6 +2224,61 @@ class UserCog(commands.Cog):
             + (f" · ⚠️ {failed} échec(s) (catégorie pleine ? 50 max)." if failed else "."),
             ephemeral=True)
 
+    @app_commands.command(
+        name="setidentite",
+        description="[OWNER] Identité par défaut des VAs de CE serveur (ex: jessye)",
+    )
+    @app_commands.describe(
+        identity="Nom de l'identité (ex: jessye). Vide = afficher l'actuelle ; 'none' = enlever.",
+        reassigner="true = met aussi cette identité aux VAs déjà présents sur le serveur",
+    )
+    async def setidentite(
+        self, interaction: discord.Interaction,
+        identity: str = None, reassigner: bool = False,
+    ):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+        if identity is None:
+            cur = gf.get_server_identity(interaction.guild)
+            await interaction.response.send_message(
+                (f"🪪 Identité dédiée de ce serveur : **{cur}**" if cur
+                 else "🪪 Aucune identité dédiée (rotation normale du marché français).")
+                + "\n_Définis-en une : `identity:jessye` (+ `reassigner:true` pour les VAs déjà là). `identity:none` pour enlever._",
+                ephemeral=True)
+            return
+        ident = identity.strip().lower()
+        if ident in ("none", "aucune", "reset", ""):
+            gf.set_server_identity(interaction.guild, None)
+            await interaction.response.send_message(
+                "✅ Identité dédiée retirée — retour à la rotation normale.", ephemeral=True)
+            return
+        gf.set_server_identity(interaction.guild, ident)
+        if not reassigner:
+            await interaction.response.send_message(
+                f"✅ Les nouveaux VAs de **{interaction.guild.name}** auront l'identité **{ident}**.\n"
+                "_(`reassigner:true` pour l'appliquer aussi aux VAs déjà présents.)_",
+                ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        users = load_json(USERS_FILE, {})
+        chan_ids = {ch.id for ch in interaction.guild.text_channels if _ch_handle_va(ch.name)}
+        changed = 0
+        for k, data in users.items():
+            if isinstance(data, dict) and data.get("channel_id") in chan_ids and data.get("identity") != ident:
+                data["identity"] = ident
+                changed += 1
+        save_json(USERS_FILE, users)
+        await interaction.followup.send(
+            f"✅ Identité **{ident}** pour les nouveaux VAs de **{interaction.guild.name}** "
+            f"+ **{changed}** VA(s) existant(s) réassigné(s).",
+            ephemeral=True)
+
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(

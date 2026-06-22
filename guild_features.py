@@ -176,3 +176,44 @@ def set_va_category(guild_or_id, category_id) -> bool:
     except Exception:
         return False
     return True
+
+
+# ---- Identité par défaut d'un serveur (ex: "jessye" pour le marché US) ----
+# Si définie, les nouveaux VAs de ce serveur reçoivent CETTE identité au lieu
+# de la rotation normale (qui exclut les identités jailbreak-only). Permet
+# d'avoir un marché US séparé du marché français.
+_SVID_FILE = pathlib.Path(__file__).resolve().parent / "data" / "server_identity.json"
+
+
+def _load_svid() -> dict:
+    try:
+        d = json.loads(_SVID_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def get_server_identity(guild_or_id):
+    """Identité par défaut des VAs de ce serveur (str), ou None."""
+    gid = _gid(guild_or_id)
+    if gid is None:
+        return None
+    v = _load_svid().get(gid)
+    return v if (isinstance(v, str) and v.strip()) else None
+
+
+def set_server_identity(guild_or_id, ident) -> bool:
+    gid = _gid(guild_or_id)
+    if gid is None:
+        return False
+    d = _load_svid()
+    if ident and str(ident).strip():
+        d[gid] = str(ident).strip().lower()
+    else:
+        d.pop(gid, None)
+    try:
+        _SVID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SVID_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        return False
+    return True
