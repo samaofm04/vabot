@@ -881,6 +881,39 @@ def report_link_ids(team_id: str, identity: Optional[str] = None,
     return None
 
 
+def report_links_meta(team_id: str, identity: Optional[str] = None,
+                      group_id: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+    """Comme report_link_ids mais renvoie les liens avec leur nom :
+    [{id, shortcode, display_name}, …] pour un detail par lien (par VA).
+    None = echec ; [] = vrai vide. Meme strategie clé API / cookie."""
+    suffix = _SHORTCODE_SUFFIX.get((identity or "").lower()) if identity else None
+    if suffix and team_id:
+        r = list_links_team(team_id)
+        if not r.get("ok"):
+            return None
+        return [
+            {"id": l.get("id"), "shortcode": l.get("shortcode") or "",
+             "display_name": l.get("display_name") or ""}
+            for l in r.get("links", [])
+            if l.get("id") and (l.get("shortcode") or "").lower().endswith(suffix)
+        ]
+    if group_id and team_id:
+        ids = link_ids_in_group(team_id, group_id)
+        if ids is None:
+            return None
+        r = list_links_team(team_id)
+        if not r.get("ok"):
+            return None
+        by_id = {l.get("id"): l for l in r.get("links", [])}
+        out = []
+        for lid in ids:
+            l = by_id.get(lid) or {}
+            out.append({"id": lid, "shortcode": l.get("shortcode") or "",
+                        "display_name": l.get("display_name") or ""})
+        return out
+    return None
+
+
 def next_va_number_in_group(team_id: Optional[str], folder_or_group: str) -> int:
     """Calcule le prochain numéro VA disponible dans un groupe.
 

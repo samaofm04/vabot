@@ -238,12 +238,13 @@ class ClickRecap(commands.Cog):
         group_id = c.get("group_id")
         identity = c.get("identity")  # si défini -> énumération par suffixe (clé API)
         name = c.get("group_name") or "Groupe"
-        ids = await asyncio.to_thread(gms.report_link_ids, team_id, identity, group_id)
+        metas = await asyncio.to_thread(gms.report_links_meta, team_id, identity, group_id)
         # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
         # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
         # message valide (l'appelant voit None -> ne touche pas au message).
-        if ids is None:
+        if metas is None:
             return None
+        ids = [m["id"] for m in metas if m.get("id")]
         today = _paris_now().date()
         yest = today - datetime.timedelta(days=1)
         week_start = today - datetime.timedelta(days=today.weekday())  # lundi
@@ -297,6 +298,47 @@ class ClickRecap(commands.Cog):
                 name="⚠️ Aucun lien dans ce groupe",
                 value="Groupe vide, ou config périmée (groupe supprimé/recréé). "
                       "Relance `/setreportclick` si c'est inattendu.", inline=False)
+
+        # ---- Détail par VA : 1 ligne par lien (clics aujourd'hui + cycle en cours) ----
+        # Limité pour borner les appels analytics + la taille de l'embed.
+        _MAX_PER_VA = 60
+        if ids and not all_none and len(ids) <= _MAX_PER_VA:
+            cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours
+            per = await asyncio.gather(*[
+                asyncio.gather(
+                    asyncio.to_thread(gms.clicks_for_link, m["id"], today.isoformat(), today.isoformat()),
+                    asyncio.to_thread(gms.clicks_for_link, m["id"], cyc_s.isoformat(), cyc_e.isoformat()),
+                )
+                for m in metas if m.get("id")
+            ])
+            rows = []
+            for m, (ct, cc) in zip([m for m in metas if m.get("id")], per):
+                label = m.get("display_name") or m.get("shortcode") or "?"
+                rows.append((label, ct, cc))
+            # tri : plus de clics aujourd'hui en premier, puis cycle, puis nom
+            rows.sort(key=lambda r: (-(r[1] or 0), -(r[2] or 0), str(r[0])))
+
+            def _vfmt(v):
+                return "—" if v is None else str(v)
+            lines = [f"**{lab}** — {_vfmt(ct)} auj · {_vfmt(cc)} cycle" for lab, ct, cc in rows]
+            # Découpe en blocs <1024 chars (limite Discord par field)
+            block, blocks = "", []
+            for ln in lines:
+                if len(block) + len(ln) + 1 > 1000:
+                    blocks.append(block)
+                    block = ""
+                block += ("\n" if block else "") + ln
+            if block:
+                blocks.append(block)
+            for i, b in enumerate(blocks):
+                title = (f"📋 Détail par VA — auj · cycle {cyc_s.day}–{cyc_e.day} {FR_MONTHS[cyc_s.month]}"
+                         if i == 0 else "📋 Détail par VA (suite)")
+                emb.add_field(name=title, value=b, inline=False)
+        elif ids and not all_none and len(ids) > _MAX_PER_VA:
+            emb.add_field(name="📋 Détail par VA",
+                          value=f"_(trop de liens ({len(ids)}) pour le détail par lien — agrégat ci-dessus.)_",
+                          inline=False)
+
         emb.set_footer(text=f"🕐 Mis à jour à {_paris_now().strftime('%H:%M')} · maj chaque heure · GetMySocial")
         return emb
 
@@ -841,10 +883,16 @@ class ClickRecap(commands.Cog):
             return
         ws = _ws_label(team_id)
         cfg = _load_report_cfg()
-        cfg[str(interaction.guild.id)] = {
+        new_c = {
             "channel_id": interaction.channel.id, "team_id": team_id,
             "group_id": group_id, "identity": identity, "group_name": group_name,
         }
+        # Re-lancer dans le MÊME salon : on réutilise le message épinglé existant
+        # (sinon on poste un doublon). Salon différent -> nouveau message.
+        old = cfg.get(str(interaction.guild.id))
+        if isinstance(old, dict) and old.get("channel_id") == interaction.channel.id and old.get("message_id"):
+            new_c["message_id"] = old["message_id"]
+        cfg[str(interaction.guild.id)] = new_c
         _save_report_cfg(cfg)
         self._report_last_hour = _paris_now().hour  # évite un double post immédiat par la boucle
         await self._post_or_update_report(str(interaction.guild.id))
