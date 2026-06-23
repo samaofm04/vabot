@@ -2079,10 +2079,12 @@ class UserCog(commands.Cog):
     @app_commands.describe(
         membre="Le VA à débloquer (sinon : le VA du salon où tu lances la commande)",
         supprimer_gms="true = supprime aussi son lien sur GetMySocial (reset complet)",
+        regenerer="true = génère DIRECT un nouveau lien avec le bon template/identité",
     )
     async def resetlien(
         self, interaction: discord.Interaction,
         membre: discord.Member = None, supprimer_gms: bool = False,
+        regenerer: bool = False,
     ):
         app = await interaction.client.application_info()
         if interaction.user.id != app.owner.id:
@@ -2118,11 +2120,29 @@ class UserCog(commands.Cog):
         msg = f"✅ Anti-doublon réinitialisé pour {who}" + ("" if cleared or uid is None else " (rien en local)") + "."
         # 2) Optionnel : supprimer TOUS les liens va_@<handle> sur GMS (sinon la
         #    couche 2 rebloque ou affiche un ancien lien d'une autre identité).
-        if supprimer_gms and handle:
+        # regenerer implique de supprimer l'ancien lien d'abord (sinon doublon)
+        if (supprimer_gms or regenerer) and handle:
             try:
                 import gms
+                # Scan le workspace par défaut ET tous les teams connus (Threads US…)
+                # sinon un lien hybride dans Threads US ne serait pas supprimé.
+                pool = []
                 allr = await asyncio.to_thread(gms.list_all_links)
-                links = (allr.get("links") or []) if allr.get("ok") else []
+                if allr.get("ok"):
+                    pool += (allr.get("links") or [])
+                for tid in getattr(gms, "KNOWN_TEAMS", ()):
+                    try:
+                        tr = await asyncio.to_thread(gms.list_links_team, tid)
+                        if tr.get("ok"):
+                            pool += (tr.get("links") or [])
+                    except Exception:
+                        pass
+                seen_ids, links = set(), []
+                for l in pool:
+                    lid = l.get("id")
+                    if lid and lid not in seen_ids:
+                        seen_ids.add(lid)
+                        links.append(l)
                 targets = [l for l in links if l.get("id") and _gms_exact_link(handle, [l])]
                 deleted = 0
                 for l in targets:
@@ -2135,8 +2155,25 @@ class UserCog(commands.Cog):
                     msg += "\n(aucun lien `va_@` trouvé sur GMS)"
             except Exception as e:
                 msg += f"\n⚠️ GMS indispo : {e}"
-        else:
+        elif not regenerer:
             msg += "\n⚠️ S'il a déjà un lien `va_@<pseudo>` sur GMS, la vérif le rebloquera — relance avec `supprimer_gms:true` pour un reset complet."
+        # 3) Optionnel : régénère DIRECT un nouveau lien (bon template + identité serveur)
+        if regenerer and handle:
+            try:
+                import gms
+                ident = (_link_identity(interaction.guild, uid) or "").strip().lower()
+                if not ident:
+                    msg += "\n⚠️ Régénération impossible : aucune identité (ni serveur, ni VA)."
+                else:
+                    gen = await asyncio.to_thread(gms.quick_generate_for_identity, ident, handle)
+                    if gen.get("ok"):
+                        grp = f" · groupe **{gen['group']}**" if gen.get("group") else ""
+                        msg += (f"\n🔗 **Nouveau lien {ident}** : {gen.get('public_url')}{grp}\n"
+                                f"_(« Demander un lien » affichera celui-ci.)_")
+                    else:
+                        msg += f"\n⚠️ Régénération échouée : {gen.get('error')}"
+            except Exception as e:
+                msg += f"\n⚠️ Régénération : {e}"
         await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(
