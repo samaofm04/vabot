@@ -299,28 +299,30 @@ class ClickRecap(commands.Cog):
                 value="Groupe vide, ou config périmée (groupe supprimé/recréé). "
                       "Relance `/setreportclick` si c'est inattendu.", inline=False)
 
-        # ---- Détail par VA : 1 ligne par lien (clics aujourd'hui + cycle en cours) ----
+        # ---- Détail par VA : 1 ligne par lien (auj · cette semaine · quinzaine) ----
         # Limité pour borner les appels analytics + la taille de l'embed.
         _MAX_PER_VA = 60
         if ids and not all_none and len(ids) <= _MAX_PER_VA:
-            cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours
+            cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours (les 2 semaines)
             per = await asyncio.gather(*[
                 asyncio.gather(
                     asyncio.to_thread(gms.clicks_for_link, m["id"], today.isoformat(), today.isoformat()),
+                    asyncio.to_thread(gms.clicks_for_link, m["id"], week_start.isoformat(), today.isoformat()),
                     asyncio.to_thread(gms.clicks_for_link, m["id"], cyc_s.isoformat(), cyc_e.isoformat()),
                 )
                 for m in metas if m.get("id")
             ])
             rows = []
-            for m, (ct, cc) in zip([m for m in metas if m.get("id")], per):
+            for m, (ct, cw, cc) in zip([m for m in metas if m.get("id")], per):
                 label = m.get("display_name") or m.get("shortcode") or "?"
-                rows.append((label, ct, cc))
-            # tri : plus de clics aujourd'hui en premier, puis cycle, puis nom
-            rows.sort(key=lambda r: (-(r[1] or 0), -(r[2] or 0), str(r[0])))
+                rows.append((label, ct, cw, cc))
+            # tri : plus de clics aujourd'hui, puis semaine, puis quinzaine, puis nom
+            rows.sort(key=lambda r: (-(r[1] or 0), -(r[2] or 0), -(r[3] or 0), str(r[0])))
 
             def _vfmt(v):
                 return "—" if v is None else str(v)
-            lines = [f"**{lab}** — {_vfmt(ct)} auj · {_vfmt(cc)} cycle" for lab, ct, cc in rows]
+            lines = [f"**{lab}** — {_vfmt(ct)} auj · {_vfmt(cw)} sem · {_vfmt(cc)} quinz"
+                     for lab, ct, cw, cc in rows]
             # Découpe en blocs <1024 chars (limite Discord par field)
             block, blocks = "", []
             for ln in lines:
@@ -331,7 +333,7 @@ class ClickRecap(commands.Cog):
             if block:
                 blocks.append(block)
             for i, b in enumerate(blocks):
-                title = (f"📋 Détail par VA — auj · cycle {cyc_s.day}–{cyc_e.day} {FR_MONTHS[cyc_s.month]}"
+                title = (f"📋 Détail par VA — auj · sem · quinz ({cyc_s.day}–{cyc_e.day} {FR_MONTHS[cyc_s.month]})"
                          if i == 0 else "📋 Détail par VA (suite)")
                 emb.add_field(name=title, value=b, inline=False)
         elif ids and not all_none and len(ids) > _MAX_PER_VA:
