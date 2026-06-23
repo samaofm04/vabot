@@ -134,6 +134,15 @@ def _pay_period(d: datetime.date):
     return d.replace(day=16), d.replace(day=last)
 
 
+def _next_hour_unix() -> int:
+    """Timestamp Unix (UTC) du prochain top d'heure — pour le timer Discord
+    dynamique <t:…:R> (« dans X min »). Les tops d'heure Paris et UTC coïncident
+    (décalage en heures pleines), donc on calcule direct en UTC."""
+    u = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    nxt = u + datetime.timedelta(hours=1)
+    return int(calendar.timegm(nxt.timetuple()))
+
+
 def _fr(d: datetime.date) -> str:
     return f"{d.day} {FR_MONTHS[d.month]}"
 
@@ -210,7 +219,7 @@ class ClickRecap(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ---------- Report HORAIRE des clics d'un groupe (ex: Hybride) ----------
-    @tasks.loop(minutes=20)
+    @tasks.loop(minutes=5)
     async def hourly_report(self):
         """Met à jour (édite) le message de report de chaque serveur configuré,
         une fois par heure Paris (aligné sur l'heure pile, survit aux restarts)."""
@@ -359,6 +368,10 @@ class ClickRecap(commands.Cog):
         emb = await self._build_group_report(c)
         if emb is None:
             return
+        # Timer dynamique : Discord rend <t:…:R> en « dans X min » qui décompte
+        # tout seul côté client (pas besoin d'éditer pour le voir bouger).
+        ts = _next_hour_unix()
+        content = f"⏱️ **Prochaine mise à jour** <t:{ts}:R> (à <t:{ts}:t>)"
         mid = c.get("message_id")
         msg = None
         if mid:
@@ -370,7 +383,7 @@ class ClickRecap(commands.Cog):
                 return  # erreur transitoire (5xx/perm) -> on garde l'ancien
         if msg is not None:
             try:
-                await msg.edit(embed=emb)
+                await msg.edit(content=content, embed=emb)
                 return
             except discord.NotFound:
                 pass  # supprimé entre fetch et edit -> repost ci-dessous
@@ -380,7 +393,7 @@ class ClickRecap(commands.Cog):
                 print(f"[reportclick] edit transitoire échoué, ancien gardé : {e}")
                 return
         try:
-            m = await ch.send(embed=emb)
+            m = await ch.send(content=content, embed=emb)
             try:
                 await m.pin()
             except Exception:
