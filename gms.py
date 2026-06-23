@@ -970,6 +970,25 @@ def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, An
     grp = ""
     try:
         gid = get_group_id_for_folder(folder_name, team_id=team_id)
+        # Auto-decouverte : si pas de mapping, cherche un groupe nommé comme
+        # l'identité (ex: "Hybride") dans le workspace, et mémorise le mapping
+        # pour les prochaines générations.
+        if not gid and team_id:
+            try:
+                tg = list_team_groups(team_id)
+                if tg.get("ok"):
+                    fn_low = folder_name.lower()
+                    for g in tg.get("groups", []):
+                        gname = (g.get("name") or g.get("title") or "").strip().lower()
+                        if gname == fn_low:
+                            cand = g.get("id") or g.get("_id") or g.get("groupId") or ""
+                            cand = str(cand).strip()
+                            if cand:
+                                gid = cand
+                                set_group_for_folder(folder_name, gid, team_id=team_id)
+                            break
+            except Exception:
+                pass
         if gid:
             ar = assign_link_to_group(
                 dup_res["link"]["id"], gid,

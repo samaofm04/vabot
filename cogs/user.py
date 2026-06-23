@@ -2429,11 +2429,11 @@ class UserCog(commands.Cog):
             await interaction.followup.send(f"❌ GMS indispo : {e}", ephemeral=True)
             return
         # Cherche le lien template dans tous les workspaces connus + le workspace par défaut
-        link = None
         sources = [("défaut", lambda: gms.list_all_links())]
         for tid in getattr(gms, "KNOWN_TEAMS", ()):
             sources.append((tid, (lambda t=tid: gms.list_links_team(t))))
-        seen_ws = ""
+        # Collecte tous les liens (avec leur workspace) en une passe
+        all_pairs = []  # (workspace_label, link)
         for label, fn in sources:
             try:
                 r = await asyncio.to_thread(fn)
@@ -2442,15 +2442,37 @@ class UserCog(commands.Cog):
             if not r.get("ok"):
                 continue
             for l in (r.get("links") or []):
-                if sc in (str(l.get("shortcode") or "")).lower():
-                    link = l
-                    seen_ws = label
+                all_pairs.append((label, l))
+
+        def _norm(s):
+            # Tolérant aux inversions de lettres (threads/therads) et espaces
+            return "".join(sorted((s or "").lower().replace(" ", "").replace("_", "")))
+        sc_norm = _norm(sc)
+        link = None
+        seen_ws = ""
+        # Tier 1 : sous-chaîne dans le shortcode | Tier 2 : dans le display_name
+        # Tier 3 : fuzzy (mêmes lettres, ordre ignoré -> tolère les fautes de frappe)
+        for matcher in (
+            lambda l: sc in str(l.get("shortcode") or "").lower(),
+            lambda l: sc in str(l.get("display_name") or "").lower(),
+            lambda l: sc_norm and sc_norm == _norm(str(l.get("shortcode") or "")),
+            lambda l: sc_norm and sc_norm == _norm(str(l.get("display_name") or "")),
+        ):
+            for label, l in all_pairs:
+                if matcher(l):
+                    link, seen_ws = l, label
                     break
             if link:
                 break
         if not link or not link.get("id"):
+            # Diagnostic : montre les vrais shortcodes pour qu'on voie l'orthographe exacte
+            listing = []
+            for label, l in all_pairs[:25]:
+                listing.append(f"• `{l.get('shortcode')}` ({l.get('display_name') or '?'}) — {label}")
+            body = "\n".join(listing) if listing else "(aucun lien trouvé dans les workspaces)"
             await interaction.followup.send(
-                f"❌ Template `{sc}` introuvable (ni workspace par défaut, ni teams connus).",
+                f"❌ Template `{sc}` introuvable.\n**Voici les vrais shortcodes existants** "
+                f"(copie l'orthographe exacte) :\n{body}"[:1900],
                 ephemeral=True)
             return
         try:
