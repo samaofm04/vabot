@@ -47,6 +47,19 @@ def _ch_handle_va(name) -> str:
     return m.group(1) if m else ""
 
 
+def _link_message(url, guild=None) -> str:
+    """Message d'envoi du lien GMS au VA. En mode Threads : juste « Voici ton lien »
+    (pas la consigne 'story' qui est spécifique Instagram)."""
+    try:
+        import guild_features as gf
+        if gf.threads_mode(guild):
+            return f"🔗 **Voici ton lien :**\n{url}"
+    except Exception:
+        pass
+    return (f"🔗 **Voici ton lien :**\n{url}\n\n"
+            "📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !")
+
+
 def _menu_feature_check(interaction, feature: str) -> bool:
     """True si la fonction est active sur le serveur de l'interaction."""
     try:
@@ -892,9 +905,7 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             _lr_mark_generated(uid, url, res.get("va_name", ""))  # bloc dur + clôt la demande
             if va_ch:
                 try:
-                    await va_ch.send(
-                        f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !"
-                    )
+                    await va_ch.send(_link_message(url, getattr(va_ch, "guild", None)))
                 except Exception:
                     pass
             # Marque la demande comme traitée (retire le bouton)
@@ -1766,8 +1777,7 @@ class UserCog(commands.Cog):
         _ex = _lr_existing(uid)
         if _ex and _ex.get("url"):
             await interaction.followup.send(
-                f"🔗 **Voici ton lien :**\n{_ex['url']}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !",
-                ephemeral=True,
+                _link_message(_ex["url"], interaction.guild), ephemeral=True,
             )
             return
 
@@ -1808,8 +1818,7 @@ class UserCog(commands.Cog):
 
         if url:
             await interaction.followup.send(
-                f"🔗 **Voici ton lien :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !",
-                ephemeral=True,
+                _link_message(url, interaction.guild), ephemeral=True,
             )
             return
 
@@ -2362,6 +2371,62 @@ class UserCog(commands.Cog):
             lines.append(f"⚠️ list_links : {allr.get('error')}")
         await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
 
+    @app_commands.command(
+        name="settemplate",
+        description="[OWNER] Définit le template GMS à dupliquer pour une identité",
+    )
+    @app_commands.describe(
+        identity="Identité (ex: hybride)",
+        shortcode="Shortcode du template (ex: templatethreads)",
+    )
+    async def settemplate(self, interaction: discord.Interaction, identity: str, shortcode: str):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ident = identity.strip().lower()
+        sc = shortcode.strip().lstrip("/").lower()
+        try:
+            import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ GMS indispo : {e}", ephemeral=True)
+            return
+        # Cherche le lien template dans tous les workspaces connus + le workspace par défaut
+        link = None
+        sources = [("défaut", lambda: gms.list_all_links())]
+        for tid in getattr(gms, "KNOWN_TEAMS", ()):
+            sources.append((tid, (lambda t=tid: gms.list_links_team(t))))
+        seen_ws = ""
+        for label, fn in sources:
+            try:
+                r = await asyncio.to_thread(fn)
+            except Exception:
+                continue
+            if not r.get("ok"):
+                continue
+            for l in (r.get("links") or []):
+                if sc in (str(l.get("shortcode") or "")).lower():
+                    link = l
+                    seen_ws = label
+                    break
+            if link:
+                break
+        if not link or not link.get("id"):
+            await interaction.followup.send(
+                f"❌ Template `{sc}` introuvable (ni workspace par défaut, ni teams connus).",
+                ephemeral=True)
+            return
+        try:
+            gms.set_template_for_model(ident, link["id"])
+        except Exception as e:
+            await interaction.followup.send(f"❌ Échec config : {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Template de **{ident}** = `{link.get('shortcode')}` (id `{link['id']}`, workspace `{seen_ws}`).\n"
+            f"→ Les liens générés pour {ident} dupliqueront ce template.",
+            ephemeral=True)
+
     @app_commands.command(name="help", description="Affiche l'aide")
     async def help_cmd(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -2616,7 +2681,7 @@ class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial")
                 )
                 if vch:
                     try:
-                        await vch.send(f"🔗 **Voici ton lien GetMySocial :**\n{url}\n\n📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !")
+                        await vch.send(_link_message(url, getattr(vch, "guild", None)))
                         posted = f"\n→ envoyé dans {vch.mention}"
                     except Exception:
                         pass

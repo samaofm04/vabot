@@ -897,6 +897,13 @@ def list_links_team(team_id: str) -> Dict[str, Any]:
 
 # Team (workspace) "marche francais" — meme constante que la route web
 MARCHE_FRANCAIS_TID = "tm_6a1ea410d882dd2173b8a315"
+# Team (workspace) "Threads US" — pour l'identite hybride (marché US)
+THREADS_US_TID = "tm_6a3853ddfd98d2441274d270"
+# Workspaces connus à scanner pour retrouver le team d'un template.
+KNOWN_TEAMS = (MARCHE_FRANCAIS_TID, THREADS_US_TID)
+# Suffixe de shortcode par identité (défaut = nom de l'identité, pour categorize_link).
+# Pour hybride (Threads US) on veut un lien "secret" plutôt que le nom visible.
+_SHORTCODE_SUFFIX = {"hybride": "secret", "hybrid": "secret"}
 # Domaine public des liens GetMySocial
 PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
 
@@ -919,14 +926,16 @@ def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, An
     if not tpl_id:
         return {"ok": False, "error": f"Aucun template GMS défini pour @{ident}. Configure-le d'abord sur le site (onglet SFS/GMS)."}
 
-    # Detecte le workspace du template
+    # Detecte le workspace du template (marché FR ou Threads US…)
     team_id = None
-    try:
-        mf = list_links_team(MARCHE_FRANCAIS_TID)
-        if mf.get("ok") and any(l.get("id") == tpl_id for l in mf["links"]):
-            team_id = MARCHE_FRANCAIS_TID
-    except Exception:
-        pass
+    for _tid in KNOWN_TEAMS:
+        try:
+            r = list_links_team(_tid)
+            if r.get("ok") and any(l.get("id") == tpl_id for l in r["links"]):
+                team_id = _tid
+                break
+        except Exception:
+            pass
 
     folder_name = ident.capitalize()
     # Nom du lien : pseudo Discord du VA (va_@handle) si fourni, sinon compteur "VA N"
@@ -941,13 +950,14 @@ def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, An
             n = 1
         new_name = f"VA {n}"
 
-    # Shortcode = 4 chars random + identite (l'identite reste dans le shortcode
-    # pour le groupement/categorize_link). Retry si pris.
+    # Shortcode = 4 chars random + suffixe (identité, ou "secret" pour hybride).
+    # Retry si pris.
+    sc_suffix = _SHORTCODE_SUFFIX.get(ident, ident)
     last_err = ""
     dup_res: Dict[str, Any] = {}
     new_shortcode = ""
     for _ in range(5):
-        new_shortcode = generate_random_prefix(4) + ident
+        new_shortcode = generate_random_prefix(4) + sc_suffix
         dup_res = duplicate_link(tpl_id, new_shortcode, new_name, team_id=team_id)
         if dup_res.get("ok"):
             break
