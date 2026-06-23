@@ -236,8 +236,9 @@ class ClickRecap(commands.Cog):
         import gms
         team_id = c.get("team_id")
         group_id = c.get("group_id")
+        identity = c.get("identity")  # si défini -> énumération par suffixe (clé API)
         name = c.get("group_name") or "Groupe"
-        ids = await asyncio.to_thread(gms.link_ids_in_group, team_id, group_id)
+        ids = await asyncio.to_thread(gms.report_link_ids, team_id, identity, group_id)
         # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
         # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
         # message valide (l'appelant voit None -> ne touche pas au message).
@@ -788,49 +789,69 @@ class ClickRecap(commands.Cog):
                 "⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité du "
                 "serveur (`/setidentite`).", ephemeral=True)
             return
-        name = name[0].upper() + name[1:]  # hybride -> Hybride (les groupes sont capitalisés)
-        # Ordre de recherche ANCRÉ sur l'identité : le workspace préféré de
-        # cette identité (ex: hybride -> Threads US) est testé EN PREMIER, pour
-        # qu'un groupe homonyme dans le marché FR ne gagne pas par défaut.
-        order = list(getattr(gms, "KNOWN_TEAMS", ()))
-        pref = getattr(gms, "IDENTITY_TEAM", {}).get(name.lower())
-        if pref and pref in order:
-            order.remove(pref)
-            order.insert(0, pref)
-        matches = []
-        for tid in order:
-            gid = await asyncio.to_thread(gms.group_id_by_name, tid, name)
-            if gid:
-                matches.append((tid, gid))
-        if not matches:
-            await interaction.followup.send(
-                f"❌ Groupe « **{name}** » introuvable dans les workspaces GMS connus.\n"
-                f"Vérifie le nom exact du groupe sur GetMySocial.", ephemeral=True)
-            return
-        team_id, group_id = matches[0]
+        ident = name.lower()
+        group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
 
         def _ws_label(tid):
             if tid == getattr(gms, "THREADS_US_TID", None):
                 return "Threads US"
             if tid == getattr(gms, "MARCHE_FRANCAIS_TID", None):
                 return "marché FR"
-            return tid
+            return str(tid)
+
+        team_id = group_id = None
+        identity = None
+        ambig = ""
+        suffix = getattr(gms, "_SHORTCODE_SUFFIX", {}).get(ident)
+        pref_team = getattr(gms, "IDENTITY_TEAM", {}).get(ident)
+        if suffix and pref_team:
+            # Chemin ROBUSTE : identité connue (ex: hybride) -> workspace préféré
+            # + énumération des liens par suffixe `…secret` via la CLÉ API (pas
+            # de cookie de session, donc insensible à son expiration sur le VPS).
+            team_id, identity = pref_team, ident
+        else:
+            # Chemin GROUPE (cookie) : pour un groupe arbitraire sans identité connue.
+            order = list(getattr(gms, "KNOWN_TEAMS", ()))
+            if pref_team and pref_team in order:
+                order.remove(pref_team)
+                order.insert(0, pref_team)
+            matches = []
+            for tid in order:
+                gid = await asyncio.to_thread(gms.group_id_by_name, tid, group_name)
+                if gid:
+                    matches.append((tid, gid))
+            if not matches:
+                await interaction.followup.send(
+                    f"❌ Groupe « **{group_name}** » introuvable.\n"
+                    f"Si tu visais un groupe perso, le **cookie de session GMS du VPS** est "
+                    f"peut-être expiré (la résolution par groupe en dépend). Pour l'identité "
+                    f"**hybride**, ça passe par la clé API — réessaie `/setreportclick groupe:hybride`.",
+                    ephemeral=True)
+                return
+            team_id, group_id = matches[0]
+            if len(matches) > 1:
+                ambig = (f"\n⚠️ Un groupe « {group_name} » existe dans **{len(matches)}** workspaces — "
+                         f"j'ai pris **{_ws_label(team_id)}**.")
+        # Validation : on arrive bien à lister les liens (sinon config inutile)
+        ids = await asyncio.to_thread(gms.report_link_ids, team_id, identity, group_id)
+        if ids is None:
+            await interaction.followup.send(
+                "❌ Impossible de lister les liens (API/cookie GMS injoignable). Réessaie "
+                "dans un instant.", ephemeral=True)
+            return
         ws = _ws_label(team_id)
-        ambig = (f"\n⚠️ Un groupe « {name} » existe dans **{len(matches)}** workspaces — "
-                 f"j'ai pris **{ws}**. Si c'est le mauvais, renomme l'autre groupe."
-                 ) if len(matches) > 1 else ""
         cfg = _load_report_cfg()
         cfg[str(interaction.guild.id)] = {
-            "channel_id": interaction.channel.id,
-            "team_id": team_id, "group_id": group_id, "group_name": name,
+            "channel_id": interaction.channel.id, "team_id": team_id,
+            "group_id": group_id, "identity": identity, "group_name": group_name,
         }
         _save_report_cfg(cfg)
         self._report_last_hour = _paris_now().hour  # évite un double post immédiat par la boucle
         await self._post_or_update_report(str(interaction.guild.id))
         await interaction.followup.send(
-            f"✅ Report horaire des clics du groupe **{name}** (workspace **{ws}**) activé dans "
-            f"{interaction.channel.mention}.\n"
-            f"Le message est **édité chaque heure** (aujourd'hui / hier / semaine / période 1–15 / 16–fin). "
+            f"✅ Report horaire des clics **{group_name}** (workspace **{ws}**, {len(ids)} lien(s)) "
+            f"activé dans {interaction.channel.mention}.\n"
+            f"Message **édité chaque heure** (aujourd'hui / hier / semaine / période 1–15 / 16–fin). "
             f"Désactive avec `/reportclick_off`.{ambig}", ephemeral=True)
 
     @app_commands.command(

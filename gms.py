@@ -858,6 +858,29 @@ def link_ids_in_group(team_id: str, group_id: str) -> Optional[List[str]]:
     return out
 
 
+def report_link_ids(team_id: str, identity: Optional[str] = None,
+                    group_id: Optional[str] = None) -> Optional[List[str]]:
+    """Link ids a inclure dans un report de clics, le plus ROBUSTEMENT possible.
+
+    Priorite au SUFFIXE de shortcode (ex: hybride -> '…secret') via la CLE API
+    publique (fiable, et exclut naturellement le template) ; sinon repli sur
+    l'appartenance au GROUPE via le cookie de session (API privee, peut etre
+    expire sur le VPS).
+    None = impossible de recuperer (l'appelant NE DOIT PAS afficher « 0 clic »).
+    []   = recupere mais aucun lien (vrai vide).
+    """
+    suffix = _SHORTCODE_SUFFIX.get((identity or "").lower()) if identity else None
+    if suffix and team_id:
+        r = list_links_team(team_id)
+        if not r.get("ok"):
+            return None
+        return [l["id"] for l in r.get("links", [])
+                if l.get("id") and (l.get("shortcode") or "").lower().endswith(suffix)]
+    if group_id and team_id:
+        return link_ids_in_group(team_id, group_id)
+    return None
+
+
 def next_va_number_in_group(team_id: Optional[str], folder_or_group: str) -> int:
     """Calcule le prochain numéro VA disponible dans un groupe.
 
