@@ -60,6 +60,20 @@ def _link_message(url, guild=None) -> str:
             "📲 Voilà ton lien à mettre dans tes **story** (mets-le en story) !")
 
 
+def _link_identity(guild, uid):
+    """Identité à utiliser pour le LIEN GMS d'un VA : si le serveur a une identité
+    dédiée (ex: hybride pour Threads US), on l'utilise — peu importe l'identité
+    stockée du VA. Sinon, l'identité du VA. Évite de devoir réassigner chaque VA."""
+    try:
+        import guild_features as gf
+        si = gf.get_server_identity(guild)
+        if si:
+            return si
+    except Exception:
+        pass
+    return get_user_identity(uid)
+
+
 def _menu_feature_check(interaction, feature: str) -> bool:
     """True si la fonction est active sur le serveur de l'interaction."""
     try:
@@ -849,7 +863,8 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             return
         _LINK_GEN_INFLIGHT.add(uid)
         try:
-            identity = get_user_identity(uid)
+            # Identité du LIEN = identité dédiée du serveur (ex: hybride) si définie.
+            identity = _link_identity(interaction.guild, uid)
             if not identity:
                 await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
                 return
@@ -1765,7 +1780,8 @@ class UserCog(commands.Cog):
             await interaction.response.send_message("⚠️ Fonction désactivée sur ce serveur.", ephemeral=True)
             return
         uid = interaction.user.id
-        identity = get_user_identity(uid)
+        # Identité dédiée du serveur (ex: hybride pour Threads) si définie, sinon celle du VA.
+        identity = _link_identity(interaction.guild, uid)
         if not identity:
             await interaction.response.send_message(
                 "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
