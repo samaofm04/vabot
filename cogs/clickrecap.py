@@ -824,83 +824,32 @@ class ClickRecap(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
             return
-        import guild_features as gf
-        name = (groupe or gf.get_server_identity(interaction.guild) or "").strip()
-        if not name:
-            await interaction.followup.send(
-                "⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité du "
-                "serveur (`/setidentite`).", ephemeral=True)
+        data, err = await self._resolve_report_group(interaction.guild, groupe)
+        if err:
+            await interaction.followup.send(err, ephemeral=True)
             return
-        ident = name.lower()
-        group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
-
-        def _ws_label(tid):
-            if tid == getattr(gms, "THREADS_US_TID", None):
-                return "Threads US"
-            if tid == getattr(gms, "MARCHE_FRANCAIS_TID", None):
-                return "marché FR"
-            return str(tid)
-
-        team_id = group_id = None
-        identity = None
-        ambig = ""
-        suffix = getattr(gms, "_SHORTCODE_SUFFIX", {}).get(ident)
-        pref_team = getattr(gms, "IDENTITY_TEAM", {}).get(ident)
-        if suffix and pref_team:
-            # Chemin ROBUSTE : identité connue (ex: hybride) -> workspace préféré
-            # + énumération des liens par suffixe `…secret` via la CLÉ API (pas
-            # de cookie de session, donc insensible à son expiration sur le VPS).
-            team_id, identity = pref_team, ident
-        else:
-            # Chemin GROUPE (cookie) : pour un groupe arbitraire sans identité connue.
-            order = list(getattr(gms, "KNOWN_TEAMS", ()))
-            if pref_team and pref_team in order:
-                order.remove(pref_team)
-                order.insert(0, pref_team)
-            matches = []
-            for tid in order:
-                gid = await asyncio.to_thread(gms.group_id_by_name, tid, group_name)
-                if gid:
-                    matches.append((tid, gid))
-            if not matches:
-                await interaction.followup.send(
-                    f"❌ Groupe « **{group_name}** » introuvable.\n"
-                    f"Si tu visais un groupe perso, le **cookie de session GMS du VPS** est "
-                    f"peut-être expiré (la résolution par groupe en dépend). Pour l'identité "
-                    f"**hybride**, ça passe par la clé API — réessaie `/setreportclick groupe:hybride`.",
-                    ephemeral=True)
-                return
-            team_id, group_id = matches[0]
-            if len(matches) > 1:
-                ambig = (f"\n⚠️ Un groupe « {group_name} » existe dans **{len(matches)}** workspaces — "
-                         f"j'ai pris **{_ws_label(team_id)}**.")
-        # Validation : on arrive bien à lister les liens (sinon config inutile)
-        ids = await asyncio.to_thread(gms.report_link_ids, team_id, identity, group_id)
-        if ids is None:
-            await interaction.followup.send(
-                "❌ Impossible de lister les liens (API/cookie GMS injoignable). Réessaie "
-                "dans un instant.", ephemeral=True)
-            return
-        ws = _ws_label(team_id)
+        gid = str(interaction.guild.id)
         cfg = _load_report_cfg()
         new_c = {
-            "channel_id": interaction.channel.id, "team_id": team_id,
-            "group_id": group_id, "identity": identity, "group_name": group_name,
+            "channel_id": interaction.channel.id, "team_id": data["team_id"],
+            "group_id": data["group_id"], "identity": data["identity"],
+            "group_name": data["group_name"],
         }
         # Re-lancer dans le MÊME salon : on réutilise le message épinglé existant
         # (sinon on poste un doublon). Salon différent -> nouveau message.
-        old = cfg.get(str(interaction.guild.id))
+        old = cfg.get(gid)
         if isinstance(old, dict) and old.get("channel_id") == interaction.channel.id and old.get("message_id"):
             new_c["message_id"] = old["message_id"]
-        cfg[str(interaction.guild.id)] = new_c
+        cfg[gid] = new_c
         _save_report_cfg(cfg)
         self._report_last_hour = _paris_now().hour  # évite un double post immédiat par la boucle
-        await self._post_or_update_report(str(interaction.guild.id))
+        await self._post_or_update_report(gid)
         await interaction.followup.send(
-            f"✅ Report horaire des clics **{group_name}** (workspace **{ws}**, {len(ids)} lien(s)) "
-            f"activé dans {interaction.channel.mention}.\n"
+            f"✅ Report horaire des clics **{data['group_name']}** (workspace **{data['ws']}**, "
+            f"{data['n']} lien(s)) activé dans {interaction.channel.mention}.\n"
             f"Message **édité chaque heure** (aujourd'hui / hier / semaine / période 1–15 / 16–fin). "
-            f"Désactive avec `/reportclick_off`.{ambig}", ephemeral=True)
+            f"Snapshot à la demande : `/reportclicknow`. Désactive : `/reportclick_off`.{data['ambig']}",
+            ephemeral=True)
 
     @app_commands.command(
         name="reportclick_off",
@@ -920,6 +869,100 @@ class ClickRecap(commands.Cog):
             await interaction.response.send_message("🛑 Report horaire désactivé.", ephemeral=True)
         else:
             await interaction.response.send_message("ℹ️ Aucun report configuré ici.", ephemeral=True)
+
+    async def _resolve_report_group(self, guild, groupe):
+        """Résout la cible d'un report de clics. Retourne (data, None) si OK —
+        data = {team_id, identity, group_id, group_name, ws, ambig, n} —, sinon
+        (None, message_erreur). Partagé par /setreportclick et /reportclicknow."""
+        import gms
+        import guild_features as gf
+        name = (groupe or gf.get_server_identity(guild) or "").strip()
+        if not name:
+            return None, ("⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité "
+                          "du serveur (`/setidentite`).")
+        ident = name.lower()
+        group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
+
+        def _ws_label(tid):
+            if tid == getattr(gms, "THREADS_US_TID", None):
+                return "Threads US"
+            if tid == getattr(gms, "MARCHE_FRANCAIS_TID", None):
+                return "marché FR"
+            return str(tid)
+
+        team_id = group_id = identity = None
+        ambig = ""
+        suffix = getattr(gms, "_SHORTCODE_SUFFIX", {}).get(ident)
+        pref_team = getattr(gms, "IDENTITY_TEAM", {}).get(ident)
+        if suffix and pref_team:
+            # Identité connue (ex: hybride) -> workspace préféré + énumération par
+            # suffixe `…secret` via la CLÉ API (insensible à l'expiration du cookie).
+            team_id, identity = pref_team, ident
+        else:
+            # Groupe arbitraire -> résolution par nom de groupe (cookie de session).
+            order = list(getattr(gms, "KNOWN_TEAMS", ()))
+            if pref_team and pref_team in order:
+                order.remove(pref_team)
+                order.insert(0, pref_team)
+            matches = []
+            for tid in order:
+                g = await asyncio.to_thread(gms.group_id_by_name, tid, group_name)
+                if g:
+                    matches.append((tid, g))
+            if not matches:
+                return None, (f"❌ Groupe « **{group_name}** » introuvable.\n"
+                              f"Si tu visais un groupe perso, le **cookie de session GMS du VPS** "
+                              f"est peut-être expiré. Pour **hybride**, essaie `groupe:hybride` (clé API).")
+            team_id, group_id = matches[0]
+            if len(matches) > 1:
+                ambig = (f"\n⚠️ Un groupe « {group_name} » existe dans **{len(matches)}** workspaces "
+                         f"— j'ai pris **{_ws_label(team_id)}**.")
+        ids = await asyncio.to_thread(gms.report_link_ids, team_id, identity, group_id)
+        if ids is None:
+            return None, ("❌ Impossible de lister les liens (API/cookie GMS injoignable). "
+                          "Réessaie dans un instant.")
+        return {"team_id": team_id, "identity": identity, "group_id": group_id,
+                "group_name": group_name, "ws": _ws_label(team_id),
+                "ambig": ambig, "n": len(ids)}, None
+
+    @app_commands.command(
+        name="reportclicknow",
+        description="[OWNER] Poste MAINTENANT un report complet des clics (snapshot)",
+    )
+    @app_commands.describe(groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)")
+    async def reportclicknow(self, interaction: discord.Interaction, groupe: str = None):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms  # noqa: F401 (vérifie juste que le module est dispo)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        data, err = await self._resolve_report_group(interaction.guild, groupe)
+        if err:
+            await interaction.followup.send(err, ephemeral=True)
+            return
+        emb = await self._build_group_report({
+            "team_id": data["team_id"], "group_id": data["group_id"],
+            "identity": data["identity"], "group_name": data["group_name"],
+        })
+        if emb is None:
+            await interaction.followup.send(
+                "❌ GMS injoignable pour l'instant — réessaie dans un instant.", ephemeral=True)
+            return
+        try:
+            await interaction.channel.send(embed=emb)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Envoi impossible ici : {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Report complet **{data['group_name']}** posté ici ({data['n']} lien(s)).{data['ambig']}",
+            ephemeral=True)
 
 
 async def setup(bot):
