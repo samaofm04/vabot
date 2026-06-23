@@ -74,6 +74,23 @@ def _link_identity(guild, uid):
     return get_user_identity(uid)
 
 
+def _link_is_for_server_identity(url, guild) -> bool:
+    """Sur un serveur à identité dédiée (ex: hybride), True seulement si le lien
+    correspond à CETTE identité. Un ancien lien d'une autre identité (julia/emma)
+    est considéré périmé -> on le régénère. Sans identité dédiée : toujours True."""
+    try:
+        import guild_features as gf
+        si = gf.get_server_identity(guild)
+        if not si:
+            return True
+        import gms
+        suffix = (gms._SHORTCODE_SUFFIX.get(si, si) or si).lower()
+        sc = (url or "").rstrip("/").rsplit("/", 1)[-1].lower()
+        return bool(sc) and sc.endswith(suffix)
+    except Exception:
+        return True
+
+
 def _menu_feature_check(interaction, feature: str) -> bool:
     """True si la fonction est active sur le serveur de l'interaction."""
     try:
@@ -1789,9 +1806,10 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        # 1) Lien déjà connu en local -> on l'affiche tout de suite (rapide, sans réseau).
+        # 1) Lien déjà connu en local -> on l'affiche (sauf s'il est d'une autre
+        #    identité que celle dédiée au serveur : alors on le considère périmé).
         _ex = _lr_existing(uid)
-        if _ex and _ex.get("url"):
+        if _ex and _ex.get("url") and _link_is_for_server_identity(_ex["url"], interaction.guild):
             await interaction.followup.send(
                 _link_message(_ex["url"], interaction.guild), ephemeral=True,
             )
@@ -1826,8 +1844,10 @@ class UserCog(commands.Cog):
                     _hit = _gms_exact_link(handle, _all.get("links") or [])
                     if _hit:
                         _sc = _hit.get("shortcode", "")
-                        url = f"{gms.PUBLIC_LINK_DOMAIN}/{_sc}" if _sc else ""
-                        if url:
+                        _u = f"{gms.PUBLIC_LINK_DOMAIN}/{_sc}" if _sc else ""
+                        # On ignore un lien d'une autre identité (serveur hybride).
+                        if _u and _link_is_for_server_identity(_u, interaction.guild):
+                            url = _u
                             _lr_mark_generated(uid, url, _hit.get("display_name", ""))
             except Exception:
                 pass  # GMS indispo -> on retombe sur la demande normale
