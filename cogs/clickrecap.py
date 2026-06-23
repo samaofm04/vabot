@@ -68,6 +68,28 @@ def _save_linkcache(d: dict):
         pass
 
 
+# ---- Report horaire des clics d'un GROUPE GMS (ex: Hybride) dans un salon dédié ----
+# data/ est gitignore -> config runtime VPS. {guild_id: {channel_id, team_id,
+# group_id, group_name, message_id}}. message_id = message live édité chaque heure.
+_REPORT_CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_click.json"
+
+
+def _load_report_cfg() -> dict:
+    try:
+        d = json.loads(_REPORT_CFG_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_report_cfg(d: dict):
+    try:
+        _REPORT_CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _REPORT_CFG_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _match_shortcode(sc, links):
     sc = (sc or "").lower()
     if not sc:
@@ -147,8 +169,10 @@ class ClickRecap(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self._last_run = None  # date ISO du dernier récap auto (anti-doublon)
+        self._report_last_hour = None  # heure Paris du dernier report horaire posté
         if _auto_enabled():
             self.daily_recap.start()
+        self.hourly_report.start()
 
     async def cog_load(self):
         # Vue persistante : le bouton 'Mes clics' marche même après un restart.
@@ -160,6 +184,8 @@ class ClickRecap(commands.Cog):
     def cog_unload(self):
         if self.daily_recap.is_running():
             self.daily_recap.cancel()
+        if self.hourly_report.is_running():
+            self.hourly_report.cancel()
 
     async def _is_owner(self, uid):
         if self._owner_id is None:
@@ -182,6 +208,148 @@ class ClickRecap(commands.Cog):
     @daily_recap.before_loop
     async def _before(self):
         await self.bot.wait_until_ready()
+
+    # ---------- Report HORAIRE des clics d'un groupe (ex: Hybride) ----------
+    @tasks.loop(minutes=20)
+    async def hourly_report(self):
+        """Met à jour (édite) le message de report de chaque serveur configuré,
+        une fois par heure Paris (aligné sur l'heure pile, survit aux restarts)."""
+        now = _paris_now()
+        if self._report_last_hour == now.hour:
+            return
+        self._report_last_hour = now.hour
+        cfg = _load_report_cfg()
+        for gid in list(cfg.keys()):
+            try:
+                await self._post_or_update_report(gid)
+            except Exception as e:
+                print(f"[reportclick] update {gid} échoué : {e}")
+            await asyncio.sleep(1)
+
+    @hourly_report.before_loop
+    async def _before_report(self):
+        await self.bot.wait_until_ready()
+
+    async def _build_group_report(self, c: dict):
+        """Construit l'embed du report d'un groupe : aujourd'hui / hier / semaine
+        / période 1–15 / période 16–fin. None si le module GMS est indispo."""
+        import gms
+        team_id = c.get("team_id")
+        group_id = c.get("group_id")
+        name = c.get("group_name") or "Groupe"
+        ids = await asyncio.to_thread(gms.link_ids_in_group, team_id, group_id)
+        # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
+        # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
+        # message valide (l'appelant voit None -> ne touche pas au message).
+        if ids is None:
+            return None
+        today = _paris_now().date()
+        yest = today - datetime.timedelta(days=1)
+        week_start = today - datetime.timedelta(days=today.weekday())  # lundi
+        last = calendar.monthrange(today.year, today.month)[1]
+        p1s, p1e = today.replace(day=1), today.replace(day=15)
+        p2s, p2e = today.replace(day=16), today.replace(day=last)
+        ranges = [
+            (today, today),        # aujourd'hui
+            (yest, yest),          # hier
+            (week_start, today),   # cette semaine
+            (p1s, p1e),            # période 1–15
+            (p2s, p2e),            # période 16–fin
+        ]
+        vals = await asyncio.gather(*[
+            asyncio.to_thread(gms.clicks_for_ids, ids, s.isoformat(), e.isoformat())
+            for (s, e) in ranges
+        ])
+        c_today, c_yest, c_week, c_p1, c_p2 = vals
+        all_none = all(v is None for v in vals)
+
+        def fmt(v):
+            return "—" if v is None else f"**{v}**"
+
+        if all_none:
+            color = discord.Color.orange()
+        elif (c_today or 0) > 0 or (c_week or 0) > 0:
+            color = discord.Color.green()
+        else:
+            color = discord.Color.dark_grey()
+        emb = discord.Embed(
+            title=f"📊 Report clics — {name}",
+            description=f"Clics cumulés du groupe **{name}** ({len(ids)} lien(s)).",
+            color=color,
+        )
+        emb.add_field(name="🟢 Aujourd'hui", value=f"{fmt(c_today)} clic(s)", inline=True)
+        emb.add_field(name="📅 Hier", value=f"{fmt(c_yest)} clic(s)", inline=True)
+        emb.add_field(name=f"🗓️ Cette semaine (dep. {_fr(week_start)})",
+                      value=f"{fmt(c_week)} clic(s)", inline=False)
+        emb.add_field(name=f"💰 Période 1–15 ({_fr(p1s)}–{_fr(p1e)})",
+                      value=f"{fmt(c_p1)} clic(s)", inline=True)
+        emb.add_field(name=f"💰 Période 16–{p2e.day} ({_fr(p2s)}–{_fr(p2e)})",
+                      value=f"{fmt(c_p2)} clic(s)", inline=True)
+        if all_none:
+            emb.add_field(name="⚠️ Données indisponibles",
+                          value="GetMySocial ne répond pas pour l'instant.", inline=False)
+        elif not ids:
+            # board OK mais 0 lien : groupe réellement vide OU group_id périmé
+            # (groupe supprimé/recréé) -> on le signale (sinon « 0 clic » trompeur).
+            emb.color = discord.Color.orange()
+            emb.add_field(
+                name="⚠️ Aucun lien dans ce groupe",
+                value="Groupe vide, ou config périmée (groupe supprimé/recréé). "
+                      "Relance `/setreportclick` si c'est inattendu.", inline=False)
+        emb.set_footer(text=f"🕐 Mis à jour à {_paris_now().strftime('%H:%M')} · maj chaque heure · GetMySocial")
+        return emb
+
+    async def _post_or_update_report(self, guild_id: str):
+        """Édite le message live de report du serveur, ou le poste (1re fois)."""
+        cfg = _load_report_cfg()
+        c = cfg.get(guild_id)
+        if not c:
+            return
+        ch = self.bot.get_channel(int(c["channel_id"]))
+        if ch is None:
+            try:
+                ch = await self.bot.fetch_channel(int(c["channel_id"]))
+            except Exception:
+                return
+        emb = await self._build_group_report(c)
+        if emb is None:
+            return
+        mid = c.get("message_id")
+        msg = None
+        if mid:
+            try:
+                msg = await ch.fetch_message(int(mid))
+            except discord.NotFound:
+                msg = None  # message vraiment supprimé -> on en reposte un
+            except Exception:
+                return  # erreur transitoire (5xx/perm) -> on garde l'ancien
+        if msg is not None:
+            try:
+                await msg.edit(embed=emb)
+                return
+            except discord.NotFound:
+                pass  # supprimé entre fetch et edit -> repost ci-dessous
+            except Exception as e:
+                # 5xx / perte de perm / 429 : on NE reposte PAS (sinon doublons
+                # de messages épinglés qui s'accumulent) -> on garde l'ancien.
+                print(f"[reportclick] edit transitoire échoué, ancien gardé : {e}")
+                return
+        try:
+            m = await ch.send(embed=emb)
+            try:
+                await m.pin()
+            except Exception:
+                pass
+            # Re-load juste avant d'écrire : un /reportclick_off ou un autre
+            # /setreportclick a pu modifier le fichier pendant le ch.send().
+            # On ne touche QUE le message_id de CE serveur (pas d'écrasement
+            # du snapshot complet, pas de résurrection d'un guild supprimé).
+            fresh = _load_report_cfg()
+            if guild_id in fresh:
+                fresh[guild_id]["message_id"] = m.id
+                _save_report_cfg(fresh)
+        except Exception as e:
+            print(f"[reportclick] post initial échoué : {e}")
 
     # ---------- Coeur ----------
     async def _links(self):
@@ -591,6 +759,98 @@ class ClickRecap(commands.Cog):
              "🛑 Récap clics automatique **désactivé**. Utilise `/recapclics` pour tester à la main."),
             ephemeral=True,
         )
+
+
+    @app_commands.command(
+        name="setreportclick",
+        description="[OWNER] Report horaire des clics d'un groupe GMS dans CE salon",
+    )
+    @app_commands.describe(
+        groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)",
+    )
+    async def setreportclick(self, interaction: discord.Interaction, groupe: str = None):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        import guild_features as gf
+        name = (groupe or gf.get_server_identity(interaction.guild) or "").strip()
+        if not name:
+            await interaction.followup.send(
+                "⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité du "
+                "serveur (`/setidentite`).", ephemeral=True)
+            return
+        name = name[0].upper() + name[1:]  # hybride -> Hybride (les groupes sont capitalisés)
+        # Ordre de recherche ANCRÉ sur l'identité : le workspace préféré de
+        # cette identité (ex: hybride -> Threads US) est testé EN PREMIER, pour
+        # qu'un groupe homonyme dans le marché FR ne gagne pas par défaut.
+        order = list(getattr(gms, "KNOWN_TEAMS", ()))
+        pref = getattr(gms, "IDENTITY_TEAM", {}).get(name.lower())
+        if pref and pref in order:
+            order.remove(pref)
+            order.insert(0, pref)
+        matches = []
+        for tid in order:
+            gid = await asyncio.to_thread(gms.group_id_by_name, tid, name)
+            if gid:
+                matches.append((tid, gid))
+        if not matches:
+            await interaction.followup.send(
+                f"❌ Groupe « **{name}** » introuvable dans les workspaces GMS connus.\n"
+                f"Vérifie le nom exact du groupe sur GetMySocial.", ephemeral=True)
+            return
+        team_id, group_id = matches[0]
+
+        def _ws_label(tid):
+            if tid == getattr(gms, "THREADS_US_TID", None):
+                return "Threads US"
+            if tid == getattr(gms, "MARCHE_FRANCAIS_TID", None):
+                return "marché FR"
+            return tid
+        ws = _ws_label(team_id)
+        ambig = (f"\n⚠️ Un groupe « {name} » existe dans **{len(matches)}** workspaces — "
+                 f"j'ai pris **{ws}**. Si c'est le mauvais, renomme l'autre groupe."
+                 ) if len(matches) > 1 else ""
+        cfg = _load_report_cfg()
+        cfg[str(interaction.guild.id)] = {
+            "channel_id": interaction.channel.id,
+            "team_id": team_id, "group_id": group_id, "group_name": name,
+        }
+        _save_report_cfg(cfg)
+        self._report_last_hour = _paris_now().hour  # évite un double post immédiat par la boucle
+        await self._post_or_update_report(str(interaction.guild.id))
+        await interaction.followup.send(
+            f"✅ Report horaire des clics du groupe **{name}** (workspace **{ws}**) activé dans "
+            f"{interaction.channel.mention}.\n"
+            f"Le message est **édité chaque heure** (aujourd'hui / hier / semaine / période 1–15 / 16–fin). "
+            f"Désactive avec `/reportclick_off`.{ambig}", ephemeral=True)
+
+    @app_commands.command(
+        name="reportclick_off",
+        description="[OWNER] Désactive le report horaire des clics sur CE serveur",
+    )
+    async def reportclick_off(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        cfg = _load_report_cfg()
+        if str(interaction.guild.id) in cfg:
+            cfg.pop(str(interaction.guild.id), None)
+            _save_report_cfg(cfg)
+            await interaction.response.send_message("🛑 Report horaire désactivé.", ephemeral=True)
+        else:
+            await interaction.response.send_message("ℹ️ Aucun report configuré ici.", ephemeral=True)
 
 
 async def setup(bot):

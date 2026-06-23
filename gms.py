@@ -348,6 +348,29 @@ def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[in
         return 0
 
 
+def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:
+    """Total de clics pour une LISTE de liens sur une periode (YYYY-MM-DD).
+    Batch par 200 (limite analytics). Retourne None si UN SEUL batch echoue
+    (le total serait partiel/faux — chiffre de paie, on prefere « indispo » a
+    un sous-comptage credible), sinon la somme (0 si liste vide)."""
+    if not link_ids:
+        return 0
+    total = 0
+    for i in range(0, len(link_ids), 200):
+        chunk = link_ids[i:i + 200]
+        res = get_analytics_overview(start_date, end_date, link_ids=chunk)
+        if not res.get("ok"):
+            return None  # batch echoue -> total non fiable
+        d = res.get("data")
+        if not isinstance(d, dict):
+            d = res
+        try:
+            total += int(d.get("total_clicks") or 0)
+        except Exception:
+            return None  # reponse illisible -> total non fiable
+    return total
+
+
 def _norm_handle(s: str) -> str:
     import re as _re
     return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
@@ -786,6 +809,55 @@ def list_team_groups(team_id: str) -> Dict[str, Any]:
     return {"ok": True, "groups": d.get("groups") or []}
 
 
+def group_id_by_name(team_id: str, name: str) -> Optional[str]:
+    """Retourne l'id du groupe nommé `name` (insensible a la casse) dans un
+    workspace team, ou None. Tolere les champs id/_id/groupId."""
+    nl = (name or "").strip().lower()
+    if not nl:
+        return None
+    r = list_team_groups(team_id)
+    if not r.get("ok"):
+        return None
+    for g in r.get("groups", []):
+        gn = (g.get("name") or g.get("title") or "").strip().lower()
+        if gn == nl:
+            gid = g.get("id") or g.get("_id") or g.get("groupId") or ""
+            return str(gid).strip() or None
+    return None
+
+
+def link_ids_in_group(team_id: str, group_id: str) -> Optional[List[str]]:
+    """Liste des link_ids (format lnk_<hex>) places dans `group_id`, via les
+    `placements` du board dashboard.
+
+    IMPORTANT : distingue ECHEC de VIDE.
+    - None  : impossible de recuperer le board (cookie absent, HTTP != 200,
+              reseau/JSON KO) -> l'appelant NE DOIT PAS afficher « 0 clic ».
+    - []    : board recupere mais le groupe ne contient aucun lien (vrai vide).
+    """
+    cookie = get_session_cookie()
+    if not cookie or not group_id:
+        return None
+    tid = team_id[3:] if team_id.startswith("tm_") else team_id
+    try:
+        r = requests.get(
+            f"{PRIVATE_API_BASE}/links/board?as=team&teamId={tid}",
+            headers={"Cookie": cookie}, timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    out: List[str] = []
+    for p in d.get("placements") or []:
+        if str(p.get("groupId")) == str(group_id):
+            lid = p.get("linkId")
+            if lid:
+                out.append(lid if str(lid).startswith("lnk_") else "lnk_" + str(lid))
+    return out
+
+
 def next_va_number_in_group(team_id: Optional[str], folder_or_group: str) -> int:
     """Calcule le prochain numéro VA disponible dans un groupe.
 
@@ -904,6 +976,10 @@ KNOWN_TEAMS = (MARCHE_FRANCAIS_TID, THREADS_US_TID)
 # Suffixe de shortcode par identité (défaut = nom de l'identité, pour categorize_link).
 # Pour hybride (Threads US) on veut un lien "secret" plutôt que le nom visible.
 _SHORTCODE_SUFFIX = {"hybride": "secret", "hybrid": "secret"}
+# Workspace préféré par identité : évite qu'un groupe homonyme dans 2 workspaces
+# (ex: "Hybride" en FR ET en Threads US) résolve sur le mauvais (marché FR gagne
+# sinon car premier dans KNOWN_TEAMS). L'identité hybride vit dans Threads US.
+IDENTITY_TEAM = {"hybride": THREADS_US_TID, "hybrid": THREADS_US_TID}
 # Domaine public des liens GetMySocial
 PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
 
