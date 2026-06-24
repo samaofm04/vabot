@@ -1933,13 +1933,32 @@ class UserCog(commands.Cog):
         name="menucentral",
         description="[ADMIN] Poste ICI un menu central : chaque VA clique, le contenu arrive dans SON salon",
     )
-    async def menucentral(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        nettoyer="true = vide d'abord le salon pour ne laisser QUE le menu (épinglé)",
+    )
+    async def menucentral(self, interaction: discord.Interaction, nettoyer: bool = False):
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
             return
         if not _menu_feature_check(interaction, "contenu"):
             await interaction.response.send_message("⚠️ Le menu contenu est désactivé sur ce serveur.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
+        ch = interaction.channel
+        cleaned = 0
+        if nettoyer and ch is not None:
+            try:
+                deleted = await ch.purge(limit=1000)
+                cleaned = len(deleted)
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "⚠️ Il me manque la permission **Gérer les messages** pour nettoyer ce salon.",
+                    ephemeral=True)
+                return
+            except Exception as e:
+                # Nettoyage partiel (ex: messages > 14 j non supprimables en masse) :
+                # on continue quand même à poser le menu.
+                print(f"[menucentral] purge partielle : {e}")
         emb = discord.Embed(
             title="🎛️ Menu contenu — clique, ça arrive dans TON salon",
             description=(
@@ -1952,7 +1971,25 @@ class UserCog(commands.Cog):
             ),
             color=discord.Color.blurple(),
         )
-        await interaction.response.send_message(embed=emb, view=CentralMenuView(self))
+        try:
+            msg = await ch.send(embed=emb, view=CentralMenuView(self))
+        except Exception as e:
+            await interaction.followup.send(f"❌ Impossible de poster le menu : {e}", ephemeral=True)
+            return
+        try:
+            await msg.pin(reason="Menu central permanent")
+            # Supprime la notif système « X a épinglé un message » pour rester
+            # 100% menu-only (ne touche jamais le message du menu lui-même).
+            if nettoyer:
+                await asyncio.sleep(0.4)
+                await ch.purge(limit=5, check=lambda m: m.id != msg.id)
+        except Exception:
+            pass
+        note = f" · 🗑️ **{cleaned}** message(s) supprimé(s)" if nettoyer else ""
+        await interaction.followup.send(
+            f"✅ Menu central posté et épinglé ici{note}.\n"
+            "Les VAs cliquent → leur contenu arrive dans **leur** salon perso (pas ici).",
+            ephemeral=True)
 
     async def _pin_menus_for_guild(self, guild, clean_onboarding=False) -> int:
         """Remplace/épingle le menu (adapté au serveur) dans chaque salon va- du
