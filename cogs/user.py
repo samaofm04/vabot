@@ -2444,6 +2444,60 @@ class UserCog(commands.Cog):
             ephemeral=True)
 
     @app_commands.command(
+        name="testidentite",
+        description="[OWNER] T'assigne une identité à TOI pour la tester (réversible)",
+    )
+    @app_commands.describe(
+        identity="Identité à t'assigner pour tester (ex: alicia). 'none' = enlever/remettre l'ancienne.",
+    )
+    async def testidentite(self, interaction: discord.Interaction, identity: str):
+        app = await interaction.client.application_info()
+        if interaction.user.id != app.owner.id:
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        uid = str(interaction.user.id)
+        users = load_json(USERS_FILE, {})
+        entry = users.get(uid) if isinstance(users.get(uid), dict) else {}
+        ident = identity.strip().lower()
+        if ident in ("none", "aucune", "reset", ""):
+            # Restaure l'identité d'origine si on l'avait sauvegardée, sinon enlève.
+            prev = entry.pop("_test_prev_identity", None)
+            if prev:
+                entry["identity"] = prev
+                msg = f"✅ Identité de test retirée — tu es de nouveau **{prev}**."
+            else:
+                entry.pop("identity", None)
+                msg = "✅ Identité de test retirée."
+            if entry:
+                users[uid] = entry
+            else:
+                users.pop(uid, None)
+            save_json(USERS_FILE, users)
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+        # Vérifie que l'identité existe (active ou non — on teste exprès une désactivée)
+        try:
+            from cogs.welcome import list_identities
+            if ident not in [x.lower() for x in list_identities()]:
+                await interaction.response.send_message(
+                    f"❌ Identité `{ident}` introuvable. Crée-la d'abord (`/add`).", ephemeral=True)
+                return
+        except Exception:
+            pass
+        # Sauvegarde l'identité d'origine UNE fois (pour pouvoir revenir).
+        if entry.get("identity") and "_test_prev_identity" not in entry:
+            entry["_test_prev_identity"] = entry["identity"]
+        entry["identity"] = ident
+        users[uid] = entry
+        save_json(USERS_FILE, users)
+        await interaction.response.send_message(
+            f"✅ Tu as maintenant l'identité **{ident}** (mode test).\n"
+            f"Utilise `/menu`, `/reel`, `/username`, « Demander un lien »… → ça te sert le contenu de **{ident}** "
+            f"(même si elle est désactivée).\n"
+            f"_Pour revenir en arrière : `/testidentite identity:none`._",
+            ephemeral=True)
+
+    @app_commands.command(
         name="gmsdebug",
         description="[OWNER] Diagnostic GMS : outils API + team_id + recherche template",
     )
