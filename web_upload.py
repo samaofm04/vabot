@@ -5914,7 +5914,7 @@ def _render_gms_clicks_widget() -> str:
         # Avatar identité
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy'>"
+            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div class='vac-card-avatar vac-card-avatar-fallback'>{ident[:1].upper()}</div>"
         )
@@ -6250,7 +6250,7 @@ def _render_linkscale_clicks_widget() -> str:
         # Avatar
         avatar_url = _identity_avatar_url(ident) if callable(_identity_avatar_url) else ""
         avatar_html = (
-            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy'>"
+            f"<img src='{avatar_url}' class='vac-card-avatar' alt='{ident}' loading='lazy' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div class='vac-card-avatar vac-card-avatar-fallback'>{ident[:1].upper()}</div>"
         )
@@ -6578,7 +6578,7 @@ body.light .va-id{color:#9ca3af}
         ident_avatar = _identity_avatar_url(identity)
         # Header identité
         ident_av_html = (
-            f"<img src='{ident_avatar}' class='va-vlist-ident-av' alt='{identity}'>"
+            f"<img src='{ident_avatar}' class='va-vlist-ident-av' alt='{identity}' onerror=\"this.style.display='none'\">"
             if ident_avatar else
             f"<div class='va-vlist-ident-av' style='background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px'>{identity[:1].upper()}</div>"
         )
@@ -6676,7 +6676,7 @@ body.light .va-id{color:#9ca3af}
         members = by_identity[identity]
         ident_avatar = _identity_avatar_url(identity)
         avatar_html = (
-            f"<img src='{ident_avatar}' class='va-section-avatar' alt='{identity}'>"
+            f"<img src='{ident_avatar}' class='va-section-avatar' alt='{identity}' onerror=\"this.style.display='none'\">"
             if ident_avatar else
             f"<div class='va-section-avatar' style='display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3b82f6,#a855f7);color:#fff;font-weight:800;border:0'>{identity[:1].upper()}</div>"
         )
@@ -8969,7 +8969,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         stats = ident_stats[ident]
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0'>"
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
         )
@@ -9019,7 +9019,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     sel_stats = ident_stats.get(selected, {"n_files": 0, "size_mb": 0})
     sel_avatar_url = _identity_avatar_url(selected)
     sel_avatar_html = (
-        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
         if sel_avatar_url else
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
@@ -10495,28 +10495,82 @@ def _identity_avatar_path(identity: str) -> Path:
     return None
 
 
+# Cache court (5 min) identité -> creator_id MyPuls, pour l'avatar auto (évite
+# d'appeler list_creators/list_model_map à chaque rendu d'avatar).
+_MYPULS_AV_CACHE = {"ts": 0.0, "map": {}}
+_MYPULS_AV_TTL = 300
+
+
+def _mypuls_creator_id_for_identity(identity: str):
+    """creator_id MyPuls d'une identité : via model_map explicite, sinon match
+    par préfixe de nom (ex: 'alicia' -> 'alicia_valen'). None si rien. Caché 5 min."""
+    import time as _t
+    idl = (identity or "").lower().strip()
+    if not idl:
+        return None
+    now = _t.time()
+    if now - _MYPULS_AV_CACHE["ts"] > _MYPULS_AV_TTL:
+        m = {}
+        try:
+            import mypuls as _mp
+            if _mp.is_configured():
+                cr = _mp.list_creators()
+                creators = (cr.get("creators") or {}) if cr.get("ok") else {}
+                creators_lc = {str(k).lower(): v for k, v in creators.items()}
+                mm = _mp.list_model_map() or {}
+                ident_model = {str(k).lower().strip(): str(v) for k, v in mm.items() if v}
+                for _id in _list_content_identities():
+                    il = (_id or "").lower().strip()
+                    if not il:
+                        continue
+                    model = ident_model.get(il)
+                    if not model:
+                        for cname in creators:
+                            cl = str(cname).lower()
+                            if cl.startswith(il) or cl.replace("_", "").replace(".", "").startswith(il):
+                                model = str(cname)
+                                break
+                    cid = creators_lc.get(str(model).lower()) if model else None
+                    if cid:
+                        m[il] = cid
+        except Exception:
+            m = _MYPULS_AV_CACHE["map"]  # garde l'ancien en cas d'échec réseau
+        _MYPULS_AV_CACHE["ts"] = now
+        _MYPULS_AV_CACHE["map"] = m
+    return _MYPULS_AV_CACHE["map"].get(idl)
+
+
 def _identity_avatar_url(identity: str) -> str:
-    """URL publique de l'avatar (ou string vide si pas d'avatar)."""
+    """URL publique de l'avatar : photo uploadée en priorité, sinon photo MyPuls
+    du créateur mappé (auto), sinon string vide."""
     p = _identity_avatar_path(identity)
     if p:
         return f"/identity/avatar/{identity.lower().strip()}"
+    cid = _mypuls_creator_id_for_identity(identity)
+    if cid:
+        return f"/mypuls/avatar/{cid}"
     return ""
 
 
 def _identity_avatar_html(identity: str, size: int = 28) -> str:
-    """Petit HTML : <img> si avatar, sinon initiale colorée."""
+    """Petit HTML : photo (uploadée OU MyPuls) avec initiale de secours si l'image
+    échoue (pas d'icône cassée), sinon initiale colorée."""
     url = _identity_avatar_url(identity)
-    if url:
-        return (
-            f"<img src='{url}' style='width:{size}px;height:{size}px;border-radius:50%;"
-            f"object-fit:cover;border:1px solid #2a2a2a;flex-shrink:0'>"
-        )
     init = (identity[0] if identity else "?").upper()
+    fb = (f"background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;"
+          f"align-items:center;justify-content:center;font-weight:700;color:#fff;"
+          f"font-size:{int(size*0.45)}px")
+    if not url:
+        return (
+            f"<div style='width:{size}px;height:{size}px;border-radius:50%;{fb};flex-shrink:0'>{init}</div>"
+        )
+    # Initiale derrière + img par-dessus : si l'image MyPuls 404, onerror la retire
+    # et l'initiale réapparait.
     return (
-        f"<div style='width:{size}px;height:{size}px;border-radius:50%;"
-        f"background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;"
-        f"align-items:center;justify-content:center;font-weight:700;color:#fff;"
-        f"font-size:{int(size*0.45)}px;flex-shrink:0'>{init}</div>"
+        f"<div style='position:relative;width:{size}px;height:{size}px;border-radius:50%;"
+        f"overflow:hidden;flex-shrink:0;{fb}'>{init}"
+        f"<img src='{url}' style='position:absolute;inset:0;width:{size}px;height:{size}px;"
+        f"object-fit:cover' loading='lazy' onerror='this.remove()'></div>"
     )
 
 
