@@ -1089,9 +1089,13 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(
-            f"✅ C'est parti — ton contenu arrive dans {target.mention} 👇", ephemeral=True
-        )
+        # Accuse réception du clic SANS message visible : pour un composant,
+        # defer(thinking=False) = DeferredMessageUpdate -> rien ne s'affiche au
+        # VA, le contenu part directement dans son salon perso.
+        try:
+            await interaction.response.defer()
+        except Exception:
+            pass
         proxy = _ChannelProxy(interaction, target)
         try:
             await cmd.callback(self, proxy)
