@@ -23606,6 +23606,10 @@ ROLE_MENU_STRUCTURE = [
 # La plupart matchent déjà ; "cloud" couvre plusieurs sous-onglets Bibliothèque.
 _PERM_KEY_TO_TABS = {
     "cloud": {"cloudoverview", "cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
+    # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
+    # "Instagram Trends" (igtrends). On mappe donc la permission veille vers
+    # igtrends, sinon l'accorder ne révèle aucun menu (écran vide).
+    "veille": {"igtrends"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -23671,9 +23675,9 @@ def _role_gate_script(allowed) -> str:
         "if(el.classList&&el.classList.contains('group')){el.classList.add('open');"
         "var h=el.querySelector('.group-head');if(h)h.style.display='';}"
         "el=el.parentElement;}}"
-        "A.forEach(function(name){var b=document.getElementById('tab-'+name);"
-        "if(!b){var all=sb.querySelectorAll('.item');for(var i=0;i<all.length;i++){if(nm(all[i])===name){b=all[i];break;}}}"
-        "if(b)reveal(b);});"
+        "function findBtn(name){var b=document.getElementById('tab-'+name);if(b)return b;"
+        "var all=sb.querySelectorAll('.item');for(var i=0;i<all.length;i++){if(nm(all[i])===name)return all[i];}return null;}"
+        "A.forEach(function(name){var b=findBtn(name);if(b)reveal(b);});"
         # 3) reveler les labels de section qui precedent un bloc redevenu visible
         "Array.prototype.forEach.call(sb.children,function(c){"
         "if(c.classList&&c.classList.contains('section-label')){var n=c.nextElementSibling,v=false;"
@@ -23683,7 +23687,7 @@ def _role_gate_script(allowed) -> str:
         #    partage dans le DOM, sinon des pages autorisees (ex: Jailbreak) perdent
         #    leur style. + ouvrir l'onglet autorise par defaut.
         "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.style.display='none';});"
-        "var db=document.getElementById('tab-'+A[0]);if(db)db.click();"
+        "for(var di=0;di<A.length;di++){var db=findBtn(A[di]);if(db){db.click();break;}}"
         "}"
         "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}"
         "})();</script>"
