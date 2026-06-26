@@ -2856,6 +2856,27 @@ function showTab(group,name,title,subtitle){
   if(btn)btn.classList.add('active');
   if(head)head.classList.add('active');
   if(sec)sec.style.display='block';
+  // ===== Lazy-load des onglets lourds (1er open seulement) =====
+  if(sec){
+    var lazy = sec.querySelector('[data-lazy-tab]');
+    if(lazy && !sec.dataset.lazyLoaded && !sec.dataset.lazyLoading){
+      sec.dataset.lazyLoading = '1';
+      fetch('/?lazy=' + encodeURIComponent(name), {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
+        .then(function(r){ if(!r.ok) throw 0; return r.text(); })
+        .then(function(htmlFrag){
+          sec.innerHTML = htmlFrag;
+          sec.dataset.lazyLoaded = '1';
+          // ré-exécuter les <script> du fragment (sinon charts/toggles muets)
+          sec.querySelectorAll('script').forEach(function(old){
+            var s=document.createElement('script');
+            if(old.src)s.src=old.src; else s.textContent=old.textContent;
+            old.parentNode.replaceChild(s, old);
+          });
+        })
+        .catch(function(){ sec.innerHTML="<div style='color:#f99;padding:24px'>Erreur de chargement. <a href='#' onclick='location.reload()' style='color:#3b82f6'>Recharger</a></div>"; })
+        .finally(function(){ delete sec.dataset.lazyLoading; });
+    }
+  }
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
   // Mettre à jour l'URL pour que le Referer soit conservé après POST
@@ -12506,7 +12527,7 @@ body.light .mypuls-bar{background:#e5e7eb}
     start_str = flask_request.args.get("mp_start", default_start) if hasattr(flask_request, "args") else default_start
     end_str = flask_request.args.get("mp_end", default_end) if hasattr(flask_request, "args") else default_end
 
-    res = mypuls.fetch_team_stats(start_str, end_str)
+    res = mypuls.fetch_team_stats(start_str, end_str, use_cache=True)
     if not res.get("ok"):
         err_html = (
             "<div class='mypuls-section'>"
@@ -24618,6 +24639,15 @@ def _render_upload_inner(msg=None, error=None):
         except Exception:
             return ""
 
+    # Onglets LOURDS (I/O réseau) : on ne les rend PAS au 1er chargement. On pose
+    # un placeholder ; showTab() va chercher le fragment via /?lazy=<name> au 1er
+    # open. Gros gain de fluidité (la page ne rend plus ces onglets d'un coup).
+    def _lazy(tab):
+        if allowed is not None and tab not in allowed:
+            return ""  # role-gate : onglet interdit -> rien
+        return (f"<div data-lazy-tab='{tab}' style='padding:60px 20px;text-align:center;color:#666'>"
+                f"<div style='font-size:13px'>⏳ Chargement…</div></div>")
+
     html = (
         UPLOAD_HTML
         .replace("{ident_opts}", opts)
@@ -24649,8 +24679,8 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{textpool_html}", _g("textpool", _render_textpool_html))
         .replace("{geelark_html}", _g("geelark", _render_geelark_html))
         .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
-        .replace("{gms_html}", _g("gms", _render_gms_html))
-        .replace("{linkscale_html}", _g("linkscale", _render_linkscale_html))
+        .replace("{gms_html}", _lazy("gms"))
+        .replace("{linkscale_html}", _lazy("linkscale"))
         .replace("{schedule_html}", _g("schedule", _render_schedule_html))
         .replace("{sfssetupmym_html}", _g("sfssetupmym", lambda: _render_sfssetup_html("mym")))
         .replace("{sfssetupof_html}", _g("sfssetupof", lambda: _render_sfssetup_html("of")))
@@ -25099,6 +25129,29 @@ def create_app():
                 return f"<div id='form-chatplanning'>{_render_chatplanning_html()}</div>"
             except Exception:
                 pass  # fallback : page complete
+        # Lazy-load des onglets lourds : showTab() envoie X-Tab-Ajax + ?lazy=<name>.
+        # On renvoie UNIQUEMENT le fragment du producer (pas toute la page ~1.4MB).
+        if request.headers.get("X-Tab-Ajax") and request.args.get("lazy"):
+            _name = request.args.get("lazy")
+            # gms + linkscale uniquement : revenus/mypulslive ont des charts en
+            # DOMContentLoaded (ne se ré-initialiseraient pas après injection AJAX).
+            _prods = {
+                "gms": _render_gms_html,
+                "linkscale": _render_linkscale_html,
+            }
+            _prod = _prods.get(_name)
+            if _prod is None:
+                return ("", 404)
+            try:
+                _allowed = _role_allowed_tabs((session.get("role") or "").lower())
+            except Exception:
+                _allowed = None
+            if _allowed is not None and _name not in _allowed:
+                return ("", 403)  # role-gate : onglet interdit
+            try:
+                return _prod()
+            except Exception:
+                return ("<div style='color:#f99;padding:24px'>Erreur de chargement.</div>", 200)
         return _render_upload()
 
     @app.route("/logout")
