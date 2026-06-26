@@ -21,6 +21,7 @@ DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "gms_config.json"
 MCP_URL = "https://mcp.getmysocial.com/mcp"
 TIMEOUT = 60
+READ_TIMEOUT = 12  # lectures (list/get/analytics) : ne pas figer la page 60s sur un blocage
 
 
 # ============ Config (API key) ============
@@ -123,13 +124,44 @@ def list_tools() -> Dict[str, Any]:
     return {"ok": True, "tools": [{"name": t.get("name"), "desc": (t.get("description") or "")[:80]} for t in tools]}
 
 
-def _call_tool(tool_name: str, args: Optional[dict] = None) -> Dict[str, Any]:
-    """Appelle un outil MCP. Retourne {'ok': bool, 'data': ..., 'error': ...}."""
+import threading as _threading
+_MCP_LOCK = _threading.Lock()
+_MCP_CACHE: Dict[str, Any] = {"session": None}
+_READ_TOOLS = {"list_links", "get_analytics_overview", "_ping"}
+
+
+def _get_session() -> Optional[requests.Session]:
+    """Session MCP initialisée et RÉUTILISÉE entre les appels (évite de refaire le
+    handshake initialize+initialized — donc 2 round-trips HTTPS — à CHAQUE call).
+    None si l'init échoue."""
     api_key = get_api_key()
     if not api_key:
+        return None
+    with _MCP_LOCK:
+        s = _MCP_CACHE.get("session")
+        if s is not None:
+            return s
+        s = _make_session(api_key)
+        if not _initialize(s):
+            _MCP_CACHE["session"] = None
+            return None
+        _MCP_CACHE["session"] = s
+        return s
+
+
+def _reset_session():
+    with _MCP_LOCK:
+        _MCP_CACHE["session"] = None
+
+
+def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True) -> Dict[str, Any]:
+    """Appelle un outil MCP. Retourne {'ok': bool, 'data': ..., 'error': ...}.
+    Réutilise une session MCP cachée ; si elle a expiré (réseau / 4xx), on la
+    recrée et on réessaie UNE fois."""
+    if not get_api_key():
         return {"ok": False, "error": "Clé API GetMySocial non configurée"}
-    s = _make_session(api_key)
-    if not _initialize(s):
+    s = _get_session()
+    if s is None:
         return {"ok": False, "error": "Impossible d'initialiser la session MCP"}
     body = {
         "jsonrpc": "2.0",
@@ -137,10 +169,18 @@ def _call_tool(tool_name: str, args: Optional[dict] = None) -> Dict[str, Any]:
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": args or {}},
     }
+    _to = READ_TIMEOUT if tool_name in _READ_TOOLS else TIMEOUT
     try:
-        r = s.post(MCP_URL, json=body, timeout=TIMEOUT)
+        r = s.post(MCP_URL, json=body, timeout=_to)
     except Exception as e:
+        if _retry:  # session peut-être morte -> on la recrée et on réessaie
+            _reset_session()
+            return _call_tool(tool_name, args, _retry=False)
         return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code in (400, 401, 404) and _retry:
+        # session MCP probablement expirée -> on la recrée et on réessaie 1×
+        _reset_session()
+        return _call_tool(tool_name, args, _retry=False)
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:300]}"}
     data = _parse_sse(r.text)
@@ -203,11 +243,20 @@ def list_links(limit: int = 100) -> Dict[str, Any]:
     }
 
 
-def list_all_links(max_pages: int = 50) -> Dict[str, Any]:
+_LINKS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_LINKS_TEAM_CACHE: Dict[str, Any] = {}  # team_id -> {"ts","data"}
+_LINKS_TTL = 120  # secondes
+
+
+def list_all_links(max_pages: int = 50, force_refresh: bool = False) -> Dict[str, Any]:
     """Paginate pour récupérer TOUS les liens du compte.
 
     Limite de sécurité : max_pages * 100 liens (par défaut 5000).
+    Cache 2 min — sinon les mêmes liens sont re-paginés ~4× par render de page.
     """
+    if (not force_refresh and _LINKS_CACHE["data"] is not None
+            and (time.time() - _LINKS_CACHE["ts"]) < _LINKS_TTL):
+        return {"ok": True, "links": _LINKS_CACHE["data"]}
     all_links: List[dict] = []
     cursor: Optional[str] = None
     for _ in range(max_pages):
@@ -235,6 +284,8 @@ def list_all_links(max_pages: int = 50) -> Dict[str, Any]:
         cursor = data.get("next_cursor")
         if not cursor:
             break
+    _LINKS_CACHE["ts"] = time.time()
+    _LINKS_CACHE["data"] = all_links
     return {"ok": True, "links": all_links}
 
 
@@ -345,7 +396,7 @@ def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[in
     try:
         return int(d.get("total_clicks") or 0)
     except Exception:
-        return 0
+        return None  # payload illisible -> « indispo » (—), pas un faux 0 (sous-paie)
 
 
 def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:
@@ -429,6 +480,9 @@ def invalidate_grouping_cache():
     """À appeler après create/delete/update de lien pour forcer un refresh."""
     _GROUPED_CACHE["ts"] = 0
     _GROUPED_CACHE["data"] = None
+    _LINKS_CACHE["ts"] = 0.0
+    _LINKS_CACHE["data"] = None
+    _LINKS_TEAM_CACHE.clear()
 
 
 _TEMPLATES_FILE = DATA_DIR / "gms_templates.json"
@@ -454,7 +508,13 @@ def set_template_for_model(model: str, link_id: str):
     key = (model or "").strip().lower()
     if not key:
         return
-    if link_id and link_id.startswith("lnk_"):
+    # Normalise l'id (l'API GMS renvoie parfois sans le préfixe lnk_). Sans ça,
+    # un id sans préfixe POPpait silencieusement le template (et la route web
+    # renvoyait quand même « ✅ défini »).
+    link_id = (link_id or "").strip()
+    if link_id and not link_id.startswith("lnk_"):
+        link_id = "lnk_" + link_id
+    if link_id:
         tpls[key] = link_id
     else:
         tpls.pop(key, None)
@@ -534,6 +594,11 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
 
 def delete_link(link_id: str) -> Dict[str, Any]:
     res = _call_tool("delete_link", {"link_id": link_id})
+    if res.get("ok"):
+        try:
+            invalidate_grouping_cache()  # sinon le lien supprimé reste en cache
+        except Exception:
+            pass
     return res
 
 
@@ -849,6 +914,10 @@ def link_ids_in_group(team_id: str, group_id: str) -> Optional[List[str]]:
         d = r.json()
     except Exception:
         return None
+    # board récupéré mais structure inattendue (clé 'placements' absente =
+    # schéma changé) -> ÉCHEC (None), pas un faux « groupe vide ».
+    if not isinstance(d, dict) or "placements" not in d:
+        return None
     out: List[str] = []
     for p in d.get("placements") or []:
         if str(p.get("groupId")) == str(group_id):
@@ -997,12 +1066,17 @@ def reset_va_counter(team_id: Optional[str], folder: str):
     _save_counters(counters)
 
 
-def list_links_team(team_id: str) -> Dict[str, Any]:
-    """List_all_links scopé à un team via API publique v3."""
+def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """List_all_links scopé à un team via API publique v3. Cache 2 min par team
+    (mêmes liens re-demandés plusieurs fois par render de page sinon)."""
     api_key = get_api_key()
     if not api_key:
         return {"ok": False, "error": "API key absente"}
     tid = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
+    c = _LINKS_TEAM_CACHE.get(tid)
+    if (not force_refresh and c and c.get("data") is not None
+            and (time.time() - c.get("ts", 0)) < _LINKS_TTL):
+        return {"ok": True, "links": c["data"]}
     all_links: List[dict] = []
     cursor: Optional[str] = None
     for _ in range(50):
@@ -1020,6 +1094,7 @@ def list_links_team(team_id: str) -> Dict[str, Any]:
         if not d.get("has_more"):
             break
         cursor = d.get("next_cursor")
+    _LINKS_TEAM_CACHE[tid] = {"ts": time.time(), "data": all_links}
     return {"ok": True, "links": all_links}
 
 
@@ -1058,8 +1133,10 @@ def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, An
     if not tpl_id:
         return {"ok": False, "error": f"Aucun template GMS défini pour @{ident}. Configure-le d'abord sur le site (onglet SFS/GMS)."}
 
-    # Detecte le workspace du template (marché FR ou Threads US…)
-    team_id = None
+    # Detecte le workspace du template (marché FR ou Threads US…).
+    # Seed sur le workspace préféré de l'identité (ex: hybride -> Threads US) pour
+    # ne pas mal-détecter si un scan répond avant un autre.
+    team_id = IDENTITY_TEAM.get(ident)
     for _tid in KNOWN_TEAMS:
         try:
             r = list_links_team(_tid)
