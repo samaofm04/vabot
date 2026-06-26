@@ -48,8 +48,13 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict):
+    # Écriture ATOMIQUE (temp + replace) : un crash en plein write ne tronque plus
+    # le fichier (sinon PHPSESSID + REMEMBERME perdus -> ré-auth manuelle).
+    import os as _os
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    _os.replace(str(tmp), str(CONFIG_FILE))
 
 
 def save_cookies(phpsessid: str, rememberme: str = ""):
@@ -708,6 +713,13 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
                 break
         if cid:
             creators[name] = cid
+
+    # Parse à 0 créateur (markup MyPuls changé, page A/B, rendu client…) : NE PAS
+    # écraser le cache avec {} — sinon avatars/top-créateurs disparaissent 5 min
+    # avec ok=True. On garde le dernier bon cache et on signale l'échec.
+    if not creators:
+        return {"ok": False, "error": "parser: 0 créateur (markup MyPuls changé ?)",
+                "creators": cfg.get("creators_cache", {})}
 
     # Sauvegarder en cache
     cfg["creators_cache"] = creators

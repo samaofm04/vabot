@@ -10525,11 +10525,17 @@ def _mypuls_creator_id_for_identity(identity: str):
                         continue
                     model = ident_model.get(il)
                     if not model:
-                        for cname in creators:
-                            cl = str(cname).lower()
-                            if cl.startswith(il) or cl.replace("_", "").replace(".", "").startswith(il):
-                                model = str(cname)
-                                break
+                        # match exact d'abord, sinon le préfixe le PLUS COURT
+                        # (sinon 'emma' pouvait tomber sur 'emmanuelle', 'ali' sur
+                        # un créateur arbitraire selon l'ordre du dict).
+                        if il in creators_lc:
+                            model = il
+                        else:
+                            cands = [str(c) for c in creators
+                                     if str(c).lower().startswith(il)
+                                     or str(c).lower().replace("_", "").replace(".", "").startswith(il)]
+                            if cands:
+                                model = min(cands, key=len)
                     cid = creators_lc.get(str(model).lower()) if model else None
                     if cid:
                         m[il] = cid
@@ -12135,6 +12141,7 @@ def _render_home_dashboard_html() -> str:
 
     # Fetch MyPuls (cached)
     mp_configured = False
+    mp_error = None
     mp_data = {"totals": {}, "chatters": [], "transactions": [], "chart": {}}
     try:
         import mypuls
@@ -12143,8 +12150,11 @@ def _render_home_dashboard_html() -> str:
             res = mypuls.fetch_team_stats(start.isoformat(), end.isoformat(), use_cache=True)
             if res.get("ok"):
                 mp_data = res
-    except Exception:
-        pass
+            else:
+                # cookies expirés / MyPuls KO : on ne montre PAS un faux 0€ crédible
+                mp_error = res.get("error") or "Données MyPuls indisponibles"
+    except Exception as e:
+        mp_error = str(e)
 
     # Fetch revenus manuels (module Business)
     manual_total = 0.0
@@ -12255,6 +12265,14 @@ def _render_home_dashboard_html() -> str:
         warning = (
             "<div style='padding:14px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#fbbf24'>"
             "💡 Configure MyPuls (Business → Revenus) pour voir tes ventes en temps réel."
+            "</div>"
+        )
+    elif mp_error:
+        # cookies expirés / API KO : distinguer « data indispo » d'un vrai 0€
+        warning = (
+            "<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#ef4444'>"
+            "⚠ MyPuls indisponible — chiffres temps réel non chargés (ce n'est PAS un vrai 0€). "
+            "Vérifie/rafraîchis tes cookies dans <b>Auto-Post → MyPuls Live</b>."
             "</div>"
         )
     else:
@@ -23664,6 +23682,10 @@ _PERM_KEY_TO_TABS = {
     # "Instagram Trends" (igtrends). On mappe donc la permission veille vers
     # igtrends, sinon l'accorder ne révèle aucun menu (écran vide).
     "veille": {"igtrends"},
+    # "upload" non plus n'est pas un onglet : les vrais panneaux sont
+    # reel/post/story/storycta/pp (atteints via showTab('upload','reel',...)).
+    # Sans ce mapping, accorder "upload" à un rôle ne révèle RIEN (upload mort).
+    "upload": {"reel", "post", "story", "storycta", "pp"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
