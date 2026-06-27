@@ -448,7 +448,9 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     # 2) User reels - boucle avec pagination (tourne PENDANT le fetch du profil)
     reels = []
     one_month_ago = int(time.time()) - 30 * 86400  # 30 jours en secondes
-    max_pages = 5  # Limite max d'API calls par profil
+    # 2 pages = ~24 reels les plus récents par compte (couvre 24h/7j/30j) tout en
+    # divisant ~par 2 la conso RapidAPI -> le plan payant dure bien plus longtemps.
+    max_pages = 2  # Limite max d'API calls par profil
     pagination_token = ""
     pages_fetched = 0
     try:
