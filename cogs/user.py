@@ -2393,7 +2393,7 @@ class UserCog(commands.Cog):
         description="[OWNER] Identité par défaut des VAs de CE serveur (ex: jessye)",
     )
     @app_commands.describe(
-        identity="Nom de l'identité (ex: jessye). Vide = afficher l'actuelle ; 'none' = enlever.",
+        identity="Nom (ex: amelia) · 'random' = aléatoire · 'none' = enlever · vide = voir l'actuelle",
         reassigner="true = met aussi cette identité aux VAs déjà présents sur le serveur",
     )
     async def setidentite(
@@ -2417,6 +2417,44 @@ class UserCog(commands.Cog):
                 ephemeral=True)
             return
         ident = identity.strip().lower()
+        if ident in ("random", "aleatoire", "aléatoire", "hasard", "rotation"):
+            # Mode ALÉATOIRE : aucune identité fixe (les nouveaux VAs reçoivent une
+            # identité au hasard via la rotation). reassigner:true = redistribue aussi
+            # les VAs DÉJÀ présents au hasard, de façon équilibrée.
+            gf.set_server_identity(interaction.guild, None)
+            if not reassigner:
+                await interaction.response.send_message(
+                    "✅ **{}** en **assignation aléatoire** : les nouveaux VAs reçoivent une "
+                    "identité au hasard.\n_(`reassigner:true` pour redistribuer aussi les VAs "
+                    "déjà présents.)_".format(interaction.guild.name), ephemeral=True)
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            import random as _rnd
+            try:
+                from cogs.welcome import list_active_identities
+                idents = list_active_identities()  # exclut désactivées + jailbreak-only
+            except Exception:
+                idents = []
+            if not idents:
+                await interaction.followup.send(
+                    "⚠️ Aucune identité active à distribuer. Active-en (`/toggleidentity`) "
+                    "et désactive celles à exclure (ex: `alicia`).", ephemeral=True)
+                return
+            users = load_json(USERS_FILE, {})
+            chan_ids = {ch.id for ch in interaction.guild.text_channels if _ch_handle_va(ch.name)}
+            pool, changed = [], 0
+            for k, data in users.items():
+                if isinstance(data, dict) and data.get("channel_id") in chan_ids:
+                    if not pool:  # recharge un cycle mélangé -> distribution équilibrée
+                        pool = list(idents)
+                        _rnd.shuffle(pool)
+                    data["identity"] = pool.pop()
+                    changed += 1
+            save_json(USERS_FILE, users)
+            await interaction.followup.send(
+                f"✅ **{interaction.guild.name}** en mode **aléatoire** + **{changed}** VA(s) "
+                f"redistribué(s) au hasard sur : {', '.join(sorted(idents))}.", ephemeral=True)
+            return
         if ident in ("none", "aucune", "reset", ""):
             gf.set_server_identity(interaction.guild, None)
             await interaction.response.send_message(
