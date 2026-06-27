@@ -10034,6 +10034,12 @@ def _render_insta_accounts_html() -> str:
             "data-confirm=\"Scraper tous les comptes de la watchlist ? ~10s par compte (en arriere-plan).\" "
             "data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
         )
+        rows.append(
+            "<button type='button' onclick='igRebuildWatchlist(this)' "
+            "style='padding:12px 24px;background:#f59e0b;color:#000;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:18px;margin-left:10px' "
+            "title='Recupere les comptes depuis le cache si la liste s est videe'>"
+            "&#9851;&#65039; Recuperer mes comptes</button>"
+        )
     # JS handler async pour tous les boutons - non-bloquant, toast feedback
     rows.append("""
 <script>
@@ -10226,6 +10232,16 @@ function igRemoveOne(btn){
       if(card) card.style.opacity = '1';
       if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
     });
+}
+function igRebuildWatchlist(btn){
+  if(!confirm('Recuperer tes comptes depuis le cache (ceux deja scrapes) ?')) return;
+  btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳ ...';
+  fetch('/insta/rebuild_watchlist', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){ alert('✅ ' + d.added + ' compte(s) recupere(s). Total : ' + d.total); location.reload(); }
+      else { alert('⚠️ ' + ((d && d.error) || 'echec')); btn.disabled = false; btn.textContent = orig; }
+    }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
 }
 function igScrapeAll(btn){
   if(!confirm('Scraper tous les comptes ? ~10s par compte (en arriere-plan)')) return;
@@ -30205,6 +30221,19 @@ def create_app():
         if not is_auth():
             return jsonify({"status": "unauth", "done": 0, "total": 0})
         return jsonify(dict(_insta_trends_scrape_state))
+
+    @app.route("/insta/rebuild_watchlist", methods=["POST"])
+    def insta_rebuild_watchlist():
+        """Récupère les comptes depuis le cache (répare une watchlist vidée)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            from insta_scraper import rebuild_watchlist_from_cache, load_watchlist
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        added = rebuild_watchlist_from_cache()
+        return jsonify({"ok": True, "added": added, "total": len(load_watchlist())})
 
     @app.route("/insta/scrape_all", methods=["POST"])
     def insta_scrape_all():

@@ -80,10 +80,32 @@ def load_watchlist() -> List[str]:
 
 
 def save_watchlist(usernames: List[str]):
+    # Écriture ATOMIQUE (temp + replace) : un crash en plein write ne tronque plus
+    # le fichier (sinon load_watchlist renvoyait [] et un add écrasait toute la liste).
     _ensure_dirs()
-    WATCHLIST_FILE.write_text(
-        json.dumps(usernames, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    tmp = WATCHLIST_FILE.with_suffix(WATCHLIST_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(usernames, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(str(tmp), str(WATCHLIST_FILE))
+
+
+def rebuild_watchlist_from_cache() -> int:
+    """Récupère les comptes depuis les fichiers de cache (data/insta/cache/*.json)
+    et les FUSIONNE dans la watchlist. Répare une watchlist vidée/corrompue sans
+    perdre les comptes déjà scrapés. Retourne le nombre de comptes récupérés."""
+    if not CACHE_DIR.exists():
+        return 0
+    wl = load_watchlist()
+    existing = {(u or "").lower().strip() for u in wl}
+    added = 0
+    for f in CACHE_DIR.glob("*.json"):
+        name = f.stem.lower().strip()
+        if name and name not in existing:
+            wl.append(name)
+            existing.add(name)
+            added += 1
+    if added:
+        save_watchlist(wl)
+    return added
 
 
 def add_to_watchlist(username: str) -> bool:
