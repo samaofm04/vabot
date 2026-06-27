@@ -10329,13 +10329,20 @@ _insta_trends_scrape_lock = _trends_threading.Lock()
 _insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
 
 
-def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual") -> dict:
+def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
+                               skip_fresh_hours: float = 10.0, delay: float = 3.0) -> dict:
     """Scrape SÉQUENTIEL de toute la watchlist Trends -> data/insta/cache/.
     Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
-    Retourne {started, count, reason}."""
+
+    skip_fresh_hours : ne re-scrape PAS un profil dont le cache date de moins de N
+    heures (économise la quota/rate-limit RapidAPI + Instagram ; évite de re-brûler
+    sur des « Rafraîchir » rapprochés). Les créneaux 00h/12h sont à 12h d'écart donc
+    couvrent quand même tout. delay : pause entre comptes (anti rate-limit).
+    Retourne {started, count, scraped, skipped, reason}."""
     import time as _t
     try:
-        from insta_scraper import load_watchlist, scrape_profile, is_auth_configured
+        from insta_scraper import (load_watchlist, scrape_profile,
+                                    is_auth_configured, CACHE_DIR, _clean_username)
     except Exception as e:
         return {"started": False, "count": 0, "reason": f"module indispo: {e}"}
     try:
@@ -10352,17 +10359,31 @@ def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual") -> dict:
         _insta_trends_scrape_state.update(
             {"status": "in_progress", "done": 0, "total": len(wl),
              "started_at": int(_t.time()), "label": label})
+        scraped = skipped = 0
         for i, u in enumerate(wl):
+            fresh = False
             try:
-                scrape_profile(u, limit=limit)
+                cp = CACHE_DIR / f"{_clean_username(u)}.json"
+                if (skip_fresh_hours and cp.exists()
+                        and (_t.time() - cp.stat().st_mtime) < skip_fresh_hours * 3600):
+                    fresh = True
             except Exception:
                 pass
+            if fresh:
+                skipped += 1
+            else:
+                try:
+                    scrape_profile(u, limit=limit)
+                    scraped += 1
+                except Exception:
+                    pass
+                if i < len(wl) - 1:
+                    _t.sleep(delay)  # anti rate-limit (seulement après un vrai scrape)
             _insta_trends_scrape_state["done"] = i + 1
-            if i < len(wl) - 1:
-                _t.sleep(1.5)
         _insta_trends_scrape_state["status"] = "idle"
         _insta_trends_scrape_state["finished_at"] = int(_t.time())
-        return {"started": True, "count": len(wl), "reason": "ok"}
+        return {"started": True, "count": len(wl), "scraped": scraped,
+                "skipped": skipped, "reason": "ok"}
     finally:
         _insta_trends_scrape_lock.release()
 
