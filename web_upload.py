@@ -2885,20 +2885,14 @@ function showTab(group,name,title,subtitle){
       window.history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
     }
   }catch(e){}
-  // Auto-refresh Instagram Trends : 1x par heure max (sinon IG rate-limit)
+  // Instagram Trends : la page affiche le DERNIER scrape (instantané). Le scrape
+  // tourne en arrière-plan (2x/jour 00h/12h + à l'ajout d'un compte), PLUS à
+  // l'ouverture. Si un scrape programmé est en cours, on rattache juste la barre.
   if(name === 'igtrends'){
     try{
-      var last = parseInt(localStorage.getItem('ig_trends_last_autoscrape') || '0');
-      if(Date.now() - last > 60 * 60 * 1000){
-        localStorage.setItem('ig_trends_last_autoscrape', Date.now().toString());
-        fetch('/insta/scrape_all', {method:'POST'})
-          .then(function(r){ return r.json(); })
-          .then(function(d){
-            if(d && d.ok){
-              showGameLoader(d.count || 1);
-            }
-          }).catch(function(){});
-      }
+      fetch('/insta/scrape_status').then(function(r){return r.json();}).then(function(d){
+        if(d && d.status === 'in_progress'){ showGameLoader(d.total || 1); }
+      }).catch(function(){});
     }catch(e){}
   }
 }
@@ -10326,6 +10320,104 @@ def _time_ago(ts) -> str:
     if days < 365:
         return f"{days // 30} month{'s' if days // 30 > 1 else ''} ago"
     return f"{days // 365} year{'s' if days // 365 > 1 else ''} ago"
+
+
+# ============ Scrape watchlist Trends : factorisé (route manuelle + scheduler) ============
+import threading as _trends_threading
+_insta_trends_scrape_lock = _trends_threading.Lock()
+# État lu par /insta/scrape_status (game-loader) ET par showTab.
+_insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
+
+
+def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual") -> dict:
+    """Scrape SÉQUENTIEL de toute la watchlist Trends -> data/insta/cache/.
+    Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
+    Retourne {started, count, reason}."""
+    import time as _t
+    try:
+        from insta_scraper import load_watchlist, scrape_profile, is_auth_configured
+    except Exception as e:
+        return {"started": False, "count": 0, "reason": f"module indispo: {e}"}
+    try:
+        if not is_auth_configured():
+            return {"started": False, "count": 0, "reason": "auth non configurée"}
+    except Exception:
+        pass
+    wl = load_watchlist()
+    if not wl:
+        return {"started": False, "count": 0, "reason": "watchlist vide"}
+    if not _insta_trends_scrape_lock.acquire(blocking=False):
+        return {"started": False, "count": len(wl), "reason": "déjà en cours"}
+    try:
+        _insta_trends_scrape_state.update(
+            {"status": "in_progress", "done": 0, "total": len(wl),
+             "started_at": int(_t.time()), "label": label})
+        for i, u in enumerate(wl):
+            try:
+                scrape_profile(u, limit=limit)
+            except Exception:
+                pass
+            _insta_trends_scrape_state["done"] = i + 1
+            if i < len(wl) - 1:
+                _t.sleep(1.5)
+        _insta_trends_scrape_state["status"] = "idle"
+        _insta_trends_scrape_state["finished_at"] = int(_t.time())
+        return {"started": True, "count": len(wl), "reason": "ok"}
+    finally:
+        _insta_trends_scrape_lock.release()
+
+
+def _last_sunday_web(year: int, month: int) -> int:
+    import calendar as _cal
+    for week in reversed(_cal.monthcalendar(year, month)):
+        if week[6]:
+            return week[6]
+    return 28
+
+
+def _paris_now_web():
+    """Heure de Paris depuis l'UTC (CET=+1, CEST=+2, DST UE)."""
+    import datetime as _dt
+    u = _dt.datetime.utcnow()
+    y = u.year
+    dst_start = _dt.datetime(y, 3, _last_sunday_web(y, 3), 1)
+    dst_end = _dt.datetime(y, 10, _last_sunday_web(y, 10), 1)
+    offset = 2 if (dst_start <= u < dst_end) else 1
+    return u + _dt.timedelta(hours=offset)
+
+
+_INSTA_TRENDS_SCRAPE_HOURS = [0, 12]   # 00h et 12h Paris
+_insta_trends_last_slot = None
+_INSTA_TRENDS_SCHED_STARTED = False
+
+
+def _insta_trends_scheduler_loop():
+    """Thread daemon : scrape la watchlist Trends à 00h et 12h (Paris). Poll 5 min,
+    1× par créneau/jour, ne chevauche jamais un scrape manuel (lock)."""
+    import time as _t
+    global _insta_trends_last_slot
+    while True:
+        try:
+            now = _paris_now_web()
+            if now.hour in _INSTA_TRENDS_SCRAPE_HOURS:
+                slot = f"{now.date().isoformat()}#{now.hour}"
+                if _insta_trends_last_slot != slot:
+                    _insta_trends_last_slot = slot
+                    res = run_insta_watchlist_scrape(limit=12, label=f"sched-{now.hour}h")
+                    print(f"[insta-trends-sched] créneau {slot} -> {res}", flush=True)
+        except Exception as e:
+            print(f"[insta-trends-sched] crash: {e}", flush=True)
+        _t.sleep(300)
+
+
+def _start_insta_trends_scheduler():
+    global _INSTA_TRENDS_SCHED_STARTED
+    if _INSTA_TRENDS_SCHED_STARTED:
+        return
+    _INSTA_TRENDS_SCHED_STARTED = True
+    _trends_threading.Thread(target=_insta_trends_scheduler_loop, daemon=True,
+                             name="insta-trends-scheduler").start()
+    print("[insta-trends-sched] thread démarré — scrape 00h / 12h Paris", flush=True)
 
 
 def _render_insta_trends_grid_html() -> str:
@@ -30091,8 +30183,7 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"status": "unauth", "done": 0, "total": 0})
-        st = getattr(insta_scrape_status, "_state", None) or {"status": "idle", "done": 0, "total": 0}
-        return jsonify(st)
+        return jsonify(dict(_insta_trends_scrape_state))
 
     @app.route("/insta/scrape_all", methods=["POST"])
     def insta_scrape_all():
@@ -30101,31 +30192,17 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
         try:
-            from insta_scraper import load_watchlist, scrape_profile
+            from insta_scraper import load_watchlist
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         wl = load_watchlist()
         if not wl:
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
-        import time as _t
-        # State partage entre le thread bg et l endpoint status
-        insta_scrape_status._state = {
-            "status": "in_progress", "done": 0, "total": len(wl),
-            "started_at": int(_t.time()),
-        }
-        def _bg_scrape_all():
-            for i, u in enumerate(wl):
-                try:
-                    scrape_profile(u, limit=12)
-                except Exception:
-                    pass
-                insta_scrape_status._state["done"] = i + 1
-                if i < len(wl) - 1:
-                    _t.sleep(1.5)
-            insta_scrape_status._state["status"] = "idle"
-            insta_scrape_status._state["finished_at"] = int(_t.time())
-        threading.Thread(target=_bg_scrape_all, daemon=True).start()
+        # Scrape factorisé en arrière-plan (même fonction que le scheduler 00h/12h ;
+        # le lock empêche un chevauchement manuel/programmé).
+        threading.Thread(target=run_insta_watchlist_scrape,
+                         kwargs={"limit": 12, "label": "manual"}, daemon=True).start()
         return jsonify({
             "ok": True, "count": len(wl), "scrape_started": True,
             "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
@@ -30619,6 +30696,11 @@ def start_in_thread():
         _start_daily_insta_thread()
     except Exception as e:
         print(f"[start_in_thread] daily insta refresh failed to start: {e}", flush=True)
+    # Scheduler scrape Trends (watchlist) 00h / 12h Paris -> page Trends instantanée
+    try:
+        _start_insta_trends_scheduler()
+    except Exception as e:
+        print(f"[start_in_thread] insta trends scheduler failed to start: {e}", flush=True)
     # Seed des media pools MyPuls (idempotent : skip si pool deja peuple).
     # Au boot, restaure les listes hardcoded dans seed_media_pools.py pour
     # chaque createur (EMMA, AMELIA, JULIA, etc.) si le pool est vide.
