@@ -790,6 +790,11 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
             return result
         errors.append(f"RapidAPI: {result['error']}")
         log.warning(f"RapidAPI échoué pour {username}: {result['error']}")
+        # Mode RapidAPI STRICT : la clé est configurée -> on NE bascule PAS sur les
+        # cookies Instagram (Web/instaloader). On renvoie l'erreur RapidAPI telle
+        # quelle (ex: quota épuisé). L'utilisateur veut fonctionner SEULEMENT via
+        # l'API payante. (Le scrape remarchera dès que la quota se recharge.)
+        return {"error": " | ".join(errors)}
 
     if not auth.get("sessionid"):
         if errors:
