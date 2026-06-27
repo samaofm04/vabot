@@ -23703,10 +23703,11 @@ _PERM_KEY_TO_TABS = {
     # "Instagram Trends" (igtrends). On mappe donc la permission veille vers
     # igtrends, sinon l'accorder ne révèle aucun menu (écran vide).
     "veille": {"igtrends"},
-    # "upload" non plus n'est pas un onglet : les vrais panneaux sont
-    # reel/post/story/storycta/pp (atteints via showTab('upload','reel',...)).
-    # Sans ce mapping, accorder "upload" à un rôle ne révèle RIEN (upload mort).
-    "upload": {"reel", "post", "story", "storycta", "pp"},
+    # "upload" non plus n'est pas un onglet : les vrais panneaux (reel/post/story/
+    # storycta/pp) s'ouvrent via les boutons « Add media » DANS la Bibliothèque.
+    # On révèle donc la Bibliothèque (cloudoverview = navigable) + on dé-masque les
+    # panneaux d'upload. Sans cloudoverview, accorder "upload" ne montrait aucun menu.
+    "upload": {"cloudoverview", "reel", "post", "story", "storycta", "pp"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -24407,6 +24408,13 @@ function savePermissions(){
     if(field === 'enabled') perms[menu].enabled = input.checked;
     else if(field === 'perm' && input.checked) perms[menu].perms.push(input.dataset.perm);
     else if(field === 'scope' && input.checked) perms[menu].scope = input.value;
+  });
+  // FIX : cocher une sous-option (view/create/edit…) suffit à activer le menu.
+  // Sinon l'admin coche des permissions mais oublie la case maître -> le menu
+  // est enregistré enabled:false et l'onglet n'est jamais révélé (« ça prend pas
+  // les bonnes options »). On lie donc : une perm cochée => menu activé.
+  Object.keys(perms).forEach(function(m){
+    if(perms[m].perms && perms[m].perms.length) perms[m].enabled = true;
   });
   var form = new FormData();
   form.append('role_key', window.__currentEditRoleKey);
