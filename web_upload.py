@@ -29833,7 +29833,23 @@ def create_app():
         if not m:
             return jsonify({"ok": False, "error": "shortcode introuvable dans url"})
         shortcode = m.group(1)
-        # Combine plusieurs URLs + UAs
+        # yt-dlp + cookie IG : recupere la VRAIE description (fiable). Tente en
+        # PREMIER si un cookie est configure (la page publique est souvent bloquee
+        # par Instagram). skip_download -> rapide (metadonnees seules).
+        try:
+            import veille_telegram as _vt
+            _ck = _vt._find_ig_cookies()
+            if _ck:
+                import yt_dlp as _ytdl
+                with _ytdl.YoutubeDL({"quiet": True, "no_warnings": True,
+                                      "skip_download": True, "cookiefile": _ck}) as _yd:
+                    _info = _yd.extract_info(url, download=False)
+                _desc = (_info.get("description") or "").strip()
+                if _desc:
+                    return jsonify({"ok": True, "caption": _desc[:1000]})
+        except Exception:
+            pass
+        # Combine plusieurs URLs + UAs (fallback no-cookie)
         urls = [
             f"https://www.instagram.com/p/{shortcode}/",
             f"https://www.instagram.com/reel/{shortcode}/",
@@ -29992,6 +30008,23 @@ def create_app():
             if disk_file.exists() and disk_file.stat().st_size > 1024:
                 from flask import send_file
                 return send_file(str(disk_file), mimetype="video/mp4", conditional=True)
+        # ETAPE 0.5 : yt-dlp + cookie IG (la meme methode que la Veille). FIABLE pour
+        # TOUS les reels (l'API ne donne pas la video). On ne tente que si un cookie
+        # est configure. Telecharge -> cache disque -> sert (les prochains clics =
+        # instantanes via l'ETAPE 0).
+        if sc and post_url:
+            try:
+                import veille_telegram as _vt
+                if _vt._find_ig_cookies():
+                    _yb = _vt.download_via_ytdlp(post_url, timeout=45)
+                    if _yb:
+                        from pathlib import Path as _P2
+                        _vd = _P2("data/insta/videos"); _vd.mkdir(parents=True, exist_ok=True)
+                        (_vd / f"{sc}.mp4").write_bytes(_yb)
+                        from flask import send_file
+                        return send_file(str(_vd / f"{sc}.mp4"), mimetype="video/mp4", conditional=True)
+            except Exception:
+                pass
         # ETAPE 1 : essaie URL directe (cas reel fresh)
         if direct_vurl:
             res = try_stream(direct_vurl)
