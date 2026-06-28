@@ -455,12 +455,18 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
 
     def _fetch_profile_resp():
         try:
-            _prof_box["resp"] = requests.post(
-                f"{base}/ig_get_fb_profile_v3.php",
-                headers=headers,
-                data={"username_or_url": username},
-                timeout=12,
-            )
+            _resp = None
+            for _attempt in range(3):
+                _resp = requests.post(
+                    f"{base}/ig_get_fb_profile_v3.php",
+                    headers=headers,
+                    data={"username_or_url": username},
+                    timeout=12,
+                )
+                if _resp.status_code != 429:  # 429 = rafale -> backoff + retry
+                    break
+                time.sleep(1.5 * (_attempt + 1))
+            _prof_box["resp"] = _resp
         except Exception as _e:
             _prof_box["exc"] = _e
 
@@ -477,16 +483,23 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     pages_fetched = 0
     try:
         while pages_fetched < max_pages:
-            r = requests.post(
-                f"{base}/get_ig_user_reels.php",
-                headers=headers,
-                data={
-                    "username_or_url": username,
-                    "amount": str(limit),
-                    "pagination_token": pagination_token,
-                },
-                timeout=12,
-            )
+            # Retry sur 429 (limite de RAFALE RapidAPI quand plusieurs comptes sont
+            # scrapés en parallèle) : petit backoff croissant puis on retente.
+            r = None
+            for _attempt in range(3):
+                r = requests.post(
+                    f"{base}/get_ig_user_reels.php",
+                    headers=headers,
+                    data={
+                        "username_or_url": username,
+                        "amount": str(limit),
+                        "pagination_token": pagination_token,
+                    },
+                    timeout=12,
+                )
+                if r.status_code != 429:
+                    break
+                time.sleep(1.5 * (_attempt + 1))
             log.info(f"RapidAPI reels page {pages_fetched+1} HTTP {r.status_code} pour {username}")
             pages_fetched += 1
             if r.status_code != 200:

@@ -1515,6 +1515,8 @@ window.igPlayInline = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
+  // Déjà en lecture embed -> ne pas réinjecter l'iframe
+  if(media.querySelector('.reel-embed-wrap')) return;
   // Si cette video est DEJA en lecture -> toggle pause/play manuel
   // (on n'utilise plus controls=true sur le video element donc on
   // gere manuellement)
@@ -1546,6 +1548,10 @@ window.igPlayInline = function(media){
   });
   var url = card.getAttribute('data-url') || '';
   var videoUrl = card.getAttribute('data-video-url') || '';
+  // Mode RapidAPI : l'API ne fournit PAS l'URL vidéo des reels (testé). S'il n'y a
+  // pas de video_url natif (= cookie Instagram), on lit la vidéo via l'embed
+  // Instagram rogné -> lecture dans le site, sans cookie, sans le proxy à 10s.
+  if(!videoUrl){ igEmbedInCard(card); return; }
   // Cree l'element <video> s'il n'existe pas (cas reels d'ancien scrape sans video_url cache)
   var v = media.querySelector('.reel-video');
   if(!v){
@@ -10352,14 +10358,15 @@ _insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
 
 
 def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
-                               skip_fresh_hours: float = 10.0, workers: int = 8) -> dict:
+                               skip_fresh_hours: float = 10.0, workers: int = 5) -> dict:
     """Scrape PARALLÈLE de toute la watchlist Trends -> data/insta/cache/.
     Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
 
-    Parallélisé (ThreadPoolExecutor) -> ~30s pour 56 comptes au lieu de ~5 min.
-    skip_fresh_hours : saute un profil dont le cache date de moins de N heures
-    (0 = force tout, pour un Rafraîchir manuel). Retourne {started, count, scraped,
-    skipped, reason}."""
+    Parallélisé (ThreadPoolExecutor) -> ~30-40s pour 56 comptes au lieu de ~5 min.
+    workers=5 : RapidAPI a une limite de RAFALE (429 si trop d'appels simultanés) ;
+    5 workers tient le débit sûr (~5 req/s) tout en restant rapide. _scrape_via_rapidapi
+    re-tente en plus sur 429. skip_fresh_hours : saute un profil dont le cache date de
+    moins de N heures (0 = force tout, pour un Rafraîchir manuel)."""
     import time as _t
     try:
         from insta_scraper import (load_watchlist, scrape_profile,
