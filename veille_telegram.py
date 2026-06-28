@@ -130,7 +130,7 @@ def _find_ig_cookies() -> Optional[str]:
     return None
 
 
-def download_via_ytdlp(post_url: str, timeout: int = 90,
+def download_via_ytdlp(post_url: str, timeout: int = 25,
                        info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
     """Telecharge la video d'un permalink IG via yt-dlp (comme le bot ig-downloader).
 
@@ -164,7 +164,7 @@ def download_via_ytdlp(post_url: str, timeout: int = 90,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
-        "retries": 3,
+        "retries": 1,
         "socket_timeout": timeout,
         "max_filesize": 50 * 1024 * 1024,  # Telegram cap : yt-dlp skip si >50MB
     }

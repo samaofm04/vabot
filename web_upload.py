@@ -30051,7 +30051,7 @@ def create_app():
             try:
                 import veille_telegram as _vt
                 if _vt._find_ig_cookies():
-                    _yb = _vt.download_via_ytdlp(post_url, timeout=45)
+                    _yb = _vt.download_via_ytdlp(post_url, timeout=25)
                     if _yb:
                         from pathlib import Path as _P2
                         _vd = _P2("data/insta/videos"); _vd.mkdir(parents=True, exist_ok=True)
