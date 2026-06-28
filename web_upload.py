@@ -1648,12 +1648,12 @@ window.igPlayInline = function(media){
     v.src = videoUrl;
     var p = v.play();
     if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-    // Timeout 5s sur URL directe : si rien charge, bascule proxy
+    // Timeout 3s sur URL directe : si rien charge (URL CDN expirée), bascule proxy
     setTimeout(function(){
       if(!v.readyState || v.readyState < 1){
         tryProxy();
       }
-    }, 5000);
+    }, 3000);
   } else {
     tryProxy();
   }
@@ -29995,9 +29995,10 @@ def create_app():
             if disk_file.exists() and disk_file.stat().st_size > 1024:
                 from flask import send_file
                 return send_file(str(disk_file), mimetype="video/mp4", conditional=True)
-        # ETAPE 1 : essaie URL directe (cas reel fresh)
+        # ETAPE 1 : essaie URL directe (cas reel fresh). fast=True -> si l'URL est
+        # morte/expirée, on le détecte en 4s au lieu de 30s avant de passer au refresh.
         if direct_vurl:
-            res = try_stream(direct_vurl)
+            res = try_stream(direct_vurl, fast=True)
             if res is not None:
                 # Sauvegarde sur disque pour future plays instantanes
                 if sc:
@@ -30036,38 +30037,42 @@ def create_app():
                                 cache[post_url] = {"ts": now, "video_url": video_url}
                                 return res
                         break
-            # 3b : fresh scrape RapidAPI - limit 500 pour couvrir les vieux reels
-            result = scrape_profile(owner, limit=500)
-            if "error" in result:
-                return (f"RapidAPI: {result['error'][:200]}", 502)
-            nb_reels = len(result.get("reels", []))
-            for reel in result.get("reels", []):
-                if reel.get("shortcode") == shortcode:
-                    video_url = (reel.get("video_url") or "").strip()
-                    if not video_url:
-                        # Tente endpoint RapidAPI single-post
-                        try:
-                            from insta_scraper import _scrape_via_rapidapi_single_post
-                            single = _scrape_via_rapidapi_single_post(shortcode)
-                            if single and single.get("video_url"):
-                                video_url = single["video_url"]
-                        except Exception:
-                            pass
-                    if not video_url:
-                        # Scrape la page Instagram directement (/p/ et /embed/)
-                        video_url = _scrape_ig_page_for_video(shortcode)
-                    if not video_url:
-                        return ("Reel public mais URL video introuvable apres RapidAPI + scraping page. Bug API.", 404)
-                    cache[post_url] = {"ts": now, "video_url": video_url}
-                    res = try_stream(video_url)
-                    if res is not None:
-                        if shortcode:
-                            import threading as _th
-                            _th.Thread(target=_download_reel_video,
-                                       args=(shortcode, video_url), daemon=True).start()
-                        return res
-                    return ("URL RapidAPI mais CDN refuse stream", 502)
-            return (f"@{owner} : reel {shortcode} introuvable parmi {nb_reels} reels scrapes", 404)
+            # 3b : SINGLE-POST RapidAPI EN PREMIER (1 appel CIBLÉ ~1-2s). Avant, on
+            # re-scrapait TOUT le profil (limit=500 = jusqu'à ~40 appels API ~10s)
+            # juste pour retrouver UN reel -> c'était la cause des 10s de chargement.
+            video_url = ""
+            try:
+                from insta_scraper import _scrape_via_rapidapi_single_post
+                single = _scrape_via_rapidapi_single_post(shortcode)
+                if single and single.get("video_url"):
+                    video_url = (single["video_url"] or "").strip()
+            except Exception:
+                pass
+            # 3c : fallback scrape de la page IG (/p/ + /embed/) — sans API, rapide
+            if not video_url:
+                try:
+                    video_url = _scrape_ig_page_for_video(shortcode) or ""
+                except Exception:
+                    video_url = ""
+            # 3d : DERNIER recours — scrape profil complet (lent) si tout le reste échoue
+            if not video_url:
+                result = scrape_profile(owner, limit=500)
+                if "error" in result:
+                    return (f"RapidAPI: {result['error'][:200]}", 502)
+                for reel in result.get("reels", []):
+                    if reel.get("shortcode") == shortcode:
+                        video_url = (reel.get("video_url") or "").strip()
+                        break
+            if not video_url:
+                return ("URL video introuvable (single-post + page + profil). Bug API.", 404)
+            cache[post_url] = {"ts": now, "video_url": video_url}
+            res = try_stream(video_url)
+            if res is not None:
+                import threading as _th
+                _th.Thread(target=_download_reel_video,
+                           args=(shortcode, video_url), daemon=True).start()
+                return res
+            return ("URL video resolue mais CDN refuse le stream", 502)
         except Exception as e:
             return (f"RapidAPI error: {type(e).__name__}: {str(e)[:200]}", 500)
 
