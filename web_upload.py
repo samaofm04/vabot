@@ -17960,8 +17960,9 @@ def _render_veille_feed_html() -> str:
     # Render par jour - format DD/MM
     import datetime as _dt_v
 
-    # Bandeau d'actions globales : selection + bulk send
-    if s['unsent_count'] > 0:
+    # Bandeau d'actions globales : selection + bulk send. TOUJOURS affiche pour
+    # pouvoir multi-selectionner ET renvoyer des reels deja envoyes.
+    if True:
         bulk_bar = (
             "<div style='position:sticky;top:0;z-index:20;background:#0a0a0a;display:flex;align-items:center;gap:14px;padding:14px 18px;margin-bottom:18px;border:1px solid #2a2a2a;border-radius:12px'>"
             "<label class='vl-pick vl-pick-sm' style='cursor:pointer;display:inline-flex'>"
@@ -17970,7 +17971,7 @@ def _render_veille_feed_html() -> str:
             "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
             "</span>"
             "</label>"
-            "<span style='color:#aaa;font-size:13px'>Tout sélectionner (non envoyés)</span>"
+            "<span style='color:#aaa;font-size:13px'>Tout sélectionner</span>"
             "<div style='margin-left:auto;color:#888;font-size:12px'><span id='veille-selected-count'>0</span> sélectionné(s)</div>"
             "<button onclick='sendSelectedVeille()' id='veille-send-selected-btn' disabled "
             "style='background:#0088cc;color:#fff;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;opacity:0.4'>"
@@ -18040,7 +18041,7 @@ def _render_veille_feed_html() -> str:
             f"<div><h3 style='margin:0;font-size:17px;color:#fff;letter-spacing:-.01em'>{day_label}</h3>"
             f"<div style='font-size:12px;color:#666;margin-top:2px'>{len(reels)} reels · {unsent_count} non envoyés</div></div>"
         )
-        if unsent_count > 0:
+        if reels:
             section_html += (
                 f"<button onclick=\"selectDayVeille('{day}')\" "
                 f"title='Tout sélectionner ce jour' "
@@ -18048,7 +18049,7 @@ def _render_veille_feed_html() -> str:
                 f"onmouseover=\"this.style.background='rgba(59,130,246,.2)'\" "
                 f"onmouseout=\"this.style.background='rgba(59,130,246,.1)'\">"
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='9 11 12 14 22 4'/><path d='M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'/></svg>"
-                f"Tout cocher ({unsent_count})</button>"
+                f"Tout cocher ({len(reels)})</button>"
             )
         section_html += "</div>"
 
@@ -18086,18 +18087,17 @@ def _render_veille_feed_html() -> str:
             # Ribbon sent
             ribbon = ""
             if sent:
-                ribbon = ("<div style='position:absolute;top:10px;left:10px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
+                ribbon = ("<div style='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'>✓ ENVOYÉ</div>")
-            # Checkbox bulk selection
-            cb_html = ""
-            if not sent:
-                cb_html = (
-                    f"<label class='vl-pick' onclick='event.stopPropagation()' style='position:absolute;top:10px;left:10px;z-index:6'>"
-                    f"<input type='checkbox' class='veille-cb' data-rid='{rid}' data-day='{day}' onchange='veilleOnSelect()'>"
-                    f"<span class='vl-pick-circle'>"
-                    f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
-                    f"</span></label>"
-                )
+            # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
+            # pouvoir multi-selectionner et RENVOYER en lot.
+            cb_html = (
+                f"<label class='vl-pick' onclick='event.stopPropagation()' style='position:absolute;top:10px;left:10px;z-index:7'>"
+                f"<input type='checkbox' class='veille-cb' data-rid='{rid}' data-day='{day}' onchange='veilleOnSelect()'>"
+                f"<span class='vl-pick-circle'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
+                f"</span></label>"
+            )
             # Video element (reutilise meme structure que Trends)
             # Toujours emettre le <video> (meme si video_url vide/expire) : igPlayInline
             # bascule alors sur le proxy via le permalink IG. Sinon la carte reste morte.
@@ -18130,8 +18130,8 @@ def _render_veille_feed_html() -> str:
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
-      <button onclick='starReelMenu(this, "{rid}")' title="⭐ Envoyer en banger (meilleur reel) vers une identité" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#ffd54a;cursor:pointer;display:flex;align-items:center;justify-content:center">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <button onclick='resendVeilleReel("{rid}", this)' title="Renvoyer ce reel sur Telegram (même déjà envoyé)" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
       </button>
       <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -18393,6 +18393,45 @@ async function sendSelectedVeille(){
     btn.style.background = '#0088cc';
     veilleOnSelect();  // recalcule l etat des bouton/compteurs
   }, 2500);
+}
+// Renvoyer UN reel precis sur Telegram (marche meme s'il est deja envoye :
+// /veille/send ne bloque pas les reels deja 'sent_to_telegram').
+async function resendVeilleReel(rid, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  try {
+    const fd = new FormData(); fd.set('reel_id', rid);
+    const r = await fetch('/veille/send', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      btn.innerHTML = '✓';
+      btn.style.background = 'rgba(34,197,94,.65)';
+      const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
+      if(card && card.getAttribute('data-sent') !== '1'){
+        const media = card.querySelector('.reel-media');
+        if(media){
+          const rb = document.createElement('div');
+          rb.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px';
+          rb.textContent = '✓ ENVOYÉ';
+          media.appendChild(rb);
+        }
+        card.setAttribute('data-sent','1');
+      }
+      if(j.mode === 'link' && j.fallback_reason){
+        alert('⚠️ Renvoyé en LIEN (pas en vidéo).\\nRaison : ' + j.fallback_reason);
+      }
+    } else {
+      btn.innerHTML = '✗';
+      btn.style.background = 'rgba(239,68,68,.6)';
+      alert('Erreur : ' + (j.error || '?'));
+    }
+  } catch(e){
+    btn.innerHTML = '✗';
+    btn.style.background = 'rgba(239,68,68,.6)';
+    alert('Erreur : ' + e);
+  }
+  setTimeout(() => { btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.42)'; btn.disabled = false; }, 2500);
 }
 // Lecteur inline : swap thumb <-> video au click sur le bouton play
 function veillePlayToggle(btn){
