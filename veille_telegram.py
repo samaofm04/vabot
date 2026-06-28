@@ -490,6 +490,7 @@ def send_video_from_url(video_url: str, caption: str = "",
     _scm = _re_v.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', fallback_url or "")
     _sc = _scm.group(1) if _scm else ""
     _cache_f = (_Pv("data/insta/videos") / f"{_sc}.mp4") if _sc else None
+    _desc_f = (_Pv("data/insta/videos") / f"{_sc}.txt") if _sc else None  # sidecar description
     yt_info: Dict[str, Any] = {}
     yt_reason = ""
     video_bytes = None
@@ -498,6 +499,16 @@ def send_video_from_url(video_url: str, caption: str = "",
             video_bytes = _cache_f.read_bytes()
         except Exception:
             video_bytes = None
+        # CACHE HIT : yt-dlp ne tourne pas -> on relit la description sauvegardee a
+        # cote (sinon la description manquerait sur un renvoi). Garde l'ordre
+        # video -> lien -> description meme depuis le cache.
+        if video_bytes and _desc_f and _desc_f.exists() and (not followup_text or not followup_text.strip()):
+            try:
+                _ds = _desc_f.read_text(encoding="utf-8").strip()
+                if _ds:
+                    followup_text = _ds
+            except Exception:
+                pass
     # 0) yt-dlp depuis le permalink (auth via cookies) si PAS en cache. Recupere
     #    AUSSI la description (yt_info['description']).
     if not video_bytes:
@@ -506,11 +517,14 @@ def send_video_from_url(video_url: str, caption: str = "",
         # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien
         if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
             return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
-        # Met en cache (partage avec Trends) pour les prochains renvois/lectures
+        # Met en cache (partage avec Trends) + SAUVE la description a cote -> dispo
+        # meme sur les futurs cache hits (renvois).
         if video_bytes and _cache_f:
             try:
                 _cache_f.parent.mkdir(parents=True, exist_ok=True)
                 _cache_f.write_bytes(video_bytes)
+                if yt_info.get("description") and _desc_f:
+                    _desc_f.write_text(yt_info["description"], encoding="utf-8")
             except Exception:
                 pass
     # Description : si aucune fournie, utilise celle que yt-dlp a recuperee
