@@ -2393,7 +2393,7 @@ class UserCog(commands.Cog):
         description="[OWNER] Identité par défaut des VAs de CE serveur (ex: jessye)",
     )
     @app_commands.describe(
-        identity="Nom (ex: amelia) · 'random' = aléatoire · 'none' = enlever · vide = voir l'actuelle",
+        identity="Nom · 'random' aléatoire · 'category' selon catégorie Discord · 'none' enlever",
         reassigner="true = met aussi cette identité aux VAs déjà présents sur le serveur",
     )
     async def setidentite(
@@ -2454,6 +2454,50 @@ class UserCog(commands.Cog):
             await interaction.followup.send(
                 f"✅ **{interaction.guild.name}** en mode **aléatoire** + **{changed}** VA(s) "
                 f"redistribué(s) au hasard sur : {', '.join(sorted(idents))}.", ephemeral=True)
+            return
+        if ident in ("category", "categorie", "catégorie", "auto", "dossier", "categories"):
+            # Assigne chaque VA selon la CATEGORIE Discord de son salon : les salons
+            # sont DEJA ranges par identite (VAs sous 'Lola' -> lola, sous 'Alicia' ->
+            # alicia, etc.). C'est le vrai "remettre comme avant".
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            import re as _re_cat
+            def _norm(s):
+                return _re_cat.sub(r'[^a-z]', '', (s or '').lower())
+            try:
+                from cogs.welcome import list_identities
+                valid = list_identities()
+            except Exception:
+                valid = []
+            valid_norm = [(_norm(v), v) for v in valid]
+            gf.set_server_identity(interaction.guild, None)  # enleve le "serveur = X" force
+            users = load_json(USERS_FILE, {})
+            chan_ident = {}
+            for ch in interaction.guild.text_channels:
+                if not _ch_handle_va(ch.name) or not ch.category:
+                    continue
+                cn = _norm(ch.category.name)
+                if not cn:
+                    continue
+                for vn, vv in valid_norm:
+                    if vn and (vn == cn or cn.startswith(vn)):
+                        chan_ident[ch.id] = vv
+                        break
+            changed, counts = 0, {}
+            for k, data in users.items():
+                if isinstance(data, dict) and data.get("channel_id") in chan_ident:
+                    newid = chan_ident[data["channel_id"]]
+                    if data.get("identity") != newid:
+                        data["identity"] = newid
+                        changed += 1
+                    counts[newid] = counts.get(newid, 0) + 1
+            save_json(USERS_FILE, users)
+            summary = ', '.join(f"{v} ×{c}" for v, c in sorted(counts.items()))
+            if not summary:
+                summary = "— (aucun salon VA rangé dans une catégorie identité)"
+            await interaction.followup.send(
+                f"✅ **{changed}** VA(s) réassigné(s) selon leur **catégorie Discord**.\n"
+                f"📊 Répartition : {summary}",
+                ephemeral=True)
             return
         if ident in ("none", "aucune", "reset", ""):
             gf.set_server_identity(interaction.guild, None)
