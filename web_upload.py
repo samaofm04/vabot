@@ -28222,21 +28222,10 @@ def create_app():
         if not veille_telegram.is_configured():
             return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
         url = (reel.get("url") or "").strip()
-        # Si la description ou le video_url manquent, re-scrape via instaloader
-        # (les caption sont souvent vides depuis le scraping initial des trends)
-        needs_refresh = not (reel.get("caption") or "").strip() or not (reel.get("video_url") or "").strip()
-        if needs_refresh and url:
-            fresh = veille_telegram.refresh_post_data(url, owner=reel.get("owner", ""))
-            updated_fields = {}
-            if fresh.get("caption") and not (reel.get("caption") or "").strip():
-                reel["caption"] = fresh["caption"]
-                updated_fields["caption"] = fresh["caption"]
-            if fresh.get("video_url"):
-                # On override toujours (l ancien peut etre expire)
-                reel["video_url"] = fresh["video_url"]
-                # Mais on persiste pas le video_url - il expirera de toute facon
-            if updated_fields:
-                veille.update_reel(rid, **updated_fields)
+        # PLUS de re-scrape lent (refresh_post_data) ici : yt-dlp, dans
+        # send_video_from_url, telecharge la video ET recupere la description depuis
+        # le permalink, et le cache disque sert les reels deja telecharges. On evite
+        # donc un re-scrape RapidAPI+instaloader a CHAQUE envoi -> bien plus rapide.
         caption = _veille_caption(reel)
         description = (reel.get("caption") or "").strip()
         # 1) Tente download + sendVideo, fallback sur lien si echec
