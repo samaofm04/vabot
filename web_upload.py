@@ -29696,7 +29696,7 @@ def create_app():
         if not is_auth():
             return redirect("/")
         try:
-            from insta_scraper import save_auth
+            from insta_scraper import save_auth, load_auth
         except Exception as e:
             return _error(f"❌ Module indispo: {e}")
         f = request.files.get("cookies_file")
@@ -29723,12 +29723,19 @@ def create_app():
             return _error("❌ Aucun <code>sessionid</code> trouvé dans le fichier. "
                 "Assure-toi d'être connecté à Instagram avant d'exporter les cookies.",
                 error=True,)
-        save_auth({
-            "sessionid": wanted["sessionid"],
-            "ds_user_id": wanted["ds_user_id"] or "",
-            "csrftoken": wanted["csrftoken"] or "",
-            "username": "",
-        })
+        # MERGE dans l'auth existante : NE PAS ecraser rapidapi_key / rapidapi_host
+        # (sinon l'upload de cookie casse tout le scrape RapidAPI !).
+        _auth = {}
+        try:
+            _auth = load_auth() or {}
+        except Exception:
+            _auth = {}
+        _auth["sessionid"] = wanted["sessionid"]
+        if wanted["ds_user_id"]:
+            _auth["ds_user_id"] = wanted["ds_user_id"]
+        if wanted["csrftoken"]:
+            _auth["csrftoken"] = wanted["csrftoken"]
+        save_auth(_auth)
         # Sauve AUSSI le fichier brut (format Netscape) : yt-dlp l'utilise pour
         # telecharger les reels de la Veille (data/insta/cookies.txt).
         ytdlp_ok = False
