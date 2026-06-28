@@ -2776,6 +2776,109 @@ class UserCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+def _insta_handle_check(raw: str):
+    """Normalise un pseudo/lien Instagram + VERIFIE qu'il existe (via RapidAPI).
+    Retourne (username, status) ; status: 'ok'|'notfound'|'invalid'|'unknown'|'empty'."""
+    import re as _re_i
+    s = (raw or "").strip()
+    if not s:
+        return ("", "empty")
+    m = _re_i.search(r'(?:instagram\.com|instagr\.am|threads\.net)/@?([A-Za-z0-9_.]+)', s, _re_i.IGNORECASE)
+    if m:
+        u = m.group(1)
+    else:
+        u = s.lstrip("@").strip().rstrip("/").split("/")[-1].split("?")[0]
+    u = _re_i.sub(r'[^A-Za-z0-9_.]', '', u)
+    if not u:
+        return (s[:40], "invalid")
+    try:
+        from insta_scraper import load_auth
+        auth = load_auth()
+        key = (auth.get("rapidapi_key") or "").strip()
+        if not key:
+            return (u, "unknown")  # pas de cle -> on accepte sans pouvoir verifier
+        host = (auth.get("rapidapi_host") or "instagram-scraper-stable-api.p.rapidapi.com").strip()
+        import requests
+        r = requests.post(
+            f"https://{host}/ig_get_fb_profile_v3.php",
+            headers={"x-rapidapi-key": key, "x-rapidapi-host": host,
+                     "Content-Type": "application/x-www-form-urlencoded"},
+            data={"username_or_url": u}, timeout=12,
+        )
+        body = r.text.lower()
+        if "does not exist" in body or "invalid or missing" in body:
+            return (u, "notfound")
+        try:
+            d = r.json()
+        except Exception:
+            return (u, "unknown")
+
+        def _has_pk(o, dep=0):
+            if dep > 6:
+                return False
+            if isinstance(o, dict):
+                if o.get("pk") or o.get("id") or o.get("username"):
+                    return True
+                return any(_has_pk(v, dep + 1) for v in o.values())
+            if isinstance(o, list):
+                return any(_has_pk(x, dep + 1) for x in o)
+            return False
+        return (u, "ok" if _has_pk(d) else "notfound")
+    except Exception:
+        return (u, "unknown")
+
+
+class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram"):
+    """Saisie des 3 comptes Insta du VA, avec validation d'existence en direct."""
+    insta1 = discord.ui.TextInput(label="Insta 1", placeholder="@pseudo ou lien insta", required=False, max_length=150)
+    insta2 = discord.ui.TextInput(label="Insta 2", placeholder="@pseudo ou lien insta", required=False, max_length=150)
+    insta3 = discord.ui.TextInput(label="Insta 3", placeholder="@pseudo ou lien insta", required=False, max_length=150)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        raws = [(1, self.insta1.value), (2, self.insta2.value), (3, self.insta3.value)]
+        lines, valid = [], []
+        for i, raw in raws:
+            if not (raw or "").strip():
+                continue
+            u, status = _insta_handle_check(raw)
+            if status == "ok":
+                lines.append(f"✅ **Insta {i}** — [@{u}](https://instagram.com/{u}) : compte trouvé")
+                valid.append(u)
+            elif status == "notfound":
+                lines.append(f"❌ **Insta {i}** — @{u} : **compte introuvable** (vérifie le @ / le lien)")
+            elif status == "invalid":
+                lines.append(f"❌ **Insta {i}** — `{(raw or '')[:40]}` : **@ ou lien invalide**")
+            else:  # unknown : pas pu vérifier (clé API absente / souci réseau)
+                lines.append(f"➕ **Insta {i}** — @{u} : ajouté (pas pu vérifier l'existence)")
+                valid.append(u)
+        if not lines:
+            await interaction.followup.send("⚠️ Tu n'as rempli aucun champ.", ephemeral=True)
+            return
+        if valid:
+            try:
+                users = load_json(USERS_FILE, {})
+                k = str(interaction.user.id)
+                entry = users.get(k)
+                if not isinstance(entry, dict):
+                    entry = {}
+                    users[k] = entry
+                existing = [x for x in (entry.get("insta_accounts") or []) if isinstance(x, str)]
+                low = [e.lower() for e in existing]
+                for u in valid:
+                    if u.lower() not in low:
+                        existing.append(u)
+                        low.append(u.lower())
+                entry["insta_accounts"] = existing
+                save_json(USERS_FILE, users)
+            except Exception:
+                pass
+        await interaction.followup.send(
+            "📷 **Validation de tes comptes Instagram :**\n\n" + "\n".join(lines)
+            + ("\n\n_Comptes valides enregistrés ✅ (visibles dans « Mes comptes Insta »)_" if valid else ""),
+            ephemeral=True)
+
+
 class ContentMenuView(discord.ui.View):
     """Menu de contenu cliquable. Chaque bouton sert le contenu correspondant
     pour l'identité du VA qui clique (réutilise les commandes existantes).
@@ -2836,20 +2939,9 @@ class ContentMenuView(discord.ui.View):
         if not _menu_feature_check(interaction, "onboarding"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
             return
-        # Relance l'onboarding depuis l'étape 0 (mêmes vues que le 1er onboarding)
-        try:
-            from cogs.onboarding import step_embed, OnboardingView, send_step_media
-        except Exception as e:
-            await interaction.response.send_message(f"⚠️ Onboarding indispo : {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(
-            content=f"{interaction.user.mention} — on repart de zéro pour ajouter un compte 👇",
-            embed=step_embed(0), view=OnboardingView(),
-        )
-        try:
-            await send_step_media(interaction.channel, 0, bot=interaction.client)
-        except Exception:
-            pass
+        # Ouvre le modal de saisie des 3 comptes Insta (Insta 1/2/3) avec validation
+        # d'existence : pseudo OU lien -> verifie que le compte existe sur Instagram.
+        await interaction.response.send_modal(MesComptesInstaModal())
 
     @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=3)
     async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2875,6 +2967,16 @@ class ContentMenuView(discord.ui.View):
             u = (a.get("username") or "").strip().lstrip("@")
             if u and u not in usernames:
                 usernames.append(u)
+        # + comptes renseignes par le VA lui-meme via le modal "Ajouter un compte"
+        try:
+            _u = load_json(USERS_FILE, {}).get(str(interaction.user.id))
+            if isinstance(_u, dict):
+                for x in (_u.get("insta_accounts") or []):
+                    xx = (x or "").strip().lstrip("@")
+                    if xx and xx not in usernames:
+                        usernames.append(xx)
+        except Exception:
+            pass
         if not usernames:
             await interaction.followup.send(
                 f"📷 **Aucun compte {reseau} relié à ton Discord.**\n"
