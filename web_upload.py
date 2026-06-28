@@ -10346,15 +10346,14 @@ _insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
 
 
 def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
-                               skip_fresh_hours: float = 10.0, delay: float = 3.0) -> dict:
-    """Scrape SÉQUENTIEL de toute la watchlist Trends -> data/insta/cache/.
+                               skip_fresh_hours: float = 10.0, workers: int = 8) -> dict:
+    """Scrape PARALLÈLE de toute la watchlist Trends -> data/insta/cache/.
     Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
 
-    skip_fresh_hours : ne re-scrape PAS un profil dont le cache date de moins de N
-    heures (économise la quota/rate-limit RapidAPI + Instagram ; évite de re-brûler
-    sur des « Rafraîchir » rapprochés). Les créneaux 00h/12h sont à 12h d'écart donc
-    couvrent quand même tout. delay : pause entre comptes (anti rate-limit).
-    Retourne {started, count, scraped, skipped, reason}."""
+    Parallélisé (ThreadPoolExecutor) -> ~30s pour 56 comptes au lieu de ~5 min.
+    skip_fresh_hours : saute un profil dont le cache date de moins de N heures
+    (0 = force tout, pour un Rafraîchir manuel). Retourne {started, count, scraped,
+    skipped, reason}."""
     import time as _t
     try:
         from insta_scraper import (load_watchlist, scrape_profile,
@@ -10372,33 +10371,38 @@ def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
     if not _insta_trends_scrape_lock.acquire(blocking=False):
         return {"started": False, "count": len(wl), "reason": "déjà en cours"}
     try:
-        _insta_trends_scrape_state.update(
-            {"status": "in_progress", "done": 0, "total": len(wl),
-             "started_at": int(_t.time()), "label": label})
-        scraped = skipped = 0
-        for i, u in enumerate(wl):
-            fresh = False
+        now = _t.time()
+        # Filtre : ne garde que les comptes à (re)scraper (saute les caches frais)
+        to_scrape, skipped = [], 0
+        for u in wl:
             try:
                 cp = CACHE_DIR / f"{_clean_username(u)}.json"
                 if (skip_fresh_hours and cp.exists()
-                        and (_t.time() - cp.stat().st_mtime) < skip_fresh_hours * 3600):
-                    fresh = True
+                        and (now - cp.stat().st_mtime) < skip_fresh_hours * 3600):
+                    skipped += 1
+                    continue
             except Exception:
                 pass
-            if fresh:
-                skipped += 1
-            else:
+            to_scrape.append(u)
+        _insta_trends_scrape_state.update(
+            {"status": "in_progress", "done": skipped, "total": len(wl),
+             "started_at": int(now), "label": label})
+        if to_scrape:
+            import concurrent.futures as _cf
+            _done_lock = _trends_threading.Lock()
+
+            def _one(_u):
                 try:
-                    scrape_profile(u, limit=limit)
-                    scraped += 1
+                    scrape_profile(_u, limit=limit)
                 except Exception:
                     pass
-                if i < len(wl) - 1:
-                    _t.sleep(delay)  # anti rate-limit (seulement après un vrai scrape)
-            _insta_trends_scrape_state["done"] = i + 1
+                with _done_lock:
+                    _insta_trends_scrape_state["done"] += 1
+            with _cf.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+                list(ex.map(_one, to_scrape))
         _insta_trends_scrape_state["status"] = "idle"
         _insta_trends_scrape_state["finished_at"] = int(_t.time())
-        return {"started": True, "count": len(wl), "scraped": scraped,
+        return {"started": True, "count": len(wl), "scraped": len(to_scrape),
                 "skipped": skipped, "reason": "ok"}
     finally:
         _insta_trends_scrape_lock.release()
@@ -30250,12 +30254,14 @@ def create_app():
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
         # Scrape factorisé en arrière-plan (même fonction que le scheduler 00h/12h ;
-        # le lock empêche un chevauchement manuel/programmé).
+        # le lock empêche un chevauchement manuel/programmé). Manuel = skip_fresh_hours=0
+        # pour FORCER tout (du frais immédiat) ; parallèle -> ~30s pour 56 comptes.
         threading.Thread(target=run_insta_watchlist_scrape,
-                         kwargs={"limit": 12, "label": "manual"}, daemon=True).start()
+                         kwargs={"limit": 12, "label": "manual", "skip_fresh_hours": 0},
+                         daemon=True).start()
         return jsonify({
             "ok": True, "count": len(wl), "scrape_started": True,
-            "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
+            "message": f"Scrape de {len(wl)} compte(s) lancé en parallèle (~30s)…",
         })
 
     @app.route("/settings/admin_token", methods=["POST"])

@@ -1,0 +1,155 @@
+
+window.__glGroups = [];
+window.__glIdentities = [];
+
+;
+
+function glOpenCreateModal(){
+  console.log('glOpenCreateModal called');
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.onclick = function(e){ if(e.target === overlay) close(); };
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden';
+  var grps = window.__glGroups || [];
+  var idents = window.__glIdentities || [];
+  // Build options via DOM-safe concat (pas de template literals nested)
+  var grpField = '';
+  if(grps.length){
+    var grpOpts = '';
+    for(var i=0; i<grps.length; i++) grpOpts += '<option value="' + grps[i].name + '">' + grps[i].name + '</option>';
+    grpField = '<select id="gl-cr-group" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><option value="">-- choisir --</option>' + grpOpts + '</select>';
+  } else {
+    grpField = '<input type="text" id="gl-cr-group" placeholder="Nom du groupe GeeLark" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><small style="color:#888;font-size:11px">API GeeLark indisponible - tape le nom manuellement</small>';
+  }
+  var identField = '';
+  if(idents.length){
+    var identOpts = '';
+    for(var k=0; k<idents.length; k++) identOpts += '<option value="' + idents[k] + '">' + idents[k] + '</option>';
+    identField = '<select id="gl-cr-ident" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px"><option value="">-- choisir --</option>' + identOpts + '</select>';
+  } else {
+    identField = '<input type="text" id="gl-cr-ident" placeholder="nom de l identite (ex: emma)" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">';
+  }
+  card.innerHTML =
+    '<div style="padding:20px 24px;border-bottom:1px solid #232323">' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px">📱</div>' +
+        '<div>' +
+          '<div style="color:#fff;font-weight:700;font-size:16px">Créer un push GeeLark</div>' +
+          '<div style="color:#888;font-size:12px;margin-top:2px">Quotidien a heure de Paris</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:18px 24px;display:flex;flex-direction:column;gap:14px">' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Groupe GeeLark *</label>' +
+        grpField +
+      '</div>' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Identite *</label>' +
+        identField +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Reels</label><input type="number" id="gl-cr-reels" value="1" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Stories</label><input type="number" id="gl-cr-stories" value="3" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+        '<div><label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">CTAs</label><input type="number" id="gl-cr-ctas" value="1" min="0" max="20" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;text-align:center"></div>' +
+      '</div>' +
+      '<div>' +
+        '<label style="display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Heure de push (heure Paris) *</label>' +
+        '<input type="time" id="gl-cr-time" value="22:00" style="width:100%;padding:10px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px">' +
+        '<small style="color:#666;font-size:11px;display:block;margin-top:4px">Le push s execute chaque jour a cette heure</small>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:14px 22px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #232323;background:#0f0f0f">' +
+      '<button type="button" id="gl-cr-cancel" style="background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">Annuler</button>' +
+      '<button type="button" id="gl-cr-save" style="background:#a855f7;color:#fff;border:0;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(168,85,247,.3)">Creer</button>' +
+    '</div>';
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const f = document.getElementById('gl-cr-group');
+    if(f) f.focus();
+  }, 50);
+  function onKey(e){ if(e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  document.getElementById('gl-cr-cancel').onclick = close;
+  document.getElementById('gl-cr-save').onclick = save;
+  async function save(){
+    const grp = (document.getElementById('gl-cr-group').value || '').trim();
+    const ident = (document.getElementById('gl-cr-ident').value || '').trim();
+    const reels = parseInt(document.getElementById('gl-cr-reels').value || '0', 10);
+    const stories = parseInt(document.getElementById('gl-cr-stories').value || '0', 10);
+    const ctas = parseInt(document.getElementById('gl-cr-ctas').value || '0', 10);
+    const time = (document.getElementById('gl-cr-time').value || '00:00').trim();
+    if(!grp || !ident){
+      if(typeof showToast==='function') showToast('⚠ Groupe et identité requis', 'warning', 2500);
+      return;
+    }
+    if(reels + stories + ctas === 0){
+      if(typeof showToast==='function') showToast('⚠ Au moins 1 reel/story/CTA', 'warning', 2500);
+      return;
+    }
+    const [h, m] = time.split(':');
+    const fd = new FormData();
+    fd.set('groupe', grp);
+    fd.set('identite', ident);
+    fd.set('reels', String(reels));
+    fd.set('stories', String(stories));
+    fd.set('storyctas', String(ctas));
+    fd.set('hour_paris', h);
+    fd.set('minute_paris', m);
+    try {
+      const r = await fetch('/geelark/create_schedule', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        if(typeof showToast==='function') showToast('✓ Push planifié créé', 'success', 2500);
+        close();
+        setTimeout(() => location.reload(), 600);
+      } else {
+        if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error', 3000);
+      }
+    } catch(e){
+      if(typeof showToast==='function') showToast('❌ Erreur réseau', 'error');
+    }
+  }
+  function close(){
+    document.removeEventListener('keydown', onKey);
+    if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+}
+async function glDeleteSchedule(id, btn){
+  mplConfirmAction({
+    icon: '🗑',
+    title: 'Supprimer ce push programme ?',
+    subtitle: 'Le push quotidien sera annule. Tu peux le recreer via /geelarkpush sur Discord.',
+    confirmLabel: 'Supprimer',
+    danger: true,
+    onConfirm: async () => {
+      const fd = new FormData(); fd.set('schedule_id', id);
+      const r = await fetch('/geelark/delete_schedule', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        const row = btn.closest('div[style*="background:#0f0f0f"]');
+        if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; setTimeout(()=>location.reload(), 300); }
+      }
+    }
+  });
+}
+async function glDeleteWatcher(id, btn){
+  mplConfirmAction({
+    icon: '🛑',
+    title: 'Arreter ce watcher ?',
+    subtitle: 'Le bot ne surveillera plus ces phones automatiquement.',
+    confirmLabel: 'Arreter',
+    danger: true,
+    onConfirm: async () => {
+      const fd = new FormData(); fd.set('watcher_id', id);
+      const r = await fetch('/geelark/delete_watcher', {method:'POST', body:fd});
+      const j = await r.json();
+      if(j.ok){
+        const row = btn.closest('div[style*="background:#0f0f0f"]');
+        if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; setTimeout(()=>location.reload(), 300); }
+      }
+    }
+  });
+}
