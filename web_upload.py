@@ -18382,7 +18382,10 @@ async function sendSelectedVeille(){
     vpLabel.textContent='📤 Envoi '+(i+1)+' / '+ids.length;
     btn.innerHTML='⏳ '+(i+1)+'/'+ids.length;
     let okv=false, mode='', hasd=false, errmsg='';
+    const _c0=document.querySelector('.veille-card[data-rid="'+rid+'"]');
     const fd=new FormData(); fd.set('reel_id', rid);
+    // Envoie la caption AFFICHEE (data-caption) -> la description visible part bien
+    if(_c0 && _c0.dataset.caption && _c0.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _c0.dataset.caption);
     try {
       const r=await fetch('/veille/send', {method:'POST', body:fd});
       const j=await r.json();
@@ -18448,6 +18451,8 @@ async function resendVeilleReel(rid, btn){
   btn.innerHTML = '⏳';
   try {
     const fd = new FormData(); fd.set('reel_id', rid);
+    const _rc=document.querySelector('.veille-card[data-rid="'+rid+'"]');
+    if(_rc && _rc.dataset.caption && _rc.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _rc.dataset.caption);
     const r = await fetch('/veille/send', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok){
@@ -28274,6 +28279,12 @@ def create_app():
         # donc un re-scrape RapidAPI+instaloader a CHAQUE envoi -> bien plus rapide.
         caption = _veille_caption(reel)
         description = (reel.get("caption") or "").strip()
+        # Le client peut envoyer la caption DEJA AFFICHEE sur la carte (recuperee cote
+        # navigateur via igAutoFetchCaption, mais PAS persistee serveur). On l'utilise
+        # -> garantit que la description VISIBLE part bien (le vrai "copier-coller").
+        _client_cap = (request.form.get("caption") or "").strip()
+        if _client_cap and "pas de caption" not in _client_cap.lower():
+            description = _client_cap
         # 1) Tente download + sendVideo, fallback sur lien si echec
         #    + followup texte avec la description IG si elle existe
         #    owner = @compte source -> permet de re-resoudre le video_url via
