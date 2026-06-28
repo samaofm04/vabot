@@ -18342,11 +18342,31 @@ async function sendSelectedVeille(){
   const btn = document.getElementById('veille-send-selected-btn');
   const orig = btn.innerHTML;
   btn.disabled = true;
+  // === Barre de progression style "jeu" : % + temps estimé + shimmer ===
+  if(!document.getElementById('vp-style')){
+    const st=document.createElement('style'); st.id='vp-style';
+    st.textContent='@keyframes vpShine{0%{left:-90px}100%{left:100%}}';
+    document.head.appendChild(st);
+  }
+  let pb=document.getElementById('veille-progress'); if(pb) pb.remove();
+  pb=document.createElement('div'); pb.id='veille-progress';
+  pb.style.cssText='margin:0 0 16px;padding:15px 17px;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:13px;box-shadow:0 8px 24px rgba(0,0,0,.45)';
+  pb.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13.5px;font-weight:800;color:#fff">'
+    +'<span id="vp-label">⏳ Préparation…</span>'
+    +'<span id="vp-eta" style="color:#3b82f6;font-family:ui-monospace,monospace;font-size:12.5px"></span></div>'
+    +'<div style="position:relative;height:13px;background:#1b2330;border-radius:8px;overflow:hidden;border:1px solid #283341">'
+    +'<div id="vp-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:8px;transition:width .45s cubic-bezier(.4,0,.2,1);box-shadow:0 0 12px rgba(59,130,246,.6)"></div>'
+    +'<div style="position:absolute;top:0;bottom:0;left:-90px;width:90px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:vpShine 1.2s linear infinite;pointer-events:none"></div></div>';
+  btn.parentElement.insertAdjacentElement('afterend', pb);
+  const vpLabel=document.getElementById('vp-label'), vpEta=document.getElementById('vp-eta'), vpFill=document.getElementById('vp-fill');
+  const fmtEta=(s)=>{ s=Math.max(0,Math.round(s)); return s<60?('~'+s+'s'):('~'+Math.floor(s/60)+'m'+String(s%60).padStart(2,'0')+'s'); };
+  const t0=Date.now();
   let done = 0, errs = 0, videos = 0, links = 0;
   let firstErr = '', firstLinkReason = '';
   for(let i = 0; i < ids.length; i++){
     const rid = ids[i];
-    btn.innerHTML = '⏳ Téléchargement & envoi ' + (i+1) + '/' + ids.length + '...';
+    if(vpLabel) vpLabel.textContent='⬇️ Reel '+(i+1)+' / '+ids.length+'…';
+    btn.innerHTML = '⏳ '+(i+1)+'/'+ids.length;
     const fd = new FormData(); fd.set('reel_id', rid);
     try {
       const r = await fetch('/veille/send', {method:'POST', body:fd});
@@ -18355,26 +18375,29 @@ async function sendSelectedVeille(){
         done++;
         if(j.mode === 'video') videos++;
         else if(j.mode === 'link'){ links++; if(!firstLinkReason && j.fallback_reason) firstLinkReason = j.fallback_reason; }
-        // Marque la card comme envoyee visuellement
         const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
         if(card){
           card.classList.remove('is-picked');
-          const cb = card.querySelector('.veille-cb');
-          if(cb) cb.checked = false;
-          // Ajoute le ruban vert
-          const media = card.querySelector('.veille-media');
-          if(media && !media.querySelector('.veille-sent-ribbon')){
-            const r2 = document.createElement('div');
-            r2.className = 'veille-sent-ribbon';
-            r2.style.cssText = 'position:absolute;top:8px;right:8px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6;letter-spacing:.3px';
-            r2.textContent = '✓ ENVOYÉ';
-            media.appendChild(r2);
+          const cb = card.querySelector('.veille-cb'); if(cb) cb.checked = false;
+          if(card.getAttribute('data-sent')!=='1'){
+            const media = card.querySelector('.reel-media');
+            if(media){
+              const r2 = document.createElement('div');
+              r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px';
+              r2.textContent='✓ ENVOYÉ'; media.appendChild(r2);
+            }
+            card.setAttribute('data-sent','1');
           }
         }
       } else { errs++; if(!firstErr) firstErr = j.error || '?'; }
     } catch(e){ errs++; if(!firstErr) firstErr = String(e); }
+    const pct = Math.round(((i+1)/ids.length)*100);
+    if(vpFill) vpFill.style.width = pct+'%';
+    const el=(Date.now()-t0)/1000, eta=(el/(i+1))*(ids.length-(i+1));
+    if(vpEta) vpEta.textContent = pct+'%  •  '+((i+1<ids.length)?(fmtEta(eta)+' restant'):'terminé');
   }
-  // Compteur final
+  if(vpLabel) vpLabel.textContent='✓ Terminé — '+done+' / '+ids.length+' envoyé(s)';
+  if(vpFill) vpFill.style.background='#22c55e';
   let summary = '✓ ' + done + ' envoyé(s)';
   if(videos > 0 && links > 0) summary += ' (' + videos + ' vidéo, ' + links + ' lien)';
   else if(videos > 0) summary += ' (vidéo)';
@@ -18385,14 +18408,15 @@ async function sendSelectedVeille(){
   if(errs && firstErr){
     alert('Première erreur : ' + firstErr + '\\n\\n(Vérifie ta config Telegram dans Settings → Veille Telegram)');
   } else if(links && firstLinkReason){
-    alert('⚠️ Envoyé en LIEN (pas en vidéo).\\nRaison : ' + firstLinkReason + '\\n\\nPour récupérer la vidéo : configure une clé RapidAPI Instagram (Settings → Instagram) ou des cookies Instagram. Le lien reste cliquable en attendant.');
+    alert('⚠️ Envoyé en LIEN (pas en vidéo).\\nRaison : ' + firstLinkReason + '\\n\\nLe compte cookie est peut-être rate-limité (gros lot) — réessaie en petits paquets ou avec un cookie frais.');
   }
-  // Reset les selecteurs apres 2s
   setTimeout(() => {
     btn.innerHTML = orig;
     btn.style.background = '#0088cc';
-    veilleOnSelect();  // recalcule l etat des bouton/compteurs
-  }, 2500);
+    const p=document.getElementById('veille-progress');
+    if(p){ p.style.transition='opacity .4s'; p.style.opacity='0'; setTimeout(()=>p.remove(),400); }
+    veilleOnSelect();
+  }, 3000);
 }
 // Renvoyer UN reel precis sur Telegram (marche meme s'il est deja envoye :
 // /veille/send ne bloque pas les reels deja 'sent_to_telegram').
