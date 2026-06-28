@@ -527,7 +527,26 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     iv2 = media.get("image_versions2", {})
                     candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
                     if candidates:
-                        thumb = candidates[0].get("url", "")
+                        # PERF page Trends : les cartes font ~280px de large. Charger le
+                        # candidat 1080px (candidates[0] = le plus grand) = ~150-300 Ko
+                        # par miniature pour rien. On prend le PLUS PETIT candidat >= 480px
+                        # (net en retina) -> ~10x moins de données -> la grille s'affiche
+                        # bien plus vite. Fallback : le plus grand si aucune largeur connue.
+                        def _cw(c):
+                            try:
+                                return int(c.get("width") or 0)
+                            except (TypeError, ValueError):
+                                return 0
+                        sized = [c for c in candidates if isinstance(c, dict) and c.get("url")]
+                        big_enough = [c for c in sized if _cw(c) >= 480]
+                        if big_enough:
+                            chosen = min(big_enough, key=lambda c: _cw(c) or 99999)
+                        elif sized:
+                            chosen = sized[0]
+                        else:
+                            chosen = None
+                        if chosen:
+                            thumb = chosen.get("url", "")
                     if not thumb:
                         thumb = media.get("thumbnail_url") or media.get("display_url") or ""
                     # Extraction ULTRA-thorough du video_url.

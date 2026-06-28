@@ -10579,7 +10579,7 @@ def _render_insta_trends_grid_html() -> str:
        onmouseenter='igHoverPlay(this)'
        onmouseleave='igHoverStop(this)'
        onclick='igPlayInline(this)'>
-    <img src="{thumb}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
+    <img src="{thumb}" loading="lazy" decoding="async" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html}
     <!-- Play overlay (visible quand pas en lecture / paused) -->
     <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
