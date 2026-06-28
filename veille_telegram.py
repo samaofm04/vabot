@@ -173,7 +173,13 @@ def download_via_ytdlp(post_url: str, timeout: int = 90,
         opts["cookiefile"] = cookies
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.extract_info(post_url, download=True)
+            _ydi = ydl.extract_info(post_url, download=True)
+        # Recupere AUSSI la description (caption) du reel -> aucun appel supplementaire
+        # (yt-dlp l'a deja extraite en telechargeant). Sert de followup sur Telegram.
+        if info is not None and isinstance(_ydi, dict):
+            _desc = (_ydi.get("description") or "").strip()
+            if _desc:
+                info["description"] = _desc
         files = [f for f in glob.glob(os.path.join(tmpdir, "v.*")) if os.path.isfile(f)]
         if not files:
             _set("trop_gros_50mb" if cookies is not None else "ytdlp_pas_de_fichier")
@@ -448,14 +454,40 @@ def send_video_from_url(video_url: str, caption: str = "",
         "login_requis_cookies": "Instagram demande une connexion (ajoute des cookies IG : reglages > Instagram)",
     }
     last_err = ""
-    # 0) yt-dlp depuis le permalink = methode la PLUS FIABLE (comme ig-downloader,
-    #    auth via cookies). On la tente en premier.
+    # CACHE disque PARTAGE avec la lecture Trends (data/insta/videos/{sc}.mp4) : un
+    # reel deja telecharge (lu sur Trends OU envoye avant) est REUTILISE -> renvoi
+    # INSTANTANE + zero appel yt-dlp (donc moins de rate-limit / risque de ban).
+    import re as _re_v
+    from pathlib import Path as _Pv
+    _scm = _re_v.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', fallback_url or "")
+    _sc = _scm.group(1) if _scm else ""
+    _cache_f = (_Pv("data/insta/videos") / f"{_sc}.mp4") if _sc else None
     yt_info: Dict[str, Any] = {}
-    video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
-    yt_reason = yt_info.get("reason", "")
-    # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien direct
-    if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
-        return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
+    yt_reason = ""
+    video_bytes = None
+    if _cache_f and _cache_f.exists() and 1024 < _cache_f.stat().st_size <= 50 * 1024 * 1024:
+        try:
+            video_bytes = _cache_f.read_bytes()
+        except Exception:
+            video_bytes = None
+    # 0) yt-dlp depuis le permalink (auth via cookies) si PAS en cache. Recupere
+    #    AUSSI la description (yt_info['description']).
+    if not video_bytes:
+        video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
+        yt_reason = yt_info.get("reason", "")
+        # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien
+        if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
+            return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
+        # Met en cache (partage avec Trends) pour les prochains renvois/lectures
+        if video_bytes and _cache_f:
+            try:
+                _cache_f.parent.mkdir(parents=True, exist_ok=True)
+                _cache_f.write_bytes(video_bytes)
+            except Exception:
+                pass
+    # Description : si aucune fournie, utilise celle que yt-dlp a recuperee
+    if (not followup_text or not followup_text.strip()) and yt_info.get("description"):
+        followup_text = yt_info["description"]
 
     # 1) Fallback : URL CDN directe stockee
     if not video_bytes:
