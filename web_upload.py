@@ -18342,90 +18342,103 @@ async function sendSelectedVeille(){
   const btn = document.getElementById('veille-send-selected-btn');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  // === Barre de progression style "jeu" : % + temps estimé + shimmer ===
+  // === Affichage progression : pastille par reel (validation 1 par 1) + temps restant ===
   if(!document.getElementById('vp-style')){
     const st=document.createElement('style'); st.id='vp-style';
-    st.textContent='@keyframes vpShine{0%{left:-90px}100%{left:100%}}';
+    st.textContent='@keyframes vpPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}';
     document.head.appendChild(st);
   }
   let pb=document.getElementById('veille-progress'); if(pb) pb.remove();
   pb=document.createElement('div'); pb.id='veille-progress';
-  pb.style.cssText='margin:0 0 16px;padding:15px 17px;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:13px;box-shadow:0 8px 24px rgba(0,0,0,.45)';
-  pb.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13.5px;font-weight:800;color:#fff">'
-    +'<span id="vp-label">⏳ Préparation…</span>'
-    +'<span id="vp-eta" style="color:#3b82f6;font-family:ui-monospace,monospace;font-size:12.5px"></span></div>'
-    +'<div style="position:relative;height:13px;background:#1b2330;border-radius:8px;overflow:hidden;border:1px solid #283341">'
-    +'<div id="vp-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:8px;transition:width .45s cubic-bezier(.4,0,.2,1);box-shadow:0 0 12px rgba(59,130,246,.6)"></div>'
-    +'<div style="position:absolute;top:0;bottom:0;left:-90px;width:90px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:vpShine 1.2s linear infinite;pointer-events:none"></div></div>';
+  pb.style.cssText='margin:0 0 16px;padding:16px 18px;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:13px;box-shadow:0 8px 24px rgba(0,0,0,.45)';
+  pb.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">'
+    +'<span id="vp-label" style="font-size:14px;font-weight:800;color:#fff">📤 Préparation…</span>'
+    +'<span id="vp-eta" style="font-size:15px;font-weight:800;color:#3b82f6;font-family:ui-monospace,monospace">⏱️ —</span></div>'
+    +'<div id="vp-dots" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>'
+    +'<div style="position:relative;height:12px;background:#1b2330;border-radius:7px;overflow:hidden;border:1px solid #283341;margin-bottom:9px">'
+    +'<div id="vp-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:7px;transition:width .4s ease;box-shadow:0 0 10px rgba(59,130,246,.5)"></div></div>'
+    +'<div id="vp-status" style="font-size:12.5px;color:#9aa0a6;min-height:18px">En attente…</div>';
   btn.parentElement.insertAdjacentElement('afterend', pb);
-  const vpLabel=document.getElementById('vp-label'), vpEta=document.getElementById('vp-eta'), vpFill=document.getElementById('vp-fill');
-  const fmtEta=(s)=>{ s=Math.max(0,Math.round(s)); return s<60?('~'+s+'s'):('~'+Math.floor(s/60)+'m'+String(s%60).padStart(2,'0')+'s'); };
+  const vpLabel=document.getElementById('vp-label'), vpEta=document.getElementById('vp-eta'),
+        vpFill=document.getElementById('vp-fill'), vpStatus=document.getElementById('vp-status'),
+        vpDots=document.getElementById('vp-dots');
+  const dotEls=[];
+  for(let k=0;k<ids.length;k++){
+    const dd=document.createElement('div');
+    dd.style.cssText='width:19px;height:19px;border-radius:50%;background:#1f2937;border:1.5px solid #374151;display:flex;align-items:center;justify-content:center;font-size:10px;color:#6b7280;font-weight:800;transition:background .25s,border-color .25s,color .25s;flex-shrink:0';
+    dd.textContent=String(k+1); vpDots.appendChild(dd); dotEls.push(dd);
+  }
+  const fmtEta=(s)=>{ s=Math.max(0,Math.round(s)); return s<60?(s+'s'):(Math.floor(s/60)+'m'+String(s%60).padStart(2,'0')+'s'); };
   const t0=Date.now();
-  let done = 0, errs = 0, videos = 0, links = 0;
-  let firstErr = '', firstLinkReason = '';
-  for(let i = 0; i < ids.length; i++){
-    const rid = ids[i];
-    const reelStart = Date.now();
-    if(vpLabel) vpLabel.textContent='⬇️ Reel '+(i+1)+' / '+ids.length+'…';
-    btn.innerHTML = '⏳ '+(i+1)+'/'+ids.length;
-    const fd = new FormData(); fd.set('reel_id', rid);
+  let done=0, errs=0, videos=0, links=0, descs=0;
+  let firstErr='', firstLinkReason='';
+  for(let i=0;i<ids.length;i++){
+    const rid=ids[i];
+    const reelStart=Date.now();
+    // pastille COURANTE : pulse bleu
+    dotEls[i].style.background='#1e3a8a'; dotEls[i].style.borderColor='#3b82f6'; dotEls[i].style.color='#fff';
+    dotEls[i].style.animation='vpPulse 1s ease-in-out infinite';
+    vpLabel.textContent='📤 Envoi '+(i+1)+' / '+ids.length;
+    btn.innerHTML='⏳ '+(i+1)+'/'+ids.length;
+    let okv=false, mode='', hasd=false, errmsg='';
+    const fd=new FormData(); fd.set('reel_id', rid);
     try {
-      const r = await fetch('/veille/send', {method:'POST', body:fd});
-      const j = await r.json();
+      const r=await fetch('/veille/send', {method:'POST', body:fd});
+      const j=await r.json();
       if(j.ok){
-        done++;
-        if(j.mode === 'video') videos++;
-        else if(j.mode === 'link'){ links++; if(!firstLinkReason && j.fallback_reason) firstLinkReason = j.fallback_reason; }
-        const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
+        okv=true; done++; mode=j.mode; hasd=!!j.has_desc;
+        if(j.mode==='video') videos++;
+        else if(j.mode==='link'){ links++; if(!firstLinkReason && j.fallback_reason) firstLinkReason=j.fallback_reason; }
+        if(hasd) descs++;
+        const card=document.querySelector('.veille-card[data-rid="'+rid+'"]');
         if(card){
           card.classList.remove('is-picked');
-          const cb = card.querySelector('.veille-cb'); if(cb) cb.checked = false;
+          const cb=card.querySelector('.veille-cb'); if(cb) cb.checked=false;
           if(card.getAttribute('data-sent')!=='1'){
-            const media = card.querySelector('.reel-media');
-            if(media){
-              const r2 = document.createElement('div');
-              r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px';
-              r2.textContent='✓ ENVOYÉ'; media.appendChild(r2);
-            }
+            const media=card.querySelector('.reel-media');
+            if(media){ const r2=document.createElement('div'); r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'; r2.textContent='✓ ENVOYÉ'; media.appendChild(r2); }
             card.setAttribute('data-sent','1');
           }
         }
-      } else { errs++; if(!firstErr) firstErr = j.error || '?'; }
-    } catch(e){ errs++; if(!firstErr) firstErr = String(e); }
-    const pct = Math.round(((i+1)/ids.length)*100);
-    if(vpFill) vpFill.style.width = pct+'%';
+      } else { errs++; errmsg=j.error||'?'; if(!firstErr) firstErr=errmsg; }
+    } catch(e){ errs++; errmsg=String(e); if(!firstErr) firstErr=errmsg; }
+    // pastille FINALE selon le resultat
+    dotEls[i].style.animation='';
+    if(okv && mode==='video' && hasd){ dotEls[i].style.background='#16a34a'; dotEls[i].style.borderColor='#22c55e'; dotEls[i].style.color='#fff'; dotEls[i].textContent='✓'; }
+    else if(okv && mode==='video'){ dotEls[i].style.background='#2563eb'; dotEls[i].style.borderColor='#3b82f6'; dotEls[i].style.color='#fff'; dotEls[i].textContent='✓'; }
+    else if(okv && mode==='link'){ dotEls[i].style.background='#b45309'; dotEls[i].style.borderColor='#f59e0b'; dotEls[i].style.color='#fff'; dotEls[i].textContent='!'; }
+    else { dotEls[i].style.background='#b91c1c'; dotEls[i].style.borderColor='#ef4444'; dotEls[i].style.color='#fff'; dotEls[i].textContent='✗'; }
+    // statut texte du reel qui vient de finir
+    if(okv && mode==='video') vpStatus.innerHTML='<b style="color:#22c55e">✓ Reel '+(i+1)+'</b> — vidéo'+(hasd?' + 📝 description':' <span style="color:#888">(pas de description sur ce reel)</span>');
+    else if(okv && mode==='link') vpStatus.innerHTML='<b style="color:#f59e0b">⚠️ Reel '+(i+1)+'</b> — envoyé en LIEN (pas en vidéo)';
+    else vpStatus.innerHTML='<b style="color:#ef4444">✗ Reel '+(i+1)+'</b> — erreur : '+errmsg.slice(0,60);
+    // barre + temps restant
+    const pct=Math.round(((i+1)/ids.length)*100);
+    vpFill.style.width=pct+'%';
     const el=(Date.now()-t0)/1000, eta=(el/(i+1))*(ids.length-(i+1));
-    if(vpEta) vpEta.textContent = pct+'%  •  '+((i+1<ids.length)?(fmtEta(eta)+' restant'):'terminé');
-    // Throttle anti-rate-limit : si CE reel a fait un VRAI telechargement (lent,
-    // >3s), on souffle 2s avant le suivant pour ne pas se faire bloquer par
-    // Instagram. Les envois INSTANTANES (cache/file_id) n'attendent pas.
+    vpEta.textContent=(i+1<ids.length)?('⏱️ ~'+fmtEta(eta)+' restant'):'✓ terminé';
+    // Throttle anti-rate-limit : pause 2s APRES un vrai telechargement (>3s), pas
+    // apres un envoi instantane (cache/file_id) -> on suit le rythme sans cramer.
     const took=(Date.now()-reelStart)/1000;
-    if(i < ids.length-1 && took > 3){
-      if(vpLabel) vpLabel.textContent='⏳ Petite pause anti-blocage Instagram…';
-      await new Promise(res=>setTimeout(res, 2000));
+    if(i<ids.length-1 && took>3){
+      vpLabel.textContent='⏸️ Pause anti-blocage (2s)…';
+      await new Promise(res=>setTimeout(res,2000));
     }
   }
-  if(vpLabel) vpLabel.textContent='✓ Terminé — '+done+' / '+ids.length+' envoyé(s)';
-  if(vpFill) vpFill.style.background='#22c55e';
-  let summary = '✓ ' + done + ' envoyé(s)';
-  if(videos > 0 && links > 0) summary += ' (' + videos + ' vidéo, ' + links + ' lien)';
-  else if(videos > 0) summary += ' (vidéo)';
-  else if(links > 0) summary += ' (lien)';
-  if(errs) summary += ' · ' + errs + ' erreur(s)';
-  btn.innerHTML = summary;
-  btn.style.background = errs ? '#f59e0b' : '#22c55e';
-  if(errs && firstErr){
-    alert('Première erreur : ' + firstErr + '\\n\\n(Vérifie ta config Telegram dans Settings → Veille Telegram)');
-  } else if(links && firstLinkReason){
-    alert('⚠️ Envoyé en LIEN (pas en vidéo).\\nRaison : ' + firstLinkReason + '\\n\\nLe compte cookie est peut-être rate-limité (gros lot) — réessaie en petits paquets ou avec un cookie frais.');
-  }
-  setTimeout(() => {
-    btn.innerHTML = orig;
-    btn.style.background = '#0088cc';
-    const p=document.getElementById('veille-progress');
-    if(p){ p.style.transition='opacity .4s'; p.style.opacity='0'; setTimeout(()=>p.remove(),400); }
+  vpLabel.textContent='✓ Terminé';
+  vpStatus.innerHTML='<b style="color:#22c55e">'+done+'/'+ids.length+' envoyé(s)</b> · '+videos+' vidéo'+(links?(' · '+links+' lien'):'')+' · '+descs+' avec description'+(errs?(' · '+errs+' erreur'):'');
+  vpEta.textContent='✓ terminé';
+  vpFill.style.background='#22c55e';
+  btn.innerHTML='✓ '+done+'/'+ids.length;
+  btn.style.background=errs?'#f59e0b':'#22c55e';
+  if(errs && firstErr){ alert('Erreur : '+firstErr+'\\n\\n(Config Telegram : Settings → Veille Telegram)'); }
+  else if(links && firstLinkReason){ alert('⚠️ '+links+' reel(s) en LIEN (pas vidéo).\\nRaison : '+firstLinkReason+'\\n\\nCompte cookie rate-limité ? Envoie en petits paquets, ou recolle un cookie frais.'); }
+  setTimeout(()=>{
+    btn.innerHTML=orig; btn.style.background='#0088cc';
+    const p=document.getElementById('veille-progress'); if(p){ p.style.transition='opacity .4s'; p.style.opacity='0'; setTimeout(()=>p.remove(),400); }
     veilleOnSelect();
-  }, 3000);
+  }, 4000);
 }
 // Renvoyer UN reel precis sur Telegram (marche meme s'il est deja envoye :
 // /veille/send ne bloque pas les reels deja 'sent_to_telegram').
@@ -28275,10 +28288,17 @@ def create_app():
         )
         if res.get("ok"):
             veille.mark_sent(rid)
-            # Memorise le file_id Telegram -> renvoi INSTANTANE la prochaine fois
+            _upd = {}
+            # file_id Telegram -> renvoi INSTANTANE la prochaine fois
             if res.get("tg_file_id"):
+                _upd["tg_file_id"] = res["tg_file_id"]
+            # Description recuperee -> persiste sur le reel = copier-coller instantane
+            # au prochain envoi (plus de re-fetch), et dispo sur la grille.
+            if res.get("description") and not (reel.get("caption") or "").strip():
+                _upd["caption"] = res["description"]
+            if _upd:
                 try:
-                    veille.update_reel(rid, tg_file_id=res["tg_file_id"])
+                    veille.update_reel(rid, **_upd)
                 except Exception:
                     pass
         return jsonify(res)
@@ -30084,11 +30104,18 @@ def create_app():
             try:
                 import veille_telegram as _vt
                 if _vt._find_ig_cookies():
-                    _yb = _vt.download_via_ytdlp(post_url, timeout=25)
+                    _yi = {}
+                    _yb = _vt.download_via_ytdlp(post_url, timeout=25, info=_yi)
                     if _yb:
                         from pathlib import Path as _P2
                         _vd = _P2("data/insta/videos"); _vd.mkdir(parents=True, exist_ok=True)
                         (_vd / f"{sc}.mp4").write_bytes(_yb)
+                        # sauve AUSSI la description -> dispo pour la Veille (cache hit)
+                        if _yi.get("description"):
+                            try:
+                                (_vd / f"{sc}.txt").write_text(_yi["description"], encoding="utf-8")
+                            except Exception:
+                                pass
                         from flask import send_file
                         return send_file(str(_vd / f"{sc}.mp4"), mimetype="video/mp4", conditional=True)
             except Exception:

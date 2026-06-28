@@ -445,7 +445,9 @@ def send_video_from_url(video_url: str, caption: str = "",
                             timeout=15)
                     except Exception:
                         pass
-                return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id}
+                return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id,
+                        "has_desc": bool(followup_text and followup_text.strip()),
+                        "description": (followup_text or "")}
         except Exception:
             pass  # file_id invalide/expire -> on retombe sur le telechargement normal
 
@@ -616,6 +618,8 @@ def send_video_from_url(video_url: str, caption: str = "",
         "mode": "video",
         "message_id": msg_id,
         "tg_file_id": _new_fid,
+        "has_desc": bool(followup_text and followup_text.strip()),
+        "description": (followup_text or ""),
     }
 
 
