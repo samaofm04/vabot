@@ -2524,10 +2524,18 @@ class UserCog(commands.Cog):
                     continue
                 first_ident = None
                 try:
-                    async for msg in ch.history(limit=50, oldest_first=True):
+                    async for msg in ch.history(limit=80, oldest_first=True):
+                        texts = [msg.content or ""]
                         for emb in (msg.embeds or []):
-                            ft = (emb.footer.text if emb.footer else "") or ""
-                            mm = _re_h.search(r'[Ii]dentit[ée]\s*:\s*([a-zA-Z]+)', ft)
+                            if emb.footer and emb.footer.text:
+                                texts.append(emb.footer.text)
+                            if emb.title:
+                                texts.append(emb.title)
+                            if emb.description:
+                                texts.append(emb.description)
+                        for t in texts:
+                            # "Identité : X" OU "identité X" OU "identité `X`" (footer ou texte)
+                            mm = _re_h.search(r'identit[ée]\s*[:\-—]*\s*[`*_]*([a-zA-Z]{2,})', t or "", _re_h.IGNORECASE)
                             if mm and mm.group(1).strip().lower() in valid:
                                 first_ident = mm.group(1).strip().lower()
                                 break
