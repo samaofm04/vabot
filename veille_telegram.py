@@ -395,7 +395,8 @@ def refresh_post_data(post_url: str, owner: str = "") -> Dict[str, str]:
 def send_video_from_url(video_url: str, caption: str = "",
                         fallback_url: str = "",
                         followup_text: str = "",
-                        owner: str = "") -> Dict[str, Any]:
+                        owner: str = "",
+                        tg_file_id: str = "") -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
 
     Comportement comme un bot downloader Discord/Telegram :
@@ -420,6 +421,33 @@ def send_video_from_url(video_url: str, caption: str = "",
     chat_id = cfg.get("chat_id")
     if not token or not chat_id:
         return {"ok": False, "error": "Bot Telegram non configure"}
+
+    # 0bis) REUTILISATION du file_id Telegram : si ce reel a deja ete envoye en
+    # VIDEO, Telegram a garde sa copie -> on renvoie via le file_id = INSTANTANE
+    # (zero telechargement, zero upload). Le vrai "copier-coller" de la video.
+    if tg_file_id:
+        try:
+            _rf = requests.post(
+                f"{TG_API_BASE}/bot{token}/sendVideo",
+                data={"chat_id": chat_id, "caption": (caption or "")[:1024],
+                      "video": tg_file_id, "supports_streaming": "true"},
+                timeout=30,
+            )
+            _jf = _rf.json()
+            if _rf.status_code == 200 and _jf.get("ok"):
+                _midf = _jf.get("result", {}).get("message_id")
+                if followup_text and followup_text.strip():
+                    try:
+                        requests.post(
+                            f"{TG_API_BASE}/bot{token}/sendMessage",
+                            json={"chat_id": chat_id, "text": followup_text.strip()[:4000],
+                                  "disable_web_page_preview": True, "reply_to_message_id": _midf},
+                            timeout=15)
+                    except Exception:
+                        pass
+                return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id}
+        except Exception:
+            pass  # file_id invalide/expire -> on retombe sur le telechargement normal
 
     def _fallback(reason: str) -> Dict[str, Any]:
         if not fallback_url:
@@ -541,11 +569,16 @@ def send_video_from_url(video_url: str, caption: str = "",
         except Exception:
             return _fallback(f"HTTP {r.status_code}")
 
+    _new_fid = ""
     try:
         j = r.json()
         if not j.get("ok"):
             return _fallback(j.get("description", "Reponse Telegram non ok"))
-        msg_id = j.get("result", {}).get("message_id")
+        _res = j.get("result", {})
+        msg_id = _res.get("message_id")
+        # file_id de la video uploadee -> permet un renvoi INSTANTANE plus tard
+        _new_fid = ((_res.get("video") or {}).get("file_id")
+                    or (_res.get("document") or {}).get("file_id") or "")
     except Exception as e:
         return _fallback(f"Reponse invalide : {e}")
 
@@ -568,6 +601,7 @@ def send_video_from_url(video_url: str, caption: str = "",
         "ok": True,
         "mode": "video",
         "message_id": msg_id,
+        "tg_file_id": _new_fid,
     }
 
 

@@ -28238,9 +28238,16 @@ def create_app():
             fallback_url=url,
             followup_text=description,
             owner=reel.get("owner", ""),
+            tg_file_id=reel.get("tg_file_id", ""),
         )
         if res.get("ok"):
             veille.mark_sent(rid)
+            # Memorise le file_id Telegram -> renvoi INSTANTANE la prochaine fois
+            if res.get("tg_file_id"):
+                try:
+                    veille.update_reel(rid, tg_file_id=res["tg_file_id"])
+                except Exception:
+                    pass
         return jsonify(res)
 
     @app.route("/veille/identities", methods=["GET"])
