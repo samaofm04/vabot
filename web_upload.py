@@ -855,6 +855,12 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 
 /* Cards de preview - hover scale et shadow */
 .cloud-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+/* PERF : ~670 reels d'un coup = le navigateur ne peint QUE les cartes proches du
+   viewport (saute le rendu/layout des cartes hors écran -> scroll ultra fluide).
+   La carte a déjà overflow:hidden donc le paint-containment ne change rien visuellement.
+   contain-intrinsic-size réserve la place (pas de saut de scrollbar) ; 'auto' se
+   recalibre à la vraie taille après le 1er rendu. */
+.reel-card{content-visibility:auto;contain-intrinsic-size:auto 520px}
 .cloud-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4);border-color:#444!important}
 /* Reel désactivé : grisé (l'utilisateur voit qu'il n'est plus à utiliser). Les boutons d'action restent cliquables. */
 .cloud-card.is-reel-off{opacity:.4;filter:grayscale(1);transition:opacity .2s ease,filter .2s ease}
