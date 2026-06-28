@@ -448,30 +448,15 @@ def send_video_from_url(video_url: str, caption: str = "",
         "login_requis_cookies": "Instagram demande une connexion (ajoute des cookies IG : reglages > Instagram)",
     }
     last_err = ""
-    video_bytes = None
-    # 0) FEED posts (get_ig_user_posts.php) : RAPIDE (~2s), SANS cookie, et il a les
-    #    video_versions. La plupart des reels sont au feed -> chemin rapide qui marche
-    #    meme si les cookies yt-dlp ont expire (cause frequente de "ca marche plus").
-    import re as _re_v
-    _scm = _re_v.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', fallback_url or "")
-    if _scm and owner:
-        try:
-            import insta_scraper as _is_v
-            _feed_u = _is_v._resolve_video_via_posts(owner.lstrip("@").strip(), _scm.group(1))
-            if _feed_u:
-                video_bytes = download_video_bytes(_feed_u)
-        except Exception:
-            pass
-    # 1) yt-dlp depuis le permalink (auth via cookies IG) : recupere AUSSI les reels
-    #    qui ne sont PAS au feed (onglet Reels only). Tente si le feed n'a rien donne.
+    # 0) yt-dlp depuis le permalink = methode PRINCIPALE (auth via cookies IG, comme
+    #    le bot downloader). C'est la plus fiable : elle prend TOUS les reels (feed +
+    #    onglet Reels only), pas juste ceux du feed. Tentee EN PREMIER.
     yt_info: Dict[str, Any] = {}
-    yt_reason = ""
-    if not video_bytes:
-        video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
-        yt_reason = yt_info.get("reason", "")
-        # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien direct
-        if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
-            return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
+    video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
+    yt_reason = yt_info.get("reason", "")
+    # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien direct
+    if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
+        return _fallback("Telechargement impossible : " + _readable.get(yt_reason, yt_reason))
 
     # 1) Fallback : URL CDN directe stockee
     if not video_bytes:
