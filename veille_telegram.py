@@ -130,7 +130,7 @@ def _find_ig_cookies() -> Optional[str]:
     return None
 
 
-def download_via_ytdlp(post_url: str, timeout: int = 40,
+def download_via_ytdlp(post_url: str, timeout: int = 90,
                        info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
     """Telecharge la video d'un permalink IG via yt-dlp (comme le bot ig-downloader).
 
@@ -164,7 +164,7 @@ def download_via_ytdlp(post_url: str, timeout: int = 40,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
-        "retries": 2,
+        "retries": 3,
         "socket_timeout": timeout,
         "max_filesize": 50 * 1024 * 1024,  # Telegram cap : yt-dlp skip si >50MB
     }
@@ -448,9 +448,8 @@ def send_video_from_url(video_url: str, caption: str = "",
         "login_requis_cookies": "Instagram demande une connexion (ajoute des cookies IG : reglages > Instagram)",
     }
     last_err = ""
-    # 0) yt-dlp depuis le permalink = methode PRINCIPALE (auth via cookies IG, comme
-    #    le bot downloader). C'est la plus fiable : elle prend TOUS les reels (feed +
-    #    onglet Reels only), pas juste ceux du feed. Tentee EN PREMIER.
+    # 0) yt-dlp depuis le permalink = methode la PLUS FIABLE (comme ig-downloader,
+    #    auth via cookies). On la tente en premier.
     yt_info: Dict[str, Any] = {}
     video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
     yt_reason = yt_info.get("reason", "")
