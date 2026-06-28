@@ -18147,8 +18147,8 @@ def _render_veille_feed_html() -> str:
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
-      <button onclick='starReelMenu(this, "{rid}")' title="⭐ Envoyer en banger (meilleur reel) vers une identité" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#ffd54a;cursor:pointer;display:flex;align-items:center;justify-content:center">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <button onclick='resendVeilleReel("{rid}", this)' title="Renvoyer ce reel sur Telegram (même déjà envoyé)" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
       </button>
       <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -18410,6 +18410,46 @@ async function sendSelectedVeille(){
     btn.style.background = '#0088cc';
     veilleOnSelect();  // recalcule l etat des bouton/compteurs
   }, 2500);
+}
+// Renvoyer UN reel precis sur Telegram (marche meme s'il est deja envoye :
+// la route /veille/send ne bloque pas les reels deja 'sent_to_telegram').
+async function resendVeilleReel(rid, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  try {
+    const fd = new FormData(); fd.set('reel_id', rid);
+    const r = await fetch('/veille/send', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      btn.innerHTML = '✓';
+      btn.style.background = 'rgba(34,197,94,.65)';
+      // Ajoute le ruban ENVOYÉ si la card ne l'avait pas encore
+      const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
+      if(card && card.getAttribute('data-sent') !== '1'){
+        const media = card.querySelector('.reel-media');
+        if(media){
+          const rb = document.createElement('div');
+          rb.style.cssText = 'position:absolute;top:10px;left:10px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px';
+          rb.textContent = '✓ ENVOYÉ';
+          media.appendChild(rb);
+        }
+        card.setAttribute('data-sent','1');
+      }
+      if(j.mode === 'link' && j.fallback_reason){
+        alert('⚠️ Renvoyé en LIEN (pas en vidéo).\\nRaison : ' + j.fallback_reason);
+      }
+    } else {
+      btn.innerHTML = '✗';
+      btn.style.background = 'rgba(239,68,68,.6)';
+      alert('Erreur : ' + (j.error || '?'));
+    }
+  } catch(e){
+    btn.innerHTML = '✗';
+    btn.style.background = 'rgba(239,68,68,.6)';
+    alert('Erreur : ' + e);
+  }
+  setTimeout(() => { btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.42)'; btn.disabled = false; }, 2500);
 }
 // Lecteur inline : swap thumb <-> video au click sur le bouton play
 function veillePlayToggle(btn){
