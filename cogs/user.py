@@ -2393,7 +2393,7 @@ class UserCog(commands.Cog):
         description="[OWNER] Identité par défaut des VAs de CE serveur (ex: jessye)",
     )
     @app_commands.describe(
-        identity="Nom · 'random' aléatoire · 'category' selon catégorie Discord · 'none' enlever",
+        identity="Nom · 'first' = 1ère identité (historique) · 'category' · 'random' · 'none'",
         reassigner="true = met aussi cette identité aux VAs déjà présents sur le serveur",
     )
     async def setidentite(
@@ -2497,6 +2497,57 @@ class UserCog(commands.Cog):
             await interaction.followup.send(
                 f"✅ **{changed}** VA(s) réassigné(s) selon leur **catégorie Discord**.\n"
                 f"📊 Répartition : {summary}",
+                ephemeral=True)
+            return
+        if ident in ("first", "premiere", "première", "conv", "historique", "history", "origine", "original"):
+            # Remet la PREMIERE identite de chaque VA, lue dans l'HISTORIQUE du salon :
+            # le tout 1er menu du bot a un embed footer "Identité : X". Plus fiable que
+            # la categorie (qui a pu bouger). Long (lit l'historique de chaque salon).
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            import re as _re_h
+            try:
+                from cogs.welcome import list_identities
+                valid = {n.lower() for n in list_identities()}
+            except Exception:
+                valid = set()
+            users = load_json(USERS_FILE, {})
+            chan_to_key = {}
+            for k, data in users.items():
+                if isinstance(data, dict) and data.get("channel_id"):
+                    chan_to_key[data["channel_id"]] = k
+            changed, notfound, counts = 0, 0, {}
+            for ch in interaction.guild.text_channels:
+                if not _ch_handle_va(ch.name):
+                    continue
+                key = chan_to_key.get(ch.id)
+                if not key:
+                    continue
+                first_ident = None
+                try:
+                    async for msg in ch.history(limit=50, oldest_first=True):
+                        for emb in (msg.embeds or []):
+                            ft = (emb.footer.text if emb.footer else "") or ""
+                            mm = _re_h.search(r'[Ii]dentit[ée]\s*:\s*([a-zA-Z]+)', ft)
+                            if mm and mm.group(1).strip().lower() in valid:
+                                first_ident = mm.group(1).strip().lower()
+                                break
+                        if first_ident:
+                            break
+                except Exception:
+                    pass
+                if first_ident:
+                    if users[key].get("identity") != first_ident:
+                        users[key]["identity"] = first_ident
+                        changed += 1
+                    counts[first_ident] = counts.get(first_ident, 0) + 1
+                else:
+                    notfound += 1
+            save_json(USERS_FILE, users)
+            gf.set_server_identity(interaction.guild, None)
+            summary = ', '.join(f"{v} ×{c}" for v, c in sorted(counts.items())) or "—"
+            await interaction.followup.send(
+                f"✅ **{changed}** VA(s) remis à leur **1ʳᵉ identité** (lue dans l'historique du salon).\n"
+                f"📊 {summary}" + (f"\n⚠️ {notfound} salon(s) sans 1er menu trouvé (gardent l'actuelle)." if notfound else ""),
                 ephemeral=True)
             return
         if ident in ("none", "aucune", "reset", ""):
