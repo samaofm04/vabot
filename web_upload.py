@@ -855,12 +855,6 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 
 /* Cards de preview - hover scale et shadow */
 .cloud-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
-/* PERF : ~670 reels d'un coup = le navigateur ne peint QUE les cartes proches du
-   viewport (saute le rendu/layout des cartes hors écran -> scroll ultra fluide).
-   La carte a déjà overflow:hidden donc le paint-containment ne change rien visuellement.
-   contain-intrinsic-size réserve la place (pas de saut de scrollbar) ; 'auto' se
-   recalibre à la vraie taille après le 1er rendu. */
-.reel-card{content-visibility:auto;contain-intrinsic-size:auto 520px}
 .cloud-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4);border-color:#444!important}
 /* Reel désactivé : grisé (l'utilisateur voit qu'il n'est plus à utiliser). Les boutons d'action restent cliquables. */
 .cloud-card.is-reel-off{opacity:.4;filter:grayscale(1);transition:opacity .2s ease,filter .2s ease}
@@ -1515,8 +1509,6 @@ window.igPlayInline = function(media){
   if(!media) return;
   var card = media.closest('.reel-card');
   if(!card) return;
-  // Déjà en lecture embed -> ne pas réinjecter l'iframe
-  if(media.querySelector('.reel-embed-wrap')) return;
   // Si cette video est DEJA en lecture -> toggle pause/play manuel
   // (on n'utilise plus controls=true sur le video element donc on
   // gere manuellement)
@@ -1548,10 +1540,6 @@ window.igPlayInline = function(media){
   });
   var url = card.getAttribute('data-url') || '';
   var videoUrl = card.getAttribute('data-video-url') || '';
-  // Mode RapidAPI : l'API ne fournit PAS l'URL vidéo des reels (testé). S'il n'y a
-  // pas de video_url natif (= cookie Instagram), on lit la vidéo via l'embed
-  // Instagram rogné -> lecture dans le site, sans cookie, sans le proxy à 10s.
-  if(!videoUrl){ igEmbedInCard(card); return; }
   // Cree l'element <video> s'il n'existe pas (cas reels d'ancien scrape sans video_url cache)
   var v = media.querySelector('.reel-video');
   if(!v){
@@ -1654,12 +1642,12 @@ window.igPlayInline = function(media){
     v.src = videoUrl;
     var p = v.play();
     if(p && p.catch) p.catch(function(){ v.setAttribute('controls', 'controls'); });
-    // Timeout 3s sur URL directe : si rien charge (URL CDN expirée), bascule proxy
+    // Timeout 5s sur URL directe : si rien charge, bascule proxy
     setTimeout(function(){
       if(!v.readyState || v.readyState < 1){
         tryProxy();
       }
-    }, 3000);
+    }, 5000);
   } else {
     tryProxy();
   }
@@ -10358,15 +10346,15 @@ _insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
 
 
 def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
-                               skip_fresh_hours: float = 10.0, workers: int = 5) -> dict:
-    """Scrape PARALLÈLE de toute la watchlist Trends -> data/insta/cache/.
+                               skip_fresh_hours: float = 10.0, delay: float = 3.0) -> dict:
+    """Scrape SÉQUENTIEL de toute la watchlist Trends -> data/insta/cache/.
     Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
 
-    Parallélisé (ThreadPoolExecutor) -> ~30-40s pour 56 comptes au lieu de ~5 min.
-    workers=5 : RapidAPI a une limite de RAFALE (429 si trop d'appels simultanés) ;
-    5 workers tient le débit sûr (~5 req/s) tout en restant rapide. _scrape_via_rapidapi
-    re-tente en plus sur 429. skip_fresh_hours : saute un profil dont le cache date de
-    moins de N heures (0 = force tout, pour un Rafraîchir manuel)."""
+    skip_fresh_hours : ne re-scrape PAS un profil dont le cache date de moins de N
+    heures (économise la quota/rate-limit RapidAPI + Instagram ; évite de re-brûler
+    sur des « Rafraîchir » rapprochés). Les créneaux 00h/12h sont à 12h d'écart donc
+    couvrent quand même tout. delay : pause entre comptes (anti rate-limit).
+    Retourne {started, count, scraped, skipped, reason}."""
     import time as _t
     try:
         from insta_scraper import (load_watchlist, scrape_profile,
@@ -10384,38 +10372,33 @@ def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
     if not _insta_trends_scrape_lock.acquire(blocking=False):
         return {"started": False, "count": len(wl), "reason": "déjà en cours"}
     try:
-        now = _t.time()
-        # Filtre : ne garde que les comptes à (re)scraper (saute les caches frais)
-        to_scrape, skipped = [], 0
-        for u in wl:
+        _insta_trends_scrape_state.update(
+            {"status": "in_progress", "done": 0, "total": len(wl),
+             "started_at": int(_t.time()), "label": label})
+        scraped = skipped = 0
+        for i, u in enumerate(wl):
+            fresh = False
             try:
                 cp = CACHE_DIR / f"{_clean_username(u)}.json"
                 if (skip_fresh_hours and cp.exists()
-                        and (now - cp.stat().st_mtime) < skip_fresh_hours * 3600):
-                    skipped += 1
-                    continue
+                        and (_t.time() - cp.stat().st_mtime) < skip_fresh_hours * 3600):
+                    fresh = True
             except Exception:
                 pass
-            to_scrape.append(u)
-        _insta_trends_scrape_state.update(
-            {"status": "in_progress", "done": skipped, "total": len(wl),
-             "started_at": int(now), "label": label})
-        if to_scrape:
-            import concurrent.futures as _cf
-            _done_lock = _trends_threading.Lock()
-
-            def _one(_u):
+            if fresh:
+                skipped += 1
+            else:
                 try:
-                    scrape_profile(_u, limit=limit)
+                    scrape_profile(u, limit=limit)
+                    scraped += 1
                 except Exception:
                     pass
-                with _done_lock:
-                    _insta_trends_scrape_state["done"] += 1
-            with _cf.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-                list(ex.map(_one, to_scrape))
+                if i < len(wl) - 1:
+                    _t.sleep(delay)  # anti rate-limit (seulement après un vrai scrape)
+            _insta_trends_scrape_state["done"] = i + 1
         _insta_trends_scrape_state["status"] = "idle"
         _insta_trends_scrape_state["finished_at"] = int(_t.time())
-        return {"started": True, "count": len(wl), "scraped": len(to_scrape),
+        return {"started": True, "count": len(wl), "scraped": scraped,
                 "skipped": skipped, "reason": "ok"}
     finally:
         _insta_trends_scrape_lock.release()
@@ -10586,7 +10569,7 @@ def _render_insta_trends_grid_html() -> str:
        onmouseenter='igHoverPlay(this)'
        onmouseleave='igHoverStop(this)'
        onclick='igPlayInline(this)'>
-    <img src="{thumb}" loading="lazy" decoding="async" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
+    <img src="{thumb}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html}
     <!-- Play overlay (visible quand pas en lecture / paused) -->
     <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
@@ -30002,10 +29985,9 @@ def create_app():
             if disk_file.exists() and disk_file.stat().st_size > 1024:
                 from flask import send_file
                 return send_file(str(disk_file), mimetype="video/mp4", conditional=True)
-        # ETAPE 1 : essaie URL directe (cas reel fresh). fast=True -> si l'URL est
-        # morte/expirée, on le détecte en 4s au lieu de 30s avant de passer au refresh.
+        # ETAPE 1 : essaie URL directe (cas reel fresh)
         if direct_vurl:
-            res = try_stream(direct_vurl, fast=True)
+            res = try_stream(direct_vurl)
             if res is not None:
                 # Sauvegarde sur disque pour future plays instantanes
                 if sc:
@@ -30044,42 +30026,38 @@ def create_app():
                                 cache[post_url] = {"ts": now, "video_url": video_url}
                                 return res
                         break
-            # 3b : SINGLE-POST RapidAPI EN PREMIER (1 appel CIBLÉ ~1-2s). Avant, on
-            # re-scrapait TOUT le profil (limit=500 = jusqu'à ~40 appels API ~10s)
-            # juste pour retrouver UN reel -> c'était la cause des 10s de chargement.
-            video_url = ""
-            try:
-                from insta_scraper import _scrape_via_rapidapi_single_post
-                single = _scrape_via_rapidapi_single_post(shortcode)
-                if single and single.get("video_url"):
-                    video_url = (single["video_url"] or "").strip()
-            except Exception:
-                pass
-            # 3c : fallback scrape de la page IG (/p/ + /embed/) — sans API, rapide
-            if not video_url:
-                try:
-                    video_url = _scrape_ig_page_for_video(shortcode) or ""
-                except Exception:
-                    video_url = ""
-            # 3d : DERNIER recours — scrape profil complet (lent) si tout le reste échoue
-            if not video_url:
-                result = scrape_profile(owner, limit=500)
-                if "error" in result:
-                    return (f"RapidAPI: {result['error'][:200]}", 502)
-                for reel in result.get("reels", []):
-                    if reel.get("shortcode") == shortcode:
-                        video_url = (reel.get("video_url") or "").strip()
-                        break
-            if not video_url:
-                return ("URL video introuvable (single-post + page + profil). Bug API.", 404)
-            cache[post_url] = {"ts": now, "video_url": video_url}
-            res = try_stream(video_url)
-            if res is not None:
-                import threading as _th
-                _th.Thread(target=_download_reel_video,
-                           args=(shortcode, video_url), daemon=True).start()
-                return res
-            return ("URL video resolue mais CDN refuse le stream", 502)
+            # 3b : fresh scrape RapidAPI - limit 500 pour couvrir les vieux reels
+            result = scrape_profile(owner, limit=500)
+            if "error" in result:
+                return (f"RapidAPI: {result['error'][:200]}", 502)
+            nb_reels = len(result.get("reels", []))
+            for reel in result.get("reels", []):
+                if reel.get("shortcode") == shortcode:
+                    video_url = (reel.get("video_url") or "").strip()
+                    if not video_url:
+                        # Tente endpoint RapidAPI single-post
+                        try:
+                            from insta_scraper import _scrape_via_rapidapi_single_post
+                            single = _scrape_via_rapidapi_single_post(shortcode)
+                            if single and single.get("video_url"):
+                                video_url = single["video_url"]
+                        except Exception:
+                            pass
+                    if not video_url:
+                        # Scrape la page Instagram directement (/p/ et /embed/)
+                        video_url = _scrape_ig_page_for_video(shortcode)
+                    if not video_url:
+                        return ("Reel public mais URL video introuvable apres RapidAPI + scraping page. Bug API.", 404)
+                    cache[post_url] = {"ts": now, "video_url": video_url}
+                    res = try_stream(video_url)
+                    if res is not None:
+                        if shortcode:
+                            import threading as _th
+                            _th.Thread(target=_download_reel_video,
+                                       args=(shortcode, video_url), daemon=True).start()
+                        return res
+                    return ("URL RapidAPI mais CDN refuse stream", 502)
+            return (f"@{owner} : reel {shortcode} introuvable parmi {nb_reels} reels scrapes", 404)
         except Exception as e:
             return (f"RapidAPI error: {type(e).__name__}: {str(e)[:200]}", 500)
 
@@ -30272,14 +30250,12 @@ def create_app():
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
         # Scrape factorisé en arrière-plan (même fonction que le scheduler 00h/12h ;
-        # le lock empêche un chevauchement manuel/programmé). Manuel = skip_fresh_hours=0
-        # pour FORCER tout (du frais immédiat) ; parallèle -> ~30s pour 56 comptes.
+        # le lock empêche un chevauchement manuel/programmé).
         threading.Thread(target=run_insta_watchlist_scrape,
-                         kwargs={"limit": 12, "label": "manual", "skip_fresh_hours": 0},
-                         daemon=True).start()
+                         kwargs={"limit": 12, "label": "manual"}, daemon=True).start()
         return jsonify({
             "ok": True, "count": len(wl), "scrape_started": True,
-            "message": f"Scrape de {len(wl)} compte(s) lancé en parallèle (~30s)…",
+            "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
         })
 
     @app.route("/settings/admin_token", methods=["POST"])
