@@ -2834,6 +2834,16 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
     insta2 = discord.ui.TextInput(label="Insta 2", placeholder="@pseudo ou lien insta", required=False, max_length=150)
     insta3 = discord.ui.TextInput(label="Insta 3", placeholder="@pseudo ou lien insta", required=False, max_length=150)
 
+    def __init__(self, prefill=None):
+        super().__init__()
+        pf = [x for x in (prefill or []) if isinstance(x, str)]
+        if len(pf) > 0:
+            self.insta1.default = pf[0]
+        if len(pf) > 1:
+            self.insta2.default = pf[1]
+        if len(pf) > 2:
+            self.insta3.default = pf[2]
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         raws = [(1, self.insta1.value), (2, self.insta2.value), (3, self.insta3.value)]
@@ -2939,63 +2949,36 @@ class ContentMenuView(discord.ui.View):
         if not _menu_feature_check(interaction, "onboarding"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
             return
-        # Ouvre le modal de saisie des 3 comptes Insta (Insta 1/2/3) avec validation
-        # d'existence : pseudo OU lien -> verifie que le compte existe sur Instagram.
-        await interaction.response.send_modal(MesComptesInstaModal())
+        # Relance l'onboarding depuis l'étape 0 (mêmes vues que le 1er onboarding)
+        try:
+            from cogs.onboarding import step_embed, OnboardingView, send_step_media
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Onboarding indispo : {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            content=f"{interaction.user.mention} — on repart de zéro pour ajouter un compte 👇",
+            embed=step_embed(0), view=OnboardingView(),
+        )
+        try:
+            await send_step_media(interaction.channel, 0, bot=interaction.client)
+        except Exception:
+            pass
 
     @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=3)
     async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _menu_feature_check(interaction, "contenu"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            import guild_features as gf
-            threads = gf.threads_mode(interaction.guild)
-        except Exception:
-            threads = False
-        reseau = "Threads" if threads else "Instagram"
-        base = "https://www.threads.net/@" if threads else "https://instagram.com/"
-        try:
-            import jailbreak
-            accts = jailbreak.accounts_for_discord_username(interaction.user.name)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Indispo : {e}", ephemeral=True)
-            return
-        usernames = []
-        for a in accts:
-            u = (a.get("username") or "").strip().lstrip("@")
-            if u and u not in usernames:
-                usernames.append(u)
-        # + comptes renseignes par le VA lui-meme via le modal "Ajouter un compte"
+        # Ouvre le modal de saisie des 3 comptes Insta (Insta 1/2/3) : pseudo OU lien,
+        # avec validation d'existence. Pre-rempli avec ce que le VA a deja mis.
+        prefill = []
         try:
             _u = load_json(USERS_FILE, {}).get(str(interaction.user.id))
             if isinstance(_u, dict):
-                for x in (_u.get("insta_accounts") or []):
-                    xx = (x or "").strip().lstrip("@")
-                    if xx and xx not in usernames:
-                        usernames.append(xx)
+                prefill = [x for x in (_u.get("insta_accounts") or []) if isinstance(x, str)][:3]
         except Exception:
             pass
-        if not usernames:
-            await interaction.followup.send(
-                f"📷 **Aucun compte {reseau} relié à ton Discord.**\n"
-                "Demande à un manager de mettre ton pseudo Discord sur ta fiche "
-                "et d'ajouter tes comptes.",
-                ephemeral=True,
-            )
-            return
-        shown = usernames[:50]  # garde-fou limite embed Discord (4096 car.)
-        desc = "\n".join(f"🔗 [@{u}]({base}{u})" for u in shown)
-        if len(usernames) > len(shown):
-            desc += f"\n… +{len(usernames) - len(shown)} autre(s)"
-        emb = discord.Embed(
-            title=f"📷 Tes comptes {reseau}",
-            description=desc,
-            color=discord.Color.blurple(),
-        )
-        emb.set_footer(text=f"{len(usernames)} compte(s) · clique pour ouvrir")
-        await interaction.followup.send(embed=emb, ephemeral=True)
+        await interaction.response.send_modal(MesComptesInstaModal(prefill=prefill))
 
 
 class CentralMenuView(discord.ui.View):
