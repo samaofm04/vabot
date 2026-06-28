@@ -18365,6 +18365,7 @@ async function sendSelectedVeille(){
   let firstErr = '', firstLinkReason = '';
   for(let i = 0; i < ids.length; i++){
     const rid = ids[i];
+    const reelStart = Date.now();
     if(vpLabel) vpLabel.textContent='⬇️ Reel '+(i+1)+' / '+ids.length+'…';
     btn.innerHTML = '⏳ '+(i+1)+'/'+ids.length;
     const fd = new FormData(); fd.set('reel_id', rid);
@@ -18395,6 +18396,14 @@ async function sendSelectedVeille(){
     if(vpFill) vpFill.style.width = pct+'%';
     const el=(Date.now()-t0)/1000, eta=(el/(i+1))*(ids.length-(i+1));
     if(vpEta) vpEta.textContent = pct+'%  •  '+((i+1<ids.length)?(fmtEta(eta)+' restant'):'terminé');
+    // Throttle anti-rate-limit : si CE reel a fait un VRAI telechargement (lent,
+    // >3s), on souffle 2s avant le suivant pour ne pas se faire bloquer par
+    // Instagram. Les envois INSTANTANES (cache/file_id) n'attendent pas.
+    const took=(Date.now()-reelStart)/1000;
+    if(i < ids.length-1 && took > 3){
+      if(vpLabel) vpLabel.textContent='⏳ Petite pause anti-blocage Instagram…';
+      await new Promise(res=>setTimeout(res, 2000));
+    }
   }
   if(vpLabel) vpLabel.textContent='✓ Terminé — '+done+' / '+ids.length+' envoyé(s)';
   if(vpFill) vpFill.style.background='#22c55e';
