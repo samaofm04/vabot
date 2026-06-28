@@ -352,15 +352,76 @@ def _scrape_ig_page_for_video(shortcode: str) -> str:
     return ""
 
 
+def _resolve_video_via_posts(owner: str, shortcode: str, max_pages: int = 3) -> str:
+    """Cherche le video_url d'un reel dans le FEED du compte via get_ig_user_posts.php.
+
+    CET endpoint renvoie les `video_versions` (contrairement à get_ig_user_reels.php
+    qui ne donne JAMAIS de vidéo). Rapide (~1 appel), SANS cookie. Marche pour les
+    reels publiés au feed (la plupart). Retourne le .mp4 ou '' si introuvable.
+    """
+    import requests
+    owner = (owner or "").lstrip("@").strip()
+    sc = (shortcode or "").strip()
+    if not owner or not sc:
+        return ""
+    auth = load_auth()
+    api_key = (auth.get("rapidapi_key") or "").strip()
+    if not api_key:
+        return ""
+    host = (auth.get("rapidapi_host") or "instagram-scraper-stable-api.p.rapidapi.com").strip()
+    headers = {"x-rapidapi-key": api_key, "x-rapidapi-host": host,
+               "Content-Type": "application/x-www-form-urlencoded"}
+    base = f"https://{host}"
+    token = ""
+    for _page in range(max(1, max_pages)):
+        try:
+            r = requests.post(f"{base}/get_ig_user_posts.php", headers=headers,
+                              data={"username_or_url": owner, "amount": "30",
+                                    "pagination_token": token}, timeout=12)
+            if r.status_code != 200:
+                return ""
+            d = r.json()
+        except Exception:
+            return ""
+        posts = d.get("posts") or d.get("items") or d.get("data") or []
+        for p in posts:
+            node = p.get("node") if isinstance(p, dict) else None
+            if isinstance(node, dict) and isinstance(node.get("media"), dict):
+                media = node["media"]
+            else:
+                media = node if isinstance(node, dict) else (p if isinstance(p, dict) else {})
+            code = media.get("code") or media.get("shortcode") or ""
+            if code != sc:
+                continue
+            # vidéo directe
+            vv = media.get("video_versions")
+            if isinstance(vv, list) and vv and isinstance(vv[0], dict):
+                u = vv[0].get("url")
+                if isinstance(u, str) and u.startswith("http"):
+                    return u
+            # carrousel : 1er élément vidéo
+            for it in (media.get("carousel_media") or []):
+                if isinstance(it, dict):
+                    vv2 = it.get("video_versions")
+                    if isinstance(vv2, list) and vv2 and isinstance(vv2[0], dict):
+                        u = vv2[0].get("url")
+                        if isinstance(u, str) and u.startswith("http"):
+                            return u
+            return ""  # post trouvé mais pas de vidéo (image/carrousel-photo)
+        token = d.get("pagination_token") or ""
+        if not token:
+            break
+    return ""
+
+
 def get_video_url_for_shortcode(shortcode: str, owner_username: str = "") -> dict:
     """Resout un video_url FRAIS pour un reel/post a partir de son shortcode.
 
-    Cascade IDENTIQUE a celle (eprouvee) de /insta/proxy_video, la 1ere qui
-    rend une video gagne :
-      1) **Reels du proprietaire** via scrape_profile(owner, limit=500) —
-         l'endpoint /get_ig_user_reels.php alimente les stats tous les jours
-         donc CONFIRME fiable. limit=500 pour couvrir aussi les vieux reels.
-      2) Endpoint RapidAPI "post unique" (rapide mais fragile, souvent vide).
+    Cascade, la 1ere qui rend une video gagne :
+      1) **FEED du proprietaire** via get_ig_user_posts.php — le SEUL endpoint
+         RapidAPI qui renvoie les video_versions (get_ig_user_reels.php n'en
+         donne JAMAIS). Rapide, sans cookie, marche pour les reels du feed.
+      2) Endpoint RapidAPI "post unique" (best effort, souvent vide).
       3) Scrape direct de la page IG /p/ et /embed/ (SANS API ni owner).
 
     `owner_username` = le @compte source (stocke dans chaque reel de veille).
@@ -371,25 +432,22 @@ def get_video_url_for_shortcode(shortcode: str, owner_username: str = "") -> dic
     sc = (shortcode or "").strip()
     if not sc:
         return {"video_url": "", "source": "", "trace": ["pas_de_shortcode"]}
-    # 1) Reels du proprietaire (endpoint fiable) -> matche le shortcode
+    # 1) FEED du proprietaire via get_ig_user_posts.php : a les video_versions,
+    #    RAPIDE (~1 appel), sans cookie. (L'ancien tier "scrape_profile(500)" est
+    #    SUPPRIME : get_ig_user_reels.php ne renvoie JAMAIS de video_url -> il
+    #    perdait ~10s pour rien a chaque envoi.)
     owner = (owner_username or "").lstrip("@").strip()
     if owner:
         try:
-            data = scrape_profile(owner, limit=500)
-            if isinstance(data, dict) and not data.get("error"):
-                reels = data.get("reels") or []
-                for r in reels:
-                    if (r.get("shortcode") or "") == sc and (r.get("video_url") or "").strip():
-                        return {"video_url": r["video_url"], "source": "owner_reels",
-                                "trace": trace + [f"owner_reels:match({len(reels)})"]}
-                trace.append(f"owner_reels:pas_de_match({len(reels)})")
-            else:
-                err = (data or {}).get("error", "") if isinstance(data, dict) else ""
-                trace.append("owner_reels:err:" + str(err)[:90])
+            u = _resolve_video_via_posts(owner, sc)
+            if u:
+                return {"video_url": u, "source": "feed_posts",
+                        "trace": trace + ["feed_posts:ok"]}
+            trace.append("feed_posts:vide")
         except Exception as e:
-            trace.append(f"owner_reels:exc:{type(e).__name__}:{str(e)[:70]}")
+            trace.append(f"feed_posts:exc:{type(e).__name__}:{str(e)[:70]}")
     else:
-        trace.append("owner_reels:pas_de_owner")
+        trace.append("feed_posts:pas_de_owner")
     # 2) Endpoint post-unique (best effort)
     try:
         rp = _scrape_via_rapidapi_single_post(sc)
