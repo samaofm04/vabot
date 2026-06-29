@@ -2559,31 +2559,58 @@ class UserCog(commands.Cog):
                 ephemeral=True)
             return
         if ident in ("sync", "syncacces", "acces", "accès", "permissions", "perms"):
-            # Re-synchronise l'ACCES aux salons d'identite (general-/banger-/
-            # exemple-compte-X) selon l'identite ACTUELLE de chaque VA. Tourne en
-            # arriere-plan (Discord limite fort les modifs de permissions).
+            # Donne a CHAQUE VA l'acces aux salons par-identite (general-/banger-/
+            # exemple-compte-X) de SA CATEGORIE Discord, et retire ceux des autres
+            # identites. La CATEGORIE du salon du VA est la source de verite (ce que
+            # tu vois/ranges) ; on retombe sur l'etiquette stockee si la categorie
+            # n'est pas une identite reconnue. Tourne en arriere-plan (Discord
+            # limite fort les modifs de permissions).
             guild = interaction.guild
+            import re as _re_sync
+            def _norm(s):
+                return _re_sync.sub(r'[^a-z]', '', (s or '').lower())
+            try:
+                from cogs.welcome import list_identities
+                _valid = list_identities()
+            except Exception:
+                _valid = []
+            _valid_norm = [(_norm(v), v) for v in _valid]
+            def _ident_from_category(_ch):
+                if not _ch or not getattr(_ch, "category", None):
+                    return None
+                cn = _norm(_ch.category.name)
+                if not cn:
+                    return None
+                for vn, vv in _valid_norm:
+                    if vn and (vn == cn or cn.startswith(vn)):
+                        return vv
+                return None
             users = load_json(USERS_FILE, {})
             chan_ids = {ch.id for ch in guild.text_channels if _ch_handle_va(ch.name)}
-            targets = []
+            targets = []  # (member, identite_cible, source)
             for k, data in users.items():
                 if not isinstance(data, dict) or data.get("channel_id") not in chan_ids:
-                    continue
-                idt = (data.get("identity") or "").strip().lower()
-                if not idt:
                     continue
                 try:
                     mem = guild.get_member(int(k))
                 except Exception:
                     mem = None
-                if mem:
-                    targets.append((mem, idt))
+                if not mem:
+                    continue
+                vch = guild.get_channel(data.get("channel_id"))
+                cat_ident = _ident_from_category(vch)
+                idt = cat_ident or (data.get("identity") or "").strip().lower()
+                if not idt:
+                    continue
+                targets.append((mem, idt, "catégorie" if cat_ident else "étiquette"))
             if not targets:
                 await interaction.response.send_message(
                     "Aucun VA (membre présent) à synchroniser.", ephemeral=True)
                 return
+            _n_cat = sum(1 for _, _, s in targets if s == "catégorie")
             await interaction.response.send_message(
-                f"🔄 Sync des accès lancé pour **{len(targets)}** VA(s) — en arrière-plan "
+                f"🔄 Sync des accès lancé pour **{len(targets)}** VA(s) "
+                f"({_n_cat} via leur catégorie Discord) — en arrière-plan "
                 f"(~quelques minutes, Discord limite les permissions). Je préviens ici à la fin.",
                 ephemeral=True)
             _chan = interaction.channel
@@ -2598,7 +2625,7 @@ class UserCog(commands.Cog):
                 fixed = 0          # VAs dont au moins 1 acces a change
                 tot_granted = 0    # acces a la BONNE identite ajoutes
                 tot_revoked = 0    # acces a une MAUVAISE identite retires
-                for mem, idt in targets:
+                for mem, idt, _src in targets:
                     try:
                         res = await sync_general_channel_access(guild, mem, idt)
                         ok += 1
@@ -2612,11 +2639,12 @@ class UserCog(commands.Cog):
                         pass
                 try:
                     await _chan.send(
-                        f"✅ <@{_uid}> Accès aux salons d'identité **synchronisés**.\n"
+                        f"✅ <@{_uid}> Accès aux salons d'identité **synchronisés** "
+                        f"(basé sur la **catégorie** de chaque VA).\n"
                         f"• {ok}/{len(targets)} VA(s) vérifié(s)\n"
-                        f"• **{fixed}** VA(s) corrigé(s) (étaient sur la mauvaise identité)\n"
-                        f"• {tot_granted} accès ajouté(s) à la bonne identité, "
-                        f"{tot_revoked} accès retiré(s) d'une mauvaise identité")
+                        f"• **{fixed}** VA(s) dont l'accès a été mis à jour\n"
+                        f"• {tot_granted} accès **ajouté(s)** (salons de leur catégorie), "
+                        f"{tot_revoked} accès **retiré(s)** (salons d'une autre identité)")
                 except Exception:
                     pass
             interaction.client.loop.create_task(_sync_run())
