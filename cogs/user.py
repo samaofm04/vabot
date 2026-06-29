@@ -2558,6 +2558,57 @@ class UserCog(commands.Cog):
                 f"📊 {summary}" + (f"\n⚠️ {notfound} salon(s) sans 1er menu trouvé (gardent l'actuelle)." if notfound else ""),
                 ephemeral=True)
             return
+        if ident in ("sync", "syncacces", "acces", "accès", "permissions", "perms"):
+            # Re-synchronise l'ACCES aux salons d'identite (general-/banger-/
+            # exemple-compte-X) selon l'identite ACTUELLE de chaque VA. Tourne en
+            # arriere-plan (Discord limite fort les modifs de permissions).
+            guild = interaction.guild
+            users = load_json(USERS_FILE, {})
+            chan_ids = {ch.id for ch in guild.text_channels if _ch_handle_va(ch.name)}
+            targets = []
+            for k, data in users.items():
+                if not isinstance(data, dict) or data.get("channel_id") not in chan_ids:
+                    continue
+                idt = (data.get("identity") or "").strip().lower()
+                if not idt:
+                    continue
+                try:
+                    mem = guild.get_member(int(k))
+                except Exception:
+                    mem = None
+                if mem:
+                    targets.append((mem, idt))
+            if not targets:
+                await interaction.response.send_message(
+                    "Aucun VA (membre présent) à synchroniser.", ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f"🔄 Sync des accès lancé pour **{len(targets)}** VA(s) — en arrière-plan "
+                f"(~quelques minutes, Discord limite les permissions). Je préviens ici à la fin.",
+                ephemeral=True)
+            _chan = interaction.channel
+            _uid = interaction.user.id
+
+            async def _sync_run():
+                try:
+                    from cogs.welcome import sync_general_channel_access
+                except Exception:
+                    return
+                ok = 0
+                for mem, idt in targets:
+                    try:
+                        await sync_general_channel_access(guild, mem, idt)
+                        ok += 1
+                    except Exception:
+                        pass
+                try:
+                    await _chan.send(
+                        f"✅ <@{_uid}> Accès aux salons d'identité **synchronisés** : "
+                        f"{ok}/{len(targets)} VA(s).")
+                except Exception:
+                    pass
+            interaction.client.loop.create_task(_sync_run())
+            return
         if ident in ("none", "aucune", "reset", ""):
             gf.set_server_identity(interaction.guild, None)
             await interaction.response.send_message(
