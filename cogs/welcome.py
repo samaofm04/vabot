@@ -326,37 +326,59 @@ def find_general_channel_for_identity(guild, identity):
 
 
 async def sync_general_channel_access(guild, member, identity):
-    """Donne au VA l'acces au salon general-<identity> et le RETIRE des autres
-    general-*. Best-effort, ignore les erreurs silencieusement.
+    """Aligne l'acces du VA aux salons par-identite (general-/banger-/exemple-
+    compte-X) sur son identite ACTUELLE.
 
-    Si identity est vide/None : retire l'overwrite specifique du membre sur
-    TOUS les salons general-* (utilise par /resetva).
+    - Son identite -> view=True (uniquement si pas deja le cas : economise des
+      appels API / rate-limit).
+    - Une AUTRE identite avec un acces qui traine (grant d'une ancienne
+      identite) -> deny EXPLICITE (view=False). Le deny explicite est plus fort
+      que de simplement retirer l'overwrite : il neutralise aussi un acces qui
+      viendrait d'un role / d'une categorie. C'est ce qui corrige le cas "VA
+      emma qui voit encore general-amelia" apres un changement d'identite.
+    - identity vide/None (reset, /resetva) -> retire l'overwrite specifique du
+      membre sur TOUS les salons par-identite.
+
+    Best-effort (ignore les erreurs). Retourne (granted, revoked) pour le report.
     """
     ident_lc = (identity or "").strip().lower()
+    granted = 0
+    revoked = 0
     for ch in guild.text_channels:
         suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
         if suffix is None:
             continue
         try:
+            cur = ch.overwrites_for(member)
             if ident_lc and suffix == ident_lc:
-                await ch.set_permissions(
-                    member,
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    attach_files=True,
-                    reason=f"VA assignee a {ident_lc} - acces salons identite",
-                )
-            else:
-                # retire l'overwrite specifique au membre (laisse les roles)
-                if ch.overwrites_for(member).view_channel is not None:
+                # Son identite -> acces garanti (skip si deja accorde)
+                if cur.view_channel is not True:
                     await ch.set_permissions(
                         member,
-                        overwrite=None,
-                        reason=f"VA retiree de {suffix}" if ident_lc else "VA reset",
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        attach_files=True,
+                        reason=f"VA assignee a {ident_lc} - acces salons identite",
                     )
+                    granted += 1
+            elif not ident_lc:
+                # Reset complet : retire l'overwrite specifique du membre
+                if cur.view_channel is not None:
+                    await ch.set_permissions(
+                        member, overwrite=None, reason="VA reset")
+                    revoked += 1
+            else:
+                # Pas son identite : il ne doit PAS voir ce salon. Si un acces
+                # traine (ancienne identite / role) -> deny explicite.
+                if cur.view_channel is True:
+                    await ch.set_permissions(
+                        member, view_channel=False,
+                        reason=f"VA n'est pas {suffix} - retire acces salon identite")
+                    revoked += 1
         except Exception:
             pass
+    return granted, revoked
 
 
 async def create_va_channel(guild, member, identity):

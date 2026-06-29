@@ -2595,16 +2595,28 @@ class UserCog(commands.Cog):
                 except Exception:
                     return
                 ok = 0
+                fixed = 0          # VAs dont au moins 1 acces a change
+                tot_granted = 0    # acces a la BONNE identite ajoutes
+                tot_revoked = 0    # acces a une MAUVAISE identite retires
                 for mem, idt in targets:
                     try:
-                        await sync_general_channel_access(guild, mem, idt)
+                        res = await sync_general_channel_access(guild, mem, idt)
                         ok += 1
+                        if isinstance(res, tuple):
+                            g, r = res
+                            tot_granted += g
+                            tot_revoked += r
+                            if g or r:
+                                fixed += 1
                     except Exception:
                         pass
                 try:
                     await _chan.send(
-                        f"✅ <@{_uid}> Accès aux salons d'identité **synchronisés** : "
-                        f"{ok}/{len(targets)} VA(s).")
+                        f"✅ <@{_uid}> Accès aux salons d'identité **synchronisés**.\n"
+                        f"• {ok}/{len(targets)} VA(s) vérifié(s)\n"
+                        f"• **{fixed}** VA(s) corrigé(s) (étaient sur la mauvaise identité)\n"
+                        f"• {tot_granted} accès ajouté(s) à la bonne identité, "
+                        f"{tot_revoked} accès retiré(s) d'une mauvaise identité")
                 except Exception:
                     pass
             interaction.client.loop.create_task(_sync_run())
