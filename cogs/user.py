@@ -37,7 +37,7 @@ _MENU_BTN_FEATURE = {
 
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
 # Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
-_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes"}
+_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help"}
 
 
 def _ch_handle_va(name) -> str:
@@ -165,6 +165,8 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:comptes", "contenu",
         "📷 Mes comptes Threads" if threads else "📷 Mes comptes Insta",
         "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
+    add("cmenu:help", None, "🆘 Assistance",
+        "Un souci ? Explique-le, un manager/boss vient t'aider")
     if identity and not threads:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -264,6 +266,39 @@ def _is_staff_member(member):
         if any(k in nm for k in _STAFF_ROLE_KEYWORDS):
             return True
     return False
+
+
+# Roles a notifier pour une demande d'aide VA (managers/boss).
+_HELP_PING_KEYWORDS = ("boss", "manager", "manageur", "manageuse")
+
+
+def _find_help_channel(guild):
+    """Salon d'aide (ex: 🆘・help) : 1er salon texte dont le nom contient 'help'
+    (prioritaire), sinon 'aide'/'sos'/🆘. None si introuvable."""
+    best = None
+    for ch in getattr(guild, "text_channels", []):
+        n = (getattr(ch, "name", "") or "").lower()
+        if "help" in n:
+            return ch
+        if best is None and ("aide" in n or "sos" in n or "🆘" in n):
+            best = ch
+    return best
+
+
+def _staff_ping(guild):
+    """Mentions des roles managers/boss du serveur (pour notifier une demande
+    d'aide), dedupliquees ; '@here' en dernier recours."""
+    seen, out = set(), []
+    for r in getattr(guild, "roles", []):
+        nm = (getattr(r, "name", "") or "").lower()
+        if nm == "@everyone":
+            continue
+        if any(k in nm for k in _HELP_PING_KEYWORDS):
+            m = r.mention
+            if m not in seen:
+                seen.add(m)
+                out.append(m)
+    return " ".join(out) if out else "@here"
 
 
 # ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 SEUL lien / VA) ----
@@ -1954,6 +1989,67 @@ class UserCog(commands.Cog):
         finally:
             _IDENTITY_OVERRIDE.reset(token)
 
+    async def _handle_assistance(self, interaction, probleme):
+        """Bouton 🆘 Assistance : transmet le probleme du VA au salon d'aide
+        (🆘・help) avec ping managers/boss, puis confirme au VA."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send("À utiliser dans un serveur.", ephemeral=True)
+            return
+        probleme = (probleme or "").strip()
+        if not probleme:
+            await interaction.followup.send(
+                "Tu n'as rien écrit — reclique sur 🆘 Assistance et explique ton souci.",
+                ephemeral=True)
+            return
+        help_ch = _find_help_channel(guild)
+        if help_ch is None:
+            await interaction.followup.send(
+                "⚠️ Je ne trouve pas le salon d'aide (🆘・help). Préviens un admin.",
+                ephemeral=True)
+            return
+        identity = get_user_identity(interaction.user.id) or "—"
+        # Salon perso du VA (via users.json), fallback sur le salon courant si va-
+        va_ch = None
+        try:
+            users = load_json(USERS_FILE, {})
+            data = users.get(str(interaction.user.id))
+            if isinstance(data, dict) and data.get("channel_id"):
+                va_ch = guild.get_channel(data["channel_id"])
+        except Exception:
+            va_ch = None
+        if va_ch is None and _ch_handle_va(getattr(interaction.channel, "name", "")):
+            va_ch = interaction.channel
+        emb = discord.Embed(
+            title="🆘 Un VA a besoin d'aide",
+            description=f"**Problème :**\n{probleme[:1500]}",
+            color=discord.Color.red(),
+        )
+        emb.add_field(name="👤 VA", value=interaction.user.mention, inline=True)
+        emb.add_field(name="🎭 Identité", value=str(identity), inline=True)
+        if va_ch is not None:
+            emb.add_field(name="📍 Son salon", value=va_ch.mention, inline=True)
+        emb.set_footer(text=f"{interaction.user} · ID {interaction.user.id}")
+        try:
+            await help_ch.send(
+                content=f"{_staff_ping(guild)} — un VA demande de l'aide 👇",
+                embed=emb,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=True),
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "⚠️ Je n'ai pas la permission d'écrire dans le salon d'aide. Préviens un admin.",
+                ephemeral=True)
+            return
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Erreur d'envoi : {e}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            "✅ **C'est transmis !** Un **manager** ou un **boss** va venir t'aider très vite. "
+            "Reste dans ton salon, on te répond ici. 🙌",
+            ephemeral=True)
+
     @app_commands.command(
         name="menujailbreak",
         description="[ADMIN] Poste ICI le menu Jailbreak (toutes les models) pour les VA avec le role Jailbreak",
@@ -3134,6 +3230,10 @@ class ContentMenuView(discord.ui.View):
             return
         await cog._handle_myclicks(interaction)
 
+    @discord.ui.button(label="Assistance", emoji="🆘", style=discord.ButtonStyle.danger, custom_id="cmenu:help", row=2)
+    async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AssistanceModal(self.cog))
+
     @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=3)
     async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _menu_feature_check(interaction, "onboarding"):
@@ -3214,6 +3314,27 @@ class CentralMenuView(discord.ui.View):
     @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu2:lien", row=2)
     async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.request_link(interaction)
+
+    @discord.ui.button(label="Assistance", emoji="🆘", style=discord.ButtonStyle.danger, custom_id="cmenu2:help", row=2)
+    async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AssistanceModal(self.cog))
+
+
+class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
+    """Le VA explique son probleme -> transmis au salon 🆘・help."""
+    probleme = discord.ui.TextInput(
+        label="C'est quoi ton problème ?",
+        placeholder="Explique ton souci en quelques mots, un manager va venir t'aider…",
+        style=discord.TextStyle.paragraph,
+        required=True, min_length=3, max_length=1000,
+    )
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog._handle_assistance(interaction, str(self.probleme.value or ""))
 
 
 # ============ Menu JAILBREAK (toutes les models) ============
