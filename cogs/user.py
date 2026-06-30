@@ -2031,10 +2031,20 @@ class UserCog(commands.Cog):
         if va_ch is not None:
             emb.add_field(name="📍 Son salon", value=va_ch.mention, inline=True)
         emb.set_footer(text=f"{interaction.user} · ID {interaction.user.id}")
+        # Bouton-lien pour sauter DIRECT dans le salon du VA (1 clic).
+        _view = None
+        if va_ch is not None:
+            _view = discord.ui.View(timeout=None)
+            _view.add_item(discord.ui.Button(
+                label="💬 Aller dans son salon",
+                style=discord.ButtonStyle.link,
+                url=f"https://discord.com/channels/{guild.id}/{va_ch.id}",
+            ))
         try:
             await help_ch.send(
                 content=f"{_staff_ping(guild)} — un VA demande de l'aide 👇",
                 embed=emb,
+                view=_view,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=True),
             )
         except discord.Forbidden:
