@@ -270,7 +270,10 @@ class VAActivity(commands.Cog):
                 if cur_dot == dot:
                     st["skipped"] += 1
                     continue  # déjà le bon rond -> pas de rename (anti rate-limit)
-                target = f"{dot}-va-{h}"
+                # Préserve le 🔗 (marqueur "a un lien", géré ailleurs) s'il est là :
+                # on ne touche QU'au rond d'activité.
+                link = "🔗" if "🔗" in cur else ""
+                target = f"{dot}{link}-va-{h}"
                 try:
                     await ch.edit(name=target, reason="VA activity score")
                     st["renamed"] += 1

@@ -47,20 +47,23 @@ def _ch_handle_va(name) -> str:
     return m.group(1) if m else ""
 
 
-# Marqueurs visuels dans le NOM du salon VA selon la presence d'un lien GMS.
-LINK_MARK = "🟢🔗"     # a un lien
-NOLINK_MARK = "🔴"     # pas de lien
+# Marqueur "a un lien GMS" : un 🔗 ajoute APRES le rond d'activite (🟢/🟠/🔴, gere
+# par le cog vaactivity). INDEPENDANT de l'activite -> un VA 🔴 (peu actif) peut tres
+# bien avoir un 🔗 (un lien). Absence de lien = pas de 🔗 (le rond reste, lui).
+LINK_MARK = "🔗"
+_ACTIVITY_DOTS = ("🟢", "🟠", "🔴")
 
 
 def _va_channel_target_name(name, has_link):
-    """Nom cible d'un salon va- selon la presence d'un lien :
-    '🟢🔗-va-<handle>' (a un lien) ou '🔴-va-<handle>' (pas de lien).
-    None si ce n'est pas un salon va-. Reconstruit a partir du handle -> remplace
-    tout prefixe existant par le bon marqueur (idempotent)."""
+    """Nom cible d'un salon va- : PRESERVE le rond d'activite existant (🟢/🟠/🔴) et
+    ajoute/retire seulement le 🔗 selon la presence d'un lien.
+    Ex: '🔴🔗-va-handle' (peu actif MAIS a un lien). None si pas un salon va-."""
     handle = _ch_handle_va(name)
     if not handle:
         return None
-    return f"{LINK_MARK if has_link else NOLINK_MARK}-va-{handle}"
+    n = name or ""
+    dot = n[0] if n[:1] in _ACTIVITY_DOTS else ""
+    return f"{dot}{LINK_MARK if has_link else ''}-va-{handle}"
 
 
 async def _apply_va_link_mark(channel, has_link, reason="marqueur lien VA"):
@@ -2095,7 +2098,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(
         name="marquerliens",
-        description="[ADMIN] Marque les salons VA : 🟢🔗 = a un lien, 🔴 = pas de lien",
+        description="[ADMIN] Ajoute/retire le 🔗 (a un lien) sur les salons VA, sans toucher au rond d'activite",
     )
     async def marquerliens(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
@@ -2129,9 +2132,10 @@ class UserCog(commands.Cog):
             return
         n_link = sum(1 for _, h in targets if h)
         await interaction.followup.send(
-            f"🔄 Marquage lancé sur **{len(targets)}** salon(s) VA "
-            f"({n_link} avec lien 🟢🔗, {len(targets) - n_link} sans 🔴) — en arrière-plan "
-            f"(Discord limite les renommages, ~quelques minutes). Je préviens ici à la fin.",
+            f"🔄 Marquage 🔗 lancé sur **{len(targets)}** salon(s) VA "
+            f"({n_link} avec lien 🔗, {len(targets) - n_link} sans) — en arrière-plan "
+            f"(Discord limite les renommages, ~quelques minutes). Le rond d'activité (🟢/🟠/🔴) "
+            f"n'est PAS touché. Je préviens ici à la fin.",
             ephemeral=True)
         _chan = interaction.channel
         _uid = interaction.user.id
@@ -2150,9 +2154,9 @@ class UserCog(commands.Cog):
                     failed += 1
             try:
                 await _chan.send(
-                    f"✅ <@{_uid}> Marquage des liens terminé : **{renamed}** renommé(s), "
+                    f"✅ <@{_uid}> Marquage 🔗 terminé : **{renamed}** mis à jour, "
                     f"{already} déjà ok" + (f", {failed} échec(s)" if failed else "") + ".\n"
-                    f"🟢🔗 = a un lien · 🔴 = pas de lien")
+                    f"🔗 = a un lien (ajouté à côté du rond d'activité 🟢/🟠/🔴, qui ne bouge pas)")
             except Exception:
                 pass
         interaction.client.loop.create_task(_run())
