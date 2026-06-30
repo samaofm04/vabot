@@ -47,6 +47,35 @@ def _ch_handle_va(name) -> str:
     return m.group(1) if m else ""
 
 
+# Marqueurs visuels dans le NOM du salon VA selon la presence d'un lien GMS.
+LINK_MARK = "🟢🔗"     # a un lien
+NOLINK_MARK = "🔴"     # pas de lien
+
+
+def _va_channel_target_name(name, has_link):
+    """Nom cible d'un salon va- selon la presence d'un lien :
+    '🟢🔗-va-<handle>' (a un lien) ou '🔴-va-<handle>' (pas de lien).
+    None si ce n'est pas un salon va-. Reconstruit a partir du handle -> remplace
+    tout prefixe existant par le bon marqueur (idempotent)."""
+    handle = _ch_handle_va(name)
+    if not handle:
+        return None
+    return f"{LINK_MARK if has_link else NOLINK_MARK}-va-{handle}"
+
+
+async def _apply_va_link_mark(channel, has_link, reason="marqueur lien VA"):
+    """Renomme un salon va- pour refleter la presence d'un lien. No-op (False) si
+    deja correct ou si echec ; True si renomme. Best-effort (ignore les erreurs)."""
+    target = _va_channel_target_name(getattr(channel, "name", ""), has_link)
+    if not target or getattr(channel, "name", "") == target:
+        return False
+    try:
+        await channel.edit(name=target, reason=reason)
+        return True
+    except Exception:
+        return False
+
+
 def _link_message(url, guild=None) -> str:
     """Message d'envoi du lien GMS au VA. En mode Threads : juste « Voici ton lien »
     (pas la consigne 'story' qui est spécifique Instagram)."""
@@ -998,6 +1027,10 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             if va_ch:
                 try:
                     await va_ch.send(_link_message(url, getattr(va_ch, "guild", None)))
+                except Exception:
+                    pass
+                try:
+                    await _apply_va_link_mark(va_ch, True, reason="lien généré")
                 except Exception:
                     pass
             # Marque la demande comme traitée (retire le bouton)
@@ -2059,6 +2092,70 @@ class UserCog(commands.Cog):
             "✅ **C'est transmis !** Un **manager** ou un **boss** va venir t'aider très vite. "
             "Reste dans ton salon, on te répond ici. 🙌",
             ephemeral=True)
+
+    @app_commands.command(
+        name="marquerliens",
+        description="[ADMIN] Marque les salons VA : 🟢🔗 = a un lien, 🔴 = pas de lien",
+    )
+    async def marquerliens(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            import gms
+            links = await asyncio.to_thread(gms.list_all_links)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Module GMS indispo : {e}", ephemeral=True)
+            return
+        if not isinstance(links, dict) or not links.get("ok"):
+            await interaction.followup.send(
+                "⚠️ GetMySocial ne répond pas — réessaie dans un instant.", ephemeral=True)
+            return
+        link_list = links.get("links") or []
+        targets = []
+        for ch in guild.text_channels:
+            h = _ch_handle_va(ch.name)
+            if not h:
+                continue
+            has = bool(_gms_exact_link(h, link_list))
+            targets.append((ch, has))
+        if not targets:
+            await interaction.followup.send("Aucun salon `va-…` trouvé sur ce serveur.", ephemeral=True)
+            return
+        n_link = sum(1 for _, h in targets if h)
+        await interaction.followup.send(
+            f"🔄 Marquage lancé sur **{len(targets)}** salon(s) VA "
+            f"({n_link} avec lien 🟢🔗, {len(targets) - n_link} sans 🔴) — en arrière-plan "
+            f"(Discord limite les renommages, ~quelques minutes). Je préviens ici à la fin.",
+            ephemeral=True)
+        _chan = interaction.channel
+        _uid = interaction.user.id
+
+        async def _run():
+            renamed = already = failed = 0
+            for ch, has in targets:
+                try:
+                    target = _va_channel_target_name(ch.name, has)
+                    if not target or ch.name == target:
+                        already += 1
+                        continue
+                    await ch.edit(name=target, reason="marquage lien VA")
+                    renamed += 1
+                except Exception:
+                    failed += 1
+            try:
+                await _chan.send(
+                    f"✅ <@{_uid}> Marquage des liens terminé : **{renamed}** renommé(s), "
+                    f"{already} déjà ok" + (f", {failed} échec(s)" if failed else "") + ".\n"
+                    f"🟢🔗 = a un lien · 🔴 = pas de lien")
+            except Exception:
+                pass
+        interaction.client.loop.create_task(_run())
 
     @app_commands.command(
         name="menujailbreak",
@@ -3565,6 +3662,10 @@ class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial")
                     try:
                         await vch.send(_link_message(url, getattr(vch, "guild", None)))
                         posted = f"\n→ envoyé dans {vch.mention}"
+                    except Exception:
+                        pass
+                    try:
+                        await _apply_va_link_mark(vch, True, reason="lien généré")
                     except Exception:
                         pass
                     break
