@@ -821,7 +821,18 @@ def random_story_cta_image_for(identity):
     return random.choice(images) if images else None
 
 
+import contextvars
+# Override d'identite (menu Jailbreak) : quand il est pose, get_user_identity
+# renvoie CETTE identite a la place de celle stockee pour le VA. Local a la task
+# asyncio (contextvars) -> aucune interference entre interactions concurrentes.
+# Par defaut None = comportement STRICTEMENT identique pour tous les VAs normaux.
+_IDENTITY_OVERRIDE = contextvars.ContextVar("identity_override", default=None)
+
+
 def get_user_identity(user_id):
+    _ov = _IDENTITY_OVERRIDE.get()
+    if _ov:
+        return _ov
     users = load_json(USERS_FILE, {})
     data = users.get(str(user_id))
     if data is None:
@@ -831,6 +842,20 @@ def get_user_identity(user_id):
     if isinstance(data, dict):
         return data.get("identity")
     return None
+
+
+def _has_jailbreak_role(member):
+    """True si le membre a le role 'Jailbreak' (ou est staff/admin, pour tester)."""
+    try:
+        if any((getattr(r, "name", "") or "").strip().lower() == "jailbreak"
+               for r in getattr(member, "roles", [])):
+            return True
+    except Exception:
+        pass
+    try:
+        return _is_staff_member(member)
+    except Exception:
+        return False
 
 
 class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
@@ -1595,6 +1620,7 @@ class UserCog(commands.Cog):
         try:
             self.bot.add_view(ContentMenuView(self))
             self.bot.add_view(CentralMenuView(self))
+            self.bot.add_view(JailbreakMenuView(self))  # menu jailbreak (select des models)
             self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
             self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
         except Exception:
@@ -1910,6 +1936,72 @@ class UserCog(commands.Cog):
             f"✅ Menu poussé à **{sent}** VA(s) de **{interaction.guild.name}** (chacun @pingé dans son salon).",
             ephemeral=True,
         )
+
+    async def _run_for_model(self, interaction, model, cmd):
+        """Execute une action de contenu (reel/story/...) pour la MODEL choisie en
+        surchargeant temporairement l'identite via le contextvar. Utilise par le
+        menu Jailbreak. Local a la task -> pas d'interference entre clics simultanes."""
+        token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
+        try:
+            await cmd.callback(self, interaction)
+        finally:
+            _IDENTITY_OVERRIDE.reset(token)
+
+    @app_commands.command(
+        name="menujailbreak",
+        description="[ADMIN] Poste ICI le menu Jailbreak (toutes les models) pour les VA avec le role Jailbreak",
+    )
+    async def menujailbreak(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        try:
+            from cogs.welcome import list_active_identities
+            models = list_active_identities()  # actives, sans jessye (jailbreak-only)
+        except Exception:
+            models = []
+        if not models:
+            await interaction.response.send_message(
+                "⚠️ Aucune model active à afficher.", ephemeral=True)
+            return
+        # S'assurer que le role 'Jailbreak' existe (auto-creation best-effort)
+        role = discord.utils.find(
+            lambda r: (getattr(r, "name", "") or "").strip().lower() == "jailbreak", guild.roles)
+        created = False
+        if role is None:
+            try:
+                role = await guild.create_role(
+                    name="Jailbreak", colour=discord.Color.dark_red(),
+                    reason="Menu Jailbreak — accès à toutes les models")
+                created = True
+            except Exception:
+                role = None
+        role_txt = f"@{role.name}" if role else "Jailbreak"
+        emb = discord.Embed(
+            title="🔓 Menu Jailbreak — toutes les models",
+            description=(
+                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
+                "voulue (reel, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                f"🔒 Réservé aux membres avec le rôle **{role_txt}**."
+            ),
+            color=discord.Color.dark_red(),
+        )
+        emb.set_footer(text=f"{len(models)} models : " + ", ".join(m.capitalize() for m in models))
+        await interaction.response.send_message(embed=emb, view=JailbreakMenuView(self))
+        note = ""
+        if created:
+            note = f"\n✅ Rôle **{role.name}** créé — donne-le aux VA jailbreak."
+        elif role is None:
+            note = ("\n⚠️ Je n'ai pas pu créer le rôle « Jailbreak » (permissions manquantes) "
+                    "— crée-le à la main et donne-le aux VA concernés.")
+        try:
+            await interaction.followup.send(f"✅ Menu Jailbreak posté ici.{note}", ephemeral=True)
+        except Exception:
+            pass
 
     @app_commands.command(
         name="panellien",
@@ -3115,6 +3207,102 @@ class CentralMenuView(discord.ui.View):
     @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu2:lien", row=2)
     async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.request_link(interaction)
+
+
+# ============ Menu JAILBREAK (toutes les models) ============
+# Reserve aux VA avec le role 'Jailbreak'. Un select des models -> un menu
+# ephemere d'actions (reel/story/post/storycta/pseudo/name/bio/pp) qui genere le
+# contenu de la MODEL choisie (via cog._run_for_model + override d'identite).
+# (cle action, label bouton, attribut de la commande sur le cog)
+_JB_ACTIONS = [
+    ("reel", "🎬 Reel", "reel"),
+    ("story", "📖 Story", "story"),
+    ("post", "🖼️ Post", "post"),
+    ("storycta", "📲 Story CTA", "storycta"),
+    ("pseudo", "👤 Pseudo", "username"),
+    ("name", "📝 Name", "name"),
+    ("bio", "💬 Bio", "bio"),
+    ("pp", "🖼️ PP", "profilepic"),
+]
+
+
+class _JailbreakActionButton(discord.ui.Button):
+    """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
+    def __init__(self, cog, model, label, cmd_attr, row):
+        super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
+        self.cog = cog
+        self.model = model
+        self.cmd_attr = cmd_attr
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _has_jailbreak_role(interaction.user):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (il te faut le rôle « Jailbreak »).",
+                ephemeral=True)
+            return
+        cmd = getattr(self.cog, self.cmd_attr, None)
+        if cmd is None:
+            await interaction.response.send_message("Action indisponible.", ephemeral=True)
+            return
+        await self.cog._run_for_model(interaction, self.model, cmd)
+
+
+class JailbreakActionsView(discord.ui.View):
+    """Les 8 actions pour UNE model. Ephemere (regeneree a chaque choix de model)."""
+    def __init__(self, cog, model):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.model = model
+        for i, (_key, label, cmd_attr) in enumerate(_JB_ACTIONS):
+            self.add_item(_JailbreakActionButton(cog, model, label, cmd_attr, row=i // 4))
+
+
+class _JailbreakModelSelect(discord.ui.Select):
+    """Select des models. custom_id stable -> persistant apres redemarrage."""
+    def __init__(self, cog):
+        self.cog = cog
+        opts = []
+        try:
+            from cogs.welcome import list_active_identities
+            models = list_active_identities()
+        except Exception:
+            models = []
+        for m in models[:25]:
+            opts.append(discord.SelectOption(label=str(m).capitalize(), value=str(m).lower()))
+        if not opts:
+            opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
+        super().__init__(
+            placeholder="Choisis une model…",
+            min_values=1, max_values=1, options=opts,
+            custom_id="jbmenu:model",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _has_jailbreak_role(interaction.user):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (il te faut le rôle « Jailbreak »).",
+                ephemeral=True)
+            return
+        model = (self.values[0] if self.values else "").lower()
+        if not model or model == "__none__":
+            await interaction.response.send_message(
+                "Aucune model disponible.", ephemeral=True)
+            return
+        emb = discord.Embed(
+            title=f"🔓 {model.capitalize()} — que veux-tu générer ?",
+            description=f"Clique sur une action. Le contenu généré sera celui de **{model.capitalize()}**.",
+            color=discord.Color.dark_red(),
+        )
+        await interaction.response.send_message(
+            embed=emb, view=JailbreakActionsView(self.cog, model), ephemeral=True)
+
+
+class JailbreakMenuView(discord.ui.View):
+    """Vue persistante : le select des models du menu Jailbreak."""
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.add_item(_JailbreakModelSelect(cog))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):
