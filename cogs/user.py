@@ -1937,13 +1937,20 @@ class UserCog(commands.Cog):
             ephemeral=True,
         )
 
-    async def _run_for_model(self, interaction, model, cmd):
+    async def _run_for_model(self, interaction, model, cmd, count=None, supports_count=False):
         """Execute une action de contenu (reel/story/...) pour la MODEL choisie en
-        surchargeant temporairement l'identite via le contextvar. Utilise par le
-        menu Jailbreak. Local a la task -> pas d'interference entre clics simultanes."""
+        surchargeant temporairement l'identite via le contextvar (menu Jailbreak).
+        `count` = quantite demandee (multiplicateur) ; envoyee a la commande SEULEMENT
+        si elle accepte un parametre `nombre` (reel/story/post/storycta/bio/pp). Le
+        plafond Range[1,10] du slash n'est PAS applique ici (appel direct du callback)
+        -> on peut demander beaucoup ; les generateurs plafonnent au stock dispo. Local
+        a la task -> pas d'interference entre clics simultanes."""
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
         try:
-            await cmd.callback(self, interaction)
+            if supports_count and count and count > 0:
+                await cmd.callback(self, interaction, count)
+            else:
+                await cmd.callback(self, interaction)
         finally:
             _IDENTITY_OVERRIDE.reset(token)
 
@@ -3211,50 +3218,104 @@ class CentralMenuView(discord.ui.View):
 
 # ============ Menu JAILBREAK (toutes les models) ============
 # Reserve aux VA avec le role 'Jailbreak'. Un select des models -> un menu
-# ephemere d'actions (reel/story/post/storycta/pseudo/name/bio/pp) qui genere le
-# contenu de la MODEL choisie (via cog._run_for_model + override d'identite).
-# (cle action, label bouton, attribut de la commande sur le cog)
+# ephemere : choix de la QUANTITE (multiplicateur) + 8 actions (reel/story/post/
+# storycta/pseudo/name/bio/pp) qui generent le contenu de la MODEL choisie (via
+# cog._run_for_model + override d'identite).
+# (cle action, label bouton, attribut commande cog, accepte une quantite ?)
 _JB_ACTIONS = [
-    ("reel", "🎬 Reel", "reel"),
-    ("story", "📖 Story", "story"),
-    ("post", "🖼️ Post", "post"),
-    ("storycta", "📲 Story CTA", "storycta"),
-    ("pseudo", "👤 Pseudo", "username"),
-    ("name", "📝 Name", "name"),
-    ("bio", "💬 Bio", "bio"),
-    ("pp", "🖼️ PP", "profilepic"),
+    ("reel", "🎬 Reel", "reel", True),
+    ("story", "📖 Story", "story", True),
+    ("post", "🖼️ Post", "post", True),
+    ("storycta", "📲 Story CTA", "storycta", True),
+    ("pseudo", "👤 Pseudo", "username", False),
+    ("name", "📝 Name", "name", False),
+    ("bio", "💬 Bio", "bio", True),
+    ("pp", "🖼️ PP", "profilepic", True),
 ]
 
+# Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
+_JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 
-class _JailbreakActionButton(discord.ui.Button):
-    """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
-    def __init__(self, cog, model, label, cmd_attr, row):
-        super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
-        self.cog = cog
-        self.model = model
-        self.cmd_attr = cmd_attr
+
+class _JailbreakQtySelect(discord.ui.Select):
+    """Choix de la quantite de media par action (multiplicateur jailbreak)."""
+    def __init__(self, current):
+        opts = [
+            discord.SelectOption(
+                label=f"{q} média par action", value=str(q), default=(q == current))
+            for q in _JB_QTY_OPTIONS
+        ]
+        super().__init__(
+            placeholder=f"📦 Quantité : {current} par action",
+            min_values=1, max_values=1, options=opts, row=0)
 
     async def callback(self, interaction: discord.Interaction):
         if not _has_jailbreak_role(interaction.user):
             await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (il te faut le rôle « Jailbreak »).",
-                ephemeral=True)
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        try:
+            q = int(self.values[0])
+        except Exception:
+            q = 3
+        view = self.view
+        view.quantity = q
+        view._build()  # reconstruit pour refleter la nouvelle quantite
+        await interaction.response.edit_message(embed=view._embed(), view=view)
+
+
+class _JailbreakActionButton(discord.ui.Button):
+    """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
+    def __init__(self, cog, model, label, cmd_attr, supports_count, row):
+        super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
+        self.cog = cog
+        self.model = model
+        self.cmd_attr = cmd_attr
+        self.supports_count = supports_count
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _has_jailbreak_role(interaction.user):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
         cmd = getattr(self.cog, self.cmd_attr, None)
         if cmd is None:
             await interaction.response.send_message("Action indisponible.", ephemeral=True)
             return
-        await self.cog._run_for_model(interaction, self.model, cmd)
+        qty = getattr(self.view, "quantity", 3)
+        await self.cog._run_for_model(
+            interaction, self.model, cmd, count=qty, supports_count=self.supports_count)
 
 
 class JailbreakActionsView(discord.ui.View):
-    """Les 8 actions pour UNE model. Ephemere (regeneree a chaque choix de model)."""
-    def __init__(self, cog, model):
+    """Quantite + 8 actions pour UNE model. Ephemere (regeneree a chaque choix)."""
+    def __init__(self, cog, model, quantity=3):
         super().__init__(timeout=600)
         self.cog = cog
         self.model = model
-        for i, (_key, label, cmd_attr) in enumerate(_JB_ACTIONS):
-            self.add_item(_JailbreakActionButton(cog, model, label, cmd_attr, row=i // 4))
+        self.quantity = quantity
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        self.add_item(_JailbreakQtySelect(self.quantity))
+        for i, (_key, label, cmd_attr, sc) in enumerate(_JB_ACTIONS):
+            self.add_item(_JailbreakActionButton(
+                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4))
+
+    def _embed(self):
+        m = self.model.capitalize()
+        return discord.Embed(
+            title=f"🔓 {m} — que veux-tu générer ?",
+            description=(
+                f"📦 **Quantité : {self.quantity} média par action** "
+                "_(change-la dans le menu déroulant ci-dessus)._\n"
+                "La quantité est **plafonnée au stock dispo** de la model.\n"
+                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n\n"
+                "Clique sur une action 👇"
+            ),
+            color=discord.Color.dark_red(),
+        )
 
 
 class _JailbreakModelSelect(discord.ui.Select):
@@ -3280,21 +3341,16 @@ class _JailbreakModelSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not _has_jailbreak_role(interaction.user):
             await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (il te faut le rôle « Jailbreak »).",
-                ephemeral=True)
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
         model = (self.values[0] if self.values else "").lower()
         if not model or model == "__none__":
             await interaction.response.send_message(
                 "Aucune model disponible.", ephemeral=True)
             return
-        emb = discord.Embed(
-            title=f"🔓 {model.capitalize()} — que veux-tu générer ?",
-            description=f"Clique sur une action. Le contenu généré sera celui de **{model.capitalize()}**.",
-            color=discord.Color.dark_red(),
-        )
+        view = JailbreakActionsView(self.cog, model)
         await interaction.response.send_message(
-            embed=emb, view=JailbreakActionsView(self.cog, model), ephemeral=True)
+            embed=view._embed(), view=view, ephemeral=True)
 
 
 class JailbreakMenuView(discord.ui.View):
