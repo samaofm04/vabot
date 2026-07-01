@@ -52,6 +52,7 @@ def _ch_handle_va(name) -> str:
 # bien avoir un 🔗 (un lien). Absence de lien = pas de 🔗 (le rond reste, lui).
 LINK_MARK = "🔗"
 _ACTIVITY_DOTS = ("🟢", "🟠", "🔴")
+_VS = "️"  # sélecteur de variante (VS16) : parfois normalisé par Discord
 
 
 def _va_channel_target_name(name, has_link):
@@ -63,14 +64,18 @@ def _va_channel_target_name(name, has_link):
         return None
     n = name or ""
     dot = n[0] if n[:1] in _ACTIVITY_DOTS else ""
-    return f"{dot}{LINK_MARK if has_link else ''}-va-{handle}"
+    gear = "⚙️" if "⚙" in n else ""  # préserve le marqueur "0 clic 3j" (géré par clickrecap)
+    return f"{dot}{LINK_MARK if has_link else ''}{gear}-va-{handle}"
 
 
 async def _apply_va_link_mark(channel, has_link, reason="marqueur lien VA"):
     """Renomme un salon va- pour refleter la presence d'un lien. No-op (False) si
     deja correct ou si echec ; True si renomme. Best-effort (ignore les erreurs)."""
-    target = _va_channel_target_name(getattr(channel, "name", ""), has_link)
-    if not target or getattr(channel, "name", "") == target:
+    cur = getattr(channel, "name", "") or ""
+    target = _va_channel_target_name(cur, has_link)
+    # Comparaison insensible au sélecteur de variante (_VS) : évite une boucle de
+    # renommage si Discord normalise le ⚙️.
+    if not target or target.replace(_VS, "") == cur.replace(_VS, ""):
         return False
     try:
         await channel.edit(name=target, reason=reason)
@@ -2145,7 +2150,7 @@ class UserCog(commands.Cog):
             for ch, has in targets:
                 try:
                     target = _va_channel_target_name(ch.name, has)
-                    if not target or ch.name == target:
+                    if not target or target.replace(_VS, "") == (ch.name or "").replace(_VS, ""):
                         already += 1
                         continue
                     await ch.edit(name=target, reason="marquage lien VA")

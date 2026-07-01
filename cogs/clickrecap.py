@@ -50,6 +50,27 @@ _VA_CH_RE = re.compile(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$")
 def _ch_handle(name):
     m = _VA_CH_RE.search((name or "").lower())
     return m.group(1) if m else None
+
+
+# Marqueur ⚙️ : le lien du VA a fait 0 clic sur 3 jours (lien qui tourne à vide).
+# ADDITIF : se pose APRÈS le rond d'activité (🟢🟠🔴) et le 🔗. Ordre canonique du
+# nom de salon : {rond}{🔗}{⚙️}-va-handle.
+GEAR_MARK = "⚙️"
+
+
+def _va_name_set_gear(name, has_gear):
+    """Pose/retire le ⚙️ en PRÉSERVANT le rond d'activité (🟢🟠🔴) et le 🔗.
+    None si ce n'est pas un salon va-."""
+    h = _ch_handle(name)
+    if not h:
+        return None
+    n = name or ""
+    dot = n[0] if n[:1] in ("🟢", "🟠", "🔴") else ""
+    link = "🔗" if "🔗" in n else ""
+    gear = GEAR_MARK if has_gear else ""
+    return f"{dot}{link}{gear}-va-{h}"
+
+
 _LINKCACHE_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap_links.json"
 
 
@@ -759,10 +780,95 @@ class ClickRecap(commands.Cog):
                 elif r == "nolink":
                     nolink += 1
                 await asyncio.sleep(1.2)  # rate-limit friendly (Discord + GMS API)
+            # MAJ auto des ⚙️ (lien 0 clic 3j) pour ce serveur
+            try:
+                await self._apply_gear_marks(guild)
+            except Exception as e:
+                print(f"[clickrecap] gear marks: {e}")
         print(f"[clickrecap] récap posté : {sent} avec lien, {nolink} sans lien")
         return sent, nolink
 
+    async def _apply_gear_marks(self, guild):
+        """Pose ⚙️ sur les salons va- dont le LIEN a fait 0 clic sur 3 jours
+        (J-2..J), le retire sinon. Préserve le rond d'activité + le 🔗.
+        Best-effort. Retourne un dict de compteurs, ou None si GMS indispo."""
+        import gms
+        try:
+            lr = await asyncio.to_thread(gms.list_all_links)
+        except Exception:
+            return None
+        if not isinstance(lr, dict) or not lr.get("ok"):
+            return None
+        link_list = lr.get("links") or []
+        try:
+            from cogs.user import _gms_exact_link
+        except Exception:
+            return None
+        today = _paris_now().date()
+        start3 = today - datetime.timedelta(days=2)  # 3 jours inclus : J-2, J-1, J
+        st = {"gear": 0, "ungear": 0, "skip": 0, "fail": 0}
+        for ch in guild.text_channels:
+            h = _ch_handle(ch.name)
+            if not h:
+                continue
+            link = _gms_exact_link(h, link_list)
+            has_gear = False
+            if link:
+                c3 = await asyncio.to_thread(
+                    gms.clicks_for_link, link.get("id"),
+                    start3.isoformat(), today.isoformat())
+                # 0 EXACT -> ⚙️. None = API indispo -> on ne marque PAS (évite un faux ⚙️).
+                if c3 == 0:
+                    has_gear = True
+            target = _va_name_set_gear(ch.name, has_gear)
+            cur = ch.name or ""
+            # comparaison insensible au sélecteur de variante (évite une boucle)
+            if not target or target.replace("️", "") == cur.replace("️", ""):
+                st["skip"] += 1
+                continue
+            try:
+                await ch.edit(name=target, reason="VA lien 0 clic 3j")
+                st["gear" if has_gear else "ungear"] += 1
+                await asyncio.sleep(2)  # anti rate-limit (rename de salon)
+            except Exception:
+                st["fail"] += 1
+        return st
+
     # ---------- Commandes ----------
+    @app_commands.command(
+        name="marquerinactifs",
+        description="[OWNER] Met ⚙️ sur les salons VA dont le lien a fait 0 clic en 3 jours",
+    )
+    async def marquerinactifs(self, interaction: discord.Interaction):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "🔄 Analyse des clics (3 derniers jours) en arrière-plan — je pose ⚙️ sur les liens "
+            "à 0 clic, sans toucher au rond d'activité ni au 🔗. Je préviens ici à la fin.",
+            ephemeral=True)
+        _chan = interaction.channel
+        _uid = interaction.user.id
+
+        async def _run():
+            st = await self._apply_gear_marks(guild)
+            try:
+                if st is None:
+                    await _chan.send(
+                        f"<@{_uid}> ⚠️ GetMySocial indisponible — réessaie dans un instant.")
+                else:
+                    await _chan.send(
+                        f"✅ <@{_uid}> ⚙️ terminé : posé sur **{st['gear']}** salon(s) "
+                        f"(lien + 0 clic/3j), retiré de {st['ungear']}, {st['skip']} inchangé(s)"
+                        + (f", {st['fail']} échec(s)" if st['fail'] else "") + ".")
+            except Exception:
+                pass
+        interaction.client.loop.create_task(_run())
+
     @app_commands.command(
         name="recapclics",
         description="[OWNER] Poste le récap des clics dans CE salon (test), ou partout",
