@@ -356,7 +356,10 @@ def _payment_summary(pay):
         return None
     if pay.get("method") == "TapTap":
         return f"📱 TapTap · {pay.get('network', '?')} · `{pay.get('number', '?')}`"
-    return f"💰 {pay.get('method', '?')} · `{pay.get('address', '?')}`"
+    chain = pay.get("chain")
+    head = pay.get("method", "?") + (f" ({chain})" if chain else "")
+    shot = " · 📸" if pay.get("screenshot") else ""
+    return f"💰 {head} · `{pay.get('address', '?')}`{shot}"
 
 
 def _find_payment_channel(guild):
@@ -2132,39 +2135,103 @@ class UserCog(commands.Cog):
             "Reste dans ton salon, on te répond ici. 🙌",
             ephemeral=True)
 
-    async def _save_payment(self, interaction, info):
-        """Enregistre le moyen de paiement du VA dans users.json + confirme + notifie
-        le salon paiement (s'il existe)."""
+    def _store_payment(self, uid, info):
+        """Ecrit users.json[uid]['payment'] = info (cree l'entree dict si besoin)."""
         import time as _t
         info["updated_at"] = int(_t.time())
         users = load_json(USERS_FILE, {})
-        uid = str(interaction.user.id)
         data = users.get(uid)
         if not isinstance(data, dict):
             data = {"identity": data} if isinstance(data, str) and data else {}
             users[uid] = data
         data["payment"] = info
         save_json(USERS_FILE, users)
+
+    async def _notify_payment(self, interaction, info, screenshot_att=None):
+        """Poste le moyen de paiement dans le salon paiement (si existant). Joint la
+        capture d'ecran (re-upload -> persistante) quand elle est fournie."""
+        ch = _find_payment_channel(interaction.guild)
+        if ch is None:
+            return
+        emb = discord.Embed(title="💸 Moyen de paiement (VA)", color=discord.Color.gold())
+        emb.add_field(name="👤 VA", value=interaction.user.mention, inline=True)
+        idt = get_user_identity(interaction.user.id)
+        if idt:
+            emb.add_field(name="🎭 Identité", value=str(idt), inline=True)
+        emb.add_field(name="💰 Moyen", value=_payment_summary(info) or "—", inline=False)
+        emb.set_footer(text=f"{interaction.user} · ID {interaction.user.id}")
+        try:
+            if screenshot_att is not None:
+                f = await screenshot_att.to_file()
+                await ch.send(embed=emb, file=f)
+            else:
+                await ch.send(embed=emb)
+        except Exception:
+            try:
+                await ch.send(embed=emb)
+            except Exception:
+                pass
+
+    async def _save_payment(self, interaction, info):
+        """Enregistre le moyen de paiement (TapTap) + confirme + notifie."""
+        self._store_payment(str(interaction.user.id), info)
         summary = _payment_summary(info) or "—"
         await interaction.response.send_message(
             f"✅ **Moyen de paiement enregistré !**\n{summary}\n\n"
             "Le boss le verra pour te payer. Tu peux le changer quand tu veux "
             "avec le même bouton. 💸",
             ephemeral=True)
-        # Notif dans un salon paiement s'il existe (sinon juste stocké -> /moyenspaiement)
-        ch = _find_payment_channel(interaction.guild)
-        if ch is not None:
-            emb = discord.Embed(title="💸 Moyen de paiement (VA)", color=discord.Color.gold())
-            emb.add_field(name="👤 VA", value=interaction.user.mention, inline=True)
-            idt = get_user_identity(interaction.user.id)
-            if idt:
-                emb.add_field(name="🎭 Identité", value=str(idt), inline=True)
-            emb.add_field(name="💰 Moyen", value=summary, inline=False)
-            emb.set_footer(text=f"{interaction.user} · ID {uid}")
+        await self._notify_payment(interaction, info, None)
+
+    async def _save_crypto_and_ask_screenshot(self, interaction, info):
+        """Enregistre l'adresse USDC puis demande au VA de DEPOSER une capture d'ecran
+        dans le salon (les modals Discord n'acceptent pas d'image) ; l'attache ensuite
+        au moyen de paiement + notif."""
+        import asyncio as _a
+        uid = str(interaction.user.id)
+        self._store_payment(uid, info)
+        chain = info.get("chain", "")
+        await interaction.response.send_message(
+            f"✅ Adresse enregistrée : **USDC · {chain}**\n`{info.get('address', '')}`\n\n"
+            "📸 **Dernière étape : envoie une CAPTURE D'ÉCRAN de ton wallet dans ce salon** "
+            "(glisse l'image ici). Tu as 5 min. _(ou tape `skip` pour passer)_",
+            ephemeral=True)
+
+        def _check(m):
+            return (m.author.id == interaction.user.id
+                    and getattr(m.channel, "id", None) == getattr(interaction.channel, "id", None)
+                    and (bool(m.attachments) or (m.content or "").strip().lower() == "skip"))
+
+        try:
+            msg = await interaction.client.wait_for("message", check=_check, timeout=300)
+        except _a.TimeoutError:
             try:
-                await ch.send(embed=emb)
+                await interaction.followup.send(
+                    "⏳ Pas de capture reçue — ton adresse est **enregistrée** quand même. "
+                    "Tu pourras rajouter la capture plus tard via 💸 Mon paiement.",
+                    ephemeral=True)
             except Exception:
                 pass
+            await self._notify_payment(interaction, info, None)
+            return
+        if msg.attachments:
+            att = msg.attachments[0]
+            info["screenshot"] = att.url
+            self._store_payment(uid, info)  # re-ecrit avec le lien de la capture
+            try:
+                await interaction.followup.send(
+                    "✅ Capture reçue, merci ! Ton moyen de paiement est **complet**. 💸",
+                    ephemeral=True)
+            except Exception:
+                pass
+            await self._notify_payment(interaction, info, screenshot_att=att)
+        else:
+            try:
+                await interaction.followup.send(
+                    "Ok, sans capture. Ton adresse est **enregistrée**. 💸", ephemeral=True)
+            except Exception:
+                pass
+            await self._notify_payment(interaction, info, None)
 
     @app_commands.command(
         name="moyenspaiement",
@@ -3583,19 +3650,19 @@ class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
 # TapTap mobile money (reseau + numero). Stocke dans users.json[uid]["payment"].
 # Flux : bouton -> select methode -> (crypto: modal adresse) / (taptap: select
 # reseau -> modal numero) -> _save_payment.
-_CRYPTO_METHODS = {"USDC", "ETH", "SOL"}
+# Reseaux (chaines) sur lesquels le VA peut recevoir de l'USDC.
+_USDC_CHAINS = [
+    ("Solana", "USDC sur Solana", "🟣"),
+    ("ETH", "USDC sur Ethereum", "💎"),
+]
 
 
 class _PaymentMethodSelect(discord.ui.Select):
     def __init__(self, cog):
         self.cog = cog
         opts = [
-            discord.SelectOption(label="USDC", value="USDC", emoji="💵",
-                                 description="Crypto (stablecoin dollar)"),
-            discord.SelectOption(label="ETH", value="ETH", emoji="💎",
-                                 description="Crypto Ethereum"),
-            discord.SelectOption(label="Solana (SOL)", value="SOL", emoji="🟣",
-                                 description="Crypto Solana"),
+            discord.SelectOption(label="USDC (crypto)", value="USDC", emoji="💵",
+                                 description="Reçu en USDC sur Solana ou Ethereum"),
             discord.SelectOption(label="TapTap (Mobile Money)", value="TAPTAP", emoji="📱",
                                  description="Airtel / Orange / Mvola / Moov / MTN"),
         ]
@@ -3603,9 +3670,10 @@ class _PaymentMethodSelect(discord.ui.Select):
                          min_values=1, max_values=1, options=opts)
 
     async def callback(self, interaction: discord.Interaction):
-        v = self.values[0]
-        if v in _CRYPTO_METHODS:
-            await interaction.response.send_modal(_CryptoAddressModal(self.cog, v))
+        if self.values[0] == "USDC":
+            await interaction.response.edit_message(
+                content="💵 **USDC** — sur quel réseau veux-tu le recevoir ?",
+                embed=None, view=_UsdcChainView(self.cog))
         else:
             await interaction.response.edit_message(
                 content="📱 **TapTap** — choisis ton réseau :",
@@ -3616,6 +3684,24 @@ class PaymentMethodView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=300)
         self.add_item(_PaymentMethodSelect(cog))
+
+
+class _UsdcChainSelect(discord.ui.Select):
+    def __init__(self, cog):
+        self.cog = cog
+        opts = [discord.SelectOption(label=code, value=code, description=desc, emoji=emo)
+                for code, desc, emo in _USDC_CHAINS]
+        super().__init__(placeholder="Solana ou Ethereum…",
+                         min_values=1, max_values=1, options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(_CryptoAddressModal(self.cog, self.values[0]))
+
+
+class _UsdcChainView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=300)
+        self.add_item(_UsdcChainSelect(cog))
 
 
 class _PaymentNetworkSelect(discord.ui.Select):
@@ -3637,19 +3723,20 @@ class _PaymentNetworkView(discord.ui.View):
 
 
 class _CryptoAddressModal(discord.ui.Modal):
-    def __init__(self, cog, method):
-        super().__init__(title=f"💰 Paiement {method}")
+    def __init__(self, cog, chain):
+        super().__init__(title=f"💵 USDC — {chain}")
         self.cog = cog
-        self.method = method
+        self.chain = chain
         self.addr = discord.ui.TextInput(
-            label=f"Ton adresse {method}",
+            label=f"Ton adresse USDC ({chain})",
             placeholder="Colle ici ton adresse de wallet",
             required=True, max_length=200)
         self.add_item(self.addr)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await self.cog._save_payment(interaction, {
-            "method": self.method, "address": str(self.addr.value or "").strip()})
+        await self.cog._save_crypto_and_ask_screenshot(interaction, {
+            "method": "USDC", "chain": self.chain,
+            "address": str(self.addr.value or "").strip()})
 
 
 class _MobileNumberModal(discord.ui.Modal):
