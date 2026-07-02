@@ -24,8 +24,8 @@ DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "sheets_config.json"
 SA_FILE = DATA_DIR / "google_service_account.json"
 
-HEADER = ["id", "username", "password", "email", "two_fa", "va", "notes"]
-_FIELDS = ("username", "password", "email", "two_fa", "va", "notes")
+HEADER = ["username", "password", "email", "two_fa", "va", "notes"]
+_FIELDS = ("password", "email", "two_fa", "va", "notes")  # champs maj (username = la clé)
 
 _lock = threading.Lock()
 _last_hash: dict = {}   # identity -> hash des comptes (evite les reecritures inutiles)
@@ -92,9 +92,9 @@ def test_connection() -> tuple:
 
 # ---------- Helpers ----------
 def _acct_row(a: dict) -> list:
-    return [str(a.get("id", "") or ""), a.get("username", "") or "",
-            a.get("password", "") or "", a.get("email", "") or "",
-            a.get("two_fa", "") or "", a.get("va", "") or "", a.get("notes", "") or ""]
+    return [a.get("username", "") or "", a.get("password", "") or "",
+            a.get("email", "") or "", a.get("two_fa", "") or "",
+            a.get("va", "") or "", a.get("notes", "") or ""]
 
 
 def _accts_hash(accts: list) -> str:
@@ -318,33 +318,37 @@ def pull_and_merge() -> tuple:
         if not isinstance(entry, dict):
             continue  # identite pas dans jailbreak (= dossier absent) -> on ne cree pas
         accts = entry.setdefault("accounts", [])
-        by_id = {}
+        # Correspondance par USERNAME (l'id n'est plus dans le Sheet, géré en interne).
+        by_uname = {}
         for a in accts:
-            try:
-                by_id[int(a.get("id", 0))] = a
-            except Exception:
-                pass
+            u = (a.get("username") or "").strip().lower()
+            if u and u not in by_uname:
+                by_uname[u] = a
         seen = set()
         for row in rows:
             username = (row.get("username") or "").strip()
             if not username:
                 continue
-            rid = (row.get("id") or "").strip()
-            acct = by_id.get(int(rid)) if rid.isdigit() else None
+            ul = username.lower()
+            if ul in seen:
+                continue  # doublon de username dans le Sheet -> on ignore les suivants
+            seen.add(ul)
+            acct = by_uname.get(ul)
             if acct is not None:
-                seen.add(int(acct.get("id", 0)))
                 ch = False
                 for f in _FIELDS:
                     v = (row.get(f) or "").strip()
                     if (acct.get(f) or "") != v:
                         acct[f] = v
                         ch = True
+                if acct.get("username") != username:   # ex: changement de casse
+                    acct["username"] = username[:80]
+                    ch = True
                 if ch:
                     updated += 1
             else:
-                nid = _gen_id()
                 accts.append({
-                    "id": nid, "username": username[:80],
+                    "id": _gen_id(), "username": username[:80],
                     "password": (row.get("password") or "").strip()[:200],
                     "email": (row.get("email") or "").strip()[:120],
                     "two_fa": (row.get("two_fa") or "").strip()[:500],
@@ -353,17 +357,13 @@ def pull_and_merge() -> tuple:
                     "notes": (row.get("notes") or "").strip()[:500],
                     "created_at": int(time.time()),
                 })
-                seen.add(nid)
                 added += 1
         # Suppressions (anti-wipe : uniquement si l'onglet a des comptes)
         if rows:
             kept = []
             for a in accts:
-                try:
-                    aid = int(a.get("id", 0))
-                except Exception:
-                    aid = 0
-                if aid and aid not in seen:
+                u = (a.get("username") or "").strip().lower()
+                if u and u not in seen:
                     removed += 1
                 else:
                     kept.append(a)
