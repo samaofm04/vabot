@@ -131,6 +131,94 @@ class SheetsSync(commands.Cog):
             "Actions : `setup` (sheet_id + clé), `test`, `push`, `pull`, `status`.",
             ephemeral=True)
 
+    @app_commands.command(
+        name="jailbreakreset",
+        description="[OWNER] DANGER: supprime TOUS les comptes JB sauf ceux d'un VA (backup auto)",
+    )
+    @app_commands.describe(
+        garder_va="Le VA dont on GARDE les comptes (ex: Toky). Tout le reste est supprimé.",
+        confirmer="Laisse vide = APERÇU (rien supprimé). Mets True = SUPPRIME pour de vrai.",
+    )
+    async def jailbreakreset(self, interaction: discord.Interaction,
+                             garder_va: str, confirmer: bool = False):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        keep = (garder_va or "").strip()
+        if not keep:
+            await interaction.response.send_message("Précise le VA à garder (ex: Toky).", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        import jailbreak as jb
+        kl = keep.lower()
+
+        def _counts(data):
+            total = kept = 0
+            for e in data.values():
+                if not isinstance(e, dict):
+                    continue
+                accts = e.get("accounts") or []
+                total += len(accts)
+                kept += sum(1 for a in accts if (a.get("va") or "").strip().lower() == kl)
+            return total, kept
+
+        if not confirmer:
+            total, kept = _counts(await asyncio.to_thread(jb._load))
+            await interaction.followup.send(
+                f"⚠️ **APERÇU — rien n'est supprimé.**\nGarder le VA « **{keep}** » :\n"
+                f"• Total actuel : **{total}** comptes\n"
+                f"• Gardés («{keep}») : **{kept}**\n"
+                f"• Seraient **SUPPRIMÉS** : **{total - kept}**\n\n"
+                f"Si c'est bon, relance avec :\n"
+                f"`/jailbreakreset garder_va:{keep} confirmer:True`\n"
+                f"_(un backup du fichier est fait avant toute suppression)._",
+                ephemeral=True)
+            return
+
+        # Exécution : pause le poller pendant l'opé (anti ré-import), backup, filtre, save + push synchrone
+        was = self.poll.is_running()
+        if was:
+            self.poll.cancel()
+
+        def _do():
+            import json as _j, time as _t
+            data = jb._load()
+            total_before, _ = _counts(data)
+            backup = jb.DATA_DIR / f"jailbreak.backup.{int(_t.time())}.json"
+            try:
+                jb.DATA_DIR.mkdir(parents=True, exist_ok=True)
+                backup.write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+            for identity, entry in data.items():
+                if not isinstance(entry, dict):
+                    continue
+                entry["accounts"] = [a for a in (entry.get("accounts") or [])
+                                     if (a.get("va") or "").strip().lower() == kl]
+                entry["vas"] = [v for v in (entry.get("vas") or [])
+                                if (v.get("name") if isinstance(v, dict) else v or "").strip().lower() == kl]
+            _, kept = _counts(data)
+            jb._save(data)
+            try:
+                sheets_sync.push_all(data, force=True)  # maj le Sheet MAINTENANT (anti-race)
+            except Exception:
+                pass
+            return total_before, kept, total_before - kept, str(backup)
+
+        try:
+            total_before, kept, removed, backup = await asyncio.to_thread(_do)
+        finally:
+            if was and not self.poll.is_running():
+                self.poll.start()
+        await interaction.followup.send(
+            f"✅ **Reset effectué** — gardé le VA « {keep} ».\n"
+            f"• Avant : **{total_before}** comptes\n"
+            f"• Gardés : **{kept}**\n"
+            f"• Supprimés : **{removed}**\n"
+            f"🗂 Backup sauvegardé : `{backup}` (sur le VPS, au cas où).\n"
+            f"Le Sheet a été mis à jour.",
+            ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(SheetsSync(bot))
