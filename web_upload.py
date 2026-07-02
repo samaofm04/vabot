@@ -648,106 +648,84 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 LOGIN_HTML = """
 <!DOCTYPE html>
-<html lang="fr"><head><title>Youlab — Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="fr"><head><meta charset="utf-8"><title>Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  background:#fafafa;color:#0a0a0a;min-height:100vh;display:flex;
+  background:#04050c;color:#eef0ff;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow-x:hidden;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
-.layout{display:flex;width:100%;min-height:100vh}
-/* Panneau gauche : formulaire */
-.left{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 32px;background:#fff;
-  min-width:0}
-.card{width:100%;max-width:380px}
-.logo{display:flex;align-items:center;gap:10px;margin-bottom:48px;font-weight:800;font-size:22px;letter-spacing:-.03em}
-.logo-mark{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#a855f7);
-  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:18px;
-  box-shadow:0 4px 14px rgba(59,130,246,.3)}
-h1{font-size:30px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px;color:#0a0a0a}
-.subtitle{color:#6b7280;font-size:14px;margin-bottom:32px}
+/* Nébuleuses en fond (violet / bleu / cyan) qui dérivent lentement */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 45% at 18% 22%,rgba(99,102,241,.16),transparent 62%),
+             radial-gradient(ellipse 52% 42% at 82% 78%,rgba(168,85,247,.14),transparent 62%),
+             radial-gradient(ellipse 46% 36% at 68% 12%,rgba(56,189,248,.09),transparent 60%),
+             radial-gradient(circle 340px at 50% 52%,rgba(124,93,250,.12),transparent 70%);
+  animation:nebula 26s ease-in-out infinite alternate}
+@keyframes nebula{from{transform:translate(0,0) scale(1)}to{transform:translate(-26px,18px) scale(1.07)}}
+/* Champ d'étoiles (points générés en JS) */
+#stars{position:fixed;inset:0;pointer-events:none}
+.star{position:absolute;background:#fff;border-radius:50%;animation:twinkle var(--d,4s) ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:var(--o,.7)}50%{opacity:.08}}
+/* Étoiles filantes */
+.shoot{position:fixed;width:130px;height:1.5px;border-radius:2px;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,#fff,rgba(255,255,255,0));animation:shoot 9s linear infinite}
+@keyframes shoot{0%,86%{opacity:0;transform:translate(0,0) rotate(-32deg)}88%{opacity:.9}100%{opacity:0;transform:translate(-620px,380px) rotate(-32deg)}}
+/* Carte de connexion centrée, effet verre */
+.card{position:relative;width:100%;max-width:400px;margin:24px;
+  background:rgba(12,14,26,.72);border:1px solid rgba(148,163,255,.16);border-radius:20px;
+  padding:40px 36px 32px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 30px 80px rgba(0,0,0,.65)}
+h1{font-size:28px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px;color:#fff;text-align:center}
+.subtitle{color:#8b93b8;font-size:14px;margin-bottom:30px;text-align:center}
 .field{margin-bottom:18px}
-label{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}
-label .req{color:#ef4444;font-weight:700;margin-left:2px}
-input{width:100%;padding:11px 14px;background:#f9fafb;border:1px solid #e5e7eb;
-  color:#0a0a0a;border-radius:9px;font-size:14px;font-family:inherit;
+label{display:block;font-size:13px;font-weight:600;color:#aeb6d9;margin-bottom:6px}
+label .req{color:#f87171;font-weight:700;margin-left:2px}
+input{width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(148,163,255,.18);
+  color:#fff;border-radius:9px;font-size:14px;font-family:inherit;
   transition:all .15s;outline:none}
-input:focus{border-color:#3b82f6;background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
-input::placeholder{color:#9ca3af}
-.row-links{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;font-size:13px}
-.row-links a{color:#3b82f6;text-decoration:none;font-weight:500}
-.row-links a:hover{text-decoration:underline}
-.row-links .muted{color:#6b7280;font-weight:500}
-.remember-row{display:flex;align-items:center;gap:10px;margin-bottom:22px;cursor:pointer;font-size:13px;color:#374151;user-select:none}
+input:focus{border-color:#818cf8;background:rgba(255,255,255,.08);box-shadow:0 0 0 3px rgba(129,140,248,.18)}
+input::placeholder{color:#5a6183}
+.remember-row{display:flex;align-items:center;gap:10px;margin-bottom:22px;cursor:pointer;font-size:13px;color:#aeb6d9;user-select:none}
 .remember-row input[type=checkbox]{position:absolute;opacity:0;pointer-events:none}
-.remember-check{width:18px;height:18px;border:1.5px solid #d1d5db;border-radius:5px;display:flex;align-items:center;justify-content:center;background:#fff;transition:all .15s;flex-shrink:0}
+.remember-check{width:18px;height:18px;border:1.5px solid rgba(148,163,255,.35);border-radius:5px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);transition:all .15s;flex-shrink:0}
 .remember-check svg{width:12px;height:12px;display:none}
-.remember-row input[type=checkbox]:checked + .remember-check{background:#3b82f6;border-color:#3b82f6}
+.remember-row input[type=checkbox]:checked + .remember-check{background:#818cf8;border-color:#818cf8}
 .remember-row input[type=checkbox]:checked + .remember-check svg{display:block}
-.remember-row:hover .remember-check{border-color:#3b82f6}
-.remember-hint{color:#9ca3af;font-size:11px;margin-left:auto;font-weight:400}
-.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;background:#3b82f6;color:#fff;border:0;border-radius:9px;
+.remember-row:hover .remember-check{border-color:#818cf8}
+.remember-hint{color:#5a6183;font-size:11px;margin-left:auto;font-weight:400}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;
+  background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;border:0;border-radius:9px;
   font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;
-  box-shadow:0 1px 2px rgba(59,130,246,.15);min-height:46px}
-.btn:hover{background:#2563eb;box-shadow:0 4px 14px rgba(59,130,246,.35);transform:translateY(-1px)}
+  box-shadow:0 8px 24px rgba(124,93,250,.35);min-height:46px}
+.btn:hover{box-shadow:0 12px 32px rgba(124,93,250,.5);transform:translateY(-1px)}
 .btn:active{transform:translateY(0)}
 .btn:disabled{cursor:wait;opacity:.85;transform:none}
-.btn:disabled:hover{transform:none;box-shadow:0 1px 2px rgba(59,130,246,.15)}
+.btn:disabled:hover{transform:none;box-shadow:0 8px 24px rgba(124,93,250,.35)}
 /* Spinner Insta-style pour le bouton de login */
 .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .7s linear infinite;flex-shrink:0}
 .btn .spinner{display:none}
 .btn.loading .spinner{display:inline-block}
 .btn.loading .label{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-.footer-note{margin-top:28px;text-align:center;color:#6b7280;font-size:13px}
-.footer-note a{color:#3b82f6;text-decoration:none;font-weight:500}
-.footer-note a:hover{text-decoration:underline}
-.err{background:#fee2e2;border:1px solid #fecaca;color:#dc2626;padding:11px 14px;
+.footer-note{margin-top:26px;text-align:center;color:#5a6183;font-size:13px}
+.err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#fca5a5;padding:11px 14px;
   border-radius:9px;font-size:13px;margin-bottom:20px;font-weight:500;
   display:flex;align-items:center;gap:8px}
-/* Panneau droit : visuel */
-.right{flex:1;background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#3b0764 100%);
-  display:flex;align-items:center;justify-content:center;padding:48px;
-  position:relative;overflow:hidden}
-.right::before{content:'';position:absolute;inset:-50%;
-  background:radial-gradient(circle at 30% 50%,rgba(59,130,246,.15),transparent 60%),
-             radial-gradient(circle at 70% 20%,rgba(168,85,247,.12),transparent 50%);
-  animation:drift 20s ease-in-out infinite}
-@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-20px)}}
-.brand{position:relative;text-align:center;color:#fff;max-width:420px}
-.brand h2{font-size:32px;font-weight:800;letter-spacing:-.03em;margin-bottom:14px;line-height:1.2}
-.brand p{font-size:15px;color:rgba(255,255,255,.7);line-height:1.6}
-.stats{display:flex;gap:28px;justify-content:center;margin-top:36px;padding-top:28px;
-  border-top:1px solid rgba(255,255,255,.1)}
-.stat-item{text-align:center}
-.stat-v{font-size:22px;font-weight:800;letter-spacing:-.02em}
-.stat-l{font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.08em;
-  font-weight:600;margin-top:4px}
-@media (max-width:900px){
-  .right{display:none}
-  .layout{justify-content:center}
-}
 /* Page loader global - même style que dashboard */
-#page-loader{position:fixed;inset:0;background:rgba(15,15,15,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+#page-loader{position:fixed;inset:0;background:rgba(4,5,12,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
 #page-loader.show{display:flex}
-#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
+#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(129,140,248,.15);border-top-color:#818cf8;border-radius:50%;animation:plSpin .8s linear infinite}
 @keyframes plSpin{to{transform:rotate(360deg)}}
 </style></head><body>
 <div id="page-loader"><div class="pl-ring"></div></div>
-<div class="layout">
-  <div class="left">
+<div id="stars"></div>
+<div class="shoot" style="top:9%;left:74%"></div>
+<div class="shoot" style="top:36%;left:90%;animation-delay:4.6s"></div>
     <div class="card">
-      <div class="logo">
-        <div class="logo-mark">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 4 L12 13 L19 4"/>
-            <path d="M12 13 L12 20"/>
-          </svg>
-        </div>
-        <span>Youlab</span>
-      </div>
       <h1>Connexion</h1>
       <p class="subtitle">Content de te revoir</p>
       {err}
@@ -801,19 +779,19 @@ input::placeholder{color:#9ca3af}
       </script>
       <div class="footer-note">Privé · accès réservé</div>
     </div>
-  </div>
-  <div class="right">
-    <div class="brand">
-      <h2>Pilote ton agence depuis une seule interface</h2>
-      <p>Upload contenu, planification SFS, suivi des ventes MyPuls en temps réel, paiements chatteurs, et bien plus.</p>
-      <div class="stats">
-        <div class="stat-item"><div class="stat-v">5</div><div class="stat-l">Modèles</div></div>
-        <div class="stat-item"><div class="stat-v">160+</div><div class="stat-l">Chatteurs</div></div>
-        <div class="stat-item"><div class="stat-v">24/7</div><div class="stat-l">Sync auto</div></div>
-      </div>
-    </div>
-  </div>
-</div>
+<script>
+// Génère le champ d'étoiles (taille, position, scintillement aléatoires)
+(function(){
+  var c = document.getElementById('stars');
+  if(!c) return;
+  var html = '';
+  for(var i = 0; i < 150; i++){
+    var s = (Math.random()*1.8 + 0.6).toFixed(1);
+    html += '<span class="star" style="left:' + (Math.random()*100).toFixed(2) + '%;top:' + (Math.random()*100).toFixed(2) + '%;width:' + s + 'px;height:' + s + 'px;--o:' + (Math.random()*.55 + .35).toFixed(2) + ';--d:' + (Math.random()*4 + 2.5).toFixed(1) + 's;animation-delay:' + (Math.random()*5).toFixed(1) + 's"></span>';
+  }
+  c.innerHTML = html;
+})();
+</script>
 </body></html>
 """
 
