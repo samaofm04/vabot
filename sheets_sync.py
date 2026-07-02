@@ -263,12 +263,10 @@ def pull_all() -> dict | None:
         sh = _open_sheet()
         out = {}
         for ws in sh.worksheets():
-            if _is_va_tab(ws.title):
-                continue  # onglet vue-par-VA (lecture seule) -> jamais lu comme identité
-            identity = ws.title.strip().lower()
+            title = ws.title.strip()   # nom ORIGINAL (classification identité/VA dans le merge)
             values = ws.get_all_values()
             if not values:
-                out[identity] = []
+                out[title] = []
                 continue
             header = [str(h).strip().lower() for h in values[0]]
             accts = []
@@ -278,22 +276,54 @@ def pull_all() -> dict | None:
                 if not (d.get("username") or "").strip():
                     continue
                 accts.append(d)
-            out[identity] = accts
+            out[title] = accts
         return out
     except Exception as e:
         print(f"[sheets_sync] pull_all: {e}", flush=True)
         return None
 
 
+def _row_new_account(u, r, va, gen_id):
+    return {
+        "id": gen_id(), "username": u[:80],
+        "password": (r.get("password") or "").strip()[:200],
+        "email": (r.get("email") or "").strip()[:120],
+        "two_fa": (r.get("two_fa") or "").strip()[:500],
+        "two_fa_validated": False,
+        "va": (va or "").strip()[:60],
+        "notes": (r.get("notes") or "").strip()[:500],
+        "created_at": int(time.time()),
+    }
+
+
 def pull_and_merge() -> tuple:
-    """Applique le Sheet dans jailbreak.json : upsert par `id`, ajoute les nouveaux
-    (id vide/inconnu), supprime ceux absents du Sheet (ANTI-WIPE : seulement si
-    l'onglet contient au moins 1 compte). Retourne (changed: bool, summary: str)."""
+    """Applique le Sheet dans jailbreak.json. 2 types d'onglets ÉDITABLES :
+      - IDENTITÉ (nom = 'amelia') : gouverne TOUS les comptes de l'identité.
+      - PAR VA (nom = 'amelia andry') : gouverne les comptes de cette identité gérés
+        par ce VA.
+    Règle : un compte est SUPPRIMÉ s'il est absent d'un onglet NON VIDE où il devrait
+    figurer (identité OU son onglet VA) -> supprimer d'un côté supprime partout. Un
+    username nouveau -> ajouté. ANTI-WIPE : un onglet VIDE n'entraîne aucune suppression.
+    Retourne (changed, summary)."""
     import jailbreak as jb
     sheet = pull_all()
     if sheet is None:
         return False, "Sheet indisponible"
     data = jb._load()
+    known = {str(k).strip().lower() for k in data.keys()}
+
+    # Classer les onglets du Sheet
+    id_tabs = {}                 # identity_lower -> rows
+    va_tabs = {}                 # identity_lower -> {va_lower: (va_display, rows)}
+    for title, rows in sheet.items():
+        tl = title.strip().lower()
+        if tl in known:
+            id_tabs[tl] = rows
+        else:
+            parts = title.strip().split(" ", 1)
+            if len(parts) == 2 and parts[0].strip().lower() in known and parts[1].strip():
+                va_tabs.setdefault(parts[0].strip().lower(), {})[parts[1].strip().lower()] = \
+                    (parts[1].strip(), rows)
 
     used_ids = set()
     for entry in data.values():
@@ -313,63 +343,101 @@ def pull_and_merge() -> tuple:
         return nid
 
     added = updated = removed = 0
-    for identity, rows in sheet.items():
-        entry = data.get(identity)
+    for identity in list(data.keys()):
+        entry = data[identity]
         if not isinstance(entry, dict):
-            continue  # identite pas dans jailbreak (= dossier absent) -> on ne cree pas
+            continue
+        il = str(identity).strip().lower()
+        va_meta = va_tabs.get(il, {})
+        if il not in id_tabs and not va_meta:
+            continue  # rien pour cette identité dans le Sheet -> on ne touche pas
         accts = entry.setdefault("accounts", [])
-        # Correspondance par USERNAME (l'id n'est plus dans le Sheet, géré en interne).
+
+        # Présences (onglets NON VIDES seulement = anti-wipe)
+        id_rows = id_tabs.get(il)
+        id_present = None
+        if id_rows:
+            id_present = {(r.get("username") or "").strip().lower()
+                          for r in id_rows if (r.get("username") or "").strip()}
+        va_present = {}
+        for vl, (vdisp, rows) in va_meta.items():
+            if rows:
+                va_present[vl] = {(r.get("username") or "").strip().lower()
+                                  for r in rows if (r.get("username") or "").strip()}
+
+        # --- SUPPRESSIONS : absent d'un onglet non vide où il devrait figurer ---
+        kept, deleted = [], set()
+        for a in accts:
+            u = (a.get("username") or "").strip().lower()
+            vx = (a.get("va") or "").strip().lower()
+            gone = (id_present is not None and u and u not in id_present) or \
+                   (vx and vx in va_present and u and u not in va_present[vx])
+            if gone:
+                removed += 1
+                if u:
+                    deleted.add(u)
+            else:
+                kept.append(a)
+        entry["accounts"] = kept
+        accts = kept
         by_uname = {}
         for a in accts:
             u = (a.get("username") or "").strip().lower()
             if u and u not in by_uname:
                 by_uname[u] = a
-        seen = set()
-        for row in rows:
-            username = (row.get("username") or "").strip()
-            if not username:
-                continue
-            ul = username.lower()
-            if ul in seen:
-                continue  # doublon de username dans le Sheet -> on ignore les suivants
-            seen.add(ul)
-            acct = by_uname.get(ul)
-            if acct is not None:
-                ch = False
-                for f in _FIELDS:
-                    v = (row.get(f) or "").strip()
-                    if (acct.get(f) or "") != v:
-                        acct[f] = v
+
+        # --- MAJ + AJOUTS depuis l'onglet IDENTITÉ (va = colonne 'va') ---
+        if id_rows:
+            seen = set()
+            for r in id_rows:
+                u = (r.get("username") or "").strip()
+                if not u or u.lower() in seen:
+                    continue
+                seen.add(u.lower())
+                acct = by_uname.get(u.lower())
+                if acct is not None:
+                    ch = False
+                    for f in _FIELDS:
+                        v = (r.get(f) or "").strip()
+                        if (acct.get(f) or "") != v:
+                            acct[f] = v
+                            ch = True
+                    if acct.get("username") != u:
+                        acct["username"] = u[:80]
                         ch = True
-                if acct.get("username") != username:   # ex: changement de casse
-                    acct["username"] = username[:80]
-                    ch = True
-                if ch:
-                    updated += 1
-            else:
-                accts.append({
-                    "id": _gen_id(), "username": username[:80],
-                    "password": (row.get("password") or "").strip()[:200],
-                    "email": (row.get("email") or "").strip()[:120],
-                    "two_fa": (row.get("two_fa") or "").strip()[:500],
-                    "two_fa_validated": False,
-                    "va": (row.get("va") or "").strip()[:60],
-                    "notes": (row.get("notes") or "").strip()[:500],
-                    "created_at": int(time.time()),
-                })
-                added += 1
-        # Suppressions (anti-wipe : uniquement si l'onglet a des comptes)
-        if rows:
-            kept = []
-            for a in accts:
-                u = (a.get("username") or "").strip().lower()
-                if u and u not in seen:
-                    removed += 1
-                else:
-                    kept.append(a)
-            entry["accounts"] = kept
-            accts = kept
-        # Assure que les 'va' des comptes existent dans entry["vas"] (coherence)
+                    if ch:
+                        updated += 1
+                elif u.lower() not in deleted:
+                    acct = _row_new_account(u, r, (r.get("va") or "").strip(), _gen_id)
+                    accts.append(acct)
+                    by_uname[u.lower()] = acct
+                    added += 1
+
+        # --- MAJ + AJOUTS depuis les onglets PAR VA (va = nom de l'onglet) ---
+        for vl, (vdisp, rows) in va_meta.items():
+            seen = set()
+            for r in rows:
+                u = (r.get("username") or "").strip()
+                if not u or u.lower() in seen:
+                    continue
+                seen.add(u.lower())
+                acct = by_uname.get(u.lower())
+                if acct is not None:
+                    ch = False
+                    for f in ("password", "email", "two_fa", "notes"):
+                        v = (r.get(f) or "").strip()
+                        if (acct.get(f) or "") != v:
+                            acct[f] = v
+                            ch = True
+                    if ch:
+                        updated += 1
+                elif u.lower() not in deleted:
+                    acct = _row_new_account(u, r, vdisp, _gen_id)
+                    accts.append(acct)
+                    by_uname[u.lower()] = acct
+                    added += 1
+
+        # Cohérence : les 'va' des comptes existent dans entry["vas"]
         vas = entry.setdefault("vas", [])
         have = {(_v.get("name") if isinstance(_v, dict) else _v or "").strip().lower()
                 for _v in vas}
@@ -381,5 +449,5 @@ def pull_and_merge() -> tuple:
 
     changed = bool(added or updated or removed)
     if changed:
-        jb._save(data)  # declenche push_all_async -> converge (idempotent)
+        jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
     return changed, f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr."
