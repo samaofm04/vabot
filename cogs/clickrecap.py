@@ -615,35 +615,40 @@ class ClickRecap(commands.Cog):
 
     async def _fetch_daily_stats(self, lid, gms, start, end):
         """Par JOUR de start..end -> {iso: (total, eligible)|None}. 'eligible' = clics
-        des pays qui paient bien (FR/BE/CH/LU/MC). Meme appel API que les clics totaux
-        (analytics_for_link) -> AUCUN cout reseau en plus. Parallele (6) + cache."""
-        ck = ("dstats", lid, start.isoformat(), end.isoformat())
-        cached = _CLICKS_CACHE.get(ck)
-        if cached and (time.time() - cached[0]) < _CLICKS_TTL:
-            return cached[1]
+        des pays qui paient bien (FR/BE/CH/LU/MC). Meme appel API que le total
+        (analytics_for_link) -> 0 cout reseau en plus. Cache PAR JOUR (partage entre
+        'Mes clics' et le rapport de paie -> ne refetch que les jours manquants) +
+        concurrence limitee a 6."""
+        now = time.time()
         days, d = [], start
         while d <= end:
             days.append(d)
             d += datetime.timedelta(days=1)
-        sem = asyncio.Semaphore(6)
-
-        async def _one(dd):
-            async with sem:
-                return await asyncio.to_thread(
-                    gms.analytics_for_link, lid, dd.isoformat(), dd.isoformat())
-
-        vals = await asyncio.gather(*[_one(dd) for dd in days])
-        out = {}
-        for i, dd in enumerate(days):
-            total, countries = vals[i]
-            if total is None:
-                out[dd.isoformat()] = None
+        out, missing = {}, []
+        for dd in days:
+            c = _CLICKS_CACHE.get(("dstat1", lid, dd.isoformat()))
+            if c and (now - c[0]) < _CLICKS_TTL:
+                out[dd.isoformat()] = c[1]
             else:
+                missing.append(dd)
+        if missing:
+            sem = asyncio.Semaphore(6)
+
+            async def _one(dd):
+                async with sem:
+                    t, ctry = await asyncio.to_thread(
+                        gms.analytics_for_link, lid, dd.isoformat(), dd.isoformat())
+                    return dd, t, ctry
+
+            for dd, total, countries in await asyncio.gather(*[_one(x) for x in missing]):
+                if total is None:
+                    out[dd.isoformat()] = None
+                    continue
                 elig = sum(v for k, v in (countries or {}).items()
                            if k in self._ELIGIBLE_COUNTRIES)
-                out[dd.isoformat()] = (total, elig)
-        if not all(v is None for v in out.values()):
-            _CLICKS_CACHE[ck] = (time.time(), out)
+                val = (total, elig)
+                out[dd.isoformat()] = val
+                _CLICKS_CACHE[("dstat1", lid, dd.isoformat())] = (now, val)
         return out
 
     def _myclicks_money_embed(self, link, today, dstats):
@@ -934,6 +939,105 @@ class ClickRecap(commands.Cog):
             except Exception:
                 pass
         interaction.client.loop.create_task(_run())
+
+    async def _pay_report(self, guild, gms, p_start, p_end):
+        """Paie (clics ELIGIBLES) par VA sur p_start..p_end. Retourne une liste de
+        (categorie, handle, eligibles, money) pour les VA a payer ($>0). Detection du
+        lien par nom (va_@handle) pour rester rapide sur bcp de salons."""
+        try:
+            from cogs.user import _gms_exact_link
+        except Exception:
+            return []
+        links = await self._links()
+        rows = []
+        for ch in guild.text_channels:
+            h = _ch_handle(ch.name)
+            if not h:
+                continue
+            link = _gms_exact_link(h, links)
+            if not link:
+                continue
+            dstats = await self._fetch_daily_stats(link.get("id"), gms, p_start, p_end)
+            elig = sum(v[1] for v in dstats.values() if v is not None)
+            money = sum(self._money_for_clicks(v[1]) for v in dstats.values() if v is not None)
+            if money <= 0:
+                continue
+            cat = ch.category.name if getattr(ch, "category", None) else "Sans catégorie"
+            rows.append((cat, h, elig, money))
+        return rows
+
+    @staticmethod
+    def _format_pay_report(rows, title):
+        """Groupe par categorie (triees par sous-total desc), VA tries par $ desc.
+        Retourne une liste de lignes."""
+        from collections import defaultdict
+        by_cat = defaultdict(list)
+        for cat, h, elig, money in rows:
+            by_cat[cat].append((h, elig, money))
+        cat_total = {c: sum(m for _, _, m in v) for c, v in by_cat.items()}
+        grand = sum(cat_total.values())
+        lines = [f"💸 **{title}**",
+                 "_clics éligibles uniquement · triés du + payé au - payé_", ""]
+        for c in sorted(by_cat.keys(), key=lambda x: -cat_total[x]):
+            lines.append(f"📁 **{c}** — sous-total **${cat_total[c]:.2f}**")
+            for h, elig, money in sorted(by_cat[c], key=lambda x: -x[2]):
+                lines.append(f"  • `va-{h}` — {elig} élig. → **${money:.2f}**")
+            lines.append("")
+        lines.append(f"💰 **TOTAL À PAYER : ${grand:.2f}**  ·  {len(rows)} VA")
+        return lines
+
+    async def _run_pay_report(self, interaction, which):
+        if not await self._is_owner(interaction.user.id):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import gms
+        today = _paris_now().date()
+        p_start, p_end = _pay_period(today)
+        if which == "previous":
+            pe = p_start - datetime.timedelta(days=1)
+            p_start, p_end = _pay_period(pe)
+            title = f"RAPPORT DE PAIE — quinzaine PRÉCÉDENTE ({_fr(p_start)}–{_fr(p_end)})"
+        else:
+            p_end = today
+            title = f"RAPPORT DE PAIE — quinzaine EN COURS ({_fr(p_start)}–{_fr(p_end)})"
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            rows = await self._pay_report(guild, gms, p_start, p_end)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur rapport : {e}", ephemeral=True)
+            return
+        if not rows:
+            await interaction.followup.send(
+                f"💸 **{title}**\nAucun VA à payer (0 clic éligible sur la période).",
+                ephemeral=True)
+            return
+        lines = self._format_pay_report(rows, title)
+        buf = ""
+        for ln in lines:
+            if len(buf) + len(ln) + 1 > 1900:
+                await interaction.followup.send(buf, ephemeral=True)
+                buf = ""
+            buf += ln + "\n"
+        if buf.strip():
+            await interaction.followup.send(buf, ephemeral=True)
+
+    @app_commands.command(
+        name="rapportpaie",
+        description="[OWNER] Qui payer — quinzaine EN COURS (clics éligibles, par catégorie, trié par $)",
+    )
+    async def rapportpaie(self, interaction: discord.Interaction):
+        await self._run_pay_report(interaction, "current")
+
+    @app_commands.command(
+        name="rapportpaieavant",
+        description="[OWNER] Qui payer — quinzaine PRÉCÉDENTE (clics éligibles, par catégorie, trié par $)",
+    )
+    async def rapportpaieavant(self, interaction: discord.Interaction):
+        await self._run_pay_report(interaction, "previous")
 
     @app_commands.command(
         name="recapclics",
