@@ -118,7 +118,7 @@ def _rows_hash(rows) -> str:
 
 
 # ---------- Vues LECTURE SEULE : 1 onglet par (identité, VA), nom "identité va" ----------
-_VIEW_HEADER = ["username", "password", "email", "two_fa", "notes", "id"]
+_VIEW_HEADER = ["username", "password", "email", "two_fa", "notes"]
 
 
 def _safe_tab_title(name: str) -> str:
@@ -157,7 +157,7 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
             pairs.setdefault((str(identity), va), []).append([
                 a.get("username", "") or "", a.get("password", "") or "",
                 a.get("email", "") or "", a.get("two_fa", "") or "",
-                a.get("notes", "") or "", str(a.get("id", "") or "")])
+                a.get("notes", "") or ""])
     wanted = {}
     changed = False
     for (identity, va), rows in pairs.items():
