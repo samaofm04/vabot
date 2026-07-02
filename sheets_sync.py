@@ -283,6 +283,52 @@ def pull_all() -> dict | None:
         return None
 
 
+def check_sync() -> str:
+    """Compare jailbreak.json (site) et les onglets IDENTITÉ du Sheet -> rapport texte
+    des écarts (comptes en plus / en moins par identité). Read-only (ne modifie rien)."""
+    if not (is_configured() and gspread_available()):
+        return "❌ Pas configuré / gspread absent."
+    import jailbreak as jb
+    data = jb._load()
+    sheet = pull_all()
+    if sheet is None:
+        return "❌ Sheet illisible pour l'instant — réessaie."
+    known = {str(k).strip().lower(): k for k in data.keys()}
+    sheet_by_id = {}
+    for title, rows in sheet.items():
+        tl = title.strip().lower()
+        if tl in known:
+            sheet_by_id[tl] = {(r.get("username") or "").strip().lower()
+                               for r in rows if (r.get("username") or "").strip()}
+    lines = []
+    tj = ts = tmiss = textra = 0
+    for il, orig in sorted(known.items()):
+        entry = data.get(orig) or {}
+        ju = {(a.get("username") or "").strip().lower()
+              for a in (entry.get("accounts") or []) if (a.get("username") or "").strip()}
+        su = sheet_by_id.get(il, set())
+        tj += len(ju)
+        ts += len(su)
+        miss = ju - su   # sur le site mais PAS dans le Sheet
+        extra = su - ju  # dans le Sheet mais PAS sur le site
+        tmiss += len(miss)
+        textra += len(extra)
+        if miss or extra or il not in sheet_by_id:
+            tag = " (onglet absent du Sheet)" if il not in sheet_by_id else ""
+            lines.append(
+                f"• **{orig}** : site {len(ju)} / sheet {len(su)}{tag}"
+                + (f" · +{len(extra)} en trop au Sheet" if extra else "")
+                + (f" · {len(miss)} manquant(s) au Sheet" if miss else ""))
+    head = f"📊 **Vérif sync** — site : **{tj}** comptes · Sheet : **{ts}** comptes\n"
+    if not lines:
+        return head + "✅ **Tout est identique** — aucun écart (même comptes des deux côtés)."
+    body = "\n".join(lines[:20])
+    if len(lines) > 20:
+        body += f"\n… +{len(lines) - 20} autre(s)"
+    return (head + f"⚠️ **Écarts** (manque au Sheet : {tmiss} · en trop au Sheet : {textra}) :\n"
+            + body + "\n\n_Pour réaligner : `/sheetsync push` (site → Sheet) ou `/sheetsync pull` (Sheet → site)._")
+
+
 def _row_new_account(u, r, va, gen_id):
     return {
         "id": gen_id(), "username": u[:80],

@@ -127,8 +127,14 @@ class SheetsSync(commands.Cog):
                 "Rien de nouveau côté Sheet (ou Sheet indispo).", ephemeral=True)
             return
 
+        if action == "check":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            report = await asyncio.to_thread(sheets_sync.check_sync)
+            await interaction.followup.send(report[:1990], ephemeral=True)
+            return
+
         await interaction.response.send_message(
-            "Actions : `setup` (sheet_id + clé), `test`, `push`, `pull`, `status`.",
+            "Actions : `setup` (sheet_id + clé), `test`, `check`, `push`, `pull`, `status`.",
             ephemeral=True)
 
     @app_commands.command(
