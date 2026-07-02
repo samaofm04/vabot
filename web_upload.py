@@ -2214,6 +2214,13 @@ function toggleBangerFilter(btn){
       }
     }
   }
+  // Retour visuel du bouton visible "Reels Banger" (peu importe ce qui a togglé).
+  var sb = document.getElementById('banger-toggle-btn');
+  if(sb){
+    sb.style.background = bangerFilterOn ? '#3a2f00' : '#1a1a1a';
+    sb.style.borderColor = bangerFilterOn ? '#f5c518' : '#3a3a3a';
+    sb.textContent = bangerFilterOn ? '⭐ Bangers ✓' : '⭐ Reels Banger';
+  }
   applyBangerFilter();
 }
 // 🗑 Vide le salon banger-{identite} (supprime les messages du bot + etoiles -> gris)
@@ -9124,9 +9131,6 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
         "<span class='vault-radio'></span>Décroissant</a>"
         + (("<div class='vault-sort-sep'></div>"
-            "<button type='button' class='vault-sort-item' id='banger-filter-item' "
-            "onclick='toggleBangerFilter(this)' style='width:100%;background:none;border:0;text-align:left;font-family:inherit'>"
-            "<span class='vault-radio'></span>⭐ Bangers seulement</button>"
             "<button type='button' class='vault-sort-item' "
             f"onclick='purgeBanger(\"{selected}\", this)' "
             "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
@@ -9135,6 +9139,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         + "</div>"
         "</div>"
     )
+
+    # Bouton VISIBLE "Reels Banger" (uniquement sur les pages vidéo/reels) : filtre
+    # instantané pour n'afficher que les reels marqués ⭐ (banger_marks.json).
+    banger_toggle_html = (
+        "<button type='button' id='banger-toggle-btn' onclick='toggleBangerFilter(this)' "
+        "title='Afficher seulement les reels marqués ⭐ banger' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Reels Banger</button>"
+    ) if is_video else ""
 
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
     # Reels = vidéos only, Posts = photos only → pas de filtre.
@@ -9200,7 +9214,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div>{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{sort_btn_html}</div>"
         f"</div>"
     )
 
