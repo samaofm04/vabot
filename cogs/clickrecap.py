@@ -585,6 +585,31 @@ class ClickRecap(commands.Cog):
             return 0.0
         return c * cls._rate_for_clicks(c)
 
+    def _tier_breakdown(self, dstats, s, e):
+        """Repartit les jours de s..e par palier (selon les clics ELIGIBLES/jour) :
+        {'deb':[jours,$], 'moy':[jours,$], 'exp':[jours,$]}. Ignore les jours a 0 elig."""
+        out = {"deb": [0, 0.0], "moy": [0, 0.0], "exp": [0, 0.0]}
+        d = s
+        while d <= e:
+            v = dstats.get(d.isoformat())
+            d += datetime.timedelta(days=1)
+            if v is None:
+                continue
+            elig = v[1] or 0
+            if elig <= 0:
+                continue
+            money = self._money_for_clicks(elig)
+            if elig <= 50:
+                out["deb"][0] += 1
+                out["deb"][1] += money
+            elif elig <= 100:
+                out["moy"][0] += 1
+                out["moy"][1] += money
+            else:
+                out["exp"][0] += 1
+                out["exp"][1] += money
+        return out
+
     # Pays "eligibles" (qui paient bien) : l'argent se calcule sur CES clics.
     _ELIGIBLE_COUNTRIES = {"FR", "BE", "CH", "LU", "MC"}  # UE francophone
 
@@ -691,9 +716,31 @@ class ClickRecap(commands.Cog):
             value=f"{fmt(t_week)} clic(s) · {fmt(e_week)} élig. → 💵 **${m_week:.2f}**",
             inline=False)
         emb.add_field(
-            name=f"💰 Quinzaine ({_fr(p_start)}–{_fr(p_end)})",
+            name=f"💰 Quinzaine EN COURS ({_fr(p_start)}–{_fr(p_end)})",
             value=f"{fmt(t_period)} clic(s) · {fmt(e_period)} élig. → 💵 **${m_period:.2f} gagnés**",
             inline=False)
+
+        # Quinzaine PRECEDENTE (celle qu'on paie le jour de paie) + detail par palier.
+        prev_end = p_start - datetime.timedelta(days=1)
+        prev_start, _ = _pay_period(prev_end)
+        n_prev = (prev_end - prev_start).days + 1
+        prev_has = any(dstats.get((prev_start + datetime.timedelta(days=i)).isoformat()) is not None
+                       for i in range(n_prev))
+        if prev_has:
+            pt = _sum(prev_start, prev_end, 0)
+            pe = _sum(prev_start, prev_end, 1)
+            pm = _money(prev_start, prev_end)
+            emb.add_field(
+                name=f"📅 Quinzaine PRÉCÉDENTE ({_fr(prev_start)}–{_fr(prev_end)})",
+                value=f"{fmt(pt)} clic(s) · {fmt(pe)} élig. → 💵 **${pm:.2f}**",
+                inline=False)
+            tb = self._tier_breakdown(dstats, prev_start, prev_end)
+            emb.add_field(
+                name="💵 Détail paiement (période précédente)",
+                value=(f"🥉 Débutant (≤50/j, $0.05) : **{tb['deb'][0]}** j → ${tb['deb'][1]:.2f}\n"
+                       f"🥈 Moyen (51-100/j, $0.06) : **{tb['moy'][0]}** j → ${tb['moy'][1]:.2f}\n"
+                       f"🥇 Expert (>100/j, $0.07) : **{tb['exp'][0]}** j → ${tb['exp'][1]:.2f}"),
+                inline=False)
 
         et = e_today or 0
         if not all_none:
@@ -743,9 +790,12 @@ class ClickRecap(commands.Cog):
             return
         today = _paris_now().date()
         p_start, _p_end = _pay_period(today)
+        prev_end = p_start - datetime.timedelta(days=1)
+        prev_start, _ = _pay_period(prev_end)
         week_start = today - datetime.timedelta(days=today.weekday())
         yest = today - datetime.timedelta(days=1)
-        start = min(p_start, week_start, yest)
+        # On remonte jusqu'a la quinzaine PRECEDENTE (visible le jour de paie).
+        start = min(prev_start, week_start, yest)
         dstats = await self._fetch_daily_stats(link.get("id"), gms, start, today)
         emb = self._myclicks_money_embed(link, today, dstats)
         try:
