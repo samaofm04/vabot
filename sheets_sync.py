@@ -113,6 +113,74 @@ def _ws_write(ws, rows) -> None:
             ws.update(rows)                                    # dernier recours
 
 
+def _rows_hash(rows) -> str:
+    return hashlib.md5(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+# ---------- Vues LECTURE SEULE par VA (onglet "👤 Nom") ----------
+_VA_PREFIX = "👤 "
+VA_HEADER = ["identité", "username", "password", "email", "two_fa", "notes", "id"]
+
+
+def _safe_tab_title(name: str) -> str:
+    t = (name or "").strip()
+    for ch in ":\\/?*[]":
+        t = t.replace(ch, " ")
+    return (_VA_PREFIX + t).strip()[:99]
+
+
+def _is_va_tab(title: str) -> bool:
+    return (title or "").strip().lower().startswith(_VA_PREFIX.strip().lower())
+
+
+def _va_rows(data: dict) -> dict:
+    """{va_name: [[identité, username, password, email, two_fa, notes, id], ...]}."""
+    out = {}
+    for identity, entry in (data or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for a in entry.get("accounts") or []:
+            va = (a.get("va") or "").strip()
+            if not va:
+                continue
+            out.setdefault(va, []).append([
+                identity, a.get("username", "") or "", a.get("password", "") or "",
+                a.get("email", "") or "", a.get("two_fa", "") or "",
+                a.get("notes", "") or "", str(a.get("id", "") or "")])
+    return out
+
+
+def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
+    """(Re)genere un onglet LECTURE SEULE par VA : tous ses comptes, toutes identites
+    confondues (colonne Identite). Supprime les onglets VA obsoletes. Le poller les
+    ignore (prefixe 👤 -> pas une identite)."""
+    va_rows = _va_rows(data)
+    wanted = set()
+    for va, rows in va_rows.items():
+        title = _safe_tab_title(va)
+        key = title.strip().lower()
+        wanted.add(key)
+        full = [VA_HEADER] + sorted(rows, key=lambda r: (r[0].lower(), r[1].lower()))
+        h = _rows_hash(full)
+        if not force and _last_hash.get(title) == h:
+            continue
+        ws = existing.get(key)
+        if ws is None:
+            ws = sh.add_worksheet(title=title, rows=max(len(full) + 5, 20), cols=len(VA_HEADER))
+            existing[key] = ws
+        ws.clear()
+        _ws_write(ws, full)
+        _last_hash[title] = h
+    # onglets VA obsoletes (plus aucun compte pour ce VA) -> supprimes
+    for key, ws in list(existing.items()):
+        if _is_va_tab(key) and key not in wanted:
+            try:
+                sh.del_worksheet(ws)
+                existing.pop(key, None)
+            except Exception:
+                pass
+
+
 # ---------- Site -> Sheet ----------
 def push_all(data: dict, force: bool = False) -> bool:
     """Ecrit chaque identite dans SON onglet (rewrite). Ne reecrit que les onglets dont
@@ -139,6 +207,8 @@ def push_all(data: dict, force: bool = False) -> bool:
                 ws.clear()
                 _ws_write(ws, rows)
                 _last_hash[identity] = h
+            # Vues lecture seule par VA (onglets 👤 Nom)
+            _push_va_views(sh, existing, data, force)
             return True
     except Exception as e:
         print(f"[sheets_sync] push_all: {e}", flush=True)
@@ -165,6 +235,8 @@ def pull_all() -> dict | None:
         sh = _open_sheet()
         out = {}
         for ws in sh.worksheets():
+            if _is_va_tab(ws.title):
+                continue  # onglet vue-par-VA (lecture seule) -> jamais lu comme identité
             identity = ws.title.strip().lower()
             values = ws.get_all_values()
             if not values:
