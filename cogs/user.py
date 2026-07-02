@@ -31,6 +31,7 @@ _MENU_BTN_FEATURE = {
     "cmenu:reel": "contenu", "cmenu:story": "contenu", "cmenu:post": "contenu",
     "cmenu:storycta": "contenu", "cmenu:pseudo": "contenu", "cmenu:name": "contenu",
     "cmenu:bio": "contenu", "cmenu:pp": "contenu", "cmenu:comptes": "contenu",
+    "cmenu:banger": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -192,6 +193,7 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
     add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
+    add("cmenu:banger", "contenu", "💥 Reels Banger", "Tes meilleurs reels (marqués ⭐)")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -820,6 +822,35 @@ def random_n_reels_for(identity, n: int):
     n = min(n, len(videos))
     picked = random.sample(videos, n)
     return [(v, *_video_meta(v)) for v in picked]
+
+
+def banger_reels_for(identity, limit=15):
+    """Reels marques ⭐ banger d'une identite -> [(video, caption, desc, example)].
+    Lit data/banger_marks.json (cle file_id = 'identity|videos|filename', cf
+    web_upload). Ne garde que les fichiers video encore presents. Plafonne a `limit`."""
+    import json as _json
+    marks_file = DATA_DIR / "banger_marks.json"
+    try:
+        raw = _json.loads(marks_file.read_text(encoding="utf-8"))
+        keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
+    except Exception:
+        keys = []
+    prefix = f"{identity}|videos|"
+    names = []
+    for k in keys:
+        if isinstance(k, str) and k.startswith(prefix):
+            fn = k[len(prefix):]
+            if fn and fn not in names:
+                names.append(fn)
+    vids_dir = IDENTITIES_DIR / identity / "videos"
+    out = []
+    for fn in names:
+        p = vids_dir / fn
+        if p.exists() and p.is_file():
+            out.append((p, *_video_meta(p)))
+            if limit and len(out) >= limit:
+                break
+    return out
 
 
 def random_reel_for(identity):
@@ -1625,6 +1656,82 @@ class UserCog(commands.Cog):
                     except Exception:
                         pass
 
+    async def _deliver_reels_loop(self, interaction, reels, identity, label="REEL", delete_after=False):
+        """Envoie chaque reel [(video, caption, desc, example)] : video (+exemple) avec
+        fallback fichier trop lourd, puis CAPTION et DESCRIPTION. `label` = REEL/BANGER.
+        `delete_after` supprime la source (JAMAIS pour les bangers). Interaction deja defer()."""
+        total = len(reels)
+        for idx, (video, caption, description, example) in enumerate(reels, start=1):
+            intro = (
+                f"🎬 **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
+                f"📥 Télécharge la vidéo CLEAN."
+            )
+            if example:
+                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
+            video_to_send = video
+            files = [discord.File(video_to_send, filename=video.name)]
+            if example:
+                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+            try:
+                await interaction.followup.send(content=intro, files=files)
+            except discord.HTTPException as e:
+                if example and len(files) == 2:
+                    try:
+                        await interaction.followup.send(
+                            content=intro + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
+                            file=discord.File(video_to_send, filename=video.name),
+                        )
+                    except discord.HTTPException:
+                        await interaction.followup.send(
+                            f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
+                        continue
+                else:
+                    await interaction.followup.send(
+                        f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
+                    continue
+            if caption:
+                await interaction.followup.send(
+                    f"📝 **CAPTION {label} {idx}** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
+                await interaction.followup.send(caption)
+            if description:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
+                await interaction.followup.send(description)
+            if delete_after:
+                try:
+                    video.unlink(missing_ok=True)
+                    video.with_suffix(".txt").unlink(missing_ok=True)
+                    video.with_suffix(".desc.txt").unlink(missing_ok=True)
+                    if example:
+                        example.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    async def _send_banger_reels(self, interaction):
+        """Bouton '💥 Reels Banger' : envoie au VA ses reels marques ⭐ banger (dans la
+        Bibliotheque) pour SON identite. Ne supprime JAMAIS la source."""
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        reels = banger_reels_for(identity)
+        if not reels:
+            await interaction.response.send_message(
+                "💥 Aucun **reel banger** pour ton identité pour l'instant.\n"
+                "_(Les meilleurs reels sont marqués avec l'étoile ⭐ dans la Bibliothèque.)_",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = len(reels)
+        await interaction.followup.send(
+            f"💥 **{total} REEL(S) BANGER pour `{identity}`** — tes meilleurs, à reposter ! 🔥\n\n"
+            f"🚨 **1 reel différent par compte.**\n"
+            f"📝 **CAPTION** = par-dessus la vidéo · **DESCRIPTION** = dans la légende du post.")
+        await self._deliver_reels_loop(interaction, reels, identity, label="BANGER", delete_after=False)
+
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
     async def reel(
@@ -1674,59 +1781,8 @@ class UserCog(commands.Cog):
                 f"(tu en as demande {nombre})."
             )
 
-        for idx, (video, caption, description, example) in enumerate(reels, start=1):
-            intro = (
-                f"🎬 **REEL {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
-                f"📥 Télécharge la vidéo CLEAN."
-            )
-            if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
-            video_to_send = video  # toujours envoyer l'original
-            files = [discord.File(video_to_send, filename=video.name)]
-            if example:
-                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
-            try:
-                await interaction.followup.send(content=intro, files=files)
-            except discord.HTTPException as e:
-                if example and len(files) == 2:
-                    try:
-                        await interaction.followup.send(
-                            content=intro + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
-                            file=discord.File(video_to_send, filename=video.name),
-                        )
-                    except discord.HTTPException:
-                        await interaction.followup.send(
-                            f"⚠️ Reel {idx}: impossible d'envoyer (trop lourd): {e}"
-                        )
-                        continue
-                else:
-                    await interaction.followup.send(
-                        f"⚠️ Reel {idx}: impossible d'envoyer (trop lourd): {e}"
-                    )
-                    continue
-            if caption:
-                await interaction.followup.send(
-                    f"📝 **CAPTION REEL {idx}** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :"
-                )
-                await interaction.followup.send(caption)
-            if description:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION REEL {idx}** (à coller dans le **champ légende** du post) :"
-                )
-                await interaction.followup.send(description)
-
-            # Suppression de la source si configuré
-            if transform_cfg.get("delete_source_after_use", False):
-                try:
-                    video.unlink(missing_ok=True)
-                    cap_p = video.with_suffix(".txt")
-                    desc_p = video.with_suffix(".desc.txt")
-                    cap_p.unlink(missing_ok=True)
-                    desc_p.unlink(missing_ok=True)
-                    if example:
-                        example.unlink(missing_ok=True)
-                except Exception:
-                    pass
+        _del = transform_cfg.get("delete_source_after_use", False)
+        await self._deliver_reels_loop(interaction, reels, identity, label="REEL", delete_after=_del)
 
     async def cog_load(self):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
@@ -3538,6 +3594,10 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu:storycta", row=0)
     async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.storycta.callback(self.cog, interaction)
+
+    @discord.ui.button(label="Reels Banger", emoji="💥", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
+    async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_banger_reels(interaction)
 
     @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
     async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
