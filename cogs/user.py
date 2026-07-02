@@ -2207,9 +2207,18 @@ class UserCog(commands.Cog):
         save_json(USERS_FILE, users)
 
     async def _notify_payment(self, interaction, info, screenshot_att=None):
-        """Poste le moyen de paiement dans le salon paiement (si existant). Joint la
-        capture d'ecran (re-upload -> persistante) quand elle est fournie."""
-        ch = _find_payment_channel(interaction.guild)
+        """Poste le moyen de paiement dans le SALON PERSO du VA (privé : seul le VA +
+        le staff le voient), PAS dans un salon public. Joint la capture si fournie."""
+        guild = interaction.guild
+        ch = None
+        try:
+            _u = load_json(USERS_FILE, {}).get(str(interaction.user.id))
+            if isinstance(_u, dict) and _u.get("channel_id"):
+                ch = guild.get_channel(_u["channel_id"])
+        except Exception:
+            ch = None
+        if ch is None and _ch_handle_va(getattr(interaction.channel, "name", "")):
+            ch = interaction.channel  # fallback : le salon courant si c'est un va-
         if ch is None:
             return
         emb = discord.Embed(title="💸 Moyen de paiement (VA)", color=discord.Color.gold())
