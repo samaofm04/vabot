@@ -399,6 +399,35 @@ def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[in
         return None  # payload illisible -> « indispo » (—), pas un faux 0 (sous-paie)
 
 
+def analytics_for_link(link_id: str, start_date: str, end_date: str):
+    """(total_clicks, {country_code: count}) pour UN lien sur une periode.
+    Le detail pays vient de `top_countries` (top ~10 -> un pays eligible hors du
+    top peut manquer = leger sous-comptage, cote "on ne surpaye pas").
+    Retourne (None, None) si l'appel echoue."""
+    if not link_id:
+        return None, None
+    res = get_analytics_overview(start_date, end_date, link_ids=[link_id])
+    if not res.get("ok"):
+        return None, None
+    d = res.get("data")
+    if not isinstance(d, dict):
+        d = res
+    try:
+        total = int(d.get("total_clicks") or 0)
+    except Exception:
+        return None, None
+    countries = {}
+    for c in (d.get("top_countries") or []):
+        code = (c.get("country_code") or "").upper()
+        if not code:
+            continue
+        try:
+            countries[code] = int(c.get("count") or 0)
+        except Exception:
+            pass
+    return total, countries
+
+
 def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:
     """Total de clics pour une LISTE de liens sur une periode (YYYY-MM-DD).
     Batch par 200 (limite analytics). Retourne None si UN SEUL batch echoue

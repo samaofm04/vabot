@@ -585,11 +585,14 @@ class ClickRecap(commands.Cog):
             return 0.0
         return c * cls._rate_for_clicks(c)
 
-    async def _fetch_daily_clicks(self, lid, gms, start, end):
-        """Clics par JOUR de start..end inclus -> dict {iso: int|None}. Parallele
-        (concurrence limitee a 6) + cache court. Necessaire car les paliers d'argent
-        sont JOURNALIERS : impossible de deduire l'argent d'un total multi-jours."""
-        ck = ("daily", lid, start.isoformat(), end.isoformat())
+    # Pays "eligibles" (qui paient bien) : l'argent se calcule sur CES clics.
+    _ELIGIBLE_COUNTRIES = {"FR", "BE", "CH", "LU", "MC"}  # UE francophone
+
+    async def _fetch_daily_stats(self, lid, gms, start, end):
+        """Par JOUR de start..end -> {iso: (total, eligible)|None}. 'eligible' = clics
+        des pays qui paient bien (FR/BE/CH/LU/MC). Meme appel API que les clics totaux
+        (analytics_for_link) -> AUCUN cout reseau en plus. Parallele (6) + cache."""
+        ck = ("dstats", lid, start.isoformat(), end.isoformat())
         cached = _CLICKS_CACHE.get(ck)
         if cached and (time.time() - cached[0]) < _CLICKS_TTL:
             return cached[1]
@@ -602,53 +605,65 @@ class ClickRecap(commands.Cog):
         async def _one(dd):
             async with sem:
                 return await asyncio.to_thread(
-                    gms.clicks_for_link, lid, dd.isoformat(), dd.isoformat())
+                    gms.analytics_for_link, lid, dd.isoformat(), dd.isoformat())
 
         vals = await asyncio.gather(*[_one(dd) for dd in days])
-        out = {days[i].isoformat(): vals[i] for i in range(len(days))}
-        if not all(v is None for v in vals):
+        out = {}
+        for i, dd in enumerate(days):
+            total, countries = vals[i]
+            if total is None:
+                out[dd.isoformat()] = None
+            else:
+                elig = sum(v for k, v in (countries or {}).items()
+                           if k in self._ELIGIBLE_COUNTRIES)
+                out[dd.isoformat()] = (total, elig)
+        if not all(v is None for v in out.values()):
             _CLICKS_CACHE[ck] = (time.time(), out)
         return out
 
-    def _myclicks_money_embed(self, link, today, dailies):
-        """Embed clics + ARGENT. Argent calcule JOUR PAR JOUR (palier journalier)
-        puis somme sur la periode."""
+    def _myclicks_money_embed(self, link, today, dstats):
+        """Embed clics + ARGENT. dstats[iso] = (total, eligible). L'argent est calcule
+        sur les clics ELIGIBLES (FR/BE/CH/LU/MC), JOUR PAR JOUR (palier journalier)
+        puis somme. On affiche aussi le total (tous pays)."""
         shortcode = link.get("shortcode") or ""
         week_start = today - datetime.timedelta(days=today.weekday())
         p_start, p_end = _pay_period(today)
         yest = today - datetime.timedelta(days=1)
 
-        def _sum_clicks(s, e):
+        def _sum(s, e, idx):
             vals, d = [], s
             while d <= e:
-                vals.append(dailies.get(d.isoformat()))
+                v = dstats.get(d.isoformat())
+                vals.append(v[idx] if v is not None else None)
                 d += datetime.timedelta(days=1)
-            known = [v for v in vals if v is not None]
+            known = [x for x in vals if x is not None]
             return sum(known) if known else None
 
-        def _sum_money(s, e):
+        def _money(s, e):
             total, d = 0.0, s
             while d <= e:
-                v = dailies.get(d.isoformat())
-                if v:
-                    total += self._money_for_clicks(v)
+                v = dstats.get(d.isoformat())
+                if v is not None:
+                    total += self._money_for_clicks(v[1])  # v[1] = clics eligibles
                 d += datetime.timedelta(days=1)
             return total
 
-        c_today = dailies.get(today.isoformat())
-        c_yest = dailies.get(yest.isoformat())
-        c_week = _sum_clicks(week_start, today)
-        c_period = _sum_clicks(p_start, today)
-        all_none = (not dailies) or all(v is None for v in dailies.values())
+        vt = dstats.get(today.isoformat())
+        vy = dstats.get(yest.isoformat())
+        t_today, e_today = (vt if vt is not None else (None, None))
+        t_yest, e_yest = (vy if vy is not None else (None, None))
+        t_week, e_week = _sum(week_start, today, 0), _sum(week_start, today, 1)
+        t_period, e_period = _sum(p_start, today, 0), _sum(p_start, today, 1)
+        all_none = (not dstats) or all(v is None for v in dstats.values())
 
-        m_today = self._money_for_clicks(c_today or 0)
-        m_yest = self._money_for_clicks(c_yest or 0)
-        m_week = _sum_money(week_start, today)
-        m_period = _sum_money(p_start, today)
+        m_today = self._money_for_clicks(e_today or 0)
+        m_yest = self._money_for_clicks(e_yest or 0)
+        m_week = _money(week_start, today)
+        m_period = _money(p_start, today)
 
         if all_none:
             color = discord.Color.orange()
-        elif (c_today or 0) > 0 or (c_period or 0) > 0:
+        elif (t_today or 0) > 0 or (t_period or 0) > 0:
             color = discord.Color.green()
         else:
             color = discord.Color.dark_grey()
@@ -658,40 +673,41 @@ class ClickRecap(commands.Cog):
 
         emb = discord.Embed(
             title="📊 Tes clics & ton argent — en direct",
-            description=f"🔗 {GMS_DOMAIN}/{shortcode}",
+            description=f"🔗 {GMS_DOMAIN}/{shortcode}\n"
+                        "_L'argent est payé sur les **clics éligibles** "
+                        "(🇫🇷 France · 🇨🇭 Suisse · 🇧🇪 Belgique · 🇱🇺 · 🇲🇨)._",
             color=color,
         )
-        rate_today = self._rate_for_clicks(c_today or 0)
         emb.add_field(
             name="🟢 Aujourd'hui",
-            value=f"{fmt(c_today)} clic(s) → 💵 **${m_today:.2f}**\n_(${rate_today:.2f}/clic)_",
+            value=f"{fmt(t_today)} clic(s) · {fmt(e_today)} élig. → 💵 **${m_today:.2f}**",
             inline=True)
         emb.add_field(
             name="📅 Hier",
-            value=f"{fmt(c_yest)} clic(s) → 💵 **${m_yest:.2f}**",
+            value=f"{fmt(t_yest)} clic(s) · {fmt(e_yest)} élig. → 💵 **${m_yest:.2f}**",
             inline=True)
         emb.add_field(
             name=f"🗓️ Cette semaine (depuis {_fr(week_start)})",
-            value=f"{fmt(c_week)} clic(s) → 💵 **${m_week:.2f}**",
+            value=f"{fmt(t_week)} clic(s) · {fmt(e_week)} élig. → 💵 **${m_week:.2f}**",
             inline=False)
         emb.add_field(
             name=f"💰 Quinzaine ({_fr(p_start)}–{_fr(p_end)})",
-            value=f"{fmt(c_period)} clic(s) → 💵 **${m_period:.2f} gagnés**",
+            value=f"{fmt(t_period)} clic(s) · {fmt(e_period)} élig. → 💵 **${m_period:.2f} gagnés**",
             inline=False)
 
-        ct = c_today or 0
+        et = e_today or 0
         if not all_none:
-            if ct <= 50:
+            if et <= 50:
                 emb.add_field(name="🚀 Astuce",
-                              value=f"Encore **{51 - ct}** clic(s) aujourd'hui → passe à **$0.06/clic** !",
+                              value=f"Encore **{51 - et}** clic(s) **éligibles** aujourd'hui → **$0.06/clic** !",
                               inline=False)
-            elif ct <= 100:
+            elif et <= 100:
                 emb.add_field(name="🚀 Astuce",
-                              value=f"Encore **{101 - ct}** clic(s) aujourd'hui → passe à **$0.07/clic** !",
+                              value=f"Encore **{101 - et}** clic(s) **éligibles** aujourd'hui → **$0.07/clic** !",
                               inline=False)
             else:
                 emb.add_field(name="🔥 Palier max",
-                              value="Tu es au **meilleur taux : $0.07/clic** aujourd'hui 💪",
+                              value="Tu es au **meilleur taux : $0.07/clic éligible** aujourd'hui 💪",
                               inline=False)
 
         if all_none:
@@ -699,7 +715,7 @@ class ClickRecap(commands.Cog):
                           value="GetMySocial ne répond pas pour l'instant — réessaie dans un instant.",
                           inline=False)
         emb.set_footer(
-            text="Paliers/jour : ≤50 → $0.05 · 51-100 → $0.06 · >100 → $0.07 · GetMySocial")
+            text="Payé sur clics éligibles/jour : ≤50 → $0.05 · 51-100 → $0.06 · >100 → $0.07 · GetMySocial")
         return emb
 
     async def _handle_myclicks(self, interaction: discord.Interaction):
@@ -730,8 +746,8 @@ class ClickRecap(commands.Cog):
         week_start = today - datetime.timedelta(days=today.weekday())
         yest = today - datetime.timedelta(days=1)
         start = min(p_start, week_start, yest)
-        dailies = await self._fetch_daily_clicks(link.get("id"), gms, start, today)
-        emb = self._myclicks_money_embed(link, today, dailies)
+        dstats = await self._fetch_daily_stats(link.get("id"), gms, start, today)
+        emb = self._myclicks_money_embed(link, today, dstats)
         try:
             await interaction.followup.send(embed=emb, ephemeral=True)
         except Exception as e:
