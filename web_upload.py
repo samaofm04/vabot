@@ -17062,11 +17062,11 @@ def _render_jailbreak_html() -> str:
         "    document.body.appendChild(f); f.submit();"
         "  }"
         "  if(typeof showConfirmAsync === 'function'){"
-        "    showConfirmAsync('Retirer le VA ?', 'VA \"' + vaName + '\" sera retiré de ' + identity + '. Les comptes existants gardent leur référence (tu pourras les réassigner).').then(function(ok){"
+        "    showConfirmAsync('Supprimer le VA et TOUS ses comptes ?', 'Le VA \"' + vaName + '\" et tous ses comptes seront supprimés définitivement (et retirés du Google Sheet).').then(function(ok){"
         "      if(ok) _do();"
         "    });"
         "  } else {"
-        "    if(confirm('Retirer le VA ' + vaName + ' ?')) _do();"
+        "    if(confirm('Supprimer le VA ' + vaName + ' et TOUS ses comptes ?')) _do();"
         "  }"
         "}"
         # === Toggle section pliable (legacy fallback - inutilise par sidebar) ===
@@ -27938,9 +27938,15 @@ def create_app():
         va_name = (request.form.get("va_name") or "").strip()
         if not identity or not va_name:
             return _error("❌ Identité ou nom du VA manquant", tab="jailbreak")
-        if jb.remove_va(identity, va_name):
+        n = jb.remove_va_and_accounts(identity, va_name)
+        if n >= 0:
+            try:
+                import sheets_sync
+                sheets_sync.push_all(jb._load(), force=True)  # maj le Sheet tout de suite (anti ré-import)
+            except Exception:
+                pass
             return _success(
-                f"✅ VA <b>{va_name}</b> retirée. Les comptes existants gardent leur référence.",
+                f"✅ VA <b>{va_name}</b> supprimé avec ses <b>{n}</b> compte(s).",
                 tab="jailbreak",
             )
         return _error(f"❌ VA <b>{va_name}</b> introuvable", tab="jailbreak")

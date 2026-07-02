@@ -469,6 +469,27 @@ def remove_va(identity: str, va_name: str) -> bool:
     return True
 
 
+def remove_va_and_accounts(identity: str, va_name: str) -> int:
+    """Supprime un VA ET tous ses comptes. Retourne le nb de comptes supprimes,
+    ou -1 si identite/VA vide ou identite introuvable. (Sinon le VA revient car il
+    est re-deduit de ses comptes -> il faut supprimer les comptes aussi.)"""
+    identity = (identity or "").strip().lower()
+    va_name = (va_name or "").strip()
+    if not identity or not va_name:
+        return -1
+    data = _load()
+    entry = data.get(identity)
+    if not isinstance(entry, dict):
+        return -1
+    vl = va_name.lower()
+    accts = entry.get("accounts") or []
+    before = len(accts)
+    entry["accounts"] = [a for a in accts if (a.get("va") or "").strip().lower() != vl]
+    entry["vas"] = [v for v in (entry.get("vas") or []) if _va_name(v).lower() != vl]
+    _save(data)
+    return before - len(entry["accounts"])
+
+
 def rename_va(identity: str, old_name: str, new_name: str) -> bool:
     """Helper retrocompat - delegue a update_va(new_name=...)."""
     return update_va(identity, old_name, new_name=new_name)
