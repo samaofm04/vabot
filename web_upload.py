@@ -16625,6 +16625,12 @@ def _render_jailbreak_html() -> str:
                     f"</div>"
                     f"</div>"
                     f"<span class='jb-detail-count-badge'>{len(va_accts)} compte{'s' if len(va_accts)!=1 else ''}</span>"
+                    f"<button type='button' class='jb-detail-head-edit' "
+                    f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
+                    f"data-va-discord='{html_escape(discord_username)}' "
+                    f"onclick='jbOpenEditVaModal(this)' title='Modifier ce VA (blaze / Discord — la PP se resync)' "
+                    f"style='background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.35);color:#c084fc;"
+                    f"width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;flex-shrink:0;margin-right:6px'>✎</button>"
                     f"<button type='button' class='jb-detail-head-remove' "
                     f"onclick=\"jbRemoveVa('{ident_safe}','{va_attr}')\" title='Retirer ce VA'>×</button>"
                     f"</div>"
@@ -16876,6 +16882,33 @@ def _render_jailbreak_html() -> str:
         "</div></div></div>"
     )
 
+    # Modal EDITION D UN VA (blaze + discord ; la PP Discord se resync au submit
+    # car elle est resolue depuis discord_username a chaque rendu)
+    edit_va_modal = (
+        "<div id='jb-edit-va-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseEditVaModal()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3>✎ Modifier le VA</h3>"
+        "<form id='jb-edit-va-form' method='POST' action='/jailbreak/update_va'>"
+        "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='identity' id='jb-edit-va-identity'>"
+        "<input type='hidden' name='old_name' id='jb-edit-va-oldname'>"
+        "<label>Nom affiché (blaze) <span style='color:#ef4444'>*</span></label>"
+        "<input type='text' name='new_name' id='jb-edit-va-name' required maxlength='60'>"
+        "<label style='margin-top:12px'>🟣 Discord username <span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(la PP se resync automatiquement)</span></label>"
+        "<input type='text' name='discord_username' id='jb-edit-va-discord' maxlength='60' "
+        "placeholder='ex: safidy0356_08105 — vide = retirer le lien'>"
+        "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>"
+        "Si le user est dans ton serveur Discord, sa photo de profil est récupérée automatiquement."
+        "</small>"
+        "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
+        "<button type='button' onclick='jbCloseEditVaModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
+        "<button type='submit' style='background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Enregistrer</button>"
+        "</div>"
+        "</form>"
+        "</div></div></div>"
+    )
+
     # Modal CREATION D IDENTITE (multipart pour upload avatar)
     create_id_modal = (
         "<div id='jb-create-id-overlay' class='jb-overlay' onclick='if(event.target===this)jbCloseCreateIdentityModal()'>"
@@ -17113,6 +17146,33 @@ def _render_jailbreak_html() -> str:
         "}"
         "function jbCloseAddVaModal(){"
         "  var o = document.getElementById('jb-add-va-overlay');"
+        "  if(o) o.classList.remove('show');"
+        "}"
+        # === Edit VA (blaze + discord ; PP resync au submit) — data-attrs, pas d args inline ===
+        "function jbOpenEditVaModal(btn){"
+        "  try {"
+        "    var d = (btn && btn.dataset) || {};"
+        "    var idEl = document.getElementById('jb-edit-va-identity');"
+        "    var oldEl = document.getElementById('jb-edit-va-oldname');"
+        "    var nameEl = document.getElementById('jb-edit-va-name');"
+        "    var discEl = document.getElementById('jb-edit-va-discord');"
+        "    var overlay = document.getElementById('jb-edit-va-overlay');"
+        "    if(!idEl || !oldEl || !nameEl || !overlay){"
+        "      if(typeof showToast === 'function') showToast('Erreur : modal Modifier VA introuvable', 'error');"
+        "      return;"
+        "    }"
+        "    idEl.value = d.identity || '';"
+        "    oldEl.value = d.vaName || '';"
+        "    nameEl.value = d.vaName || '';"
+        "    if(discEl) discEl.value = d.vaDiscord || '';"
+        "    overlay.classList.add('show');"
+        "    setTimeout(function(){ try { nameEl.focus(); } catch(e){} }, 50);"
+        "  } catch(e){"
+        "    if(typeof showToast === 'function') showToast('Erreur ouverture modal : ' + e.message, 'error');"
+        "  }"
+        "}"
+        "function jbCloseEditVaModal(){"
+        "  var o = document.getElementById('jb-edit-va-overlay');"
         "  if(o) o.classList.remove('show');"
         "}"
         "function jbValidateAddVa(){"
@@ -17493,7 +17553,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + datalist_html + toolbar + body + add_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + toolbar + body + add_va_modal + edit_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
