@@ -366,20 +366,28 @@ def pull_and_merge() -> tuple:
                                   for r in rows if (r.get("username") or "").strip()}
 
         # --- SUPPRESSIONS : absent d'un onglet non vide où il devrait figurer ---
-        kept, deleted = [], set()
+        to_delete, kept = [], []
         for a in accts:
             u = (a.get("username") or "").strip().lower()
             vx = (a.get("va") or "").strip().lower()
             gone = (id_present is not None and u and u not in id_present) or \
                    (vx and vx in va_present and u and u not in va_present[vx])
-            if gone:
-                removed += 1
-                if u:
-                    deleted.add(u)
-            else:
-                kept.append(a)
-        entry["accounts"] = kept
-        accts = kept
+            (to_delete if gone else kept).append(a)
+        # GARDE-FOU anti-suppression massive : si un seul sync voudrait supprimer
+        # BEAUCOUP de comptes d'une identité (>10 ET >40%), c'est louche (lecture
+        # partielle du Sheet / bug) -> on N'APPLIQUE PAS (protège la data). Les
+        # suppressions volontaires en masse passent par /jailbreakreset ou le site.
+        n_before = len(accts)
+        deleted = set()
+        if to_delete and len(to_delete) > max(10, int(n_before * 0.4)):
+            print(f"[sheets_sync] anti-mass-delete {identity}: -{len(to_delete)}/{n_before} IGNORÉ",
+                  flush=True)
+        else:
+            entry["accounts"] = kept
+            accts = kept
+            removed += len(to_delete)
+            deleted = {(a.get("username") or "").strip().lower()
+                       for a in to_delete if (a.get("username") or "").strip()}
         by_uname = {}
         for a in accts:
             u = (a.get("username") or "").strip().lower()
