@@ -117,25 +117,36 @@ def _rows_hash(rows) -> str:
     return hashlib.md5(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-# ---------- Vues LECTURE SEULE par VA (onglet "👤 Nom") ----------
-_VA_PREFIX = "👤 "
-VA_HEADER = ["identité", "username", "password", "email", "two_fa", "notes", "id"]
+# ---------- Vues LECTURE SEULE : 1 onglet par (identité, VA), nom "identité va" ----------
+_VIEW_HEADER = ["username", "password", "email", "two_fa", "notes", "id"]
 
 
 def _safe_tab_title(name: str) -> str:
     t = (name or "").strip()
     for ch in ":\\/?*[]":
         t = t.replace(ch, " ")
-    return (_VA_PREFIX + t).strip()[:99]
+    return t[:99]
+
+
+def _view_tab_names() -> set:
+    try:
+        return {str(x).strip().lower() for x in (load_config().get("va_view_tabs") or [])}
+    except Exception:
+        return set()
 
 
 def _is_va_tab(title: str) -> bool:
-    return (title or "").strip().lower().startswith(_VA_PREFIX.strip().lower())
+    """Onglet 'vue' (lecture seule) -> ignoré par le poller."""
+    t = (title or "").strip().lower()
+    return t.startswith("👤") or t in _view_tab_names()
 
 
-def _va_rows(data: dict) -> dict:
-    """{va_name: [[identité, username, password, email, two_fa, notes, id], ...]}."""
-    out = {}
+def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
+    """Un onglet LECTURE SEULE par couple (identité, VA), nommé 'identité va' (ex
+    'lola jhon'), trié pour grouper les mêmes identités côte à côte. Le poller les
+    ignore (le nom n'est pas une identité). Nettoie les vues obsolètes (suivi via
+    config 'va_view_tabs' + anciens onglets 👤). Réordonne si la structure change."""
+    pairs = {}
     for identity, entry in (data or {}).items():
         if not isinstance(entry, dict):
             continue
@@ -143,42 +154,59 @@ def _va_rows(data: dict) -> dict:
             va = (a.get("va") or "").strip()
             if not va:
                 continue
-            out.setdefault(va, []).append([
-                identity, a.get("username", "") or "", a.get("password", "") or "",
+            pairs.setdefault((str(identity), va), []).append([
+                a.get("username", "") or "", a.get("password", "") or "",
                 a.get("email", "") or "", a.get("two_fa", "") or "",
                 a.get("notes", "") or "", str(a.get("id", "") or "")])
-    return out
-
-
-def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
-    """(Re)genere un onglet LECTURE SEULE par VA : tous ses comptes, toutes identites
-    confondues (colonne Identite). Supprime les onglets VA obsoletes. Le poller les
-    ignore (prefixe 👤 -> pas une identite)."""
-    va_rows = _va_rows(data)
-    wanted = set()
-    for va, rows in va_rows.items():
-        title = _safe_tab_title(va)
+    wanted = {}
+    changed = False
+    for (identity, va), rows in pairs.items():
+        title = _safe_tab_title(f"{identity} {va}")
         key = title.strip().lower()
-        wanted.add(key)
-        full = [VA_HEADER] + sorted(rows, key=lambda r: (r[0].lower(), r[1].lower()))
+        full = [_VIEW_HEADER] + sorted(rows, key=lambda r: r[0].lower())
         h = _rows_hash(full)
-        if not force and _last_hash.get(title) == h:
-            continue
         ws = existing.get(key)
         if ws is None:
-            ws = sh.add_worksheet(title=title, rows=max(len(full) + 5, 20), cols=len(VA_HEADER))
+            ws = sh.add_worksheet(title=title, rows=max(len(full) + 5, 20), cols=len(_VIEW_HEADER))
             existing[key] = ws
-        ws.clear()
-        _ws_write(ws, full)
-        _last_hash[title] = h
-    # onglets VA obsoletes (plus aucun compte pour ce VA) -> supprimes
-    for key, ws in list(existing.items()):
-        if _is_va_tab(key) and key not in wanted:
+            changed = True
+        if force or _last_hash.get(title) != h:
+            ws.clear()
+            _ws_write(ws, full)
+            _last_hash[title] = h
+        wanted[key] = ws
+    # Vues obsolètes (suivies en config, ou anciens onglets 👤) -> supprimées
+    for key in (_view_tab_names() | {k for k in list(existing) if str(k).startswith("👤")}):
+        if key in wanted:
+            continue
+        ws = existing.get(key)
+        if ws is not None:
             try:
                 sh.del_worksheet(ws)
                 existing.pop(key, None)
+                changed = True
             except Exception:
                 pass
+    # Mémoriser la liste des vues (nettoyage futur + skip du poller)
+    try:
+        cfg = load_config()
+        cfg["va_view_tabs"] = sorted(wanted.keys())
+        save_config(cfg)
+    except Exception:
+        pass
+    # Réordonner : autres (Feuille 1) + identités triées + vues triées (groupées par identité)
+    if changed or force:
+        try:
+            identity_names = {str(k).strip().lower() for k in (data or {}).keys()}
+            allws = sh.worksheets()
+            views = [w for w in allws if w.title.strip().lower() in wanted]
+            idents = [w for w in allws if w.title.strip().lower() in identity_names]
+            others = [w for w in allws if w not in views and w not in idents]
+            idents.sort(key=lambda w: w.title.lower())
+            views.sort(key=lambda w: w.title.lower())
+            sh.reorder_worksheets(others + idents + views)
+        except Exception:
+            pass
 
 
 # ---------- Site -> Sheet ----------
