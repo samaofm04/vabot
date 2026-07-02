@@ -105,6 +105,12 @@ def _save(data: Dict[str, Dict[str, Any]]):
     JAILBREAK_FILE.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    # Sync -> Google Sheet (best-effort, non bloquant, no-op si non configure).
+    try:
+        import sheets_sync
+        sheets_sync.push_all_async(data)
+    except Exception:
+        pass
 
 
 def _ensure_identity(data: Dict[str, Dict[str, Any]], identity: str) -> Dict[str, Any]:
