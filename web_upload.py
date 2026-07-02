@@ -418,13 +418,15 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
 # (ancien format = simple liste de file_ids -> migré automatiquement en dict).
 # La membership `file_id in marks` marche pareil (clés du dict).
 def _load_banger_marks() -> dict:
+    # PERF : cache par mtime (_cached_json_load) -> re-parse seulement si le
+    # fichier a change. Copie superficielle : les mutateurs (set/pop) modifient
+    # leur copie puis sauvent (le save change le mtime -> invalide le cache).
     try:
-        if BANGER_MARKS_FILE.exists():
-            data = json.loads(BANGER_MARKS_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-            if isinstance(data, list):
-                return {fid: {} for fid in data}
+        data = _cached_json_load(BANGER_MARKS_FILE)
+        if isinstance(data, dict):
+            return dict(data)
+        if isinstance(data, list):
+            return {fid: {} for fid in data}
     except Exception:
         pass
     return {}
@@ -458,13 +460,13 @@ DISABLED_REELS_FILE = DATA_DIR / "disabled_reels.json"
 
 
 def _load_disabled_reels() -> set:
+    # PERF : cache par mtime -> re-parse seulement si le fichier a change.
     try:
-        if DISABLED_REELS_FILE.exists():
-            data = json.loads(DISABLED_REELS_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                return set(data)
-            if isinstance(data, dict):
-                return set(data.keys())
+        data = _cached_json_load(DISABLED_REELS_FILE)
+        if isinstance(data, list):
+            return set(data)
+        if isinstance(data, dict):
+            return set(data.keys())
     except Exception:
         pass
     return set()
@@ -855,6 +857,9 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 
 /* Cards de preview - hover scale et shadow */
 .cloud-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+/* PERF : le navigateur saute le rendu des cartes hors écran -> scroll fluide
+   même avec des centaines de cartes. Aucun changement visuel. */
+.reel-card,.cloud-card{content-visibility:auto;contain-intrinsic-size:auto 480px}
 .cloud-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4);border-color:#444!important}
 /* Reel désactivé : grisé (l'utilisateur voit qu'il n'est plus à utiliser). Les boutons d'action restent cliquables. */
 .cloud-card.is-reel-off{opacity:.4;filter:grayscale(1);transition:opacity .2s ease,filter .2s ease}
@@ -4845,8 +4850,11 @@ def _count_files(d: Path, exts=None) -> int:
     )
 
 
+@ttl_cache(seconds=30)
 def _identity_stats(identity: str) -> dict:
-    """Compte les contenus de cette identité."""
+    """Compte les contenus de cette identité. PERF: memoize 30s (4 scans disque +
+    3 JSON par appel, appelé N identités × 4 par page) ; invalidé sur toute
+    mutation via _success -> _invalidate_all_ttl_cache."""
     base = IDENTITIES_DIR / identity
     reels = _count_files(base / "videos", VIDEO_EXTS)
     posts = _count_files(base / "posts", IMAGE_EXTS)
@@ -8752,16 +8760,63 @@ def _generate_video_thumbnail(src: Path, dest: Path) -> bool:
         return False
 
 
+# PERF thumbnails : verrou PAR CLE (2 requêtes/threads pour le même fichier ne
+# lancent pas 2 ffmpeg concurrents sur la même destination) + pré-génération en
+# arrière-plan au rendu d'une galerie (le 1er affichage ne bloque plus sur ffmpeg).
+_THUMB_META_LOCK = threading.Lock()
+_THUMB_GEN_LOCKS: dict = {}
+_THUMB_PREGEN_ACTIVE = [False]
+
+
+def _thumb_gen_lock(rel_key: str):
+    with _THUMB_META_LOCK:
+        lk = _THUMB_GEN_LOCKS.get(rel_key)
+        if lk is None:
+            lk = threading.Lock()
+            _THUMB_GEN_LOCKS[rel_key] = lk
+        return lk
+
+
 def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
-    """Retourne le path du thumbnail, en le générant si besoin."""
+    """Retourne le path du thumbnail, en le générant si besoin (1 génération max
+    par clé grâce au verrou ; le 2e appelant attend puis trouve le fichier)."""
     thumb = _thumb_path_for(rel_key)
     if thumb.exists():
         return thumb
-    if is_video:
-        ok = _generate_video_thumbnail(src, thumb)
-    else:
-        ok = _generate_image_thumbnail(src, thumb)
+    with _thumb_gen_lock(rel_key):
+        if thumb.exists():   # généré pendant l'attente du verrou
+            return thumb
+        if is_video:
+            ok = _generate_video_thumbnail(src, thumb)
+        else:
+            ok = _generate_image_thumbnail(src, thumb)
+    with _THUMB_META_LOCK:
+        _THUMB_GEN_LOCKS.pop(rel_key, None)
     return thumb if ok else None
+
+
+def _pregen_thumbs_async(items):
+    """Pré-génère en arrière-plan les thumbnails manquants d'une galerie.
+    items = [(src_path, rel_key, is_video)]. 1 seul worker à la fois (les
+    suivants seront pris au prochain rendu ou à la demande). Best-effort."""
+    with _THUMB_META_LOCK:
+        if _THUMB_PREGEN_ACTIVE[0]:
+            return
+        _THUMB_PREGEN_ACTIVE[0] = True
+
+    def _run():
+        try:
+            for src, key, isv in items:
+                try:
+                    if not _thumb_path_for(key).exists():
+                        _get_or_create_thumbnail(src, key, isv)
+                except Exception:
+                    pass
+        finally:
+            with _THUMB_META_LOCK:
+                _THUMB_PREGEN_ACTIVE[0] = False
+
+    threading.Thread(target=_run, daemon=True, name="thumb-pregen").start()
 
 
 def _fmt_size(p) -> str:
@@ -8909,27 +8964,14 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     )
 
 
-def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> str:
-    """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
-    (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
-    Pas de navigation back/forward, tout dans la même page.
-
-    include_jb=True ajoute les identités jailbreak-only (ex: jessye) — utilisé
-    UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
-    """
-    from flask import request as _req
-    identities = _list_content_identities()  # masque les identités Jailbreak-only
-    if include_jb:
-        for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
-            if _jb not in identities:
-                identities.append(_jb)
-    if not identities:
-        return "<p style='color:#888'>Aucune identité créée.</p>"
-    is_video = subdir == "videos"
-
-    # Calculer stats par identité (counts + size)
+@ttl_cache(seconds=30)
+def _cloud_ident_stats_cached(subdir: str, exts_t: tuple, idents_t: tuple) -> dict:
+    """Stats sidebar (counts + tailles) par identité pour une galerie. PERF :
+    memoize 30s (scan de TOUTES les identités × fichiers avec stat() à chaque
+    affichage sinon) ; invalidé sur mutation via _success."""
+    exts = set(exts_t)
     ident_stats = {}
-    for ident in identities:
+    for ident in idents_t:
         folder = IDENTITIES_DIR / ident / subdir
         n_files = 0
         n_videos = 0
@@ -8954,6 +8996,30 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             "n_files": n_files, "n_videos": n_videos,
             "n_images": n_images, "size_mb": size_mb,
         }
+    return ident_stats
+
+
+def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> str:
+    """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
+    (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
+    Pas de navigation back/forward, tout dans la même page.
+
+    include_jb=True ajoute les identités jailbreak-only (ex: jessye) — utilisé
+    UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
+    """
+    from flask import request as _req
+    identities = _list_content_identities()  # masque les identités Jailbreak-only
+    if include_jb:
+        for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+            if _jb not in identities:
+                identities.append(_jb)
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+    is_video = subdir == "videos"
+
+    # Stats par identité (counts + size) — cachées 30s (cf helper ci-dessus)
+    ident_stats = _cloud_ident_stats_cached(
+        subdir, tuple(sorted(exts)), tuple(identities))
 
     # Identité sélectionnée. Priorité : ?param explicite > dernière identité
     # où on vient d'uploader (pour voir son upload tout de suite) > 1re avec
@@ -9241,6 +9307,14 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
+        # PERF : pré-génère les thumbnails manquants en arrière-plan -> quand le
+        # navigateur les demande, ils sont déjà prêts (plus de ffmpeg bloquant).
+        try:
+            _pregen_thumbs_async([
+                (p, f"{selected}/{subdir}/{p.name}", p.suffix.lower() in VIDEO_EXTS)
+                for p in files])
+        except Exception:
+            pass
         for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
             clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
@@ -9742,6 +9816,7 @@ document.addEventListener('click', function(e){
 window.__vaultPrefetchCache = window.__vaultPrefetchCache || {};
 window.__vaultPrefetchInflight = window.__vaultPrefetchInflight || {};
 
+window.__vaultPrefetchOrder = window.__vaultPrefetchOrder || [];
 window.vaultPrefetch = function(url){
   if(!url || window.__vaultPrefetchCache[url] || window.__vaultPrefetchInflight[url]) return;
   window.__vaultPrefetchInflight[url] = true;
@@ -9749,6 +9824,12 @@ window.vaultPrefetch = function(url){
     .then(r=>r.text())
     .then(html=>{
       window.__vaultPrefetchCache[url] = html;
+      window.__vaultPrefetchOrder.push(url);
+      // PERF : cap LRU (24 pages max) -> la memoire du navigateur ne gonfle pas
+      // sur les longues sessions qui naviguent beaucoup.
+      while(window.__vaultPrefetchOrder.length > 24){
+        delete window.__vaultPrefetchCache[window.__vaultPrefetchOrder.shift()];
+      }
       delete window.__vaultPrefetchInflight[url];
     })
     .catch(()=>{ delete window.__vaultPrefetchInflight[url]; });
@@ -25261,6 +25342,12 @@ def create_app():
 
     def _success(msg, tab=None):
         """Pattern POST-Redirect-GET : flash le message + redirige sur GET."""
+        # PERF : toute mutation réussie invalide les caches TTL -> le GET qui suit
+        # recalcule tout (compteurs, stats sidebar...) = données toujours fraîches.
+        try:
+            _invalidate_all_ttl_cache()
+        except Exception:
+            pass
         session["flash_msg"] = msg
         session["flash_error"] = False
         return redirect(_redirect_back(tab))
@@ -25493,7 +25580,7 @@ def create_app():
         if not path:
             return "Not found", 404
         from flask import send_file
-        response = send_file(str(path))
+        response = send_file(str(path), conditional=True)
         response.headers["Cache-Control"] = "public, max-age=3600"
         return response
 
@@ -25548,7 +25635,7 @@ def create_app():
             response.headers["Cache-Control"] = "public, max-age=3600"
             return response
         from flask import send_file
-        response = send_file(str(thumb))
+        response = send_file(str(thumb), conditional=True)
         response.headers["Cache-Control"] = "public, max-age=86400"
         return response
 
@@ -25569,7 +25656,7 @@ def create_app():
             response.headers["Cache-Control"] = "public, max-age=3600"
             return response
         from flask import send_file
-        response = send_file(str(thumb))
+        response = send_file(str(thumb), conditional=True)
         response.headers["Cache-Control"] = "public, max-age=86400"
         return response
 
@@ -25590,7 +25677,10 @@ def create_app():
         if not path.exists() or not path.is_file():
             return "Not found", 404
         from flask import send_file
-        return send_file(str(path))
+        # conditional=True : 304 + Range requests (206) -> seek vidéo instantané.
+        response = send_file(str(path), conditional=True)
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
 
     @app.route("/cloud/send_banger", methods=["POST"])
     def cloud_send_banger():
@@ -25742,7 +25832,9 @@ def create_app():
         if not path.exists() or not path.is_file():
             return "Not found", 404
         from flask import send_file
-        return send_file(str(path))
+        response = send_file(str(path), conditional=True)
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
 
     def _parse_file_id(file_id: str):
         """Parse 'identity|subdir|name' avec validation anti-path-traversal."""
@@ -29435,7 +29527,9 @@ def create_app():
             p = DATA_DIR / f"profile_pic.{ext}"
             if p.exists():
                 from flask import send_file
-                return send_file(str(p))
+                response = send_file(str(p), conditional=True)
+                response.headers["Cache-Control"] = "public, max-age=86400"
+                return response
         return "Not found", 404
 
     @app.route("/settings/account", methods=["POST"])
@@ -30115,7 +30209,9 @@ def create_app():
             resp = Response(stream_with_context(generate()), mimetype=content_type)
             if content_length:
                 resp.headers["Content-Length"] = content_length
-            resp.headers["Cache-Control"] = "private, max-age=300"
+            # Les URLs CDN Instagram restent valides des heures -> 1h de cache
+            # navigateur (evite de re-streamer la meme video a chaque re-clic).
+            resp.headers["Cache-Control"] = "private, max-age=3600"
             return resp
         # Extraction shortcode pour cache disque
         m_sc = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', post_url or '')
@@ -30899,7 +30995,9 @@ def run_web_app():
     try:
         app = create_app()
         log.info(f"Web upload starting on port {WEB_PORT}")
-        app.run(host="0.0.0.0", port=WEB_PORT, debug=False, use_reloader=False)
+        # threaded=True EXPLICITE : les requêtes (pages, thumbs, vidéos) tournent en
+        # parallèle — une génération de thumbnail lente ne bloque jamais le reste.
+        app.run(host="0.0.0.0", port=WEB_PORT, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         log.error(f"Web upload crashed: {e}")
 
