@@ -37,7 +37,7 @@ _MENU_BTN_FEATURE = {
 
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
 # Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
-_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help"}
+_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay"}
 
 
 def _ch_handle_va(name) -> str:
@@ -204,6 +204,8 @@ def _build_menu_embed(identity, guild=None):
         "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
     add("cmenu:help", None, "🆘 Assistance",
         "Un souci ? Explique-le, un manager/boss vient t'aider")
+    add("cmenu:pay", None, "💸 Mon paiement",
+        "Ton moyen pour recevoir l'argent (crypto ou TapTap)")
     if identity and not threads:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -336,6 +338,35 @@ def _staff_ping(guild):
                 seen.add(m)
                 out.append(m)
     return " ".join(out) if out else "@here"
+
+
+# Reseaux TapTap (mobile money) proposes : code -> libelle (pays).
+_PAY_NETWORKS = [
+    ("Airtel", "Airtel — Madagascar 🇲🇬"),
+    ("Orange", "Orange — Madagascar 🇲🇬"),
+    ("Mvola", "Mvola — Madagascar 🇲🇬"),
+    ("Moov", "Moov — Bénin 🇧🇯"),
+    ("MTN", "MTN — Bénin 🇧🇯"),
+]
+
+
+def _payment_summary(pay):
+    """Resume lisible d'un moyen de paiement stocke, ou None si absent/invalide."""
+    if not isinstance(pay, dict) or not pay.get("method"):
+        return None
+    if pay.get("method") == "TapTap":
+        return f"📱 TapTap · {pay.get('network', '?')} · `{pay.get('number', '?')}`"
+    return f"💰 {pay.get('method', '?')} · `{pay.get('address', '?')}`"
+
+
+def _find_payment_channel(guild):
+    """Salon de paiement (si l'user en a cree un), sinon None. Nom contenant
+    'paiement'/'payment'/'paye'/💸."""
+    for ch in getattr(guild, "text_channels", []):
+        n = (getattr(ch, "name", "") or "").lower()
+        if "paiement" in n or "payment" in n or "paye" in n or "💸" in n:
+            return ch
+    return None
 
 
 # ---- Demandes de lien : anti-spam (1 demande en attente) + anti-doublon (1 SEUL lien / VA) ----
@@ -2101,6 +2132,80 @@ class UserCog(commands.Cog):
             "Reste dans ton salon, on te répond ici. 🙌",
             ephemeral=True)
 
+    async def _save_payment(self, interaction, info):
+        """Enregistre le moyen de paiement du VA dans users.json + confirme + notifie
+        le salon paiement (s'il existe)."""
+        import time as _t
+        info["updated_at"] = int(_t.time())
+        users = load_json(USERS_FILE, {})
+        uid = str(interaction.user.id)
+        data = users.get(uid)
+        if not isinstance(data, dict):
+            data = {"identity": data} if isinstance(data, str) and data else {}
+            users[uid] = data
+        data["payment"] = info
+        save_json(USERS_FILE, users)
+        summary = _payment_summary(info) or "—"
+        await interaction.response.send_message(
+            f"✅ **Moyen de paiement enregistré !**\n{summary}\n\n"
+            "Le boss le verra pour te payer. Tu peux le changer quand tu veux "
+            "avec le même bouton. 💸",
+            ephemeral=True)
+        # Notif dans un salon paiement s'il existe (sinon juste stocké -> /moyenspaiement)
+        ch = _find_payment_channel(interaction.guild)
+        if ch is not None:
+            emb = discord.Embed(title="💸 Moyen de paiement (VA)", color=discord.Color.gold())
+            emb.add_field(name="👤 VA", value=interaction.user.mention, inline=True)
+            idt = get_user_identity(interaction.user.id)
+            if idt:
+                emb.add_field(name="🎭 Identité", value=str(idt), inline=True)
+            emb.add_field(name="💰 Moyen", value=summary, inline=False)
+            emb.set_footer(text=f"{interaction.user} · ID {uid}")
+            try:
+                await ch.send(embed=emb)
+            except Exception:
+                pass
+
+    @app_commands.command(
+        name="moyenspaiement",
+        description="[ADMIN] Liste les moyens de paiement déclarés par les VA",
+    )
+    async def moyenspaiement(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        users = load_json(USERS_FILE, {})
+        guild = interaction.guild
+        lines = []
+        for uid, data in users.items():
+            if not isinstance(data, dict):
+                continue
+            summary = _payment_summary(data.get("payment"))
+            if not summary:
+                continue
+            mem = None
+            try:
+                mem = guild.get_member(int(uid)) if guild else None
+            except Exception:
+                mem = None
+            who = mem.mention if mem else f"`{uid}`"
+            lines.append(f"• {who} — {summary}")
+        if not lines:
+            await interaction.response.send_message(
+                "Aucun VA n'a encore déclaré de moyen de paiement.", ephemeral=True)
+            return
+        header = f"💸 **Moyens de paiement des VA** ({len(lines)})\n"
+        out, total = [], len(header)
+        for ln in lines:
+            if total + len(ln) + 1 > 1950:
+                break
+            out.append(ln)
+            total += len(ln) + 1
+        body = header + "\n".join(out)
+        if len(out) < len(lines):
+            body += f"\n… +{len(lines) - len(out)} autre(s) (trop pour un message)"
+        await interaction.response.send_message(body, ephemeral=True)
+
     @app_commands.command(
         name="marquerliens",
         description="[ADMIN] Ajoute/retire le 🔗 (a un lien) sur les salons VA, sans toucher au rond d'activite",
@@ -3386,6 +3491,16 @@ class ContentMenuView(discord.ui.View):
             pass
         await interaction.response.send_modal(MesComptesInstaModal(prefill=prefill))
 
+    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=3)
+    async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        emb = discord.Embed(
+            title="💸 Ton moyen de paiement",
+            description="Choisis **comment tu veux recevoir ton argent** 👇",
+            color=discord.Color.gold(),
+        )
+        await interaction.response.send_message(
+            embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
+
 
 class CentralMenuView(discord.ui.View):
     """Menu CENTRAL (salon partagé type #commande-va) : chaque bouton envoie le
@@ -3435,6 +3550,16 @@ class CentralMenuView(discord.ui.View):
     async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AssistanceModal(self.cog))
 
+    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu2:pay", row=2)
+    async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        emb = discord.Embed(
+            title="💸 Ton moyen de paiement",
+            description="Choisis **comment tu veux recevoir ton argent** 👇",
+            color=discord.Color.gold(),
+        )
+        await interaction.response.send_message(
+            embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
+
 
 class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
     """Le VA explique son probleme -> transmis au salon 🆘・help."""
@@ -3451,6 +3576,97 @@ class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await self.cog._handle_assistance(interaction, str(self.probleme.value or ""))
+
+
+# ============ Moyen de paiement du VA ============
+# Le VA declare comment il veut etre paye : crypto (USDC/ETH/SOL -> adresse) ou
+# TapTap mobile money (reseau + numero). Stocke dans users.json[uid]["payment"].
+# Flux : bouton -> select methode -> (crypto: modal adresse) / (taptap: select
+# reseau -> modal numero) -> _save_payment.
+_CRYPTO_METHODS = {"USDC", "ETH", "SOL"}
+
+
+class _PaymentMethodSelect(discord.ui.Select):
+    def __init__(self, cog):
+        self.cog = cog
+        opts = [
+            discord.SelectOption(label="USDC", value="USDC", emoji="💵",
+                                 description="Crypto (stablecoin dollar)"),
+            discord.SelectOption(label="ETH", value="ETH", emoji="💎",
+                                 description="Crypto Ethereum"),
+            discord.SelectOption(label="Solana (SOL)", value="SOL", emoji="🟣",
+                                 description="Crypto Solana"),
+            discord.SelectOption(label="TapTap (Mobile Money)", value="TAPTAP", emoji="📱",
+                                 description="Airtel / Orange / Mvola / Moov / MTN"),
+        ]
+        super().__init__(placeholder="Choisis ton moyen de paiement…",
+                         min_values=1, max_values=1, options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        v = self.values[0]
+        if v in _CRYPTO_METHODS:
+            await interaction.response.send_modal(_CryptoAddressModal(self.cog, v))
+        else:
+            await interaction.response.edit_message(
+                content="📱 **TapTap** — choisis ton réseau :",
+                embed=None, view=_PaymentNetworkView(self.cog))
+
+
+class PaymentMethodView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=300)
+        self.add_item(_PaymentMethodSelect(cog))
+
+
+class _PaymentNetworkSelect(discord.ui.Select):
+    def __init__(self, cog):
+        self.cog = cog
+        opts = [discord.SelectOption(label=code, value=code, description=desc)
+                for code, desc in _PAY_NETWORKS]
+        super().__init__(placeholder="Choisis ton réseau…",
+                         min_values=1, max_values=1, options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(_MobileNumberModal(self.cog, self.values[0]))
+
+
+class _PaymentNetworkView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=300)
+        self.add_item(_PaymentNetworkSelect(cog))
+
+
+class _CryptoAddressModal(discord.ui.Modal):
+    def __init__(self, cog, method):
+        super().__init__(title=f"💰 Paiement {method}")
+        self.cog = cog
+        self.method = method
+        self.addr = discord.ui.TextInput(
+            label=f"Ton adresse {method}",
+            placeholder="Colle ici ton adresse de wallet",
+            required=True, max_length=200)
+        self.add_item(self.addr)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog._save_payment(interaction, {
+            "method": self.method, "address": str(self.addr.value or "").strip()})
+
+
+class _MobileNumberModal(discord.ui.Modal):
+    def __init__(self, cog, network):
+        super().__init__(title=f"📱 TapTap — {network}")
+        self.cog = cog
+        self.network = network
+        self.number = discord.ui.TextInput(
+            label="Ton numéro",
+            placeholder="ex : +261 34 12 345 67",
+            required=True, max_length=40)
+        self.add_item(self.number)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog._save_payment(interaction, {
+            "method": "TapTap", "network": self.network,
+            "number": str(self.number.value or "").strip()})
 
 
 # ============ Menu JAILBREAK (toutes les models) ============
