@@ -1032,6 +1032,56 @@ body.light .sfs-day[style*="background:#1f1410"]{background:#eff6ff!important}
 body.light .sfs-day[style*="background:#15100d"]{background:#f3f4f6!important}
 body.light .sfs-ident-row.active{background:rgba(59,130,246,.1)!important;color:#3b82f6!important}
 
+/* =============== THÈMES PREMIUM (sombres) : Obsidian glass / Neo luxe violet / Midnight gold =============== */
+/* --- OBSIDIAN GLASS (bleu-nuit + périwinkle) --- */
+body.obsidian{background:#0b0d12!important}
+body.obsidian .sidebar{background:#0a0c11!important;border-right-color:#171b24!important}
+body.obsidian .box,body.obsidian .stat,body.obsidian .reel-card,body.obsidian .cloud-card{background:#14171f!important;border-color:rgba(150,170,235,.14)!important}
+body.obsidian input,body.obsidian select,body.obsidian textarea,body.obsidian [style*="background:#0f0f0f"]{background:#0f121a!important;border-color:rgba(150,170,235,.16)!important}
+body.obsidian [style*="background:#1a1a1a"]{background:#14171f!important}
+body.obsidian [style*="background:#0a0a0a"]{background:#0a0c11!important}
+body.obsidian [style*="border:1px solid #2a2a2a"],body.obsidian [style*="border:1px solid #1a1a1a"]{border-color:rgba(150,170,235,.14)!important}
+body.obsidian [style*="background:#3b82f6"]{background:#8b9cf7!important}
+body.obsidian [style*="color:#3b82f6"]{color:#8b9cf7!important}
+body.obsidian .btn,body.obsidian button[type=submit],body.obsidian .lb-btn-primary,body.obsidian .badge,body.obsidian .vac-btn-active,body.obsidian .vpm-kind-btn.active,body.obsidian .vpm-save,body.obsidian .cur-toggle button.active,body.obsidian .exp-submit,body.obsidian .sel-cb:checked + .sel-circle,body.obsidian .sidebar .group .item .badge,body.obsidian .up-step .up-dot{background:#8b9cf7!important;border-color:#8b9cf7!important}
+body.obsidian a,body.obsidian .subtab.active,body.obsidian .sidebar .item.active,body.obsidian .sidebar .group .item.active,body.obsidian .sidebar .group .item.active svg,body.obsidian .sidebar .solo-item.active,body.obsidian .sidebar .group-head.active svg.lead,body.obsidian .vlm-dup{color:#8b9cf7!important}
+body.obsidian .vlm-dup{border-color:#8b9cf7!important}
+body.obsidian .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(139,156,247,.16),rgba(103,232,249,.10))!important}
+body.obsidian input:focus,body.obsidian select:focus,body.obsidian textarea:focus{border-color:#8b9cf7!important;box-shadow:0 0 0 3px rgba(139,156,247,.2)!important}
+
+/* --- NEO LUXE VIOLET (violet électrique + rose) --- */
+body.violet{background:#0b0713!important}
+body.violet .sidebar{background:#0c0817!important;border-right-color:#1c1330!important}
+body.violet .box,body.violet .stat,body.violet .reel-card,body.violet .cloud-card{background:#160e26!important;border-color:#2d1b4e!important}
+body.violet input,body.violet select,body.violet textarea,body.violet [style*="background:#0f0f0f"]{background:#130a20!important;border-color:#34215a!important}
+body.violet [style*="background:#1a1a1a"]{background:#160e26!important}
+body.violet [style*="background:#0a0a0a"]{background:#0c0817!important}
+body.violet [style*="border:1px solid #2a2a2a"],body.violet [style*="border:1px solid #1a1a1a"]{border-color:#2d1b4e!important}
+body.violet [style*="background:#3b82f6"]{background:#a855f7!important}
+body.violet [style*="color:#3b82f6"]{color:#c084fc!important}
+body.violet .btn,body.violet button[type=submit],body.violet .lb-btn-primary,body.violet .badge,body.violet .vac-btn-active,body.violet .vpm-kind-btn.active,body.violet .vpm-save,body.violet .cur-toggle button.active,body.violet .exp-submit,body.violet .sel-cb:checked + .sel-circle,body.violet .sidebar .group .item .badge,body.violet .up-step .up-dot{background:#a855f7!important;border-color:#a855f7!important}
+body.violet a,body.violet .subtab.active,body.violet .sidebar .item.active,body.violet .sidebar .group .item.active,body.violet .sidebar .group .item.active svg,body.violet .sidebar .solo-item.active,body.violet .sidebar .group-head.active svg.lead,body.violet .vlm-dup{color:#c084fc!important}
+body.violet .vlm-dup{border-color:#a855f7!important}
+body.violet .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(168,85,247,.18),rgba(236,72,153,.12))!important}
+body.violet input:focus,body.violet select:focus,body.violet textarea:focus{border-color:#a855f7!important;box-shadow:0 0 0 3px rgba(168,85,247,.22)!important}
+
+/* --- MIDNIGHT GOLD (noir profond + or champagne, texte foncé sur les boutons) --- */
+body.gold{background:#0a0908!important}
+body.gold .sidebar{background:#0b0a07!important;border-right-color:#1a1712!important}
+body.gold .box,body.gold .stat,body.gold .reel-card,body.gold .cloud-card{background:#15130f!important;border-color:#2c2619!important}
+body.gold input,body.gold select,body.gold textarea,body.gold [style*="background:#0f0f0f"]{background:#100e0a!important;border-color:#322b1c!important}
+body.gold [style*="background:#1a1a1a"]{background:#15130f!important}
+body.gold [style*="background:#0a0a0a"]{background:#0b0a07!important}
+body.gold [style*="border:1px solid #2a2a2a"],body.gold [style*="border:1px solid #1a1a1a"]{border-color:#2c2619!important}
+body.gold [style*="background:#3b82f6"]{background:#d9b74a!important}
+body.gold [style*="color:#3b82f6"]{color:#e6c65e!important}
+body.gold .btn,body.gold button[type=submit],body.gold .lb-btn-primary,body.gold .badge,body.gold .vac-btn-active,body.gold .vpm-kind-btn.active,body.gold .vpm-save,body.gold .cur-toggle button.active,body.gold .exp-submit,body.gold .sel-cb:checked + .sel-circle,body.gold .sidebar .group .item .badge,body.gold .up-step .up-dot{background:#d9b74a!important;border-color:#d9b74a!important}
+body.gold .btn,body.gold button[type=submit],body.gold .lb-btn-primary,body.gold .badge,body.gold .vpm-save,body.gold .exp-submit,body.gold .sidebar .group .item .badge,body.gold [style*="background:#3b82f6"]{color:#1c1600!important}
+body.gold a,body.gold .subtab.active,body.gold .sidebar .item.active,body.gold .sidebar .group .item.active,body.gold .sidebar .group .item.active svg,body.gold .sidebar .solo-item.active,body.gold .sidebar .group-head.active svg.lead,body.gold .vlm-dup{color:#e6c65e!important}
+body.gold .vlm-dup{border-color:#d9b74a!important}
+body.gold .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(212,175,55,.18),rgba(247,231,180,.10))!important}
+body.gold input:focus,body.gold select:focus,body.gold textarea:focus{border-color:#d9b74a!important;box-shadow:0 0 0 3px rgba(212,175,55,.22)!important}
+
 /* === Selected day (les 2 modes) === */
 .sfs-day.selected{box-shadow:inset 0 0 0 2px #3b82f6}
 body:not(.light) .sfs-day.selected{background:#0f1a2e!important}
@@ -1201,53 +1251,53 @@ function toggleSubGroup(id){
 function comingSoon(){
   showToast('🚧 Pas encore implémenté — viendra bientôt', 'warning');
 }
-// === THEME (light/dark) ===
+// === THEME (dark / light / obsidian / violet / gold) ===
+var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
+function _vabotThemeLabel(t){
+  return ({dark:'sombre',light:'clair',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
+}
 function setTheme(theme){
-  var de = document.documentElement;
+  var de = document.documentElement, b = document.body;
+  // On repart propre : on enlève TOUTES les classes de thème possibles
+  b.classList.remove('light','obsidian','violet','gold');
+  de.classList.remove('light-pre','pre-light','pre-obsidian','pre-violet','pre-gold');
   if(theme === 'light'){
-    document.body.classList.add('light');
+    b.classList.add('light');
     de.classList.add('light-pre'); de.classList.add('pre-light');
-  } else {
-    document.body.classList.remove('light');
-    // IMPORTANT : retirer les classes de pre-paint (CSS !important qui FORCE le clair)
-    // sinon le mode sombre reste bloqué en fond clair -> "ça bug".
-    de.classList.remove('light-pre'); de.classList.remove('pre-light');
+  } else if(VABOT_DARK_VARIANTS.indexOf(theme) !== -1){
+    b.classList.add(theme);
   }
+  // theme === 'dark' -> aucune classe (c'est le thème de base)
   try{ localStorage.setItem('vabot_theme', theme); }catch(e){}
   // Mettre à jour la sélection visuelle des cards
   document.querySelectorAll('.theme-card').forEach(function(c){
     if(c.dataset.theme === theme){
-      c.style.outline = '3px solid #3b82f6';
+      c.style.outline = '3px solid #6aa8ff';
       c.style.outlineOffset = '2px';
     } else {
       c.style.outline = '';
     }
   });
   if(typeof showToast === 'function'){
-    showToast('🎨 Thème ' + (theme === 'light' ? 'clair' : 'sombre') + ' activé', 'success', 2000);
+    showToast('🎨 Thème ' + _vabotThemeLabel(theme) + ' activé', 'success', 2000);
   }
 }
 // Appliquer le thème au plus tôt (avant render) - défaut : clair
 (function(){
   try{
     var saved = localStorage.getItem('vabot_theme') || 'light';
+    var darkVariants = ['obsidian','violet','gold'];
     if(saved === 'light'){
       document.documentElement.classList.add('pre-light');
-      document.addEventListener('DOMContentLoaded', function(){
-        document.body.classList.add('light');
-        document.querySelectorAll('.theme-card[data-theme="light"]').forEach(function(c){
-          c.style.outline = '3px solid #3b82f6';
-          c.style.outlineOffset = '2px';
-        });
-      });
-    } else {
-      document.addEventListener('DOMContentLoaded', function(){
-        document.querySelectorAll('.theme-card[data-theme="dark"]').forEach(function(c){
-          c.style.outline = '3px solid #3b82f6';
-          c.style.outlineOffset = '2px';
-        });
-      });
     }
+    document.addEventListener('DOMContentLoaded', function(){
+      if(saved === 'light') document.body.classList.add('light');
+      else if(darkVariants.indexOf(saved) !== -1) document.body.classList.add(saved);
+      document.querySelectorAll('.theme-card[data-theme="'+saved+'"]').forEach(function(c){
+        c.style.outline = '3px solid #6aa8ff';
+        c.style.outlineOffset = '2px';
+      });
+    });
   }catch(e){}
 })();
 // Active les transitions de couleur du theme APRES le 1er paint, sinon
@@ -3252,6 +3302,18 @@ window.upClearPrefill = function(utab){
         'html.light-pre .box,html.light-pre .stat{background:#fff !important;border-color:#e5e7eb !important}'+
         'html.light-pre .main{background:#f9fafb !important}';
       document.head.appendChild(s);
+    } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold'){
+      // Thèmes sombres premium : on teinte le fond/sidebar/cartes AVANT le 1er paint
+      var PAL = {obsidian:['#0b0d12','#0a0c11','#14171f','rgba(150,170,235,.14)'],
+                 violet:['#0b0713','#0c0817','#160e26','#2d1b4e'],
+                 gold:['#0a0908','#0b0a07','#15130f','#2c2619']}[theme];
+      document.documentElement.classList.add('pre-'+theme);
+      var s2 = document.createElement('style');
+      s2.textContent = 'html.pre-'+theme+' body{background:'+PAL[0]+' !important}'+
+        'html.pre-'+theme+' .main{background:'+PAL[0]+' !important}'+
+        'html.pre-'+theme+' .sidebar{background:'+PAL[1]+' !important}'+
+        'html.pre-'+theme+' .box,html.pre-'+theme+' .stat{background:'+PAL[2]+' !important;border-color:'+PAL[3]+' !important}';
+      document.head.appendChild(s2);
     }
     // SFW pre-apply : floute les images avant qu'elles s'affichent si actif
     // (exclus la lightbox, sera unblurred au clic)
@@ -4293,21 +4355,57 @@ document.addEventListener('keydown', function(e){
 <div class="form-section" id="form-sprefs" style="display:none">
 <div class="box">
 <h3 style="margin-top:0">🎨 Affichage</h3>
-<small>Choisis entre le mode clair et sombre</small>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
-  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:20px;cursor:pointer;text-align:center;color:#111827">
-    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:8px;width:100%"><div style="width:14px;height:14px;border-radius:50%;background:#e5e7eb"></div><div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px"></div></div>
-      <div style="display:flex;align-items:center;gap:8px;width:60%"><div style="width:14px;height:14px;border-radius:50%;background:#e5e7eb"></div><div style="flex:1;height:8px;background:#3b82f6;border-radius:4px"></div></div>
+<small>Choisis l'apparence de ton dashboard — le choix est mémorisé sur cet appareil</small>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;margin-top:14px">
+  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0c0c0c;border:2px solid #262626;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #262626">
+      <div style="width:20px;background:#0b0b0b"></div>
+      <div style="flex:1;background:#101012;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#1c1c1e;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#4a90ff;border-radius:4px"></div>
+      </div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px"><input type="radio" name="theme-radio" style="margin:0" id="theme-radio-light"><label for="theme-radio-light" style="font-size:14px;font-weight:600;cursor:pointer;color:#111827;margin:0">Light mode</label></div>
+    <div style="font-size:12.5px;font-weight:600;color:#fafafa">Sombre</div>
   </div>
-  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0a0a0a;border:2px solid #2a2a2a;border-radius:12px;padding:20px;cursor:pointer;text-align:center;color:#fff">
-    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:8px;width:100%"><div style="width:14px;height:14px;border-radius:50%;background:#2a2a2a"></div><div style="flex:1;height:8px;background:#2a2a2a;border-radius:4px"></div></div>
-      <div style="display:flex;align-items:center;gap:8px;width:60%"><div style="width:14px;height:14px;border-radius:50%;background:#2a2a2a"></div><div style="flex:1;height:8px;background:#3b82f6;border-radius:4px"></div></div>
+  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#ffffff;border:2px solid #e5e7eb;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #e5e7eb">
+      <div style="width:20px;background:#ffffff"></div>
+      <div style="flex:1;background:#f7f8fa;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#eceef2;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#4a90ff;border-radius:4px"></div>
+      </div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px"><input type="radio" name="theme-radio" style="margin:0" id="theme-radio-dark" checked><label for="theme-radio-dark" style="font-size:14px;font-weight:600;cursor:pointer;color:#fff;margin:0">Dark mode</label></div>
+    <div style="font-size:12.5px;font-weight:600;color:#111827">Clair</div>
+  </div>
+  <div onclick="setTheme('obsidian')" class="theme-card" data-theme="obsidian" style="background:#0b0d12;border:2px solid #1b2130;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #1b2130">
+      <div style="width:20px;background:#0a0c11"></div>
+      <div style="flex:1;background:#0c0e14;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#161a23;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#8b9cf7;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#e6eaf2">Obsidian glass</div>
+  </div>
+  <div onclick="setTheme('violet')" class="theme-card" data-theme="violet" style="background:#0b0713;border:2px solid #2d1b4e;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #2d1b4e">
+      <div style="width:20px;background:#0c0817"></div>
+      <div style="flex:1;background:#0d0819;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#17102a;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#b06cff;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#ece3f7">Neo luxe violet</div>
+  </div>
+  <div onclick="setTheme('gold')" class="theme-card" data-theme="gold" style="background:#0a0908;border:2px solid #2c2619;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #2c2619">
+      <div style="width:20px;background:#0b0a07"></div>
+      <div style="flex:1;background:#0b0a08;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#17140f;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#d9b74a;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#f1ead9">Midnight gold</div>
   </div>
 </div>
 </div>
