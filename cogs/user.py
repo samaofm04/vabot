@@ -37,7 +37,7 @@ _MENU_BTN_FEATURE = {
 
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
 # Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
-_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay"}
+_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay", "cmenu:tuto"}
 
 
 def _ch_handle_va(name) -> str:
@@ -206,10 +206,13 @@ def _build_menu_embed(identity, guild=None):
         "Un souci ? Explique-le, un manager/boss vient t'aider")
     add("cmenu:pay", None, "💸 Mon paiement",
         "Ton moyen pour recevoir l'argent (crypto ou TapTap)")
+    add("cmenu:tuto", None, "❓ Comprends rien ?",
+        "Une vidéo qui explique comment tout marche")
     if identity and not threads:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
 USERS_FILE = DATA_DIR / "users.json"
+TUTO_VIDEO_FILE = DATA_DIR / "tutoriel.mp4"  # vidéo explicative (bouton "Comprends rien ?")
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 # Config demandes de lien. Nouveau format PAR SERVEUR : {"<guild_id>": {channel_id, role_id}}.
 # Rétro-compat : ancien format global {channel_id, role_id} encore lu en fallback.
@@ -2273,6 +2276,54 @@ class UserCog(commands.Cog):
             body += f"\n… +{len(lines) - len(out)} autre(s) (trop pour un message)"
         await interaction.response.send_message(body, ephemeral=True)
 
+    async def _send_tutoriel(self, interaction):
+        """Bouton 'Comprends rien ?' : envoie la vidéo explicative (data/tutoriel.mp4)
+        en privé au VA (ré-upload natif -> lecture inline)."""
+        if not TUTO_VIDEO_FILE.exists():
+            await interaction.response.send_message(
+                "📹 La vidéo explicative n'est pas encore disponible — un admin doit la "
+                "définir avec `/settutoriel`. Reviens bientôt !", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await interaction.followup.send(
+                content="🎬 **Comment ça marche — la vidéo qui explique tout :**\n"
+                        "Regarde ça tranquillement, tu vas tout comprendre ! 👇",
+                file=discord.File(str(TUTO_VIDEO_FILE), filename="tutoriel.mp4"),
+                ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(
+                f"⚠️ Impossible d'envoyer la vidéo ({e}). Préviens un admin.", ephemeral=True)
+
+    @app_commands.command(
+        name="settutoriel",
+        description="[ADMIN] Définit la vidéo explicative montrée par le bouton « Comprends rien ? »",
+    )
+    @app_commands.describe(video="La vidéo explicative (mp4/mov). Elle remplace l'ancienne.")
+    async def settutoriel(self, interaction: discord.Interaction, video: discord.Attachment):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        ct = (video.content_type or "").lower()
+        if "video" not in ct and not video.filename.lower().endswith((".mp4", ".mov", ".webm", ".m4v")):
+            await interaction.response.send_message(
+                "❌ Envoie un fichier **vidéo** (.mp4, .mov…).", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            TUTO_VIDEO_FILE.parent.mkdir(parents=True, exist_ok=True)
+            await video.save(str(TUTO_VIDEO_FILE))
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur de sauvegarde : {e}", ephemeral=True)
+            return
+        _mo = video.size / (1024 * 1024)
+        await interaction.followup.send(
+            f"✅ Vidéo explicative enregistrée (**{_mo:.1f} Mo**). "
+            "Le bouton **« Comprends rien ? »** la montrera aux VA.\n"
+            "⚠️ Si elle est trop lourde pour Discord (~25 Mo sans boost), l'envoi aux VA "
+            "peut échouer — garde-la légère.",
+            ephemeral=True)
+
     @app_commands.command(
         name="marquerliens",
         description="[ADMIN] Ajoute/retire le 🔗 (a un lien) sur les salons VA, sans toucher au rond d'activite",
@@ -3522,6 +3573,10 @@ class ContentMenuView(discord.ui.View):
     async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AssistanceModal(self.cog))
 
+    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu:tuto", row=2)
+    async def b_tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_tutoriel(interaction)
+
     @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=3)
     async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _menu_feature_check(interaction, "onboarding"):
@@ -3626,6 +3681,10 @@ class CentralMenuView(discord.ui.View):
         )
         await interaction.response.send_message(
             embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
+
+    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu2:tuto", row=2)
+    async def b_tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_tutoriel(interaction)
 
 
 class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
