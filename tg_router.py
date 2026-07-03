@@ -308,14 +308,26 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
 # ── Cœur du routage ─────────────────────────────────────────────────────────
 def _handle_update(cfg: dict, upd: dict):
-    msg = upd.get("message") or {}
+    edited = "edited_message" in upd
+    msg = upd.get("message") or upd.get("edited_message") or {}
     if not msg:
         return
     chat_id = (msg.get("chat") or {}).get("id")
     text = (msg.get("text") or "").strip()
 
     if text.startswith("/"):
-        _handle_command(cfg, msg, text)
+        if not edited:
+            _handle_command(cfg, msg, text)
+        return
+
+    # Message ÉDITÉ : si c'est une veille connue, on met juste à jour sa légende
+    if edited and _is_video_msg(msg):
+        v = _VEILLES.get((chat_id, msg.get("message_id")))
+        if v and not v.get("routed"):
+            v["caption"] = (msg.get("caption") or "").strip()
+            _update_pending_caption(cfg, v)
+            _cache_save()
+            _trace(f"veille éditée -> légende mise à jour ({v.get('model')})")
         return
 
     src = cfg["sources"].get(str(chat_id))
@@ -450,7 +462,7 @@ def _poll_loop():
         try:
             res = _api("getUpdates", {
                 "offset": offset + 1, "timeout": 50,
-                "allowed_updates": ["message"],
+                "allowed_updates": ["message", "edited_message"],
             }, timeout=60)
             if not res.get("ok"):
                 STATUS["error"] = res.get("description", "?")
