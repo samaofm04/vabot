@@ -3654,6 +3654,10 @@ window.upClearPrefill = function(utab){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
+    <button class="item" id="tab-facture" onclick="showTab('finances','facture','Facture','Compta mensuelle : revenus, dépenses, part lead')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+      Facture
+    </button>
     <button class="item" id="tab-depenses" onclick="showTab('finances','depenses','Dépenses','Suivi des couts')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Dépenses
@@ -4242,6 +4246,10 @@ document.addEventListener('keydown', function(e){
 </div>
 
 <!-- BUSINESS - DÉPENSES -->
+<div class="form-section" id="form-facture" style="display:none">
+{facture_html}
+</div>
+
 <div class="form-section" id="form-depenses" style="display:none">
 {depenses_html}
 </div>
@@ -20327,6 +20335,15 @@ def _render_videocrea_html() -> str:
         return f"<div style='padding:24px;color:#f99'>Module « Création de vidéos » indisponible : {type(e).__name__}: {e}</div>"
 
 
+def _render_facture_html() -> str:
+    """Page Facture (compta mensuelle OFM). Isolé dans facture_web.py."""
+    try:
+        import facture_web
+        return facture_web.render_page()
+    except Exception as e:
+        return f"<div style='padding:24px;color:#f99'>Module « Facture » indisponible : {type(e).__name__}: {e}</div>"
+
+
 def _render_chatplanning_html() -> str:
     """Emploi du temps chatteurs - tableau Excel-style multi-EDT multi-semaines."""
     try:
@@ -25894,6 +25911,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
+        .replace("{facture_html}", _g("facture", _render_facture_html))
         .replace("{depenses_html}", _g("depenses", _render_depenses_html))
         .replace("{paievas_html}", _g("paievas", _render_paievas_html))
         .replace("{biolinks_html}", _g("biolinks", _render_biolinks_html))
@@ -31985,6 +32003,13 @@ def create_app():
         noctus_web.register(app, is_auth, _error, _success)
     except Exception as _nx_e:
         log.error(f"noctus_web register échoué: {_nx_e}")
+
+    # Page « Facture » : compta mensuelle OFM (facture_web.py)
+    try:
+        import facture_web
+        facture_web.register(app, is_auth)
+    except Exception as _fx_e:
+        log.error(f"facture_web register échoué: {_fx_e}")
 
     return app
 
