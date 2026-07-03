@@ -3443,7 +3443,7 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
-    <button class="item" id="tab-textpool" onclick="showTab('cloud','textpool','Bibliothèque texte','Pool de Names, Usernames, Bios, CTAs')">
+    <button class="item" id="tab-textpool" onclick="showTab('cloud','textpool','Bibliothèque texte','Bios générées par IA + CTAs')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
       Bibliothèque texte
     </button>
@@ -4177,7 +4177,9 @@ document.addEventListener('keydown', function(e){
 
 <!-- HOME -->
 <div class="form-section" id="form-home">
+<div id="home-dash-wrap">
 {home_dashboard_html}
+</div>
 </div>
 
 <!-- VA LIST -->
@@ -9739,6 +9741,200 @@ document.addEventListener('DOMContentLoaded', initReelSlots);
 window.initReelSlots = initReelSlots;
 
 // === BULK REEL UPLOAD ===
+// === PANNEAU DE TÂCHES façon Infloww : cartes flottantes avec progression,
+//     X = passe en arrière-plan (la tâche continue), pill de rappel en bas. ===
+window.vaTask = (function(){
+  var css = document.createElement('style');
+  css.textContent = '#vatasks{position:fixed;top:66px;right:22px;width:360px;max-width:calc(100vw - 40px);z-index:9997;display:flex;flex-direction:column;gap:10px;pointer-events:none}' +
+    '.vatask{pointer-events:auto;background:#15171e;border:1px solid #2a2d38;border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 12px 32px rgba(0,0,0,.5);animation:toastIn .3s cubic-bezier(.16,1,.3,1)}' +
+    'body.light .vatask{background:#fff;border-color:#e5e7eb;box-shadow:0 12px 32px rgba(0,0,0,.12)}' +
+    '.vatask .vt-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:#23262f;flex-shrink:0;display:flex;align-items:center;justify-content:center}' +
+    '.vatask .vt-body{flex:1;min-width:0}' +
+    '.vatask .vt-title{font-size:13px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    'body.light .vatask .vt-title{color:#111827}' +
+    '.vatask .vt-bar{height:6px;background:#23262f;border-radius:4px;overflow:hidden;margin-top:7px;position:relative}' +
+    'body.light .vatask .vt-bar{background:#e5e7eb}' +
+    '.vatask .vt-fill{height:100%;background:#3b82f6;border-radius:4px;width:0%;transition:width .25s ease}' +
+    '.vatask .vt-fill.ind{position:absolute;width:38%;animation:vtSlide 1.15s ease-in-out infinite}' +
+    '@keyframes vtSlide{0%{left:-38%}100%{left:100%}}' +
+    '.vatask .vt-sub{font-size:11px;color:#8a90a3;margin-top:5px}' +
+    '.vatask .vt-x{background:none;border:0;color:#666;cursor:pointer;font-size:17px;line-height:1;padding:4px;margin:0;flex-shrink:0}' +
+    '.vatask .vt-x:hover{color:#fff}' +
+    'body.light .vatask .vt-x:hover{color:#111}' +
+    '#vatasks-pill{position:fixed;bottom:22px;right:22px;z-index:9997;background:#1c1f27;border:1px solid #2f3340;color:#cfd3e0;border-radius:999px;padding:10px 18px;font-size:12.5px;font-weight:700;cursor:pointer;display:none;box-shadow:0 8px 24px rgba(0,0,0,.4);align-items:center;gap:8px}' +
+    'body.light #vatasks-pill{background:#fff;border-color:#e5e7eb;color:#374151}' +
+    '.vt-btnspin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite;vertical-align:-2px}';
+  document.head.appendChild(css);
+  var tasks = {}; // id -> {el, hidden, done}
+  function wrapEl(){
+    var w = document.getElementById('vatasks');
+    if(!w){ w = document.createElement('div'); w.id = 'vatasks'; document.body.appendChild(w); }
+    return w;
+  }
+  function pillEl(){
+    var p = document.getElementById('vatasks-pill');
+    if(!p){
+      p = document.createElement('button');
+      p.id = 'vatasks-pill';
+      p.addEventListener('click', function(){
+        Object.keys(tasks).forEach(function(id){
+          tasks[id].hidden = false;
+          if(tasks[id].el) tasks[id].el.style.display = 'flex';
+        });
+        updPill();
+      });
+      document.body.appendChild(p);
+    }
+    return p;
+  }
+  function updPill(){
+    var n = 0;
+    Object.keys(tasks).forEach(function(id){ if(tasks[id].hidden && !tasks[id].done) n++; });
+    var p = pillEl();
+    if(n > 0){ p.style.display = 'flex'; p.innerHTML = '<span class="vt-btnspin" style="border-top-color:#3b82f6;border-color:rgba(59,130,246,.25)"></span> ' + n + ' tâche(s) en arrière-plan'; }
+    else p.style.display = 'none';
+  }
+  function add(id, opts){
+    opts = opts || {};
+    remove(id);
+    var el = document.createElement('div');
+    el.className = 'vatask';
+    var thumb = opts.thumb
+      ? '<img class="vt-thumb" src="' + opts.thumb + '" alt="">'
+      : '<div class="vt-thumb">' + (opts.icon || '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8a90a3" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>') + '</div>';
+    el.innerHTML = thumb +
+      '<div class="vt-body"><div class="vt-title"></div>' +
+      '<div class="vt-bar"><div class="vt-fill' + (opts.indeterminate ? ' ind' : '') + '"></div></div>' +
+      '<div class="vt-sub"></div></div>' +
+      '<button class="vt-x" title="Continuer en arrière-plan">×</button>';
+    el.querySelector('.vt-title').textContent = opts.title || 'Tâche';
+    el.querySelector('.vt-sub').textContent = opts.sub || (opts.indeterminate ? 'En cours…' : '0%');
+    el.querySelector('.vt-x').addEventListener('click', function(){
+      el.style.display = 'none';
+      if(tasks[id]) tasks[id].hidden = true;
+      updPill();
+    });
+    wrapEl().appendChild(el);
+    tasks[id] = {el: el, hidden: false, done: false};
+  }
+  function progress(id, frac, sub){
+    var t = tasks[id]; if(!t || !t.el) return;
+    var f = t.el.querySelector('.vt-fill');
+    f.classList.remove('ind');
+    var pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+    f.style.width = pct + '%';
+    t.el.querySelector('.vt-sub').textContent = (sub ? sub + ' · ' : '') + pct + '%';
+  }
+  function done(id, msg){
+    var t = tasks[id]; if(!t) return;
+    t.done = true;
+    if(t.el){
+      var f = t.el.querySelector('.vt-fill');
+      f.classList.remove('ind'); f.style.width = '100%'; f.style.background = '#22c55e';
+      t.el.querySelector('.vt-sub').textContent = 'Terminé';
+      (function(el){ setTimeout(function(){ el.classList.add('exit'); setTimeout(function(){ el.remove(); }, 300); }, 900); })(t.el);
+    }
+    delete tasks[id];
+    updPill();
+    if(msg && typeof showToast === 'function') showToast(msg, 'success');
+  }
+  function error(id, msg){
+    var t = tasks[id]; if(!t) return;
+    if(t.el){
+      t.el.style.display = 'flex';
+      t.hidden = false;
+      var f = t.el.querySelector('.vt-fill');
+      f.classList.remove('ind'); f.style.width = '100%'; f.style.background = '#ef4444';
+      t.el.querySelector('.vt-sub').textContent = msg || 'Erreur';
+      (function(el){ setTimeout(function(){ el.remove(); }, 6000); })(t.el);
+    }
+    delete tasks[id];
+    updPill();
+    if(msg && typeof showToast === 'function') showToast(msg, 'error');
+  }
+  function remove(id){
+    var t = tasks[id];
+    if(t && t.el) t.el.remove();
+    delete tasks[id];
+    updPill();
+  }
+  return {add: add, progress: progress, done: done, error: error, remove: remove};
+})();
+// Upload XHR avec progression réelle (fetch ne donne pas upload.onprogress)
+window.vaXhrUpload = function(url, fd, onProg){
+  return new Promise(function(resolve, reject){
+    var x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.upload.onprogress = function(e){
+      if(e.lengthComputable && onProg) onProg(e.loaded / e.total);
+    };
+    x.onload = function(){ resolve({ok: x.status >= 200 && x.status < 400, status: x.status}); };
+    x.onerror = function(){ reject(new Error('network')); };
+    x.send(fd);
+  });
+};
+// Tooltip des points du chart SVG "Ventes par jour"
+document.addEventListener('mouseover', function(e){
+  var d = e.target.closest ? e.target.closest('.hsc-dot') : null;
+  if(!d) return;
+  var tip = document.getElementById('hsc-tip');
+  if(!tip){
+    tip = document.createElement('div');
+    tip.id = 'hsc-tip';
+    tip.style.cssText = 'position:fixed;z-index:9999;background:rgba(20,22,30,.96);border:1px solid #2f3340;color:#fff;font-size:12px;padding:8px 12px;border-radius:8px;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.45);white-space:pre-line';
+    document.body.appendChild(tip);
+  }
+  tip.textContent = d.getAttribute('data-tip') || '';
+  var r = d.getBoundingClientRect();
+  tip.style.display = 'block';
+  tip.style.left = Math.min(window.innerWidth - 160, r.left + 12) + 'px';
+  tip.style.top = (r.top - 48) + 'px';
+});
+document.addEventListener('mouseout', function(e){
+  if(e.target.closest && e.target.closest('.hsc-dot')){
+    var tip = document.getElementById('hsc-tip');
+    if(tip) tip.style.display = 'none';
+  }
+});
+// === Dashboard home : switch de période en AJAX (zéro rechargement = zéro freeze) ===
+document.addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('.home-period-btn') : null;
+  if(!a) return;
+  e.preventDefault();
+  var m = (a.getAttribute('href') || '').match(/home_period=([a-z]+)/);
+  var p = m ? m[1] : 'week';
+  var wrap = document.getElementById('home-dash-wrap');
+  if(!wrap) return;
+  wrap.style.opacity = '.45';
+  wrap.style.pointerEvents = 'none';
+  fetch('/home/overview?home_period=' + p)
+    .then(function(r){ return r.text(); })
+    .then(function(html){
+      wrap.innerHTML = html;
+      wrap.style.opacity = '1';
+      wrap.style.pointerEvents = '';
+      try { history.replaceState(null, '', '?tab=home&home_period=' + p); } catch(e2){}
+    })
+    .catch(function(){
+      wrap.style.opacity = '1';
+      wrap.style.pointerEvents = '';
+    });
+});
+// Pré-chauffe les autres périodes en arrière-plan -> les clics suivants sont instantanés
+setTimeout(function(){
+  if(!document.getElementById('home-dash-wrap')) return;
+  var periods = ['today', 'yesterday', 'month'];
+  var i = 0;
+  function warm(){
+    if(i >= periods.length) return;
+    var p = periods[i]; i++;
+    fetch('/home/overview?home_period=' + p)
+      .then(function(){ setTimeout(warm, 2500); })
+      .catch(function(){ setTimeout(warm, 2500); });
+  }
+  warm();
+}, 4000);
+
 async function pushAllReels(form){
   const slots = Array.from(form.querySelectorAll('#reel-slots-container .reel-slot'));
   if(!slots.length) return;
@@ -9752,10 +9948,9 @@ async function pushAllReels(form){
       return;
     }
   }
-  const submitBtn = form.querySelector('.up-submit');
-  let done = 0, errs = 0;
-  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = '⬆ Upload 0 / ' + slots.length + '...'; }
-  async function pushOne(slot, idx){
+  // === SNAPSHOT immédiat de tous les slots -> on peut retourner sur la galerie
+  //     tout de suite, uploader en arrière-plan, et re-spammer un autre batch. ===
+  const jobs = slots.map(function(slot){
     const fd = new FormData();
     fd.append('identity', identity);
     const cleanInput = slot.querySelector('input[data-name=video]');
@@ -9766,44 +9961,56 @@ async function pushAllReels(form){
     if(exampleInput && exampleInput.files[0]) fd.append('example', exampleInput.files[0], exampleInput.files[0].name);
     if(captionT) fd.append('caption', captionT.value || '');
     if(descT) fd.append('description', descT.value || '');
-    const status = slot.querySelector('.reel-slot-status');
-    if(status){ status.className = 'reel-slot-status uploading'; status.textContent = '⏳ Upload en cours...'; }
+    return fd;
+  });
+  // Reset du form (prêt pour un nouveau batch pendant que ça upload)
+  slots.forEach(function(s, i){
+    if(i > 0){ s.remove(); return; }
+    s.querySelectorAll('input[type=file]').forEach(function(x){ x.value = ''; });
+    s.querySelectorAll('textarea').forEach(function(x){ x.value = ''; });
+    var st = s.querySelector('.reel-slot-status');
+    if(st){ st.className = 'reel-slot-status'; st.textContent = ''; }
+  });
+  // Carte de progression façon Infloww (X = continue en arrière-plan)
+  const taskId = 'reels-' + Date.now();
+  const fileProg = {};
+  let done = 0, errs = 0;
+  vaTask.add(taskId, {title: 'Upload de ' + jobs.length + ' reel(s) → ' + identity,
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>'});
+  function updAgg(){
+    let sum = 0;
+    for(let i = 0; i < jobs.length; i++) sum += (fileProg[i] || 0);
+    vaTask.progress(taskId, sum / jobs.length, (done + errs) + '/' + jobs.length + ' reels');
+  }
+  // Retour DIRECT sur la galerie Reels (l'upload continue en haut à droite)
+  var reelsTabBtn = document.querySelector('.sidebar button[onclick*=cloudreels]');
+  if(reelsTabBtn) reelsTabBtn.click();
+  async function pushOne(fd, idx){
     try {
-      const r = await fetch(form.action, {method:'POST', body:fd, credentials:'same-origin'});
-      if(r.ok){
-        done++;
-        if(status){ status.className = 'reel-slot-status ok'; status.textContent = '✓ Upload OK'; }
-      } else {
-        errs++;
-        if(status){ status.className = 'reel-slot-status err'; status.textContent = '✗ Erreur ' + r.status; }
-      }
+      const r = await vaXhrUpload(form.action, fd, function(f){ fileProg[idx] = f; updAgg(); });
+      fileProg[idx] = 1;
+      if(r.ok) done++; else errs++;
     } catch(e){
-      errs++;
-      if(status){ status.className = 'reel-slot-status err'; status.textContent = '✗ Erreur réseau'; }
+      errs++; fileProg[idx] = 1;
     }
-    if(submitBtn) submitBtn.textContent = '⬆ Upload ' + (done+errs) + ' / ' + slots.length + '...';
+    updAgg();
   }
   // Push 2 reels en parallele max (videos lourdes)
   const CONCURRENCY = 2;
-  for(let i = 0; i < slots.length; i += CONCURRENCY){
-    await Promise.all(slots.slice(i, i + CONCURRENCY).map((s, j)=>pushOne(s, i+j)));
+  for(let i = 0; i < jobs.length; i += CONCURRENCY){
+    await Promise.all(jobs.slice(i, i + CONCURRENCY).map((fd, j)=>pushOne(fd, i+j)));
   }
-  if(submitBtn){
-    submitBtn.disabled = false;
-    submitBtn.textContent = '✅ ' + done + ' reel(s) OK' + (errs?' · '+errs+' erreur(s)':'');
-    submitBtn.style.background = errs ? 'linear-gradient(135deg,#22c55e,#ef4444)' : 'linear-gradient(135deg,#22c55e,#16a34a)';
-  }
-  setTimeout(()=>{
-    if(submitBtn){
-      submitBtn.textContent = '⬆ Uploader tous les reels';
-      submitBtn.style.background = '';
-    }
-  }, 3500);
-  // Refresh auto : on retourne direct sur la galerie REELS de l'identité (pas le Dashboard)
+  if(errs > 0){ vaTask.error(taskId, errs + ' erreur(s) sur ' + jobs.length + ' reels'); }
+  else { vaTask.done(taskId, '✓ ' + done + ' reel(s) uploadé(s) → ' + identity); }
+  // Si l'utilisateur est TOUJOURS sur la galerie reels -> refresh pour voir les nouveaux.
+  // S'il bosse ailleurs, on ne le dérange pas (le toast suffit).
   if(done > 0){
-    setTimeout(function(){
-      window.location.href = '?tab=cloudreels&cloud_videos_ident=' + encodeURIComponent(identity);
-    }, 1000);
+    var curTab = new URLSearchParams(window.location.search).get('tab');
+    if(curTab === 'cloudreels'){
+      setTimeout(function(){
+        window.location.href = '?tab=cloudreels&cloud_videos_ident=' + encodeURIComponent(identity);
+      }, 900);
+    }
   }
 }
 
@@ -9818,12 +10025,11 @@ document.addEventListener('submit', function(e){
     return;
   }
   const mainInput = form.querySelector('.up-file-main');
-  if(!mainInput || !mainInput.files || mainInput.files.length <= 1) return; // <=1 file : laisse le submit natif
+  if(!mainInput || !mainInput.files || mainInput.files.length < 1) return; // 0 fichier : submit natif (validation serveur)
   e.preventDefault();
   const files = Array.from(mainInput.files);
   const exampleInput = form.querySelector('.up-file-example');
   const exampleFile = exampleInput && exampleInput.files.length ? exampleInput.files[0] : null;
-  const submitBtn = form.querySelector('.up-submit');
   const baseData = new FormData(form);
   // Conserve les champs non-fichier
   const nonFileFields = {};
@@ -9831,8 +10037,37 @@ document.addEventListener('submit', function(e){
     if(!(v instanceof File)) nonFileFields[k] = v;
   });
   let done = 0, errs = 0;
-  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = '⬆ Upload 0 / ' + files.length + '...'; }
   const fileFieldName = mainInput.getAttribute('name');
+  const _gmap = {
+    reel: ['cloudreels','cloud_videos_ident'],
+    post: ['cloudposts','cloud_posts_ident'],
+    story: ['cloudstories','cloud_stories_ident'],
+    storycta: ['cloudstoryctas','cloud_storyctas_ident'],
+    pp: ['cloudpps', null]
+  };
+  const _g = _gmap[form.dataset.utype];
+  const _ident = nonFileFields['identity'] || '';
+  const typeLbl = {reel:'reel(s)', post:'post(s)', story:'story(s)', storycta:'story CTA', pp:'photo(s) de profil'}[form.dataset.utype] || 'fichier(s)';
+  // Carte de progression façon Infloww, avec miniature du 1er fichier image
+  const taskId = 'up-' + Date.now();
+  let thumbUrl = null;
+  try { if(files[0] && files[0].type && files[0].type.indexOf('image/') === 0) thumbUrl = URL.createObjectURL(files[0]); } catch(e2){}
+  vaTask.add(taskId, {title: 'Upload de ' + files.length + ' ' + typeLbl + (_ident ? ' → ' + _ident : ''), thumb: thumbUrl});
+  const fileProg = {};
+  function updAgg(){
+    let sum = 0;
+    for(let i = 0; i < files.length; i++) sum += (fileProg[i] || 0);
+    vaTask.progress(taskId, sum / files.length, (done + errs) + '/' + files.length);
+  }
+  // Le form est libéré tout de suite : on vide l'input (re-spam possible) et on
+  // retourne DIRECT sur la bonne galerie — l'upload continue en haut à droite.
+  mainInput.value = '';
+  if(exampleInput) exampleInput.value = '';
+  if(typeof _upRefreshTable === 'function'){ try { _upRefreshTable(mainInput); } catch(e3){} }
+  if(_g){
+    var tabBtn = document.querySelector('.sidebar button[onclick*=' + _g[0] + ']');
+    if(tabBtn) tabBtn.click();
+  }
   async function pushOne(file, idx){
     const fd = new FormData();
     Object.entries(nonFileFields).forEach(([k,v])=>fd.append(k, v));
@@ -9841,22 +10076,14 @@ document.addEventListener('submit', function(e){
     if(idx === 0 && exampleFile){
       fd.append('example', exampleFile, exampleFile.name);
     }
-    const pgEl = form.querySelector('.up-progress[data-idx="' + idx + '"]');
-    if(pgEl){ pgEl.textContent = '⏳'; pgEl.style.color = '#3b82f6'; }
     try {
-      const r = await fetch(form.action, {method:'POST', body:fd, credentials:'same-origin'});
-      if(r.ok){
-        done++;
-        if(pgEl){ pgEl.textContent = '✓'; pgEl.style.color = '#22c55e'; }
-      } else {
-        errs++;
-        if(pgEl){ pgEl.textContent = '✗ ' + r.status; pgEl.style.color = '#ef4444'; }
-      }
+      const r = await vaXhrUpload(form.action, fd, function(f){ fileProg[idx] = f; updAgg(); });
+      fileProg[idx] = 1;
+      if(r.ok) done++; else errs++;
     } catch(e){
-      errs++;
-      if(pgEl){ pgEl.textContent = '✗'; pgEl.style.color = '#ef4444'; }
+      errs++; fileProg[idx] = 1;
     }
-    if(submitBtn) submitBtn.textContent = '⬆ Upload ' + (done+errs) + ' / ' + files.length + '...';
+    updAgg();
   }
   // Push 3 en parallele max
   (async function(){
@@ -9864,33 +10091,17 @@ document.addEventListener('submit', function(e){
     for(let i = 0; i < files.length; i += CONCURRENCY){
       await Promise.all(files.slice(i, i + CONCURRENCY).map((f, j)=>pushOne(f, i+j)));
     }
-    if(submitBtn){
-      submitBtn.disabled = false;
-      submitBtn.textContent = '✅ ' + done + ' upload(s) OK' + (errs?' · '+errs+' erreur(s)':'');
-      submitBtn.style.background = errs ? 'linear-gradient(135deg,#22c55e,#ef4444)' : 'linear-gradient(135deg,#22c55e,#16a34a)';
-    }
-    setTimeout(function(){
-      if(submitBtn){
-        submitBtn.textContent = '⬆ Uploader';
-        submitBtn.style.background = '';
+    if(thumbUrl){ try { URL.revokeObjectURL(thumbUrl); } catch(e4){} }
+    if(errs > 0){ vaTask.error(taskId, errs + ' erreur(s) sur ' + files.length + ' upload(s)'); }
+    else { vaTask.done(taskId, '✓ ' + done + ' ' + typeLbl + ' uploadé(s)' + (_ident ? ' → ' + _ident : '')); }
+    // Refresh la galerie SEULEMENT si l'utilisateur y est encore (sinon on ne dérange pas)
+    if(done > 0 && _g){
+      var curTab = new URLSearchParams(window.location.search).get('tab');
+      if(curTab === _g[0]){
+        setTimeout(function(){
+          window.location.href = '?tab=' + _g[0] + (_g[1] && _ident ? '&' + _g[1] + '=' + encodeURIComponent(_ident) : '');
+        }, 900);
       }
-      mainInput.value = '';
-      _upRefreshTable(mainInput);
-    }, 2500);
-    // Refresh auto : on retourne direct sur la galerie du bon type (pas le Dashboard)
-    if(done > 0){
-      var _gmap = {
-        reel: ['cloudreels','cloud_videos_ident'],
-        post: ['cloudposts','cloud_posts_ident'],
-        story: ['cloudstories','cloud_stories_ident'],
-        storycta: ['cloudstoryctas','cloud_storyctas_ident']
-      };
-      var _g = _gmap[form.dataset.utype];
-      var _id = nonFileFields['identity'] || '';
-      setTimeout(function(){
-        if(_g){ window.location.href = '?tab=' + _g[0] + '&' + _g[1] + '=' + encodeURIComponent(_id); }
-        else { window.location.reload(); }
-      }, 1100);
     }
   })();
 }, true);
@@ -10309,6 +10520,15 @@ function igPollStatus(){
         stillPending++;
       }
     });
+    // Carte agrégée "scrape all" : X/N comptes
+    if(window.__igAllTotal){
+      var doneN = window.__igAllTotal - stillPending;
+      vaTask.progress('igall', doneN / window.__igAllTotal, doneN + '/' + window.__igAllTotal + ' comptes');
+      if(stillPending === 0){
+        vaTask.done('igall', '✓ Scrape terminé (' + window.__igAllTotal + ' comptes)');
+        window.__igAllTotal = 0;
+      }
+    }
     if(stillPending === 0){
       igStopPolling();
     }
@@ -10316,6 +10536,10 @@ function igPollStatus(){
 }
 function igUpdateCard(it){
   var u = it.username;
+  // Ferme la carte de tâche + son timer de progression estimée
+  var pend = window.__igScraping[u];
+  if(pend && pend.timer) clearInterval(pend.timer);
+  vaTask.done('ig-' + u);
   // Cherche la card par data-insta-user
   var card = document.querySelector('.cloud-card[data-insta-user="' + u.replace(/"/g, '') + '"]');
   if(!card) return;
@@ -10354,7 +10578,7 @@ function igAddPlaceholderCard(u){
     + '<div style="display:flex;align-items:center;gap:12px">'
     +   '<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px">' + u.charAt(0).toUpperCase() + '</div>'
     +   '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px;color:#fff">@' + u + '</div>'
-    +   '<div style="font-size:11px;color:#3b82f6">⏳ Scrape en cours…</div></div>'
+    +   '<div style="font-size:11px;color:#3b82f6;display:flex;align-items:center;gap:6px"><span class="vt-btnspin" style="border-top-color:#3b82f6;border-color:rgba(59,130,246,.25);width:11px;height:11px"></span> Scrape en cours…</div></div>'
     + '</div>'
     + '<div style="display:flex;gap:14px;font-size:12px;color:#aaa;border-top:1px solid #2a2a2a;padding-top:10px">'
     +   '<div class="ig-followers"><b style="color:#fff">…</b> followers</div>'
@@ -10362,7 +10586,7 @@ function igAddPlaceholderCard(u){
     + '</div>'
     + '<div class="ig-scraped-at" style="font-size:11px;color:#666">En cours de chargement</div>'
     + '<div style="display:flex;gap:6px;margin-top:auto">'
-    +   '<button type="button" disabled style="flex:1;padding:8px;background:#3b82f6;opacity:.5;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600">⏳ ...</button>'
+    +   '<button type="button" disabled style="flex:1;padding:8px;background:#3b82f6;opacity:.5;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600"><span class="vt-btnspin"></span></button>'
     + '</div>';
   grid.insertBefore(card, grid.firstChild);
 }
@@ -10421,7 +10645,7 @@ function igScrapeOne(btn){
   if(!u) return;
   btn.disabled = true;
   var orig = btn.innerHTML;
-  btn.innerHTML = '⏳ ...';
+  btn.innerHTML = '<span class="vt-btnspin"></span>';
   var fd = new FormData();
   fd.append('username', u);
   fetch('/insta/scrape', {method:'POST', body:fd})
@@ -10430,10 +10654,10 @@ function igScrapeOne(btn){
       btn.disabled = false;
       btn.innerHTML = orig;
       if(d && d.ok){
-        if(typeof showToast === 'function') showToast(d.message || ('@' + u + ' scrape en bg'), 'success');
-        // Spinner + polling pour update auto quand fini
+        // Carte de progression (pp du compte + %) + polling pour update auto quand fini
         window.__igScraping[u] = {startedAt: Date.now()};
         igAddSpinnerToCard(u);
+        igAddScrapeTask(u);
         igStartPolling();
       } else {
         if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
@@ -10444,6 +10668,20 @@ function igScrapeOne(btn){
       btn.innerHTML = orig;
       if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
     });
+}
+// Tâche façon Infloww pour un scrape : pp du compte + % estimé (~13s),
+// complétée pour de vrai quand le polling détecte la fin du scrape.
+function igAddScrapeTask(u){
+  var card = document.querySelector('.cloud-card[data-insta-user="' + u.replace(/"/g, '') + '"]');
+  var img = card ? card.querySelector('img') : null;
+  vaTask.add('ig-' + u, {title: 'Scrape @' + u, thumb: img ? img.src : null,
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'});
+  var t0 = Date.now();
+  var timer = setInterval(function(){
+    if(!window.__igScraping[u]){ clearInterval(timer); return; }
+    vaTask.progress('ig-' + u, Math.min(0.93, (Date.now() - t0) / 13000), '@' + u);
+  }, 400);
+  window.__igScraping[u].timer = timer;
 }
 function igRemoveOne(btn){
   var u = btn.getAttribute('data-username') || '';
@@ -10471,7 +10709,7 @@ function igRemoveOne(btn){
 }
 function igRebuildWatchlist(btn){
   if(!confirm('Recuperer tes comptes depuis le cache (ceux deja scrapes) ?')) return;
-  btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳ ...';
+  btn.disabled = true; var orig = btn.innerHTML; btn.innerHTML = '<span class="vt-btnspin"></span>';
   fetch('/insta/rebuild_watchlist', {method:'POST'})
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -10482,29 +10720,30 @@ function igRebuildWatchlist(btn){
 function igScrapeAll(btn){
   if(!confirm('Scraper tous les comptes ? ~10s par compte (en arriere-plan)')) return;
   btn.disabled = true;
-  var orig = btn.textContent;
-  btn.textContent = '⏳ ...';
+  var orig = btn.innerHTML;
+  btn.innerHTML = '<span class="vt-btnspin"></span>';
   fetch('/insta/scrape_all', {method:'POST'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       btn.disabled = false;
-      btn.textContent = orig;
+      btn.innerHTML = orig;
       if(d && d.ok){
-        // Affiche uniquement le game-loader (pas de toast en parallele)
-        if(typeof showGameLoader === 'function'){
-          showGameLoader(d.count || 1);
-        } else if(typeof showToast === 'function'){
-          showToast(d.message || 'Scrape global lance', 'success');
-        }
         // Spinner + polling sur toutes les cards existantes
         var now = Date.now();
+        var count = 0;
         document.querySelectorAll('.cloud-card[data-insta-user]').forEach(function(card){
           var u = card.getAttribute('data-insta-user');
           if(u){
             window.__igScraping[u] = {startedAt: now};
             igAddSpinnerToCard(u);
+            count++;
           }
         });
+        // Une seule carte de tâche agrégée : X/N comptes scrapés
+        window.__igAllTotal = count || d.count || 1;
+        vaTask.add('igall', {title: 'Scrape de ' + window.__igAllTotal + ' comptes Instagram',
+          icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/></svg>'});
+        vaTask.progress('igall', 0, '0/' + window.__igAllTotal + ' comptes');
         igStartPolling();
       } else {
         if(typeof showToast === 'function') showToast(d && d.error || 'Erreur', 'error');
@@ -10512,7 +10751,7 @@ function igScrapeAll(btn){
     })
     .catch(function(err){
       btn.disabled = false;
-      btn.textContent = orig;
+      btn.innerHTML = orig;
       if(typeof showToast === 'function') showToast('Erreur: ' + err, 'error');
     });
 }
@@ -12493,6 +12732,74 @@ def _render_depenses_html() -> str:
 
 
 @_arg_cached(seconds=60, key_args=("home_period",))
+def _home_sales_svg(labels, vals) -> str:
+    """Courbe 'Ventes par jour' en SVG PUR généré côté serveur.
+
+    Zéro dépendance (Chart.js pouvait être bloqué côté client -> carte vide),
+    rendu instantané, tooltip au survol des points via le handler global .hsc-dot.
+    """
+    W, H = 720.0, 240.0
+    ml, mr, mt, mb = 46.0, 14.0, 14.0, 30.0
+    iw, ih = W - ml - mr, H - mt - mb
+    n = len(vals)
+    vmax = max(vals) if vals else 0
+    if vmax <= 0:
+        vmax = 1.0
+    # Échelle Y "propre" (arrondie au palier supérieur)
+    step = 10 ** max(0, len(str(int(vmax))) - 1)
+    ymax = ((int(vmax) // step) + 1) * step
+    pts = []
+    for i, v in enumerate(vals):
+        x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
+        y = mt + ih - (ih * min(v, ymax) / ymax)
+        pts.append((x, y))
+    # Path lissé (Catmull-Rom -> Bézier)
+    if len(pts) > 1:
+        d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}"
+        for i in range(len(pts) - 1):
+            p0 = pts[max(0, i - 1)]
+            p1, p2 = pts[i], pts[i + 1]
+            p3 = pts[min(len(pts) - 1, i + 2)]
+            c1x, c1y = p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6
+            c2x, c2y = p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6
+            d += f" C{c1x:.1f},{c1y:.1f} {c2x:.1f},{c2y:.1f} {p2[0]:.1f},{p2[1]:.1f}"
+    else:
+        d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}" if pts else ""
+    area = d + f" L{pts[-1][0]:.1f},{mt + ih:.1f} L{pts[0][0]:.1f},{mt + ih:.1f} Z" if pts else ""
+    # Grille horizontale + labels €
+    grid = ""
+    for k in range(5):
+        gy = mt + ih * k / 4
+        gval = ymax * (4 - k) / 4
+        grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
+                 f"<text x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{gval:.0f}€</text>")
+    # Labels X
+    xlbls = ""
+    for i, lb in enumerate(labels):
+        x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
+        xlbls += f"<text x='{x:.1f}' y='{H - 8}' text-anchor='middle' font-size='10' fill='#888'>{lb}</text>"
+    # Points avec tooltip (data-tip lu par le handler global)
+    dots = ""
+    for (x, y), lb, v in zip(pts, labels, vals):
+        dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
+                 f"style='cursor:pointer' data-tip='{lb}\n{v:.2f} €'/>")
+    return (
+        "<div class='home-card' style='margin-top:18px'>"
+        "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Ventes par jour "
+        "<span style='font-size:11px;color:#888;font-weight:500'>7 derniers jours</span></div>"
+        f"<svg viewBox='0 0 {W:.0f} {H:.0f}' style='width:100%;height:auto;display:block' xmlns='http://www.w3.org/2000/svg'>"
+        "<defs><linearGradient id='hscg' x1='0' y1='0' x2='0' y2='1'>"
+        "<stop offset='0%' stop-color='#3b82f6' stop-opacity='.26'/>"
+        "<stop offset='100%' stop-color='#3b82f6' stop-opacity='0'/>"
+        "</linearGradient></defs>"
+        + grid
+        + (f"<path d='{area}' fill='url(#hscg)'/>" if area else "")
+        + (f"<path d='{d}' fill='none' stroke='#3b82f6' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/>" if d else "")
+        + dots + xlbls
+        + "</svg></div>"
+    )
+
+
 def _render_home_dashboard_html() -> str:
     """Dashboard global affiché à la racine — synthèse de TOUS les revenus.
 
@@ -12798,41 +13105,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         except Exception:
             pass
         if chart_labels:
-            import json as _json
-            sales_chart_html = (
-                "<div class='home-card' style='margin-top:18px'>"
-                "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Ventes par jour "
-                "<span style='font-size:11px;color:#888;font-weight:500'>7 derniers jours</span></div>"
-                "<div style='position:relative;height:260px'><canvas id='home-sales-chart'></canvas></div>"
-                "</div>"
-                "<script>"
-                "(function(){"
-                f"var L = {_json.dumps(chart_labels)};"
-                f"var V = {_json.dumps(chart_vals)};"
-                "function init(){"
-                "  if(typeof Chart === 'undefined'){ setTimeout(init, 120); return; }"
-                "  var el = document.getElementById('home-sales-chart');"
-                "  if(!el) return;"
-                "  if(window.__homeSalesChart){ try{ window.__homeSalesChart.destroy(); }catch(e){} }"
-                "  var ctx = el.getContext('2d');"
-                "  var grad = ctx.createLinearGradient(0, 0, 0, 260);"
-                "  grad.addColorStop(0, 'rgba(59,130,246,.28)'); grad.addColorStop(1, 'rgba(59,130,246,0)');"
-                "  window.__homeSalesChart = new Chart(el, {type:'line',"
-                "    data:{labels:L, datasets:[{data:V, borderColor:'#3b82f6', backgroundColor:grad, fill:true,"
-                "      tension:.35, borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#fff',"
-                "      pointBorderColor:'#3b82f6', pointBorderWidth:2, pointHoverRadius:6}]},"
-                "    options:{responsive:true, maintainAspectRatio:false,"
-                "      interaction:{intersect:false, mode:'index'},"
-                "      plugins:{legend:{display:false},"
-                "        tooltip:{backgroundColor:'rgba(20,22,30,.95)', padding:12, displayColors:false,"
-                "          callbacks:{label:function(c){ return c.parsed.y.toFixed(2) + ' \\u20ac'; }}}},"
-                "      scales:{y:{beginAtZero:true, grid:{color:'rgba(136,136,136,.12)'}, ticks:{color:'#888'}},"
-                "              x:{grid:{display:false}, ticks:{color:'#888'}}}}});"
-                "}"
-                "init();"
-                "})();"
-                "</script>"
-            )
+            sales_chart_html = _home_sales_svg(chart_labels, chart_vals)
 
     return (
         css
@@ -18042,7 +18315,7 @@ def _render_textpool_html() -> str:
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
         "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>📚 Bibliothèque texte</h2>"
-        "<p style='margin:0;color:#888;font-size:13px'>Pools de Names, Usernames, Bios, CTAs - prets a piocher pour les VAs.</p>"
+        "<p style='margin:0;color:#888;font-size:13px'>Bios (générées par IA selon la model) et CTAs - prêts à piocher pour les VAs. Names/usernames : gérés par le scraper API.</p>"
         "</div>"
         f"<div style='display:flex;gap:18px'>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#fff'>{total_all}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>TOTAL</div></div>"
@@ -18051,8 +18324,29 @@ def _render_textpool_html() -> str:
         "</div></div>"
     )
 
+    # Names/usernames retirés de l'UI : c'est le scraper API qui les gère.
+    # (les données restent dans text_pool.json, rien n'est supprimé)
+    ident_opts = ""
+    try:
+        for _i in sorted(_list_identities()):
+            ident_opts += f"<option value='{_i}'>{_i}</option>"
+    except Exception:
+        pass
+    ai_bios_html = (
+        "<div style='background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:12px;margin-bottom:10px'>"
+        "<div style='font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px'>✨ Générer par IA (selon la model et son âge)</div>"
+        "<div style='display:flex;gap:6px;margin-bottom:8px'>"
+        f"<select id='tp-ai-ident' style='flex:1;padding:8px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px'>{ident_opts}</select>"
+        "<input id='tp-ai-age' type='number' min='18' max='35' value='21' title='Âge de la model' "
+        "style='width:60px;padding:8px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px'>"
+        "<select id='tp-ai-count' title='Nombre de bios' style='width:60px;padding:8px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px'>"
+        "<option>6</option><option>10</option><option>15</option></select>"
+        "</div>"
+        "<button onclick='tpAiBios(this)' style='width:100%;background:#22c55e;color:#04241d;border:0;padding:9px;border-radius:7px;font-size:12.5px;font-weight:800;cursor:pointer'>✨ Générer les bios</button>"
+        "</div>"
+    )
     columns_html = ""
-    for cat in tp.CATEGORIES:
+    for cat in ("bios", "ctas"):
         meta = tp.CATEGORY_META[cat]
         cstats = s[cat]
         items = tp.list_entries(cat)
@@ -18113,8 +18407,10 @@ def _render_textpool_html() -> str:
             f'<button onclick=\'tpBulk("{cat}")\' '
             f"style='background:transparent;border:1px dashed #444;color:#888;padding:6px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;margin-bottom:10px'>"
             f"📋 Bulk paste (1 par ligne)</button>"
+            # Génération IA (bios uniquement)
+            + (ai_bios_html if cat == "bios" else "")
             # Items
-            f"<div class='tp-items' data-cat='{cat}' style='flex:1;overflow-y:auto;max-height:480px'>{items_html}</div>"
+            + f"<div class='tp-items' data-cat='{cat}' style='flex:1;overflow-y:auto;max-height:480px'>{items_html}</div>"
             f"</div>"
         )
 
@@ -18125,6 +18421,30 @@ def _render_textpool_html() -> str:
 
     js = """
 <script>
+async function tpAiBios(btn){
+  const ident = (document.getElementById('tp-ai-ident')||{}).value || '';
+  const age = (document.getElementById('tp-ai-age')||{}).value || '21';
+  const count = (document.getElementById('tp-ai-count')||{}).value || '6';
+  btn.disabled = true;
+  const o = btn.innerHTML;
+  btn.innerHTML = '<span class="vt-btnspin" style="border-top-color:#04241d;border-color:rgba(0,0,0,.2)"></span> Génération…';
+  const fd = new FormData();
+  fd.set('identity', ident); fd.set('age', age); fd.set('count', count);
+  try {
+    const r = await fetch('/textpool/ai_bios', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.ok){
+      if(typeof showToast==='function') showToast('✨ ' + j.added + ' bios générées pour ' + (ident||'la model'), 'success');
+      tpRefresh();
+    } else {
+      if(typeof showToast==='function') showToast(j.error || 'Erreur IA', 'error', 8000);
+    }
+  } catch(e){
+    if(typeof showToast==='function') showToast('Erreur réseau', 'error');
+  }
+  btn.disabled = false;
+  btn.innerHTML = o;
+}
 async function tpAdd(cat){
   const inp = document.getElementById('tp-input-'+cat);
   const text = (inp.value || '').trim();
@@ -27493,6 +27813,19 @@ def create_app():
             return _success(f"✅ Lien {verb}")
         return _error(f"❌ {res.get('error', 'Action échouée')}")
 
+    # ============ DASHBOARD HOME (fragment AJAX, switch de période fluide) ============
+
+    @app.route("/home/overview")
+    def home_overview():
+        """Fragment HTML du dashboard home — chargé en AJAX au clic sur une
+        période (plus de rechargement complet = plus de freeze)."""
+        if not is_auth():
+            return "", 401
+        try:
+            return _render_home_dashboard_html()
+        except Exception as e:
+            return f"<div style='color:#f87171;padding:20px'>Erreur : {e}</div>"
+
     # ============ PAIE VAS AUTO ============
 
     @app.route("/paievas/report")
@@ -28683,6 +29016,74 @@ def create_app():
         cat = (request.form.get("category") or "").strip()
         text = (request.form.get("text") or "").strip()
         return jsonify(tp.add_entry(cat, text))
+
+    @app.route("/textpool/ai_bios", methods=["POST"])
+    def textpool_ai_bios():
+        """Génère des bios Insta par IA (Claude) selon la model + son âge,
+        et les ajoute au pool 'bios'. Clé : ANTHROPIC_API_KEY dans le .env."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip()
+        age = (request.form.get("age") or "21").strip()
+        try:
+            count = max(1, min(15, int(request.form.get("count") or 6)))
+        except Exception:
+            count = 6
+        key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+        if not key:
+            for line in _read_env_lines():
+                if line.strip().startswith("ANTHROPIC_API_KEY="):
+                    key = line.strip().split("=", 1)[1].strip()
+                    break
+        if not key:
+            return jsonify({"ok": False, "error": "Clé IA manquante : ajoute ANTHROPIC_API_KEY=sk-ant-... dans le .env du VPS (console.anthropic.com)"})
+        prompt = (
+            f"Tu écris des bios Instagram pour le compte d'une créatrice/modèle.\n"
+            f"Identité : {identity or 'une jeune femme française'} — Âge : {age} ans.\n"
+            f"Génère exactement {count} bios DIFFÉRENTES, une par ligne, sans numérotation, sans tirets, sans guillemets.\n"
+            "Contraintes STRICTES :\n"
+            "- max 140 caractères chacune\n"
+            "- style fille jeune, française, naturelle (pas commercial)\n"
+            "- quelques emojis bien placés (🇫🇷 💌 ☀️ 🤍 …)\n"
+            "- varie les styles : mystérieuse, fun, directe, minimaliste\n"
+            "- mentionne l'âge dans certaines (ex: « 21 · Paris »)\n"
+            "- AUCUNE mention d'OnlyFans/MYM/lien, aucun mot risqué pour Instagram\n"
+            "Réponds UNIQUEMENT avec les bios, une par ligne."
+        )
+        try:
+            import requests as _rq
+            r = _rq.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": "claude-haiku-4-5", "max_tokens": 1200,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=60,
+            )
+            data = r.json()
+            if r.status_code != 200:
+                err = (data.get("error") or {}).get("message") or f"HTTP {r.status_code}"
+                return jsonify({"ok": False, "error": f"API Claude : {err}"})
+            text = "".join(b.get("text", "") for b in (data.get("content") or []))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Appel IA échoué : {e}"})
+        import text_pool as tp
+        added = 0
+        for line in text.splitlines():
+            line = line.strip().strip("\"'").lstrip("-•*0123456789. ").strip()
+            if not (5 <= len(line) <= 150):
+                continue
+            try:
+                if tp.add_entry("bios", line).get("ok"):
+                    added += 1
+            except Exception:
+                pass
+            if added >= count:
+                break
+        if not added:
+            return jsonify({"ok": False, "error": "L'IA n'a rien renvoyé d'utilisable, réessaie"})
+        return jsonify({"ok": True, "added": added})
 
     @app.route("/textpool/bulk_add", methods=["POST"])
     def textpool_bulk_add():
