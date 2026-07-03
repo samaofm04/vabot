@@ -281,14 +281,19 @@ def _handle_update(cfg: dict, upd: dict):
         _handle_command(cfg, msg, text)
         return
 
-    # Mémorise le dernier TEXTE long du sujet (description de veille probable)
+    # Mémorise le TEXTE du sujet (description de veille probable)
     tkey = (chat_id, msg.get("message_thread_id"))
-    if text and len(text) > 40:
+    if text and len(text) > 12:
         _LAST_TEXT[tkey] = (time.time(), text)
-        # texte qui arrive APRÈS une vidéo récente -> c'est SA description
-        lv = _LAST_VIDEO.get(tkey)
-        if lv and time.time() - lv[0] < 600:
-            _VIDEO_DESC[(chat_id, lv[1])] = text
+        # texte qui RÉPOND directement à une vidéo -> c'est SA description (sûr à 100%)
+        tref = _real_reply(msg)
+        if tref and _is_video_msg(tref):
+            _VIDEO_DESC[(chat_id, tref.get("message_id"))] = text
+        else:
+            # sinon : texte qui arrive APRÈS une vidéo récente -> SA description
+            lv = _LAST_VIDEO.get(tkey)
+            if lv and time.time() - lv[0] < 600:
+                _VIDEO_DESC[(chat_id, lv[1])] = text
         _cache_save()
         _trace(f"description mémorisée ({len(text)} car.) dans {tkey}")
     # Vidéo SANS vraie réponse = probablement une veille postée : on la mémorise
