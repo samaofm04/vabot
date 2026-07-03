@@ -201,6 +201,61 @@ def _veille_caption(v: dict) -> str:
     return "\n\n".join(parts)[:1020]
 
 
+def bound_models() -> dict:
+    """{model: {"chat_id": …, "thread": …}} depuis la config du routeur."""
+    cfg = _load()
+    out = {}
+    for cid, src in (cfg.get("sources") or {}).items():
+        if isinstance(src, str):
+            src = {"model": src, "thread": None}
+        m = src.get("model")
+        if m and m not in out:
+            try:
+                out[m] = {"chat_id": int(cid), "thread": src.get("thread")}
+            except Exception:
+                pass
+    return out
+
+
+def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str = "") -> dict:
+    """Envoie une veille (vidéo via file_id Telegram) dans le sujet IG CONTENT
+    de la modèle + l'enregistre : elle apparaît aussi « en attente » dans le
+    sujet de la modèle du groupe destination. Appelé par le SITE (bouton veille).
+    NB: le poller ne voit pas les messages du bot lui-même -> on enregistre ici."""
+    bm = bound_models().get((model or "").lower())
+    if not bm:
+        return {"ok": False, "error": f"« {model} » non branchée (/setmodel dans son groupe)"}
+    cfg = _load()
+    p = {"chat_id": bm["chat_id"], "video": tg_file_id, "supports_streaming": True}
+    if link:
+        p["caption"] = link[:1020]
+    if bm.get("thread"):
+        p["message_thread_id"] = bm["thread"]
+    res = _api("sendVideo", p)
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("description", "?")}
+    vid_msg = (res.get("result") or {}).get("message_id")
+    text_msg_id = None
+    if (desc or "").strip():
+        p2 = {"chat_id": bm["chat_id"], "text": desc.strip()[:4000],
+              "reply_to_message_id": vid_msg, "disable_web_page_preview": True}
+        if bm.get("thread"):
+            p2["message_thread_id"] = bm["thread"]
+        r2 = _api("sendMessage", p2)
+        if r2.get("ok"):
+            text_msg_id = (r2.get("result") or {}).get("message_id")
+    v = {"file_id": tg_file_id, "caption": (link or "").strip(),
+         "desc": (desc or "").strip() or None, "text_msg_id": text_msg_id,
+         "dest_msg_id": None, "model": model, "ts": time.time(), "routed": False}
+    _VEILLES[(bm["chat_id"], vid_msg)] = v
+    _LAST_VEILLE[(bm["chat_id"], bm.get("thread"))] = (time.time(), vid_msg)
+    if cfg.get("dest_chat_id"):
+        _post_pending(cfg, v, model)
+    _cache_save()
+    _trace(f"veille envoyée depuis le SITE -> {model}")
+    return {"ok": True}
+
+
 def _post_pending(cfg: dict, v: dict, model: str):
     """Poste la veille (vidéo + lien + description) dans le sujet de la modèle."""
     tid = _topic_for(cfg, model)

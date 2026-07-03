@@ -19207,6 +19207,56 @@ function veilleJumpToDate(day){
   var card = document.querySelector('.veille-card[data-day="' + day + '"]');
   if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
 }
+// ===== 📲 Chips « Envoyer aussi aux modèles » (routeur Telegram) =====
+function veilleModelsSelected(){
+  try { return JSON.parse(localStorage.getItem('vabot_veille_models') || '[]'); } catch(e){ return []; }
+}
+async function veilleInitModelChips(){
+  const btn = document.getElementById('veille-send-selected-btn');
+  if(!btn || document.getElementById('veille-model-chips')) return;
+  let models = [];
+  try {
+    const r = await fetch('/veille/models');
+    const j = await r.json();
+    models = (j.ok && j.models) || [];
+  } catch(e){}
+  if(!models.length) return;
+  let sel = veilleModelsSelected().filter(function(m){ return models.indexOf(m) !== -1; });
+  const bar = document.createElement('div');
+  bar.id = 'veille-model-chips';
+  bar.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;padding:8px 12px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.18);border-radius:10px';
+  const lbl = document.createElement('span');
+  lbl.textContent = '📲 Envoyer AUSSI dans IG CONTENT de :';
+  lbl.style.cssText = 'font-size:11.5px;color:#888;font-weight:700';
+  bar.appendChild(lbl);
+  models.forEach(function(m){
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.textContent = m;
+    function paint(){
+      const on = sel.indexOf(m) !== -1;
+      c.style.cssText = 'padding:5px 13px;border-radius:999px;font-size:11.5px;font-weight:700;cursor:pointer;margin:0;border:1px solid ' +
+        (on ? 'rgba(34,197,94,.6)' : '#333') + ';background:' + (on ? 'rgba(34,197,94,.16)' : 'transparent') +
+        ';color:' + (on ? '#4ade80' : '#888');
+    }
+    paint();
+    c.addEventListener('click', function(){
+      const i = sel.indexOf(m);
+      if(i === -1) sel.push(m); else sel.splice(i, 1);
+      try { localStorage.setItem('vabot_veille_models', JSON.stringify(sel)); } catch(e){}
+      paint();
+    });
+    bar.appendChild(c);
+  });
+  const hint = document.createElement('span');
+  hint.textContent = '(la veille arrive chez la modèle + en attente dans son sujet VEILLE ID)';
+  hint.style.cssText = 'font-size:10.5px;color:#666';
+  bar.appendChild(hint);
+  const anchor = btn.closest('div');
+  if(anchor && anchor.parentElement) anchor.parentElement.insertBefore(bar, anchor);
+}
+document.addEventListener('DOMContentLoaded', function(){ setTimeout(veilleInitModelChips, 800); });
+
 // ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
 window.__bangerIdentities = null;
 async function _loadBangerIdentities(){
@@ -19338,6 +19388,8 @@ async function sendSelectedVeille(){
     const fd=new FormData(); fd.set('reel_id', rid);
     // Envoie la caption AFFICHEE (data-caption) -> la description visible part bien
     if(_c0 && _c0.dataset.caption && _c0.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _c0.dataset.caption);
+    // Chips modèles cochées -> part aussi dans leur IG CONTENT (+ sujet VEILLE ID)
+    const _tm=veilleModelsSelected(); if(_tm.length) fd.set('to_models', _tm.join(','));
     try {
       const r=await fetch('/veille/send', {method:'POST', body:fd});
       const j=await r.json();
@@ -19405,6 +19457,7 @@ async function resendVeilleReel(rid, btn){
     const fd = new FormData(); fd.set('reel_id', rid);
     const _rc=document.querySelector('.veille-card[data-rid="'+rid+'"]');
     if(_rc && _rc.dataset.caption && _rc.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _rc.dataset.caption);
+    const _tm2=veilleModelsSelected(); if(_tm2.length) fd.set('to_models', _tm2.join(','));
     const r = await fetch('/veille/send', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok){
@@ -29441,7 +29494,42 @@ def create_app():
                     veille.update_reel(rid, **_upd)
                 except Exception:
                     pass
+            # --- Envoi AUSSI dans les sujets IG CONTENT des modèles choisies ---
+            # (le routeur enregistre la veille -> apparaît « en attente » dans
+            # le sujet de la modèle du groupe VEILLE ID)
+            to_models = [m.strip().lower() for m in (request.form.get("to_models") or "").split(",") if m.strip()]
+            if to_models:
+                fid = res.get("tg_file_id") or reel.get("tg_file_id") or ""
+                sent_m, err_m = [], []
+                if res.get("mode") != "video" or not fid:
+                    err_m = [f"{m} (envoyé en lien, pas en vidéo)" for m in to_models]
+                else:
+                    try:
+                        import tg_router
+                        desc_final = (res.get("description") or description or "").strip()
+                        for m in to_models:
+                            r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final)
+                            if r2.get("ok"):
+                                sent_m.append(m)
+                            else:
+                                err_m.append(f"{m} ({r2.get('error', '?')})")
+                    except Exception as e:
+                        err_m.append(str(e))
+                res["models_sent"] = sent_m
+                res["models_err"] = err_m
         return jsonify(res)
+
+    @app.route("/veille/models", methods=["GET"])
+    def veille_models():
+        """Modèles branchées au routeur Telegram (pour les chips d'envoi veille)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import tg_router
+            return jsonify({"ok": True, "models": sorted(tg_router.bound_models().keys())})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @app.route("/veille/identities", methods=["GET"])
     def veille_identities():
