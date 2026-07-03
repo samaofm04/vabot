@@ -1,16 +1,21 @@
-"""cogs/vasort.py — Range les salons VA dans chaque catégorie par "qui travaille".
+"""cogs/vasort.py — Range les salons VA + salons-séparateurs par groupe.
 
-Ordre (du haut vers le bas), à l'intérieur de chaque catégorie :
-  1. 🔗 VA avec lien qui tourne (pas de ⚙️)      — les 🟢 d'abord, puis 🟠, 🔴
-  2. 🔗⚙️ VA avec lien à 0 clic (3 j)            — pareil 🟢 → 🔴
-  3. VA sans lien                                 — 🟢 → 🟠 → 🔴 → sans rond
-Égalité -> ordre alphabétique du pseudo (stable).
+Ordre dans chaque catégorie :
+  [salons non-VA : général, banger, exemple…]      (intouchés, en haut)
+  ──🔗-lien-actif                                   (séparateur, staff only)
+  1. 🔗 VA avec lien qui tourne — 🟢 puis 🟠 puis 🔴
+  ──⚙️-lien-0-clic
+  2. 🔗⚙️ VA avec lien à 0 clic (3 j) — 🟢 → 🔴
+  ──😴-sans-lien
+  3. VA sans lien — 🟢 → 🟠 → 🔴
+Égalité -> ordre alphabétique du pseudo.
 
-Les salons non-VA de la catégorie (général-X, banger-X, exemple-compte-X…)
-restent au-dessus, dans leur ordre actuel.
+Séparateurs : salons texte verrouillés, visibles UNIQUEMENT par le staff
+(deny @everyone ; les rôles contenant « boss » / « manager » + admins voient).
+Créés automatiquement quand le groupe existe, supprimés si le groupe se vide.
 
-Auto : re-tri toutes les 20 min (uniquement si l'ordre a changé -> 1 seul
-appel API bulk par catégorie). Manuel : /rangerva.
+Auto : re-tri toutes les 20 min (1 appel bulk par catégorie, seulement si
+l'ordre a changé). Manuel : /rangerva (aperçu) puis /rangerva confirmer:True.
 """
 import re
 
@@ -21,6 +26,20 @@ from discord.ext import commands, tasks
 _VA_RE = re.compile(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$")
 DOT_RANK = {"🟢": 0, "🟠": 1, "🔴": 2}
 
+SEP_LINK = "──🔗-lien-actif"
+SEP_GEAR = "──⚙️-lien-0-clic"
+SEP_NONE = "──😴-sans-lien"
+SEP_BY_GROUP = {0: SEP_LINK, 1: SEP_GEAR, 2: SEP_NONE}
+
+
+def _norm(s):
+    """Compare sans le variation selector (⚙️ = ⚙ + U+FE0F) — anti-doublon."""
+    return (s or "").replace("️", "")
+
+
+def _is_sep(name):
+    return _norm(name) in {_norm(s) for s in SEP_BY_GROUP.values()}
+
 
 def _va_handle(name):
     m = _VA_RE.search((name or "").lower())
@@ -28,7 +47,7 @@ def _va_handle(name):
 
 
 def _sort_key(name: str):
-    """(groupe, rond, pseudo) — plus petit = plus haut dans la catégorie."""
+    """(groupe, rond, pseudo) — plus petit = plus haut."""
     n = name or ""
     handle = _va_handle(n) or ""
     idx = n.lower().find("va-")
@@ -37,33 +56,90 @@ def _sort_key(name: str):
     has_link = "🔗" in prefix
     has_gear = "⚙" in prefix
     if has_link and not has_gear:
-        group = 0     # lien qui tourne
+        group = 0
     elif has_link:
-        group = 1     # lien mais 0 clic
+        group = 1
     else:
-        group = 2     # pas de lien
+        group = 2
     return (group, dot, handle)
 
 
-def _desired_order(category):
-    """Liste des salons texte dans l'ordre voulu, ou None si rien à trier."""
-    txts = list(category.text_channels)  # déjà triés par position
-    vas = [c for c in txts if _va_handle(c.name)]
-    if len(vas) < 2:
-        return None
-    others = [c for c in txts if not _va_handle(c.name)]
-    vas_sorted = sorted(vas, key=lambda c: _sort_key(c.name))
-    desired = others + vas_sorted
-    return None if desired == txts else desired
+def _split(category):
+    """(others, groupes {0:[ch],1:[],2:[]}, separateurs existants {group: ch})"""
+    txts = list(category.text_channels)
+    others, seps = [], {}
+    groups = {0: [], 1: [], 2: []}
+    for c in txts:
+        if _is_sep(c.name):
+            for g, sname in SEP_BY_GROUP.items():
+                if _norm(c.name) == _norm(sname):
+                    seps[g] = c
+            continue
+        if _va_handle(c.name):
+            groups[_sort_key(c.name)[0]].append(c)
+        else:
+            others.append(c)
+    for g in groups:
+        groups[g].sort(key=lambda c: _sort_key(c.name))
+    return others, groups, seps
+
+
+async def _staff_overwrites(guild):
+    """Séparateurs visibles staff only : deny @everyone, allow boss/manager."""
+    ow = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+    for role in guild.roles:
+        rn = role.name.lower()
+        if "boss" in rn or "manager" in rn or "staff" in rn:
+            ow[role] = discord.PermissionOverwrite(view_channel=True, send_messages=False)
+    return ow
+
+
+async def _sync_separators(guild, category, groups, seps, allow_create=True):
+    """Crée les séparateurs manquants (groupe non vide) / supprime les inutiles."""
+    changed = False
+    for g in (0, 1, 2):
+        need = bool(groups[g])
+        have = seps.get(g)
+        if need and not have and allow_create:
+            try:
+                ow = await _staff_overwrites(guild)
+                ch = await guild.create_text_channel(
+                    SEP_BY_GROUP[g], category=category, overwrites=ow,
+                    reason="Séparateur tri VA")
+                seps[g] = ch
+                changed = True
+            except Exception as e:
+                print(f"[vasort] create sep {SEP_BY_GROUP[g]}: {e}", flush=True)
+        elif not need and have:
+            try:
+                await have.delete(reason="Groupe VA vide — séparateur retiré")
+                seps.pop(g, None)
+                changed = True
+            except Exception:
+                pass
+    return changed
+
+
+def _desired(others, groups, seps):
+    """Ordre voulu (avec les séparateurs qui EXISTENT)."""
+    out = list(others)
+    for g in (0, 1, 2):
+        if not groups[g]:
+            continue
+        if seps.get(g):
+            out.append(seps[g])
+        out.extend(groups[g])
+    return out
 
 
 async def _apply_order(guild, category, desired):
-    """Réordonne en UN appel bulk (fallback: move un par un)."""
     current = list(category.text_channels)
+    if [c.id for c in current] == [c.id for c in desired]:
+        return 0
     positions = sorted(c.position for c in current)
     payload = []
     for i, ch in enumerate(desired):
-        if ch.position != positions[i]:
+        if i < len(positions) and ch.position != positions[i]:
             payload.append({"id": ch.id, "position": positions[i]})
     if not payload:
         return 0
@@ -71,25 +147,32 @@ async def _apply_order(guild, category, desired):
         await guild._state.http.bulk_channel_update(
             guild.id, payload, reason="Tri VA (liens/activité)")
     except Exception:
-        # Fallback : déplacements individuels (plus lent mais sûr)
         for i, ch in enumerate(desired):
             try:
-                await ch.move(category=category, beginning=True, offset=len(
-                    [c for c in desired[:i]]))
+                await ch.move(category=category, beginning=True, offset=i)
             except Exception:
                 pass
     return len(payload)
 
 
-async def sort_guild(guild) -> tuple:
-    """Trie toutes les catégories contenant des salons VA. -> (cats, moves)"""
+async def sort_guild(guild, create_seps=True) -> tuple:
+    """Trie toutes les catégories avec des salons VA. -> (cats_modifiées, moves)"""
     cats = moves = 0
     for cat in guild.categories:
-        desired = _desired_order(cat)
-        if not desired:
+        others, groups, seps = _split(cat)
+        n_vas = sum(len(v) for v in groups.values())
+        if n_vas < 1:
+            # plus de VA : retire les séparateurs orphelins
+            for ch in list(seps.values()):
+                try:
+                    await ch.delete(reason="Plus de salons VA ici")
+                except Exception:
+                    pass
             continue
+        sep_changed = await _sync_separators(guild, cat, groups, seps, allow_create=create_seps)
+        desired = _desired(others, groups, seps)
         n = await _apply_order(guild, cat, desired)
-        if n:
+        if n or sep_changed:
             cats += 1
             moves += n
     return cats, moves
@@ -118,7 +201,7 @@ class VASort(commands.Cog):
 
     @app_commands.command(
         name="rangerva",
-        description="Range les salons VA : liens en haut, puis liens 0 clic, puis 🟢🟠🔴",
+        description="Range les salons VA : séparateurs + liens en haut, puis 0 clic, puis 🟢🟠🔴",
     )
     @app_commands.describe(
         confirmer="Laisse vide = APERÇU (rien n'est déplacé). Mets True = range pour de vrai.",
@@ -132,29 +215,37 @@ class VASort(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         if not confirmer:
-            # ---- APERÇU : montre le nouvel ordre, sans rien déplacer ----
+            # ---- APERÇU : montre le nouvel ordre, sans rien créer ni déplacer ----
             blocks = []
             for cat in interaction.guild.categories:
-                desired = _desired_order(cat)
-                if not desired:
+                others, groups, seps = _split(cat)
+                if sum(len(v) for v in groups.values()) < 1:
                     continue
-                current = list(cat.text_channels)
+                # position actuelle (hors séparateurs) pour marquer ce qui bougerait
+                cur_wo = [c for c in cat.text_channels if not _is_sep(c.name)]
+                pos = {c.id: i for i, c in enumerate(cur_wo)}
+                des_idx = 0
                 rows = [f"\n📂 **{cat.name}**"]
-                for i, ch in enumerate(desired):
-                    mark = "🔀" if current.index(ch) != i else "▫️"
-                    rows.append(f"{mark} {ch.name}")
+                for c in others:
+                    rows.append(f"▫️ {c.name}")
+                    des_idx += 1
+                for g in (0, 1, 2):
+                    if not groups[g]:
+                        continue
+                    tag = "" if seps.get(g) else " _(sera créé)_"
+                    rows.append(f"➖ `{SEP_BY_GROUP[g]}`{tag}")
+                    for c in groups[g]:
+                        mark = "🔀" if pos.get(c.id) != des_idx else "▫️"
+                        rows.append(f"{mark} {c.name}")
+                        des_idx += 1
                 blocks.append("\n".join(rows))
             if not blocks:
-                await interaction.followup.send(
-                    "✅ Tout est déjà dans le bon ordre (🔗 → 🔗⚙️ → 🟢🟠🔴) — rien à déplacer.",
-                    ephemeral=True)
+                await interaction.followup.send("Aucune catégorie avec des salons VA.", ephemeral=True)
                 return
-            header = ("👀 **APERÇU — rien n'est déplacé.** Nouvel ordre "
-                      "(🔀 = salon qui bougerait) :\n")
-            footer = ("\n\nSi c'est bon : `/rangerva confirmer:True`\n"
-                      "_(le tri auto toutes les 20 min appliquera aussi cet ordre)_")
+            header = ("👀 **APERÇU — rien n'est déplacé ni créé.**\n"
+                      "Séparateurs visibles STAFF uniquement (boss/manager/admin).\n")
+            footer = "\n\nSi c'est bon : `/rangerva confirmer:True`"
             text = header + "\n".join(blocks) + footer
-            # Discord = 2000 chars max par message -> on découpe
             chunks, buf = [], ""
             for line in text.split("\n"):
                 if len(buf) + len(line) + 1 > 1900:
@@ -164,11 +255,10 @@ class VASort(commands.Cog):
                     buf += ("\n" if buf else "") + line
             if buf:
                 chunks.append(buf)
-            for c in chunks[:5]:
+            for c in chunks[:6]:
                 await interaction.followup.send(c, ephemeral=True)
             return
 
-        # ---- EXÉCUTION ----
         try:
             cats, moves = await sort_guild(interaction.guild)
         except Exception as e:
@@ -176,12 +266,13 @@ class VASort(commands.Cog):
             return
         if not cats:
             await interaction.followup.send(
-                "✅ Tout est déjà dans le bon ordre (🔗 → 🔗⚙️ → 🟢🟠🔴).", ephemeral=True)
+                "✅ Tout est déjà dans le bon ordre (séparateurs + 🔗 → 🔗⚙️ → 🟢🟠🔴).",
+                ephemeral=True)
         else:
             await interaction.followup.send(
                 f"✅ **{cats}** catégorie(s) rangée(s) ({moves} salon(s) déplacé(s)).\n"
-                "Ordre : 🔗 lien actif → 🔗⚙️ lien 0 clic → 🟢 → 🟠 → 🔴. "
-                "Le tri se refait tout seul toutes les 20 min.", ephemeral=True)
+                "Séparateurs staff-only en place. Le tri se refait tout seul toutes les 20 min.",
+                ephemeral=True)
 
 
 async def setup(bot):
