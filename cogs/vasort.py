@@ -120,13 +120,55 @@ class VASort(commands.Cog):
         name="rangerva",
         description="Range les salons VA : liens en haut, puis liens 0 clic, puis 🟢🟠🔴",
     )
-    async def rangerva(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        confirmer="Laisse vide = APERÇU (rien n'est déplacé). Mets True = range pour de vrai.",
+    )
+    async def rangerva(self, interaction: discord.Interaction, confirmer: bool = False):
         perms = getattr(interaction.user, "guild_permissions", None)
         if not (perms and perms.manage_channels):
             await interaction.response.send_message(
                 "Il faut la permission « Gérer les salons ».", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if not confirmer:
+            # ---- APERÇU : montre le nouvel ordre, sans rien déplacer ----
+            blocks = []
+            for cat in interaction.guild.categories:
+                desired = _desired_order(cat)
+                if not desired:
+                    continue
+                current = list(cat.text_channels)
+                rows = [f"\n📂 **{cat.name}**"]
+                for i, ch in enumerate(desired):
+                    mark = "🔀" if current.index(ch) != i else "▫️"
+                    rows.append(f"{mark} {ch.name}")
+                blocks.append("\n".join(rows))
+            if not blocks:
+                await interaction.followup.send(
+                    "✅ Tout est déjà dans le bon ordre (🔗 → 🔗⚙️ → 🟢🟠🔴) — rien à déplacer.",
+                    ephemeral=True)
+                return
+            header = ("👀 **APERÇU — rien n'est déplacé.** Nouvel ordre "
+                      "(🔀 = salon qui bougerait) :\n")
+            footer = ("\n\nSi c'est bon : `/rangerva confirmer:True`\n"
+                      "_(le tri auto toutes les 20 min appliquera aussi cet ordre)_")
+            text = header + "\n".join(blocks) + footer
+            # Discord = 2000 chars max par message -> on découpe
+            chunks, buf = [], ""
+            for line in text.split("\n"):
+                if len(buf) + len(line) + 1 > 1900:
+                    chunks.append(buf)
+                    buf = line
+                else:
+                    buf += ("\n" if buf else "") + line
+            if buf:
+                chunks.append(buf)
+            for c in chunks[:5]:
+                await interaction.followup.send(c, ephemeral=True)
+            return
+
+        # ---- EXÉCUTION ----
         try:
             cats, moves = await sort_guild(interaction.guild)
         except Exception as e:
