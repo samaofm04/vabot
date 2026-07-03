@@ -135,14 +135,39 @@ def _handle_command(cfg: dict, msg: dict, text: str):
                         "Dans chaque chat de travail, tape /setmodel <nom> pour brancher.", thread_id)
 
     elif cmd == "/setmodel":
+        if cfg.get("dest_chat_id") == chat_id:
+            _reply(chat_id, "⚠️ Pas ici ! Ce groupe est la DESTINATION.\n"
+                            "Tape /setmodel <nom> dans le GROUPE PRIVÉ de la modèle "
+                            "(là où tu lui envoies la veille et où elle répond avec ses vidéos).",
+                   thread_id)
+            return
         if not arg:
-            _reply(chat_id, "Usage : /setmodel amelia", thread_id)
+            _reply(chat_id, "Usage : /setmodel emma\n"
+                            "(à taper dans le groupe privé de la modèle, avec son blaze)", thread_id)
             return
         cfg["sources"][str(chat_id)] = arg
         _save(cfg)
         _reply(chat_id, f"✅ Chat branché sur la modèle « {arg} ».\n"
                         "Quand quelqu'un RÉPOND à une vidéo avec une vidéo, "
                         "j'envoie l'exemple + la brute dans son sujet.", thread_id)
+
+    elif cmd == "/settopic":
+        # À taper DANS un sujet du groupe destination : lie ce sujet à une modèle
+        # (utile si les sujets ont été créés à la main).
+        if cfg.get("dest_chat_id") != chat_id:
+            _reply(chat_id, "⚠️ /settopic se tape DANS le groupe destination, "
+                            "à l'intérieur du sujet à lier.", thread_id)
+            return
+        if not arg:
+            _reply(chat_id, "Usage : dans le sujet AMELIA, tape /settopic amelia", thread_id)
+            return
+        if not thread_id:
+            _reply(chat_id, "⚠️ Tape la commande À L'INTÉRIEUR du sujet (pas dans General).")
+            return
+        cfg["topics"][arg] = thread_id
+        _save(cfg)
+        _reply(chat_id, f"✅ Ce sujet est maintenant celui de « {arg} » — "
+                        "ses vidéos arriveront ici.", thread_id)
 
     elif cmd == "/unsetmodel":
         cfg["sources"].pop(str(chat_id), None)
