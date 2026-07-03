@@ -797,7 +797,7 @@ input::placeholder{color:#5a6183}
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
-<html><head><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8"><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -1060,6 +1060,48 @@ body.gold .vlm-dup{border-color:#d9b74a!important}
 body.gold .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(212,175,55,.18),rgba(247,231,180,.10))!important}
 body.gold input:focus,body.gold select:focus,body.gold textarea:focus{border-color:#d9b74a!important;box-shadow:0 0 0 3px rgba(212,175,55,.22)!important}
 
+/* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
+.sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
+.rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
+.rail-toggle:hover{background:#181818;color:#fff}
+.rail-toggle svg{width:16px;height:16px;flex-shrink:0;transition:transform .25s}
+body.light .rail-toggle:hover{background:#f3f4f6;color:#111827}
+html.rail .rail-toggle svg{transform:rotate(180deg)}
+html.rail .sidebar{width:64px}
+html.rail .sidebar .section-label,html.rail .sidebar .label,html.rail .sidebar .group-head .arrow,html.rail .sidebar .subgroup-head .arrow{display:none}
+html.rail .sidebar .solo-item,html.rail .sidebar .logout-btn,html.rail .rail-toggle{font-size:0;gap:0;justify-content:center;padding:11px 0}
+html.rail .sidebar .group-head{justify-content:center;gap:0;padding:11px 0}
+html.rail .sidebar .group{position:relative}
+/* Flyout : panneau flottant à droite de l'icône (l'accordéon .open est neutralisé en mode rail) */
+html.rail .sidebar .group.open .items{display:none}
+html.rail .sidebar .group:hover > .items,html.rail .sidebar .group:focus-within > .items{display:flex;position:absolute;left:100%;top:-6px;z-index:6000;min-width:218px;margin:0;padding:8px;background:#111;border:1px solid #262626;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.6);animation:flyIn .16s cubic-bezier(.16,1,.3,1)}
+html.rail .sidebar .group:hover > .items .label{display:inline}
+html.rail .sidebar .group:hover > .items .sub-items{display:flex}
+@keyframes flyIn{from{opacity:0;transform:translateX(-6px) scale(.98)}to{opacity:1;transform:translateX(0) scale(1)}}
+/* Les groupes du bas s'ancrent par le bas (le flyout ne sort pas de l'écran) */
+html.rail .sidebar #grp-finances:hover > .items,html.rail .sidebar #grp-finances:focus-within > .items,html.rail .sidebar #grp-settings:hover > .items,html.rail .sidebar #grp-settings:focus-within > .items{top:auto;bottom:-6px}
+/* Flyout adapté aux autres thèmes */
+html.rail body.light .sidebar .group:hover > .items,html.rail body.light .sidebar .group:focus-within > .items{background:#fff;border-color:#e5e7eb;box-shadow:0 18px 44px rgba(0,0,0,.14)}
+html.rail body.obsidian .sidebar .group:hover > .items{background:#14171f;border-color:rgba(150,170,235,.16)}
+html.rail body.violet .sidebar .group:hover > .items{background:#160e26;border-color:#2d1b4e}
+html.rail body.gold .sidebar .group:hover > .items{background:#15130f;border-color:#2c2619}
+
+/* =============== ANIMATIONS+ : cascade des cartes & micro-interactions =============== */
+.form-section[style*="block"] > .box{animation:slideUp .3s ease-out both}
+.form-section[style*="block"] > .box:nth-child(2){animation-delay:.05s}
+.form-section[style*="block"] > .box:nth-child(3){animation-delay:.1s}
+.form-section[style*="block"] > .box:nth-child(4){animation-delay:.15s}
+.form-section[style*="block"] > .box:nth-child(n+5){animation-delay:.2s}
+.stat{transition:transform .15s ease,box-shadow .15s ease}
+.stat:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.3)}
+body.light .stat:hover{box-shadow:0 8px 20px rgba(0,0,0,.08)}
+button[type=submit]:active,.btn:active,.danger-btn:active{transform:scale(.97)}
+.sidebar .group-head svg.lead,.sidebar .solo-item svg{transition:transform .15s ease}
+.sidebar .group-head:hover svg.lead,.sidebar .solo-item:hover svg{transform:scale(1.12)}
+table tbody tr{transition:background .12s ease}
+.theme-card{transition:transform .15s ease,box-shadow .15s ease}
+.theme-card:hover{transform:translateY(-2px)}
+
 /* === Selected day (les 2 modes) === */
 .sfs-day.selected{box-shadow:inset 0 0 0 2px #3b82f6}
 body:not(.light) .sfs-day.selected{background:#0f1a2e!important}
@@ -1229,6 +1271,17 @@ function toggleSubGroup(id){
 function comingSoon(){
   showToast('🚧 Pas encore implémenté — viendra bientôt', 'warning');
 }
+// === SIDEBAR RAIL (menu réduit en icônes avec flyouts) ===
+function toggleSidebarRail(){
+  var on = document.documentElement.classList.toggle('rail');
+  try{ localStorage.setItem('vabot_rail', on ? '1' : '0'); }catch(e){}
+}
+// Restaure l'état AVANT le premier paint (CSS keyé sur html.rail -> zéro flash)
+(function(){
+  try{
+    if(localStorage.getItem('vabot_rail') === '1') document.documentElement.classList.add('rail');
+  }catch(e){}
+})();
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
 function _vabotThemeLabel(t){
@@ -3334,6 +3387,12 @@ window.upClearPrefill = function(utab){
 <!-- SIDEBAR : groupes pliables avec flèches -->
 <div class="sidebar">
 
+<!-- Toggle rail : réduit la sidebar en rail d'icônes avec flyouts -->
+<button class="rail-toggle" onclick="toggleSidebarRail()" title="Réduire / agrandir le menu">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+  <span class="label">Réduire le menu</span>
+</button>
+
 <!-- DASHBOARD STANDALONE (top) -->
 <div class="solo-group">
   <button class="item solo-item active" id="tab-home" onclick="showTab('solo','home','Dashboard','Tous tes revenus en un coup d oeil')">
@@ -3541,23 +3600,7 @@ window.upClearPrefill = function(utab){
   </div>
 </div>
 
-<div class="group" id="grp-autopost">
-  <button class="group-head" onclick="toggleGroup('autopost')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-    <span class="label">Auto-Post</span>
-    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-  </button>
-  <div class="items">
-    <button class="item" id="tab-mypulslive" onclick="showTab('autopost','mypulslive','MyPuls Live — Push direct','Pousse stories/posts directement dans le scheduler MyPuls via cookies')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-      MyPuls Live
-    </button>
-    <button class="item" id="tab-schedule" onclick="showTab('autopost','schedule','Schedule — Auto-post','Genere un fichier Excel template d import de posts planifies')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
-      Schedule Excel
-    </button>
-  </div>
-</div>
+<!-- Auto-Post retiré du menu (les pages restent accessibles par URL, cookies MyPuls déplacés dans Settings) -->
 
 <!-- GeeLark : groupe separe (extrait de Auto-Post pour le mettre en avant) -->
 <div class="group" id="grp-geelark">
@@ -3650,6 +3693,10 @@ window.upClearPrefill = function(utab){
     <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
       Cookies Instagram
+    </button>
+    <button class="item" id="tab-smypuls" onclick="showTab('settings','smypuls','Cookies MyPuls','Session mypuls.app — sync revenus chatteurs et push planning')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="8.5" cy="9.5" r="1" fill="currentColor"/><circle cx="14.5" cy="8.5" r="1" fill="currentColor"/><circle cx="10" cy="14.5" r="1" fill="currentColor"/><circle cx="15.5" cy="13.5" r="1" fill="currentColor"/></svg>
+      Cookies MyPuls
     </button>
     <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
@@ -4405,6 +4452,15 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🛡️ Sessions actives</h3>
 <small>Personnes actuellement connectées à ton site</small>
 {security_sessions_html}
+</div>
+</div>
+
+<!-- SETTINGS - COOKIES MYPULS -->
+<div class="form-section" id="form-smypuls" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🍪 Cookies MyPuls</h3>
+<small>Session mypuls.app — utilisée pour la sync des revenus chatteurs et le push planning</small>
+<div style="margin-top:14px">{mypuls_cookies_html}</div>
 </div>
 </div>
 
@@ -12593,7 +12649,7 @@ def _render_home_dashboard_html() -> str:
         warning = (
             "<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#ef4444'>"
             "⚠ MyPuls indisponible — chiffres temps réel non chargés (ce n'est PAS un vrai 0€). "
-            "Vérifie/rafraîchis tes cookies dans <b>Auto-Post → MyPuls Live</b>."
+            "Vérifie/rafraîchis tes cookies dans <b>Settings → Cookies MyPuls</b>."
             "</div>"
         )
     else:
@@ -24011,6 +24067,62 @@ def _load_active_sessions() -> list:
         return []
 
 
+def _render_mypuls_cookies_settings() -> str:
+    """Section Settings : cookies MyPuls (statut + formulaire + effacer).
+
+    Remplace l'accès via l'ancien menu Auto-Post (retiré) — les routes
+    /mypuls/save_cookies et /mypuls/clear_cookies existaient déjà.
+    """
+    configured = False
+    try:
+        import mypuls
+        cfg = mypuls.load_config()
+        configured = bool(cfg.get("PHPSESSID"))
+    except Exception:
+        pass
+    if configured:
+        status = (
+            "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
+            "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
+            "✅ Cookies enregistrés — la sync MyPuls est active. Colle de nouveaux cookies ci-dessous pour les remplacer."
+            "</div>"
+        )
+    else:
+        status = (
+            "<div style='padding:12px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);"
+            "border-radius:8px;margin-bottom:14px;font-size:13px;color:#fbbf24'>"
+            "⚠ Cookies non configurés. Loggue-toi sur <a href='https://mypuls.app/' target='_blank' "
+            "style='color:#fbbf24;text-decoration:underline'>mypuls.app</a> et colle tes cookies ci-dessous."
+            "</div>"
+        )
+    return (
+        status
+        + "<form method='POST' action='/mypuls/save_cookies' style='display:flex;flex-direction:column;gap:8px;margin-bottom:14px'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Cookie PHPSESSID (obligatoire)</label>"
+        "<input type='password' name='phpsessid' placeholder='9c1f82750ae5104c5d326e57150fe0c9' required minlength='16' style='font-family:monospace;font-size:12px'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:6px'>Cookie REMEMBERME (optionnel, garde la session plus longtemps)</label>"
+        "<input type='password' name='rememberme' placeholder='App.Entity.User%3A...' style='font-family:monospace;font-size:11px'>"
+        "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer les cookies</button>"
+        "</form>"
+        "<details style='font-size:12px;color:#888;margin-bottom:14px'>"
+        "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Comment récupérer mes cookies ?</summary>"
+        "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+        "<li>Loggue-toi sur <code>mypuls.app</code></li>"
+        "<li>Appuie sur <b>F12</b> → onglet <b>Application</b> (Storage)</li>"
+        "<li>Côté gauche : <b>Cookies → https://mypuls.app</b></li>"
+        "<li>Copie la valeur de <code>PHPSESSID</code> (et <code>REMEMBERME</code> si dispo)</li>"
+        "</ol>"
+        "</details>"
+        + (
+            "<form method='POST' action='/mypuls/clear_cookies' "
+            "onsubmit='return confirm(\"Effacer les cookies MyPuls ? La sync revenus sera coupée.\")'>"
+            "<button type='submit' class='danger-btn' style='margin:0'>🗑 Effacer les cookies</button>"
+            "</form>"
+            if configured else ""
+        )
+    )
+
+
 def _render_security_sessions_html() -> str:
     """Liste des sessions actives."""
     sessions = _load_active_sessions()
@@ -24119,10 +24231,6 @@ ROLE_MENU_STRUCTURE = [
         {"key": "sfs", "name": "SFS — Planning", "perms": ["view", "create", "edit"]},
         {"key": "sfssetupmym", "name": "Setup SFS MYM", "perms": ["view"]},
         {"key": "sfssetupof", "name": "Setup SFS OF", "perms": ["view"]},
-    ]},
-    {"section": "Outils — Auto-Post", "items": [
-        {"key": "mypulslive", "name": "MyPuls Live — Push direct", "perms": ["view", "create"]},
-        {"key": "schedule", "name": "Schedule — Auto-post", "perms": ["view", "create"]},
     ]},
     {"section": "Outils — Autres", "items": [
         {"key": "geelark", "name": "GeeLark — Cloud phones", "perms": ["view", "create"]},
@@ -25150,6 +25258,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{bilan_html}", _g("bilan", _render_bilan_html))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
+        .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
         .replace("{role_settings_html}", _g("srole", _render_role_settings_html))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
         .replace("{employees_table_html}", _g("semp", _render_employees_table_html))
