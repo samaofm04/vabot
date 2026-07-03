@@ -137,19 +137,23 @@ def _handle_command(cfg: dict, msg: dict, text: str):
     elif cmd == "/setmodel":
         if cfg.get("dest_chat_id") == chat_id:
             _reply(chat_id, "⚠️ Pas ici ! Ce groupe est la DESTINATION.\n"
-                            "Tape /setmodel <nom> dans le GROUPE PRIVÉ de la modèle "
-                            "(là où tu lui envoies la veille et où elle répond avec ses vidéos).",
+                            "Tape /setmodel <nom> dans le GROUPE de la modèle, "
+                            "DANS le sujet où passent les reels (ex: IG CONTENT).",
                    thread_id)
             return
         if not arg:
             _reply(chat_id, "Usage : /setmodel emma\n"
-                            "(à taper dans le groupe privé de la modèle, avec son blaze)", thread_id)
+                            "(à taper dans le groupe de la modèle, DANS le sujet "
+                            "des reels — ex: IG CONTENT)", thread_id)
             return
-        cfg["sources"][str(chat_id)] = arg
+        # Mémorise AUSSI le sujet où la commande est tapée : le bot n'écoutera
+        # que ce sujet (ex: IG CONTENT), pas THREADS/General.
+        cfg["sources"][str(chat_id)] = {"model": arg, "thread": thread_id}
         _save(cfg)
-        _reply(chat_id, f"✅ Chat branché sur la modèle « {arg} ».\n"
+        where = "de CE SUJET uniquement" if thread_id else "de ce chat"
+        _reply(chat_id, f"✅ Branché : les vidéos {where} partent dans le sujet « {arg} ».\n"
                         "Quand quelqu'un RÉPOND à une vidéo avec une vidéo, "
-                        "j'envoie l'exemple + la brute dans son sujet.", thread_id)
+                        "j'envoie l'exemple + la brute là-bas.", thread_id)
 
     elif cmd == "/settopic":
         # À taper DANS un sujet du groupe destination : lie ce sujet à une modèle
@@ -175,11 +179,14 @@ def _handle_command(cfg: dict, msg: dict, text: str):
         _reply(chat_id, "✅ Chat débranché du routeur.", thread_id)
 
     elif cmd == "/routerstatus":
-        n = len(cfg["sources"])
         dest = cfg.get("dest_chat_id")
+        models = []
+        for v in cfg["sources"].values():
+            models.append(v.get("model") if isinstance(v, dict) else v)
         _reply(chat_id,
                f"📡 Routeur reels\n• Destination : {'✅ configurée' if dest else '❌ /setdestination dans le groupe à sujets'}\n"
-               f"• Chats branchés : {n}\n• Vidéos rangées : {STATUS.get('routed', 0)}", thread_id)
+               f"• Sujets sources branchés : {len(models)} ({', '.join(sorted(set(models))) or '—'})\n"
+               f"• Vidéos rangées : {STATUS.get('routed', 0)}", thread_id)
 
 
 def _handle_update(cfg: dict, upd: dict):
@@ -194,15 +201,27 @@ def _handle_update(cfg: dict, upd: dict):
         _handle_command(cfg, msg, text)
         return
 
-    # Routage : vidéo en RÉPONSE dans un chat branché
-    model = cfg["sources"].get(str(chat_id))
-    if not model or not cfg.get("dest_chat_id"):
+    # Routage : vidéo en RÉPONSE dans un chat/sujet branché
+    src = cfg["sources"].get(str(chat_id))
+    if not src or not cfg.get("dest_chat_id"):
         return
+    if isinstance(src, str):           # rétro-compat ancien format
+        src = {"model": src, "thread": None}
+    model = src.get("model")
+    want_thread = src.get("thread")
+    if want_thread and msg.get("message_thread_id") != want_thread:
+        return  # autre sujet du groupe (THREADS, General…) -> on ignore
     if not _is_video_msg(msg):
         return
     ref = msg.get("reply_to_message")
     if not ref:
         return  # vidéo sans réponse = pas un « recopiage », on ignore
+    # Quirk des forums Telegram : un message NON-réponse dans un sujet a quand
+    # même reply_to_message = racine du sujet. Ce n'est PAS une vraie réponse.
+    if ref.get("forum_topic_created"):
+        return
+    if msg.get("message_thread_id") and ref.get("message_id") == msg.get("message_thread_id"):
+        return
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
