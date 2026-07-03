@@ -1,24 +1,23 @@
 """tg_router.py — Routeur Telegram : range les vidéos des modèles par sujet.
 
-Workflow :
-- Dans un chat/groupe « de travail » avec une modèle, le boss envoie la veille
-  (vidéo exemple). La modèle RÉPOND à cette vidéo avec sa version brute.
-- Le bot (même token que la Veille) détecte la réponse-vidéo et copie
-  LA VIDÉO EXEMPLE + LA VIDÉO BRUTE dans le groupe de destination,
-  dans le SUJET (topic) de la modèle — créé automatiquement.
+Workflow (2 temps) :
+1. Le boss poste la VEILLE dans le sujet branché (ex: IG CONTENT) d'un groupe
+   de modèle : vidéo (+ lien en caption) + texte de description.
+   -> Le bot poste IMMÉDIATEMENT la vidéo exemple + lien + description dans le
+      sujet de la modèle du groupe destination (état « en attente »).
+2. La modèle RÉPOND (à la vidéo OU au texte) avec sa vidéo brute.
+   -> Le bot REMPLACE le message d'attente par un ALBUM : vidéo exemple +
+      vidéo brute côte à côte, avec lien + description en légende. Réaction 🔥.
 
-Config Telegram-native (commandes à taper DANS Telegram) :
-- dans le groupe de destination (avec « Sujets » activés + bot admin) :
-      /setdestination        -> ce groupe reçoit les vidéos rangées
-- dans chaque chat de travail d'une modèle (bot admin pour voir les messages) :
-      /setmodel amelia       -> les vidéos d'ici partent dans le sujet « amelia »
-      /unsetmodel            -> retire ce chat du routeur
-- n'importe où : /routerstatus
+Config Telegram-native :
+- groupe destination (Sujets activés + bot admin)      : /setdestination
+- lier un sujet créé à la main à une modèle            : /settopic emma (dans le sujet)
+- chat de travail d'une modèle, DANS le sujet des reels : /setmodel emma
+- debug : /routerdebug · statut : /routerstatus · retirer : /unsetmodel
 
-Stockage : data/tg_router.json
-{"dest_chat_id": ..., "topics": {"amelia": 123}, "sources": {"<chat_id>": "amelia"}, "offset": 0}
-
-Tourne dans un THREAD daemon (long-polling getUpdates) démarré par cogs/tgrouter.py.
+Stockage : data/tg_router.json (config) + data/tg_router_cache.json (veilles
+en attente + descriptions — persistés pour survivre aux redéploiements).
+Tourne dans un THREAD daemon (long-polling getUpdates) via cogs/tgrouter.py.
 """
 from __future__ import annotations
 
@@ -31,55 +30,22 @@ import requests
 
 DATA_DIR = Path("data")
 CFG_FILE = DATA_DIR / "tg_router.json"
+CACHE_FILE = DATA_DIR / "tg_router_cache.json"
 TG = "https://api.telegram.org"
 _LOCK = threading.Lock()
 _THREAD = None
 _STOP = threading.Event()
 STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
 EVENTS = []  # ring buffer des 15 dernières décisions (debug)
-# Dernier TEXTE long vu par sujet (la description de la veille arrive dans un
-# message séparé -> on la colle en légende de l'album). {(chat,thread): (ts, txt)}
-_LAST_TEXT = {}
-# Description associée à UNE vidéo précise : quand un texte long arrive juste
-# avant/après une vidéo dans le sujet, on les lie. {(chat, video_msg_id): txt}
-_VIDEO_DESC = {}
-# Dernière vidéo vue par sujet (pour lier un texte qui arrive APRÈS la vidéo)
-_LAST_VIDEO = {}
-# Les 3 caches sont PERSISTÉS (sinon un redémarrage/déploiement entre la veille
-# et la réponse de la modèle perdait la description).
-CACHE_FILE = DATA_DIR / "tg_router_cache.json"
 
-
-def _cache_load():
-    try:
-        d = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-        for k, v in (d.get("last_text") or {}).items():
-            c, t = k.split("|", 1)
-            _LAST_TEXT[(int(c), None if t == "None" else int(t))] = tuple(v)
-        for k, v in (d.get("video_desc") or {}).items():
-            c, m = k.split("|", 1)
-            _VIDEO_DESC[(int(c), int(m))] = v
-        for k, v in (d.get("last_video") or {}).items():
-            c, t = k.split("|", 1)
-            _LAST_VIDEO[(int(c), None if t == "None" else int(t))] = tuple(v)
-    except Exception:
-        pass
-
-
-def _cache_save():
-    try:
-        # cap la taille (les plus récents gagnent, dicts Python = ordre d'insertion)
-        for d, cap in ((_VIDEO_DESC, 300), (_LAST_TEXT, 100), (_LAST_VIDEO, 100)):
-            while len(d) > cap:
-                d.pop(next(iter(d)))
-        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_FILE.write_text(json.dumps({
-            "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
-            "video_desc": {f"{k[0]}|{k[1]}": v for k, v in _VIDEO_DESC.items()},
-            "last_video": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VIDEO.items()},
-        }, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
+# ── Registre des veilles ────────────────────────────────────────────────────
+# {(chat_id, video_msg_id): {file_id, caption, desc, text_msg_id, dest_msg_id,
+#                            model, ts}}  — persisté (cache file)
+_VEILLES = {}
+# Dernière veille par sujet (pour lier un texte qui arrive APRÈS la vidéo)
+_LAST_VEILLE = {}   # {(chat,thread): (ts, video_msg_id)}
+# Dernier texte par sujet (pour lier une description qui arrive AVANT la vidéo)
+_LAST_TEXT = {}     # {(chat,thread): (ts, text, text_msg_id)}
 
 
 def _trace(txt: str):
@@ -106,9 +72,40 @@ def _save(d: dict):
         CFG_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _cache_load():
+    try:
+        d = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        for k, v in (d.get("veilles") or {}).items():
+            c, m = k.split("|", 1)
+            _VEILLES[(int(c), int(m))] = v
+        for k, v in (d.get("last_veille") or {}).items():
+            c, t = k.split("|", 1)
+            _LAST_VEILLE[(int(c), None if t == "None" else int(t))] = tuple(v)
+        for k, v in (d.get("last_text") or {}).items():
+            c, t = k.split("|", 1)
+            _LAST_TEXT[(int(c), None if t == "None" else int(t))] = tuple(v)
+    except Exception:
+        pass
+
+
+def _cache_save():
+    try:
+        while len(_VEILLES) > 200:
+            _VEILLES.pop(next(iter(_VEILLES)))
+        for d in (_LAST_VEILLE, _LAST_TEXT):
+            while len(d) > 100:
+                d.pop(next(iter(d)))
+        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_FILE.write_text(json.dumps({
+            "veilles": {f"{k[0]}|{k[1]}": v for k, v in _VEILLES.items()},
+            "last_veille": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VEILLE.items()},
+            "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _token():
-    # Bot DÉDIÉ au routeur si configuré (évite le conflit getUpdates si le
-    # token Veille est aussi utilisé par un autre process, ex: downloader).
     cfg = _load()
     if cfg.get("router_token"):
         return cfg["router_token"]
@@ -166,7 +163,6 @@ def _real_reply(msg: dict):
 
 
 def _topic_for(cfg: dict, model: str):
-    """thread_id du sujet de la modèle (créé si absent)."""
     tid = cfg["topics"].get(model)
     if tid:
         return tid
@@ -178,7 +174,6 @@ def _topic_for(cfg: dict, model: str):
             _save(cfg)
             _reply(cfg["dest_chat_id"], f"📁 Sujet « {model} » prêt — les vidéos arrivent ici.", tid)
             return tid
-    # Fallback : sujet "General" (thread_id absent = message racine)
     return None
 
 
@@ -189,6 +184,42 @@ def _copy(dest, thread_id, from_chat, message_id):
     return _api("copyMessage", p)
 
 
+def _veille_caption(v: dict) -> str:
+    parts = []
+    if v.get("caption"):
+        parts.append(v["caption"])
+    if v.get("desc") and v["desc"] not in parts:
+        parts.append(v["desc"])
+    return "\n\n".join(parts)[:1020]
+
+
+def _post_pending(cfg: dict, v: dict, model: str):
+    """Poste la veille (vidéo + lien + description) dans le sujet de la modèle."""
+    tid = _topic_for(cfg, model)
+    p = {"chat_id": cfg["dest_chat_id"], "video": v["file_id"]}
+    cap = _veille_caption(v)
+    if cap:
+        p["caption"] = cap
+    if tid:
+        p["message_thread_id"] = tid
+    res = _api("sendVideo", p)
+    if res.get("ok"):
+        v["dest_msg_id"] = (res.get("result") or {}).get("message_id")
+        _trace(f"veille postée dans le sujet {model} (en attente de la modèle)")
+    else:
+        _trace(f"post veille échoué ({model}) : {res.get('description', '?')}")
+
+
+def _update_pending_caption(cfg: dict, v: dict):
+    if not v.get("dest_msg_id"):
+        return
+    _api("editMessageCaption", {
+        "chat_id": cfg["dest_chat_id"], "message_id": v["dest_msg_id"],
+        "caption": _veille_caption(v),
+    })
+
+
+# ── Commandes ───────────────────────────────────────────────────────────────
 def _handle_command(cfg: dict, msg: dict, text: str):
     chat = msg.get("chat") or {}
     chat_id = chat.get("id")
@@ -220,18 +251,14 @@ def _handle_command(cfg: dict, msg: dict, text: str):
                             "(à taper dans le groupe de la modèle, DANS le sujet "
                             "des reels — ex: IG CONTENT)", thread_id)
             return
-        # Mémorise AUSSI le sujet où la commande est tapée : le bot n'écoutera
-        # que ce sujet (ex: IG CONTENT), pas THREADS/General.
         cfg["sources"][str(chat_id)] = {"model": arg, "thread": thread_id}
         _save(cfg)
         where = "de CE SUJET uniquement" if thread_id else "de ce chat"
-        _reply(chat_id, f"✅ Branché : les vidéos {where} partent dans le sujet « {arg} ».\n"
-                        "Quand quelqu'un RÉPOND à une vidéo avec une vidéo, "
-                        "j'envoie l'exemple + la brute là-bas.", thread_id)
+        _reply(chat_id, f"✅ Branché : les veilles {where} partent dans le sujet « {arg} ».\n"
+                        "Dès que tu postes une veille je la mets là-bas, et quand la "
+                        "modèle répond avec sa vidéo je fais l'album des deux.", thread_id)
 
     elif cmd == "/settopic":
-        # À taper DANS un sujet du groupe destination : lie ce sujet à une modèle
-        # (utile si les sujets ont été créés à la main).
         if cfg.get("dest_chat_id") != chat_id:
             _reply(chat_id, "⚠️ /settopic se tape DANS le groupe destination, "
                             "à l'intérieur du sujet à lier.", thread_id)
@@ -263,12 +290,15 @@ def _handle_command(cfg: dict, msg: dict, text: str):
         models = []
         for v in cfg["sources"].values():
             models.append(v.get("model") if isinstance(v, dict) else v)
+        pending = sum(1 for v in _VEILLES.values() if v.get("dest_msg_id") and not v.get("routed"))
         _reply(chat_id,
                f"📡 Routeur reels\n• Destination : {'✅ configurée' if dest else '❌ /setdestination dans le groupe à sujets'}\n"
                f"• Sujets sources branchés : {len(models)} ({', '.join(sorted(set(models))) or '—'})\n"
+               f"• Veilles en attente d'une vidéo : {pending}\n"
                f"• Vidéos rangées : {STATUS.get('routed', 0)}", thread_id)
 
 
+# ── Cœur du routage ─────────────────────────────────────────────────────────
 def _handle_update(cfg: dict, upd: dict):
     msg = upd.get("message") or {}
     if not msg:
@@ -276,110 +306,125 @@ def _handle_update(cfg: dict, upd: dict):
     chat_id = (msg.get("chat") or {}).get("id")
     text = (msg.get("text") or "").strip()
 
-    # Commandes de config (dans n'importe quel chat où le bot est)
     if text.startswith("/"):
         _handle_command(cfg, msg, text)
         return
 
-    # Mémorise le TEXTE du sujet (description de veille probable)
-    tkey = (chat_id, msg.get("message_thread_id"))
-    if text and len(text) > 12:
-        _LAST_TEXT[tkey] = (time.time(), text)
-        # texte qui RÉPOND directement à une vidéo -> c'est SA description (sûr à 100%)
-        tref = _real_reply(msg)
-        if tref and _is_video_msg(tref):
-            _VIDEO_DESC[(chat_id, tref.get("message_id"))] = text
-        else:
-            # sinon : texte qui arrive APRÈS une vidéo récente -> SA description
-            lv = _LAST_VIDEO.get(tkey)
-            if lv and time.time() - lv[0] < 600:
-                _VIDEO_DESC[(chat_id, lv[1])] = text
-        _cache_save()
-        _trace(f"description mémorisée ({len(text)} car.) dans {tkey}")
-    # Vidéo SANS vraie réponse = probablement une veille postée : on la mémorise
-    # et on lui associe le dernier texte récent (description AVANT la vidéo)
-    if _is_video_msg(msg) and not _real_reply(msg):
-        _LAST_VIDEO[tkey] = (time.time(), msg.get("message_id"))
-        lt = _LAST_TEXT.get(tkey)
-        if lt and time.time() - lt[0] < 600:
-            _VIDEO_DESC[(chat_id, msg.get("message_id"))] = lt[1]
-        _cache_save()
-
-    # Routage : vidéo en RÉPONSE dans un chat/sujet branché
     src = cfg["sources"].get(str(chat_id))
-    if not src:
-        if _is_video_msg(msg):
-            _trace(f"video ignorée : chat {chat_id} pas branché (/setmodel manquant)")
-        return
-    if not cfg.get("dest_chat_id"):
-        _trace("video ignorée : pas de destination (/setdestination)")
-        return
-    if isinstance(src, str):           # rétro-compat ancien format
+    if isinstance(src, str):
         src = {"model": src, "thread": None}
+    if not src or not cfg.get("dest_chat_id"):
+        return
     model = src.get("model")
     want_thread = src.get("thread")
+    if want_thread and msg.get("message_thread_id") != want_thread:
+        return
+    tkey = (chat_id, msg.get("message_thread_id"))
+    now = time.time()
+
+    # ---- TEXTE : description de veille ----
+    if text and len(text) > 12:
+        _LAST_TEXT[tkey] = (now, text, msg.get("message_id"))
+        v = None
+        tref = _real_reply(msg)
+        if tref and _is_video_msg(tref):
+            v = _VEILLES.get((chat_id, tref.get("message_id")))
+        if not v:
+            lv = _LAST_VEILLE.get(tkey)
+            if lv and now - lv[0] < 600:
+                v = _VEILLES.get((chat_id, lv[1]))
+        if v and not v.get("routed"):
+            v["desc"] = text
+            v["text_msg_id"] = msg.get("message_id")
+            _update_pending_caption(cfg, v)
+            _trace(f"description liée à la veille ({model}) : {text[:40]}…")
+        else:
+            _trace(f"texte mémorisé ({model}) : {text[:40]}…")
+        _cache_save()
+        return
+
     if not _is_video_msg(msg):
         return
-    if want_thread and msg.get("message_thread_id") != want_thread:
-        _trace(f"video ignorée : sujet {msg.get('message_thread_id')} ≠ sujet branché {want_thread}")
-        return
+
     ref = _real_reply(msg)
+
+    # ---- VIDÉO SANS RÉPONSE = NOUVELLE VEILLE ----
     if not ref:
-        _trace(f"video ignorée ({model}) : ce n'est PAS une réponse (utilise Répondre)")
+        fid = (msg.get("video") or {}).get("file_id")
+        if not fid:
+            _trace(f"veille ignorée ({model}) : pas une vidéo classique (note/doc)")
+            return
+        v = {"file_id": fid, "caption": (msg.get("caption") or "").strip(),
+             "desc": None, "text_msg_id": None, "dest_msg_id": None,
+             "model": model, "ts": now, "routed": False}
+        # description arrivée AVANT la vidéo ?
+        lt = _LAST_TEXT.get(tkey)
+        if lt and now - lt[0] < 600:
+            v["desc"] = lt[1]
+            v["text_msg_id"] = lt[2]
+        _VEILLES[(chat_id, msg.get("message_id"))] = v
+        _LAST_VEILLE[tkey] = (now, msg.get("message_id"))
+        _post_pending(cfg, v, model)
+        _cache_save()
+        return
+
+    # ---- VIDÉO EN RÉPONSE = LA MODÈLE A FAIT SA VERSION ----
+    raw_fid = (msg.get("video") or {}).get("file_id")
+    # retrouve la veille : réponse à la vidéo, ou au texte de description
+    v = _VEILLES.get((chat_id, ref.get("message_id")))
+    if not v:
+        for vv in _VEILLES.values():
+            if vv.get("text_msg_id") == ref.get("message_id") and vv.get("model") == model:
+                v = vv
+                break
+    if not v and _is_video_msg(ref):
+        # veille inconnue (postée avant le bot) : on la reconstruit depuis la réponse
+        v = {"file_id": (ref.get("video") or {}).get("file_id"),
+             "caption": (ref.get("caption") or ref.get("text") or "").strip(),
+             "desc": None, "text_msg_id": None, "dest_msg_id": None,
+             "model": model, "ts": now, "routed": False}
+        lt = _LAST_TEXT.get(tkey)
+        if lt and now - lt[0] < 7200:
+            v["desc"] = lt[1]
+    if not v:
+        _trace(f"réponse ignorée ({model}) : impossible de retrouver la veille d'origine")
         return
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
-
-    # Légende = caption du message exemple + SA description (texte associé à
-    # cette vidéo précise), sinon dernier texte long du sujet (< 2 h).
-    cap_parts = []
-    ref_cap = (ref.get("caption") or ref.get("text") or "").strip()
-    if ref_cap:
-        cap_parts.append(ref_cap)
-    desc = _VIDEO_DESC.get((chat_id, ref.get("message_id")))
-    if not desc:
-        lt = _LAST_TEXT.get((chat_id, msg.get("message_thread_id")))
-        if lt and time.time() - lt[0] < 7200:
-            desc = lt[1]
-    if desc and desc not in cap_parts:
-        cap_parts.append(desc)
-    caption = "\n\n".join(cap_parts)[:1020]
-
-    ex_vid = (ref.get("video") or {}).get("file_id")
-    raw_vid = (msg.get("video") or {}).get("file_id")
+    caption = _veille_caption(v)
 
     res = {"ok": False}
-    if ex_vid and raw_vid:
-        # ALBUM : les 2 vidéos côte à côte + description en légende
-        res = _api("sendMediaGroup", {
-            "chat_id": dest, "message_thread_id": tid,
-            "media": [
-                {"type": "video", "media": ex_vid, "caption": caption or None},
-                {"type": "video", "media": raw_vid},
-            ],
-        }) if tid else _api("sendMediaGroup", {
-            "chat_id": dest,
-            "media": [
-                {"type": "video", "media": ex_vid, "caption": caption or None},
-                {"type": "video", "media": raw_vid},
-            ],
-        })
-    elif raw_vid:
-        # Pas de vidéo exemple (réponse à un texte/lien) : la brute + légende
-        p = {"chat_id": dest, "video": raw_vid, "caption": caption or None}
+    if v.get("file_id") and raw_fid:
+        media = [{"type": "video", "media": v["file_id"]},
+                 {"type": "video", "media": raw_fid}]
+        if caption:
+            media[0]["caption"] = caption
+        p = {"chat_id": dest, "media": media}
+        if tid:
+            p["message_thread_id"] = tid
+        res = _api("sendMediaGroup", p)
+    elif raw_fid:
+        p = {"chat_id": dest, "video": raw_fid}
+        if caption:
+            p["caption"] = caption
         if tid:
             p["message_thread_id"] = tid
         res = _api("sendVideo", p)
     if not res.get("ok"):
-        # Fallback (video_note, document…) : copie brute des 2 messages
         _trace(f"album KO ({model}) : {res.get('description', '?')} -> fallback copie")
         _copy(dest, tid, chat_id, ref.get("message_id"))
         res = _copy(dest, tid, chat_id, msg.get("message_id"))
 
     if res.get("ok"):
+        # remplace le message « en attente » par l'album
+        if v.get("dest_msg_id"):
+            _api("deleteMessage", {"chat_id": dest, "message_id": v["dest_msg_id"]})
+            v["dest_msg_id"] = None
+        v["routed"] = True
         STATUS["routed"] = STATUS.get("routed", 0) + 1
-        _trace(f"✅ routé ({model}) -> sujet {tid} (album)")
+        _cache_save()
+        _trace(f"✅ routé ({model}) -> album dans le sujet {tid}")
         _api("setMessageReaction", {
             "chat_id": chat_id, "message_id": msg.get("message_id"),
             "reaction": [{"type": "emoji", "emoji": "🔥"}],
@@ -401,13 +446,12 @@ def _poll_loop():
             }, timeout=60)
             if not res.get("ok"):
                 STATUS["error"] = res.get("description", "?")
-                # token manquant / conflit -> on attend avant de retenter
                 time.sleep(15)
                 continue
             for upd in res.get("result") or []:
                 offset = max(offset, int(upd.get("update_id") or 0))
                 try:
-                    cfg = _load()  # config fraîche (commandes récentes)
+                    cfg = _load()
                     _handle_update(cfg, upd)
                 except Exception as e:
                     STATUS["error"] = str(e)
