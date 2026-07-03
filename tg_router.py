@@ -37,6 +37,9 @@ _THREAD = None
 _STOP = threading.Event()
 STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
 EVENTS = []  # ring buffer des 15 dernières décisions (debug)
+# Dernier TEXTE long vu par sujet (la description de la veille arrive dans un
+# message séparé -> on la colle en légende de l'album). {(chat,thread): (ts, txt)}
+_LAST_TEXT = {}
 
 
 def _trace(txt: str):
@@ -225,6 +228,10 @@ def _handle_update(cfg: dict, upd: dict):
         _handle_command(cfg, msg, text)
         return
 
+    # Mémorise le dernier TEXTE long du sujet (description de veille probable)
+    if text and len(text) > 40:
+        _LAST_TEXT[(chat_id, msg.get("message_thread_id"))] = (time.time(), text)
+
     # Routage : vidéo en RÉPONSE dans un chat/sujet branché
     src = cfg["sources"].get(str(chat_id))
     if not src:
@@ -256,21 +263,58 @@ def _handle_update(cfg: dict, upd: dict):
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
-    # 1) l'exemple (le message auquel on répond : vidéo OU lien veille)
-    r1 = _copy(dest, tid, chat_id, ref.get("message_id"))
-    if not r1.get("ok"):
-        _trace(f"copie EXEMPLE échouée ({model}) : {r1.get('description', '?')}")
-    # 2) la vidéo brute de la modèle
-    res = _copy(dest, tid, chat_id, msg.get("message_id"))
+
+    # Légende = caption/texte du message exemple + dernière description vue
+    # dans le sujet (< 2 h) — la veille envoie souvent la description à part.
+    cap_parts = []
+    ref_cap = (ref.get("caption") or ref.get("text") or "").strip()
+    if ref_cap:
+        cap_parts.append(ref_cap)
+    lt = _LAST_TEXT.get((chat_id, msg.get("message_thread_id")))
+    if lt and time.time() - lt[0] < 7200 and lt[1] not in cap_parts:
+        cap_parts.append(lt[1])
+    caption = "\n\n".join(cap_parts)[:1020]
+
+    ex_vid = (ref.get("video") or {}).get("file_id")
+    raw_vid = (msg.get("video") or {}).get("file_id")
+
+    res = {"ok": False}
+    if ex_vid and raw_vid:
+        # ALBUM : les 2 vidéos côte à côte + description en légende
+        res = _api("sendMediaGroup", {
+            "chat_id": dest, "message_thread_id": tid,
+            "media": [
+                {"type": "video", "media": ex_vid, "caption": caption or None},
+                {"type": "video", "media": raw_vid},
+            ],
+        }) if tid else _api("sendMediaGroup", {
+            "chat_id": dest,
+            "media": [
+                {"type": "video", "media": ex_vid, "caption": caption or None},
+                {"type": "video", "media": raw_vid},
+            ],
+        })
+    elif raw_vid:
+        # Pas de vidéo exemple (réponse à un texte/lien) : la brute + légende
+        p = {"chat_id": dest, "video": raw_vid, "caption": caption or None}
+        if tid:
+            p["message_thread_id"] = tid
+        res = _api("sendVideo", p)
+    if not res.get("ok"):
+        # Fallback (video_note, document…) : copie brute des 2 messages
+        _trace(f"album KO ({model}) : {res.get('description', '?')} -> fallback copie")
+        _copy(dest, tid, chat_id, ref.get("message_id"))
+        res = _copy(dest, tid, chat_id, msg.get("message_id"))
+
     if res.get("ok"):
         STATUS["routed"] = STATUS.get("routed", 0) + 1
-        _trace(f"✅ routé ({model}) -> sujet {tid}")
+        _trace(f"✅ routé ({model}) -> sujet {tid} (album)")
         _api("setMessageReaction", {
             "chat_id": chat_id, "message_id": msg.get("message_id"),
             "reaction": [{"type": "emoji", "emoji": "🔥"}],
         })
     else:
-        _trace(f"copie BRUTE échouée ({model}) : {res.get('description', '?')}")
+        _trace(f"routage échoué ({model}) : {res.get('description', '?')}")
 
 
 def _poll_loop():
