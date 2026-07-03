@@ -508,6 +508,10 @@ def render_page() -> str:
     <button onclick="nxToggleAllV(this)" style="background:none;border:0;color:#a855f7;font-size:12px;cursor:pointer;padding:0">tout cocher / décocher</button>
     <div style="font-size:12px;color:#888;margin:14px 0 6px">Captions (texte incrusté sur la vidéo) — coche celles à appliquer :</div>
     <div id="nx-caps" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">{cap_rows}</div>
+    <!-- Éditeur CapCut : place les textes sur la vidéo + timeline -->
+    <button onclick="nxEdOpen()" style="display:flex;align-items:center;gap:10px;width:100%;justify-content:center;padding:14px;margin-bottom:12px;background:linear-gradient(135deg,#0ea5e9,#a855f7);border:0;color:#fff;border-radius:12px;font-weight:800;cursor:pointer;font-size:15px">
+      🎬 Ouvrir l'éditeur CapCut <span style="font-weight:500;font-size:12px;opacity:.85">— place tes textes sur la vidéo, timeline, couleurs, tailles</span>
+    </button>
     <div style="background:#0a0a0a;border:1px solid #2a2a2a;border-radius:10px;padding:14px">
       <div style="font-size:13px;color:#a855f7;font-weight:800;margin-bottom:8px">✍️ Écris ta caption ici :</div>
       <textarea id="nx-captext" placeholder="Le texte qui s'affichera sur la vidéo… (ex : Pov : quand tu rentres et que…)" style="width:100%;min-height:72px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:11px 13px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;display:block"></textarea>
@@ -690,6 +694,7 @@ function nxSelectModel(){{ nxRefreshInputs(); nxRefreshOutputs(); }}
 // init
 setTimeout(function(){{ if(document.getElementById('nx-model') && nxModel()){{ nxRefreshInputs(); nxRefreshOutputs(); }} }}, 200);
 </script>
+<script src="/noctus/editor.js" defer></script>
 """
 
 
@@ -795,6 +800,76 @@ def register(app, is_auth, error_fn, success_fn):
         dl = request.args.get("dl") == "1"   # ?dl=1 -> force le téléchargement
         return send_file(str(p), mimetype="video/mp4",
                          as_attachment=dl, download_name=name, conditional=True)
+
+    @app.route("/noctus/input_file/<model>/<path:name>", methods=["GET"])
+    def noctus_input_file(model, name):
+        """Stream d'une vidéo SOURCE (input/) — preview de l'éditeur CapCut."""
+        if not is_auth():
+            return redirect("/")
+        mid = _safe(model)
+        if "/" in name or "\\" in name or ".." in name:
+            return "Not found", 404
+        base = (_models_dir() / mid / "input").resolve()
+        p = (base / name).resolve()
+        if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
+            return "Not found", 404
+        return send_file(str(p), mimetype="video/mp4", conditional=True)
+
+    @app.route("/noctus/save_version", methods=["POST"])
+    def noctus_save_version():
+        """Upsert d'une VERSION de captions depuis l'éditeur CapCut.
+        Params : label, font (défaut version), json = liste de captions
+        [{start,end,text,x,y,size,color,font}] (style optionnel par caption)."""
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        label = re.sub(r"[^A-Za-z0-9_\-]", "_", (request.form.get("label") or "").strip())[:40]
+        if not label:
+            return jsonify({"ok": False, "error": "nom de version invalide"})
+        font = (request.form.get("font") or "").strip() or None
+        try:
+            raw = json.loads(request.form.get("json") or "[]")
+            assert isinstance(raw, list)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"JSON invalide: {e}"})
+        segs = []
+        for c in raw:
+            if not isinstance(c, dict) or not (c.get("text") or "").strip():
+                continue
+            seg = {"start": str(c.get("start") or "00:00:00.000"),
+                   "end": str(c.get("end") or "99:99:99.000"),
+                   "text": str(c.get("text"))[:500]}
+            # Style optionnel (éditeur) — champs absents = comportement historique
+            try:
+                if c.get("x") is not None:
+                    seg["x"] = max(0.03, min(0.97, float(c["x"])))
+                if c.get("y") is not None:
+                    seg["y"] = max(0.03, min(0.96, float(c["y"])))
+                if c.get("size") is not None:
+                    seg["size"] = max(16, min(160, int(c["size"])))
+            except Exception:
+                pass
+            col = str(c.get("color") or "")
+            if re.match(r"^#[0-9a-fA-F]{3,8}$", col):
+                seg["color"] = col
+            if c.get("font"):
+                seg["font"] = str(c["font"])[:40]
+            segs.append(seg)
+        caps = read_captions()
+        caps = [c for c in caps if not (isinstance(c, dict) and c.get("label") == label)]
+        caps.append({"label": label, "font": font, "captions": segs})
+        if write_captions(caps):
+            return jsonify({"ok": True, "label": label, "count": len(segs)})
+        return jsonify({"ok": False, "error": "écriture échouée"})
+
+    @app.route("/noctus/editor.js", methods=["GET"])
+    def noctus_editor_js():
+        """JS de l'éditeur CapCut (fichier séparé -> pas d'enfer d'échappement)."""
+        if not is_auth():
+            return "", 401
+        p = BOT_DIR / "noctus_editor.js"
+        if not p.exists():
+            return "// editor manquant", 404
+        return send_file(str(p), mimetype="text/javascript", conditional=True)
 
     @app.route("/noctus/captions", methods=["GET", "POST"])
     def noctus_captions():

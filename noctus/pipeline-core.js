@@ -370,7 +370,22 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const W    = CONFIG.outputWidth;
   const H    = CONFIG.outputHeight;
   const maxW = CONFIG.maxTextWidth;
-  const BASE = CONFIG.fontSize;
+  // ── Style PAR CAPTION (éditeur CapCut web) : x/y fraction 0-1, size px, color hex,
+  //    font par segment. Champs absents -> comportement historique inchangé.
+  const st = (captions && captions.length === 1 && captions[0]) || {};
+  if (st.font) fontFamily = st.font;
+  const BASE = (Number(st.size) > 0)
+    ? Math.min(160, Math.max(16, Math.round(Number(st.size))))
+    : CONFIG.fontSize;
+  const fillColor = (typeof st.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(st.color))
+    ? st.color : 'white';
+  const hasCustomY = (st.y != null && isFinite(parseFloat(st.y)));
+  const capY = hasCustomY ? Math.min(0.96, Math.max(0.03, parseFloat(st.y))) : CONFIG.verticalY;
+  const hasCustomX = (st.x != null && isFinite(parseFloat(st.x)));
+  const capX = hasCustomX ? Math.min(0.97, Math.max(0.03, parseFloat(st.x))) : 0.5;
+  const CX = Math.round(W * capX);
+  // Position custom -> micro-jitter anti-fingerprint seulement (le ±300px casserait le placement)
+  const effYOffset = hasCustomY ? Math.max(-14, Math.min(14, yOffset)) : yOffset;
   // Police texte selectionnee (fallback Arial si non disponible)
   // Bebas/Anton sont des fontes "Regular" qui font deja un effet bold visuel
   // InterRegular/InterMedium sont des poids legers (style TikTok native)
@@ -450,8 +465,8 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
 
   const lineH  = Math.round(BASE * CONFIG.lineSpacing);
   const totalH = (finalLines.length - 1) * lineH;
-  // baseY = position verticale ratio + offset aleatoire anti-detection (-5..+5 px par render)
-  const baseY  = Math.round(H * CONFIG.verticalY) + yOffset;
+  // baseY = position verticale (custom editeur ou ratio config) + offset anti-detection
+  const baseY  = Math.round(H * capY) + effYOffset;
   const startY = baseY - totalH / 2;
 
   for (let i = 0; i < finalLines.length; i++) {
@@ -466,23 +481,23 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     const hasEmoji = runs.some(r => r.type === 'emoji');
 
     if (!hasEmoji) {
-      // Texte pur — rendu centré classique
+      // Texte pur — rendu centré sur CX (custom éditeur ou centre)
       ctx.textAlign   = 'center';
       ctx.strokeStyle = 'rgba(0,0,0,0.95)';
-      ctx.strokeText(text, Math.round(W / 2), y);
-      ctx.fillStyle = 'white';
-      ctx.fillText(text, Math.round(W / 2), y);
+      ctx.strokeText(text, CX, y);
+      ctx.fillStyle = fillColor;
+      ctx.fillText(text, CX, y);
     } else {
       // Mixte texte + emoji — mesure totale puis dessin gauche→droite
       ctx.textAlign = 'left';
       const totalW  = _measureLine(ctx, text, emojiSize);
-      let curX      = Math.round(W / 2 - totalW / 2);
+      let curX      = Math.round(CX - totalW / 2);
 
       for (const run of runs) {
         if (run.type === 'text') {
           ctx.strokeStyle = 'rgba(0,0,0,0.95)';
           ctx.strokeText(run.content, curX, y);
-          ctx.fillStyle = 'white';
+          ctx.fillStyle = fillColor;
           ctx.fillText(run.content, curX, y);
           curX += ctx.measureText(run.content).width;
         } else {
