@@ -350,13 +350,25 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
     elif cmd == "/routerstatus":
         dest = cfg.get("dest_chat_id")
-        models = []
-        for v in cfg["sources"].values():
-            models.append(v.get("model") if isinstance(v, dict) else v)
+        # Détail par branchement : modèle -> NOM du groupe Telegram (getChat)
+        lines = []
+        seen_models = {}
+        for cid, v in cfg["sources"].items():
+            m = v.get("model") if isinstance(v, dict) else v
+            title = "?"
+            try:
+                gc = _api("getChat", {"chat_id": int(cid)})
+                if gc.get("ok"):
+                    title = (gc.get("result") or {}).get("title") or "(chat privé)"
+            except Exception:
+                pass
+            dup = " ⚠️ DOUBLON" if m in seen_models else ""
+            seen_models[m] = True
+            lines.append(f"  • {m} → « {title} »{dup}")
         pending = sum(1 for v in _VEILLES.values() if v.get("dest_msg_id") and not v.get("routed"))
         _reply(chat_id,
                f"📡 Routeur reels\n• Destination : {'✅ configurée' if dest else '❌ /setdestination dans le groupe à sujets'}\n"
-               f"• Sujets sources branchés : {len(models)} ({', '.join(sorted(set(models))) or '—'})\n"
+               f"• Branchements ({len(lines)}) :\n" + ("\n".join(lines) or "  (aucun)") + "\n"
                f"• Veilles en attente d'une vidéo : {pending}\n"
                f"• Vidéos rangées : {STATUS.get('routed', 0)}", thread_id)
 

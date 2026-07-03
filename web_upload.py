@@ -3942,41 +3942,6 @@ window.upClearPrefill = function(utab){
 <!-- INSTAGRAM TRENDS -->
 <div class="form-section" id="form-igtrends" style="display:none">
 
-<!-- Header avec stats agency -->
-<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;align-items:center;gap:16px">
-  <div style="display:flex;align-items:center;gap:10px;flex:1">
-    <div style="width:36px;height:36px;background:#2a2a2a;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#888" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    </div>
-    <div style="width:44px;height:44px;background:#2a2a2a;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff">YO</div>
-    <div>
-      <div style="font-weight:700;font-size:18px;color:#fff">Youssef</div>
-      <div style="font-size:11px;color:#888;letter-spacing:1px">AGENCY</div>
-    </div>
-  </div>
-  <div style="display:flex;gap:18px;align-items:center;color:#888;font-size:14px">
-    <span style="display:flex;align-items:center;gap:4px">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-      0
-    </span>
-    <span style="display:flex;align-items:center;gap:4px">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      0
-    </span>
-    <span style="display:flex;align-items:center;gap:4px">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-      0
-    </span>
-    <span style="display:flex;align-items:center;gap:4px">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/></svg>
-      0
-    </span>
-    <div style="width:40px;height:40px;border:2px solid #06b6d4;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#06b6d4;cursor:pointer">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>
-    </div>
-  </div>
-</div>
-
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
 
 <!-- Sub-tabs style Insta : Mes suivies / Explorer / Veille -->
