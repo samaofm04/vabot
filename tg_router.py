@@ -40,6 +40,11 @@ EVENTS = []  # ring buffer des 15 dernières décisions (debug)
 # Dernier TEXTE long vu par sujet (la description de la veille arrive dans un
 # message séparé -> on la colle en légende de l'album). {(chat,thread): (ts, txt)}
 _LAST_TEXT = {}
+# Description associée à UNE vidéo précise : quand un texte long arrive juste
+# avant/après une vidéo dans le sujet, on les lie. {(chat, video_msg_id): txt}
+_VIDEO_DESC = {}
+# Dernière vidéo vue par sujet (pour lier un texte qui arrive APRÈS la vidéo)
+_LAST_VIDEO = {}
 
 
 def _trace(txt: str):
@@ -110,6 +115,19 @@ def _is_video_msg(msg: dict) -> bool:
         return True
     doc = msg.get("document") or {}
     return str(doc.get("mime_type") or "").startswith("video/")
+
+
+def _real_reply(msg: dict):
+    """La VRAIE réponse, ou None. (Quirk forums : un message non-réponse dans
+    un sujet a quand même reply_to_message = racine du sujet.)"""
+    ref = msg.get("reply_to_message")
+    if not ref:
+        return None
+    if ref.get("forum_topic_created"):
+        return None
+    if msg.get("message_thread_id") and ref.get("message_id") == msg.get("message_thread_id"):
+        return None
+    return ref
 
 
 def _topic_for(cfg: dict, model: str):
@@ -229,8 +247,20 @@ def _handle_update(cfg: dict, upd: dict):
         return
 
     # Mémorise le dernier TEXTE long du sujet (description de veille probable)
+    tkey = (chat_id, msg.get("message_thread_id"))
     if text and len(text) > 40:
-        _LAST_TEXT[(chat_id, msg.get("message_thread_id"))] = (time.time(), text)
+        _LAST_TEXT[tkey] = (time.time(), text)
+        # texte qui arrive APRÈS une vidéo récente -> c'est SA description
+        lv = _LAST_VIDEO.get(tkey)
+        if lv and time.time() - lv[0] < 600:
+            _VIDEO_DESC[(chat_id, lv[1])] = text
+    # Vidéo SANS vraie réponse = probablement une veille postée : on la mémorise
+    # et on lui associe le dernier texte récent (description AVANT la vidéo)
+    if _is_video_msg(msg) and not _real_reply(msg):
+        _LAST_VIDEO[tkey] = (time.time(), msg.get("message_id"))
+        lt = _LAST_TEXT.get(tkey)
+        if lt and time.time() - lt[0] < 600:
+            _VIDEO_DESC[(chat_id, msg.get("message_id"))] = lt[1]
 
     # Routage : vidéo en RÉPONSE dans un chat/sujet branché
     src = cfg["sources"].get(str(chat_id))
@@ -250,29 +280,27 @@ def _handle_update(cfg: dict, upd: dict):
     if want_thread and msg.get("message_thread_id") != want_thread:
         _trace(f"video ignorée : sujet {msg.get('message_thread_id')} ≠ sujet branché {want_thread}")
         return
-    ref = msg.get("reply_to_message")
+    ref = _real_reply(msg)
     if not ref:
         _trace(f"video ignorée ({model}) : ce n'est PAS une réponse (utilise Répondre)")
-        return
-    # Quirk des forums Telegram : un message NON-réponse dans un sujet a quand
-    # même reply_to_message = racine du sujet. Ce n'est PAS une vraie réponse.
-    if ref.get("forum_topic_created") or (
-            msg.get("message_thread_id") and ref.get("message_id") == msg.get("message_thread_id")):
-        _trace(f"video ignorée ({model}) : réponse à la racine du sujet, pas à une vidéo")
         return
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
 
-    # Légende = caption/texte du message exemple + dernière description vue
-    # dans le sujet (< 2 h) — la veille envoie souvent la description à part.
+    # Légende = caption du message exemple + SA description (texte associé à
+    # cette vidéo précise), sinon dernier texte long du sujet (< 2 h).
     cap_parts = []
     ref_cap = (ref.get("caption") or ref.get("text") or "").strip()
     if ref_cap:
         cap_parts.append(ref_cap)
-    lt = _LAST_TEXT.get((chat_id, msg.get("message_thread_id")))
-    if lt and time.time() - lt[0] < 7200 and lt[1] not in cap_parts:
-        cap_parts.append(lt[1])
+    desc = _VIDEO_DESC.get((chat_id, ref.get("message_id")))
+    if not desc:
+        lt = _LAST_TEXT.get((chat_id, msg.get("message_thread_id")))
+        if lt and time.time() - lt[0] < 7200:
+            desc = lt[1]
+    if desc and desc not in cap_parts:
+        cap_parts.append(desc)
     caption = "\n\n".join(cap_parts)[:1020]
 
     ex_vid = (ref.get("video") or {}).get("file_id")
