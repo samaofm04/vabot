@@ -3,6 +3,7 @@ Tourne dans un thread du process bot. Accès via http://<VPS_IP>:8080
 Authentification par mot de passe (env WEB_UPLOAD_PASSWORD ou par défaut "changeme").
 """
 import os
+import re
 import json
 import logging
 import threading
@@ -3459,10 +3460,6 @@ window.upClearPrefill = function(utab){
     <button class="item" id="tab-valist" onclick="showTab('va','valist','Délégations VA','VAs assignés à chaque identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
       Liste VAs
-    </button>
-    <button class="item" id="tab-vastats" onclick="showTab('va','vastats','Statistiques par identité','Contenus dispo par identité')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
-      Stats par identité
     </button>
     <button class="item" id="tab-onboarding" onclick="showTab('va','onboarding','Onboarding','Plan etape par etape (JOUR 0, JOUR 1...) avec medias')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -12583,7 +12580,7 @@ def _render_home_dashboard_html() -> str:
         except Exception:
             pass
         items = []
-        for i, ds in enumerate(chart_data["datasets"][:5]):
+        for i, ds in enumerate([d for d in chart_data["datasets"] if float(d.get("total", 0) or 0) > 0][:5]):
             cid = creators_map.get(ds["label"])
             avatar = (
                 f"<img src='/mypuls/avatar/{cid}' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
@@ -12611,31 +12608,38 @@ def _render_home_dashboard_html() -> str:
             + "</div></div>"
         )
 
-    # Top chatteurs (top 5)
+    # Sales ranking chatteurs (façon Infloww) : filtre les lignes à 0€, badges 1/2/3
     top_chatters_html = ""
-    if chatters:
+    ranked = [c for c in chatters if float(c.get("ca_total", 0) or 0) > 0]
+    if ranked:
         items = []
-        max_ca = chatters[0].get("ca_total", 1) or 1
-        for c in chatters[:5]:
-            pct = (c.get("ca_total", 0) / max_ca * 100) if max_ca else 0
+        badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
+        for i, c in enumerate(ranked[:8], start=1):
+            bg = badge_bg.get(i)
+            badge = (
+                f"<div style='width:26px;height:26px;border-radius:50%;background:{bg};color:#04241d;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0'>{i}</div>"
+                if bg else
+                f"<div style='width:26px;height:26px;border-radius:50%;background:#26262a;color:#aaa;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0'>{i}</div>"
+            )
             items.append(
-                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
-                f"<div style='width:32px;height:32px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px'>{c['name'][:2].upper()}</div>"
-                f"<div style='flex:1;min-width:0'>"
-                f"<div style='font-weight:600;font-size:14px'>{c['name']}</div>"
-                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
-                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#a855f7,#ec4899)'></div></div>"
-                f"<div style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>{c['ca_total']:.0f}€</div>"
-                f"</div>"
-                f"</div>"
+                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 6px;border-bottom:1px solid #222'>"
+                f"{badge}"
+                f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{c['name']}</div>"
+                f"<div style='font-size:14px;color:#3b82f6;font-weight:700'>{c['ca_total']:,.2f}€</div>"
                 f"</div>"
             )
         top_chatters_html = (
             "<div class='home-card'>"
-            "<div class='home-card-header'>Top chatteurs</div>"
-            "<div style='display:flex;flex-direction:column;gap:8px'>"
+            "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Sales ranking "
+            "<span style='font-size:11px;color:#888;font-weight:500'>Décroissant</span></div>"
+            "<div style='display:flex;flex-direction:column'>"
             + "".join(items)
             + "</div></div>"
+        )
+    elif chatters:
+        top_chatters_html = (
+            "<div class='home-card'><div class='home-card-header'>Sales ranking</div>"
+            "<div style='color:#888;font-size:13px;padding:16px 0;text-align:center'>Aucune vente sur la période</div></div>"
         )
 
     if not mp_configured:
@@ -12754,10 +12758,75 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         + "</div>"
     )
 
+    # ---- Courbe "Ventes par jour" (7 derniers jours, indépendante de la période) ----
+    sales_chart_html = ""
+    if mp_configured and not mp_error:
+        chart_labels, chart_vals = [], []
+        try:
+            wk_start = today - _dt.timedelta(days=6)
+            wres = mypuls.fetch_team_stats(wk_start.isoformat(), today.isoformat(), use_cache=True)
+            if wres.get("ok"):
+                wch = wres.get("chart") or {}
+                days = wch.get("days") or []
+                sums = [0.0] * len(days)
+                for ds in wch.get("datasets") or []:
+                    for i, v in enumerate(ds.get("data") or []):
+                        if i < len(sums):
+                            try:
+                                sums[i] += float(v or 0)
+                            except Exception:
+                                pass
+                for d_iso, s in zip(days, sums):
+                    try:
+                        dd = _dt.date.fromisoformat(d_iso)
+                        chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
+                    except Exception:
+                        chart_labels.append(d_iso)
+                    chart_vals.append(round(s, 2))
+        except Exception:
+            pass
+        if chart_labels:
+            import json as _json
+            sales_chart_html = (
+                "<div class='home-card' style='margin-top:18px'>"
+                "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Ventes par jour "
+                "<span style='font-size:11px;color:#888;font-weight:500'>7 derniers jours</span></div>"
+                "<div style='position:relative;height:260px'><canvas id='home-sales-chart'></canvas></div>"
+                "</div>"
+                "<script>"
+                "(function(){"
+                f"var L = {_json.dumps(chart_labels)};"
+                f"var V = {_json.dumps(chart_vals)};"
+                "function init(){"
+                "  if(typeof Chart === 'undefined'){ setTimeout(init, 120); return; }"
+                "  var el = document.getElementById('home-sales-chart');"
+                "  if(!el) return;"
+                "  if(window.__homeSalesChart){ try{ window.__homeSalesChart.destroy(); }catch(e){} }"
+                "  var ctx = el.getContext('2d');"
+                "  var grad = ctx.createLinearGradient(0, 0, 0, 260);"
+                "  grad.addColorStop(0, 'rgba(59,130,246,.28)'); grad.addColorStop(1, 'rgba(59,130,246,0)');"
+                "  window.__homeSalesChart = new Chart(el, {type:'line',"
+                "    data:{labels:L, datasets:[{data:V, borderColor:'#3b82f6', backgroundColor:grad, fill:true,"
+                "      tension:.35, borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#fff',"
+                "      pointBorderColor:'#3b82f6', pointBorderWidth:2, pointHoverRadius:6}]},"
+                "    options:{responsive:true, maintainAspectRatio:false,"
+                "      interaction:{intersect:false, mode:'index'},"
+                "      plugins:{legend:{display:false},"
+                "        tooltip:{backgroundColor:'rgba(20,22,30,.95)', padding:12, displayColors:false,"
+                "          callbacks:{label:function(c){ return c.parsed.y.toFixed(2) + ' \\u20ac'; }}}},"
+                "      scales:{y:{beginAtZero:true, grid:{color:'rgba(136,136,136,.12)'}, ticks:{color:'#888'}},"
+                "              x:{grid:{display:false}, ticks:{color:'#888'}}}}});"
+                "}"
+                "init();"
+                "})();"
+                "</script>"
+            )
+
     return (
         css
         + warning
         + overview_html
+        + sales_chart_html
         + (
             f"<div class='home-row'>{top_creators_html}{top_chatters_html}</div>"
             if top_creators_html or top_chatters_html else ""
@@ -13848,6 +13917,210 @@ def _render_revenus_html() -> str:
     return "".join(rows)
 
 
+# ---------- Paie VAs AUTOMATIQUE : clics éligibles GMS par quinzaine ----------
+# Même logique que /rapportpaie (cogs/clickrecap.py) mais en SYNC pour Flask :
+# paliers JOURNALIERS (≤50→$0.05, 51-100→$0.06, >100→$0.07) sur les clics
+# éligibles (FR/BE/CH/LU/MC). VAs = salons Discord va-<handle> (pas jailbreak).
+_PAY_ELIGIBLE_COUNTRIES = {"FR", "BE", "CH", "LU", "MC"}
+_PAY_VA_CH_RE = re.compile(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$")
+_PAY_DAYCACHE_FILE = DATA_DIR / "paievas_daycache.json"
+_PAY_DAYCACHE: dict = {}       # "lid|iso" -> [total, eligible, ts]
+_PAY_DAYCACHE_LOADED = False
+_PAY_DAYCACHE_LOCK = threading.Lock()
+_PAY_REPORT_CACHE: dict = {}   # period_key -> (ts, payload)
+
+
+def _pay_rate_for_clicks(clicks: int) -> float:
+    if clicks <= 50:
+        return 0.05
+    if clicks <= 100:
+        return 0.06
+    return 0.07
+
+
+def _pay_money_for_clicks(clicks: int) -> float:
+    return round(clicks * _pay_rate_for_clicks(clicks), 2)
+
+
+def _pay_quinzaine(d):
+    """Quinzaine de paie contenant la date d : (début, fin)."""
+    import calendar as _cal
+    if d.day <= 15:
+        return d.replace(day=1), d.replace(day=15)
+    last = _cal.monthrange(d.year, d.month)[1]
+    return d.replace(day=16), d.replace(day=last)
+
+
+def _pay_gms_exact_link(handle: str, links):
+    """Match STRICT display_name normalisé == 'va'+handle (cf. cogs/user.py)."""
+    h = re.sub(r"[^a-z0-9]", "", (handle or "").lower())
+    if len(h) < 3 or not links:
+        return None
+    target = "va" + h
+    for l in links:
+        if re.sub(r"[^a-z0-9]", "", (l.get("display_name") or "").lower()) == target:
+            return l
+    return None
+
+
+def _pay_daycache_load():
+    global _PAY_DAYCACHE_LOADED
+    if _PAY_DAYCACHE_LOADED:
+        return
+    with _PAY_DAYCACHE_LOCK:
+        if _PAY_DAYCACHE_LOADED:
+            return
+        try:
+            d = json.loads(_PAY_DAYCACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                _PAY_DAYCACHE.update(d)
+        except Exception:
+            pass
+        _PAY_DAYCACHE_LOADED = True
+
+
+def _pay_daycache_save():
+    try:
+        with _PAY_DAYCACHE_LOCK:
+            _PAY_DAYCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _PAY_DAYCACHE_FILE.write_text(json.dumps(_PAY_DAYCACHE), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
+    """(total, eligible) pour un lien sur UN jour. Jours passés cachés à vie
+    (persistés sur disque), aujourd'hui re-fetch après 120s."""
+    key = f"{lid}|{iso_day}"
+    now = time.time()
+    with _PAY_DAYCACHE_LOCK:
+        c = _PAY_DAYCACHE.get(key)
+    if c and (is_past or now - float(c[2] if len(c) > 2 else 0) < 120):
+        return int(c[0]), int(c[1])
+    try:
+        total, countries = gms_mod.analytics_for_link(lid, iso_day, iso_day)
+    except Exception:
+        return 0, 0
+    total = int(total or 0)
+    eligible = 0
+    if countries:
+        eligible = sum(int(countries.get(cc, 0) or 0) for cc in _PAY_ELIGIBLE_COUNTRIES)
+    with _PAY_DAYCACHE_LOCK:
+        _PAY_DAYCACHE[key] = [total, eligible, now]
+    return total, eligible
+
+
+def _pay_list_discord_vas():
+    """[(categorie, handle)] depuis les salons Discord va-<handle> (tous serveurs)."""
+    out = []
+    seen = set()
+    if _BOT_REF is None:
+        return out
+    try:
+        for g in _BOT_REF.guilds:
+            for ch in getattr(g, "text_channels", []):
+                m = _PAY_VA_CH_RE.search((ch.name or "").lower())
+                if not m:
+                    continue
+                h = m.group(1)
+                if h in seen:
+                    continue
+                seen.add(h)
+                cat = ch.category.name if getattr(ch, "category", None) else "Sans catégorie"
+                out.append((cat, h))
+    except Exception:
+        pass
+    return out
+
+
+def _compute_va_pay_report(period: str) -> dict:
+    """Rapport de paie automatique par quinzaine ('current' ou 'previous').
+    Cache 5 min par période ; le cache par (lien, jour) rend les recalculs rapides."""
+    import datetime as _dt
+    from concurrent.futures import ThreadPoolExecutor
+
+    cached = _PAY_REPORT_CACHE.get(period)
+    if cached and time.time() - cached[0] < 300:
+        return cached[1]
+
+    today = _dt.date.today()
+    if period == "previous":
+        cur_start, _ = _pay_quinzaine(today)
+        p_start, p_end = _pay_quinzaine(cur_start - _dt.timedelta(days=1))
+    else:
+        p_start, p_end = _pay_quinzaine(today)
+    end_capped = min(p_end, today)
+
+    import gms
+    links = gms.list_all_links()
+    vas = _pay_list_discord_vas()
+    matched = []  # (cat, handle, link_id)
+    for cat, h in vas:
+        l = _pay_gms_exact_link(h, links)
+        if l and l.get("id"):
+            matched.append((cat, h, str(l["id"])))
+
+    _pay_daycache_load()
+    day_list = []
+    d = p_start
+    while d <= end_capped:
+        day_list.append((d.isoformat(), d < today))
+        d += _dt.timedelta(days=1)
+
+    tasks = [(lid, iso, past) for _, _, lid in matched for iso, past in day_list]
+    results: dict = {}
+    if tasks:
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            futs = {ex.submit(_pay_day_stats, gms, lid, iso, past): (lid, iso)
+                    for lid, iso, past in tasks}
+            for f in futs:
+                lid, iso = futs[f]
+                try:
+                    results[(lid, iso)] = f.result()
+                except Exception:
+                    results[(lid, iso)] = (0, 0)
+    _pay_daycache_save()
+
+    cats: dict = {}
+    grand_total = 0.0
+    for cat, h, lid in matched:
+        eligible_total = 0
+        money = 0.0
+        for iso, _past in day_list:
+            _t, e = results.get((lid, iso), (0, 0))
+            eligible_total += e
+            money += _pay_money_for_clicks(e)
+        money = round(money, 2)
+        grand_total += money
+        cats.setdefault(cat, []).append({"handle": h, "eligible": eligible_total, "money": money})
+
+    categories = []
+    for cat, rows in cats.items():
+        rows.sort(key=lambda r: r["money"], reverse=True)
+        subtotal = round(sum(r["money"] for r in rows), 2)
+        categories.append({"name": cat, "subtotal": subtotal, "vas": rows})
+    categories.sort(key=lambda c: c["subtotal"], reverse=True)
+
+    mois = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+            "août", "septembre", "octobre", "novembre", "décembre"]
+    label = f"Quinzaine du {p_start.day} au {p_end.day} {mois[p_end.month]} {p_end.year}"
+    if end_capped < p_end:
+        label += f" (calculé jusqu'au {end_capped.day})"
+
+    payload = {
+        "ok": True,
+        "label": label,
+        "start": p_start.isoformat(),
+        "end": p_end.isoformat(),
+        "total": round(grand_total, 2),
+        "va_count": len(matched),
+        "va_total": len(vas),
+        "categories": categories,
+    }
+    _PAY_REPORT_CACHE[period] = (time.time(), payload)
+    return payload
+
+
 def _render_paievas_html() -> str:
     try:
         from business import list_va_payments, va_payment_stats
@@ -13871,6 +14144,58 @@ def _render_paievas_html() -> str:
     items = list_va_payments()
     stats = va_payment_stats()
     rows = []
+    # --- Rapport de paie AUTOMATIQUE (clics éligibles GMS, quinzaines) ---
+    rows.append(
+        "<div class='box' id='vapay-auto'>"
+        "<h4 style='margin-top:0'>💸 À payer automatiquement — clics éligibles</h4>"
+        "<small>Pays éligibles : FR/BE/CH/LU/MC · Paliers journaliers : ≤50 → $0.05 · 51-100 → $0.06 · &gt;100 → $0.07 par clic. "
+        "VAs des salons Discord <code>va-…</code> avec un lien GMS (les jailbreak ne sont pas comptés).</small>"
+        "<div style='display:flex;gap:8px;margin:14px 0;flex-wrap:wrap'>"
+        "<button type='button' class='vapay-btn' data-period='current' onclick='vapayLoad(this)' style='margin:0'>Quinzaine en cours</button>"
+        "<button type='button' class='vapay-btn' data-period='previous' onclick='vapayLoad(this)' style='margin:0;background:#2a2a2a'>Quinzaine précédente</button>"
+        "</div>"
+        "<div id='vapay-out'><small style='color:#888'>Clique une quinzaine pour lancer le calcul. "
+        "Premier calcul : jusqu&#39;à ~1 min (GMS jour par jour), ensuite quasi instantané (cache).</small></div>"
+        "</div>"
+        "<script>"
+        "function vapayLoad(btn){"
+        "  var p = btn.dataset.period;"
+        "  document.querySelectorAll('.vapay-btn').forEach(function(b){ b.style.background = (b === btn) ? '' : '#2a2a2a'; });"
+        "  var out = document.getElementById('vapay-out');"
+        "  out.innerHTML = \"<div style='display:flex;align-items:center;gap:10px;color:#888;font-size:13px;padding:10px 0'>\" +"
+        "    \"<div style='width:20px;height:20px;border:3px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite;flex-shrink:0'></div>\" +"
+        "    \"Calcul en cours\\u2026 (jusqu&#39;\\u00e0 ~1 min au premier calcul)</div>\";"
+        "  fetch('/paievas/report?period=' + p).then(function(r){ return r.json(); }).then(function(d){"
+        "    if(!d.ok){ out.innerHTML = \"<div style='color:#f87171;font-size:13px'>Erreur : \" + (d.error || '?') + '</div>'; return; }"
+        "    var h = \"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px'>\" +"
+        "      \"<span style='font-size:14px;font-weight:700'>\" + d.label + '</span>' +"
+        "      \"<span style='background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#34d399;font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px'>Total : $\" + d.total.toFixed(2) + '</span>' +"
+        "      \"<span style='color:#888;font-size:12px'>\" + d.va_count + ' VAs avec lien / ' + d.va_total + ' salons VA</span></div>';"
+        "    if(!d.categories.length){ out.innerHTML = h + \"<div style='color:#888;font-size:13px'>Aucun VA avec lien GMS trouv\\u00e9.</div>\"; return; }"
+        "    d.categories.forEach(function(cat){"
+        "      h += \"<div style='margin-top:14px'>\" +"
+        "        \"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>\" +"
+        "        \"<span style='font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#aaa'>\" + cat.name + '</span>' +"
+        "        \"<span style='font-weight:700;font-size:13px;color:#34d399'>$\" + cat.subtotal.toFixed(2) + '</span></div>' +"
+        "        \"<table style='width:100%;border-collapse:collapse;font-size:13px'>\" +"
+        "        \"<tr style='background:#1a1a1a'><th style='padding:7px 10px;text-align:left'>VA</th>\" +"
+        "        \"<th style='padding:7px 10px;text-align:right'>Clics \\u00e9ligibles</th>\" +"
+        "        \"<th style='padding:7px 10px;text-align:right'>\\u00c0 payer</th></tr>\";"
+        "      cat.vas.forEach(function(v){"
+        "        h += \"<tr style='border-bottom:1px solid #222'>\" +"
+        "          \"<td style='padding:7px 10px'>@\" + v.handle + '</td>' +"
+        "          \"<td style='padding:7px 10px;text-align:right'>\" + v.eligible + '</td>' +"
+        "          \"<td style='padding:7px 10px;text-align:right;font-weight:700;color:#34d399'>$\" + v.money.toFixed(2) + '</td></tr>';"
+        "      });"
+        "      h += '</table></div>';"
+        "    });"
+        "    out.innerHTML = h;"
+        "  }).catch(function(e){"
+        "    out.innerHTML = \"<div style='color:#f87171;font-size:13px'>Erreur r\\u00e9seau : \" + e + '</div>';"
+        "  });"
+        "}"
+        "</script>"
+    )
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
         f"<div class='stat'><div class='v' style='color:#ffb800'>{stats['total_unpaid']:.0f}€</div><div class='l'>À payer (en attente)</div></div>"
@@ -24214,7 +24539,6 @@ ROLE_MENU_STRUCTURE = [
     ]},
     {"section": "Management — VAs", "items": [
         {"key": "valist", "name": "Liste VAs / Délégations", "perms": ["view", "edit"]},
-        {"key": "vastats", "name": "Stats par identité", "perms": ["view"]},
         {"key": "onboarding", "name": "Onboarding", "perms": ["view", "edit"]},
         {"key": "paievas", "name": "Paie VAs", "perms": ["view", "create"]},
     ]},
@@ -27156,6 +27480,23 @@ def create_app():
             verb = "activé" if action == "enable" else "désactivé"
             return _success(f"✅ Lien {verb}")
         return _error(f"❌ {res.get('error', 'Action échouée')}")
+
+    # ============ PAIE VAS AUTO ============
+
+    @app.route("/paievas/report")
+    def paievas_report():
+        """Rapport de paie auto (clics éligibles GMS) — JSON pour la page Paie VAs.
+        Peut prendre ~1 min au premier calcul (1 appel GMS par lien et par jour)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        period = (request.args.get("period") or "current").strip().lower()
+        if period not in ("current", "previous"):
+            period = "current"
+        try:
+            return jsonify(_compute_va_pay_report(period))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     # ============ MYPULS ============
 
