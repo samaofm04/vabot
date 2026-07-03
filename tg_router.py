@@ -57,11 +57,22 @@ def _save(d: dict):
 
 
 def _token():
+    # Bot DÉDIÉ au routeur si configuré (évite le conflit getUpdates si le
+    # token Veille est aussi utilisé par un autre process, ex: downloader).
+    cfg = _load()
+    if cfg.get("router_token"):
+        return cfg["router_token"]
     try:
         import veille_telegram
         return (veille_telegram.load_config() or {}).get("bot_token") or ""
     except Exception:
         return ""
+
+
+def set_router_token(token: str):
+    cfg = _load()
+    cfg["router_token"] = (token or "").strip()
+    _save(cfg)
 
 
 def _api(method: str, payload: dict, timeout=20):

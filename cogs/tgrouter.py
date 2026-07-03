@@ -29,18 +29,31 @@ class TGRouter(commands.Cog):
         name="tgrouter",
         description="Statut du routeur Telegram (vidéos modèles → sujets du groupe)",
     )
-    async def tgrouter(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        token="(optionnel) Token d'un bot Telegram DÉDIÉ au routeur (via @BotFather) — évite le conflit avec le downloader",
+    )
+    async def tgrouter(self, interaction: discord.Interaction, token: str = None):
         perms = getattr(interaction.user, "guild_permissions", None)
         if not (perms and perms.manage_channels):
             await interaction.response.send_message("Réservé au staff.", ephemeral=True)
+            return
+        if token:
+            tg_router.set_router_token(token)
+            await interaction.response.send_message(
+                "✅ Token du bot routeur enregistré — il est utilisé immédiatement.\n"
+                "⚠️ Ajoute CE nouveau bot (admin) dans VEILLE ID + les groupes des modèles, "
+                "puis refais `/setdestination` et `/setmodel` avec lui si besoin "
+                "(la config des sujets/chats existante est conservée).",
+                ephemeral=True)
             return
         cfg = tg_router._load()
         st = tg_router.STATUS
         import veille_telegram
         has_token = bool((veille_telegram.load_config() or {}).get("bot_token"))
+        dedicated = bool(cfg.get("router_token"))
         txt = (
             "📡 **Routeur Telegram — reels modèles**\n"
-            f"• Bot token (Veille Telegram) : {'✅' if has_token else '❌ configure-le dans Settings → Veille Telegram'}\n"
+            f"• Bot : {'✅ bot DÉDIÉ routeur' if dedicated else ('✅ token Veille partagé' if has_token else '❌ aucun token — Settings → Veille Telegram, ou /tgrouter token:...')}\n"
             f"• Poller : {'🟢 actif' if st.get('running') else '🔴 arrêté'}"
             + (f" — dernière activité <t:{st['last_update']}:R>" if st.get("last_update") else "") + "\n"
             f"• Groupe destination : {'✅ ' + str(cfg.get('dest_chat_id')) if cfg.get('dest_chat_id') else '❌ tape /setdestination dans ton groupe à sujets'}\n"
