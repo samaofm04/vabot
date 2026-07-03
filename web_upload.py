@@ -1075,24 +1075,22 @@ html.rail .sidebar .group-head{justify-content:center;gap:0;padding:11px 0}
 html.rail .sidebar .group{position:relative}
 /* Flyout : panneau flottant à droite de l'icône (l'accordéon .open est neutralisé en mode rail) */
 html.rail .sidebar .group.open .items{display:none}
-html.rail .sidebar .group:hover > .items,html.rail .sidebar .group:focus-within > .items{display:flex;position:absolute;left:100%;top:-6px;z-index:6000;min-width:218px;margin:0;padding:8px;background:#111;border:1px solid #262626;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.6);animation:flyIn .16s cubic-bezier(.16,1,.3,1)}
+html.rail .sidebar .group:hover > .items{display:flex;position:absolute;left:100%;top:-6px;z-index:6000;min-width:218px;margin:0;padding:8px;background:#111;border:1px solid #262626;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.6);animation:flyIn .16s cubic-bezier(.16,1,.3,1)}
 html.rail .sidebar .group:hover > .items .label{display:inline}
 html.rail .sidebar .group:hover > .items .sub-items{display:flex}
 @keyframes flyIn{from{opacity:0;transform:translateX(-6px) scale(.98)}to{opacity:1;transform:translateX(0) scale(1)}}
 /* Les groupes du bas s'ancrent par le bas (le flyout ne sort pas de l'écran) */
-html.rail .sidebar #grp-finances:hover > .items,html.rail .sidebar #grp-finances:focus-within > .items,html.rail .sidebar #grp-settings:hover > .items,html.rail .sidebar #grp-settings:focus-within > .items{top:auto;bottom:-6px}
+html.rail .sidebar #grp-finances:hover > .items,html.rail .sidebar #grp-settings:hover > .items{top:auto;bottom:-6px}
+/* Fermeture instantanée après clic sur un item (classe posée en JS, retirée au mouseleave) */
+html.rail .sidebar .group.flyout-closed > .items{display:none!important}
 /* Flyout adapté aux autres thèmes */
-html.rail body.light .sidebar .group:hover > .items,html.rail body.light .sidebar .group:focus-within > .items{background:#fff;border-color:#e5e7eb;box-shadow:0 18px 44px rgba(0,0,0,.14)}
+html.rail body.light .sidebar .group:hover > .items{background:#fff;border-color:#e5e7eb;box-shadow:0 18px 44px rgba(0,0,0,.14)}
 html.rail body.obsidian .sidebar .group:hover > .items{background:#14171f;border-color:rgba(150,170,235,.16)}
 html.rail body.violet .sidebar .group:hover > .items{background:#160e26;border-color:#2d1b4e}
 html.rail body.gold .sidebar .group:hover > .items{background:#15130f;border-color:#2c2619}
 
-/* =============== ANIMATIONS+ : cascade des cartes & micro-interactions =============== */
-.form-section[style*="block"] > .box{animation:slideUp .3s ease-out both}
-.form-section[style*="block"] > .box:nth-child(2){animation-delay:.05s}
-.form-section[style*="block"] > .box:nth-child(3){animation-delay:.1s}
-.form-section[style*="block"] > .box:nth-child(4){animation-delay:.15s}
-.form-section[style*="block"] > .box:nth-child(n+5){animation-delay:.2s}
+/* =============== ANIMATIONS+ : micro-interactions (PAS de cascade des .box :
+   elle re-cachait les cartes a chaque changement d'onglet = flash noir) =============== */
 .stat{transition:transform .15s ease,box-shadow .15s ease}
 .stat:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.3)}
 body.light .stat:hover{box-shadow:0 8px 20px rgba(0,0,0,.08)}
@@ -1283,6 +1281,20 @@ function toggleSidebarRail(){
     if(localStorage.getItem('vabot_rail') === '1') document.documentElement.classList.add('rail');
   }catch(e){}
 })();
+// En mode rail : fermer le flyout dès qu'on clique un item (sinon il reste ouvert
+// tant que la souris est dessus). La classe est retirée quand la souris sort.
+document.addEventListener('click', function(e){
+  if(!document.documentElement.classList.contains('rail')) return;
+  var it = e.target && e.target.closest ? e.target.closest('.sidebar .group .items .item') : null;
+  if(!it) return;
+  var g = it.closest('.group');
+  if(!g) return;
+  g.classList.add('flyout-closed');
+  g.addEventListener('mouseleave', function h(){
+    g.classList.remove('flyout-closed');
+    g.removeEventListener('mouseleave', h);
+  });
+});
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
 function _vabotThemeLabel(t){
