@@ -36,6 +36,13 @@ _LOCK = threading.Lock()
 _THREAD = None
 _STOP = threading.Event()
 STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
+EVENTS = []  # ring buffer des 15 dernières décisions (debug)
+
+
+def _trace(txt: str):
+    EVENTS.append(f"{time.strftime('%H:%M:%S')} {txt}")
+    del EVENTS[:-15]
+    print(f"[tg_router] {txt}", flush=True)
 
 
 def _load() -> dict:
@@ -189,6 +196,12 @@ def _handle_command(cfg: dict, msg: dict, text: str):
         _save(cfg)
         _reply(chat_id, "✅ Chat débranché du routeur.", thread_id)
 
+    elif cmd == "/routerdebug":
+        ev = "\n".join(EVENTS[-12:]) or "(aucun événement depuis le démarrage)"
+        _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}"
+               + (f"\n\n⚠️ Erreur : {STATUS.get('error')}" if STATUS.get("error") else ""),
+               thread_id)
+
     elif cmd == "/routerstatus":
         dest = cfg.get("dest_chat_id")
         models = []
@@ -214,39 +227,50 @@ def _handle_update(cfg: dict, upd: dict):
 
     # Routage : vidéo en RÉPONSE dans un chat/sujet branché
     src = cfg["sources"].get(str(chat_id))
-    if not src or not cfg.get("dest_chat_id"):
+    if not src:
+        if _is_video_msg(msg):
+            _trace(f"video ignorée : chat {chat_id} pas branché (/setmodel manquant)")
+        return
+    if not cfg.get("dest_chat_id"):
+        _trace("video ignorée : pas de destination (/setdestination)")
         return
     if isinstance(src, str):           # rétro-compat ancien format
         src = {"model": src, "thread": None}
     model = src.get("model")
     want_thread = src.get("thread")
-    if want_thread and msg.get("message_thread_id") != want_thread:
-        return  # autre sujet du groupe (THREADS, General…) -> on ignore
     if not _is_video_msg(msg):
+        return
+    if want_thread and msg.get("message_thread_id") != want_thread:
+        _trace(f"video ignorée : sujet {msg.get('message_thread_id')} ≠ sujet branché {want_thread}")
         return
     ref = msg.get("reply_to_message")
     if not ref:
-        return  # vidéo sans réponse = pas un « recopiage », on ignore
+        _trace(f"video ignorée ({model}) : ce n'est PAS une réponse (utilise Répondre)")
+        return
     # Quirk des forums Telegram : un message NON-réponse dans un sujet a quand
     # même reply_to_message = racine du sujet. Ce n'est PAS une vraie réponse.
-    if ref.get("forum_topic_created"):
-        return
-    if msg.get("message_thread_id") and ref.get("message_id") == msg.get("message_thread_id"):
+    if ref.get("forum_topic_created") or (
+            msg.get("message_thread_id") and ref.get("message_id") == msg.get("message_thread_id")):
+        _trace(f"video ignorée ({model}) : réponse à la racine du sujet, pas à une vidéo")
         return
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
     # 1) l'exemple (le message auquel on répond : vidéo OU lien veille)
-    _copy(dest, tid, chat_id, ref.get("message_id"))
+    r1 = _copy(dest, tid, chat_id, ref.get("message_id"))
+    if not r1.get("ok"):
+        _trace(f"copie EXEMPLE échouée ({model}) : {r1.get('description', '?')}")
     # 2) la vidéo brute de la modèle
     res = _copy(dest, tid, chat_id, msg.get("message_id"))
     if res.get("ok"):
         STATUS["routed"] = STATUS.get("routed", 0) + 1
-        # petit accusé dans le chat source (réaction impossible en bot API simple -> message discret)
+        _trace(f"✅ routé ({model}) -> sujet {tid}")
         _api("setMessageReaction", {
             "chat_id": chat_id, "message_id": msg.get("message_id"),
             "reaction": [{"type": "emoji", "emoji": "🔥"}],
         })
+    else:
+        _trace(f"copie BRUTE échouée ({model}) : {res.get('description', '?')}")
 
 
 def _poll_loop():
