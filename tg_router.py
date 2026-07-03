@@ -22,6 +22,7 @@ Tourne dans un THREAD daemon (long-polling getUpdates) via cogs/tgrouter.py.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -184,12 +185,19 @@ def _copy(dest, thread_id, from_chat, message_id):
     return _api("copyMessage", p)
 
 
+def _no_links(t: str) -> str:
+    """Retire les URLs (l'user ne veut QUE les vidéos + la description)."""
+    return re.sub(r"https?://\S+", "", t or "").strip()
+
+
 def _veille_caption(v: dict) -> str:
     parts = []
-    if v.get("caption"):
-        parts.append(v["caption"])
-    if v.get("desc") and v["desc"] not in parts:
-        parts.append(v["desc"])
+    cap = _no_links(v.get("caption"))
+    if cap:
+        parts.append(cap)
+    desc = _no_links(v.get("desc"))
+    if desc and desc not in parts:
+        parts.append(desc)
     return "\n\n".join(parts)[:1020]
 
 
