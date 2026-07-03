@@ -45,6 +45,41 @@ _LAST_TEXT = {}
 _VIDEO_DESC = {}
 # Dernière vidéo vue par sujet (pour lier un texte qui arrive APRÈS la vidéo)
 _LAST_VIDEO = {}
+# Les 3 caches sont PERSISTÉS (sinon un redémarrage/déploiement entre la veille
+# et la réponse de la modèle perdait la description).
+CACHE_FILE = DATA_DIR / "tg_router_cache.json"
+
+
+def _cache_load():
+    try:
+        d = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        for k, v in (d.get("last_text") or {}).items():
+            c, t = k.split("|", 1)
+            _LAST_TEXT[(int(c), None if t == "None" else int(t))] = tuple(v)
+        for k, v in (d.get("video_desc") or {}).items():
+            c, m = k.split("|", 1)
+            _VIDEO_DESC[(int(c), int(m))] = v
+        for k, v in (d.get("last_video") or {}).items():
+            c, t = k.split("|", 1)
+            _LAST_VIDEO[(int(c), None if t == "None" else int(t))] = tuple(v)
+    except Exception:
+        pass
+
+
+def _cache_save():
+    try:
+        # cap la taille (les plus récents gagnent, dicts Python = ordre d'insertion)
+        for d, cap in ((_VIDEO_DESC, 300), (_LAST_TEXT, 100), (_LAST_VIDEO, 100)):
+            while len(d) > cap:
+                d.pop(next(iter(d)))
+        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_FILE.write_text(json.dumps({
+            "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
+            "video_desc": {f"{k[0]}|{k[1]}": v for k, v in _VIDEO_DESC.items()},
+            "last_video": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VIDEO.items()},
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _trace(txt: str):
@@ -254,6 +289,8 @@ def _handle_update(cfg: dict, upd: dict):
         lv = _LAST_VIDEO.get(tkey)
         if lv and time.time() - lv[0] < 600:
             _VIDEO_DESC[(chat_id, lv[1])] = text
+        _cache_save()
+        _trace(f"description mémorisée ({len(text)} car.) dans {tkey}")
     # Vidéo SANS vraie réponse = probablement une veille postée : on la mémorise
     # et on lui associe le dernier texte récent (description AVANT la vidéo)
     if _is_video_msg(msg) and not _real_reply(msg):
@@ -261,6 +298,7 @@ def _handle_update(cfg: dict, upd: dict):
         lt = _LAST_TEXT.get(tkey)
         if lt and time.time() - lt[0] < 600:
             _VIDEO_DESC[(chat_id, msg.get("message_id"))] = lt[1]
+        _cache_save()
 
     # Routage : vidéo en RÉPONSE dans un chat/sujet branché
     src = cfg["sources"].get(str(chat_id))
@@ -384,6 +422,7 @@ def start():
     global _THREAD
     if _THREAD and _THREAD.is_alive():
         return False
+    _cache_load()
     _STOP.clear()
     _THREAD = threading.Thread(target=_poll_loop, daemon=True, name="tg-router")
     _THREAD.start()
