@@ -548,18 +548,23 @@ def _poll_loop():
                 STATUS["error"] = res.get("description", "?")
                 time.sleep(15)
                 continue
-            for upd in res.get("result") or []:
-                offset = max(offset, int(upd.get("update_id") or 0))
+            batch = res.get("result") or []
+            if batch:
+                # ACK D'ABORD : on persiste l'offset AVANT de traiter. Si le bot
+                # est tué en plein traitement (déploiement), Telegram ne relivre
+                # PAS les mêmes messages -> zéro réponse en double.
+                for upd in batch:
+                    offset = max(offset, int(upd.get("update_id") or 0))
+                cfg = _load()
+                cfg["offset"] = offset
+                _save(cfg)
+            for upd in batch:
                 try:
                     cfg = _load()
                     _handle_update(cfg, upd)
                 except Exception as e:
                     STATUS["error"] = str(e)
                 STATUS["last_update"] = int(time.time())
-            if res.get("result"):
-                cfg = _load()
-                cfg["offset"] = offset
-                _save(cfg)
         except Exception as e:
             STATUS["error"] = str(e)
             time.sleep(10)
