@@ -314,7 +314,10 @@ def _handle_command(cfg: dict, msg: dict, text: str):
                             "(à taper dans le groupe de la modèle, DANS le sujet "
                             "des reels — ex: IG CONTENT)", thread_id)
             return
-        cfg["sources"][str(chat_id)] = {"model": arg, "thread": thread_id}
+        # On retient QUI a branché (le boss) : seules SES vidéos sans « Répondre »
+        # deviennent des veilles — celles de la modèle doivent RÉPONDRE.
+        boss_id = ((msg.get("from") or {}).get("id"))
+        cfg["sources"][str(chat_id)] = {"model": arg, "thread": thread_id, "boss": boss_id}
         _save(cfg)
         # Crée le sujet de la modèle TOUT DE SUITE dans le groupe destination
         # (avant, il n'apparaissait qu'à la 1ère veille -> confusion)
@@ -440,8 +443,13 @@ def _handle_update(cfg: dict, upd: dict):
 
     ref = _real_reply(msg)
 
-    # ---- VIDÉO SANS RÉPONSE = NOUVELLE VEILLE ----
+    # ---- VIDÉO SANS RÉPONSE = NOUVELLE VEILLE (seulement du BOSS) ----
     if not ref:
+        boss = src.get("boss")
+        sender = (msg.get("from") or {}).get("id")
+        if boss and sender and sender != boss:
+            _trace(f"vidéo de la modèle sans « Répondre » ignorée ({model}) — elle doit répondre à la veille")
+            return
         fid = (msg.get("video") or {}).get("file_id")
         if not fid:
             _trace(f"veille ignorée ({model}) : pas une vidéo classique (note/doc)")
