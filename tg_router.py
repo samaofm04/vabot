@@ -316,10 +316,15 @@ def _handle_command(cfg: dict, msg: dict, text: str):
             return
         cfg["sources"][str(chat_id)] = {"model": arg, "thread": thread_id}
         _save(cfg)
+        # Crée le sujet de la modèle TOUT DE SUITE dans le groupe destination
+        # (avant, il n'apparaissait qu'à la 1ère veille -> confusion)
+        if cfg.get("dest_chat_id"):
+            _topic_for(cfg, arg)
         where = "de CE SUJET uniquement" if thread_id else "de ce chat"
         _reply(chat_id, f"✅ Branché : les veilles {where} partent dans le sujet « {arg} ».\n"
-                        "Dès que tu postes une veille je la mets là-bas, et quand la "
-                        "modèle répond avec sa vidéo je fais l'album des deux.", thread_id)
+                        "Son sujet est prêt dans le groupe destination. Dès que tu postes "
+                        "une veille je la mets là-bas, et quand la modèle répond avec sa "
+                        "vidéo je fais l'album des deux.", thread_id)
 
     elif cmd == "/settopic":
         if cfg.get("dest_chat_id") != chat_id:
