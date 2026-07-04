@@ -610,6 +610,8 @@ def _handle_update(cfg: dict, upd: dict):
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
     caption = _veille_caption(v)
+    _trace(f"réponse reçue ({model}) : veille {'connue' if (chat_id, ref.get('message_id')) in _VEILLES or v.get('dest_msg_id') is not None else 'RECONSTRUITE'}, "
+           f"légende {len(caption)} car. (cap:{bool(v.get('caption'))} desc:{bool(v.get('desc'))} ocr:{bool(v.get('overlay'))})")
 
     res = {"ok": False}
     if v.get("file_id") and raw_fid:
