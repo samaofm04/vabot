@@ -21,8 +21,11 @@ Tourne dans un THREAD daemon (long-polling getUpdates) via cogs/tgrouter.py.
 """
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -192,6 +195,10 @@ def _no_links(t: str) -> str:
 
 def _veille_caption(v: dict) -> str:
     parts = []
+    # Texte incrusté sur la vidéo (retranscrit par IA vision) en premier
+    ov = (v.get("overlay") or "").strip()
+    if ov:
+        parts.append(f"✍️ « {ov} »")
     cap = _no_links(v.get("caption"))
     if cap:
         parts.append(cap)
@@ -199,6 +206,112 @@ def _veille_caption(v: dict) -> str:
     if desc and desc not in parts:
         parts.append(desc)
     return "\n\n".join(parts)[:1020]
+
+
+# ── Transcription IA du texte incrusté sur la vidéo (3 premières secondes) ──
+_OCR_PROMPT = (
+    "Ces images sont des frames des 3 premières secondes d'un reel Instagram. "
+    "Retranscris EXACTEMENT le texte incrusté sur la vidéo (la caption ajoutée "
+    "par l'auteur), avec ses emojis si lisibles. Ignore les éléments d'interface, "
+    "watermarks, usernames et sous-titres automatiques. Réponds UNIQUEMENT avec "
+    "le texte retranscrit, sans guillemets ni commentaire. "
+    "S'il n'y a AUCUN texte incrusté, réponds exactement : AUCUN"
+)
+
+
+def _env_api_key() -> str:
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if key:
+        return key
+    try:
+        env = Path(__file__).resolve().parent / ".env"
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("ANTHROPIC_API_KEY="):
+                return line.strip().split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _transcribe_veille_async(vkey):
+    """Lit le texte incrusté de la veille en arrière-plan (thread dédié)."""
+    if not _env_api_key():
+        return
+    threading.Thread(target=_transcribe_veille, args=(vkey,), daemon=True).start()
+
+
+def _transcribe_veille(vkey):
+    v = _VEILLES.get(vkey)
+    if not v or v.get("overlay") is not None:
+        return
+    token = _token()
+    tmpdir = DATA_DIR / "tg_tmp"
+    vid = tmpdir / f"v_{vkey[1]}.mp4"
+    try:
+        gf = _api("getFile", {"file_id": v["file_id"]})
+        if not gf.get("ok"):
+            _trace(f"transcription: getFile KO ({gf.get('description', '?')})")
+            return
+        fp = (gf.get("result") or {}).get("file_path")
+        if not fp:
+            return
+        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=90)
+        if r.status_code != 200:
+            return
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        vid.write_bytes(r.content)
+        frames = []
+        for ts in ("0.4", "1.5", "2.8"):
+            out = tmpdir / f"f_{vkey[1]}_{ts.replace('.', '_')}.jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
+                     "-vf", "scale=540:-2", "-q:v", "5", str(out)],
+                    capture_output=True, timeout=30)
+                if out.exists() and out.stat().st_size > 1000:
+                    frames.append(base64.b64encode(out.read_bytes()).decode())
+            except Exception:
+                pass
+            finally:
+                try:
+                    out.unlink()
+                except Exception:
+                    pass
+        if not frames:
+            _trace("transcription: extraction frames échouée (ffmpeg ?)")
+            return
+        content = [{"type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": f}}
+                   for f in frames]
+        content.append({"type": "text", "text": _OCR_PROMPT})
+        rr = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": _env_api_key(), "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5", "max_tokens": 300,
+                  "messages": [{"role": "user", "content": content}]},
+            timeout=60)
+        data = rr.json()
+        if rr.status_code != 200:
+            _trace(f"transcription: API {(data.get('error') or {}).get('message', '?')}")
+            return
+        text = "".join(b.get("text", "") for b in (data.get("content") or [])).strip()
+        if not text or text.upper().startswith("AUCUN"):
+            v["overlay"] = ""   # analysé : pas de texte incrusté
+        else:
+            v["overlay"] = text[:300]
+            _trace(f"✍️ texte lu sur la vidéo ({v.get('model')}) : {text[:45]}…")
+        _cache_save()
+        # met à jour le message « en attente » avec le texte lu
+        cfg = _load()
+        _update_pending_caption(cfg, v)
+    except Exception as e:
+        _trace(f"transcription: {e}")
+    finally:
+        try:
+            vid.unlink()
+        except Exception:
+            pass
 
 
 def bound_models() -> dict:
@@ -253,6 +366,8 @@ def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str 
         _post_pending(cfg, v, model)
     _cache_save()
     _trace(f"veille envoyée depuis le SITE -> {model}")
+    # Lecture IA du texte incrusté en arrière-plan
+    _transcribe_veille_async((bm["chat_id"], vid_msg))
     return {"ok": True}
 
 
@@ -466,6 +581,8 @@ def _handle_update(cfg: dict, upd: dict):
         _LAST_VEILLE[tkey] = (now, msg.get("message_id"))
         _post_pending(cfg, v, model)
         _cache_save()
+        # Lecture IA du texte incrusté (3 premières secondes) en arrière-plan
+        _transcribe_veille_async((chat_id, msg.get("message_id")))
         return
 
     # ---- VIDÉO EN RÉPONSE = LA MODÈLE A FAIT SA VERSION ----
