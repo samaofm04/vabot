@@ -240,6 +240,77 @@ def _transcribe_veille_async(vkey):
     threading.Thread(target=_transcribe_veille, args=(vkey,), daemon=True).start()
 
 
+def _ocr_file_id(file_id: str, tag: str = "") -> str:
+    """Lit le texte incrusté d'une vidéo (file_id Telegram) via IA vision.
+    Retourne le texte, "" si aucun/erreur. Synchrone (~qq secondes)."""
+    if not (_env_api_key() and file_id):
+        return ""
+    token = _token()
+    tmpdir = DATA_DIR / "tg_tmp"
+    vid = tmpdir / f"ocr_{abs(hash(file_id)) % 10**8}.mp4"
+    try:
+        gf = _api("getFile", {"file_id": file_id})
+        if not gf.get("ok"):
+            _trace(f"ocr: getFile KO ({gf.get('description', '?')})")
+            return ""
+        fp = (gf.get("result") or {}).get("file_path")
+        if not fp:
+            return ""
+        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=90)
+        if r.status_code != 200:
+            return ""
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        vid.write_bytes(r.content)
+        frames = []
+        for ts in ("0.4", "1.5", "2.8"):
+            out = tmpdir / f"fr_{abs(hash(file_id)) % 10**8}_{ts.replace('.', '_')}.jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
+                     "-vf", "scale=540:-2", "-q:v", "5", str(out)],
+                    capture_output=True, timeout=30)
+                if out.exists() and out.stat().st_size > 1000:
+                    frames.append(base64.b64encode(out.read_bytes()).decode())
+            except Exception:
+                pass
+            finally:
+                try:
+                    out.unlink()
+                except Exception:
+                    pass
+        if not frames:
+            _trace("ocr: extraction frames échouée (ffmpeg ?)")
+            return ""
+        content = [{"type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": f}}
+                   for f in frames]
+        content.append({"type": "text", "text": _OCR_PROMPT})
+        rr = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": _env_api_key(), "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5", "max_tokens": 300,
+                  "messages": [{"role": "user", "content": content}]},
+            timeout=60)
+        data = rr.json()
+        if rr.status_code != 200:
+            _trace(f"ocr: API {(data.get('error') or {}).get('message', '?')}")
+            return ""
+        text = "".join(b.get("text", "") for b in (data.get("content") or [])).strip()
+        if text and not text.upper().startswith("AUCUN"):
+            _trace(f"✍️ texte lu {tag}: {text[:45]}…")
+            return text[:300]
+        return ""
+    except Exception as e:
+        _trace(f"ocr: {e}")
+        return ""
+    finally:
+        try:
+            vid.unlink()
+        except Exception:
+            pass
+
+
 def _transcribe_veille(vkey):
     v = _VEILLES.get(vkey)
     if not v or v.get("overlay") is not None:
@@ -610,6 +681,14 @@ def _handle_update(cfg: dict, upd: dict):
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
     caption = _veille_caption(v)
+    # FALLBACK : légende vide (description perdue / OCR pas encore fait) -> on lit
+    # le texte incrusté de la vidéo exemple MAINTENANT (l'album a toujours un texte)
+    if not caption.strip() and v.get("file_id") and not v.get("overlay"):
+        ocr = _ocr_file_id(v["file_id"], f"({model} fallback)")
+        if ocr:
+            v["overlay"] = ocr
+            _cache_save()
+            caption = _veille_caption(v)
     _trace(f"réponse reçue ({model}) : veille {'connue' if (chat_id, ref.get('message_id')) in _VEILLES or v.get('dest_msg_id') is not None else 'RECONSTRUITE'}, "
            f"légende {len(caption)} car. (cap:{bool(v.get('caption'))} desc:{bool(v.get('desc'))} ocr:{bool(v.get('overlay'))})")
 
