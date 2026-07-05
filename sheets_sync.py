@@ -147,14 +147,30 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
     ignore (le nom n'est pas une identité). Nettoie les vues obsolètes (suivi via
     config 'va_view_tabs' + anciens onglets 👤). Réordonne si la structure change."""
     pairs = {}
+    canon = {}  # (identité, va) insensible à la casse -> clé canonique
+
+    def _key(identity, va):
+        k = (str(identity).strip().lower(), va.strip().lower())
+        if k not in canon:
+            canon[k] = (str(identity), va.strip())
+        return canon[k]
+
     for identity, entry in (data or {}).items():
         if not isinstance(entry, dict):
             continue
+        # 1) TOUS les VAs déclarés -> onglet créé même SANS compte (sinon les
+        #    nouveaux VAs — bo7/andry — n'apparaissaient jamais dans le Sheet)
+        for v in entry.get("vas") or []:
+            name = (v.get("name") if isinstance(v, dict) else v) or ""
+            name = str(name).strip()
+            if name:
+                pairs.setdefault(_key(identity, name), [])
+        # 2) les comptes remplissent les onglets
         for a in entry.get("accounts") or []:
             va = (a.get("va") or "").strip()
             if not va:
                 continue
-            pairs.setdefault((str(identity), va), []).append([
+            pairs.setdefault(_key(identity, va), []).append([
                 a.get("username", "") or "", a.get("password", "") or "",
                 a.get("email", "") or "", a.get("two_fa", "") or "",
                 a.get("notes", "") or ""])
