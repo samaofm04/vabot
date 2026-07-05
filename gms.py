@@ -840,6 +840,19 @@ def assign_link_to_group(link_id: str, group_id: str,
     """
     if not group_id or len(group_id) < 20:
         return {"ok": False, "error": f"group_id invalide : {group_id!r}"}
+    # 0) Tentative via l'outil MCP officiel assign_links_to_group (le plus fiable :
+    #    l'API privée peut répondre ok SANS effet sur un groupe vide — vu le 04/07
+    #    avec les groupes BO7/ANDRY). Le group_id doit être préfixé grp_.
+    try:
+        gid_p = group_id if str(group_id).startswith("grp_") else f"grp_{group_id}"
+        args = {"group_id": gid_p, "link_ids": [link_id]}
+        if team_id:
+            args["team_id"] = team_id if str(team_id).startswith("tm_") else f"tm_{team_id}"
+        mcp_res = _call_tool("assign_links_to_group", args)
+        if mcp_res.get("ok"):
+            return {"ok": True, "via": "mcp_bulk"}
+    except Exception:
+        pass
     # Détecte le type. Si on n'a pas link_obj, on fetch pour savoir.
     link_type = None
     if link_obj:
