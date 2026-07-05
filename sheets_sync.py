@@ -226,11 +226,50 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
 
 
 # ---------- Site -> Sheet ----------
+def _dedup_accounts(data: dict) -> int:
+    """Retire les comptes en double (même username, insensible casse) DANS une
+    identité — garde la ligne la plus remplie. Retourne le nombre supprimé.
+    (Un redémarrage pile pendant un ajout avait pu créer des doublons qui
+    s'auto-répliquaient à chaque sync.)"""
+    removed = 0
+    for entry in (data or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        seen = {}
+        out = []
+        for a in (entry.get("accounts") or []):
+            u = (a.get("username") or "").strip().lower()
+            if not u:
+                out.append(a)
+                continue
+            if u not in seen:
+                seen[u] = a
+                out.append(a)
+            else:
+                # garde la ligne la plus complète (plus de champs remplis)
+                prev = seen[u]
+                score = lambda x: sum(1 for f in ("password", "email", "two_fa", "notes") if (x.get(f) or "").strip())
+                if score(a) > score(prev):
+                    out[out.index(prev)] = a
+                    seen[u] = a
+                removed += 1
+        if removed:
+            entry["accounts"] = out
+    return removed
+
+
 def push_all(data: dict, force: bool = False) -> bool:
     """Ecrit chaque identite dans SON onglet (rewrite). Ne reecrit que les onglets dont
     les comptes ont change (sauf force=True). Best-effort (retourne False si echec)."""
     if not (is_configured() and gspread_available()):
         return False
+    # Dédup préventive (les doublons se répliquaient à chaque sync)
+    try:
+        if _dedup_accounts(data):
+            import jailbreak as jb
+            jb._save(data)
+    except Exception:
+        pass
     try:
         with _lock:
             sh = _open_sheet()
