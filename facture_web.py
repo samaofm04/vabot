@@ -41,6 +41,8 @@ CATS = {
     "other":     {"label": "Autres",       "icon": "📁", "type": "exp"},
 }
 CAT_ORDER = ["rev_of", "rev_mym", "rev_other", "model", "chatter", "va", "manager", "app", "other"]
+# Bases % « catégorie » (héritées) + on ajoute dynamiquement chaque LIGNE de revenu
+# (clé "line:<id>") pour lier un % à un revenu précis.
 PCT_BASES = {"rev_total": "de TOUS les revenus", "rev_of": "de Revenue OF", "rev_mym": "de Revenue MYM"}
 
 
@@ -80,7 +82,8 @@ def _to_usd(amount: float, currency: str, settings: dict) -> float:
 
 
 def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
-    """Montant mensuel en USD d'une ligne (fixe converti, ou % d'une base revenus)."""
+    """Montant mensuel en USD d'une ligne : fixe converti, ou % d'une base revenus
+    (globale 'rev_total'/'rev_of'/'rev_mym' OU une LIGNE précise 'line:<id>')."""
     if (line.get("form") or "fixed") == "pct":
         pct = float(line.get("pct") or 0)
         base = float(rev_bases.get(line.get("pct_of") or "rev_total", 0))
@@ -103,7 +106,7 @@ def compute_state(month: str) -> dict:
         months.sort()
     lines = list((d["months"].get(month) or {}).get("lines") or [])
 
-    # Bases revenus (pour les lignes en %)
+    # Bases revenus (pour les lignes en %) : globales + PAR LIGNE ('line:<id>')
     rev_bases = {"rev_total": 0.0, "rev_of": 0.0, "rev_mym": 0.0}
     for l in lines:
         if l.get("type") == "rev" and (l.get("form") or "fixed") == "fixed":
@@ -111,6 +114,8 @@ def compute_state(month: str) -> dict:
             rev_bases["rev_total"] += usd
             if l.get("cat") in ("rev_of", "rev_mym"):
                 rev_bases[l["cat"]] += usd
+            if l.get("id"):
+                rev_bases[f"line:{l['id']}"] = usd
 
     out_lines = []
     tot_rev = tot_exp = 0.0
@@ -151,6 +156,13 @@ def compute_state(month: str) -> dict:
         "cats": CATS,
         "cat_order": CAT_ORDER,
         "pct_bases": PCT_BASES,
+        # Lignes de revenus (montant fixe) -> pour lier un % à un revenu précis
+        "rev_lines": [
+            {"id": l["id"], "label": l.get("label") or "revenu",
+             "cat": l.get("cat"), "usd": rev_bases.get(f"line:{l['id']}", 0.0)}
+            for l in lines
+            if l.get("type") == "rev" and (l.get("form") or "fixed") == "fixed" and l.get("id")
+        ],
     }
 
 
@@ -182,7 +194,9 @@ def _sanitize_line(raw: dict) -> dict:
         line["pct"] = round(float(raw.get("pct") or 0), 2)
     except Exception:
         line["pct"] = 0.0
-    line["pct_of"] = raw.get("pct_of") if raw.get("pct_of") in PCT_BASES else "rev_total"
+    pct_of = str(raw.get("pct_of") or "")
+    # base valide : une catégorie connue OU un lien vers une ligne "line:<id>"
+    line["pct_of"] = pct_of if (pct_of in PCT_BASES or re.match(r"^line:[a-zA-Z0-9]{4,32}$", pct_of)) else "rev_total"
     phases = []
     for p in (raw.get("phases") or [])[:8]:
         if isinstance(p, dict) and p.get("date"):
@@ -196,7 +210,7 @@ def _sanitize_line(raw: dict) -> dict:
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
-        "<div id='facture-root' style='max-width:1080px'>"
+        "<div id='facture-root' style='max-width:1500px;margin:0 auto;width:100%'>"
         "<div style='display:flex;align-items:center;gap:10px;color:#888;font-size:13px;padding:30px 0'>"
         "<div style='width:20px;height:20px;border:3px solid rgba(59,130,246,.15);border-top-color:#3b82f6;"
         "border-radius:50%;animation:plSpin .8s linear infinite'></div> Chargement de la facture…</div>"

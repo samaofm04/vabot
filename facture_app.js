@@ -291,9 +291,22 @@
     var catOpts = d.cat_order.map(function (c) {
       return '<option value="' + c + '"' + (line.cat === c ? ' selected' : '') + '>' + d.cats[c].icon + ' ' + d.cats[c].label + '</option>';
     }).join('');
-    var pctBaseOpts = Object.keys(d.pct_bases).map(function (k) {
+    // Options du "% calculé sur" : catégories globales + CHAQUE ligne de revenu
+    // (ex: la ligne "OF" de Revenue OF) -> le % suit ce revenu précis.
+    var revLines = (d.rev_lines || []).filter(function (rl) { return rl.id !== line.id; });
+    var pctBaseOpts = '<optgroup label="Global">';
+    pctBaseOpts += Object.keys(d.pct_bases).map(function (k) {
       return '<option value="' + k + '"' + (line.pct_of === k ? ' selected' : '') + '>' + esc(d.pct_bases[k]) + '</option>';
-    }).join('');
+    }).join('') + '</optgroup>';
+    if (revLines.length) {
+      pctBaseOpts += '<optgroup label="Une ligne de revenu précise">';
+      pctBaseOpts += revLines.map(function (rl) {
+        var key = 'line:' + rl.id;
+        var tag = (d.cats[rl.cat] ? d.cats[rl.cat].label : '');
+        return '<option value="' + key + '"' + (line.pct_of === key ? ' selected' : '') + '>💠 ' +
+          esc(rl.label) + (tag ? ' (' + esc(tag) + ')' : '') + '</option>';
+      }).join('') + '</optgroup>';
+    }
     modal(
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">' +
       '<div style="font-size:17px;font-weight:800">' + (isEdit ? 'Modifier la ligne' : 'Ajouter une ligne') + '</div>' +
