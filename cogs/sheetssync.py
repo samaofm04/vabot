@@ -48,6 +48,15 @@ class SheetsSync(commands.Cog):
     @poll.before_loop
     async def _before(self):
         await self.bot.wait_until_ready()
+        # PUSH INITIAL avant le 1er pull : si le bot a redémarré pile pendant un
+        # ajout côté site, le push async a pu être perdu -> sans ça, le pull
+        # supprimerait le compte du site (absent du Sheet). Push d'abord = safe.
+        try:
+            import jailbreak as jb
+            await asyncio.to_thread(sheets_sync.push_all, jb._load(), False)
+            print("[sheetssync] push initial au démarrage OK", flush=True)
+        except Exception as e:
+            print(f"[sheetssync] push initial: {e}", flush=True)
 
     # ---------- Commande ----------
     @app_commands.command(
