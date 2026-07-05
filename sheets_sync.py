@@ -24,8 +24,35 @@ DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "sheets_config.json"
 SA_FILE = DATA_DIR / "google_service_account.json"
 
-HEADER = ["username", "password", "email", "two_fa", "va", "notes"]
+HEADER = ["username", "password", "email", "two_fa", "va", "notes", "statut"]
 _FIELDS = ("password", "email", "two_fa", "va", "notes")  # champs maj (username = la clé)
+
+# Statut BANNI : lu du cache du scraper Insta (va_insta_3_stats_cache.json, clé =
+# username). Colonne INFO en lecture seule (le pull ne la remonte pas au site).
+_BAN_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
+_ban_cache = {"ts": 0.0, "set": set()}
+
+
+def _banned_usernames() -> set:
+    """Set des usernames (lower) marqués banned par le scraper. Cache 30 s."""
+    now = time.time()
+    if now - _ban_cache["ts"] < 30:
+        return _ban_cache["set"]
+    banned = set()
+    try:
+        d = json.loads(_BAN_FILE.read_text(encoding="utf-8"))
+        for handle, st in (d or {}).items():
+            if isinstance(st, dict) and st.get("banned"):
+                banned.add(str(handle).strip().lower())
+    except Exception:
+        pass
+    _ban_cache["ts"] = now
+    _ban_cache["set"] = banned
+    return banned
+
+
+def _statut(username: str) -> str:
+    return "🚫 BANNI" if (username or "").strip().lower() in _banned_usernames() else ""
 
 _lock = threading.Lock()
 _last_hash: dict = {}   # identity -> hash des comptes (evite les reecritures inutiles)
@@ -92,9 +119,10 @@ def test_connection() -> tuple:
 
 # ---------- Helpers ----------
 def _acct_row(a: dict) -> list:
-    return [a.get("username", "") or "", a.get("password", "") or "",
+    u = a.get("username", "") or ""
+    return [u, a.get("password", "") or "",
             a.get("email", "") or "", a.get("two_fa", "") or "",
-            a.get("va", "") or "", a.get("notes", "") or ""]
+            a.get("va", "") or "", a.get("notes", "") or "", _statut(u)]
 
 
 def _accts_hash(accts: list) -> str:
@@ -118,7 +146,7 @@ def _rows_hash(rows) -> str:
 
 
 # ---------- Vues LECTURE SEULE : 1 onglet par (identité, VA), nom "identité va" ----------
-_VIEW_HEADER = ["username", "password", "email", "two_fa", "notes"]
+_VIEW_HEADER = ["username", "password", "email", "two_fa", "notes", "statut"]
 
 
 def _safe_tab_title(name: str) -> str:
@@ -170,16 +198,18 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
             va = (a.get("va") or "").strip()
             if not va:
                 continue
+            _u = a.get("username", "") or ""
             pairs.setdefault(_key(identity, va), []).append([
-                a.get("username", "") or "", a.get("password", "") or "",
+                _u, a.get("password", "") or "",
                 a.get("email", "") or "", a.get("two_fa", "") or "",
-                a.get("notes", "") or ""])
+                a.get("notes", "") or "", _statut(_u)])
     wanted = {}
     changed = False
     for (identity, va), rows in pairs.items():
         title = _safe_tab_title(f"{identity} {va}")
         key = title.strip().lower()
-        full = [_VIEW_HEADER] + sorted(rows, key=lambda r: r[0].lower())
+        # ORDRE D'AJOUT (pas alphabétique) : rows est déjà dans l'ordre du fichier
+        full = [_VIEW_HEADER] + rows
         h = _rows_hash(full)
         ws = existing.get(key)
         if ws is None:
