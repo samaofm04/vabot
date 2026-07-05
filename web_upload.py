@@ -12704,7 +12704,6 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
-@_arg_cached(seconds=60, key_args=("home_period",))
 def _home_sales_svg(labels, vals) -> str:
     """Courbe 'Ventes par jour' en SVG PUR généré côté serveur.
 
@@ -12773,6 +12772,7 @@ def _home_sales_svg(labels, vals) -> str:
     )
 
 
+@_arg_cached(seconds=60, key_args=("home_period",))
 def _render_home_dashboard_html() -> str:
     """Dashboard global affiché à la racine — synthèse de TOUS les revenus.
 
