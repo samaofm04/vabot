@@ -19843,6 +19843,28 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
             "</div>"
         )
 
+    # Tri par ABONNÉS décroissant (les plus gros comptes en haut) ; alpha en secours
+    def _abonnes_num(ident):
+        try:
+            v = str((sfs_setup.get_identity(platform, ident) or {}).get("abonnes") or "").strip().lower()
+        except Exception:
+            v = ""
+        if not v:
+            return -1.0
+        m = re.search(r"([\d\s.,]+)\s*(k|m)?", v)
+        if not m:
+            return -1.0
+        try:
+            n = float(m.group(1).replace(" ", "").replace(",", "."))
+        except Exception:
+            return -1.0
+        if m.group(2) == "k":
+            n *= 1000
+        elif m.group(2) == "m":
+            n *= 1_000_000
+        return n
+    identities = sorted(identities, key=lambda x: (-_abonnes_num(x), x.lower()))
+
     # Pre-charge la map MyPuls pour les avatars MyM
     mypuls_map = _mypuls_creators_map() if platform == "mym" else {}
 
