@@ -538,7 +538,9 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
     elif cmd == "/routerdebug":
         ev = "\n".join(EVENTS[-12:]) or "(aucun événement depuis le démarrage)"
-        _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}"
+        ocr_on = "✅ clé IA présente (lecture du texte sur la vidéo active)" if _env_api_key() \
+            else "❌ PAS de clé IA (ANTHROPIC_API_KEY manquante dans le .env du VPS) → le texte incrusté ne peut PAS être lu"
+        _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}\n\n🤖 OCR : {ocr_on}"
                + (f"\n\n⚠️ Erreur : {STATUS.get('error')}" if STATUS.get("error") else ""),
                thread_id)
 
@@ -615,7 +617,10 @@ def _handle_update(cfg: dict, upd: dict):
             if lv and now - lv[0] < 600:
                 v = _VEILLES.get((chat_id, lv[1]))
         if v and not v.get("routed"):
-            v["desc"] = text
+            # ACCUMULE : plusieurs messages entre 2 reels = la description complète
+            prev = (v.get("desc") or "").strip()
+            if text not in prev:
+                v["desc"] = (prev + "\n" + text).strip() if prev else text
             v["text_msg_id"] = msg.get("message_id")
             _update_pending_caption(cfg, v)
             _trace(f"description liée à la veille ({model}) : {text[:40]}…")
