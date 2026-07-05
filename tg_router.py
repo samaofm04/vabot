@@ -680,6 +680,14 @@ def _handle_update(cfg: dict, upd: dict):
 
     tid = _topic_for(cfg, model)
     dest = cfg["dest_chat_id"]
+    # Si la veille n'a pas de description liée, prends le DERNIER texte long vu
+    # dans le sujet (l'user écrit la description juste après le reel) — <2 h.
+    if not (v.get("desc") or "").strip():
+        lt = _LAST_TEXT.get((chat_id, msg.get("message_thread_id")))
+        if lt and now - lt[0] < 7200 and (lt[1] or "").strip():
+            v["desc"] = lt[1]
+            _cache_save()
+            _trace(f"description récupérée du sujet ({model}) : {lt[1][:40]}…")
     caption = _veille_caption(v)
     # FALLBACK : légende vide (description perdue / OCR pas encore fait) -> on lit
     # le texte incrusté de la vidéo exemple MAINTENANT (l'album a toujours un texte)
