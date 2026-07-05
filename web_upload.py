@@ -3715,6 +3715,10 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
       Veille Telegram
     </button>
+    <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 6h10c0-2 2-3 2-6a7 7 0 0 0-7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+      Clé IA
+    </button>
   </div>
 </div>
 
@@ -4445,6 +4449,15 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🍪 Cookies MyPuls</h3>
 <small>Session mypuls.app — utilisée pour la sync des revenus chatteurs et le push planning</small>
 <div style="margin-top:14px">{mypuls_cookies_html}</div>
+</div>
+</div>
+
+<!-- SETTINGS - CLÉ IA (Anthropic) -->
+<div class="form-section" id="form-saikey" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🧠 Clé IA (Anthropic)</h3>
+<small>Sert à : lire le texte incrusté sur les vidéos de veille (Telegram) + générer les bios IA. Une seule clé pour les deux.</small>
+<div style="margin-top:14px">{aikey_html}</div>
 </div>
 </div>
 
@@ -24759,6 +24772,50 @@ def _load_active_sessions() -> list:
         return []
 
 
+def _ai_key_present() -> bool:
+    if (os.environ.get("ANTHROPIC_API_KEY") or "").strip():
+        return True
+    for line in _read_env_lines():
+        if line.strip().startswith("ANTHROPIC_API_KEY=") and line.split("=", 1)[1].strip():
+            return True
+    return False
+
+
+def _render_aikey_settings() -> str:
+    """Champ pour saisir la clé Anthropic (ANTHROPIC_API_KEY), stockée dans le
+    .env du VPS via /settings/ai_key. Ne renvoie JAMAIS la clé au client."""
+    present = _ai_key_present()
+    status = (
+        "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
+        "✅ Clé enregistrée — l'OCR des vidéos et les bios IA sont actifs. "
+        "Colle une nouvelle clé ci-dessous pour la remplacer.</div>"
+        if present else
+        "<div style='padding:12px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#fbbf24'>"
+        "⚠ Aucune clé. Sans elle, le bot ne peut pas lire le texte incrusté sur les vidéos "
+        "(les albums Telegram partent sans description) ni générer les bios IA.</div>"
+    )
+    return (
+        status
+        + "<form method='POST' action='/settings/ai_key' style='display:flex;flex-direction:column;gap:8px'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Clé API Anthropic (sk-ant-…)</label>"
+        "<input type='password' name='ai_key' placeholder='sk-ant-api03-…' autocomplete='off' "
+        "style='font-family:monospace;font-size:12px' required minlength='20'>"
+        "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer la clé</button>"
+        "</form>"
+        "<details style='font-size:12px;color:#888;margin-top:14px'>"
+        "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Où trouver ma clé ?</summary>"
+        "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+        "<li>Va sur <a href='https://console.anthropic.com/settings/keys' target='_blank' style='color:#3b82f6'>console.anthropic.com</a> (connecte-toi)</li>"
+        "<li>Settings → API Keys → <b>Create Key</b></li>"
+        "<li>Copie la clé <code>sk-ant-…</code> et colle-la ici</li>"
+        "</ol>"
+        "<p style='margin-top:8px;color:#666'>Le site redémarre ~3 s après l'enregistrement pour activer la clé.</p>"
+        "</details>"
+    )
+
+
 def _render_mypuls_cookies_settings() -> str:
     """Section Settings : cookies MyPuls (statut + formulaire + effacer).
 
@@ -25951,6 +26008,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
+        .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
         .replace("{role_settings_html}", _g("srole", _render_role_settings_html))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
         .replace("{employees_table_html}", _g("semp", _render_employees_table_html))
@@ -31589,6 +31647,20 @@ def create_app():
             "ok": True, "count": len(wl), "scrape_started": True,
             "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
         })
+
+    @app.route("/settings/ai_key", methods=["POST"])
+    def settings_ai_key():
+        if not is_auth():
+            return redirect("/")
+        key = (request.form.get("ai_key") or "").strip()
+        if not key.startswith("sk-ant-") or len(key) < 20:
+            return _error("❌ Clé invalide (elle doit commencer par sk-ant-…)", tab="saikey")
+        if not _write_env_var("ANTHROPIC_API_KEY", key):
+            return _error("❌ Erreur écriture .env (permissions ?)", tab="saikey")
+        os.environ["ANTHROPIC_API_KEY"] = key  # dispo tout de suite (avant restart)
+        _schedule_restart(2.0)
+        return _success("✅ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
+                        "Le site redémarre dans 2 s.", tab="saikey")
 
     @app.route("/settings/admin_token", methods=["POST"])
     def settings_admin_token():
