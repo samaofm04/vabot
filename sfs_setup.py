@@ -178,6 +178,24 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
     idx_actif = 0
     plat_fields = fields_for(platform)
     has_any_field = False
+
+    # Tri par ABONNÉS décroissant (les plus gros comptes en premier dans le
+    # message), quel que soit l'ordre reçu. Alpha en secours.
+    import re as _re
+
+    def _ab(ident):
+        v = str((data.get(ident.lower().strip(), {}) or {}).get("abonnes") or "").strip().lower()
+        m = _re.search(r"([\d\s.,]+)\s*(k|m)?", v)
+        if not m:
+            return -1.0
+        try:
+            n = float(m.group(1).replace(" ", "").replace(",", "."))
+        except Exception:
+            return -1.0
+        return n * (1000 if m.group(2) == "k" else 1_000_000 if m.group(2) == "m" else 1)
+
+    identities_ordered = sorted(identities_ordered, key=lambda x: (-_ab(x), x.lower()))
+
     for ident in identities_ordered:
         key = ident.lower().strip()
         info = data.get(key, {})
