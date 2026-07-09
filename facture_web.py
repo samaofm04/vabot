@@ -92,6 +92,51 @@ def _to_usd(amount: float, currency: str, settings: dict) -> float:
     return amount
 
 
+_MYPULS_CACHE_FILE = DATA_DIR / "facture_mypuls_cache.json"
+_MYPULS_MONTH_CACHE: dict = {}
+
+
+def _mypuls_ca(model: str, month: str) -> float:
+    """CA MyPuls (EUR) d'une créatrice sur un mois entier.
+    Mois PASSÉS : cache disque permanent (le CA ne bouge plus une fois le mois
+    fini) ; mois COURANT : cache 5 min interne de mypuls.fetch_team_stats."""
+    want = (model or "").strip().lower()
+    if not want:
+        return 0.0
+    cur = _cur_month()
+    key = f"{month}|{want}"
+    global _MYPULS_MONTH_CACHE
+    if month < cur:
+        if not _MYPULS_MONTH_CACHE and _MYPULS_CACHE_FILE.exists():
+            try:
+                _MYPULS_MONTH_CACHE = json.loads(_MYPULS_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                _MYPULS_MONTH_CACHE = {}
+        if key in _MYPULS_MONTH_CACHE:
+            return float(_MYPULS_MONTH_CACHE[key])
+    try:
+        import mypuls
+        first, last = _month_bounds(month)
+        today = datetime.date.today()
+        if first > today:
+            return 0.0
+        st = mypuls.fetch_team_stats(first.isoformat(), min(last, today).isoformat())
+        if not st.get("ok"):
+            return 0.0
+        tot = round(sum(float(tx.get("amount") or 0) for tx in (st.get("transactions") or [])
+                        if (tx.get("creator") or "").strip().lower() == want), 2)
+        if month < cur:  # mois clos + fetch OK -> on fige
+            _MYPULS_MONTH_CACHE[key] = tot
+            try:
+                _MYPULS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _MYPULS_CACHE_FILE.write_text(json.dumps(_MYPULS_MONTH_CACHE), encoding="utf-8")
+            except Exception:
+                pass
+        return tot
+    except Exception:
+        return 0.0
+
+
 def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     """Montant mensuel en USD d'une ligne : fixe converti, ou % d'une base revenus
     (globale 'rev_total'/'rev_of'/'rev_mym' OU une LIGNE précise 'line:<id>')."""
@@ -126,22 +171,32 @@ def compute_state(month: str) -> dict:
     months.sort()
     lines = list((d["months"].get(month) or {}).get("lines") or [])
 
-    # Bases revenus (pour les lignes en %) : globales + PAR LIGNE ('line:<id>')
+    # Bases revenus (pour les lignes en %) : globales + PAR LIGNE ('line:<id>').
+    # Une ligne 'mypuls' = revenu AUTO : CA du mois tiré de MyPuls (EUR->USD).
     rev_bases = {"rev_total": 0.0, "rev_of": 0.0, "rev_mym": 0.0}
+    resolved_rev = {}
     for l in lines:
-        if l.get("type") == "rev" and (l.get("form") or "fixed") == "fixed":
+        if l.get("type") != "rev":
+            continue
+        form = l.get("form") or "fixed"
+        if form == "fixed":
             usd = _to_usd(float(l.get("amount") or 0), l.get("currency") or "USD", settings)
-            rev_bases["rev_total"] += usd
-            if l.get("cat") in ("rev_of", "rev_mym"):
-                rev_bases[l["cat"]] += usd
-            if l.get("id"):
-                rev_bases[f"line:{l['id']}"] = usd
+        elif form == "mypuls":
+            usd = round(_to_usd(_mypuls_ca(l.get("mypuls_model") or "", month), "EUR", settings), 2)
+        else:
+            continue  # % d'un autre revenu -> résolu ensuite via rev_bases
+        if l.get("id"):
+            resolved_rev[l["id"]] = usd
+            rev_bases[f"line:{l['id']}"] = usd
+        rev_bases["rev_total"] += usd
+        if l.get("cat") in ("rev_of", "rev_mym"):
+            rev_bases[l["cat"]] += usd
 
     out_lines = []
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0} for mk in MARKETS}
     for l in lines:
-        usd = _line_usd(l, rev_bases, settings)
+        usd = resolved_rev[l["id"]] if l.get("id") in resolved_rev else _line_usd(l, rev_bases, settings)
         ll = dict(l)
         ll["usd"] = usd
         mk = l.get("market") if l.get("market") in MARKETS else MARKET_DEFAULT
@@ -192,12 +247,12 @@ def compute_state(month: str) -> dict:
         "markets": MARKETS,
         "market_order": MARKET_ORDER,
         "by_market": by_market,
-        # Lignes de revenus (montant fixe) -> pour lier un % à un revenu précis
+        # Lignes de revenus (fixe OU CA MyPuls auto) -> pour lier un % à un revenu précis
         "rev_lines": [
             {"id": l["id"], "label": l.get("label") or "revenu",
              "cat": l.get("cat"), "usd": rev_bases.get(f"line:{l['id']}", 0.0)}
             for l in lines
-            if l.get("type") == "rev" and (l.get("form") or "fixed") == "fixed" and l.get("id")
+            if l.get("type") == "rev" and (l.get("form") or "fixed") in ("fixed", "mypuls") and l.get("id")
         ],
     }
 
@@ -211,7 +266,8 @@ def _sanitize_line(raw: dict) -> dict:
         "label": s("label", 120) or "Sans nom",
         "type": "rev" if raw.get("type") == "rev" else "exp",
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
-        "form": "pct" if raw.get("form") == "pct" else "fixed",
+        "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls") else "fixed",
+        "mypuls_model": s("mypuls_model", 80),
         "market": raw.get("market") if raw.get("market") in MARKETS else MARKET_DEFAULT,
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
         "freq": raw.get("freq") if raw.get("freq") in ("monthly", "biweekly", "weekly", "once") else "monthly",
@@ -234,6 +290,8 @@ def _sanitize_line(raw: dict) -> dict:
     pct_of = str(raw.get("pct_of") or "")
     # base valide : une catégorie connue OU un lien vers une ligne "line:<id>"
     line["pct_of"] = pct_of if (pct_of in PCT_BASES or re.match(r"^line:[a-zA-Z0-9]{4,32}$", pct_of)) else "rev_total"
+    if line["form"] == "mypuls":
+        line["type"] = "rev"  # un CA MyPuls est forcément un revenu
     phases = []
     for p in (raw.get("phases") or [])[:8]:
         if isinstance(p, dict) and p.get("date"):
@@ -301,6 +359,20 @@ def register(app, is_auth):
             month = _cur_month()
         try:
             return jsonify(compute_state(month))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/facture/mypuls_models")
+    def facture_mypuls_models():
+        """Liste des créatrices MyPuls (pour le select 'CA MyPuls auto')."""
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls
+            res = mypuls.list_creators()
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("error") or "MyPuls indisponible"})
+            return jsonify({"ok": True, "models": sorted(res.get("creators") or {}, key=str.lower)})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 

@@ -174,9 +174,19 @@
     var isRev = l.type === 'rev';
     var accent = isRev ? '#22c55e' : (l.paid ? '#22c55e' : '#2a2a35');
     // sous-titre montant d'origine
-    var origin = (l.form === 'pct')
-      ? l.pct + '% ' + esc(d.pct_bases[l.pct_of] || '')
-      : (l.currency === 'EUR' ? '€' : '$') + (l.amount || 0).toFixed(2);
+    var origin;
+    if (l.form === 'pct') {
+      var baseLbl = d.pct_bases[l.pct_of] || '';
+      if (!baseLbl && l.pct_of && l.pct_of.indexOf('line:') === 0) {
+        var rl = (d.rev_lines || []).filter(function (x) { return 'line:' + x.id === l.pct_of; })[0];
+        baseLbl = rl ? 'de « ' + rl.label + ' »' : '';
+      }
+      origin = l.pct + '% ' + esc(baseLbl);
+    } else if (l.form === 'mypuls') {
+      origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
+    } else {
+      origin = (l.currency === 'EUR' ? '€' : '$') + (l.amount || 0).toFixed(2);
+    }
     // badges
     var badges = '';
     var mb = monthBounds();
@@ -334,11 +344,17 @@
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
       fld('💼 Type', '<select id="fxm-type" style="' + INP + '"><option value="exp"' + (line.type !== 'rev' ? ' selected' : '') + '>📩 Dépense (sortie)</option><option value="rev"' + (line.type === 'rev' ? ' selected' : '') + '>📨 Revenu (entrée)</option></select>') +
       fld('🗂 Catégorie', '<select id="fxm-cat" style="' + INP + '">' + catOpts + '</select>') +
-      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option></select>') +
+      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '>🔄 CA MyPuls (auto)</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
       fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '</div>' +
-      '<div id="fxm-fixed-wrap" style="display:' + (line.form === 'pct' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
+      '<div id="fxm-mypuls-wrap" style="display:' + (line.form === 'mypuls' ? 'block' : 'none') + '">' +
+      fld('🔄 Créatrice MyPuls <span style="color:#55556a;text-transform:none">(CA du mois récupéré automatiquement, converti en $)</span>',
+        '<select id="fxm-mypulsmodel" style="' + INP + '">' +
+        (line.mypuls_model ? '<option value="' + esc(line.mypuls_model) + '" selected>' + esc(line.mypuls_model) + '</option>' : '<option value="">⏳ Chargement des créatrices…</option>') +
+        '</select>') +
+      '</div>' +
+      '<div id="fxm-fixed-wrap" style="display:' + (line.form === 'pct' || line.form === 'mypuls' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
       fld('💰 Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
       fld('Devise', '<select id="fxm-currency" style="' + INP + '"><option value="USD"' + (line.currency !== 'EUR' ? ' selected' : '') + '>$ USD</option><option value="EUR"' + (line.currency === 'EUR' ? ' selected' : '') + '>€ EUR</option></select>') +
       '</div>' +
@@ -364,9 +380,24 @@
 
     var phases = (line.phases || []).slice();
     document.getElementById('fxm-form').addEventListener('change', function () {
-      document.getElementById('fxm-fixed-wrap').style.display = this.value === 'pct' ? 'none' : 'grid';
+      document.getElementById('fxm-fixed-wrap').style.display = this.value === 'fixed' ? 'grid' : 'none';
       document.getElementById('fxm-pct-wrap').style.display = this.value === 'pct' ? 'grid' : 'none';
+      document.getElementById('fxm-mypuls-wrap').style.display = this.value === 'mypuls' ? 'block' : 'none';
+      if (this.value === 'mypuls') document.getElementById('fxm-type').value = 'rev';
     });
+    // Liste des créatrices MyPuls (pour la forme 'CA MyPuls auto')
+    fetch('/facture/mypuls_models').then(function (r) { return r.json(); }).then(function (j) {
+      var sel = document.getElementById('fxm-mypulsmodel');
+      if (!sel) return;
+      if (!j.ok) {
+        if (!line.mypuls_model) sel.innerHTML = '<option value="">⚠️ ' + esc(j.error || 'MyPuls indisponible') + '</option>';
+        return;
+      }
+      var curv = line.mypuls_model || '';
+      sel.innerHTML = '<option value="">— choisir une créatrice —</option>' + (j.models || []).map(function (n) {
+        return '<option value="' + esc(n) + '"' + (n === curv ? ' selected' : '') + '>' + esc(n) + '</option>';
+      }).join('');
+    }).catch(function () {});
     document.getElementById('fxm-type').addEventListener('change', function () {
       document.getElementById('fxm-nextpay-wrap').style.display = this.value === 'rev' ? 'block' : 'none';
     });
@@ -389,6 +420,7 @@
         cat: document.getElementById('fxm-cat').value,
         form: document.getElementById('fxm-form').value,
         market: document.getElementById('fxm-market').value,
+        mypuls_model: (document.getElementById('fxm-mypulsmodel') || {value: ''}).value,
         amount: parseFloat(document.getElementById('fxm-amount').value) || 0,
         currency: document.getElementById('fxm-currency').value,
         pct: parseFloat(document.getElementById('fxm-pct').value) || 0,
