@@ -139,10 +139,15 @@ def _mypuls_ca(model: str, month: str) -> float:
 
 def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     """Montant mensuel en USD d'une ligne : fixe converti, ou % d'une base revenus
-    (globale 'rev_total'/'rev_of'/'rev_mym' OU une LIGNE précise 'line:<id>')."""
+    (globale 'rev_total'/'rev_of'/'rev_mym', UNE ligne 'line:<id>' ou PLUSIEURS
+    lignes 'lines:<id1>,<id2>,...' -> somme des revenus sélectionnés)."""
     if (line.get("form") or "fixed") == "pct":
         pct = float(line.get("pct") or 0)
-        base = float(rev_bases.get(line.get("pct_of") or "rev_total", 0))
+        po = line.get("pct_of") or "rev_total"
+        if po.startswith("lines:"):
+            base = sum(float(rev_bases.get(f"line:{i}", 0)) for i in po[6:].split(",") if i)
+        else:
+            base = float(rev_bases.get(po, 0))
         return round(pct / 100.0 * base, 2)
     return round(_to_usd(float(line.get("amount") or 0), line.get("currency") or "USD", settings), 2)
 
@@ -287,9 +292,13 @@ def _sanitize_line(raw: dict) -> dict:
         line["pct"] = round(float(raw.get("pct") or 0), 2)
     except Exception:
         line["pct"] = 0.0
-    pct_of = str(raw.get("pct_of") or "")
-    # base valide : une catégorie connue OU un lien vers une ligne "line:<id>"
-    line["pct_of"] = pct_of if (pct_of in PCT_BASES or re.match(r"^line:[a-zA-Z0-9]{4,32}$", pct_of)) else "rev_total"
+    pct_of = str(raw.get("pct_of") or "")[:1500]
+    # base valide : catégorie connue, UNE ligne "line:<id>" ou PLUSIEURS "lines:<id>,<id>,..."
+    line["pct_of"] = pct_of if (
+        pct_of in PCT_BASES
+        or re.match(r"^line:[a-zA-Z0-9]{4,32}$", pct_of)
+        or re.match(r"^lines:[a-zA-Z0-9]{4,32}(,[a-zA-Z0-9]{4,32}){0,39}$", pct_of)
+    ) else "rev_total"
     if line["form"] == "mypuls":
         line["type"] = "rev"  # un CA MyPuls est forcément un revenu
     phases = []
@@ -482,11 +491,14 @@ def register(app, is_auth):
             return jsonify({"ok": False, "error": f"Le mois {nm} existe déjà"})
         src = (d["months"].get(month) or {}).get("lines") or []
         new_lines = []
+        id_map = {}  # ancien id -> nouvel id (pour réécrire les % liés)
         for l in src:
             if l.get("freq") == "once":
                 continue
             nl = dict(l)
             nl["id"] = uuid.uuid4().hex[:12]
+            if l.get("id"):
+                id_map[l["id"]] = nl["id"]
             nl["paid"] = False
             nl["paid_at"] = ""
             # décale les phases d'un mois
@@ -503,6 +515,14 @@ def register(app, is_auth):
                     pass
             nl["phases"] = phs
             new_lines.append(nl)
+        # Réécrit les liens % (line:/lines:) vers les NOUVELLES ids du mois copié
+        # (sinon le % pointerait sur les lignes de l'ancien mois -> base 0)
+        for nl in new_lines:
+            po = nl.get("pct_of") or ""
+            if po.startswith("line:"):
+                nl["pct_of"] = "line:" + id_map.get(po[5:], po[5:])
+            elif po.startswith("lines:"):
+                nl["pct_of"] = "lines:" + ",".join(id_map.get(i, i) for i in po[6:].split(",") if i)
         d["months"][nm] = {"lines": new_lines}
         _save(d)
         return jsonify({"ok": True, "month": nm, "count": len(new_lines)})

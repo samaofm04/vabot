@@ -177,7 +177,12 @@
     var origin;
     if (l.form === 'pct') {
       var baseLbl = d.pct_bases[l.pct_of] || '';
-      if (!baseLbl && l.pct_of && l.pct_of.indexOf('line:') === 0) {
+      if (!baseLbl && l.pct_of && l.pct_of.indexOf('lines:') === 0) {
+        var mids = l.pct_of.slice(6).split(',');
+        var names = (d.rev_lines || []).filter(function (x) { return mids.indexOf(x.id) >= 0; })
+          .map(function (x) { return x.label; });
+        baseLbl = 'de ' + (names.length ? names.join(' + ') : mids.length + ' revenus');
+      } else if (!baseLbl && l.pct_of && l.pct_of.indexOf('line:') === 0) {
         var rl = (d.rev_lines || []).filter(function (x) { return 'line:' + x.id === l.pct_of; })[0];
         baseLbl = rl ? 'de « ' + rl.label + ' »' : '';
       }
@@ -323,7 +328,10 @@
     // Options du "% calculé sur" : catégories globales + CHAQUE ligne de revenu
     // (ex: la ligne "OF" de Revenue OF) -> le % suit ce revenu précis.
     var revLines = (d.rev_lines || []).filter(function (rl) { return rl.id !== line.id; });
-    var pctBaseOpts = '<optgroup label="Global">';
+    var isMulti = (line.pct_of || '').indexOf('lines:') === 0;
+    var multiIds = isMulti ? line.pct_of.slice(6).split(',') : [];
+    var pctBaseOpts = '<option value="multi"' + (isMulti ? ' selected' : '') + '>🧩 Plusieurs revenus (multi-sélection)</option>';
+    pctBaseOpts += '<optgroup label="Global">';
     pctBaseOpts += Object.keys(d.pct_bases).map(function (k) {
       return '<option value="' + k + '"' + (line.pct_of === k ? ' selected' : '') + '>' + esc(d.pct_bases[k]) + '</option>';
     }).join('') + '</optgroup>';
@@ -362,6 +370,17 @@
       fld('％ Pourcent', '<input id="fxm-pct" type="number" step="0.1" min="0" max="100" style="' + INP + '" value="' + (line.pct || '') + '" placeholder="25">') +
       fld('… calculé sur', '<select id="fxm-pctof" style="' + INP + '">' + pctBaseOpts + '</select>') +
       '</div>' +
+      '<div id="fxm-multibox" style="display:' + (line.form === 'pct' && isMulti ? 'block' : 'none') + '">' +
+      fld('🧩 Revenus inclus dans la base (le % s&#39;applique à leur SOMME)',
+        '<div style="display:flex;flex-direction:column;gap:7px;max-height:190px;overflow-y:auto;border:1px dashed #2c2c3d;border-radius:9px;padding:11px">' +
+        (revLines.length ? revLines.map(function (rl) {
+          var ck = multiIds.indexOf(rl.id) >= 0;
+          return '<label style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:#c0c0d5;cursor:pointer;margin:0">' +
+            '<input type="checkbox" class="fxm-mline" value="' + rl.id + '"' + (ck ? ' checked' : '') + ' style="width:auto;accent-color:#818cf8;cursor:pointer">' +
+            esc(rl.label) + ' <span style="color:#55556a;font-size:11px">(' + money(rl.usd) + ')</span></label>';
+        }).join('') : '<div style="color:#66667a;font-size:12px">Aucune ligne de revenu ce mois-ci.</div>') +
+        '</div>') +
+      '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
       fld('📆 Date de début', '<input id="fxm-start" type="date" style="' + INP + '" value="' + esc(line.start || '') + '">') +
       fld('Date de fin <span style="color:#55556a;text-transform:none">(optionnel)</span>', '<input id="fxm-end" type="date" style="' + INP + '" value="' + esc(line.end || '') + '">') +
@@ -383,7 +402,12 @@
       document.getElementById('fxm-fixed-wrap').style.display = this.value === 'fixed' ? 'grid' : 'none';
       document.getElementById('fxm-pct-wrap').style.display = this.value === 'pct' ? 'grid' : 'none';
       document.getElementById('fxm-mypuls-wrap').style.display = this.value === 'mypuls' ? 'block' : 'none';
+      document.getElementById('fxm-multibox').style.display =
+        (this.value === 'pct' && document.getElementById('fxm-pctof').value === 'multi') ? 'block' : 'none';
       if (this.value === 'mypuls') document.getElementById('fxm-type').value = 'rev';
+    });
+    document.getElementById('fxm-pctof').addEventListener('change', function () {
+      document.getElementById('fxm-multibox').style.display = this.value === 'multi' ? 'block' : 'none';
     });
     // Liste des créatrices MyPuls (pour la forme 'CA MyPuls auto')
     fetch('/facture/mypuls_models').then(function (r) { return r.json(); }).then(function (j) {
@@ -413,6 +437,16 @@
       document.getElementById('fxm-phases').innerHTML = renderPhaseChips(phases);
     });
     document.getElementById('fxm-save').addEventListener('click', function () {
+      // Multi-sélection : la base % = 'lines:<id1>,<id2>,...' des revenus cochés
+      var pctofVal = document.getElementById('fxm-pctof').value;
+      if (pctofVal === 'multi') {
+        var mids = Array.prototype.map.call(document.querySelectorAll('.fxm-mline:checked'), function (c) { return c.value; });
+        if (document.getElementById('fxm-form').value === 'pct' && !mids.length) {
+          toast('Coche au moins un revenu dans la multi-sélection', 'error');
+          return;
+        }
+        pctofVal = 'lines:' + mids.join(',');
+      }
       var payload = {
         id: line.id || '',
         label: document.getElementById('fxm-label').value,
@@ -424,7 +458,7 @@
         amount: parseFloat(document.getElementById('fxm-amount').value) || 0,
         currency: document.getElementById('fxm-currency').value,
         pct: parseFloat(document.getElementById('fxm-pct').value) || 0,
-        pct_of: document.getElementById('fxm-pctof').value,
+        pct_of: pctofVal,
         freq: document.getElementById('fxm-freq').value,
         start: document.getElementById('fxm-start').value,
         end: document.getElementById('fxm-end').value,
