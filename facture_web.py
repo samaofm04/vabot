@@ -487,6 +487,34 @@ def _seed_of_chatters_20260709():
         pass
 
 
+def _seed_chatters_mym_20260709():
+    """One-shot CORRECTIF (09/07/2026) : les chatteurs bossent sur MyM, pas OF.
+    Leurs payes % doivent être liées à la SOMME des lignes CA MyPuls (toutes
+    les modèles SAUF Amelia, gérée par une agence de chatting externe).
+    Remplace le lien posé par _seed_of_chatters (qui pointait sur les OF)."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_chatmym_20260709"):
+            return
+        month = _cur_month()
+        lines = (d["months"].get(month) or {}).get("lines") or []
+        mym = [l for l in lines
+               if l.get("type") == "rev" and (l.get("form") or "") == "mypuls"
+               and "amelia" not in (l.get("label") or "").lower()
+               and "amelia" not in (l.get("mypuls_model") or "").lower()
+               and l.get("id")]
+        if not mym:
+            return  # lignes CA MyPuls pas encore là -> retente au prochain démarrage
+        ids = ",".join(l["id"] for l in mym)
+        for l in lines:
+            if l.get("type") != "rev" and l.get("cat") == "chatter" and (l.get("form") or "") == "pct":
+                l["pct_of"] = f"lines:{ids}"
+        d["settings"]["seed_chatmym_20260709"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
@@ -506,6 +534,7 @@ def register(app, is_auth):
     _seed_pay35_20260709()  # one-shot : payes 35% Lola/Emma/Alicia (voir docstring)
     _seed_rev_compte2_20260709()  # one-shot : revenus compte séparé Amelia/Julia/Lola + payes %
     _seed_of_chatters_20260709()  # one-shot : compte 2 -> Revenue OF + chatteurs % liés aux 3
+    _seed_chatters_mym_20260709()  # CORRECTIF : chatteurs % -> CA MyPuls (toutes sauf Amelia)
 
     @app.route("/facture/app.js")
     def facture_app_js():
