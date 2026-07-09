@@ -180,6 +180,37 @@ def _mypuls_crm_fees(month: str) -> float:
         return 0.0
 
 
+VA_CLICK_RATE = 0.07  # $/clic éligible — taux « expert » appliqué à plat (pour être large)
+_VA_CLICKS_CACHE: dict = {}  # month -> (ts, clicks)
+
+
+def _va_clicks_month(month: str) -> int:
+    """Clics éligibles cumulés des VAs Discord (non-jailbreak) sur le mois.
+    Mois clos figé en cache disque ; mois courant re-calculé toutes les 10 min
+    (les jours passés sortent du day-cache paie -> rapide)."""
+    cur = _cur_month()
+    key = f"{month}|__vaclicks__"
+    if month < cur:
+        v = _pcache_get(key)
+        if v is not None:
+            return int(v)
+    c = _VA_CLICKS_CACHE.get(month)
+    if c and (time.time() - c[0]) < 600:
+        return int(c[1])
+    try:
+        import web_upload
+        first, last = _month_bounds(month)
+        if first > datetime.date.today():
+            return 0
+        clicks = int(web_upload.compute_va_eligible_clicks(first.isoformat(), last.isoformat()))
+    except Exception:
+        return int(c[1]) if c else 0
+    _VA_CLICKS_CACHE[month] = (time.time(), clicks)
+    if month < cur and clicks > 0:
+        _pcache_set(key, clicks)
+    return clicks
+
+
 def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     """Montant mensuel en USD d'une ligne : fixe converti, ou % d'une base revenus
     (globale 'rev_total'/'rev_of'/'rev_mym', UNE ligne 'line:<id>' ou PLUSIEURS
@@ -244,14 +275,21 @@ def compute_state(month: str) -> dict:
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0} for mk in MARKETS}
     for l in lines:
+        extra = {}
         if l.get("id") in resolved_rev:
             usd = resolved_rev[l["id"]]
         elif (l.get("form") or "") == "mypuls_crm":
             # dépense AUTO : total des factures CRM MyPuls du mois (EUR->USD)
             usd = round(_to_usd(_mypuls_crm_fees(month), "EUR", settings), 2)
+        elif (l.get("form") or "") == "va_clicks":
+            # dépense AUTO : clics éligibles des VAs Discord x 0.07$ (déjà en USD)
+            clicks = _va_clicks_month(month)
+            usd = round(clicks * VA_CLICK_RATE, 2)
+            extra["va_clicks"] = clicks
         else:
             usd = _line_usd(l, rev_bases, settings)
         ll = dict(l)
+        ll.update(extra)
         ll["usd"] = usd
         mk = l.get("market") if l.get("market") in MARKETS else MARKET_DEFAULT
         ll["market"] = mk
@@ -320,7 +358,7 @@ def _sanitize_line(raw: dict) -> dict:
         "label": s("label", 120) or "Sans nom",
         "type": "rev" if raw.get("type") == "rev" else "exp",
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
-        "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls", "mypuls_crm") else "fixed",
+        "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls", "mypuls_crm", "va_clicks") else "fixed",
         "mypuls_model": s("mypuls_model", 80),
         "market": raw.get("market") if raw.get("market") in MARKETS else MARKET_DEFAULT,
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
@@ -350,8 +388,8 @@ def _sanitize_line(raw: dict) -> dict:
     ) else "rev_total"
     if line["form"] == "mypuls":
         line["type"] = "rev"  # un CA MyPuls est forcément un revenu
-    elif line["form"] == "mypuls_crm":
-        line["type"] = "exp"  # les factures du CRM sont forcément une dépense
+    elif line["form"] in ("mypuls_crm", "va_clicks"):
+        line["type"] = "exp"  # factures CRM et paie VA = forcément des dépenses
     phases = []
     for p in (raw.get("phases") or [])[:8]:
         if isinstance(p, dict) and p.get("date"):
@@ -515,6 +553,34 @@ def _seed_chatters_mym_20260709():
         pass
 
 
+def _seed_va_classique_20260709():
+    """One-shot (demande user du 09/07/2026) : ligne dépense auto « VA classique »
+    = clics éligibles du mois de tous les VAs Discord x 0.07$ (taux expert plat)."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_vaclassique_20260709"):
+            return
+        month = _cur_month()
+        m = d["months"].setdefault(month, {"lines": []})
+        lines = m.setdefault("lines", [])
+        if not any((l.get("form") or "") == "va_clicks" for l in lines):
+            lines.append({
+                "id": uuid.uuid4().hex[:12],
+                "label": "VA classique", "type": "exp", "cat": "va",
+                "form": "va_clicks", "market": "fr",
+                "currency": "USD", "freq": "monthly",
+                "start": "", "end": "", "link": "",
+                "notes": "auto : clics éligibles du mois × 0.07$ (taux expert, large)",
+                "next_pay": "", "paid": False, "paid_at": "",
+                "amount": 0.0, "pct": 0.0, "pct_of": "rev_total",
+                "mypuls_model": "", "phases": [],
+            })
+        d["settings"]["seed_vaclassique_20260709"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
@@ -535,6 +601,7 @@ def register(app, is_auth):
     _seed_rev_compte2_20260709()  # one-shot : revenus compte séparé Amelia/Julia/Lola + payes %
     _seed_of_chatters_20260709()  # one-shot : compte 2 -> Revenue OF + chatteurs % liés aux 3
     _seed_chatters_mym_20260709()  # CORRECTIF : chatteurs % -> CA MyPuls (toutes sauf Amelia)
+    _seed_va_classique_20260709()  # one-shot : ligne auto VA classique (clics x 0.07$)
 
     @app.route("/facture/app.js")
     def facture_app_js():

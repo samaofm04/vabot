@@ -14300,6 +14300,52 @@ def _pay_list_discord_vas():
     return out
 
 
+def compute_va_eligible_clicks(start_iso: str, end_iso: str) -> int:
+    """Clics ÉLIGIBLES cumulés de TOUS les VAs Discord (non-jailbreak) sur une
+    période. Réutilise le day-cache de la paie (jours passés figés à vie).
+    Utilisé par la Facture : ligne auto « VA classique » à 0.07$/clic (taux
+    expert appliqué à plat, demande user du 09/07/2026)."""
+    import datetime as _dt
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        import gms
+        links = gms.list_all_links()
+    except Exception:
+        return 0
+    vas = _pay_list_discord_vas()
+    matched = []
+    for _cat, h in vas:
+        l = _pay_gms_exact_link(h, links)
+        if l and l.get("id"):
+            matched.append(str(l["id"]))
+    if not matched:
+        return 0
+    today = _dt.date.today()
+    try:
+        d0 = _dt.date.fromisoformat(start_iso)
+        d1 = min(_dt.date.fromisoformat(end_iso), today)
+    except Exception:
+        return 0
+    _pay_daycache_load()
+    day_list = []
+    d = d0
+    while d <= d1:
+        day_list.append((d.isoformat(), d < today))
+        d += _dt.timedelta(days=1)
+    tasks = [(lid, iso, past) for lid in matched for iso, past in day_list]
+    total_eligible = 0
+    if tasks:
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            futs = [ex.submit(_pay_day_stats, gms, lid, iso, past) for lid, iso, past in tasks]
+            for f in futs:
+                try:
+                    total_eligible += int(f.result()[1])
+                except Exception:
+                    pass
+    _pay_daycache_save()
+    return total_eligible
+
+
 def _compute_va_pay_report(period: str) -> dict:
     """Rapport de paie automatique par quinzaine ('current' ou 'previous').
     Cache 5 min par période ; le cache par (lien, jour) rend les recalculs rapides."""
