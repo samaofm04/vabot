@@ -430,14 +430,15 @@ def analytics_for_link(link_id: str, start_date: str, end_date: str):
 
 def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:
     """Total de clics pour une LISTE de liens sur une periode (YYYY-MM-DD).
-    Batch par 200 (limite analytics). Retourne None si UN SEUL batch echoue
-    (le total serait partiel/faux — chiffre de paie, on prefere « indispo » a
-    un sous-comptage credible), sinon la somme (0 si liste vide)."""
+    Batch par 20 (l'API analytics rejette >~20 link_ids : Error 400
+    'link_id must contain at least one value'). Retourne None si UN SEUL batch
+    echoue (le total serait partiel/faux — chiffre de paie, on prefere
+    « indispo » a un sous-comptage credible), sinon la somme (0 si liste vide)."""
     if not link_ids:
         return 0
     total = 0
-    for i in range(0, len(link_ids), 200):
-        chunk = link_ids[i:i + 200]
+    for i in range(0, len(link_ids), 20):
+        chunk = link_ids[i:i + 20]
         res = get_analytics_overview(start_date, end_date, link_ids=chunk)
         if not res.get("ok"):
             return None  # batch echoue -> total non fiable
@@ -1230,28 +1231,49 @@ def fr_market_eligible_clicks(start_date: str, end_date: str,
     all_ids = list(dict.fromkeys(all_ids))  # dedupe
     if not all_ids:
         return {"ok": True, "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
-    eligible = 0
-    total = 0
-    for i in range(0, len(all_ids), 200):
-        res = get_analytics_overview(start_date, end_date, link_ids=all_ids[i:i + 200])
-        if not res.get("ok"):
-            return {"ok": False, "error": "analytics indisponible",
-                    "eligible": 0, "total": 0, "links": len(all_ids), "per_model": per_model}
-        d = res.get("data")
-        if not isinstance(d, dict):
-            d = res
-        try:
-            total += int(d.get("total_clicks") or 0)
-        except Exception:
-            pass
-        for c in (d.get("top_countries") or []):
-            if (c.get("country_code") or "").upper() in ELIGIBLE_COUNTRIES:
+
+    # L'API analytics plafonne à ~20 link_ids par appel (25 -> Error 400). On
+    # découpe en paquets de 20, appelés en parallèle (thread-safe, cf. paie).
+    from concurrent.futures import ThreadPoolExecutor
+    chunks = [all_ids[i:i + 20] for i in range(0, len(all_ids), 20)]
+
+    def _batch(chunk):
+        for _try in range(2):  # 1 retry (réseau)
+            res = get_analytics_overview(start_date, end_date, link_ids=chunk)
+            if res.get("ok"):
+                d = res.get("data")
+                if not isinstance(d, dict):
+                    d = res
+                tot = 0
                 try:
-                    eligible += int(c.get("count") or 0)
+                    tot = int(d.get("total_clicks") or 0)
                 except Exception:
                     pass
+                elig = 0
+                for c in (d.get("top_countries") or []):
+                    if (c.get("country_code") or "").upper() in ELIGIBLE_COUNTRIES:
+                        try:
+                            elig += int(c.get("count") or 0)
+                        except Exception:
+                            pass
+                return (tot, elig, True)
+        return (0, 0, False)
+
+    eligible = 0
+    total = 0
+    ok_batches = 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for tot, elig, okb in ex.map(_batch, chunks):
+            total += tot
+            eligible += elig
+            if okb:
+                ok_batches += 1
+    if ok_batches == 0:  # tout a échoué -> indispo (l'appelant garde l'ancien)
+        return {"ok": False, "error": "analytics indisponible",
+                "eligible": 0, "total": 0, "links": len(all_ids), "per_model": per_model}
     return {"ok": True, "eligible": eligible, "total": total,
-            "links": len(all_ids), "per_model": per_model, "source": source}
+            "links": len(all_ids), "per_model": per_model, "source": source,
+            "batches_ok": ok_batches, "batches": len(chunks)}
 
 
 def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, Any]:
