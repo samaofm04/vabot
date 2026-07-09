@@ -137,6 +137,49 @@ def _mypuls_ca(model: str, month: str) -> float:
         return 0.0
 
 
+def _pcache_get(key: str):
+    """Cache disque permanent (mois clos) partagé CA/frais MyPuls."""
+    global _MYPULS_MONTH_CACHE
+    if not _MYPULS_MONTH_CACHE and _MYPULS_CACHE_FILE.exists():
+        try:
+            _MYPULS_MONTH_CACHE = json.loads(_MYPULS_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _MYPULS_MONTH_CACHE = {}
+    return _MYPULS_MONTH_CACHE.get(key)
+
+
+def _pcache_set(key: str, val: float):
+    _MYPULS_MONTH_CACHE[key] = val
+    try:
+        _MYPULS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _MYPULS_CACHE_FILE.write_text(json.dumps(_MYPULS_MONTH_CACHE), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _mypuls_crm_fees(month: str) -> float:
+    """Total (EUR) des factures CRM MyPuls du mois (onglet Factures & Paiements).
+    Mois clos = figé en cache disque (clé '<mois>|__crm__')."""
+    cur = _cur_month()
+    key = f"{month}|__crm__"
+    if month < cur:
+        v = _pcache_get(key)
+        if v is not None:
+            return float(v)
+    try:
+        import mypuls
+        res = mypuls.fetch_invoices()
+        if not res.get("ok"):
+            return 0.0
+        tot = round(sum(float(i.get("amount") or 0) for i in (res.get("invoices") or [])
+                        if (i.get("date_iso") or "")[:7] == month), 2)
+        if month < cur:
+            _pcache_set(key, tot)
+        return tot
+    except Exception:
+        return 0.0
+
+
 def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     """Montant mensuel en USD d'une ligne : fixe converti, ou % d'une base revenus
     (globale 'rev_total'/'rev_of'/'rev_mym', UNE ligne 'line:<id>' ou PLUSIEURS
@@ -201,7 +244,13 @@ def compute_state(month: str) -> dict:
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0} for mk in MARKETS}
     for l in lines:
-        usd = resolved_rev[l["id"]] if l.get("id") in resolved_rev else _line_usd(l, rev_bases, settings)
+        if l.get("id") in resolved_rev:
+            usd = resolved_rev[l["id"]]
+        elif (l.get("form") or "") == "mypuls_crm":
+            # dépense AUTO : total des factures CRM MyPuls du mois (EUR->USD)
+            usd = round(_to_usd(_mypuls_crm_fees(month), "EUR", settings), 2)
+        else:
+            usd = _line_usd(l, rev_bases, settings)
         ll = dict(l)
         ll["usd"] = usd
         mk = l.get("market") if l.get("market") in MARKETS else MARKET_DEFAULT
@@ -271,7 +320,7 @@ def _sanitize_line(raw: dict) -> dict:
         "label": s("label", 120) or "Sans nom",
         "type": "rev" if raw.get("type") == "rev" else "exp",
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
-        "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls") else "fixed",
+        "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls", "mypuls_crm") else "fixed",
         "mypuls_model": s("mypuls_model", 80),
         "market": raw.get("market") if raw.get("market") in MARKETS else MARKET_DEFAULT,
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
@@ -301,6 +350,8 @@ def _sanitize_line(raw: dict) -> dict:
     ) else "rev_total"
     if line["form"] == "mypuls":
         line["type"] = "rev"  # un CA MyPuls est forcément un revenu
+    elif line["form"] == "mypuls_crm":
+        line["type"] = "exp"  # les factures du CRM sont forcément une dépense
     phases = []
     for p in (raw.get("phases") or [])[:8]:
         if isinstance(p, dict) and p.get("date"):

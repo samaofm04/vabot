@@ -423,6 +423,66 @@ def invalidate_cache():
     _STATS_CACHE.clear()
 
 
+# ============ Factures du CRM (onglet Factures & Paiements de /profil) ============
+
+_INVOICES_CACHE: Dict[str, Any] = {}
+
+
+def fetch_invoices(use_cache: bool = True) -> Dict[str, Any]:
+    """Factures & Paiements du CRM MyPuls (ce que MyPuls facture à l'agence).
+
+    Scrape /profil (onglet #tab-invoices, présent dans le HTML de la page) et
+    parse la table Date | Compte Créateur | N° facture | Montant | Statut.
+    Cache mémoire 5 min.
+
+    Retourne : {ok, invoices: [{date, date_iso, creator, number, amount, status}]}
+    """
+    import time as _t
+    if use_cache and _INVOICES_CACHE and (_t.time() - _INVOICES_CACHE.get("ts", 0)) < 300:
+        return _INVOICES_CACHE["data"]
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    try:
+        r = s.get(f"{BASE_URL}/profil", timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code != 200 or _detect_login_redirect(r.text):
+        return {"ok": False, "error": "Cookies expirés — reconnecte-toi sur MyPuls"}
+    _save_rotated_cookies(s)
+
+    invoices: List[Dict[str, Any]] = []
+    for headers, rows in _extract_tables(r.text):
+        # la table des factures est celle dont un entête contient "facture"
+        if not any("facture" in (h or "").lower() for h in headers):
+            continue
+        for row in rows:
+            if len(row) < 5:
+                continue
+            d = (row[0] or "").strip()  # "07/07/2026 15:17"
+            iso = ""
+            try:
+                parts = d.split(" ")[0].split("/")
+                if len(parts) == 3:
+                    iso = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            except Exception:
+                pass
+            invoices.append({
+                "date": d,
+                "date_iso": iso,
+                "creator": row[1],
+                "number": row[2],
+                "amount": _parse_amount(row[3]),
+                "status": row[4],
+            })
+    if not invoices:
+        return {"ok": False, "error": "Tableau des factures introuvable sur /profil"}
+    result = {"ok": True, "invoices": invoices}
+    _INVOICES_CACHE["ts"] = int(_t.time())
+    _INVOICES_CACHE["data"] = result
+    return result
+
+
 # ============ Métadonnées par chatteur (commission % + screenshot crypto) ============
 
 # Commission par défaut (base) appliquée à un chatteur jamais configuré.

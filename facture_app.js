@@ -189,6 +189,8 @@
       origin = l.pct + '% ' + esc(baseLbl);
     } else if (l.form === 'mypuls') {
       origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
+    } else if (l.form === 'mypuls_crm') {
+      origin = '🧾 Factures CRM MyPuls du mois <span style="color:#4ade80">(auto)</span>';
     } else {
       origin = (l.currency === 'EUR' ? '€' : '$') + (l.amount || 0).toFixed(2);
     }
@@ -352,7 +354,7 @@
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
       fld('💼 Type', '<select id="fxm-type" style="' + INP + '"><option value="exp"' + (line.type !== 'rev' ? ' selected' : '') + '>📩 Dépense (sortie)</option><option value="rev"' + (line.type === 'rev' ? ' selected' : '') + '>📨 Revenu (entrée)</option></select>') +
       fld('🗂 Catégorie', '<select id="fxm-cat" style="' + INP + '">' + catOpts + '</select>') +
-      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '>🔄 CA MyPuls (auto)</option></select>') +
+      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '>🔄 CA MyPuls (auto)</option><option value="mypuls_crm"' + (line.form === 'mypuls_crm' ? ' selected' : '') + '>🧾 Frais CRM MyPuls (auto)</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
       fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '</div>' +
@@ -362,7 +364,7 @@
         (line.mypuls_model ? '<option value="' + esc(line.mypuls_model) + '" selected>' + esc(line.mypuls_model) + '</option>' : '<option value="">⏳ Chargement des créatrices…</option>') +
         '</select>') +
       '</div>' +
-      '<div id="fxm-fixed-wrap" style="display:' + (line.form === 'pct' || line.form === 'mypuls' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
+      '<div id="fxm-fixed-wrap" style="display:' + (line.form && line.form !== 'fixed' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
       fld('💰 Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
       fld('Devise', '<select id="fxm-currency" style="' + INP + '"><option value="USD"' + (line.currency !== 'EUR' ? ' selected' : '') + '>$ USD</option><option value="EUR"' + (line.currency === 'EUR' ? ' selected' : '') + '>€ EUR</option></select>') +
       '</div>' +
@@ -405,6 +407,7 @@
       document.getElementById('fxm-multibox').style.display =
         (this.value === 'pct' && document.getElementById('fxm-pctof').value === 'multi') ? 'block' : 'none';
       if (this.value === 'mypuls') document.getElementById('fxm-type').value = 'rev';
+      if (this.value === 'mypuls_crm') document.getElementById('fxm-type').value = 'exp';
     });
     document.getElementById('fxm-pctof').addEventListener('change', function () {
       document.getElementById('fxm-multibox').style.display = this.value === 'multi' ? 'block' : 'none';
