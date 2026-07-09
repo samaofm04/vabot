@@ -459,6 +459,34 @@ def _seed_rev_compte2_20260709():
         pass
 
 
+def _seed_of_chatters_20260709():
+    """One-shot (demande user du 09/07/2026) : les 3 lignes 'compte 2'
+    (Amelia/Julia/Lola) SONT le Revenue OF -> cat rev_of + label 'OF …'.
+    Et toutes les payes CHATTEUR en % deviennent liées à la SOMME des 3."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_ofchat_20260709"):
+            return
+        month = _cur_month()
+        lines = (d["months"].get(month) or {}).get("lines") or []
+        c2 = [l for l in lines if l.get("type") == "rev" and "(compte 2)" in (l.get("label") or "")]
+        if len(c2) < 3:
+            return  # les lignes compte 2 pas encore là -> retente au prochain démarrage
+        for l in c2:
+            l["cat"] = "rev_of"
+            base = (l.get("label") or "").replace(" (compte 2)", "").strip()
+            if not base.upper().startswith("OF"):
+                l["label"] = f"OF {base} (compte 2)"
+        ids = ",".join(l["id"] for l in c2 if l.get("id"))
+        for l in lines:
+            if l.get("type") != "rev" and l.get("cat") == "chatter" and (l.get("form") or "") == "pct":
+                l["pct_of"] = f"lines:{ids}"
+        d["settings"]["seed_ofchat_20260709"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
@@ -477,6 +505,7 @@ def register(app, is_auth):
 
     _seed_pay35_20260709()  # one-shot : payes 35% Lola/Emma/Alicia (voir docstring)
     _seed_rev_compte2_20260709()  # one-shot : revenus compte séparé Amelia/Julia/Lola + payes %
+    _seed_of_chatters_20260709()  # one-shot : compte 2 -> Revenue OF + chatteurs % liés aux 3
 
     @app.route("/facture/app.js")
     def facture_app_js():
