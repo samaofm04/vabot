@@ -44,10 +44,12 @@ CAT_ORDER = ["rev_of", "rev_mym", "rev_other", "model", "chatter", "va", "manage
 # Bases % « catégorie » (héritées) + on ajoute dynamiquement chaque LIGNE de revenu
 # (clé "line:<id>") pour lier un % à un revenu précis.
 PCT_BASES = {"rev_total": "de TOUS les revenus", "rev_of": "de Revenue OF", "rev_mym": "de Revenue MYM"}
-# Marchés : chaque ligne appartient à un marché (les anciennes lignes sans le
-# champ sont considérées FR). Filtre + KPI séparés côté client, split au Bilan.
+# Marchés : chaque ligne appartient à un marché. Les anciennes lignes sans le
+# champ sont considérées US (l'activité historique de l'user est 100% US).
+# Filtre + KPI séparés côté client, split au Bilan.
 MARKETS = {"fr": {"label": "Marché FR", "icon": "🇫🇷"}, "us": {"label": "Marché US", "icon": "🇺🇸"}}
 MARKET_ORDER = ["fr", "us"]
+MARKET_DEFAULT = "us"
 
 
 def _load() -> dict:
@@ -142,7 +144,7 @@ def compute_state(month: str) -> dict:
         usd = _line_usd(l, rev_bases, settings)
         ll = dict(l)
         ll["usd"] = usd
-        mk = l.get("market") if l.get("market") in MARKETS else "fr"
+        mk = l.get("market") if l.get("market") in MARKETS else MARKET_DEFAULT
         ll["market"] = mk
         # payé = flag direct, ou toutes les phases payées
         phases = l.get("phases") or []
@@ -210,7 +212,7 @@ def _sanitize_line(raw: dict) -> dict:
         "type": "rev" if raw.get("type") == "rev" else "exp",
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
         "form": "pct" if raw.get("form") == "pct" else "fixed",
-        "market": raw.get("market") if raw.get("market") in MARKETS else "fr",
+        "market": raw.get("market") if raw.get("market") in MARKETS else MARKET_DEFAULT,
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
         "freq": raw.get("freq") if raw.get("freq") in ("monthly", "biweekly", "weekly", "once") else "monthly",
         "start": s("start", 10),

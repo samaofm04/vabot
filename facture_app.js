@@ -127,7 +127,7 @@
   }
 
   function lineMatchesFilter(l) {
-    if (S.market !== 'all' && (l.market || 'fr') !== S.market) return false;
+    if (S.market !== 'all' && (l.market || 'us') !== S.market) return false;
     if (S.filter === 'all') return true;
     if (S.filter === 'rev') return l.type === 'rev';
     if (S.filter === 'rev_mym') return l.cat === 'rev_mym';
@@ -207,7 +207,7 @@
     return '<div style="background:#14141f;border:1px solid #23232e;border-left:3px solid ' + accent + ';border-radius:10px;padding:12px 14px">' +
       '<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:200px">' +
-      '<div style="font-weight:700;font-size:13.5px;color:#fff">' + ((l.market || 'fr') === 'us' ? '🇺🇸 ' : '🇫🇷 ') + esc(l.label) + '</div>' +
+      '<div style="font-weight:700;font-size:13.5px;color:#fff">' + ((l.market || 'us') === 'fr' ? '🇫🇷 ' : '🇺🇸 ') + esc(l.label) + '</div>' +
       '<div style="font-size:11.5px;color:#77778a;margin-top:3px">' + origin + ' <span style="color:#55556a">/ mois</span></div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + badges + '</div>' +
       phasesHtml +
@@ -336,7 +336,7 @@
       fld('🗂 Catégorie', '<select id="fxm-cat" style="' + INP + '">' + catOpts + '</select>') +
       fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
-      fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + ((line.market || 'fr') !== 'us' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market === 'us' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
+      fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '</div>' +
       '<div id="fxm-fixed-wrap" style="display:' + (line.form === 'pct' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
       fld('💰 Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
