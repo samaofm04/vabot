@@ -1156,6 +1156,75 @@ IDENTITY_TEAM = {"hybride": THREADS_US_TID, "hybrid": THREADS_US_TID}
 # Domaine public des liens GetMySocial
 PUBLIC_LINK_DOMAIN = "https://getmysocial.com"
 
+# Modèles du MARCHÉ FRANÇAIS (VA classiques). Les groupes JB ont des noms
+# composés (« emma bo7 », « soulcet jaurel »…) : le match EXACT sur ces 6 noms
+# ne prend QUE les groupes classiques, jamais les JB.
+FR_MARKET_MODELS = ["lola", "amelia", "alicia", "julia", "emma", "sarah"]
+# Pays éligibles à la paie VA (marché francophone).
+ELIGIBLE_COUNTRIES = {"FR", "BE", "CH", "LU", "MC"}
+
+
+def fr_market_eligible_clicks(start_date: str, end_date: str,
+                              models: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Clics ÉLIGIBLES (FR/BE/CH/LU/MC) des liens dans les GROUPES des modèles
+    du marché français, sur une période (YYYY-MM-DD inclusif). On ne regarde QUE
+    ces groupes-là -> les groupes jailbreak sont naturellement exclus.
+
+    Résolution du groupe : mapping connu (clé API-safe) sinon nom exact (cookie).
+    Link ids : appartenance au groupe (board dashboard, cookie). Clics : clé API
+    (fiable) via get_analytics_overview batché.
+
+    Retourne {ok, eligible, total, links, per_model:{model:{ok, links|reason}}}.
+    ok=False si AUCUN groupe résolu ou analytics indispo (l'appelant garde alors
+    sa dernière valeur au lieu d'afficher un faux 0)."""
+    models = models or FR_MARKET_MODELS
+    tid = MARCHE_FRANCAIS_TID
+    mapping = load_groups_mapping()
+    per_model: Dict[str, Any] = {}
+    all_ids: List[str] = []
+    resolved = 0
+    for m in models:
+        ml = (m or "").strip().lower()
+        gid = mapping.get(f"{tid}:{ml}") or group_id_by_name(tid, ml)
+        if not gid:
+            per_model[m] = {"ok": False, "reason": "groupe introuvable"}
+            continue
+        ids = link_ids_in_group(tid, gid)
+        if ids is None:
+            per_model[m] = {"ok": False, "reason": "board indisponible"}
+            continue
+        resolved += 1
+        per_model[m] = {"ok": True, "links": len(ids)}
+        all_ids.extend(ids)
+    if resolved == 0:
+        return {"ok": False, "error": "aucun groupe marché FR résolu",
+                "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
+    all_ids = list(dict.fromkeys(all_ids))  # dedupe
+    if not all_ids:
+        return {"ok": True, "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
+    eligible = 0
+    total = 0
+    for i in range(0, len(all_ids), 200):
+        res = get_analytics_overview(start_date, end_date, link_ids=all_ids[i:i + 200])
+        if not res.get("ok"):
+            return {"ok": False, "error": "analytics indisponible",
+                    "eligible": 0, "total": 0, "links": len(all_ids), "per_model": per_model}
+        d = res.get("data")
+        if not isinstance(d, dict):
+            d = res
+        try:
+            total += int(d.get("total_clicks") or 0)
+        except Exception:
+            pass
+        for c in (d.get("top_countries") or []):
+            if (c.get("country_code") or "").upper() in ELIGIBLE_COUNTRIES:
+                try:
+                    eligible += int(c.get("count") or 0)
+                except Exception:
+                    pass
+    return {"ok": True, "eligible": eligible, "total": total,
+            "links": len(all_ids), "per_model": per_model}
+
 
 def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, Any]:
     """Genere un nouveau lien GMS pour une identite, a partir de son template :

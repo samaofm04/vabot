@@ -185,9 +185,11 @@ _VA_CLICKS_CACHE: dict = {}  # month -> (ts, clicks)
 
 
 def _va_clicks_month(month: str) -> int:
-    """Clics éligibles cumulés des VAs Discord (non-jailbreak) sur le mois.
-    Mois clos figé en cache disque ; mois courant re-calculé toutes les 10 min
-    (les jours passés sortent du day-cache paie -> rapide)."""
+    """Clics éligibles (FR/BE/CH/LU/MC) des GROUPES marché FR (Lola/Amelia/Alicia/
+    Julia/Emma/Sarah, JAMAIS les groupes jailbreak) sur le mois entier.
+    Mois clos figé en cache disque ; mois courant re-calculé toutes les 10 min.
+    Si GMS indispo (cookie board expiré, etc.) on GARDE la dernière valeur connue
+    au lieu d'afficher un faux 0."""
     cur = _cur_month()
     key = f"{month}|__vaclicks__"
     if month < cur:
@@ -198,11 +200,14 @@ def _va_clicks_month(month: str) -> int:
     if c and (time.time() - c[0]) < 600:
         return int(c[1])
     try:
-        import web_upload
+        import gms
         first, last = _month_bounds(month)
         if first > datetime.date.today():
             return 0
-        clicks = int(web_upload.compute_va_eligible_clicks(first.isoformat(), last.isoformat()))
+        res = gms.fr_market_eligible_clicks(first.isoformat(), last.isoformat())
+        if not res.get("ok"):
+            return int(c[1]) if c else 0  # indispo -> garde l'ancien, pas de faux 0
+        clicks = int(res.get("eligible") or 0)
     except Exception:
         return int(c[1]) if c else 0
     _VA_CLICKS_CACHE[month] = (time.time(), clicks)
