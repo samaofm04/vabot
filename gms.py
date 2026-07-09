@@ -1179,26 +1179,54 @@ def fr_market_eligible_clicks(start_date: str, end_date: str,
     sa dernière valeur au lieu d'afficher un faux 0)."""
     models = models or FR_MARKET_MODELS
     tid = MARCHE_FRANCAIS_TID
-    mapping = load_groups_mapping()
+    model_set = {(m or "").strip().lower() for m in models}
     per_model: Dict[str, Any] = {}
     all_ids: List[str] = []
-    resolved = 0
-    for m in models:
-        ml = (m or "").strip().lower()
-        gid = mapping.get(f"{tid}:{ml}") or group_id_by_name(tid, ml)
-        if not gid:
-            per_model[m] = {"ok": False, "reason": "groupe introuvable"}
-            continue
-        ids = link_ids_in_group(tid, gid)
-        if ids is None:
-            per_model[m] = {"ok": False, "reason": "board indisponible"}
-            continue
-        resolved += 1
-        per_model[m] = {"ok": True, "links": len(ids)}
-        all_ids.extend(ids)
-    if resolved == 0:
-        return {"ok": False, "error": "aucun groupe marché FR résolu",
-                "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
+    source = ""
+
+    # 1) PRIMAIRE — CLÉ API (fiable, pas de cookie) : liste tous les liens du
+    #    workspace marché FR et garde ceux dont le SHORTCODE ou le display_name
+    #    contient un des 6 noms de modèle (ex 'xk2amelia' -> amelia). Match direct
+    #    sur MES 6 noms (indépendant de categorize_link, dont la liste KNOWN
+    #    n'inclut pas Alicia). Les liens JB sont nommés d'après le VA (bo7 N,
+    #    andry N…), shortcode sans nom de modèle -> exclus.
+    import re as _re_fm
+    rt = list_links_team(tid)
+    if rt.get("ok"):
+        source = "api"
+        for l in rt.get("links", []):
+            if not l.get("id"):
+                continue
+            sc = (l.get("shortcode") or "").lower()
+            dn = _re_fm.sub(r"[^a-z0-9]", "", (l.get("display_name") or "").lower())
+            hay = sc + " " + dn
+            mdl = next((m for m in model_set if m and m in hay), None)
+            if mdl:
+                all_ids.append(l["id"])
+                pm = per_model.setdefault(mdl, {"ok": True, "links": 0})
+                pm["links"] += 1
+
+    # 2) SECOURS — cookie board (appartenance réelle au groupe) si l'API n'a rien
+    if not all_ids:
+        mapping = load_groups_mapping()
+        resolved = 0
+        for m in models:
+            ml = (m or "").strip().lower()
+            gid = mapping.get(f"{tid}:{ml}") or group_id_by_name(tid, ml)
+            if not gid:
+                per_model[m] = {"ok": False, "reason": "groupe introuvable"}
+                continue
+            ids = link_ids_in_group(tid, gid)
+            if ids is None:
+                per_model[m] = {"ok": False, "reason": "board indisponible"}
+                continue
+            resolved += 1
+            source = "cookie"
+            per_model[m] = {"ok": True, "links": len(ids)}
+            all_ids.extend(ids)
+        if resolved == 0:
+            return {"ok": False, "error": "aucun lien marché FR résolu (API + cookie KO)",
+                    "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
     all_ids = list(dict.fromkeys(all_ids))  # dedupe
     if not all_ids:
         return {"ok": True, "eligible": 0, "total": 0, "links": 0, "per_model": per_model}
@@ -1223,7 +1251,7 @@ def fr_market_eligible_clicks(start_date: str, end_date: str,
                 except Exception:
                     pass
     return {"ok": True, "eligible": eligible, "total": total,
-            "links": len(all_ids), "per_model": per_model}
+            "links": len(all_ids), "per_model": per_model, "source": source}
 
 
 def quick_generate_for_identity(ident: str, va_handle: str = "") -> Dict[str, Any]:
