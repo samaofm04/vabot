@@ -32166,9 +32166,17 @@ def run_web_app():
     try:
         app = create_app()
         log.info(f"Web upload starting on port {WEB_PORT}")
-        # threaded=True EXPLICITE : les requêtes (pages, thumbs, vidéos) tournent en
-        # parallèle — une génération de thumbnail lente ne bloque jamais le reste.
-        app.run(host="0.0.0.0", port=WEB_PORT, debug=False, use_reloader=False, threaded=True)
+        # SERVEUR DE PRODUCTION (waitress) : pool de threads -> encaisse plein de
+        # connexions en parallèle (pages + streaming vidéo + health-checks Cloudflare)
+        # sans jamais bloquer. Le serveur de dev Flask saturait sous charge -> 522.
+        try:
+            from waitress import serve
+            log.info("Web server: waitress (production)")
+            serve(app, host="0.0.0.0", port=WEB_PORT, threads=16,
+                  channel_timeout=300, connection_limit=200, _quiet=True)
+        except ImportError:
+            log.warning("waitress absent -> fallback serveur dev Flask (installe waitress)")
+            app.run(host="0.0.0.0", port=WEB_PORT, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         log.error(f"Web upload crashed: {e}")
 
