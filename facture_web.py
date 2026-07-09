@@ -44,6 +44,10 @@ CAT_ORDER = ["rev_of", "rev_mym", "rev_other", "model", "chatter", "va", "manage
 # Bases % « catégorie » (héritées) + on ajoute dynamiquement chaque LIGNE de revenu
 # (clé "line:<id>") pour lier un % à un revenu précis.
 PCT_BASES = {"rev_total": "de TOUS les revenus", "rev_of": "de Revenue OF", "rev_mym": "de Revenue MYM"}
+# Marchés : chaque ligne appartient à un marché (les anciennes lignes sans le
+# champ sont considérées FR). Filtre + KPI séparés côté client, split au Bilan.
+MARKETS = {"fr": {"label": "Marché FR", "icon": "🇫🇷"}, "us": {"label": "Marché US", "icon": "🇺🇸"}}
+MARKET_ORDER = ["fr", "us"]
 
 
 def _load() -> dict:
@@ -66,6 +70,11 @@ def _save(d: dict):
 
 def _cur_month() -> str:
     return datetime.date.today().strftime("%Y-%m")
+
+
+def _month_shift(month: str, delta: int) -> str:
+    idx = int(month[:4]) * 12 + int(month[5:7]) - 1 + delta
+    return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
 
 
 def _month_bounds(month: str):
@@ -103,7 +112,16 @@ def compute_state(month: str) -> dict:
     cur = _cur_month()
     if cur not in months:
         months.append(cur)
-        months.sort()
+    # 6 mois précédents toujours proposés (navigation arrière même sans données,
+    # pour saisir/consulter un mois passé)
+    for i in range(1, 7):
+        pm = _month_shift(cur, -i)
+        if pm not in months:
+            months.append(pm)
+    # + le mois demandé lui-même (au cas où il est plus vieux que la fenêtre)
+    if month not in months:
+        months.append(month)
+    months.sort()
     lines = list((d["months"].get(month) or {}).get("lines") or [])
 
     # Bases revenus (pour les lignes en %) : globales + PAR LIGNE ('line:<id>')
@@ -119,10 +137,13 @@ def compute_state(month: str) -> dict:
 
     out_lines = []
     tot_rev = tot_exp = 0.0
+    by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0} for mk in MARKETS}
     for l in lines:
         usd = _line_usd(l, rev_bases, settings)
         ll = dict(l)
         ll["usd"] = usd
+        mk = l.get("market") if l.get("market") in MARKETS else "fr"
+        ll["market"] = mk
         # payé = flag direct, ou toutes les phases payées
         phases = l.get("phases") or []
         if phases:
@@ -130,12 +151,22 @@ def compute_state(month: str) -> dict:
         out_lines.append(ll)
         if l.get("type") == "rev":
             tot_rev += usd
+            by_market[mk]["rev"] += usd
+            by_market[mk]["rev_count"] += 1
         else:
             tot_exp += usd
+            by_market[mk]["exp"] += usd
+            by_market[mk]["exp_count"] += 1
 
     assoc_pct = sum(float(a.get("pct") or 0) for a in settings["associates"])
     net = round(tot_rev - tot_exp, 2)
     lead = round(net * max(0.0, (100.0 - assoc_pct)) / 100.0, 2) if net > 0 else net
+    for bm in by_market.values():
+        bm["rev"] = round(bm["rev"], 2)
+        bm["exp"] = round(bm["exp"], 2)
+        n = round(bm["rev"] - bm["exp"], 2)
+        bm["net"] = n
+        bm["lead"] = round(n * max(0.0, (100.0 - assoc_pct)) / 100.0, 2) if n > 0 else n
 
     return {
         "ok": True,
@@ -156,6 +187,9 @@ def compute_state(month: str) -> dict:
         "cats": CATS,
         "cat_order": CAT_ORDER,
         "pct_bases": PCT_BASES,
+        "markets": MARKETS,
+        "market_order": MARKET_ORDER,
+        "by_market": by_market,
         # Lignes de revenus (montant fixe) -> pour lier un % à un revenu précis
         "rev_lines": [
             {"id": l["id"], "label": l.get("label") or "revenu",
@@ -176,6 +210,7 @@ def _sanitize_line(raw: dict) -> dict:
         "type": "rev" if raw.get("type") == "rev" else "exp",
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
         "form": "pct" if raw.get("form") == "pct" else "fixed",
+        "market": raw.get("market") if raw.get("market") in MARKETS else "fr",
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
         "freq": raw.get("freq") if raw.get("freq") in ("monthly", "biweekly", "weekly", "once") else "monthly",
         "start": s("start", 10),
@@ -205,6 +240,29 @@ def _sanitize_line(raw: dict) -> dict:
                            "paid_at": str(p.get("paid_at") or "")[:10]})
     line["phases"] = phases
     return line
+
+
+def compute_bilan() -> dict:
+    """Bilan multi-mois : totaux de chaque mois AYANT des lignes (revenus,
+    dépenses, net, part lead + split marché FR/US) + cumul global.
+    Alimente la page Finances > Bilan (rendu serveur dans web_upload)."""
+    d = _load()
+    months = sorted(m for m, v in d["months"].items() if (v or {}).get("lines"))
+    rows = []
+    tot = {"rev": 0.0, "exp": 0.0, "net": 0.0, "lead": 0.0,
+           "fr_rev": 0.0, "us_rev": 0.0, "fr_net": 0.0, "us_net": 0.0}
+    for m in months:
+        st = compute_state(m)
+        t, bm = st["totals"], st["by_market"]
+        rows.append({"month": m, "rev": t["rev"], "exp": t["exp"], "net": t["net"],
+                     "lead": t["lead"], "fr": bm["fr"], "us": bm["us"]})
+        tot["rev"] += t["rev"]; tot["exp"] += t["exp"]
+        tot["net"] += t["net"]; tot["lead"] += t["lead"]
+        tot["fr_rev"] += bm["fr"]["rev"]; tot["us_rev"] += bm["us"]["rev"]
+        tot["fr_net"] += bm["fr"]["net"]; tot["us_net"] += bm["us"]["net"]
+    for k in tot:
+        tot[k] = round(tot[k], 2)
+    return {"rows": rows, "totals": tot, "cur_month": _cur_month()}
 
 
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------

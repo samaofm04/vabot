@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var S = { month: null, data: null, filter: 'all', collapsed: {} };
+  var S = { month: null, data: null, filter: 'all', market: 'all', collapsed: {} };
   var MOIS = ['', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
               'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 
@@ -49,15 +49,29 @@
   /* ─────────────────────────── rendu principal ─────────────────────────── */
   function render() {
     var d = S.data, t = d.totals;
+    // Filtre marché actif -> les KPI basculent sur les totaux de CE marché
+    var mkTag = '';
+    if (S.market !== 'all' && d.by_market && d.by_market[S.market]) {
+      t = d.by_market[S.market];
+      mkTag = S.market === 'us' ? ' 🇺🇸' : ' 🇫🇷';
+    }
     var monthOpts = d.months.map(function (m) {
       return '<option value="' + m + '"' + (m === S.month ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
     }).join('');
 
     var kpis =
-      kpi('📨 Revenus / mois', moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
-      kpi('📩 Dépenses / mois', moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
-      kpi('💰 Bénéfice net / mois', moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
-      kpi('👑 Part lead (toi)', moneyShort(t.lead), '#facc15', (100 - t.assoc_pct) + '% du net', 'linear-gradient(90deg,#facc15,#f97316)');
+      kpi('📨 Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
+      kpi('📩 Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
+      kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
+      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead), '#facc15', (100 - d.totals.assoc_pct) + '% du net', 'linear-gradient(90deg,#facc15,#f97316)');
+
+    var mktChips = [['all', '🌍 Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
+      .map(function (c) {
+        var on = S.market === c[0];
+        return '<button class="fx-mkt" data-m="' + c[0] + '" style="padding:8px 15px;border-radius:999px;border:1px solid ' +
+          (on ? '#22c55e' : '#2a2a35') + ';background:' + (on ? 'rgba(34,197,94,.15)' : 'transparent') +
+          ';color:' + (on ? '#fff' : '#9a9aa8') + ';font-size:12.5px;font-weight:700;cursor:pointer;margin:0">' + c[1] + '</button>';
+      }).join('');
 
     var chips = [['all', 'Tout'], ['rev', '📨 Revenus'], ['rev_mym', '💛 MYM'], ['model', '🧜‍♀️ Modèles'],
       ['chatter', '💬 Chatters'], ['va', '👤 VAs'], ['manager', '👔 Managers'], ['app', '📱 Apps'], ['other', '📁 Autres']]
@@ -79,7 +93,8 @@
       '<button id="fx-next" class="fx-btn2" style="padding:10px 16px">🧾 Démarrer mois suivant</button>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">' + kpis + '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + chips +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + mktChips +
+      '<span style="width:1px;height:22px;background:#2a2a35;margin:0 4px"></span>' + chips +
       '<div style="flex:1"></div>' +
       '<button id="fx-settings" class="fx-btn2" style="padding:9px 15px">⚙️ Paramètres</button>' +
       '<button id="fx-add" style="padding:9px 17px;background:linear-gradient(135deg,#818cf8,#a78bfa);border:0;color:#0d0d18;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin:0">+ Ajouter une ligne</button>' +
@@ -96,6 +111,9 @@
     Array.prototype.forEach.call(root().querySelectorAll('.fx-chip'), function (c) {
       c.addEventListener('click', function () { S.filter = c.dataset.f; render(); });
     });
+    Array.prototype.forEach.call(root().querySelectorAll('.fx-mkt'), function (c) {
+      c.addEventListener('click', function () { S.market = c.dataset.m; render(); });
+    });
     bindGroupEvents();
   }
 
@@ -109,6 +127,7 @@
   }
 
   function lineMatchesFilter(l) {
+    if (S.market !== 'all' && (l.market || 'fr') !== S.market) return false;
     if (S.filter === 'all') return true;
     if (S.filter === 'rev') return l.type === 'rev';
     if (S.filter === 'rev_mym') return l.cat === 'rev_mym';
@@ -188,7 +207,7 @@
     return '<div style="background:#14141f;border:1px solid #23232e;border-left:3px solid ' + accent + ';border-radius:10px;padding:12px 14px">' +
       '<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:200px">' +
-      '<div style="font-weight:700;font-size:13.5px;color:#fff">' + esc(l.label) + '</div>' +
+      '<div style="font-weight:700;font-size:13.5px;color:#fff">' + ((l.market || 'fr') === 'us' ? '🇺🇸 ' : '🇫🇷 ') + esc(l.label) + '</div>' +
       '<div style="font-size:11.5px;color:#77778a;margin-top:3px">' + origin + ' <span style="color:#55556a">/ mois</span></div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + badges + '</div>' +
       phasesHtml +
@@ -317,6 +336,7 @@
       fld('🗂 Catégorie', '<select id="fxm-cat" style="' + INP + '">' + catOpts + '</select>') +
       fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
+      fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + ((line.market || 'fr') !== 'us' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market === 'us' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '</div>' +
       '<div id="fxm-fixed-wrap" style="display:' + (line.form === 'pct' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
       fld('💰 Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
@@ -368,6 +388,7 @@
         type: document.getElementById('fxm-type').value,
         cat: document.getElementById('fxm-cat').value,
         form: document.getElementById('fxm-form').value,
+        market: document.getElementById('fxm-market').value,
         amount: parseFloat(document.getElementById('fxm-amount').value) || 0,
         currency: document.getElementById('fxm-currency').value,
         pct: parseFloat(document.getElementById('fxm-pct').value) || 0,

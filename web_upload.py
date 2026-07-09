@@ -3658,11 +3658,7 @@ window.upClearPrefill = function(utab){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
       Facture
     </button>
-    <button class="item" id="tab-depenses" onclick="showTab('finances','depenses','Dépenses','Suivi des couts')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      Dépenses
-    </button>
-    <button class="item" id="tab-bilan" onclick="showTab('finances','bilan','Bilan','Synthese de ton activite')">
+    <button class="item" id="tab-bilan" onclick="showTab('finances','bilan','Bilan','Évolution mois par mois (données Facture)')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
       Bilan
     </button>
@@ -24364,6 +24360,105 @@ setTimeout(()=>loadCalendar(), 300);
 """)
 
 def _render_bilan_html() -> str:
+    """Bilan multi-mois alimenté par la FACTURE (data/facture.json) : évolution
+    mois par mois (revenus / dépenses / net / part lead) + split marché FR/US.
+    Servi en lazy (?lazy=bilan) -> recalculé à chaque ouverture de l'onglet."""
+    try:
+        import facture_web
+        b = facture_web.compute_bilan()
+    except Exception as e:
+        return f"<p style='color:#f99'>Bilan indisponible : {e}</p>"
+    rows = b["rows"]
+    if not rows:
+        return ("<div class='box' style='text-align:center;padding:60px 24px;color:#888'>"
+                "Aucune donnée pour l'instant.<br><br>Ajoute des lignes dans "
+                "<b style='color:#a78bfa'>Finances → Facture</b> : le bilan se construit tout seul, mois par mois.</div>")
+
+    MO = ["", "Janv", "Fév", "Mars", "Avril", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"]
+
+    def _ml(m):
+        return f"{MO[int(m[5:7])]} {m[:4]}"
+
+    def _usd(v, sign=False):
+        s = "+" if (sign and v > 0) else ("−" if (sign and v < 0) else "")
+        return f"{s}${abs(v):,.0f}"
+
+    t = b["totals"]
+    n_mois = len(rows)
+
+    def _kpi(label, val, color, sub, grad):
+        return (f"<div style='background:#12121a;border:1px solid #23232e;border-radius:14px;padding:16px 18px;position:relative;overflow:hidden'>"
+                f"<div style='position:absolute;top:0;left:0;right:0;height:2.5px;background:{grad}'></div>"
+                f"<div style='font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px'>{label}</div>"
+                f"<div style='font-size:27px;font-weight:800;color:{color};letter-spacing:-.02em'>{val}</div>"
+                f"<div style='font-size:11.5px;color:#77778a;margin-top:6px'>{sub}</div></div>")
+
+    kpis = (
+        _kpi("📨 Revenus cumulés", _usd(t["rev"]), "#22c55e",
+             f"🇫🇷 {_usd(t['fr_rev'])} &nbsp;·&nbsp; 🇺🇸 {_usd(t['us_rev'])}", "linear-gradient(90deg,#22c55e,#3b82f6)")
+        + _kpi("📩 Dépenses cumulées", _usd(t["exp"]), "#f87171",
+               f"sur {n_mois} mois", "linear-gradient(90deg,#ef4444,#f59e0b)")
+        + _kpi("💰 Net cumulé", _usd(t["net"]), "#22c55e" if t["net"] >= 0 else "#f87171",
+               f"🇫🇷 {_usd(t['fr_net'])} &nbsp;·&nbsp; 🇺🇸 {_usd(t['us_net'])}", "linear-gradient(90deg,#22c55e,#a855f7)")
+        + _kpi("👑 Part lead cumulée", _usd(t["lead"]), "#facc15",
+               "ta part sur la période", "linear-gradient(90deg,#facc15,#f97316)")
+    )
+
+    # ---- barres : net par mois (divs, hauteur relative au max) ----
+    max_abs = max(abs(r["net"]) for r in rows) or 1.0
+    bars = ""
+    for r in rows[-12:]:
+        h = max(6, int(abs(r["net"]) / max_abs * 100))
+        up = r["net"] >= 0
+        cur = " (en cours)" if r["month"] == b["cur_month"] else ""
+        bars += (
+            f"<div style='flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:52px'>"
+            f"<div style='font-size:10.5px;font-weight:800;color:{'#4ade80' if up else '#f87171'}'>{_usd(r['net'], sign=True)}</div>"
+            f"<div style='width:100%;max-width:46px;height:120px;display:flex;align-items:flex-end'>"
+            f"<div title='{_ml(r['month'])}{cur} : net {_usd(r['net'], sign=True)}' style='width:100%;height:{h}%;border-radius:7px 7px 3px 3px;"
+            f"background:{'linear-gradient(180deg,#22c55e,#15803d)' if up else 'linear-gradient(180deg,#ef4444,#991b1b)'}'></div></div>"
+            f"<div style='font-size:10px;color:#8a8a98;font-weight:700;white-space:nowrap'>{_ml(r['month'])}</div></div>"
+        )
+
+    # ---- tableau (mois le plus récent en premier) ----
+    trs = ""
+    for r in reversed(rows):
+        cur = " <span style='color:#818cf8;font-size:9.5px;font-weight:800'>EN COURS</span>" if r["month"] == b["cur_month"] else ""
+        nc = "#4ade80" if r["net"] >= 0 else "#f87171"
+        trs += (
+            f"<tr style='border-top:1px solid #1d1d28'>"
+            f"<td style='padding:11px 12px;font-weight:800;color:#fff;white-space:nowrap'>{_ml(r['month'])}{cur}</td>"
+            f"<td style='padding:11px 12px;color:#4ade80;font-weight:700;white-space:nowrap'>{_usd(r['rev'])}</td>"
+            f"<td style='padding:11px 12px;color:#9a9aa8;font-size:12px;white-space:nowrap'>🇫🇷 {_usd(r['fr']['rev'])} · 🇺🇸 {_usd(r['us']['rev'])}</td>"
+            f"<td style='padding:11px 12px;color:#f87171;font-weight:700;white-space:nowrap'>{_usd(r['exp'])}</td>"
+            f"<td style='padding:11px 12px;color:{nc};font-weight:800;white-space:nowrap'>{_usd(r['net'], sign=True)}</td>"
+            f"<td style='padding:11px 12px;color:#facc15;font-weight:800;white-space:nowrap'>{_usd(r['lead'])}</td>"
+            f"</tr>"
+        )
+
+    return (
+        "<div style='max-width:1500px;margin:0 auto;width:100%'>"
+        "<div style='display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px'>"
+        "<h2 style='margin:0;font-size:26px'>📊 Bilan</h2>"
+        "<div style='flex:1'></div>"
+        "<button onclick='location.reload()' style='padding:9px 15px;background:#15151d;border:1px solid #2a2a35;color:#ddd;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;margin:0'>↻ Actualiser</button>"
+        "</div>"
+        f"<p style='margin:0 0 16px;color:#888;font-size:13px'>Synthèse mois par mois, construite automatiquement depuis la <b style='color:#a78bfa'>Facture</b> ({n_mois} mois).</p>"
+        f"<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px'>{kpis}</div>"
+        "<div style='background:#10101a;border:1px solid #22222e;border-radius:14px;padding:18px;margin-bottom:16px'>"
+        "<div style='font-size:11px;color:#8a8a98;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px'>Bénéfice net par mois</div>"
+        f"<div style='display:flex;gap:10px;align-items:flex-end;overflow-x:auto;padding-bottom:4px'>{bars}</div></div>"
+        "<div style='background:#10101a;border:1px solid #22222e;border-radius:14px;overflow:hidden'>"
+        "<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:13px'>"
+        "<thead><tr style='color:#8a8a98;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em'>"
+        "<th style='padding:12px;text-align:left'>Mois</th><th style='padding:12px;text-align:left'>Revenus</th>"
+        "<th style='padding:12px;text-align:left'>Par marché</th><th style='padding:12px;text-align:left'>Dépenses</th>"
+        "<th style='padding:12px;text-align:left'>Net</th><th style='padding:12px;text-align:left'>Part lead</th></tr></thead>"
+        f"<tbody>{trs}</tbody></table></div></div></div>"
+    )
+
+
+def _render_bilan_business_OLD() -> str:
     try:
         from business import expense_stats, sfs_stats, list_expenses, revenue_stats, va_payment_stats, list_revenues, list_expenses
     except Exception as e:
@@ -26026,7 +26121,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
         .replace("{videocrea_html}", _g("videocrea", _render_videocrea_html))
-        .replace("{bilan_html}", _g("bilan", _render_bilan_html))
+        .replace("{bilan_html}", _lazy("bilan"))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
@@ -26483,6 +26578,8 @@ def create_app():
             _prods = {
                 "gms": _render_gms_html,
                 "linkscale": _render_linkscale_html,
+                # bilan : recalculé à chaque ouverture (suit les modifs Facture)
+                "bilan": _render_bilan_html,
             }
             _prod = _prods.get(_name)
             if _prod is None:
