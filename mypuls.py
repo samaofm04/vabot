@@ -443,8 +443,10 @@ def fetch_invoices(use_cache: bool = True) -> Dict[str, Any]:
     s = _make_session()
     if s is None:
         return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    # Les factures sont sur un endpoint DÉDIÉ (/profil/invoices), pas dans /profil
+    # (chargé en AJAX). Confirmé via HAR 09/07 : table complète, non paginée.
     try:
-        r = s.get(f"{BASE_URL}/profil", timeout=TIMEOUT, allow_redirects=True)
+        r = s.get(f"{BASE_URL}/profil/invoices", timeout=TIMEOUT, allow_redirects=True)
     except Exception as e:
         return {"ok": False, "error": f"Erreur réseau : {e}"}
     if r.status_code != 200 or _detect_login_redirect(r.text):
