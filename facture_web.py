@@ -553,6 +553,35 @@ def _seed_chatters_mym_20260709():
         pass
 
 
+def _seed_frais_crm_20260709():
+    """One-shot (demande user du 09/07/2026) : ligne dépense auto « Frais CRM
+    MyPuls » = total des factures du CRM MyPuls du mois (onglet Factures &
+    Paiements), EUR->USD. Catégorie Autres."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_fraiscrm_20260709"):
+            return
+        month = _cur_month()
+        m = d["months"].setdefault(month, {"lines": []})
+        lines = m.setdefault("lines", [])
+        if not any((l.get("form") or "") == "mypuls_crm" for l in lines):
+            lines.append({
+                "id": uuid.uuid4().hex[:12],
+                "label": "Frais CRM MyPuls", "type": "exp", "cat": "other",
+                "form": "mypuls_crm", "market": "fr",
+                "currency": "USD", "freq": "monthly",
+                "start": "", "end": "", "link": "",
+                "notes": "auto : total des factures CRM MyPuls du mois (EUR→USD)",
+                "next_pay": "", "paid": False, "paid_at": "",
+                "amount": 0.0, "pct": 0.0, "pct_of": "rev_total",
+                "mypuls_model": "", "phases": [],
+            })
+        d["settings"]["seed_fraiscrm_20260709"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 def _seed_va_classique_20260709():
     """One-shot (demande user du 09/07/2026) : ligne dépense auto « VA classique »
     = clics éligibles du mois de tous les VAs Discord x 0.07$ (taux expert plat)."""
@@ -602,6 +631,7 @@ def register(app, is_auth):
     _seed_of_chatters_20260709()  # one-shot : compte 2 -> Revenue OF + chatteurs % liés aux 3
     _seed_chatters_mym_20260709()  # CORRECTIF : chatteurs % -> CA MyPuls (toutes sauf Amelia)
     _seed_va_classique_20260709()  # one-shot : ligne auto VA classique (clics x 0.07$)
+    _seed_frais_crm_20260709()  # one-shot : ligne auto Frais CRM MyPuls (factures du mois)
 
     @app.route("/facture/app.js")
     def facture_app_js():
