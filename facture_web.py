@@ -431,6 +431,34 @@ def _seed_pay35_20260709():
         pass
 
 
+def _seed_rev_compte2_20260709():
+    """One-shot (demande user du 09/07/2026) : revenus d'un COMPTE SÉPARÉ
+    (différent de MyM/MyPuls) pour Amelia/Julia/Lola + paye % liée à chacun.
+    Amelia 1629.82$ (paye 30%), Julia 164.48$ (paye 40%), Lola 2286.12$ (paye 35%)."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_revcpt2_20260709"):
+            return
+        month = _cur_month()
+        m = d["months"].setdefault(month, {"lines": []})
+        lines = m.setdefault("lines", [])
+        base = {"currency": "USD", "freq": "monthly", "start": "", "end": "", "link": "",
+                "next_pay": "", "paid": False, "paid_at": "", "mypuls_model": "", "phases": [],
+                "market": "fr"}
+        for name, amount, pct in (("Amelia", 1629.82, 30.0), ("Julia", 164.48, 40.0), ("Lola", 2286.12, 35.0)):
+            rid = uuid.uuid4().hex[:12]
+            lines.append(dict(base, id=rid, label=f"{name} (compte 2)", type="rev",
+                              cat="rev_other", form="fixed", amount=amount, pct=0.0,
+                              pct_of="rev_total", notes="compte séparé (pas MyM)"))
+            lines.append(dict(base, id=uuid.uuid4().hex[:12], label=f"Paye {name} compte 2 ({pct:.0f}%)",
+                              type="exp", cat="model", form="pct", amount=0.0, pct=pct,
+                              pct_of=f"line:{rid}", notes=f"créée automatiquement : {pct:.0f}% du compte 2"))
+        d["settings"]["seed_revcpt2_20260709"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
@@ -448,6 +476,7 @@ def register(app, is_auth):
     from flask import request, jsonify, send_file
 
     _seed_pay35_20260709()  # one-shot : payes 35% Lola/Emma/Alicia (voir docstring)
+    _seed_rev_compte2_20260709()  # one-shot : revenus compte séparé Amelia/Julia/Lola + payes %
 
     @app.route("/facture/app.js")
     def facture_app_js():
