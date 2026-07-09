@@ -385,6 +385,52 @@ def compute_bilan() -> dict:
     return {"rows": rows, "totals": tot, "cur_month": _cur_month()}
 
 
+def _seed_pay35_20260709():
+    """One-shot (demande user du 09/07/2026) : créer à sa place les payes 35%
+    liées au CA MyPuls de Lola, Emma et Alicia. Idempotent : saute si une paye %
+    liée à la ligne existe déjà ; flag posé quand les 3 modèles sont traités."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_pay35_20260709"):
+            return
+        month = _cur_month()
+        m = d["months"].setdefault(month, {"lines": []})
+        lines = m.setdefault("lines", [])
+        processed = 0
+        changed = False
+        for want in ("lola", "emma", "alicia"):
+            rev = next((l for l in lines
+                        if l.get("type") == "rev" and (l.get("form") or "") == "mypuls"
+                        and (want in (l.get("mypuls_model") or "").lower()
+                             or want in (l.get("label") or "").lower())), None)
+            if not rev or not rev.get("id"):
+                continue  # ligne CA pas (encore) là -> on retentera au prochain démarrage
+            processed += 1
+            ref = f"line:{rev['id']}"
+            if any(l.get("form") == "pct" and l.get("pct_of") == ref for l in lines):
+                continue  # une paye liée à ce CA existe déjà
+            lines.append({
+                "id": uuid.uuid4().hex[:12],
+                "label": f"Paye {(rev.get('label') or want).strip()} (35%)",
+                "type": "exp", "cat": "model", "form": "pct",
+                "market": rev.get("market") if rev.get("market") in MARKETS else MARKET_DEFAULT,
+                "currency": "USD", "freq": "monthly",
+                "start": "", "end": "", "link": "",
+                "notes": "créée automatiquement : 35% du CA MyPuls",
+                "next_pay": "", "paid": False, "paid_at": "",
+                "amount": 0.0, "pct": 35.0, "pct_of": ref,
+                "mypuls_model": "", "phases": [],
+            })
+            changed = True
+        if processed == 3:
+            d["settings"]["seed_pay35_20260709"] = True
+            changed = True
+        if changed:
+            _save(d)
+    except Exception:
+        pass
+
+
 # ---------- page (shell : tout le rendu est fait par facture_app.js) ----------
 def render_page() -> str:
     return (
@@ -400,6 +446,8 @@ def render_page() -> str:
 # ---------- routes ----------
 def register(app, is_auth):
     from flask import request, jsonify, send_file
+
+    _seed_pay35_20260709()  # one-shot : payes 35% Lola/Emma/Alicia (voir docstring)
 
     @app.route("/facture/app.js")
     def facture_app_js():
