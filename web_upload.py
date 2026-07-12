@@ -29966,9 +29966,12 @@ def create_app():
         #    C'est la même méthode que l'ENVOI : marche même quand l'URL CDN a expiré.
         #    On GARDE le fichier en cache -> le lecteur du modal le lit via /veille/reelvideo.
         proxy_url = ""
+        yt_reason = ""
         if not (res and res.get("ok")):
             try:
-                vb = veille_telegram.download_via_ytdlp(reel.get("url", ""))
+                yt_info = {}
+                vb = veille_telegram.download_via_ytdlp(reel.get("url", ""), info=yt_info)
+                yt_reason = yt_info.get("reason", "")
                 if vb:
                     cdir = DATA_DIR / "tg_tmp"
                     cdir.mkdir(parents=True, exist_ok=True)
@@ -29984,10 +29987,22 @@ def create_app():
                     cpath.write_bytes(vb)
                     res = tg_router.ocr_video_url(str(cpath), second=second, headers=None, full=full, end=end)
                     proxy_url = f"/veille/reelvideo?reel_id={rid}"
-            except Exception:
-                pass
+                    if not (res and res.get("ok")):
+                        yt_reason = "vidéo téléchargée mais OCR KO (" + str((res or {}).get("error", "?"))[:40] + ")"
+            except Exception as e:
+                yt_reason = f"exception: {str(e)[:60]}"
         if not (res and res.get("ok")):
-            return jsonify({"ok": False, "error": (res or {}).get("error") or "Vidéo illisible (lien Instagram expiré ?)"})
+            # message DIAGNOSTIC : dit exactement ce qui a échoué (URL, yt-dlp, file_id)
+            diag = []
+            diag.append("URL directe expirée" if vurl else "aucune URL stockée")
+            if yt_reason:
+                diag.append("yt-dlp → " + yt_reason)
+            else:
+                diag.append("yt-dlp n'a rien renvoyé")
+            if not (reel.get("tg_file_id") or "").strip():
+                diag.append("jamais envoyé (pas de file_id)")
+            return jsonify({"ok": False,
+                            "error": "Vidéo illisible — " + " · ".join(diag)})
         res["description"] = (veille.get_reel(rid) or {}).get("caption") or ""
         # lecteur du modal : URL fraîche si on l'a, sinon le proxy (vidéo yt-dlp en cache)
         res["video_url"] = proxy_url or vurl
