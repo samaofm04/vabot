@@ -675,10 +675,12 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 @keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(42px,-32px)}}
 @keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-38px,36px)}}
 @keyframes float3{0%,100%{transform:translate(0,0)}50%{transform:translate(-32px,-26px)}}
-/* Champ d'étoiles (points générés en JS) */
+/* Champ d'étoiles (points générés en JS) : scintillent ET dérivent lentement */
 #stars{position:fixed;inset:0;pointer-events:none;z-index:0}
-.star{position:absolute;background:#fff;border-radius:50%;animation:twinkle var(--d,4s) ease-in-out infinite}
+.star{position:absolute;background:#fff;border-radius:50%;will-change:transform,opacity;
+  animation:twinkle var(--d,4s) ease-in-out infinite, drift var(--dd,16s) ease-in-out infinite alternate}
 @keyframes twinkle{0%,100%{opacity:var(--o,.7)}50%{opacity:.08}}
+@keyframes drift{from{transform:translate(0,0)}to{transform:translate(var(--mx,12px),var(--my,-10px))}}
 /* Poussière d'étoiles qui tombe */
 #fall{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .fall{position:absolute;top:-12px;border-radius:50%;background:rgba(196,218,255,.95);
@@ -734,7 +736,7 @@ input::placeholder{color:#5a6183}
 #page-loader.show{display:flex}
 #page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
 @keyframes plSpin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.orb,body::before,.fall,.shoot{animation:none!important}.orbs{transition:none}}
+@media (prefers-reduced-motion:reduce){.orb,body::before,.fall,.shoot,.star{animation:none!important}.orbs{transition:none}}
 </style></head><body>
 <div id="page-loader"><div class="pl-ring"></div></div>
 <div class="orbs"><div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div></div>
@@ -805,7 +807,10 @@ input::placeholder{color:#5a6183}
   var html = '';
   for(var i = 0; i < 150; i++){
     var s = (Math.random()*1.8 + 0.6).toFixed(1);
-    html += '<span class="star" style="left:' + (Math.random()*100).toFixed(2) + '%;top:' + (Math.random()*100).toFixed(2) + '%;width:' + s + 'px;height:' + s + 'px;--o:' + (Math.random()*.55 + .35).toFixed(2) + ';--d:' + (Math.random()*4 + 2.5).toFixed(1) + 's;animation-delay:' + (Math.random()*5).toFixed(1) + 's"></span>';
+    var mx = (Math.random()*50 - 25).toFixed(0);   // dérive horizontale ±25px
+    var my = (Math.random()*50 - 25).toFixed(0);   // dérive verticale ±25px
+    var dd = (Math.random()*12 + 9).toFixed(1);    // durée de dérive 9-21s
+    html += '<span class="star" style="left:' + (Math.random()*100).toFixed(2) + '%;top:' + (Math.random()*100).toFixed(2) + '%;width:' + s + 'px;height:' + s + 'px;--o:' + (Math.random()*.55 + .35).toFixed(2) + ';--d:' + (Math.random()*4 + 2.5).toFixed(1) + 's;--mx:' + mx + 'px;--my:' + my + 'px;--dd:' + dd + 's;animation-delay:' + (Math.random()*5).toFixed(1) + 's,-' + (Math.random()*dd).toFixed(1) + 's"></span>';
   }
   c.innerHTML = html;
 })();
@@ -814,11 +819,11 @@ input::placeholder{color:#5a6183}
   var f = document.getElementById('fall');
   if(!f) return;
   var html = '';
-  for(var i = 0; i < 34; i++){
-    var sz = (Math.random()*2.2 + 1).toFixed(1);
-    var dur = (Math.random()*9 + 8).toFixed(1);
+  for(var i = 0; i < 60; i++){
+    var sz = (Math.random()*2.4 + 1.2).toFixed(1);
+    var dur = (Math.random()*8 + 7).toFixed(1);
     var dx = (Math.random()*80 - 30).toFixed(0);
-    html += '<span class="fall" style="left:' + (Math.random()*100).toFixed(2) + '%;width:' + sz + 'px;height:' + sz + 'px;--dx:' + dx + 'px;animation-duration:' + dur + 's;animation-delay:-' + (Math.random()*dur).toFixed(1) + 's;opacity:' + (Math.random()*.5 + .35).toFixed(2) + '"></span>';
+    html += '<span class="fall" style="left:' + (Math.random()*100).toFixed(2) + '%;width:' + sz + 'px;height:' + sz + 'px;--dx:' + dx + 'px;animation-duration:' + dur + 's;animation-delay:-' + (Math.random()*dur).toFixed(1) + 's;opacity:' + (Math.random()*.45 + .45).toFixed(2) + '"></span>';
   }
   f.innerHTML = html;
 })();
