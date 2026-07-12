@@ -29762,31 +29762,40 @@ def create_app():
         reel = veille.get_reel(rid) if rid else None
         if not reel:
             return jsonify({"ok": False, "error": "Reel introuvable"})
-        # bytes de la vidéo : file_id Telegram (rapide) sinon video_url (+ re-résolution si expiré)
-        vbytes = None
-        fid = (reel.get("tg_file_id") or "").strip()
-        if fid:
-            vbytes = tg_router.download_file_bytes(fid)
-        if not vbytes:
-            vurl = (reel.get("video_url") or "").strip()
-            if vurl:
-                vbytes = veille_telegram.download_video_bytes(vurl)
-            if not vbytes:  # lien IG expiré -> on re-résout une fois
-                try:
-                    data = veille_telegram.refresh_post_data(reel.get("url", ""), reel.get("owner", ""))
-                    vurl2 = (data.get("video_url") or "").strip()
-                    if vurl2:
-                        veille.update_reel(rid, video_url=vurl2)
-                        vbytes = veille_telegram.download_video_bytes(vurl2)
-                        if data.get("caption") and not (reel.get("caption") or "").strip():
-                            veille.update_reel(rid, caption=data["caption"])
-                except Exception:
-                    pass
-        if not vbytes:
-            return jsonify({"ok": False, "error": "Vidéo introuvable (lien Instagram expiré ?)"})
-        res = tg_router.ocr_video_bytes(vbytes, second=second)
-        # renvoie aussi la description IG connue (pour pré-remplir le champ description)
+        ig_headers = {
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"),
+            "Referer": "https://www.instagram.com/",
+        }
+        vurl = (reel.get("video_url") or "").strip()
+        res = None
+        # 1) RAPIDE : ffmpeg lit les frames DIRECTEMENT depuis l'URL (pas de download 50 Mo)
+        if vurl:
+            res = tg_router.ocr_video_url(vurl, second=second, headers=ig_headers)
+        # 2) URL KO/expirée -> on re-résout puis retente
+        if not (res and res.get("ok")):
+            try:
+                data = veille_telegram.refresh_post_data(reel.get("url", ""), reel.get("owner", ""))
+                vurl2 = (data.get("video_url") or "").strip()
+                if vurl2:
+                    veille.update_reel(rid, video_url=vurl2)
+                    if data.get("caption") and not (reel.get("caption") or "").strip():
+                        veille.update_reel(rid, caption=data["caption"])
+                    res = tg_router.ocr_video_url(vurl2, second=second, headers=ig_headers)
+                    vurl = vurl2
+            except Exception:
+                pass
+        # 3) dernier recours : le file_id Telegram (download, mais fiable)
+        if not (res and res.get("ok")):
+            fid = (reel.get("tg_file_id") or "").strip()
+            if fid:
+                vb = tg_router.download_file_bytes(fid)
+                if vb:
+                    res = tg_router.ocr_video_bytes(vb, second=second)
+        if not (res and res.get("ok")):
+            return jsonify({"ok": False, "error": (res or {}).get("error") or "Vidéo illisible (lien Instagram expiré ?)"})
         res["description"] = (veille.get_reel(rid) or {}).get("caption") or ""
+        res["video_url"] = vurl  # pour le lecteur vidéo dans le modal
         return jsonify(res)
 
     @app.route("/veille/send", methods=["POST"])

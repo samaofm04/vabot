@@ -210,11 +210,12 @@ def _veille_caption(v: dict) -> str:
 
 # ── Transcription IA du texte incrusté sur la vidéo (3 premières secondes) ──
 _OCR_PROMPT = (
-    "Ces images sont des frames des 3 premières secondes d'un reel Instagram. "
+    "Ces images sont des frames des premières secondes d'un reel Instagram. "
     "Retranscris EXACTEMENT le texte incrusté sur la vidéo (la caption ajoutée "
-    "par l'auteur), avec ses emojis si lisibles. Ignore les éléments d'interface, "
-    "watermarks, usernames et sous-titres automatiques. Réponds UNIQUEMENT avec "
-    "le texte retranscrit, sans guillemets ni commentaire. "
+    "par l'auteur), AVEC ses emojis. Conserve les RETOURS À LA LIGNE exactement "
+    "comme affichés (une ligne du texte = une ligne dans ta réponse). Ignore les "
+    "éléments d'interface, watermarks, usernames et sous-titres automatiques. "
+    "Réponds UNIQUEMENT avec le texte retranscrit, sans guillemets ni commentaire. "
     "S'il n'y a AUCUN texte incrusté, réponds exactement : AUCUN"
 )
 
@@ -492,6 +493,60 @@ def ocr_video_bytes(video_bytes: bytes, second=None) -> dict:
             vid.unlink()
         except Exception:
             pass
+
+
+def _frames_from_url(video_url, slug, timestamps=None, headers=None):
+    """Extrait des frames DIRECTEMENT depuis une URL vidéo via ffmpeg (seek +
+    Range HTTP) — lit seulement quelques Ko, PAS tout le fichier. `headers` =
+    dict (User-Agent/Referer pour le CDN Instagram)."""
+    tmpdir = DATA_DIR / "tg_tmp"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    hdr = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
+    frames = []
+    for ts in (timestamps or ("0.5", "1.2", "2.0", "2.8")):
+        out = tmpdir / f"fu_{slug}_{str(ts).replace('.', '_')}.jpg"
+        cmd = ["ffmpeg", "-y"]
+        if hdr:
+            cmd += ["-headers", hdr]
+        cmd += ["-ss", str(ts), "-i", video_url, "-frames:v", "1",
+                "-vf", "scale=720:-2", "-q:v", "3", str(out)]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=40)
+            if out.exists() and out.stat().st_size > 1000:
+                frames.append(out)
+        except Exception:
+            pass
+    return frames
+
+
+def ocr_video_url(video_url, second=None, headers=None) -> dict:
+    """OCR pour le SITE en lisant les frames DIRECTEMENT depuis l'URL (rapide,
+    pas de download complet, pas de limite 50 Mo). Retourne
+    {ok, text, engine, frame(b64 JPEG de l'image analysée)}."""
+    if not _ocr_ready():
+        return {"ok": False, "text": "", "error": "Aucun OCR configuré"}
+    if not video_url:
+        return {"ok": False, "text": "", "error": "url vide"}
+    slug = f"url_{int(time.time() * 1000) % 10**9}"
+    ts = None
+    if second is not None and str(second) != "":
+        try:
+            ts = [f"{max(0.0, float(second)):.1f}"]
+        except Exception:
+            ts = None
+    frames = _frames_from_url(video_url, slug, ts, headers)
+    if not frames:
+        return {"ok": False, "text": "", "error": "frames non extraites (URL expirée ?)"}
+    try:
+        text = _run_ocr(frames, "site")
+        fb = ""
+        try:
+            fb = base64.b64encode(Path(frames[0]).read_bytes()).decode()
+        except Exception:
+            pass
+        return {"ok": True, "text": text, "engine": _OCR_ENGINE_USED or "tesseract", "frame": fb}
+    finally:
+        _cleanup_frames(frames, None)
 
 
 def _cleanup_frames(frames, vid):

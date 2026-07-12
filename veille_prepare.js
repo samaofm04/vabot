@@ -45,7 +45,11 @@
       '<button id="vprep-ocr-sec" style="padding:8px 12px;background:#1d1d28;border:1px solid #2c2c3d;color:#ddd;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Analyser à cette seconde</button>' +
       '<span id="vprep-ocr-status" style="color:#77778a;font-size:11.5px"></span>' +
       '</div>' +
-      '<textarea id="vprep-cap" placeholder="Le texte lu sur la vidéo apparaîtra ici — corrige-le si besoin." style="' + INP + ';min-height:60px;resize:vertical;margin-bottom:16px"></textarea>' +
+      '<div id="vprep-media" style="display:none;gap:10px;margin-bottom:10px">' +
+      '<div id="vprep-video-wrap" style="width:47%"></div>' +
+      '<div id="vprep-frame-wrap" style="width:47%"></div>' +
+      '</div>' +
+      '<textarea id="vprep-cap" placeholder="Le texte lu sur la vidéo apparaîtra ici — corrige-le si besoin (les retours à la ligne sont gardés)." style="' + INP + ';min-height:66px;resize:vertical;margin-bottom:16px"></textarea>' +
 
       // --- Description ---
       '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">2 · Description (postée sous la vidéo)</div>' +
@@ -107,9 +111,24 @@
           st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
           st.style.color = '#4ade80';
         } else {
-          st.textContent = 'ℹ️ aucun texte net détecté — tape-le à la main ou change de seconde';
+          st.textContent = 'ℹ️ aucun texte net détecté — regarde la vidéo, note la seconde et réanalyse';
           st.style.color = '#facc15';
         }
+        // Lecteur vidéo (posé une seule fois) : sert à trouver la bonne seconde
+        var vw = el('vprep-video-wrap');
+        if (vw && j.video_url && !vw.dataset.set) {
+          vw.innerHTML = '<video src="' + esc(j.video_url) + '" controls preload="metadata" playsinline style="width:100%;max-height:230px;border-radius:8px;background:#000"></video>' +
+            '<div style="font-size:10px;color:#77778a;margin-top:3px">▶️ regarde où le texte apparaît, note la seconde, tape-la ci-dessus puis « Analyser à cette seconde »</div>';
+          vw.dataset.set = '1';
+        }
+        // Image réellement analysée (pour vérifier qu'on a la bonne frame)
+        var fw = el('vprep-frame-wrap');
+        if (fw && j.frame) {
+          fw.innerHTML = '<img src="data:image/jpeg;base64,' + j.frame + '" style="width:100%;border-radius:8px;border:1px solid #2c2c3d">' +
+            '<div style="font-size:10px;color:#77778a;margin-top:3px;text-align:center">🖼️ image analysée' + ((second !== '' && second != null) ? (' (à ' + second + 's)') : '') + '</div>';
+        }
+        var mw = el('vprep-media');
+        if (mw && ((vw && vw.innerHTML) || (fw && fw.innerHTML))) mw.style.display = 'flex';
         if (j.description && !el('vprep-desc').value.trim()) el('vprep-desc').value = j.description;
         preview();
       })
