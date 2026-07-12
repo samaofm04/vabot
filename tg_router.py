@@ -345,10 +345,31 @@ def _run_ocr(frame_paths, tag: str = "") -> str:
     return _ocr_tesseract(frame_paths, tag)
 
 
-def _extract_frames(file_id, tag: str = "", slug: str = ""):
+def _frames_from_video_file(vid, slug, timestamps=None):
+    """Extrait des frames JPEG d'un fichier vidéo LOCAL déjà téléchargé.
+    Retourne list[Path]. timestamps = liste de secondes (str), défaut 4 instants."""
+    tmpdir = Path(vid).parent
+    frames = []
+    for ts in (timestamps or ("0.4", "1.2", "2.0", "2.8")):
+        out = tmpdir / f"fr_{slug}_{str(ts).replace('.', '_')}.jpg"
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-ss", str(ts), "-i", str(vid), "-frames:v", "1",
+                 "-vf", "scale=640:-2", "-q:v", "3", str(out)],
+                capture_output=True, timeout=30)
+            if out.exists() and out.stat().st_size > 1000:
+                frames.append(out)
+        except Exception:
+            pass
+    if not frames:
+        _trace("ocr: extraction frames échouée (ffmpeg ?)")
+    return frames
+
+
+def _extract_frames(file_id, tag: str = "", slug: str = "", timestamps=None):
     """Télécharge la vidéo (file_id Telegram) et extrait des frames JPEG sur
-    disque (4 instants des ~3 premières s). Retourne (list[Path], Path video)
-    — nettoyer via _cleanup_frames(). ([], None) si échec."""
+    disque. Retourne (list[Path], Path video) — nettoyer via _cleanup_frames().
+    ([], None) si échec."""
     token = _token()
     tmpdir = DATA_DIR / "tg_tmp"
     slug = slug or str(abs(hash(file_id)) % 10**8)
@@ -366,24 +387,63 @@ def _extract_frames(file_id, tag: str = "", slug: str = ""):
             return [], None
         tmpdir.mkdir(parents=True, exist_ok=True)
         vid.write_bytes(r.content)
-        frames = []
-        for ts in ("0.4", "1.2", "2.0", "2.8"):
-            out = tmpdir / f"fr_{slug}_{ts.replace('.', '_')}.jpg"
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
-                     "-vf", "scale=640:-2", "-q:v", "3", str(out)],
-                    capture_output=True, timeout=30)
-                if out.exists() and out.stat().st_size > 1000:
-                    frames.append(out)
-            except Exception:
-                pass
-        if not frames:
-            _trace("ocr: extraction frames échouée (ffmpeg ?)")
+        frames = _frames_from_video_file(vid, slug, timestamps)
         return frames, vid
     except Exception as e:
         _trace(f"ocr extract: {e}")
         return [], vid
+
+
+def download_file_bytes(file_id: str):
+    """Récupère les bytes d'un fichier Telegram (file_id) via getFile. None si KO."""
+    if not file_id:
+        return None
+    try:
+        gf = _api("getFile", {"file_id": file_id})
+        if not gf.get("ok"):
+            return None
+        fp = (gf.get("result") or {}).get("file_path")
+        if not fp:
+            return None
+        r = requests.get(f"{TG}/file/bot{_token()}/{fp}", timeout=90)
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def ocr_video_bytes(video_bytes: bytes, second=None) -> dict:
+    """OCR pour le SITE : lit le texte incrusté d'une vidéo fournie en BYTES
+    (téléchargée par le site depuis video_url/Telegram), à un instant précis
+    (second) ou sur 4 instants. Retourne {ok, text, engine}."""
+    if not _ocr_ready():
+        return {"ok": False, "text": "", "error": "Aucun OCR (installe Tesseract)"}
+    if not video_bytes:
+        return {"ok": False, "text": "", "error": "vidéo vide"}
+    tmpdir = DATA_DIR / "tg_tmp"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    slug = f"site_{int(time.time() * 1000) % 10**9}"
+    vid = tmpdir / f"ocr_{slug}.mp4"
+    try:
+        vid.write_bytes(video_bytes)
+        ts = None
+        if second is not None and str(second) != "":
+            try:
+                ts = [f"{max(0.0, float(second)):.1f}"]
+            except Exception:
+                ts = None
+        frames = _frames_from_video_file(vid, slug, ts)
+        try:
+            text = _run_ocr(frames, "site") if frames else ""
+            return {"ok": True, "text": text, "engine": ("ia" if _env_api_key() else "tesseract")}
+        finally:
+            _cleanup_frames(frames, None)
+    except Exception as e:
+        return {"ok": False, "text": "", "error": str(e)}
+    finally:
+        try:
+            vid.unlink()
+        except Exception:
+            pass
 
 
 def _cleanup_frames(frames, vid):
@@ -455,7 +515,8 @@ def bound_models() -> dict:
     return out
 
 
-def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str = "") -> dict:
+def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str = "",
+                         overlay=None) -> dict:
     """Envoie une veille (vidéo via file_id Telegram) dans le sujet IG CONTENT
     de la modèle + l'enregistre : elle apparaît aussi « en attente » dans le
     sujet de la modèle du groupe destination. Appelé par le SITE (bouton veille).
@@ -485,14 +546,18 @@ def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str 
     v = {"file_id": tg_file_id, "caption": (link or "").strip(),
          "desc": (desc or "").strip() or None, "text_msg_id": text_msg_id,
          "dest_msg_id": None, "model": model, "ts": time.time(), "routed": False}
+    # overlay PRÉ-VALIDÉ sur le site -> on l'utilise direct (pas de re-OCR côté TG)
+    if overlay is not None:
+        v["overlay"] = (overlay or "").strip()
     _VEILLES[(bm["chat_id"], vid_msg)] = v
     _LAST_VEILLE[(bm["chat_id"], bm.get("thread"))] = (time.time(), vid_msg)
     if cfg.get("dest_chat_id"):
         _post_pending(cfg, v, model)
     _cache_save()
     _trace(f"veille envoyée depuis le SITE -> {model}")
-    # Lecture IA du texte incrusté en arrière-plan
-    _transcribe_veille_async((bm["chat_id"], vid_msg))
+    # Lecture du texte incrusté en arrière-plan SEULEMENT si pas pré-validé
+    if overlay is None:
+        _transcribe_veille_async((bm["chat_id"], vid_msg))
     return {"ok": True}
 
 

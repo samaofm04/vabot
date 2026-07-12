@@ -4761,6 +4761,7 @@ body.light .lb-btn-secondary:hover{background:#f3f4f6;color:#111}
   </div>
 </div>
 
+<script src="/veille/prepare.js" defer></script>
 </div></body></html>
 """
 
@@ -19161,6 +19162,9 @@ def _render_veille_feed_html() -> str:
       </div>
     </div>
     <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:5" onclick="event.stopPropagation()">
+      <button onclick='veillePrepare("{rid}")' title="🎯 Préparer la veille : lire le texte incrusté, valider la caption + la description avant d'envoyer" style="width:30px;height:30px;background:rgba(37,99,235,.62);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </button>
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
@@ -29685,6 +29689,59 @@ def create_app():
         """
         return (reel.get("url") or "").strip()
 
+    @app.route("/veille/prepare.js")
+    def veille_prepare_js():
+        if not is_auth():
+            return "", 401
+        from flask import send_file
+        p = BOT_DIR / "veille_prepare.js"
+        if not p.exists():
+            return "// veille_prepare.js manquant", 404
+        return send_file(str(p), mimetype="text/javascript", conditional=True)
+
+    @app.route("/veille/analyze", methods=["POST"])
+    def veille_analyze():
+        """OCR le texte incrusté d'un reel AVANT l'envoi (pour préparer/valider la
+        caption sur le site). Param optionnel `second` = instant précis à lire."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille, veille_telegram, tg_router
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        second = request.form.get("second")
+        reel = veille.get_reel(rid) if rid else None
+        if not reel:
+            return jsonify({"ok": False, "error": "Reel introuvable"})
+        # bytes de la vidéo : file_id Telegram (rapide) sinon video_url (+ re-résolution si expiré)
+        vbytes = None
+        fid = (reel.get("tg_file_id") or "").strip()
+        if fid:
+            vbytes = tg_router.download_file_bytes(fid)
+        if not vbytes:
+            vurl = (reel.get("video_url") or "").strip()
+            if vurl:
+                vbytes = veille_telegram.download_video_bytes(vurl)
+            if not vbytes:  # lien IG expiré -> on re-résout une fois
+                try:
+                    data = veille_telegram.refresh_post_data(reel.get("url", ""), reel.get("owner", ""))
+                    vurl2 = (data.get("video_url") or "").strip()
+                    if vurl2:
+                        veille.update_reel(rid, video_url=vurl2)
+                        vbytes = veille_telegram.download_video_bytes(vurl2)
+                        if data.get("caption") and not (reel.get("caption") or "").strip():
+                            veille.update_reel(rid, caption=data["caption"])
+                except Exception:
+                    pass
+        if not vbytes:
+            return jsonify({"ok": False, "error": "Vidéo introuvable (lien Instagram expiré ?)"})
+        res = tg_router.ocr_video_bytes(vbytes, second=second)
+        # renvoie aussi la description IG connue (pour pré-remplir le champ description)
+        res["description"] = (veille.get_reel(rid) or {}).get("caption") or ""
+        return jsonify(res)
+
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
         if not is_auth():
@@ -29757,8 +29814,12 @@ def create_app():
                     try:
                         import tg_router
                         desc_final = (res.get("description") or description or "").strip()
+                        # overlay pré-validé sur le site (caption incrustée lue via
+                        # « Préparer la veille »). None = pas fourni -> OCR côté TG.
+                        overlay_val = request.form.get("overlay")
                         for m in to_models:
-                            r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final)
+                            r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final,
+                                                                overlay=overlay_val)
                             if r2.get("ok"):
                                 sent_m.append(m)
                             else:
