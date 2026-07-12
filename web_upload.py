@@ -19119,11 +19119,17 @@ def _render_veille_feed_html() -> str:
             avatar_v = ""
             if owner_pic:
                 avatar_v = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
-            # Ribbon sent
+            # Ribbon sent / prêt (mutuellement exclusifs : un reel envoyé n'est
+            # plus « à préparer »). PRÊT = brouillon caption+desc enregistré.
+            prepared = bool(r.get("prepared")) and not sent
             ribbon = ""
             if sent:
                 ribbon = ("<div style='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'>✓ ENVOYÉ</div>")
+            elif prepared:
+                ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);"
+                          "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
+                          "box-shadow:0 2px 10px rgba(59,130,246,.5)'>✓ PRÊT</div>")
             # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
             # pouvoir multi-selectionner et RENVOYER en lot.
             cb_html = (
@@ -19144,7 +19150,7 @@ def _render_veille_feed_html() -> str:
 
             # Card avec MEME structure que Trends (reel-card class) pour reutiliser tout le JS
             section_html += f"""
-<div class="reel-card veille-card cloud-card" data-rid="{rid}" data-day="{day}" data-sent="{1 if sent else 0}"
+<div class="reel-card veille-card cloud-card" data-rid="{rid}" data-day="{day}" data-sent="{1 if sent else 0}" data-prepared="{1 if prepared else 0}"
      data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}"
      data-caption="{caption}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}"
      style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
@@ -29760,9 +29766,49 @@ def create_app():
                 return jsonify({"ok": False, "error": "Reel introuvable"})
             return jsonify({"ok": True,
                             "video_url": reel.get("video_url") or "",
-                            "caption": reel.get("caption") or ""})
+                            "caption": reel.get("caption") or "",
+                            # brouillon « prêt » enregistré (pré-remplit le modal)
+                            "prepared": bool(reel.get("prepared")),
+                            "prep_overlay": reel.get("prep_overlay") or "",
+                            "prep_desc": reel.get("prep_desc") or "",
+                            "prep_models": [m for m in (reel.get("prep_models") or "").split(",") if m]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/veille/prepare_save", methods=["POST"])
+    def veille_prepare_save():
+        """Enregistre le brouillon « prêt » (caption incrustée + description +
+        modèles) SANS envoyer. La carte passe « ✓ PRÊT »."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        if not rid or not veille.get_reel(rid):
+            return jsonify({"ok": False, "error": "Reel introuvable"})
+        overlay = (request.form.get("overlay") or "").strip()
+        desc = (request.form.get("caption") or "").strip()
+        models = ",".join(m.strip().lower() for m in (request.form.get("to_models") or "").split(",") if m.strip())
+        veille.set_prepared(rid, overlay=overlay, desc=desc, models=models)
+        return jsonify({"ok": True})
+
+    @app.route("/veille/prepare_clear", methods=["POST"])
+    def veille_prepare_clear():
+        """Retire le brouillon « prêt » d'un reel."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        if rid:
+            veille.clear_prepared(rid)
+        return jsonify({"ok": True})
 
     @app.route("/veille/analyze", methods=["POST"])
     def veille_analyze():
@@ -29864,6 +29910,11 @@ def create_app():
         )
         if res.get("ok"):
             veille.mark_sent(rid)
+            # le reel devient « ENVOYÉ » -> plus de brouillon « prêt » en attente
+            try:
+                veille.clear_prepared(rid)
+            except Exception:
+                pass
             _upd = {}
             # file_id Telegram -> renvoi INSTANTANE la prochaine fois
             if res.get("tg_file_id"):

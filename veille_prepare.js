@@ -98,6 +98,7 @@
       // ── Footer ──
       '<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;padding:14px 20px;border-top:1px solid #1d2230;flex-shrink:0;background:#0c0e15">' +
       '<button id="vprep-cancel" style="' + BTN_GHOST + ';padding:10px 18px">Annuler</button>' +
+      '<button id="vprep-ready" class="vp-abtn" title="Enregistrer la caption + la description sans envoyer — la carte passe « PRÊT »" style="padding:10px 18px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(59,130,246,.22)">💾 Marquer prêt</button>' +
       '<button id="vprep-send" class="vp-abtn" style="padding:10px 24px;background:linear-gradient(135deg,#22c55e,#15803d);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(34,197,94,.25)">📤 Envoyer la veille</button>' +
       '</div></div>';
     ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
@@ -111,6 +112,7 @@
     el('vprep-cap').addEventListener('input', preview);
     el('vprep-desc').addEventListener('input', preview);
     el('vprep-send').addEventListener('click', send);
+    el('vprep-ready').addEventListener('click', savePrep);
     el('vprep-upto').addEventListener('click', function () {
       var pl = el('vprep-player');
       var ct = (pl && pl.currentTime) || 0;
@@ -119,10 +121,10 @@
       analyze('', true, ct.toFixed(2));
     });
 
+    S.prepModels = [];
     loadModels();
     preview();
-    loadPlayer();     // lecteur IMMÉDIAT (video_url connue du reel)
-    analyze('');      // OCR auto au démarrage
+    loadInfo();       // lecteur + brouillon éventuel, puis décide l'OCR auto
   }
 
   /* ── Lecteur vidéo (immédiat) + compteur 1/100s ── */
@@ -149,13 +151,70 @@
     S.raf = requestAnimationFrame(tick);
   }
 
-  function loadPlayer() {
+  function loadInfo() {
     fetch('/veille/reelinfo?reel_id=' + encodeURIComponent(S.rid))
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j.ok && j.video_url) setPlayer(j.video_url);
-        if (j.ok && j.caption && !el('vprep-desc').value.trim()) { el('vprep-desc').value = j.caption; preview(); }
-      }).catch(function () {});
+        if (!j.ok) { analyze(''); return; }
+        if (j.video_url) setPlayer(j.video_url);
+        var draft = j.prepared && ((j.prep_overlay || '').trim() || (j.prep_desc || '').trim() || (j.prep_models || []).length);
+        if (draft) {
+          // brouillon « PRÊT » : on recharge tel quel — PAS d'OCR auto, sinon on
+          // écraserait la caption déjà validée.
+          if ((j.prep_overlay || '').trim()) el('vprep-cap').value = j.prep_overlay;
+          if ((j.prep_desc || '').trim()) el('vprep-desc').value = j.prep_desc;
+          else if ((j.caption || '').trim() && !el('vprep-desc').value.trim()) el('vprep-desc').value = j.caption;
+          S.prepModels = j.prep_models || [];
+          applyPrepModels();
+          var st = el('vprep-ocr-status');
+          if (st) { st.innerHTML = '💾 brouillon « prêt » chargé — modifie si besoin, puis envoie'; st.style.color = '#8b9dff'; }
+          preview();
+        } else {
+          if ((j.caption || '').trim() && !el('vprep-desc').value.trim()) { el('vprep-desc').value = j.caption; preview(); }
+          analyze('');   // OCR auto uniquement s'il n'y a pas de brouillon
+        }
+      }).catch(function () { analyze(''); });
+  }
+
+  /* ── Marquer « prêt » : enregistre le brouillon SANS envoyer ── */
+  function applyPrepModels() {
+    var box = el('vprep-models'); if (!box) return;
+    (S.prepModels || []).forEach(function (m) {
+      S.selected[m] = true;
+      var c = box.querySelector('.vprep-chip[data-m="' + m + '"]');
+      if (c) { c.style.borderColor = '#22c55e'; c.style.background = 'rgba(34,197,94,.14)'; c.style.color = '#fff'; }
+    });
+  }
+  function markCardReady(rid) {
+    var card = document.querySelector('.veille-card[data-rid="' + rid + '"]');
+    if (!card || card.getAttribute('data-sent') === '1') return;
+    card.setAttribute('data-prepared', '1');
+    var media = card.querySelector('.reel-media');
+    if (media && !media.querySelector('.vl-ready-badge')) {
+      var b = document.createElement('div');
+      b.className = 'vl-ready-badge';
+      b.style.cssText = 'position:absolute;top:11px;left:46px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(59,130,246,.5)';
+      b.textContent = '✓ PRÊT';
+      media.appendChild(b);
+    }
+  }
+  function savePrep() {
+    var b = el('vprep-ready'); var orig = b.innerHTML;
+    b.disabled = true; b.innerHTML = '⏳…';
+    var fd = new FormData();
+    fd.set('reel_id', S.rid);
+    fd.set('overlay', (el('vprep-cap').value || '').trim());
+    fd.set('caption', (el('vprep-desc').value || '').trim());
+    fd.set('to_models', Object.keys(S.selected).join(','));
+    fetch('/veille/prepare_save', { method: 'POST', body: fd }).then(function (r) { return r.json(); })
+      .then(function (j) {
+        b.disabled = false; b.innerHTML = orig;
+        if (!j.ok) { toast('Erreur : ' + (j.error || '?'), 'error'); return; }
+        toast('✓ Marqué prêt — brouillon enregistré');
+        markCardReady(S.rid);
+        close();
+      })
+      .catch(function (e) { b.disabled = false; b.innerHTML = orig; toast('Erreur : ' + e, 'error'); });
   }
 
   /* ── Analyse OCR ── */
@@ -229,8 +288,9 @@
       }
       S.models = j.models;
       var pre = (typeof veilleModelsSelected === 'function') ? veilleModelsSelected() : [];
+      var prep = S.prepModels || [];   // modèles du brouillon « prêt »
       box.innerHTML = j.models.map(function (m) {
-        var on = pre.indexOf(m) !== -1; if (on) S.selected[m] = true;
+        var on = pre.indexOf(m) !== -1 || prep.indexOf(m) !== -1; if (on) S.selected[m] = true;
         return '<button class="vp-chip vprep-chip" data-m="' + esc(m) + '" style="padding:7px 14px;border-radius:999px;border:1px solid ' +
           (on ? '#22c55e' : '#262b3a') + ';background:' + (on ? 'rgba(34,197,94,.14)' : '#12151f') +
           ';color:' + (on ? '#fff' : '#9aa0b4') + ';font-size:12px;font-weight:700;cursor:pointer">' + esc(m) + '</button>';
@@ -282,9 +342,15 @@
         if (sent) toast('✓ Veille préparée envoyée à ' + sent + ' modèle(s)');
         if (errs.length) toast('⚠️ ' + errs.join(' · '), 'error');
         var card = document.querySelector('.veille-card[data-rid="' + S.rid + '"]');
-        if (card && card.getAttribute('data-sent') !== '1') {
+        if (card) {
           var media = card.querySelector('.reel-media');
-          if (media) { var r2 = document.createElement('div'); r2.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6'; r2.textContent = '✓ ENVOYÉ'; media.appendChild(r2); }
+          if (media) {
+            var rb = media.querySelector('.vl-ready-badge'); if (rb) rb.remove();  // PRÊT -> ENVOYÉ
+            if (card.getAttribute('data-sent') !== '1') {
+              var r2 = document.createElement('div'); r2.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6'; r2.textContent = '✓ ENVOYÉ'; media.appendChild(r2);
+            }
+          }
+          card.setAttribute('data-prepared', '0');
           card.setAttribute('data-sent', '1');
         }
         if (sent) close();

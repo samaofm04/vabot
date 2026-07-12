@@ -124,6 +124,39 @@ def mark_sent(reel_id: str) -> bool:
     return False
 
 
+def set_prepared(reel_id: str, overlay: str = "", desc: str = "", models: str = "") -> bool:
+    """Enregistre un BROUILLON « prêt » pour un reel : caption incrustée validée
+    (overlay), description, et modèles choisis (chaîne « a,b,c »). Rend la carte
+    « PRÊT » sur la grille et pré-remplit le modal à la réouverture."""
+    data = _load()
+    for r in data["reels"]:
+        if r.get("id") == reel_id:
+            r["prepared"] = True
+            r["prep_overlay"] = overlay or ""
+            r["prep_desc"] = desc or ""
+            r["prep_models"] = models or ""
+            r["prepared_at"] = datetime.utcnow().isoformat(timespec="seconds")
+            _save(data)
+            return True
+    return False
+
+
+def clear_prepared(reel_id: str) -> bool:
+    """Retire le brouillon « prêt » d'un reel."""
+    data = _load()
+    for r in data["reels"]:
+        if r.get("id") == reel_id:
+            changed = False
+            for k in ("prepared", "prep_overlay", "prep_desc", "prep_models", "prepared_at"):
+                if k in r:
+                    r.pop(k, None)
+                    changed = True
+            if changed:
+                _save(data)
+            return changed
+    return False
+
+
 def update_reel(reel_id: str, **fields) -> bool:
     """Met a jour des champs d un reel stocke (caption, video_url, thumb...)."""
     if not fields:
