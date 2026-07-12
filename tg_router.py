@@ -806,17 +806,22 @@ def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str 
     if not res.get("ok"):
         return {"ok": False, "error": res.get("description", "?")}
     vid_msg = (res.get("result") or {}).get("message_id")
-    text_msg_id = None
-    if (desc or "").strip():
-        p2 = {"chat_id": bm["chat_id"], "text": desc.strip()[:4000],
+    # 3 MESSAGES SÉPARÉS : ① la vidéo, ② la caption incrustée, ③ la description.
+    # Les deux textes répondent TOUJOURS à la vidéo (copie facile, contexte clair).
+    def _send_reply_text(txt):
+        pp = {"chat_id": bm["chat_id"], "text": txt[:4000],
               "reply_to_message_id": vid_msg, "disable_web_page_preview": True}
         if bm.get("thread"):
-            p2["message_thread_id"] = bm["thread"]
-        r2 = _api("sendMessage", p2)
-        if r2.get("ok"):
-            text_msg_id = (r2.get("result") or {}).get("message_id")
+            pp["message_thread_id"] = bm["thread"]
+        rr = _api("sendMessage", pp)
+        return (rr.get("result") or {}).get("message_id") if rr.get("ok") else None
+
+    ov = (overlay or "").strip() if overlay is not None else ""
+    cap_msg_id = _send_reply_text(ov) if ov else None
+    text_msg_id = _send_reply_text(desc.strip()) if (desc or "").strip() else None
     v = {"file_id": tg_file_id, "caption": (link or "").strip(),
          "desc": (desc or "").strip() or None, "text_msg_id": text_msg_id,
+         "cap_msg_id": cap_msg_id,
          "dest_msg_id": None, "model": model, "ts": time.time(), "routed": False}
     # overlay PRÉ-VALIDÉ sur le site -> on l'utilise direct (pas de re-OCR côté TG)
     if overlay is not None:
@@ -1064,7 +1069,8 @@ def _handle_update(cfg: dict, upd: dict):
     v = _VEILLES.get((chat_id, ref.get("message_id")))
     if not v:
         for vv in _VEILLES.values():
-            if vv.get("text_msg_id") == ref.get("message_id") and vv.get("model") == model:
+            if (ref.get("message_id") in (vv.get("text_msg_id"), vv.get("cap_msg_id"))
+                    and vv.get("model") == model):
                 v = vv
                 break
     if not v and _is_video_msg(ref):
