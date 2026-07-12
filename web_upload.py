@@ -29746,6 +29746,24 @@ def create_app():
             return "// veille_prepare.js manquant", 404
         return send_file(str(p), mimetype="text/javascript", conditional=True)
 
+    @app.route("/veille/reelinfo")
+    def veille_reelinfo():
+        """Infos instantanées d'un reel (video_url connue + caption) pour afficher
+        le lecteur DÈS l'ouverture du modal, sans attendre l'analyse."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille
+            reel = veille.get_reel((request.args.get("reel_id") or "").strip())
+            if not reel:
+                return jsonify({"ok": False, "error": "Reel introuvable"})
+            return jsonify({"ok": True,
+                            "video_url": reel.get("video_url") or "",
+                            "caption": reel.get("caption") or ""})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
     @app.route("/veille/analyze", methods=["POST"])
     def veille_analyze():
         """OCR le texte incrusté d'un reel AVANT l'envoi (pour préparer/valider la

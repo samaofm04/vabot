@@ -1,12 +1,14 @@
 /* ============================================================================
-   Veille — « Préparer la veille » : lire le texte incrusté (OCR gratuit),
-   choisir la seconde, valider la caption + la description, aperçu Telegram,
-   puis envoyer aux modèles. Fichier séparé (pas d'échappement dans UPLOAD_HTML).
+   Veille — « Préparer la veille » (v2 pro)
+   Layout 2 colonnes : lecteur vidéo immédiat (route /veille/reelinfo) + panneau
+   d'analyse. OCR rapide / toute la vidéo / jusqu'au curseur (précision 1/100s) /
+   à la seconde. Caption + description éditables, chips modèles, aperçu Telegram.
+   Fichier séparé (pas d'échappement dans UPLOAD_HTML).
    ========================================================================== */
 (function () {
   'use strict';
 
-  var S = { rid: null, models: [], selected: {} };
+  var S = { rid: null, models: [], selected: {}, raf: 0 };
 
   function esc(x) {
     return String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -14,59 +16,92 @@
   }
   function el(id) { return document.getElementById(id); }
   function toast(m, t) { if (typeof showToast === 'function') showToast(m, t || 'success'); }
+  function fmtT(sec) {
+    var m = Math.floor(sec / 60);
+    var s = sec - m * 60;
+    return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2);
+  }
 
-  var INP = 'width:100%;padding:10px 12px;background:#0d0d16;border:1px solid #2c2c3d;color:#fff;border-radius:9px;font-size:13px;font-family:inherit;box-sizing:border-box';
+  var INP = 'width:100%;padding:10px 12px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:10px;font-size:13px;font-family:inherit;box-sizing:border-box;outline:none;transition:border-color .15s';
+  var SECTION = 'font-size:10px;color:#8a91a8;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin:0 0 8px';
+  var BTN_GHOST = 'padding:9px 14px;background:#161a26;border:1px solid #262b3a;color:#c9cede;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s';
 
-  function close() { var m = el('vprep-modal'); if (m) m.remove(); }
+  function close() {
+    if (S.raf) { cancelAnimationFrame(S.raf); S.raf = 0; }
+    var m = el('vprep-modal');
+    if (m) m.remove();
+  }
 
   function open(rid) {
     S.rid = rid; S.selected = {};
     close();
-    // description déjà connue côté carte (data-caption) -> pré-remplissage instantané
     var card = document.querySelector('.veille-card[data-rid="' + rid + '"]');
     var knownDesc = '';
     if (card && card.dataset.caption && card.dataset.caption.indexOf('Pas de caption') < 0) knownDesc = card.dataset.caption;
 
     var ov = document.createElement('div');
     ov.id = 'vprep-modal';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.74);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,4,10,.78);z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(6px)';
     ov.innerHTML =
-      '<div style="background:#12121c;border:1px solid #2c2c3d;border-radius:16px;padding:22px;width:100%;max-width:560px;max-height:94vh;overflow-y:auto;box-shadow:0 30px 80px rgba(0,0,0,.6)">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
-      '<div style="font-size:17px;font-weight:800">🎯 Préparer la veille</div>' +
-      '<button id="vprep-x" style="background:#1d1d28;border:0;color:#999;width:30px;height:30px;border-radius:8px;cursor:pointer">✕</button></div>' +
+      '<div style="background:#0f1117;border:1px solid #232838;border-radius:18px;width:100%;max-width:900px;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 40px 100px rgba(0,0,0,.7);overflow:hidden;animation:vprepIn .25s cubic-bezier(.16,1,.3,1)">' +
+      '<style>@keyframes vprepIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}' +
+      '.vp-chip{transition:all .12s}.vp-chip:hover{border-color:#3b82f6!important}' +
+      '#vprep-modal textarea:focus,#vprep-modal input:focus{border-color:#3b82f6}' +
+      '.vp-abtn:hover{filter:brightness(1.12)}.vp-abtn:disabled{opacity:.5;cursor:wait}</style>' +
 
-      // --- OCR ---
-      '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">1 · Texte incrusté sur la vidéo</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">' +
-      '<button id="vprep-ocr" style="padding:9px 15px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:0;color:#fff;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">🔍 Analyser le texte</button>' +
-      '<button id="vprep-ocr-full" title="Analyse 8 images réparties sur TOUTE la vidéo : capte les textes qui changent au fil du montage, sans répéter ce qui reste affiché" style="padding:9px 15px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">🧠 Toute la vidéo</button>' +
-      '<span style="color:#77778a;font-size:12px">ou à la seconde</span>' +
-      '<input id="vprep-sec" type="number" min="0" step="0.5" placeholder="ex: 1.5" style="' + INP + ';width:90px;padding:8px 10px">' +
-      '<button id="vprep-ocr-sec" style="padding:8px 12px;background:#1d1d28;border:1px solid #2c2c3d;color:#ddd;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Analyser à cette seconde</button>' +
-      '<span id="vprep-ocr-status" style="color:#77778a;font-size:11.5px"></span>' +
+      // ── Header ──
+      '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #1d2230;flex-shrink:0">' +
+      '<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:17px">🎯</div>' +
+      '<div style="flex:1"><div style="font-size:15.5px;font-weight:800;color:#fff">Préparer la veille</div>' +
+      '<div style="font-size:11.5px;color:#8a91a8">Lis le texte incrusté, valide, puis envoie aux modèles</div></div>' +
+      '<button id="vprep-x" style="background:#161a26;border:1px solid #262b3a;color:#8a91a8;width:32px;height:32px;border-radius:9px;cursor:pointer;font-size:13px">✕</button>' +
       '</div>' +
-      '<div id="vprep-media" style="display:none;gap:10px;margin-bottom:10px">' +
-      '<div id="vprep-video-wrap" style="width:47%"></div>' +
-      '<div id="vprep-frame-wrap" style="width:47%"></div>' +
+
+      // ── Corps 2 colonnes ──
+      '<div style="display:flex;gap:0;flex:1;min-height:0;overflow:hidden">' +
+
+      // Colonne gauche : vidéo
+      '<div style="width:300px;flex-shrink:0;padding:16px;border-right:1px solid #1d2230;overflow-y:auto;background:#0c0e15">' +
+      '<div style="' + SECTION + '">Vidéo</div>' +
+      '<div id="vprep-video-wrap"><div style="height:170px;border:1px dashed #262b3a;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#5a6178;font-size:11.5px">⏳ chargement du lecteur…</div></div>' +
+      '<button id="vprep-upto" class="vp-abtn" disabled style="width:100%;margin-top:10px;padding:10px 12px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);border:0;color:#fff;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">' +
+      '🧠 Analyser jusqu&#39;ici <span id="vprep-upto-t" style="font-family:ui-monospace,Consolas,monospace;font-size:11.5px;background:rgba(0,0,0,.28);padding:2px 7px;border-radius:6px">0:00.00</span></button>' +
+      '<div style="font-size:10.5px;color:#5a6178;margin-top:7px;line-height:1.5">Place le curseur là où le texte s&#39;arrête (précis au 1/100s), puis clique — l&#39;analyse couvre du début jusqu&#39;à ce point.</div>' +
+      '<div id="vprep-frame-wrap" style="margin-top:14px"></div>' +
       '</div>' +
-      '<textarea id="vprep-cap" placeholder="Le texte lu sur la vidéo apparaîtra ici — corrige-le si besoin (les retours à la ligne sont gardés)." style="' + INP + ';min-height:66px;resize:vertical;margin-bottom:16px"></textarea>' +
 
-      // --- Description ---
-      '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">2 · Description (postée sous la vidéo)</div>' +
-      '<textarea id="vprep-desc" placeholder="La description qui accompagne la vidéo." style="' + INP + ';min-height:70px;resize:vertical;margin-bottom:16px">' + esc(knownDesc) + '</textarea>' +
+      // Colonne droite : contrôles
+      '<div style="flex:1;min-width:0;padding:16px 20px;overflow-y:auto">' +
 
-      // --- Modèles ---
-      '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">3 · Envoyer aux modèles</div>' +
-      '<div id="vprep-models" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px;min-height:34px;color:#66667a;font-size:12px">Chargement…</div>' +
+      '<div style="' + SECTION + '">1 · Texte incrusté</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+      '<button id="vprep-ocr" class="vp-abtn" style="padding:9px 15px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:0;color:#fff;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🔍 Analyser</button>' +
+      '<button id="vprep-ocr-full" class="vp-abtn" title="8 images réparties sur toute la vidéo : capte les textes qui changent au fil du montage, sans répéter ce qui reste affiché" style="padding:9px 15px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);border:0;color:#fff;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🧠 Toute la vidéo</button>' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-left:auto">' +
+      '<input id="vprep-sec" type="number" min="0" step="0.1" placeholder="sec" style="' + INP + ';width:74px;padding:8px 9px;font-size:12px">' +
+      '<button id="vprep-ocr-sec" class="vp-abtn" style="' + BTN_GHOST + '">à la seconde</button>' +
+      '</div></div>' +
+      '<div id="vprep-ocr-status" style="font-size:11.5px;color:#8a91a8;min-height:16px;margin-bottom:8px"></div>' +
+      '<textarea id="vprep-cap" placeholder="Le texte lu sur la vidéo apparaîtra ici — corrige-le si besoin (retours à la ligne conservés)." style="' + INP + ';min-height:76px;resize:vertical;margin-bottom:18px;line-height:1.5"></textarea>' +
 
-      // --- Aperçu ---
-      '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">Aperçu Telegram</div>' +
-      '<div id="vprep-preview" style="background:#0e0e16;border:1px solid #26263a;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#c8c8d8;white-space:pre-wrap;line-height:1.5;margin-bottom:18px;min-height:40px"></div>' +
+      '<div style="' + SECTION + '">2 · Description postée sous la vidéo</div>' +
+      '<textarea id="vprep-desc" placeholder="La description qui accompagne la vidéo." style="' + INP + ';min-height:64px;resize:vertical;margin-bottom:18px;line-height:1.5">' + esc(knownDesc) + '</textarea>' +
 
-      '<div style="display:flex;gap:10px;justify-content:flex-end">' +
-      '<button id="vprep-cancel" style="padding:10px 18px;background:#1d1d28;border:1px solid #2c2c3d;color:#ddd;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer">Annuler</button>' +
-      '<button id="vprep-send" style="padding:10px 22px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer">📤 Envoyer la veille</button>' +
+      '<div style="' + SECTION + '">3 · Envoyer aux modèles</div>' +
+      '<div id="vprep-models" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px;min-height:30px;color:#5a6178;font-size:12px">Chargement…</div>' +
+
+      '<div style="' + SECTION + '">Aperçu Telegram</div>' +
+      '<div style="background:linear-gradient(135deg,#182533,#141d29);border:1px solid #24384d;border-radius:14px 14px 14px 4px;padding:12px 15px;margin-bottom:6px">' +
+      '<div id="vprep-preview" style="font-size:12.5px;color:#dbe4ee;white-space:pre-wrap;line-height:1.55;min-height:20px"></div>' +
+      '<div style="text-align:right;font-size:10px;color:#5b7a99;margin-top:5px">via ton bot · Telegram</div>' +
+      '</div>' +
+
+      '</div></div>' +
+
+      // ── Footer ──
+      '<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;padding:14px 20px;border-top:1px solid #1d2230;flex-shrink:0;background:#0c0e15">' +
+      '<button id="vprep-cancel" style="' + BTN_GHOST + ';padding:10px 18px">Annuler</button>' +
+      '<button id="vprep-send" class="vp-abtn" style="padding:10px 24px;background:linear-gradient(135deg,#22c55e,#15803d);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(34,197,94,.25)">📤 Envoyer la veille</button>' +
       '</div></div>';
     ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     document.body.appendChild(ov);
@@ -79,32 +114,72 @@
     el('vprep-cap').addEventListener('input', preview);
     el('vprep-desc').addEventListener('input', preview);
     el('vprep-send').addEventListener('click', send);
+    el('vprep-upto').addEventListener('click', function () {
+      var pl = el('vprep-player');
+      var ct = (pl && pl.currentTime) || 0;
+      if (ct < 0.5) { toast('Place d\'abord le curseur de la vidéo au moment voulu', 'error'); return; }
+      if (pl && !pl.paused) pl.pause();
+      analyze('', true, ct.toFixed(2));
+    });
 
     loadModels();
     preview();
-    analyze('');   // OCR auto au démarrage (4 frames, meilleur résultat)
+    loadPlayer();     // lecteur IMMÉDIAT (video_url connue du reel)
+    analyze('');      // OCR auto au démarrage
   }
 
+  /* ── Lecteur vidéo (immédiat) + compteur 1/100s ── */
+  function setPlayer(url) {
+    var vw = el('vprep-video-wrap');
+    if (!vw || !url) return;
+    var existing = el('vprep-player');
+    if (existing) {
+      if (existing.getAttribute('src') !== url) existing.setAttribute('src', url);
+      return;
+    }
+    vw.innerHTML = '<video id="vprep-player" src="' + esc(url) + '" controls preload="metadata" playsinline style="width:100%;max-height:300px;border-radius:12px;background:#000;display:block"></video>';
+    var pl = el('vprep-player');
+    var btn = el('vprep-upto');
+    var lbl = el('vprep-upto-t');
+    if (btn) btn.disabled = false;
+    // compteur haute précision (requestAnimationFrame, pas timeupdate ~4Hz)
+    function tick() {
+      if (!document.getElementById('vprep-player')) { S.raf = 0; return; }
+      if (lbl && pl) lbl.textContent = fmtT(pl.currentTime || 0);
+      S.raf = requestAnimationFrame(tick);
+    }
+    if (S.raf) cancelAnimationFrame(S.raf);
+    S.raf = requestAnimationFrame(tick);
+  }
+
+  function loadPlayer() {
+    fetch('/veille/reelinfo?reel_id=' + encodeURIComponent(S.rid))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.ok && j.video_url) setPlayer(j.video_url);
+        if (j.ok && j.caption && !el('vprep-desc').value.trim()) { el('vprep-desc').value = j.caption; preview(); }
+      }).catch(function () {});
+  }
+
+  /* ── Analyse OCR ── */
   function analyze(second, full, end) {
-    var st = el('vprep-ocr-status'); var b1 = el('vprep-ocr'); var b2 = el('vprep-ocr-sec');
-    var b3 = el('vprep-ocr-full');
+    var st = el('vprep-ocr-status');
+    var btns = [el('vprep-ocr'), el('vprep-ocr-sec'), el('vprep-ocr-full'), el('vprep-upto')];
+    function lock(v) { btns.forEach(function (b) { if (b) b.disabled = v; }); if (!v) { var b3 = el('vprep-upto'); if (b3 && !el('vprep-player')) b3.disabled = true; } }
     st.textContent = full
-      ? (end ? ('🧠 analyse du début jusqu\'à ' + end + 's…') : '🧠 analyse de TOUTE la vidéo (8 images)… ~20-40 s')
-      : '⏳ téléchargement + lecture de la vidéo… (jusqu\'à ~30 s la 1re fois)';
-    st.style.color = '#77778a';
-    b1.disabled = b2.disabled = true;
-    if (b3) b3.disabled = true;
+      ? (end ? ('🧠 analyse du début jusqu\'à ' + fmtT(parseFloat(end)) + '…') : '🧠 analyse de toute la vidéo (8 images)… ~20-40 s')
+      : '⏳ lecture de la vidéo…';
+    st.style.color = '#8a91a8';
+    lock(true);
     var fd = new FormData(); fd.set('reel_id', S.rid);
     if (full) fd.set('full', '1');
     if (end) fd.set('end', end);
     if (second !== '' && second != null) fd.set('second', second);
-    // timeout dur : si le serveur rame (lien IG à re-résoudre), on ne reste pas bloqué
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var killed = false;
-    function unlock() { b1.disabled = b2.disabled = false; if (b3) b3.disabled = false; }
     var to = setTimeout(function () {
       killed = true; if (ctrl) ctrl.abort();
-      unlock();
+      lock(false);
       st.textContent = '⚠️ trop long (lien Instagram expiré ?) — réessaie, ou tape le texte à la main';
       st.style.color = '#f87171';
     }, full ? 160000 : 75000);
@@ -112,98 +187,68 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to); if (killed) return;
-        unlock();
+        lock(false);
         if (!j.ok) { st.textContent = '⚠️ ' + (j.error || 'échec'); st.style.color = '#f87171'; return; }
         if (j.text) {
           el('vprep-cap').value = j.text;
           var eng = j.engine === 'gemini' ? 'Gemini ✨' : (j.engine === 'ia' ? 'Claude ✨' : 'gratuit/Tesseract');
-          if (j.engine !== 'gemini' && j.gemini_err) {
-            st.innerHTML = '⚠️ Gemini KO (' + esc(j.gemini_err.slice(0, 60)) + '…) — lu en secours (gratuit), corrige';
+          if (j.engine === 'tesseract' && j.gemini_err) {
+            st.innerHTML = '⚠️ IA indisponible (' + esc(String(j.gemini_err).slice(0, 50)) + '…) — lu en secours, corrige';
             st.style.color = '#facc15';
           } else {
-            st.innerHTML = '✅ lu (' + eng + (j.full ? ' · toute la vidéo 🧠' : '') + ') — vérifie/corrige';
+            st.innerHTML = '✅ lu (' + eng + (j.full ? (end ? ' · jusqu\'à ' + fmtT(parseFloat(end)) : ' · toute la vidéo 🧠') : '') + ') — vérifie/corrige';
             st.style.color = '#4ade80';
           }
         } else if (j.gemini_key && j.gemini_err) {
-          st.innerHTML = '⚠️ Gemini a échoué : ' + esc(j.gemini_err);
+          st.innerHTML = '⚠️ IA a échoué : ' + esc(j.gemini_err);
           st.style.color = '#f87171';
-        } else if (!j.gemini_key) {
-          st.innerHTML = 'ℹ️ Gemini pas configuré (Settings → Clé IA). Lu en gratuit — pour les emojis, ajoute ta clé Gemini.';
-          st.style.color = '#facc15';
         } else {
-          st.textContent = 'ℹ️ aucun texte détecté — regarde la vidéo, note la seconde et réanalyse';
+          st.textContent = 'ℹ️ aucun texte détecté — regarde la vidéo et réanalyse (autre moment)';
           st.style.color = '#facc15';
         }
-        // Lecteur vidéo (posé une seule fois) : sert à trouver la bonne seconde
-        // et à borner l'analyse (curseur = point d'arrêt)
-        var vw = el('vprep-video-wrap');
-        if (vw && j.video_url && !vw.dataset.set) {
-          vw.innerHTML = '<video id="vprep-player" src="' + esc(j.video_url) + '" controls preload="metadata" playsinline style="width:100%;max-height:230px;border-radius:8px;background:#000"></video>' +
-            '<button id="vprep-upto" style="width:100%;margin-top:6px;padding:8px 10px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">🧠 Analyser jusqu&#39;à ce point <span id="vprep-upto-t" style="opacity:.8">(0:00)</span></button>' +
-            '<div style="font-size:10px;color:#77778a;margin-top:3px">▶️ place le curseur là où le texte s&#39;arrête, puis clique le bouton — l&#39;analyse couvre du début jusqu&#39;à ce point</div>';
-          vw.dataset.set = '1';
-          var pl = el('vprep-player');
-          var lbl = el('vprep-upto-t');
-          if (pl && lbl) {
-            pl.addEventListener('timeupdate', function () {
-              var s = Math.floor(pl.currentTime || 0);
-              lbl.textContent = '(' + Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2) + ')';
-            });
-          }
-          var up = el('vprep-upto');
-          if (up) {
-            up.addEventListener('click', function () {
-              var ct = (pl && pl.currentTime) || 0;
-              if (ct < 1) { toast('Place d\'abord le curseur de la vidéo au moment voulu', 'error'); return; }
-              if (pl && !pl.paused) pl.pause();
-              analyze('', true, ct.toFixed(1));
-            });
-          }
-        }
-        // Image réellement analysée (pour vérifier qu'on a la bonne frame)
+        if (j.video_url) setPlayer(j.video_url);
         var fw = el('vprep-frame-wrap');
         if (fw && j.frame) {
-          fw.innerHTML = '<img src="data:image/jpeg;base64,' + j.frame + '" style="width:100%;border-radius:8px;border:1px solid #2c2c3d">' +
-            '<div style="font-size:10px;color:#77778a;margin-top:3px;text-align:center">🖼️ image analysée' + ((second !== '' && second != null) ? (' (à ' + second + 's)') : '') + '</div>';
+          fw.innerHTML = '<div style="' + SECTION + '">Image analysée</div>' +
+            '<img src="data:image/jpeg;base64,' + j.frame + '" style="width:100%;border-radius:10px;border:1px solid #262b3a">';
         }
-        var mw = el('vprep-media');
-        if (mw && ((vw && vw.innerHTML) || (fw && fw.innerHTML))) mw.style.display = 'flex';
         if (j.description && !el('vprep-desc').value.trim()) el('vprep-desc').value = j.description;
         preview();
       })
       .catch(function (e) {
         clearTimeout(to); if (killed) return;
-        unlock();
+        lock(false);
         st.textContent = '⚠️ ' + e; st.style.color = '#f87171';
       });
   }
 
+  /* ── Modèles ── */
   function loadModels() {
     fetch('/veille/models').then(function (r) { return r.json(); }).then(function (j) {
       var box = el('vprep-models'); if (!box) return;
       if (!j.ok || !(j.models || []).length) {
-        box.innerHTML = '<span style="color:#77778a">Aucune modèle branchée au routeur Telegram (/setmodel dans son groupe).</span>';
+        box.innerHTML = '<span style="color:#5a6178">Aucune modèle branchée au routeur Telegram (/setmodel dans son groupe).</span>';
         return;
       }
       S.models = j.models;
-      // reprend la sélection globale des chips si elle existe
       var pre = (typeof veilleModelsSelected === 'function') ? veilleModelsSelected() : [];
       box.innerHTML = j.models.map(function (m) {
         var on = pre.indexOf(m) !== -1; if (on) S.selected[m] = true;
-        return '<button class="vprep-chip" data-m="' + esc(m) + '" style="padding:7px 13px;border-radius:999px;border:1px solid ' +
-          (on ? '#22c55e' : '#2a2a35') + ';background:' + (on ? 'rgba(34,197,94,.16)' : 'transparent') +
-          ';color:' + (on ? '#fff' : '#9a9aa8') + ';font-size:12px;font-weight:700;cursor:pointer">' + esc(m) + '</button>';
+        return '<button class="vp-chip vprep-chip" data-m="' + esc(m) + '" style="padding:7px 14px;border-radius:999px;border:1px solid ' +
+          (on ? '#22c55e' : '#262b3a') + ';background:' + (on ? 'rgba(34,197,94,.14)' : '#12151f') +
+          ';color:' + (on ? '#fff' : '#9aa0b4') + ';font-size:12px;font-weight:700;cursor:pointer">' + esc(m) + '</button>';
       }).join('');
       Array.prototype.forEach.call(box.querySelectorAll('.vprep-chip'), function (c) {
         c.addEventListener('click', function () {
           var m = c.dataset.m;
-          if (S.selected[m]) { delete S.selected[m]; c.style.borderColor = '#2a2a35'; c.style.background = 'transparent'; c.style.color = '#9a9aa8'; }
-          else { S.selected[m] = true; c.style.borderColor = '#22c55e'; c.style.background = 'rgba(34,197,94,.16)'; c.style.color = '#fff'; }
+          if (S.selected[m]) { delete S.selected[m]; c.style.borderColor = '#262b3a'; c.style.background = '#12151f'; c.style.color = '#9aa0b4'; }
+          else { S.selected[m] = true; c.style.borderColor = '#22c55e'; c.style.background = 'rgba(34,197,94,.14)'; c.style.color = '#fff'; }
         });
       });
     }).catch(function () { var b = el('vprep-models'); if (b) b.textContent = 'Erreur chargement modèles'; });
   }
 
+  /* ── Aperçu ── */
   function preview() {
     var cap = (el('vprep-cap') || {}).value || '';
     var desc = (el('vprep-desc') || {}).value || '';
@@ -214,17 +259,16 @@
     if (p) p.textContent = parts.length ? parts.join('\n\n') : '(vide — la vidéo partira sans texte)';
   }
 
-  function selectedModels() { return Object.keys(S.selected); }
-
+  /* ── Envoi ── */
   function send() {
-    var models = selectedModels();
+    var models = Object.keys(S.selected);
     if (!models.length) { toast('Coche au moins une modèle', 'error'); return; }
     var b = el('vprep-send'); var orig = b.innerHTML;
     b.disabled = true; b.innerHTML = '⏳ envoi…';
     var fd = new FormData();
     fd.set('reel_id', S.rid);
-    fd.set('overlay', (el('vprep-cap').value || '').trim());   // caption incrustée VALIDÉE
-    fd.set('caption', (el('vprep-desc').value || '').trim());  // description
+    fd.set('overlay', (el('vprep-cap').value || '').trim());
+    fd.set('caption', (el('vprep-desc').value || '').trim());
     fd.set('to_models', models.join(','));
     fetch('/veille/send', { method: 'POST', body: fd }).then(function (r) { return r.json(); })
       .then(function (j) {
@@ -234,7 +278,6 @@
         var errs = (j.models_err || []);
         if (sent) toast('✓ Veille préparée envoyée à ' + sent + ' modèle(s)');
         if (errs.length) toast('⚠️ ' + errs.join(' · '), 'error');
-        // marque la carte envoyée
         var card = document.querySelector('.veille-card[data-rid="' + S.rid + '"]');
         if (card && card.getAttribute('data-sent') !== '1') {
           var media = card.querySelector('.reel-media');
