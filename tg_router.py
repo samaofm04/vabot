@@ -541,11 +541,15 @@ def ocr_video_url(video_url, second=None, headers=None) -> dict:
         gem_key = bool(_env_gemini_key())
         gem_err = ""
         if gem_key:
-            # clé Gemini présente -> Gemini UNIQUEMENT (pas de retombée sur le
-            # charabia Tesseract). Si Gemini échoue, on renvoie la raison.
             text = _ocr_gemini(frames, "site")
             engine = "gemini"
-            gem_err = _GEMINI_LAST_ERR if not text else ""
+            if not text:
+                # Gemini KO (quota/clé) -> on remonte la raison ET on tente
+                # Tesseract en secours pour ne pas rester totalement vide.
+                gem_err = _GEMINI_LAST_ERR
+                t2 = _ocr_tesseract(frames, "site")
+                if t2:
+                    text, engine = t2, "tesseract"
         else:
             text = _ocr_tesseract(frames, "site")
             engine = "tesseract"

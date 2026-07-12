@@ -108,8 +108,13 @@
         if (j.text) {
           el('vprep-cap').value = j.text;
           var eng = j.engine === 'gemini' ? 'Gemini ✨' : (j.engine === 'ia' ? 'IA' : 'gratuit/Tesseract');
-          st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
-          st.style.color = '#4ade80';
+          if (j.engine !== 'gemini' && j.gemini_err) {
+            st.innerHTML = '⚠️ Gemini KO (' + esc(j.gemini_err.slice(0, 60)) + '…) — lu en secours (gratuit), corrige';
+            st.style.color = '#facc15';
+          } else {
+            st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
+            st.style.color = '#4ade80';
+          }
         } else if (j.gemini_key && j.gemini_err) {
           st.innerHTML = '⚠️ Gemini a échoué : ' + esc(j.gemini_err);
           st.style.color = '#f87171';
