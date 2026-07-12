@@ -521,6 +521,93 @@ def download_file_bytes(file_id: str):
         return None
 
 
+def _download_fid_to(file_id: str, path) -> bool:
+    """Télécharge un file_id Telegram sur DISQUE. False si trop gros (>20 Mo,
+    limite getFile de l'API bot) ou erreur réseau."""
+    token = _token()
+    if not (file_id and token):
+        return False
+    try:
+        gf = _api("getFile", {"file_id": file_id})
+        if not gf.get("ok"):
+            return False
+        fp = (gf.get("result") or {}).get("file_path")
+        if not fp:
+            return False
+        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=120)
+        if r.status_code != 200:
+            return False
+        path.write_bytes(r.content)
+        return path.stat().st_size > 0
+    except Exception:
+        return False
+
+
+def _swap_audio(video_fid: str, audio_fid: str, slug: str):
+    """Produit une vidéo = IMAGE de `video_fid` (la brute de la modèle) + SON de
+    `audio_fid` (le reel exemple, son tendance). Le son d'origine de la brute est
+    entièrement RETIRÉ. Le son de l'exemple est bouclé si besoin pour couvrir
+    toute la brute, puis coupé à la durée de la brute (vidéo jamais tronquée).
+    Retourne un Path (à supprimer après envoi) ou None si impossible
+    (fichier > 20 Mo, exemple sans piste audio, ffmpeg absent…)."""
+    tmpdir = DATA_DIR / "tg_tmp"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    vsrc = tmpdir / f"swap_v_{slug}.mp4"
+    asrc = tmpdir / f"swap_a_{slug}.mp4"
+    out = tmpdir / f"swap_out_{slug}.mp4"
+    try:
+        if not _download_fid_to(video_fid, vsrc):
+            _trace("swap son: brute non téléchargeable (>20 Mo ?)")
+            return None
+        if not _download_fid_to(audio_fid, asrc):
+            _trace("swap son: exemple non téléchargeable (>20 Mo ?)")
+            return None
+        cmd = ["ffmpeg", "-y", "-i", str(vsrc),
+               "-stream_loop", "-1", "-i", str(asrc),
+               "-map", "0:v:0", "-map", "1:a:0",
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+               "-shortest", "-movflags", "+faststart", str(out)]
+        p = subprocess.run(cmd, capture_output=True, timeout=180)
+        if p.returncode != 0 or not out.exists() or out.stat().st_size < 1000:
+            err = (p.stderr[-200:] if p.stderr else b"").decode("utf-8", "ignore")
+            _trace(f"swap son: ffmpeg KO ({err})")
+            try:
+                out.unlink()
+            except Exception:
+                pass
+            return None
+        return out
+    except Exception as e:
+        _trace(f"swap son: {e}")
+        return None
+    finally:
+        for f in (vsrc, asrc):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+
+def _send_album_local_brute(dest, tid, example_fid, local_path, timeout=180):
+    """sendMediaGroup [exemple (file_id), brute LOCALE uploadée] — la brute est
+    envoyée en multipart (attach://), l'exemple reste un file_id."""
+    token = _token()
+    if not token:
+        return {"ok": False, "description": "bot_token manquant"}
+    media = [{"type": "video", "media": example_fid},
+             {"type": "video", "media": "attach://brute"}]
+    data = {"chat_id": str(dest), "media": json.dumps(media)}
+    if tid:
+        data["message_thread_id"] = str(tid)
+    try:
+        with open(local_path, "rb") as fh:
+            r = requests.post(f"{TG}/bot{token}/sendMediaGroup",
+                              data=data, files={"brute": fh}, timeout=timeout)
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "description": str(e)}
+
+
 def ocr_video_bytes(video_bytes: bytes, second=None) -> dict:
     """OCR pour le SITE : lit le texte incrusté d'une vidéo fournie en BYTES
     (téléchargée par le site depuis video_url/Telegram), à un instant précis
@@ -1141,13 +1228,29 @@ def _handle_update(cfg: dict, upd: dict):
 
     res = {"ok": False}
     if v.get("file_id") and raw_fid:
+        # 🎵 SON DE L'EXEMPLE sur la vidéo de la modèle (son d'origine de la brute
+        # RETIRÉ) → album [exemple, brute-avec-le-bon-son]. Si impossible
+        # (>20 Mo, exemple sans audio, ffmpeg…), on retombe sur l'album normal.
+        slug = f"{model}_{msg.get('message_id')}"
+        swapped = _swap_audio(raw_fid, v["file_id"], slug)
+        if swapped:
+            res = _send_album_local_brute(dest, tid, v["file_id"], swapped)
+            try:
+                swapped.unlink()
+            except Exception:
+                pass
+            if res.get("ok"):
+                _trace(f"🎵 son de l'exemple posé sur la vidéo de {model}")
+            else:
+                _trace(f"swap son: envoi KO ({res.get('description', '?')}) -> album normal")
         # STYLE VEILLE : album SANS légende, les textes partent en messages séparés
-        media = [{"type": "video", "media": v["file_id"]},
-                 {"type": "video", "media": raw_fid}]
-        p = {"chat_id": dest, "media": media}
-        if tid:
-            p["message_thread_id"] = tid
-        res = _api("sendMediaGroup", p)
+        if not res.get("ok"):
+            media = [{"type": "video", "media": v["file_id"]},
+                     {"type": "video", "media": raw_fid}]
+            p = {"chat_id": dest, "media": media}
+            if tid:
+                p["message_thread_id"] = tid
+            res = _api("sendMediaGroup", p)
     elif raw_fid:
         p = {"chat_id": dest, "video": raw_fid}
         if tid:
