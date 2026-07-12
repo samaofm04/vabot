@@ -188,12 +188,15 @@
   function markCardReady(rid) {
     var card = document.querySelector('.veille-card[data-rid="' + rid + '"]');
     if (!card || card.getAttribute('data-sent') === '1') return;
+    var cb = card.querySelector('.vl-rdy-cb'); if (cb) cb.checked = true;
+    // réutilise le helper de la page (toggle vert + contour vert + badge)
+    if (typeof window.veilleReadyVisual === 'function') { window.veilleReadyVisual(card, true); return; }
     card.setAttribute('data-prepared', '1');
     var media = card.querySelector('.reel-media');
     if (media && !media.querySelector('.vl-ready-badge')) {
       var b = document.createElement('div');
       b.className = 'vl-ready-badge';
-      b.style.cssText = 'position:absolute;top:11px;left:46px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(59,130,246,.5)';
+      b.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(34,197,94,.5)';
       b.textContent = '✓ PRÊT';
       media.appendChild(b);
     }
@@ -343,12 +346,14 @@
         if (errs.length) toast('⚠️ ' + errs.join(' · '), 'error');
         var card = document.querySelector('.veille-card[data-rid="' + S.rid + '"]');
         if (card) {
+          var wasSent = card.getAttribute('data-sent') === '1';
+          var cb = card.querySelector('.vl-rdy-cb'); if (cb) cb.checked = false;
+          // PRÊT -> ENVOYÉ : éteint le toggle + retire le contour/badge vert « prêt »
+          if (typeof window.veilleReadyVisual === 'function') window.veilleReadyVisual(card, false);
+          var lbl = card.querySelector('.vl-rdy'); if (lbl) lbl.style.display = 'none';  // envoyé -> plus de toggle
           var media = card.querySelector('.reel-media');
-          if (media) {
-            var rb = media.querySelector('.vl-ready-badge'); if (rb) rb.remove();  // PRÊT -> ENVOYÉ
-            if (card.getAttribute('data-sent') !== '1') {
-              var r2 = document.createElement('div'); r2.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6'; r2.textContent = '✓ ENVOYÉ'; media.appendChild(r2);
-            }
+          if (media && !wasSent) {
+            var r2 = document.createElement('div'); r2.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6'; r2.textContent = '✓ ENVOYÉ'; media.appendChild(r2);
           }
           card.setAttribute('data-prepared', '0');
           card.setAttribute('data-sent', '1');

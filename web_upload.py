@@ -19127,9 +19127,28 @@ def _render_veille_feed_html() -> str:
                 ribbon = ("<div style='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'>✓ ENVOYÉ</div>")
             elif prepared:
-                ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);"
+                ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:#22c55e;"
                           "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
-                          "box-shadow:0 2px 10px rgba(59,130,246,.5)'>✓ PRÊT</div>")
+                          "box-shadow:0 2px 10px rgba(34,197,94,.5)'>✓ PRÊT</div>")
+            # Interrupteur PRÊT sur la carte (uniquement si pas déjà envoyé) : le
+            # mettre au vert marque le reel « prêt » sans ouvrir le modal.
+            ready_toggle = ""
+            if not sent:
+                _on = prepared
+                ready_toggle = (
+                    f"<label class='vl-rdy' onclick='event.stopPropagation()' title='Marquer ce reel PRÊT (sans ouvrir)' "
+                    f"style='position:absolute;bottom:12px;left:12px;z-index:12;display:flex;align-items:center;gap:7px;cursor:pointer'>"
+                    f"<input type='checkbox' class='vl-rdy-cb' data-rid='{rid}' {'checked' if _on else ''} "
+                    f"onchange='veilleToggleReady(this)' style='position:absolute;opacity:0;width:0;height:0'>"
+                    f"<span class='vl-rdy-track' style='width:40px;height:23px;border-radius:999px;background:{'#22c55e' if _on else 'rgba(255,255,255,.28)'};"
+                    f"position:relative;transition:background .2s;box-shadow:inset 0 1px 3px rgba(0,0,0,.4)'>"
+                    f"<span class='vl-rdy-knob' style='position:absolute;top:2.5px;left:{'19px' if _on else '2.5px'};width:18px;height:18px;"
+                    f"border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.5)'></span></span>"
+                    f"<span class='vl-rdy-lbl' style='font-size:10px;font-weight:800;letter-spacing:.4px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)'>PRÊT</span>"
+                    f"</label>")
+            # Contour VERT quand le reel est prêt (« le reel devient vert »)
+            card_edge = ("border:1px solid #22c55e;box-shadow:0 0 0 1px #22c55e,0 0 18px rgba(34,197,94,.22)"
+                         if prepared else "border:1px solid #2a2a2a")
             # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
             # pouvoir multi-selectionner et RENVOYER en lot.
             cb_html = (
@@ -19153,7 +19172,7 @@ def _render_veille_feed_html() -> str:
 <div class="reel-card veille-card cloud-card" data-rid="{rid}" data-day="{day}" data-sent="{1 if sent else 0}" data-prepared="{1 if prepared else 0}"
      data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}"
      data-caption="{caption}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}"
-     style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+     style="background:#0f0f0f;{card_edge};border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .2s,box-shadow .2s">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='igHoverPlay(this)'
        onmouseleave='igHoverStop(this)'
@@ -19187,6 +19206,7 @@ def _render_veille_feed_html() -> str:
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
       </button>
     </div>
+    {ready_toggle}
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
       <!-- Stats : toujours visibles, colonne a droite (icones Lucide, comme Trends) -->
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;margin-bottom:6px;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none">
@@ -19580,6 +19600,47 @@ async function resendVeilleReel(rid, btn){
     alert('Erreur : ' + e);
   }
   setTimeout(() => { btn.innerHTML = orig; btn.style.background = 'rgba(0,0,0,.42)'; btn.disabled = false; }, 2500);
+}
+// ── Interrupteur PRÊT sur la carte : marque/retire « prêt » sans ouvrir le modal ──
+function veilleReadyVisual(card, on){
+  if(!card) return;
+  card.setAttribute('data-prepared', on ? '1' : '0');
+  card.style.border = on ? '1px solid #22c55e' : '1px solid #2a2a2a';
+  card.style.boxShadow = on ? '0 0 0 1px #22c55e,0 0 18px rgba(34,197,94,.22)' : 'none';
+  const track = card.querySelector('.vl-rdy-track');
+  const knob = card.querySelector('.vl-rdy-knob');
+  if(track) track.style.background = on ? '#22c55e' : 'rgba(255,255,255,.28)';
+  if(knob) knob.style.left = on ? '19px' : '2.5px';
+  const media = card.querySelector('.reel-media');
+  if(media){
+    let badge = media.querySelector('.vl-ready-badge');
+    if(on && !badge && card.getAttribute('data-sent') !== '1'){
+      badge = document.createElement('div');
+      badge.className = 'vl-ready-badge';
+      badge.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(34,197,94,.5)';
+      badge.textContent = '✓ PRÊT';
+      media.appendChild(badge);
+    } else if(!on && badge){ badge.remove(); }
+  }
+}
+async function veilleToggleReady(cb){
+  const rid = cb.getAttribute('data-rid');
+  const on = cb.checked;
+  const card = document.querySelector('.veille-card[data-rid="'+rid+'"]');
+  veilleReadyVisual(card, on);   // maj visuelle immediate (optimiste)
+  try{
+    const fd = new FormData();
+    fd.set('reel_id', rid);
+    fd.set('on', on ? '1' : '0');
+    if(on && card) fd.set('caption', card.getAttribute('data-caption') || '');
+    const r = await fetch('/veille/prepare_toggle', { method:'POST', body: fd });
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || '?');
+    if(typeof showToast === 'function') showToast(on ? '✓ Reel marqué prêt' : 'Prêt retiré', 'success');
+  }catch(e){
+    cb.checked = !on; veilleReadyVisual(card, !on);   // rollback si echec
+    if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); else alert('Erreur : ' + e);
+  }
 }
 // Lecteur inline : swap thumb <-> video au click sur le bouton play
 function veillePlayToggle(btn){
@@ -29809,6 +29870,28 @@ def create_app():
         if rid:
             veille.clear_prepared(rid)
         return jsonify({"ok": True})
+
+    @app.route("/veille/prepare_toggle", methods=["POST"])
+    def veille_prepare_toggle():
+        """Interrupteur PRÊT directement sur la carte (sans ouvrir le modal).
+        on=1 -> marque prêt (sans écraser une caption déjà préparée) ; on=0 ->
+        retire prêt."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import veille
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        rid = (request.form.get("reel_id") or "").strip()
+        if not rid or not veille.get_reel(rid):
+            return jsonify({"ok": False, "error": "Reel introuvable"})
+        on = request.form.get("on") in ("1", "true", "on")
+        if on:
+            veille.mark_ready(rid, fallback_desc=(request.form.get("caption") or "").strip())
+        else:
+            veille.clear_prepared(rid)
+        return jsonify({"ok": True, "prepared": on})
 
     @app.route("/veille/analyze", methods=["POST"])
     def veille_analyze():

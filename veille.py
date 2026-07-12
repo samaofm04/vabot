@@ -141,6 +141,25 @@ def set_prepared(reel_id: str, overlay: str = "", desc: str = "", models: str = 
     return False
 
 
+def mark_ready(reel_id: str, fallback_desc: str = "") -> bool:
+    """Marque un reel « PRÊT » depuis la grille (interrupteur de la carte), SANS
+    écraser une caption déjà préparée dans le modal. Initialise juste les champs
+    manquants."""
+    data = _load()
+    for r in data["reels"]:
+        if r.get("id") == reel_id:
+            r["prepared"] = True
+            r.setdefault("prep_overlay", "")
+            if not (r.get("prep_desc") or "").strip() and fallback_desc:
+                r["prep_desc"] = fallback_desc
+            r.setdefault("prep_desc", "")
+            r.setdefault("prep_models", "")
+            r["prepared_at"] = datetime.utcnow().isoformat(timespec="seconds")
+            _save(data)
+            return True
+    return False
+
+
 def clear_prepared(reel_id: str) -> bool:
     """Retire le brouillon « prêt » d'un reel."""
     data = _load()
