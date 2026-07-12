@@ -736,7 +736,18 @@ input::placeholder{color:#5a6183}
 #page-loader.show{display:flex}
 #page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
 @keyframes plSpin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.orb,body::before,.fall,.shoot,.star{animation:none!important}.orbs{transition:none}}
+/* Animation d'entrée : la carte monte + les champs apparaissent en cascade */
+@keyframes cardIn{from{opacity:0;transform:translateY(28px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes itemIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.card{animation:cardIn .75s cubic-bezier(.16,1,.3,1) backwards}
+.card>h1{animation:itemIn .55s ease-out .18s backwards}
+.card>.subtitle{animation:itemIn .55s ease-out .25s backwards}
+.card form .field:nth-of-type(1){animation:itemIn .55s ease-out .33s backwards}
+.card form .field:nth-of-type(2){animation:itemIn .55s ease-out .40s backwards}
+.card .remember-row{animation:itemIn .55s ease-out .47s backwards}
+.card .btn{animation:itemIn .55s ease-out .54s backwards}
+.card .footer-note{animation:itemIn .55s ease-out .61s backwards}
+@media (prefers-reduced-motion:reduce){.orb,body::before,.fall,.shoot,.star,.card,.card h1,.card .subtitle,.card .field,.card .remember-row,.card .btn,.card .footer-note{animation:none!important}.orbs{transition:none}}
 </style></head><body>
 <div id="page-loader"><div class="pl-ring"></div></div>
 <div class="orbs"><div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div></div>
