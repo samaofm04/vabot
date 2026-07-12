@@ -656,30 +656,43 @@ LOGIN_HTML = """
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  background:#04050c;color:#eef0ff;min-height:100vh;display:flex;align-items:center;justify-content:center;
-  position:relative;overflow-x:hidden;
+  background:#050813;color:#eef2ff;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
-/* Nébuleuses en fond (violet / bleu / cyan) qui dérivent lentement */
-body::before{content:'';position:fixed;inset:0;pointer-events:none;
-  background:radial-gradient(ellipse 60% 45% at 18% 22%,rgba(99,102,241,.16),transparent 62%),
-             radial-gradient(ellipse 52% 42% at 82% 78%,rgba(168,85,247,.14),transparent 62%),
-             radial-gradient(ellipse 46% 36% at 68% 12%,rgba(56,189,248,.09),transparent 60%),
-             radial-gradient(circle 340px at 50% 52%,rgba(124,93,250,.12),transparent 70%);
-  animation:nebula 26s ease-in-out infinite alternate}
-@keyframes nebula{from{transform:translate(0,0) scale(1)}to{transform:translate(-26px,18px) scale(1.07)}}
+/* Halo bleu (MyPuls) qui respire lentement en fond */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 55% 50% at 22% 42%,rgba(37,99,235,.22),transparent 60%),
+             radial-gradient(ellipse 50% 45% at 80% 26%,rgba(59,130,246,.15),transparent 62%),
+             radial-gradient(ellipse 46% 40% at 64% 88%,rgba(99,102,241,.13),transparent 62%);
+  animation:nebula 24s ease-in-out infinite alternate}
+@keyframes nebula{from{transform:translate(0,0) scale(1)}to{transform:translate(-24px,16px) scale(1.06)}}
+/* Boules lumineuses interactives (flottent + parallaxe souris) */
+.orbs{position:fixed;inset:0;pointer-events:none;z-index:0;will-change:transform}
+.orb{position:absolute;border-radius:50%;filter:blur(64px);opacity:.55;mix-blend-mode:screen;will-change:transform}
+.orb1{width:540px;height:540px;left:-7%;top:26%;background:radial-gradient(circle,rgba(37,99,235,.95),transparent 68%);animation:float1 19s ease-in-out infinite}
+.orb2{width:440px;height:440px;right:-5%;top:6%;background:radial-gradient(circle,rgba(56,132,255,.8),transparent 68%);animation:float2 23s ease-in-out infinite}
+.orb3{width:380px;height:380px;left:50%;bottom:-10%;background:radial-gradient(circle,rgba(99,102,241,.72),transparent 68%);animation:float3 27s ease-in-out infinite}
+@keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(42px,-32px)}}
+@keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-38px,36px)}}
+@keyframes float3{0%,100%{transform:translate(0,0)}50%{transform:translate(-32px,-26px)}}
 /* Champ d'étoiles (points générés en JS) */
-#stars{position:fixed;inset:0;pointer-events:none}
+#stars{position:fixed;inset:0;pointer-events:none;z-index:0}
 .star{position:absolute;background:#fff;border-radius:50%;animation:twinkle var(--d,4s) ease-in-out infinite}
 @keyframes twinkle{0%,100%{opacity:var(--o,.7)}50%{opacity:.08}}
+/* Poussière d'étoiles qui tombe */
+#fall{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.fall{position:absolute;top:-12px;border-radius:50%;background:rgba(196,218,255,.95);
+  box-shadow:0 0 7px rgba(120,170,255,.85);animation:fall linear infinite}
+@keyframes fall{0%{transform:translate(0,-12px);opacity:0}12%{opacity:.9}100%{transform:translate(var(--dx,24px),108vh);opacity:0}}
 /* Étoiles filantes */
-.shoot{position:fixed;width:130px;height:1.5px;border-radius:2px;pointer-events:none;opacity:0;
-  background:linear-gradient(90deg,#fff,rgba(255,255,255,0));animation:shoot 9s linear infinite}
-@keyframes shoot{0%,86%{opacity:0;transform:translate(0,0) rotate(-32deg)}88%{opacity:.9}100%{opacity:0;transform:translate(-620px,380px) rotate(-32deg)}}
+.shoot{position:fixed;width:150px;height:1.6px;border-radius:2px;pointer-events:none;opacity:0;z-index:0;
+  background:linear-gradient(90deg,#d4e2ff,rgba(255,255,255,0));animation:shoot 8s linear infinite}
+@keyframes shoot{0%,86%{opacity:0;transform:translate(0,0) rotate(-32deg)}88%{opacity:.9}100%{opacity:0;transform:translate(-640px,400px) rotate(-32deg)}}
 /* Carte de connexion centrée, effet verre */
-.card{position:relative;width:100%;max-width:400px;margin:24px;
-  background:rgba(12,14,26,.72);border:1px solid rgba(148,163,255,.16);border-radius:20px;
-  padding:40px 36px 32px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
-  box-shadow:0 30px 80px rgba(0,0,0,.65)}
+.card{position:relative;z-index:2;width:100%;max-width:400px;margin:24px;
+  background:rgba(11,16,30,.72);border:1px solid rgba(96,140,255,.20);border-radius:20px;
+  padding:40px 36px 32px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  box-shadow:0 30px 90px rgba(0,0,0,.7),0 0 0 1px rgba(59,130,246,.05),inset 0 1px 0 rgba(255,255,255,.05)}
 h1{font-size:28px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px;color:#fff;text-align:center}
 .subtitle{color:#8b93b8;font-size:14px;margin-bottom:30px;text-align:center}
 .field{margin-bottom:18px}
@@ -688,24 +701,24 @@ label .req{color:#f87171;font-weight:700;margin-left:2px}
 input{width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(148,163,255,.18);
   color:#fff;border-radius:9px;font-size:14px;font-family:inherit;
   transition:all .15s;outline:none}
-input:focus{border-color:#818cf8;background:rgba(255,255,255,.08);box-shadow:0 0 0 3px rgba(129,140,248,.18)}
+input:focus{border-color:#3b82f6;background:rgba(59,130,246,.08);box-shadow:0 0 0 3px rgba(59,130,246,.22)}
 input::placeholder{color:#5a6183}
 .remember-row{display:flex;align-items:center;gap:10px;margin-bottom:22px;cursor:pointer;font-size:13px;color:#aeb6d9;user-select:none}
 .remember-row input[type=checkbox]{position:absolute;opacity:0;pointer-events:none}
 .remember-check{width:18px;height:18px;border:1.5px solid rgba(148,163,255,.35);border-radius:5px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);transition:all .15s;flex-shrink:0}
 .remember-check svg{width:12px;height:12px;display:none}
-.remember-row input[type=checkbox]:checked + .remember-check{background:#818cf8;border-color:#818cf8}
+.remember-row input[type=checkbox]:checked + .remember-check{background:#2563eb;border-color:#2563eb}
 .remember-row input[type=checkbox]:checked + .remember-check svg{display:block}
-.remember-row:hover .remember-check{border-color:#818cf8}
+.remember-row:hover .remember-check{border-color:#3b82f6}
 .remember-hint{color:#5a6183;font-size:11px;margin-left:auto;font-weight:400}
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;
-  background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;border:0;border-radius:9px;
+  background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border:0;border-radius:9px;
   font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;
-  box-shadow:0 8px 24px rgba(124,93,250,.35);min-height:46px}
-.btn:hover{box-shadow:0 12px 32px rgba(124,93,250,.5);transform:translateY(-1px)}
+  box-shadow:0 8px 24px rgba(37,99,235,.42);min-height:46px}
+.btn:hover{box-shadow:0 12px 34px rgba(37,99,235,.6);transform:translateY(-1px)}
 .btn:active{transform:translateY(0)}
 .btn:disabled{cursor:wait;opacity:.85;transform:none}
-.btn:disabled:hover{transform:none;box-shadow:0 8px 24px rgba(124,93,250,.35)}
+.btn:disabled:hover{transform:none;box-shadow:0 8px 24px rgba(37,99,235,.42)}
 /* Spinner Insta-style pour le bouton de login */
 .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .7s linear infinite;flex-shrink:0}
 .btn .spinner{display:none}
@@ -719,13 +732,17 @@ input::placeholder{color:#5a6183}
 /* Page loader global - même style que dashboard */
 #page-loader{position:fixed;inset:0;background:rgba(4,5,12,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
 #page-loader.show{display:flex}
-#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(129,140,248,.15);border-top-color:#818cf8;border-radius:50%;animation:plSpin .8s linear infinite}
+#page-loader .pl-ring{width:54px;height:54px;border:4px solid rgba(59,130,246,.15);border-top-color:#3b82f6;border-radius:50%;animation:plSpin .8s linear infinite}
 @keyframes plSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.orb,body::before,.fall,.shoot{animation:none!important}.orbs{transition:none}}
 </style></head><body>
 <div id="page-loader"><div class="pl-ring"></div></div>
+<div class="orbs"><div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div></div>
 <div id="stars"></div>
+<div id="fall"></div>
 <div class="shoot" style="top:9%;left:74%"></div>
 <div class="shoot" style="top:36%;left:90%;animation-delay:4.6s"></div>
+<div class="shoot" style="top:64%;left:58%;animation-delay:2.3s"></div>
     <div class="card">
       <h1>Connexion</h1>
       <p class="subtitle">Content de te revoir</p>
@@ -791,6 +808,35 @@ input::placeholder{color:#5a6183}
     html += '<span class="star" style="left:' + (Math.random()*100).toFixed(2) + '%;top:' + (Math.random()*100).toFixed(2) + '%;width:' + s + 'px;height:' + s + 'px;--o:' + (Math.random()*.55 + .35).toFixed(2) + ';--d:' + (Math.random()*4 + 2.5).toFixed(1) + 's;animation-delay:' + (Math.random()*5).toFixed(1) + 's"></span>';
   }
   c.innerHTML = html;
+})();
+// Étoiles qui tombent (poussière lente, façon MyPuls)
+(function(){
+  var f = document.getElementById('fall');
+  if(!f) return;
+  var html = '';
+  for(var i = 0; i < 34; i++){
+    var sz = (Math.random()*2.2 + 1).toFixed(1);
+    var dur = (Math.random()*9 + 8).toFixed(1);
+    var dx = (Math.random()*80 - 30).toFixed(0);
+    html += '<span class="fall" style="left:' + (Math.random()*100).toFixed(2) + '%;width:' + sz + 'px;height:' + sz + 'px;--dx:' + dx + 'px;animation-duration:' + dur + 's;animation-delay:-' + (Math.random()*dur).toFixed(1) + 's;opacity:' + (Math.random()*.5 + .35).toFixed(2) + '"></span>';
+  }
+  f.innerHTML = html;
+})();
+// Parallaxe : les boules suivent doucement la souris
+(function(){
+  var orbs = document.querySelector('.orbs');
+  if(!orbs) return;
+  var tx = 0, ty = 0, cx = 0, cy = 0, raf = 0;
+  function loop(){
+    cx += (tx - cx) * .06; cy += (ty - cy) * .06;
+    orbs.style.transform = 'translate(' + cx.toFixed(2) + 'px,' + cy.toFixed(2) + 'px)';
+    if(Math.abs(tx - cx) > .1 || Math.abs(ty - cy) > .1){ raf = requestAnimationFrame(loop); } else { raf = 0; }
+  }
+  window.addEventListener('mousemove', function(e){
+    tx = (e.clientX / window.innerWidth - .5) * 46;
+    ty = (e.clientY / window.innerHeight - .5) * 46;
+    if(!raf) raf = requestAnimationFrame(loop);
+  }, {passive:true});
 })();
 </script>
 </body></html>
