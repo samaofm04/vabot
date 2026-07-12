@@ -233,61 +233,91 @@ def _env_api_key() -> str:
     return ""
 
 
-def _transcribe_veille_async(vkey):
-    """Lit le texte incrusté de la veille en arrière-plan (thread dédié)."""
-    if not _env_api_key():
-        return
-    threading.Thread(target=_transcribe_veille, args=(vkey,), daemon=True).start()
-
-
-def _ocr_file_id(file_id: str, tag: str = "") -> str:
-    """Lit le texte incrusté d'une vidéo (file_id Telegram) via IA vision.
-    Retourne le texte, "" si aucun/erreur. Synchrone (~qq secondes)."""
-    if not (_env_api_key() and file_id):
-        return ""
-    token = _token()
-    tmpdir = DATA_DIR / "tg_tmp"
-    vid = tmpdir / f"ocr_{abs(hash(file_id)) % 10**8}.mp4"
+def _tesseract_available() -> bool:
     try:
-        gf = _api("getFile", {"file_id": file_id})
-        if not gf.get("ok"):
-            _trace(f"ocr: getFile KO ({gf.get('description', '?')})")
-            return ""
-        fp = (gf.get("result") or {}).get("file_path")
-        if not fp:
-            return ""
-        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=90)
-        if r.status_code != 200:
-            return ""
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        vid.write_bytes(r.content)
-        frames = []
-        for ts in ("0.4", "1.5", "2.8"):
-            out = tmpdir / f"fr_{abs(hash(file_id)) % 10**8}_{ts.replace('.', '_')}.jpg"
+        import pytesseract  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _ocr_ready() -> bool:
+    """Un moteur OCR est dispo : IA (payant, clé) OU Tesseract (gratuit, local)."""
+    return bool(_env_api_key()) or _tesseract_available()
+
+
+def _clean_ocr(txt: str) -> str:
+    """Nettoie une sortie OCR brute : garde les lignes qui ont >=3 lettres,
+    recolle en une phrase, compresse les espaces."""
+    keep = []
+    for line in (txt or "").splitlines():
+        s = line.strip()
+        if sum(c.isalpha() for c in s) >= 3:
+            keep.append(s)
+    return re.sub(r"\s+", " ", " ".join(keep)).strip()
+
+
+def _preprocess_for_ocr(src, dst):
+    """Prépare une frame pour Tesseract : gris, upscale x2, contraste, binarise
+    (le texte incrusté est clair -> seuil haut) pour bien détacher le texte."""
+    from PIL import Image, ImageOps, ImageEnhance
+    im = Image.open(src).convert("L")
+    w, h = im.size
+    im = im.resize((w * 2, h * 2), Image.LANCZOS)
+    im = ImageEnhance.Contrast(im).enhance(2.2)
+    im = ImageOps.autocontrast(im, cutoff=2)
+    im = im.point(lambda p: 255 if p > 165 else 0)
+    im.save(dst)
+
+
+def _ocr_tesseract(frame_paths, tag: str = "") -> str:
+    """OCR GRATUIT hors-ligne (Tesseract, français) — aucune API, 0€.
+    Garde, parmi les frames, le résultat le plus long (souvent le bon)."""
+    try:
+        import pytesseract
+    except Exception:
+        return ""
+    best = ""
+    for fp in frame_paths:
+        pre = str(fp) + ".pre.png"
+        try:
+            _preprocess_for_ocr(fp, pre)
+            raw = pytesseract.image_to_string(pre, lang="fra", config="--psm 6")
+            txt = _clean_ocr(raw)
+            if len(txt) > len(best):
+                best = txt
+        except Exception:
+            pass
+        finally:
             try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
-                     "-vf", "scale=540:-2", "-q:v", "5", str(out)],
-                    capture_output=True, timeout=30)
-                if out.exists() and out.stat().st_size > 1000:
-                    frames.append(base64.b64encode(out.read_bytes()).decode())
+                Path(pre).unlink()
             except Exception:
                 pass
-            finally:
-                try:
-                    out.unlink()
-                except Exception:
-                    pass
-        if not frames:
-            _trace("ocr: extraction frames échouée (ffmpeg ?)")
-            return ""
-        content = [{"type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": f}}
-                   for f in frames]
-        content.append({"type": "text", "text": _OCR_PROMPT})
+    if best:
+        _trace(f"✍️ texte lu (gratuit/Tesseract) {tag}: {best[:45]}…")
+    return best[:300]
+
+
+def _ocr_claude(frame_paths, tag: str = "") -> str:
+    """OCR IA (payant) — meilleure qualité si une clé ANTHROPIC est configurée."""
+    key = _env_api_key()
+    if not key:
+        return ""
+    content = []
+    for fp in frame_paths[:3]:  # 3 frames max (coût)
+        try:
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": "image/jpeg",
+                "data": base64.b64encode(Path(fp).read_bytes()).decode()}})
+        except Exception:
+            pass
+    if not content:
+        return ""
+    content.append({"type": "text", "text": _OCR_PROMPT})
+    try:
         rr = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": _env_api_key(), "anthropic-version": "2023-06-01",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
             json={"model": "claude-haiku-4-5", "max_tokens": 300,
                   "messages": [{"role": "user", "content": content}]},
@@ -298,80 +328,107 @@ def _ocr_file_id(file_id: str, tag: str = "") -> str:
             return ""
         text = "".join(b.get("text", "") for b in (data.get("content") or [])).strip()
         if text and not text.upper().startswith("AUCUN"):
-            _trace(f"✍️ texte lu {tag}: {text[:45]}…")
+            _trace(f"✍️ texte lu (IA) {tag}: {text[:45]}…")
             return text[:300]
-        return ""
     except Exception as e:
-        _trace(f"ocr: {e}")
-        return ""
-    finally:
+        _trace(f"ocr IA: {e}")
+    return ""
+
+
+def _run_ocr(frame_paths, tag: str = "") -> str:
+    """Lit le texte incrusté : IA si clé configurée (meilleure qualité), sinon
+    Tesseract (gratuit). '' si rien trouvé."""
+    if _env_api_key():
+        t = _ocr_claude(frame_paths, tag)
+        if t:
+            return t
+    return _ocr_tesseract(frame_paths, tag)
+
+
+def _extract_frames(file_id, tag: str = "", slug: str = ""):
+    """Télécharge la vidéo (file_id Telegram) et extrait des frames JPEG sur
+    disque (4 instants des ~3 premières s). Retourne (list[Path], Path video)
+    — nettoyer via _cleanup_frames(). ([], None) si échec."""
+    token = _token()
+    tmpdir = DATA_DIR / "tg_tmp"
+    slug = slug or str(abs(hash(file_id)) % 10**8)
+    vid = tmpdir / f"ocr_{slug}.mp4"
+    try:
+        gf = _api("getFile", {"file_id": file_id})
+        if not gf.get("ok"):
+            _trace(f"ocr: getFile KO ({gf.get('description', '?')})")
+            return [], None
+        fp = (gf.get("result") or {}).get("file_path")
+        if not fp:
+            return [], None
+        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=90)
+        if r.status_code != 200:
+            return [], None
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        vid.write_bytes(r.content)
+        frames = []
+        for ts in ("0.4", "1.2", "2.0", "2.8"):
+            out = tmpdir / f"fr_{slug}_{ts.replace('.', '_')}.jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
+                     "-vf", "scale=640:-2", "-q:v", "3", str(out)],
+                    capture_output=True, timeout=30)
+                if out.exists() and out.stat().st_size > 1000:
+                    frames.append(out)
+            except Exception:
+                pass
+        if not frames:
+            _trace("ocr: extraction frames échouée (ffmpeg ?)")
+        return frames, vid
+    except Exception as e:
+        _trace(f"ocr extract: {e}")
+        return [], vid
+
+
+def _cleanup_frames(frames, vid):
+    for f in (frames or []):
         try:
-            vid.unlink()
+            Path(f).unlink()
         except Exception:
             pass
+    try:
+        if vid:
+            Path(vid).unlink()
+    except Exception:
+        pass
+
+
+def _transcribe_veille_async(vkey):
+    """Lit le texte incrusté de la veille en arrière-plan (thread dédié).
+    Marche avec l'IA (clé) OU gratuitement avec Tesseract."""
+    if not _ocr_ready():
+        return
+    threading.Thread(target=_transcribe_veille, args=(vkey,), daemon=True).start()
+
+
+def _ocr_file_id(file_id: str, tag: str = "") -> str:
+    """Lit le texte incrusté d'une vidéo (file_id Telegram). IA si clé, sinon
+    Tesseract (gratuit). Retourne le texte, "" si aucun/erreur. Synchrone."""
+    if not (file_id and _ocr_ready()):
+        return ""
+    frames, vid = _extract_frames(file_id, tag)
+    try:
+        return _run_ocr(frames, tag) if frames else ""
+    finally:
+        _cleanup_frames(frames, vid)
 
 
 def _transcribe_veille(vkey):
     v = _VEILLES.get(vkey)
     if not v or v.get("overlay") is not None:
         return
-    token = _token()
-    tmpdir = DATA_DIR / "tg_tmp"
-    vid = tmpdir / f"v_{vkey[1]}.mp4"
+    frames, vid = _extract_frames(v["file_id"], tag=f"({v.get('model')})", slug=f"v_{vkey[1]}")
     try:
-        gf = _api("getFile", {"file_id": v["file_id"]})
-        if not gf.get("ok"):
-            _trace(f"transcription: getFile KO ({gf.get('description', '?')})")
-            return
-        fp = (gf.get("result") or {}).get("file_path")
-        if not fp:
-            return
-        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=90)
-        if r.status_code != 200:
-            return
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        vid.write_bytes(r.content)
-        frames = []
-        for ts in ("0.4", "1.5", "2.8"):
-            out = tmpdir / f"f_{vkey[1]}_{ts.replace('.', '_')}.jpg"
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-ss", ts, "-i", str(vid), "-frames:v", "1",
-                     "-vf", "scale=540:-2", "-q:v", "5", str(out)],
-                    capture_output=True, timeout=30)
-                if out.exists() and out.stat().st_size > 1000:
-                    frames.append(base64.b64encode(out.read_bytes()).decode())
-            except Exception:
-                pass
-            finally:
-                try:
-                    out.unlink()
-                except Exception:
-                    pass
         if not frames:
-            _trace("transcription: extraction frames échouée (ffmpeg ?)")
             return
-        content = [{"type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": f}}
-                   for f in frames]
-        content.append({"type": "text", "text": _OCR_PROMPT})
-        rr = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": _env_api_key(), "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5", "max_tokens": 300,
-                  "messages": [{"role": "user", "content": content}]},
-            timeout=60)
-        data = rr.json()
-        if rr.status_code != 200:
-            _trace(f"transcription: API {(data.get('error') or {}).get('message', '?')}")
-            return
-        text = "".join(b.get("text", "") for b in (data.get("content") or [])).strip()
-        if not text or text.upper().startswith("AUCUN"):
-            v["overlay"] = ""   # analysé : pas de texte incrusté
-        else:
-            v["overlay"] = text[:300]
-            _trace(f"✍️ texte lu sur la vidéo ({v.get('model')}) : {text[:45]}…")
+        text = _run_ocr(frames, tag=f"({v.get('model')})")
+        v["overlay"] = text[:300] if text else ""  # "" = analysé, pas de texte
         _cache_save()
         # met à jour le message « en attente » avec le texte lu
         cfg = _load()
@@ -379,10 +436,7 @@ def _transcribe_veille(vkey):
     except Exception as e:
         _trace(f"transcription: {e}")
     finally:
-        try:
-            vid.unlink()
-        except Exception:
-            pass
+        _cleanup_frames(frames, vid)
 
 
 def bound_models() -> dict:
@@ -538,8 +592,12 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
     elif cmd == "/routerdebug":
         ev = "\n".join(EVENTS[-12:]) or "(aucun événement depuis le démarrage)"
-        ocr_on = "✅ clé IA présente (lecture du texte sur la vidéo active)" if _env_api_key() \
-            else "❌ PAS de clé IA (ANTHROPIC_API_KEY manquante dans le .env du VPS) → le texte incrusté ne peut PAS être lu"
+        if _env_api_key():
+            ocr_on = "✅ IA (clé ANTHROPIC) — lecture du texte incrusté, qualité max"
+        elif _tesseract_available():
+            ocr_on = "✅ GRATUIT (Tesseract local) — lecture du texte incrusté sans payer"
+        else:
+            ocr_on = "❌ aucun OCR (ni clé IA, ni Tesseract) → texte incrusté non lu"
         _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}\n\n🤖 OCR : {ocr_on}"
                + (f"\n\n⚠️ Erreur : {STATUS.get('error')}" if STATUS.get("error") else ""),
                thread_id)
