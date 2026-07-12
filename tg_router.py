@@ -212,10 +212,19 @@ def _veille_caption(v: dict) -> str:
 _OCR_PROMPT = (
     "Ces images sont des frames des premières secondes d'un reel Instagram. "
     "Retranscris EXACTEMENT le texte incrusté sur la vidéo (la caption ajoutée "
-    "par l'auteur), AVEC ses emojis. Conserve les RETOURS À LA LIGNE exactement "
-    "comme affichés (une ligne du texte = une ligne dans ta réponse). Ignore les "
-    "éléments d'interface, watermarks, usernames et sous-titres automatiques. "
-    "Réponds UNIQUEMENT avec le texte retranscrit, sans guillemets ni commentaire. "
+    "par l'auteur), AVEC ses emojis.\n"
+    "RÈGLE ABSOLUE sur la mise en forme : reproduis EXACTEMENT les sauts de ligne "
+    "visibles à l'écran. Mets un vrai retour à la ligne à CHAQUE endroit où le "
+    "texte passe à la ligne suivante sur la vidéo. NE recolle JAMAIS plusieurs "
+    "lignes en une seule phrase — même si ça coupe une phrase au milieu.\n"
+    "Exemple : si l'écran affiche ces 3 lignes :\n"
+    "Lui : « Je suis marié avec\n"
+    "3 enfants faut qu'on arrête\n"
+    "de se voir »\n"
+    "alors ta réponse doit contenir EXACTEMENT ces 3 lignes séparées, pas une seule.\n"
+    "Ignore les éléments d'interface, watermarks, usernames et sous-titres "
+    "automatiques. Réponds UNIQUEMENT avec le texte retranscrit (avec ses retours "
+    "à la ligne), sans commentaire. "
     "S'il n'y a AUCUN texte incrusté, réponds exactement : AUCUN"
 )
 
