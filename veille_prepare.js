@@ -81,12 +81,24 @@
 
   function analyze(second) {
     var st = el('vprep-ocr-status'); var b1 = el('vprep-ocr'); var b2 = el('vprep-ocr-sec');
-    st.textContent = '⏳ lecture de la vidéo…'; st.style.color = '#77778a';
+    st.textContent = '⏳ téléchargement + lecture de la vidéo… (jusqu\'à ~30 s la 1re fois)';
+    st.style.color = '#77778a';
     b1.disabled = b2.disabled = true;
     var fd = new FormData(); fd.set('reel_id', S.rid);
     if (second !== '' && second != null) fd.set('second', second);
-    fetch('/veille/analyze', { method: 'POST', body: fd }).then(function (r) { return r.json(); })
+    // timeout dur : si le serveur rame (lien IG à re-résoudre), on ne reste pas bloqué
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var killed = false;
+    var to = setTimeout(function () {
+      killed = true; if (ctrl) ctrl.abort();
+      b1.disabled = b2.disabled = false;
+      st.textContent = '⚠️ trop long (lien Instagram expiré ?) — réessaie, ou tape le texte à la main';
+      st.style.color = '#f87171';
+    }, 75000);
+    fetch('/veille/analyze', { method: 'POST', body: fd, signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return r.json(); })
       .then(function (j) {
+        clearTimeout(to); if (killed) return;
         b1.disabled = b2.disabled = false;
         if (!j.ok) { st.textContent = '⚠️ ' + (j.error || 'échec'); st.style.color = '#f87171'; return; }
         if (j.text) {
@@ -94,13 +106,17 @@
           st.innerHTML = '✅ lu (' + (j.engine === 'ia' ? 'IA' : 'gratuit') + ') — vérifie/corrige';
           st.style.color = '#4ade80';
         } else {
-          st.textContent = 'ℹ️ aucun texte détecté — tape-le à la main ou change de seconde';
+          st.textContent = 'ℹ️ aucun texte net détecté — tape-le à la main ou change de seconde';
           st.style.color = '#facc15';
         }
         if (j.description && !el('vprep-desc').value.trim()) el('vprep-desc').value = j.description;
         preview();
       })
-      .catch(function (e) { b1.disabled = b2.disabled = false; st.textContent = '⚠️ ' + e; st.style.color = '#f87171'; });
+      .catch(function (e) {
+        clearTimeout(to); if (killed) return;
+        b1.disabled = b2.disabled = false;
+        st.textContent = '⚠️ ' + e; st.style.color = '#f87171';
+      });
   }
 
   function loadModels() {

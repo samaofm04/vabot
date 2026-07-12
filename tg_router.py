@@ -257,42 +257,75 @@ def _clean_ocr(txt: str) -> str:
     return re.sub(r"\s+", " ", " ".join(keep)).strip()
 
 
-def _preprocess_for_ocr(src, dst):
-    """Prépare une frame pour Tesseract : gris, upscale x2, contraste, binarise
-    (le texte incrusté est clair -> seuil haut) pour bien détacher le texte."""
-    from PIL import Image, ImageOps, ImageEnhance
-    im = Image.open(src).convert("L")
-    w, h = im.size
-    im = im.resize((w * 2, h * 2), Image.LANCZOS)
-    im = ImageEnhance.Contrast(im).enhance(2.2)
-    im = ImageOps.autocontrast(im, cutoff=2)
-    im = im.point(lambda p: 255 if p > 165 else 0)
-    im.save(dst)
+def _preprocess_variants(src):
+    """Plusieurs versions préparées d'une frame pour Tesseract, en NOIR sur BLANC
+    (ce que Tesseract lit le mieux — le texte incrusté est clair, donc on binarise
+    PUIS on inverse). Plusieurs seuils + une variante autocontrast : on tentera
+    toutes et on gardera la meilleure. Upscale x3 = lettres plus grosses."""
+    from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+    base = Image.open(src).convert("L")
+    w, h = base.size
+    scale = 3 if max(w, h) < 950 else 2
+    base = base.resize((w * scale, h * scale), Image.LANCZOS)
+    base = base.filter(ImageFilter.SHARPEN)
+    base = ImageEnhance.Contrast(base).enhance(1.7)
+    out = []
+    for thr in (140, 175, 205):
+        b = base.point(lambda p, t=thr: 255 if p > t else 0)  # texte clair -> blanc
+        out.append(ImageOps.invert(b))                        # -> texte NOIR sur BLANC
+    out.append(ImageOps.invert(ImageOps.autocontrast(base, cutoff=1)))
+    return out
+
+
+def _score_ocr(txt: str) -> int:
+    """Nb de mots plausibles (>=2 lettres) — pour choisir la meilleure variante."""
+    return len([w for w in re.split(r"\s+", txt or "")
+                if len(re.sub(r"[^A-Za-zÀ-ÿ]", "", w)) >= 2])
 
 
 def _ocr_tesseract(frame_paths, tag: str = "") -> str:
     """OCR GRATUIT hors-ligne (Tesseract, français) — aucune API, 0€.
-    Garde, parmi les frames, le résultat le plus long (souvent le bon)."""
+    Pour CHAQUE frame teste plusieurs pré-traitements (noir/blanc, seuils) en
+    parallèle et garde le résultat au meilleur SCORE (le plus de vrais mots)."""
     try:
         import pytesseract
     except Exception:
         return ""
-    best = ""
+    from concurrent.futures import ThreadPoolExecutor
+    jobs = []
     for fp in frame_paths:
-        pre = str(fp) + ".pre.png"
         try:
-            _preprocess_for_ocr(fp, pre)
+            variants = _preprocess_variants(fp)
+        except Exception:
+            continue
+        for vi, im in enumerate(variants):
+            pre = str(fp) + f".v{vi}.png"
+            try:
+                im.save(pre)
+                jobs.append(pre)
+            except Exception:
+                pass
+    if not jobs:
+        return ""
+
+    def _one(pre):
+        try:
             raw = pytesseract.image_to_string(pre, lang="fra", config="--psm 6")
             txt = _clean_ocr(raw)
-            if len(txt) > len(best):
-                best = txt
+            return (_score_ocr(txt), txt)
         except Exception:
-            pass
+            return (-1, "")
         finally:
             try:
                 Path(pre).unlink()
             except Exception:
                 pass
+
+    best, best_sc = "", -1
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for sc, txt in ex.map(_one, jobs):
+            if sc > best_sc:
+                best_sc, best = sc, txt
     if best:
         _trace(f"✍️ texte lu (gratuit/Tesseract) {tag}: {best[:45]}…")
     return best[:300]
