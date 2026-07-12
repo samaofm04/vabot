@@ -29954,18 +29954,60 @@ def create_app():
                     vurl = vurl2
             except Exception:
                 pass
-        # 3) dernier recours : le file_id Telegram (download, mais fiable)
+        # 3) le file_id Telegram (download, mais fiable) — si le reel a déjà été envoyé
         if not (res and res.get("ok")):
             fid = (reel.get("tg_file_id") or "").strip()
             if fid:
                 vb = tg_router.download_file_bytes(fid)
                 if vb:
                     res = tg_router.ocr_video_bytes(vb, second=second)
+        # 4) LE PLUS FIABLE : yt-dlp depuis le permalink (cookies IG) -> fichier
+        #    local -> OCR complet (garde les modes « toute la vidéo » / « jusqu'ici »).
+        #    C'est la même méthode que l'ENVOI : marche même quand l'URL CDN a expiré.
+        #    On GARDE le fichier en cache -> le lecteur du modal le lit via /veille/reelvideo.
+        proxy_url = ""
+        if not (res and res.get("ok")):
+            try:
+                vb = veille_telegram.download_via_ytdlp(reel.get("url", ""))
+                if vb:
+                    cdir = DATA_DIR / "tg_tmp"
+                    cdir.mkdir(parents=True, exist_ok=True)
+                    # purge best-effort des vidéos de cache > 2 h
+                    try:
+                        import time as _t
+                        for _f in cdir.glob("reelvid_*.mp4"):
+                            if _t.time() - _f.stat().st_mtime > 7200:
+                                _f.unlink()
+                    except Exception:
+                        pass
+                    cpath = cdir / f"reelvid_{rid}.mp4"
+                    cpath.write_bytes(vb)
+                    res = tg_router.ocr_video_url(str(cpath), second=second, headers=None, full=full, end=end)
+                    proxy_url = f"/veille/reelvideo?reel_id={rid}"
+            except Exception:
+                pass
         if not (res and res.get("ok")):
             return jsonify({"ok": False, "error": (res or {}).get("error") or "Vidéo illisible (lien Instagram expiré ?)"})
         res["description"] = (veille.get_reel(rid) or {}).get("caption") or ""
-        res["video_url"] = vurl  # pour le lecteur vidéo dans le modal
+        # lecteur du modal : URL fraîche si on l'a, sinon le proxy (vidéo yt-dlp en cache)
+        res["video_url"] = proxy_url or vurl
         return jsonify(res)
+
+    @app.route("/veille/reelvideo")
+    def veille_reelvideo():
+        """Sert la vidéo d'un reel mise en cache par l'analyse yt-dlp (quand l'URL
+        Instagram a expiré) — pour que le lecteur du modal marche quand même."""
+        if not is_auth():
+            return "", 401
+        from flask import send_file
+        rid = (request.args.get("reel_id") or "").strip()
+        # rid = shortcode alphanumérique -> pas de traversée de chemin
+        if not rid or not re.match(r"^[A-Za-z0-9_-]+$", rid):
+            return "", 404
+        p = DATA_DIR / "tg_tmp" / f"reelvid_{rid}.mp4"
+        if not p.exists():
+            return "", 404
+        return send_file(str(p), mimetype="video/mp4", conditional=True)
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
