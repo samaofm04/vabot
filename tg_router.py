@@ -375,19 +375,19 @@ _OCR_ENGINE_USED = ""
 
 def _run_ocr(frame_paths, tag: str = "") -> str:
     """Lit le texte incrusté, par ordre de préférence :
-    1) Gemini (GRATUIT + lit les emojis/texte stylé) si GEMINI_API_KEY
-    2) IA Anthropic (payant) si ANTHROPIC_API_KEY
+    1) Claude (Anthropic) si ANTHROPIC_API_KEY — lit emojis + texte stylé, fiable
+    2) Gemini (Google, gratuit) si GEMINI_API_KEY
     3) Tesseract (gratuit local, mais pas les emojis). '' si rien."""
     global _OCR_ENGINE_USED
-    if _env_gemini_key():
-        t = _ocr_gemini(frame_paths, tag)
-        if t:
-            _OCR_ENGINE_USED = "gemini"
-            return t
     if _env_api_key():
         t = _ocr_claude(frame_paths, tag)
         if t:
             _OCR_ENGINE_USED = "ia"
+            return t
+    if _env_gemini_key():
+        t = _ocr_gemini(frame_paths, tag)
+        if t:
+            _OCR_ENGINE_USED = "gemini"
             return t
     t = _ocr_tesseract(frame_paths, tag)
     _OCR_ENGINE_USED = "tesseract"
@@ -538,21 +538,28 @@ def ocr_video_url(video_url, second=None, headers=None) -> dict:
     if not frames:
         return {"ok": False, "text": "", "error": "frames non extraites (URL expirée ?)"}
     try:
+        anth_key = bool(_env_api_key())
         gem_key = bool(_env_gemini_key())
         gem_err = ""
-        if gem_key:
-            text = _ocr_gemini(frames, "site")
-            engine = "gemini"
-            if not text:
-                # Gemini KO (quota/clé) -> on remonte la raison ET on tente
-                # Tesseract en secours pour ne pas rester totalement vide.
-                gem_err = _GEMINI_LAST_ERR
-                t2 = _ocr_tesseract(frames, "site")
-                if t2:
-                    text, engine = t2, "tesseract"
-        else:
-            text = _ocr_tesseract(frames, "site")
-            engine = "tesseract"
+        text = ""
+        engine = "tesseract"
+        # 1) PRIORITÉ Claude (Anthropic) — lit emojis + texte stylé
+        if anth_key:
+            text = _ocr_claude(frames, "site")
+            if text:
+                engine = "ia"
+        # 2) Gemini si pas de Claude (ou Claude vide)
+        if not text and gem_key:
+            g = _ocr_gemini(frames, "site")
+            if g:
+                text, engine = g, "gemini"
+            else:
+                gem_err = _GEMINI_LAST_ERR  # ex: 429 quota
+        # 3) Tesseract en dernier recours
+        if not text:
+            t2 = _ocr_tesseract(frames, "site")
+            if t2:
+                text, engine = t2, "tesseract"
         fb = ""
         try:
             fb = base64.b64encode(Path(frames[0]).read_bytes()).decode()
@@ -845,10 +852,10 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
     elif cmd == "/routerdebug":
         ev = "\n".join(EVENTS[-12:]) or "(aucun événement depuis le démarrage)"
-        if _env_gemini_key():
-            ocr_on = "✅ GEMINI (Google, gratuit) — lit le texte stylé ET les emojis 🎯"
-        elif _env_api_key():
-            ocr_on = "✅ IA Anthropic (clé) — lecture du texte incrusté, qualité max"
+        if _env_api_key():
+            ocr_on = "✅ CLAUDE (Anthropic) — lit le texte stylé ET les emojis, qualité max 🎯"
+        elif _env_gemini_key():
+            ocr_on = "✅ GEMINI (Google, gratuit) — lit le texte stylé ET les emojis"
         elif _tesseract_available():
             ocr_on = "✅ GRATUIT (Tesseract local) — texte net OK, mais PAS les emojis"
         else:
