@@ -1264,9 +1264,38 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
 .stat .v{font-size:28px;font-weight:700;color:#3b82f6}
 .stat .l{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.5px}
-@media(max-width:768px){
+/* Contrôles mobile (bouton menu + fond) — cachés en desktop, montrés en <=820px */
+.mnav-btn,.mnav-backdrop{display:none}
+@media(max-width:820px){
+  /* ---- Shell : sidebar en TIROIR coulissant + contenu plein écran ---- */
   .layout{flex-direction:column}
-  .sidebar{width:100%;border-right:0;border-bottom:1px solid #2a2a2a}
+  .sidebar{position:fixed;top:0;left:0;bottom:0;width:84vw!important;max-width:310px;
+    z-index:9500;transform:translateX(-100%);
+    transition:transform .28s cubic-bezier(.16,1,.3,1);
+    overflow-y:auto;overflow-x:hidden;border-right:1px solid #1a1a1a;border-bottom:0!important;
+    box-shadow:8px 0 44px rgba(0,0,0,.55);padding-top:58px}
+  html.mnav-open .sidebar{transform:none}
+  /* le mode "rail" (réduit) ne s'applique pas sur mobile : on garde le tiroir large */
+  html.rail .sidebar{width:84vw!important}
+  html.rail .sidebar .solo-item,html.rail .sidebar .logout-btn,html.rail .rail-toggle,
+  html.rail .sidebar .group-head,html.rail .sidebar .item,html.rail .sidebar .section-label{
+    font-size:14px!important;gap:12px!important;justify-content:flex-start!important;padding:11px 14px!important}
+  .main{padding:62px 14px 28px!important;overflow-x:hidden}
+  /* Bouton hamburger fixe (ouvre/ferme le tiroir) */
+  .mnav-btn{display:flex;position:fixed;top:10px;left:10px;z-index:9600;width:42px;height:42px;
+    align-items:center;justify-content:center;background:rgba(18,18,22,.94);border:1px solid #2a2a2a;
+    border-radius:11px;color:#fff;cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  body.light .mnav-btn{background:rgba(255,255,255,.94);border-color:#e5e7eb;color:#111827}
+  html.mnav-open .mnav-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9400}
+  /* ---- Contenu : grilles denses -> moins de colonnes, tableaux scrollables ---- */
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .main table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+  .main h1{font-size:22px}
+  .main h2{font-size:18px}
+}
+@media(max-width:480px){
+  .stat-grid{grid-template-columns:1fr}
+  .main{padding:60px 10px 24px!important}
 }
 
 /* =========================================================================
@@ -3467,6 +3496,19 @@ window.upClearPrefill = function(utab){
 <!-- Page loader global (affiché pendant la navigation) -->
 <div id="page-loader"><div class="pl-ring"></div></div>
 <div class="layout">
+<!-- MOBILE : bouton hamburger + fond (n'apparaissent qu'en <=820px via CSS) -->
+<button class="mnav-btn" onclick="toggleMnav()" aria-label="Menu">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+</button>
+<div class="mnav-backdrop" onclick="toggleMnav()"></div>
+<script>
+function toggleMnav(){document.documentElement.classList.toggle('mnav-open');}
+/* fermer le tiroir quand on clique un vrai lien de nav (pas un groupe pliable) */
+document.addEventListener('click',function(e){
+  if(e.target.closest && e.target.closest('.sidebar a,.sidebar .solo-item,.sidebar .item,.sidebar .logout-btn'))
+    document.documentElement.classList.remove('mnav-open');
+});
+</script>
 <!-- SIDEBAR : groupes pliables avec flèches -->
 <div class="sidebar">
 

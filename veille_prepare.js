@@ -43,11 +43,15 @@
     ov.id = 'vprep-modal';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,4,10,.78);z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(6px)';
     ov.innerHTML =
-      '<div style="background:#0f1117;border:1px solid #232838;border-radius:18px;width:100%;max-width:900px;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 40px 100px rgba(0,0,0,.7);overflow:hidden;animation:vprepIn .25s cubic-bezier(.16,1,.3,1)">' +
+      '<div class="vp-card" style="background:#0f1117;border:1px solid #232838;border-radius:18px;width:100%;max-width:900px;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 40px 100px rgba(0,0,0,.7);overflow:hidden;animation:vprepIn .25s cubic-bezier(.16,1,.3,1)">' +
       '<style>@keyframes vprepIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}' +
       '.vp-chip{transition:all .12s}.vp-chip:hover{border-color:#3b82f6!important}' +
       '#vprep-modal textarea:focus,#vprep-modal input:focus{border-color:#3b82f6}' +
-      '.vp-abtn:hover{filter:brightness(1.12)}.vp-abtn:disabled{opacity:.5;cursor:wait}</style>' +
+      '.vp-abtn:hover{filter:brightness(1.12)}.vp-abtn:disabled{opacity:.5;cursor:wait}' +
+      '@media(max-width:820px){#vprep-modal{padding:0!important}' +
+      '.vp-card{max-width:100%!important;width:100%!important;height:100%;max-height:100%!important;border-radius:0!important}' +
+      '.vp-body{flex-direction:column!important;overflow-y:auto!important}' +
+      '.vp-colL{width:100%!important;border-right:0!important;border-bottom:1px solid #1d2230}}</style>' +
 
       // ── Header ──
       '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #1d2230;flex-shrink:0">' +
@@ -58,10 +62,10 @@
       '</div>' +
 
       // ── Corps 2 colonnes ──
-      '<div style="display:flex;gap:0;flex:1;min-height:0;overflow:hidden">' +
+      '<div class="vp-body" style="display:flex;gap:0;flex:1;min-height:0;overflow:hidden">' +
 
       // Colonne gauche : vidéo
-      '<div style="width:300px;flex-shrink:0;padding:16px;border-right:1px solid #1d2230;overflow-y:auto;background:#0c0e15">' +
+      '<div class="vp-colL" style="width:300px;flex-shrink:0;padding:16px;border-right:1px solid #1d2230;overflow-y:auto;background:#0c0e15">' +
       '<div style="' + SECTION + '">Vidéo</div>' +
       '<div id="vprep-video-wrap"><div style="height:170px;border:1px dashed #262b3a;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#5a6178;font-size:11.5px">⏳ chargement du lecteur…</div></div>' +
       '<button id="vprep-upto" class="vp-abtn" disabled style="width:100%;margin-top:10px;padding:10px 12px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);border:0;color:#fff;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">' +
