@@ -523,9 +523,11 @@ def download_file_bytes(file_id: str):
         return None
 
 
-def _download_fid_to(file_id: str, path) -> bool:
-    """Télécharge un file_id Telegram sur DISQUE. False si trop gros (>20 Mo,
-    limite getFile de l'API bot) ou erreur réseau."""
+def _download_fid_to(file_id: str, path, deadline: float = 45) -> bool:
+    """Télécharge un file_id Telegram sur DISQUE, en STREAMING avec une limite de
+    temps DURE (`deadline` s). False si trop gros (>20 Mo, limite getFile), trop
+    lent (dépasse deadline) ou erreur réseau. Retourne aussi le nb d'octets via
+    l'attribut path (on lit path.stat après)."""
     token = _token()
     if not (file_id and token):
         return False
@@ -533,16 +535,40 @@ def _download_fid_to(file_id: str, path) -> bool:
         gf = _api("getFile", {"file_id": file_id})
         if not gf.get("ok"):
             return False
-        fp = (gf.get("result") or {}).get("file_path")
+        r = (gf.get("result") or {})
+        fp = r.get("file_path")
         if not fp:
             return False
-        r = requests.get(f"{TG}/file/bot{token}/{fp}", timeout=120)
-        if r.status_code != 200:
+        sz = r.get("file_size") or 0
+        if sz and sz > 20 * 1024 * 1024:   # >20 Mo : inutile d'essayer
             return False
-        path.write_bytes(r.content)
+        t0 = time.time()
+        with requests.get(f"{TG}/file/bot{token}/{fp}",
+                          timeout=(10, 30), stream=True) as resp:
+            if resp.status_code != 200:
+                return False
+            with open(path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=262144):
+                    if chunk:
+                        fh.write(chunk)
+                    if time.time() - t0 > deadline:
+                        _trace(f"swap son: download > {deadline:.0f}s -> abandon")
+                        return False
         return path.stat().st_size > 0
     except Exception:
         return False
+
+
+def _probe_duration(path) -> float:
+    """Durée (s) d'un fichier local via ffprobe. 0.0 si inconnu."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nk=1:nw=1", str(path)],
+            capture_output=True, text=True, timeout=15)
+        return float((r.stdout or "").strip())
+    except Exception:
+        return 0.0
 
 
 def _swap_audio(video_fid: str, audio_fid: str, slug: str):
@@ -557,19 +583,29 @@ def _swap_audio(video_fid: str, audio_fid: str, slug: str):
     vsrc = tmpdir / f"swap_v_{slug}.mp4"
     asrc = tmpdir / f"swap_a_{slug}.mp4"
     out = tmpdir / f"swap_out_{slug}.mp4"
+    t0 = time.time()
     try:
         if not _download_fid_to(video_fid, vsrc):
-            _trace("swap son: brute non téléchargeable (>20 Mo ?)")
+            _trace("swap son: brute non téléchargeable (>20 Mo / trop lent)")
             return None
         if not _download_fid_to(audio_fid, asrc):
-            _trace("swap son: exemple non téléchargeable (>20 Mo ?)")
+            _trace("swap son: exemple non téléchargeable (>20 Mo / trop lent)")
             return None
+        t_dl = time.time() - t0
+        # BORNE ffmpeg à la durée de la brute -> il ne peut JAMAIS boucler l'audio
+        # à l'infini ni se bloquer.
+        vdur = _probe_duration(vsrc)
         cmd = ["ffmpeg", "-y", "-i", str(vsrc),
                "-stream_loop", "-1", "-i", str(asrc),
                "-map", "0:v:0", "-map", "1:a:0",
-               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-               "-shortest", "-movflags", "+faststart", str(out)]
-        p = subprocess.run(cmd, capture_output=True, timeout=180)
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+               "-shortest", "-movflags", "+faststart"]
+        if vdur and vdur > 0:
+            cmd += ["-t", f"{min(vdur, 180):.2f}"]
+        cmd.append(str(out))
+        tf = time.time()
+        p = subprocess.run(cmd, capture_output=True, timeout=45)
+        t_ff = time.time() - tf
         if p.returncode != 0 or not out.exists() or out.stat().st_size < 1000:
             err = (p.stderr[-200:] if p.stderr else b"").decode("utf-8", "ignore")
             _trace(f"swap son: ffmpeg KO ({err})")
@@ -578,6 +614,8 @@ def _swap_audio(video_fid: str, audio_fid: str, slug: str):
             except Exception:
                 pass
             return None
+        mb = out.stat().st_size / 1024 / 1024
+        _trace(f"swap son prêt: dl {t_dl:.0f}s + ffmpeg {t_ff:.0f}s -> {mb:.1f} Mo")
         return out
     except Exception as e:
         _trace(f"swap son: {e}")
@@ -590,9 +628,10 @@ def _swap_audio(video_fid: str, audio_fid: str, slug: str):
                 pass
 
 
-def _send_album_local_brute(dest, tid, example_fid, local_path, timeout=180):
+def _send_album_local_brute(dest, tid, example_fid, local_path, timeout=150):
     """sendMediaGroup [exemple (file_id), brute LOCALE uploadée] — la brute est
-    envoyée en multipart (attach://), l'exemple reste un file_id."""
+    envoyée en multipart (attach://), l'exemple reste un file_id. Chronométré :
+    l'upload de la vidéo est souvent le poste le plus lourd sur un VPS."""
     token = _token()
     if not token:
         return {"ok": False, "description": "bot_token manquant"}
@@ -601,12 +640,17 @@ def _send_album_local_brute(dest, tid, example_fid, local_path, timeout=180):
     data = {"chat_id": str(dest), "media": json.dumps(media)}
     if tid:
         data["message_thread_id"] = str(tid)
+    t0 = time.time()
     try:
         with open(local_path, "rb") as fh:
             r = requests.post(f"{TG}/bot{token}/sendMediaGroup",
-                              data=data, files={"brute": fh}, timeout=timeout)
-        return r.json()
+                              data=data, files={"brute": fh},
+                              timeout=(10, timeout))
+        out = r.json()
+        _trace(f"upload album: {time.time() - t0:.0f}s (ok={out.get('ok')})")
+        return out
     except Exception as e:
+        _trace(f"upload album: échec après {time.time() - t0:.0f}s ({e})")
         return {"ok": False, "description": str(e)}
 
 
