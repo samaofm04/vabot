@@ -37,6 +37,7 @@ CFG_FILE = DATA_DIR / "tg_router.json"
 CACHE_FILE = DATA_DIR / "tg_router_cache.json"
 TG = "https://api.telegram.org"
 _LOCK = threading.Lock()
+_CACHE_LOCK = threading.Lock()   # protège l'écriture du cache (routages concurrents)
 _THREAD = None
 _STOP = threading.Event()
 STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
@@ -93,20 +94,21 @@ def _cache_load():
 
 
 def _cache_save():
-    try:
-        while len(_VEILLES) > 200:
-            _VEILLES.pop(next(iter(_VEILLES)))
-        for d in (_LAST_VEILLE, _LAST_TEXT):
-            while len(d) > 100:
-                d.pop(next(iter(d)))
-        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_FILE.write_text(json.dumps({
-            "veilles": {f"{k[0]}|{k[1]}": v for k, v in _VEILLES.items()},
-            "last_veille": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VEILLE.items()},
-            "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
-        }, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
+    with _CACHE_LOCK:
+        try:
+            while len(_VEILLES) > 200:
+                _VEILLES.pop(next(iter(_VEILLES)))
+            for d in (_LAST_VEILLE, _LAST_TEXT):
+                while len(d) > 100:
+                    d.pop(next(iter(d)))
+            CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CACHE_FILE.write_text(json.dumps({
+                "veilles": {f"{k[0]}|{k[1]}": v for k, v in _VEILLES.items()},
+                "last_veille": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VEILLE.items()},
+                "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
+            }, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def _token():
@@ -1214,6 +1216,24 @@ def _handle_update(cfg: dict, upd: dict):
             v["desc"] = lt[1]
             _cache_save()
             _trace(f"description récupérée du sujet ({model}) : {lt[1][:40]}…")
+    # Marque la veille comme routée TOUT DE SUITE (évite un double-routage si le
+    # poller revoit le message) puis fait le traitement LOURD (téléchargements +
+    # ffmpeg swap son + ré-upload) en ARRIÈRE-PLAN : le poller reste réactif et
+    # plusieurs vidéos se traitent en même temps au lieu de faire la queue.
+    v["routed"] = True
+    _cache_save()
+    _trace(f"réponse reçue ({model}) — traitement du son en arrière-plan…")
+    threading.Thread(
+        target=_finish_route,
+        args=(cfg, v, raw_fid, dest, tid, model, chat_id,
+              ref.get("message_id"), msg.get("message_id")),
+        daemon=True, name=f"route-{model}").start()
+
+
+def _finish_route(cfg, v, raw_fid, dest, tid, model, chat_id, reply_msg_id, video_msg_id):
+    """Traitement LOURD d'une réponse de modèle, en ARRIÈRE-PLAN : OCR de secours,
+    swap du son (son de l'exemple sur la vidéo de la modèle), envoi de l'album,
+    textes séparés, suppression des messages « en attente », réaction 🔥."""
     caption = _veille_caption(v)
     # FALLBACK : légende vide (description perdue / OCR pas encore fait) -> on lit
     # le texte incrusté de la vidéo exemple MAINTENANT (l'album a toujours un texte)
@@ -1222,16 +1242,13 @@ def _handle_update(cfg: dict, upd: dict):
         if ocr:
             v["overlay"] = ocr
             _cache_save()
-            caption = _veille_caption(v)
-    _trace(f"réponse reçue ({model}) : veille {'connue' if (chat_id, ref.get('message_id')) in _VEILLES or v.get('dest_msg_id') is not None else 'RECONSTRUITE'}, "
-           f"légende {len(caption)} car. (cap:{bool(v.get('caption'))} desc:{bool(v.get('desc'))} ocr:{bool(v.get('overlay'))})")
 
     res = {"ok": False}
     if v.get("file_id") and raw_fid:
         # 🎵 SON DE L'EXEMPLE sur la vidéo de la modèle (son d'origine de la brute
         # RETIRÉ) → album [exemple, brute-avec-le-bon-son]. Si impossible
         # (>20 Mo, exemple sans audio, ffmpeg…), on retombe sur l'album normal.
-        slug = f"{model}_{msg.get('message_id')}"
+        slug = f"{model}_{video_msg_id}"
         swapped = _swap_audio(raw_fid, v["file_id"], slug)
         if swapped:
             res = _send_album_local_brute(dest, tid, v["file_id"], swapped)
@@ -1258,8 +1275,8 @@ def _handle_update(cfg: dict, upd: dict):
         res = _api("sendVideo", p)
     if not res.get("ok"):
         _trace(f"album KO ({model}) : {res.get('description', '?')} -> fallback copie")
-        _copy(dest, tid, chat_id, ref.get("message_id"))
-        res = _copy(dest, tid, chat_id, msg.get("message_id"))
+        _copy(dest, tid, chat_id, reply_msg_id)
+        res = _copy(dest, tid, chat_id, video_msg_id)
 
     if res.get("ok"):
         # textes (caption incrustée, description) en MESSAGES SÉPARÉS, en réponse
@@ -1282,15 +1299,18 @@ def _handle_update(cfg: dict, upd: dict):
             if v.get(key):
                 _api("deleteMessage", {"chat_id": dest, "message_id": v[key]})
                 v[key] = None
-        v["routed"] = True
         STATUS["routed"] = STATUS.get("routed", 0) + 1
         _cache_save()
         _trace(f"✅ routé ({model}) -> album dans le sujet {tid}")
         _api("setMessageReaction", {
-            "chat_id": chat_id, "message_id": msg.get("message_id"),
+            "chat_id": chat_id, "message_id": video_msg_id,
             "reaction": [{"type": "emoji", "emoji": "🔥"}],
         })
     else:
+        # échec TOTAL (même la copie de secours) : on rouvre la veille pour
+        # qu'une nouvelle réponse puisse retenter
+        v["routed"] = False
+        _cache_save()
         _trace(f"routage échoué ({model}) : {res.get('description', '?')}")
 
 
