@@ -85,17 +85,18 @@
     analyze('');   // OCR auto au démarrage (4 frames, meilleur résultat)
   }
 
-  function analyze(second, full) {
+  function analyze(second, full, end) {
     var st = el('vprep-ocr-status'); var b1 = el('vprep-ocr'); var b2 = el('vprep-ocr-sec');
     var b3 = el('vprep-ocr-full');
     st.textContent = full
-      ? '🧠 analyse de TOUTE la vidéo (8 images)… ~20-40 s'
+      ? (end ? ('🧠 analyse du début jusqu\'à ' + end + 's…') : '🧠 analyse de TOUTE la vidéo (8 images)… ~20-40 s')
       : '⏳ téléchargement + lecture de la vidéo… (jusqu\'à ~30 s la 1re fois)';
     st.style.color = '#77778a';
     b1.disabled = b2.disabled = true;
     if (b3) b3.disabled = true;
     var fd = new FormData(); fd.set('reel_id', S.rid);
     if (full) fd.set('full', '1');
+    if (end) fd.set('end', end);
     if (second !== '' && second != null) fd.set('second', second);
     // timeout dur : si le serveur rame (lien IG à re-résoudre), on ne reste pas bloqué
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -134,11 +135,30 @@
           st.style.color = '#facc15';
         }
         // Lecteur vidéo (posé une seule fois) : sert à trouver la bonne seconde
+        // et à borner l'analyse (curseur = point d'arrêt)
         var vw = el('vprep-video-wrap');
         if (vw && j.video_url && !vw.dataset.set) {
-          vw.innerHTML = '<video src="' + esc(j.video_url) + '" controls preload="metadata" playsinline style="width:100%;max-height:230px;border-radius:8px;background:#000"></video>' +
-            '<div style="font-size:10px;color:#77778a;margin-top:3px">▶️ regarde où le texte apparaît, note la seconde, tape-la ci-dessus puis « Analyser à cette seconde »</div>';
+          vw.innerHTML = '<video id="vprep-player" src="' + esc(j.video_url) + '" controls preload="metadata" playsinline style="width:100%;max-height:230px;border-radius:8px;background:#000"></video>' +
+            '<button id="vprep-upto" style="width:100%;margin-top:6px;padding:8px 10px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">🧠 Analyser jusqu&#39;à ce point <span id="vprep-upto-t" style="opacity:.8">(0:00)</span></button>' +
+            '<div style="font-size:10px;color:#77778a;margin-top:3px">▶️ place le curseur là où le texte s&#39;arrête, puis clique le bouton — l&#39;analyse couvre du début jusqu&#39;à ce point</div>';
           vw.dataset.set = '1';
+          var pl = el('vprep-player');
+          var lbl = el('vprep-upto-t');
+          if (pl && lbl) {
+            pl.addEventListener('timeupdate', function () {
+              var s = Math.floor(pl.currentTime || 0);
+              lbl.textContent = '(' + Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2) + ')';
+            });
+          }
+          var up = el('vprep-upto');
+          if (up) {
+            up.addEventListener('click', function () {
+              var ct = (pl && pl.currentTime) || 0;
+              if (ct < 1) { toast('Place d\'abord le curseur de la vidéo au moment voulu', 'error'); return; }
+              if (pl && !pl.paused) pl.pause();
+              analyze('', true, ct.toFixed(1));
+            });
+          }
         }
         // Image réellement analysée (pour vérifier qu'on a la bonne frame)
         var fw = el('vprep-frame-wrap');

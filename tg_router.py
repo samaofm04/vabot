@@ -574,11 +574,13 @@ def _frames_from_url(video_url, slug, timestamps=None, headers=None):
     return frames
 
 
-def ocr_video_url(video_url, second=None, headers=None, full=False) -> dict:
+def ocr_video_url(video_url, second=None, headers=None, full=False, end=None) -> dict:
     """OCR pour le SITE en lisant les frames DIRECTEMENT depuis l'URL (rapide,
     pas de download complet, pas de limite 50 Mo).
     full=True = mode INTELLIGENT : 8 frames sur TOUTE la vidéo + reconstitution
     de la séquence des textes (dédupliquée) — nécessite une clé IA.
+    end = borne de FIN (secondes) : l'analyse s'arrête à ce point de la vidéo
+    (l'user place le curseur du lecteur là où le texte s'arrête).
     Retourne {ok, text, engine, frame(b64 JPEG de l'image analysée)}."""
     if not _ocr_ready():
         return {"ok": False, "text": "", "error": "Aucun OCR configuré"}
@@ -586,7 +588,15 @@ def ocr_video_url(video_url, second=None, headers=None, full=False) -> dict:
         return {"ok": False, "text": "", "error": "url vide"}
     slug = f"url_{int(time.time() * 1000) % 10**9}"
     if full:
-        ts = _full_timestamps(_video_duration(video_url, headers))
+        dur = _video_duration(video_url, headers)
+        if end is not None:
+            try:
+                e = float(end)
+                if e > 0.5:
+                    dur = min(dur, e) if dur else e  # analyse 0 -> point choisi
+            except Exception:
+                pass
+        ts = _full_timestamps(dur)
     else:
         ts = None
         if second is not None and str(second) != "":
