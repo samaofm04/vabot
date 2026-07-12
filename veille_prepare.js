@@ -40,6 +40,7 @@
       '<div style="font-size:10.5px;color:#8a8a98;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">1 · Texte incrusté sur la vidéo</div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">' +
       '<button id="vprep-ocr" style="padding:9px 15px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:0;color:#fff;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">🔍 Analyser le texte</button>' +
+      '<button id="vprep-ocr-full" title="Analyse 8 images réparties sur TOUTE la vidéo : capte les textes qui changent au fil du montage, sans répéter ce qui reste affiché" style="padding:9px 15px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">🧠 Toute la vidéo</button>' +
       '<span style="color:#77778a;font-size:12px">ou à la seconde</span>' +
       '<input id="vprep-sec" type="number" min="0" step="0.5" placeholder="ex: 1.5" style="' + INP + ';width:90px;padding:8px 10px">' +
       '<button id="vprep-ocr-sec" style="padding:8px 12px;background:#1d1d28;border:1px solid #2c2c3d;color:#ddd;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Analyser à cette seconde</button>' +
@@ -73,6 +74,7 @@
     el('vprep-x').addEventListener('click', close);
     el('vprep-cancel').addEventListener('click', close);
     el('vprep-ocr').addEventListener('click', function () { analyze(''); });
+    el('vprep-ocr-full').addEventListener('click', function () { analyze('', true); });
     el('vprep-ocr-sec').addEventListener('click', function () { analyze(el('vprep-sec').value); });
     el('vprep-cap').addEventListener('input', preview);
     el('vprep-desc').addEventListener('input', preview);
@@ -83,27 +85,33 @@
     analyze('');   // OCR auto au démarrage (4 frames, meilleur résultat)
   }
 
-  function analyze(second) {
+  function analyze(second, full) {
     var st = el('vprep-ocr-status'); var b1 = el('vprep-ocr'); var b2 = el('vprep-ocr-sec');
-    st.textContent = '⏳ téléchargement + lecture de la vidéo… (jusqu\'à ~30 s la 1re fois)';
+    var b3 = el('vprep-ocr-full');
+    st.textContent = full
+      ? '🧠 analyse de TOUTE la vidéo (8 images)… ~20-40 s'
+      : '⏳ téléchargement + lecture de la vidéo… (jusqu\'à ~30 s la 1re fois)';
     st.style.color = '#77778a';
     b1.disabled = b2.disabled = true;
+    if (b3) b3.disabled = true;
     var fd = new FormData(); fd.set('reel_id', S.rid);
+    if (full) fd.set('full', '1');
     if (second !== '' && second != null) fd.set('second', second);
     // timeout dur : si le serveur rame (lien IG à re-résoudre), on ne reste pas bloqué
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var killed = false;
+    function unlock() { b1.disabled = b2.disabled = false; if (b3) b3.disabled = false; }
     var to = setTimeout(function () {
       killed = true; if (ctrl) ctrl.abort();
-      b1.disabled = b2.disabled = false;
+      unlock();
       st.textContent = '⚠️ trop long (lien Instagram expiré ?) — réessaie, ou tape le texte à la main';
       st.style.color = '#f87171';
-    }, 75000);
+    }, full ? 160000 : 75000);
     fetch('/veille/analyze', { method: 'POST', body: fd, signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to); if (killed) return;
-        b1.disabled = b2.disabled = false;
+        unlock();
         if (!j.ok) { st.textContent = '⚠️ ' + (j.error || 'échec'); st.style.color = '#f87171'; return; }
         if (j.text) {
           el('vprep-cap').value = j.text;
@@ -112,7 +120,7 @@
             st.innerHTML = '⚠️ Gemini KO (' + esc(j.gemini_err.slice(0, 60)) + '…) — lu en secours (gratuit), corrige';
             st.style.color = '#facc15';
           } else {
-            st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
+            st.innerHTML = '✅ lu (' + eng + (j.full ? ' · toute la vidéo 🧠' : '') + ') — vérifie/corrige';
             st.style.color = '#4ade80';
           }
         } else if (j.gemini_key && j.gemini_err) {
@@ -145,7 +153,7 @@
       })
       .catch(function (e) {
         clearTimeout(to); if (killed) return;
-        b1.disabled = b2.disabled = false;
+        unlock();
         st.textContent = '⚠️ ' + e; st.style.color = '#f87171';
       });
   }

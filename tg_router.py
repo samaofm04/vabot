@@ -229,6 +229,50 @@ _OCR_PROMPT = (
 )
 
 
+# Mode INTELLIGENT : frames réparties sur TOUTE la vidéo, Claude reconstitue la
+# séquence des textes (un montage peut afficher un texte, puis le même + un
+# nouveau, etc.) en dédupliquant ce qui reste affiché.
+_OCR_PROMPT_FULL = (
+    "Ces images sont des frames d'un reel Instagram, dans l'ORDRE CHRONOLOGIQUE "
+    "(du début à la fin de la vidéo). Le texte incrusté peut CHANGER au fil de la "
+    "vidéo : un premier texte apparaît, puis un nouveau s'ajoute en dessous ou le "
+    "remplace, etc.\n"
+    "Ta mission : retranscrire LA SÉQUENCE COMPLÈTE des textes incrustés, dans "
+    "l'ordre d'apparition, AVEC les emojis et les retours à la ligne de chaque bloc.\n"
+    "RÈGLE ANTI-RÉPÉTITION (absolue) : chaque texte ne doit apparaître QU'UNE SEULE "
+    "FOIS dans ta réponse. Si une frame montre l'ancien texte toujours affiché + un "
+    "nouveau texte, ne retranscris QUE le nouveau. Ne répète jamais un bloc déjà "
+    "retranscrit.\n"
+    "Sépare chaque moment/bloc par UNE ligne vide.\n"
+    "Ignore interface, watermarks, usernames et sous-titres automatiques. Réponds "
+    "UNIQUEMENT avec les textes. S'il n'y a AUCUN texte incrusté : AUCUN"
+)
+
+
+def _video_duration(src, headers=None):
+    """Durée (secondes, float) d'une vidéo locale OU d'une URL via ffprobe.
+    None si indéterminable."""
+    cmd = ["ffprobe", "-v", "error"]
+    if headers:
+        cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())]
+    cmd += ["-show_entries", "format=duration", "-of", "csv=p=0", str(src)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=25, text=True)
+        return float(r.stdout.strip())
+    except Exception:
+        return None
+
+
+def _full_timestamps(duration):
+    """8 instants répartis sur toute la vidéo (ou défaut si durée inconnue)."""
+    if not duration or duration <= 4:
+        return ["0.5", "1.2", "2.0", "2.8"]
+    n = 8
+    start, end = 0.5, max(1.0, duration - 0.4)
+    step = (end - start) / (n - 1)
+    return [f"{start + i * step:.1f}" for i in range(n)]
+
+
 def _env_api_key() -> str:
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if key:
@@ -342,13 +386,15 @@ def _ocr_tesseract(frame_paths, tag: str = "") -> str:
     return best[:300]
 
 
-def _ocr_claude(frame_paths, tag: str = "") -> str:
-    """OCR IA (payant) — meilleure qualité si une clé ANTHROPIC est configurée."""
+def _ocr_claude(frame_paths, tag: str = "", prompt: str = None,
+                max_frames: int = 3, max_len: int = 300) -> str:
+    """OCR IA (Anthropic) — lit emojis + texte stylé. `prompt`/`max_frames`
+    personnalisables (mode intelligent = 8 frames + prompt séquence)."""
     key = _env_api_key()
     if not key:
         return ""
     content = []
-    for fp in frame_paths[:3]:  # 3 frames max (coût)
+    for fp in frame_paths[:max_frames]:
         try:
             content.append({"type": "image", "source": {
                 "type": "base64", "media_type": "image/jpeg",
@@ -357,15 +403,15 @@ def _ocr_claude(frame_paths, tag: str = "") -> str:
             pass
     if not content:
         return ""
-    content.append({"type": "text", "text": _OCR_PROMPT})
+    content.append({"type": "text", "text": prompt or _OCR_PROMPT})
     try:
         rr = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5", "max_tokens": 300,
+            json={"model": "claude-haiku-4-5", "max_tokens": 600,
                   "messages": [{"role": "user", "content": content}]},
-            timeout=60)
+            timeout=90)
         data = rr.json()
         if rr.status_code != 200:
             _trace(f"ocr: API {(data.get('error') or {}).get('message', '?')}")
@@ -373,7 +419,7 @@ def _ocr_claude(frame_paths, tag: str = "") -> str:
         text = "".join(b.get("text", "") for b in (data.get("content") or [])).strip()
         if text and not text.upper().startswith("AUCUN"):
             _trace(f"✍️ texte lu (IA) {tag}: {text[:45]}…")
-            return text[:300]
+            return text[:max_len]
     except Exception as e:
         _trace(f"ocr IA: {e}")
     return ""
@@ -528,44 +574,55 @@ def _frames_from_url(video_url, slug, timestamps=None, headers=None):
     return frames
 
 
-def ocr_video_url(video_url, second=None, headers=None) -> dict:
+def ocr_video_url(video_url, second=None, headers=None, full=False) -> dict:
     """OCR pour le SITE en lisant les frames DIRECTEMENT depuis l'URL (rapide,
-    pas de download complet, pas de limite 50 Mo). Retourne
-    {ok, text, engine, frame(b64 JPEG de l'image analysée)}."""
+    pas de download complet, pas de limite 50 Mo).
+    full=True = mode INTELLIGENT : 8 frames sur TOUTE la vidéo + reconstitution
+    de la séquence des textes (dédupliquée) — nécessite une clé IA.
+    Retourne {ok, text, engine, frame(b64 JPEG de l'image analysée)}."""
     if not _ocr_ready():
         return {"ok": False, "text": "", "error": "Aucun OCR configuré"}
     if not video_url:
         return {"ok": False, "text": "", "error": "url vide"}
     slug = f"url_{int(time.time() * 1000) % 10**9}"
-    ts = None
-    if second is not None and str(second) != "":
-        try:
-            ts = [f"{max(0.0, float(second)):.1f}"]
-        except Exception:
-            ts = None
+    if full:
+        ts = _full_timestamps(_video_duration(video_url, headers))
+    else:
+        ts = None
+        if second is not None and str(second) != "":
+            try:
+                ts = [f"{max(0.0, float(second)):.1f}"]
+            except Exception:
+                ts = None
     frames = _frames_from_url(video_url, slug, ts, headers)
     if not frames:
         return {"ok": False, "text": "", "error": "frames non extraites (URL expirée ?)"}
     try:
         anth_key = bool(_env_api_key())
         gem_key = bool(_env_gemini_key())
+        prompt = _OCR_PROMPT_FULL if full else None
+        mf = 8 if full else 3
+        ml = 900 if full else 300
         gem_err = ""
         text = ""
         engine = "tesseract"
         # 1) PRIORITÉ Claude (Anthropic) — lit emojis + texte stylé
         if anth_key:
-            text = _ocr_claude(frames, "site")
+            text = _ocr_claude(frames, "site", prompt=prompt, max_frames=mf, max_len=ml)
             if text:
                 engine = "ia"
         # 2) Gemini si pas de Claude (ou Claude vide)
         if not text and gem_key:
-            g = _ocr_gemini(frames, "site")
+            g = _ocr_gemini(frames, "site", prompt=prompt, max_frames=mf, max_len=ml)
             if g:
                 text, engine = g, "gemini"
             else:
                 gem_err = _GEMINI_LAST_ERR  # ex: 429 quota
-        # 3) Tesseract en dernier recours
+        # 3) Tesseract en dernier recours (pas de dédup en mode full -> message clair)
         if not text:
+            if full and not (anth_key or gem_key):
+                return {"ok": False, "text": "",
+                        "error": "Le mode intelligent nécessite une clé IA (Settings → Clé IA)"}
             t2 = _ocr_tesseract(frames, "site")
             if t2:
                 text, engine = t2, "tesseract"
@@ -575,7 +632,7 @@ def ocr_video_url(video_url, second=None, headers=None) -> dict:
         except Exception:
             pass
         return {"ok": True, "text": text, "engine": engine, "frame": fb,
-                "gemini_key": gem_key, "gemini_err": gem_err}
+                "gemini_key": gem_key, "gemini_err": gem_err, "full": full}
     finally:
         _cleanup_frames(frames, None)
 
@@ -610,7 +667,8 @@ def _env_gemini_key() -> str:
 _GEMINI_LAST_ERR = ""
 
 
-def _ocr_gemini(frame_paths, tag: str = "") -> str:
+def _ocr_gemini(frame_paths, tag: str = "", prompt: str = None,
+                max_frames: int = 3, max_len: int = 300) -> str:
     """OCR via Gemini (Google, tier GRATUIT, clé aistudio.google.com) — lit le
     texte STYLÉ et les EMOJIS. Pose la raison d'échec dans _GEMINI_LAST_ERR."""
     global _GEMINI_LAST_ERR
@@ -620,7 +678,7 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
         _GEMINI_LAST_ERR = "clé Gemini absente (Settings → Clé IA)"
         return ""
     parts = []
-    for fp in frame_paths[:3]:
+    for fp in frame_paths[:max_frames]:
         try:
             parts.append({"inline_data": {"mime_type": "image/jpeg",
                           "data": base64.b64encode(Path(fp).read_bytes()).decode()}})
@@ -629,7 +687,7 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
     if not parts:
         _GEMINI_LAST_ERR = "aucune image à analyser"
         return ""
-    parts.append({"text": _OCR_PROMPT})
+    parts.append({"text": prompt or _OCR_PROMPT})
     try:
         # clé via header x-goog-api-key (robuste pour les 2 formats Google : AIza… ET AQ.…)
         rr = requests.post(
@@ -654,7 +712,7 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
                       ((cands[0].get("content") or {}).get("parts") or [])).strip()
         if txt and not txt.upper().startswith("AUCUN"):
             _trace(f"✍️ texte lu (Gemini) {tag}: {txt[:45]}…")
-            return txt[:300]
+            return txt[:max_len]
         _GEMINI_LAST_ERR = "Gemini n'a détecté aucun texte sur cette image"
         return ""
     except Exception as e:

@@ -29759,6 +29759,7 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         rid = (request.form.get("reel_id") or "").strip()
         second = request.form.get("second")
+        full = bool(request.form.get("full"))  # mode intelligent : toute la vidéo
         reel = veille.get_reel(rid) if rid else None
         if not reel:
             return jsonify({"ok": False, "error": "Reel introuvable"})
@@ -29771,7 +29772,7 @@ def create_app():
         res = None
         # 1) RAPIDE : ffmpeg lit les frames DIRECTEMENT depuis l'URL (pas de download 50 Mo)
         if vurl:
-            res = tg_router.ocr_video_url(vurl, second=second, headers=ig_headers)
+            res = tg_router.ocr_video_url(vurl, second=second, headers=ig_headers, full=full)
         # 2) URL KO/expirée -> on re-résout puis retente
         if not (res and res.get("ok")):
             try:
@@ -29781,7 +29782,7 @@ def create_app():
                     veille.update_reel(rid, video_url=vurl2)
                     if data.get("caption") and not (reel.get("caption") or "").strip():
                         veille.update_reel(rid, caption=data["caption"])
-                    res = tg_router.ocr_video_url(vurl2, second=second, headers=ig_headers)
+                    res = tg_router.ocr_video_url(vurl2, second=second, headers=ig_headers, full=full)
                     vurl = vurl2
             except Exception:
                 pass
