@@ -18,6 +18,14 @@ log = logging.getLogger("vabot.web")
 BOT_DIR = Path(__file__).parent.resolve()
 ENV_FILE = BOT_DIR / ".env"
 DATA_DIR = Path("data")
+# Filigrane « PRÊT » (SVG en diagonale, vert semi-transparent) posé sur la vignette
+# d'un reel marqué prêt — purement visuel, tuilé sur toute la vidéo.
+READY_WM_URI = ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20"
+                "width%3D%27150%27%20height%3D%27108%27%3E%3Ctext%20x%3D%2775%27%20y%3D%2760%27%20"
+                "font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20font-size%3D%2721%27%20"
+                "font-weight%3D%27800%27%20letter-spacing%3D%272%27%20fill%3D%27%252322c55e%27%20"
+                "fill-opacity%3D%270.5%27%20text-anchor%3D%27middle%27%20"
+                "transform%3D%27rotate%28-20%2075%2054%29%27%3EPR%C3%8AT%3C%2Ftext%3E%3C%2Fsvg%3E")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
 USERS_FILE = DATA_DIR / "users.json"
@@ -19149,6 +19157,15 @@ def _render_veille_feed_html() -> str:
             # Contour VERT quand le reel est prêt (« le reel devient vert »)
             card_edge = ("border:1px solid #22c55e;box-shadow:0 0 0 1px #22c55e,0 0 18px rgba(34,197,94,.22)"
                          if prepared else "border:1px solid #2a2a2a")
+            # Filigrane « PRÊT » sur la vignette (masqué si pas prêt ; visible quand prêt).
+            # Présent seulement sur les reels PAS envoyés (le toggle l'affiche/le cache).
+            ready_wm = ""
+            if not sent:
+                ready_wm = (
+                    f"<div class='vl-ready-wm' style=\"position:absolute;inset:0;z-index:3;pointer-events:none;"
+                    f"display:{'block' if prepared else 'none'};background-color:rgba(34,197,94,.10);"
+                    f"background-image:url('{READY_WM_URI}');background-repeat:repeat;"
+                    f"box-shadow:inset 0 0 0 2px rgba(34,197,94,.55)\"></div>")
             # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
             # pouvoir multi-selectionner et RENVOYER en lot.
             cb_html = (
@@ -19181,6 +19198,7 @@ def _render_veille_feed_html() -> str:
     {ribbon}
     <img src="{r.get('thumb', '')}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html_v}
+    {ready_wm}
     <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
       <div style="width:52px;height:52px;background:rgba(0,0,0,.45);backdrop-filter:blur(8px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.45);box-shadow:0 4px 16px rgba(0,0,0,.4)">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff" style="margin-left:3px"><polygon points="5 3 19 12 5 21"/></svg>
@@ -19611,6 +19629,8 @@ function veilleReadyVisual(card, on){
   const knob = card.querySelector('.vl-rdy-knob');
   if(track) track.style.background = on ? '#22c55e' : 'rgba(255,255,255,.28)';
   if(knob) knob.style.left = on ? '19px' : '2.5px';
+  const wm = card.querySelector('.vl-ready-wm');   // filigrane « PRÊT » sur la vidéo
+  if(wm) wm.style.display = on ? 'block' : 'none';
   const media = card.querySelector('.reel-media');
   if(media){
     let badge = media.querySelector('.vl-ready-badge');
