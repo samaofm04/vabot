@@ -103,7 +103,8 @@
         if (!j.ok) { st.textContent = '⚠️ ' + (j.error || 'échec'); st.style.color = '#f87171'; return; }
         if (j.text) {
           el('vprep-cap').value = j.text;
-          st.innerHTML = '✅ lu (' + (j.engine === 'ia' ? 'IA' : 'gratuit') + ') — vérifie/corrige';
+          var eng = j.engine === 'gemini' ? 'Gemini' : (j.engine === 'ia' ? 'IA' : 'gratuit');
+          st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
           st.style.color = '#4ade80';
         } else {
           st.textContent = 'ℹ️ aucun texte net détecté — tape-le à la main ou change de seconde';

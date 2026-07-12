@@ -25010,23 +25010,70 @@ def _ai_key_present() -> bool:
     return False
 
 
+def _gemini_key_present() -> bool:
+    if (os.environ.get("GEMINI_API_KEY") or "").strip():
+        return True
+    for line in _read_env_lines():
+        if line.strip().startswith("GEMINI_API_KEY=") and line.split("=", 1)[1].strip():
+            return True
+    return False
+
+
+def _render_gemini_settings() -> str:
+    """Clé Gemini (Google) — OCR GRATUIT qui lit le texte stylé + les emojis.
+    Stockée dans le .env du VPS via /settings/gemini_key. Jamais renvoyée."""
+    present = _gemini_key_present()
+    status = (
+        "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
+        "✅ Gemini enregistré — l'OCR lit le texte incrusté <b>et les emojis</b>, gratuitement. "
+        "Colle une nouvelle clé pour la remplacer.</div>"
+        if present else
+        "<div style='padding:12px 16px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.35);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#93c5fd'>"
+        "🎯 <b>Recommandé (gratuit)</b> : Gemini de Google lit le texte incrusté <b>ET les emojis</b> "
+        "(ce que l'OCR gratuit Tesseract ne sait pas faire), sans carte bancaire.</div>"
+    )
+    return (
+        status
+        + "<form method='POST' action='/settings/gemini_key' style='display:flex;flex-direction:column;gap:8px'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Clé API Gemini (gratuite — AIza…)</label>"
+        "<input type='password' name='gemini_key' placeholder='AIza…' autocomplete='off' "
+        "style='font-family:monospace;font-size:12px' required minlength='20'>"
+        "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer la clé Gemini</button>"
+        "</form>"
+        "<details style='font-size:12px;color:#888;margin-top:14px'>"
+        "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Où trouver ma clé Gemini GRATUITE ?</summary>"
+        "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+        "<li>Va sur <a href='https://aistudio.google.com/apikey' target='_blank' style='color:#3b82f6'>aistudio.google.com/apikey</a> (connecte-toi avec ton compte Google)</li>"
+        "<li>Clique <b>« Create API key »</b> (aucune carte bancaire demandée)</li>"
+        "<li>Copie la clé <code>AIza…</code> et colle-la ici</li>"
+        "</ol>"
+        "<p style='margin-top:8px;color:#666'>Tier gratuit : largement suffisant pour la veille. Le site redémarre ~3 s après l'enregistrement.</p>"
+        "</details>"
+        "<div style='height:1px;background:#2a2a35;margin:22px 0'></div>"
+        "<div style='font-size:12px;color:#888;margin-bottom:10px'>Alternative payante (qualité max, optionnelle) :</div>"
+    )
+
+
 def _render_aikey_settings() -> str:
-    """Champ pour saisir la clé Anthropic (ANTHROPIC_API_KEY), stockée dans le
-    .env du VPS via /settings/ai_key. Ne renvoie JAMAIS la clé au client."""
+    """Section Clé IA : Gemini (gratuit, recommandé) PUIS Anthropic (payant).
+    Clés stockées dans le .env du VPS. Ne renvoie JAMAIS les clés au client."""
     present = _ai_key_present()
     status = (
         "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
         "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
-        "✅ Clé enregistrée — l'OCR des vidéos et les bios IA sont actifs. "
+        "✅ Clé Anthropic enregistrée — les bios IA sont actives. "
         "Colle une nouvelle clé ci-dessous pour la remplacer.</div>"
         if present else
-        "<div style='padding:12px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);"
-        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#fbbf24'>"
-        "⚠ Aucune clé. Sans elle, le bot ne peut pas lire le texte incrusté sur les vidéos "
-        "(les albums Telegram partent sans description) ni générer les bios IA.</div>"
+        "<div style='padding:12px 16px;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#94a3b8'>"
+        "Optionnel. Clé Anthropic = OCR qualité max + génération des bios IA. "
+        "Pour l'OCR de la veille, Gemini ci-dessus suffit (et il est gratuit).</div>"
     )
     return (
-        status
+        _render_gemini_settings()
+        + status
         + "<form method='POST' action='/settings/ai_key' style='display:flex;flex-direction:column;gap:8px'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Clé API Anthropic (sk-ant-…)</label>"
         "<input type='password' name='ai_key' placeholder='sk-ant-api03-…' autocomplete='off' "
@@ -31949,6 +31996,20 @@ def create_app():
         _schedule_restart(2.0)
         return _success("✅ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
                         "Le site redémarre dans 2 s.", tab="saikey")
+
+    @app.route("/settings/gemini_key", methods=["POST"])
+    def settings_gemini_key():
+        if not is_auth():
+            return redirect("/")
+        key = (request.form.get("gemini_key") or "").strip()
+        if not key.startswith("AIza") or len(key) < 20:
+            return _error("❌ Clé Gemini invalide (elle doit commencer par AIza…)", tab="saikey")
+        if not _write_env_var("GEMINI_API_KEY", key):
+            return _error("❌ Erreur écriture .env (permissions ?)", tab="saikey")
+        os.environ["GEMINI_API_KEY"] = key  # dispo tout de suite (avant restart)
+        _schedule_restart(2.0)
+        return _success("✅ Clé Gemini enregistrée — l'OCR lit maintenant le texte incrusté "
+                        "ET les emojis, gratuitement. Le site redémarre dans 2 s.", tab="saikey")
 
     @app.route("/settings/admin_token", methods=["POST"])
     def settings_admin_token():

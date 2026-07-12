@@ -242,8 +242,9 @@ def _tesseract_available() -> bool:
 
 
 def _ocr_ready() -> bool:
-    """Un moteur OCR est dispo : IA (payant, clé) OU Tesseract (gratuit, local)."""
-    return bool(_env_api_key()) or _tesseract_available()
+    """Un moteur OCR dispo : Gemini (gratuit) OU IA Anthropic (payant) OU
+    Tesseract (gratuit, local)."""
+    return bool(_env_gemini_key()) or bool(_env_api_key()) or _tesseract_available()
 
 
 def _clean_ocr(txt: str) -> str:
@@ -368,14 +369,28 @@ def _ocr_claude(frame_paths, tag: str = "") -> str:
     return ""
 
 
+_OCR_ENGINE_USED = ""
+
+
 def _run_ocr(frame_paths, tag: str = "") -> str:
-    """Lit le texte incrusté : IA si clé configurée (meilleure qualité), sinon
-    Tesseract (gratuit). '' si rien trouvé."""
+    """Lit le texte incrusté, par ordre de préférence :
+    1) Gemini (GRATUIT + lit les emojis/texte stylé) si GEMINI_API_KEY
+    2) IA Anthropic (payant) si ANTHROPIC_API_KEY
+    3) Tesseract (gratuit local, mais pas les emojis). '' si rien."""
+    global _OCR_ENGINE_USED
+    if _env_gemini_key():
+        t = _ocr_gemini(frame_paths, tag)
+        if t:
+            _OCR_ENGINE_USED = "gemini"
+            return t
     if _env_api_key():
         t = _ocr_claude(frame_paths, tag)
         if t:
+            _OCR_ENGINE_USED = "ia"
             return t
-    return _ocr_tesseract(frame_paths, tag)
+    t = _ocr_tesseract(frame_paths, tag)
+    _OCR_ENGINE_USED = "tesseract"
+    return t
 
 
 def _frames_from_video_file(vid, slug, timestamps=None):
@@ -467,7 +482,7 @@ def ocr_video_bytes(video_bytes: bytes, second=None) -> dict:
         frames = _frames_from_video_file(vid, slug, ts)
         try:
             text = _run_ocr(frames, "site") if frames else ""
-            return {"ok": True, "text": text, "engine": ("ia" if _env_api_key() else "tesseract")}
+            return {"ok": True, "text": text, "engine": _OCR_ENGINE_USED or "tesseract"}
         finally:
             _cleanup_frames(frames, None)
     except Exception as e:
@@ -492,9 +507,62 @@ def _cleanup_frames(frames, vid):
         pass
 
 
+def _env_gemini_key() -> str:
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if key:
+        return key
+    try:
+        env = Path(__file__).resolve().parent / ".env"
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("GEMINI_API_KEY="):
+                return line.strip().split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _ocr_gemini(frame_paths, tag: str = "") -> str:
+    """OCR via Gemini (Google, tier GRATUIT, clé aistudio.google.com) — lit le
+    texte STYLÉ et les EMOJIS (ce que Tesseract ne sait pas faire)."""
+    key = _env_gemini_key()
+    if not key:
+        return ""
+    parts = []
+    for fp in frame_paths[:3]:
+        try:
+            parts.append({"inline_data": {"mime_type": "image/jpeg",
+                          "data": base64.b64encode(Path(fp).read_bytes()).decode()}})
+        except Exception:
+            pass
+    if not parts:
+        return ""
+    parts.append({"text": _OCR_PROMPT})
+    try:
+        rr = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.0-flash:generateContent?key=" + key,
+            headers={"content-type": "application/json"},
+            json={"contents": [{"parts": parts}]}, timeout=60)
+        data = rr.json()
+        if rr.status_code != 200:
+            _trace(f"ocr Gemini: {(data.get('error') or {}).get('message', '?')}")
+            return ""
+        cands = data.get("candidates") or []
+        if not cands:
+            return ""
+        txt = "".join(p.get("text", "") for p in
+                      ((cands[0].get("content") or {}).get("parts") or [])).strip()
+        if txt and not txt.upper().startswith("AUCUN"):
+            _trace(f"✍️ texte lu (Gemini) {tag}: {txt[:45]}…")
+            return txt[:300]
+    except Exception as e:
+        _trace(f"ocr Gemini: {e}")
+    return ""
+
+
 def _transcribe_veille_async(vkey):
     """Lit le texte incrusté de la veille en arrière-plan (thread dédié).
-    Marche avec l'IA (clé) OU gratuitement avec Tesseract."""
+    Marche avec Gemini/IA (clé) OU gratuitement avec Tesseract."""
     if not _ocr_ready():
         return
     threading.Thread(target=_transcribe_veille, args=(vkey,), daemon=True).start()
@@ -690,12 +758,14 @@ def _handle_command(cfg: dict, msg: dict, text: str):
 
     elif cmd == "/routerdebug":
         ev = "\n".join(EVENTS[-12:]) or "(aucun événement depuis le démarrage)"
-        if _env_api_key():
-            ocr_on = "✅ IA (clé ANTHROPIC) — lecture du texte incrusté, qualité max"
+        if _env_gemini_key():
+            ocr_on = "✅ GEMINI (Google, gratuit) — lit le texte stylé ET les emojis 🎯"
+        elif _env_api_key():
+            ocr_on = "✅ IA Anthropic (clé) — lecture du texte incrusté, qualité max"
         elif _tesseract_available():
-            ocr_on = "✅ GRATUIT (Tesseract local) — lecture du texte incrusté sans payer"
+            ocr_on = "✅ GRATUIT (Tesseract local) — texte net OK, mais PAS les emojis"
         else:
-            ocr_on = "❌ aucun OCR (ni clé IA, ni Tesseract) → texte incrusté non lu"
+            ocr_on = "❌ aucun OCR configuré → texte incrusté non lu"
         _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}\n\n🤖 OCR : {ocr_on}"
                + (f"\n\n⚠️ Erreur : {STATUS.get('error')}" if STATUS.get("error") else ""),
                thread_id)
