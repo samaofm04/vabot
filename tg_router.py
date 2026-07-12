@@ -193,19 +193,25 @@ def _no_links(t: str) -> str:
     return re.sub(r"https?://\S+", "", t or "").strip()
 
 
-def _veille_caption(v: dict) -> str:
-    parts = []
-    # Texte incrusté sur la vidéo (retranscrit par IA vision) en premier
+def _veille_texts(v: dict) -> list:
+    """Textes à poster en MESSAGES SÉPARÉS (style envoi veille) :
+    [texte incrusté BRUT, description] — sans ✍️, sans guillemets, sans liens."""
+    out = []
     ov = (v.get("overlay") or "").strip()
     if ov:
-        parts.append(f"✍️ « {ov} »")
+        out.append(ov)
     cap = _no_links(v.get("caption"))
-    if cap:
-        parts.append(cap)
+    if cap and cap not in out:
+        out.append(cap)
     desc = _no_links(v.get("desc"))
-    if desc and desc not in parts:
-        parts.append(desc)
-    return "\n\n".join(parts)[:1020]
+    if desc and desc not in out:
+        out.append(desc)
+    return out
+
+
+def _veille_caption(v: dict) -> str:
+    """Concat des textes (sert aux checks « y a-t-il du texte ? » et aux logs)."""
+    return "\n\n".join(_veille_texts(v))[:1020]
 
 
 # ── Transcription IA du texte incrusté sur la vidéo (3 premières secondes) ──
@@ -839,29 +845,54 @@ def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str 
 
 
 def _post_pending(cfg: dict, v: dict, model: str):
-    """Poste la veille (vidéo + lien + description) dans le sujet de la modèle."""
+    """Poste la veille dans le sujet de la modèle — STYLE VEILLE : la vidéo
+    SEULE, puis la caption incrustée et la description en messages SÉPARÉS
+    qui répondent à la vidéo."""
     tid = _topic_for(cfg, model)
     p = {"chat_id": cfg["dest_chat_id"], "video": v["file_id"]}
-    cap = _veille_caption(v)
-    if cap:
-        p["caption"] = cap
     if tid:
         p["message_thread_id"] = tid
     res = _api("sendVideo", p)
     if res.get("ok"):
         v["dest_msg_id"] = (res.get("result") or {}).get("message_id")
+        v.setdefault("dest_cap_id", None)
+        v.setdefault("dest_desc_id", None)
+        _update_pending_caption(cfg, v)
         _trace(f"veille postée dans le sujet {model} (en attente de la modèle)")
     else:
         _trace(f"post veille échoué ({model}) : {res.get('description', '?')}")
 
 
 def _update_pending_caption(cfg: dict, v: dict):
+    """Aligne les messages TEXTE du pending (caption incrustée / description) :
+    envoie chaque texte en message séparé (réponse à la vidéo), ou l'édite
+    s'il existe déjà (OCR/description arrivés après coup)."""
     if not v.get("dest_msg_id"):
         return
-    _api("editMessageCaption", {
-        "chat_id": cfg["dest_chat_id"], "message_id": v["dest_msg_id"],
-        "caption": _veille_caption(v),
-    })
+    dest = cfg["dest_chat_id"]
+    tid = _topic_for(cfg, v.get("model"))
+
+    def _sync(text, key):
+        text = (text or "").strip()
+        if not text:
+            return
+        mid = v.get(key)
+        if mid:
+            _api("editMessageText", {"chat_id": dest, "message_id": mid,
+                                     "text": text[:4000],
+                                     "disable_web_page_preview": True})
+        else:
+            pp = {"chat_id": dest, "text": text[:4000],
+                  "reply_to_message_id": v["dest_msg_id"],
+                  "disable_web_page_preview": True}
+            if tid:
+                pp["message_thread_id"] = tid
+            rr = _api("sendMessage", pp)
+            if rr.get("ok"):
+                v[key] = (rr.get("result") or {}).get("message_id")
+
+    _sync(v.get("overlay"), "dest_cap_id")
+    _sync(_no_links(v.get("desc")), "dest_desc_id")
 
 
 # ── Commandes ───────────────────────────────────────────────────────────────
@@ -1110,18 +1141,15 @@ def _handle_update(cfg: dict, upd: dict):
 
     res = {"ok": False}
     if v.get("file_id") and raw_fid:
+        # STYLE VEILLE : album SANS légende, les textes partent en messages séparés
         media = [{"type": "video", "media": v["file_id"]},
                  {"type": "video", "media": raw_fid}]
-        if caption:
-            media[0]["caption"] = caption
         p = {"chat_id": dest, "media": media}
         if tid:
             p["message_thread_id"] = tid
         res = _api("sendMediaGroup", p)
     elif raw_fid:
         p = {"chat_id": dest, "video": raw_fid}
-        if caption:
-            p["caption"] = caption
         if tid:
             p["message_thread_id"] = tid
         res = _api("sendVideo", p)
@@ -1131,10 +1159,26 @@ def _handle_update(cfg: dict, upd: dict):
         res = _copy(dest, tid, chat_id, msg.get("message_id"))
 
     if res.get("ok"):
-        # remplace le message « en attente » par l'album
-        if v.get("dest_msg_id"):
-            _api("deleteMessage", {"chat_id": dest, "message_id": v["dest_msg_id"]})
-            v["dest_msg_id"] = None
+        # textes (caption incrustée, description) en MESSAGES SÉPARÉS, en réponse
+        # au premier média de l'album
+        first_id = None
+        rr = res.get("result")
+        if isinstance(rr, list) and rr:
+            first_id = rr[0].get("message_id")
+        elif isinstance(rr, dict):
+            first_id = rr.get("message_id")
+        for txt in _veille_texts(v):
+            pp = {"chat_id": dest, "text": txt[:4000], "disable_web_page_preview": True}
+            if first_id:
+                pp["reply_to_message_id"] = first_id
+            if tid:
+                pp["message_thread_id"] = tid
+            _api("sendMessage", pp)
+        # remplace les messages « en attente » (vidéo + textes) par l'album
+        for key in ("dest_msg_id", "dest_cap_id", "dest_desc_id"):
+            if v.get(key):
+                _api("deleteMessage", {"chat_id": dest, "message_id": v[key]})
+                v[key] = None
         v["routed"] = True
         STATUS["routed"] = STATUS.get("routed", 0) + 1
         _cache_save()

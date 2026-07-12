@@ -90,11 +90,8 @@
       '<div style="' + SECTION + '">3 · Envoyer aux modèles</div>' +
       '<div id="vprep-models" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px;min-height:30px;color:#5a6178;font-size:12px">Chargement…</div>' +
 
-      '<div style="' + SECTION + '">Aperçu Telegram</div>' +
-      '<div style="background:linear-gradient(135deg,#182533,#141d29);border:1px solid #24384d;border-radius:14px 14px 14px 4px;padding:12px 15px;margin-bottom:6px">' +
-      '<div id="vprep-preview" style="font-size:12.5px;color:#dbe4ee;white-space:pre-wrap;line-height:1.55;min-height:20px"></div>' +
-      '<div style="text-align:right;font-size:10px;color:#5b7a99;margin-top:5px">via ton bot · Telegram</div>' +
-      '</div>' +
+      '<div style="' + SECTION + '">Aperçu Telegram <span style="text-transform:none;letter-spacing:0;font-weight:600;color:#5a6178">(messages séparés)</span></div>' +
+      '<div id="vprep-preview" style="display:flex;flex-direction:column;gap:7px;margin-bottom:6px"></div>' +
 
       '</div></div>' +
 
@@ -248,15 +245,21 @@
     }).catch(function () { var b = el('vprep-models'); if (b) b.textContent = 'Erreur chargement modèles'; });
   }
 
-  /* ── Aperçu ── */
+  /* ── Aperçu : une bulle par message (vidéo, caption, description) ── */
+  var BUBBLE = 'background:linear-gradient(135deg,#182533,#141d29);border:1px solid #24384d;border-radius:14px 14px 14px 4px;padding:10px 14px;font-size:12.5px;color:#dbe4ee;white-space:pre-wrap;line-height:1.55;max-width:95%';
+  function bubble(txt, dim) {
+    return '<div style="' + BUBBLE + (dim ? ';color:#7d8aa0;font-style:italic' : '') + '">' + esc(txt) + '</div>';
+  }
   function preview() {
-    var cap = (el('vprep-cap') || {}).value || '';
-    var desc = (el('vprep-desc') || {}).value || '';
-    var parts = [];
-    if (cap.trim()) parts.push('✍️ « ' + cap.trim() + ' »');
-    if (desc.trim()) parts.push(desc.trim());
+    var cap = ((el('vprep-cap') || {}).value || '').trim();
+    var desc = ((el('vprep-desc') || {}).value || '').trim();
     var p = el('vprep-preview');
-    if (p) p.textContent = parts.length ? parts.join('\n\n') : '(vide — la vidéo partira sans texte)';
+    if (!p) return;
+    var h = bubble('🎬 [la vidéo]', true);
+    if (cap) h += bubble(cap);
+    if (desc) h += bubble(desc);
+    if (!cap && !desc) h += bubble('(aucun texte — la vidéo partira seule)', true);
+    p.innerHTML = h;
   }
 
   /* ── Envoi ── */
