@@ -538,10 +538,11 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
         return ""
     parts.append({"text": _OCR_PROMPT})
     try:
+        # clé via header x-goog-api-key (robuste pour les 2 formats Google : AIza… ET AQ.…)
         rr = requests.post(
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-2.0-flash:generateContent?key=" + key,
-            headers={"content-type": "application/json"},
+            "gemini-2.0-flash:generateContent",
+            headers={"content-type": "application/json", "x-goog-api-key": key},
             json={"contents": [{"parts": parts}]}, timeout=60)
         data = rr.json()
         if rr.status_code != 200:

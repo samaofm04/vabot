@@ -25037,8 +25037,8 @@ def _render_gemini_settings() -> str:
     return (
         status
         + "<form method='POST' action='/settings/gemini_key' style='display:flex;flex-direction:column;gap:8px'>"
-        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Clé API Gemini (gratuite — AIza…)</label>"
-        "<input type='password' name='gemini_key' placeholder='AIza…' autocomplete='off' "
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Clé API Gemini (gratuite — AIza… ou AQ.…)</label>"
+        "<input type='password' name='gemini_key' placeholder='AIza… ou AQ.…' autocomplete='off' "
         "style='font-family:monospace;font-size:12px' required minlength='20'>"
         "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer la clé Gemini</button>"
         "</form>"
@@ -32002,8 +32002,10 @@ def create_app():
         if not is_auth():
             return redirect("/")
         key = (request.form.get("gemini_key") or "").strip()
-        if not key.startswith("AIza") or len(key) < 20:
-            return _error("❌ Clé Gemini invalide (elle doit commencer par AIza…)", tab="saikey")
+        # Google émet 2 formats de clés : AIza… (ancien) ET AQ.… (nouveau) -> on
+        # ne bloque plus sur le préfixe, juste une longueur minimale plausible.
+        if len(key) < 20 or " " in key:
+            return _error("❌ Clé Gemini invalide (copie la clé complète depuis aistudio.google.com)", tab="saikey")
         if not _write_env_var("GEMINI_API_KEY", key):
             return _error("❌ Erreur écriture .env (permissions ?)", tab="saikey")
         os.environ["GEMINI_API_KEY"] = key  # dispo tout de suite (avant restart)
