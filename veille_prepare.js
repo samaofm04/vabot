@@ -107,11 +107,17 @@
         if (!j.ok) { st.textContent = '⚠️ ' + (j.error || 'échec'); st.style.color = '#f87171'; return; }
         if (j.text) {
           el('vprep-cap').value = j.text;
-          var eng = j.engine === 'gemini' ? 'Gemini' : (j.engine === 'ia' ? 'IA' : 'gratuit');
+          var eng = j.engine === 'gemini' ? 'Gemini ✨' : (j.engine === 'ia' ? 'IA' : 'gratuit/Tesseract');
           st.innerHTML = '✅ lu (' + eng + ') — vérifie/corrige';
           st.style.color = '#4ade80';
+        } else if (j.gemini_key && j.gemini_err) {
+          st.innerHTML = '⚠️ Gemini a échoué : ' + esc(j.gemini_err);
+          st.style.color = '#f87171';
+        } else if (!j.gemini_key) {
+          st.innerHTML = 'ℹ️ Gemini pas configuré (Settings → Clé IA). Lu en gratuit — pour les emojis, ajoute ta clé Gemini.';
+          st.style.color = '#facc15';
         } else {
-          st.textContent = 'ℹ️ aucun texte net détecté — regarde la vidéo, note la seconde et réanalyse';
+          st.textContent = 'ℹ️ aucun texte détecté — regarde la vidéo, note la seconde et réanalyse';
           st.style.color = '#facc15';
         }
         // Lecteur vidéo (posé une seule fois) : sert à trouver la bonne seconde

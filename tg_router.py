@@ -538,13 +538,24 @@ def ocr_video_url(video_url, second=None, headers=None) -> dict:
     if not frames:
         return {"ok": False, "text": "", "error": "frames non extraites (URL expirée ?)"}
     try:
-        text = _run_ocr(frames, "site")
+        gem_key = bool(_env_gemini_key())
+        gem_err = ""
+        if gem_key:
+            # clé Gemini présente -> Gemini UNIQUEMENT (pas de retombée sur le
+            # charabia Tesseract). Si Gemini échoue, on renvoie la raison.
+            text = _ocr_gemini(frames, "site")
+            engine = "gemini"
+            gem_err = _GEMINI_LAST_ERR if not text else ""
+        else:
+            text = _ocr_tesseract(frames, "site")
+            engine = "tesseract"
         fb = ""
         try:
             fb = base64.b64encode(Path(frames[0]).read_bytes()).decode()
         except Exception:
             pass
-        return {"ok": True, "text": text, "engine": _OCR_ENGINE_USED or "tesseract", "frame": fb}
+        return {"ok": True, "text": text, "engine": engine, "frame": fb,
+                "gemini_key": gem_key, "gemini_err": gem_err}
     finally:
         _cleanup_frames(frames, None)
 
@@ -576,11 +587,17 @@ def _env_gemini_key() -> str:
     return ""
 
 
+_GEMINI_LAST_ERR = ""
+
+
 def _ocr_gemini(frame_paths, tag: str = "") -> str:
     """OCR via Gemini (Google, tier GRATUIT, clé aistudio.google.com) — lit le
-    texte STYLÉ et les EMOJIS (ce que Tesseract ne sait pas faire)."""
+    texte STYLÉ et les EMOJIS. Pose la raison d'échec dans _GEMINI_LAST_ERR."""
+    global _GEMINI_LAST_ERR
+    _GEMINI_LAST_ERR = ""
     key = _env_gemini_key()
     if not key:
+        _GEMINI_LAST_ERR = "clé Gemini absente (Settings → Clé IA)"
         return ""
     parts = []
     for fp in frame_paths[:3]:
@@ -590,6 +607,7 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
         except Exception:
             pass
     if not parts:
+        _GEMINI_LAST_ERR = "aucune image à analyser"
         return ""
     parts.append({"text": _OCR_PROMPT})
     try:
@@ -599,19 +617,28 @@ def _ocr_gemini(frame_paths, tag: str = "") -> str:
             "gemini-2.0-flash:generateContent",
             headers={"content-type": "application/json", "x-goog-api-key": key},
             json={"contents": [{"parts": parts}]}, timeout=60)
-        data = rr.json()
+        try:
+            data = rr.json()
+        except Exception:
+            data = {}
         if rr.status_code != 200:
-            _trace(f"ocr Gemini: {(data.get('error') or {}).get('message', '?')}")
+            msg = (data.get("error") or {}).get("message", "") or (rr.text or "")[:120]
+            _GEMINI_LAST_ERR = f"HTTP {rr.status_code} — {msg}"
+            _trace(f"ocr Gemini: {_GEMINI_LAST_ERR}")
             return ""
         cands = data.get("candidates") or []
         if not cands:
+            _GEMINI_LAST_ERR = "réponse Gemini vide (contenu bloqué ?)"
             return ""
         txt = "".join(p.get("text", "") for p in
                       ((cands[0].get("content") or {}).get("parts") or [])).strip()
         if txt and not txt.upper().startswith("AUCUN"):
             _trace(f"✍️ texte lu (Gemini) {tag}: {txt[:45]}…")
             return txt[:300]
+        _GEMINI_LAST_ERR = "Gemini n'a détecté aucun texte sur cette image"
+        return ""
     except Exception as e:
+        _GEMINI_LAST_ERR = str(e)[:140]
         _trace(f"ocr Gemini: {e}")
     return ""
 
