@@ -3524,6 +3524,10 @@ document.addEventListener('click',function(e){
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
     Dashboard
   </button>
+  <button class="item solo-item" onclick="location.href='/jbactivity'" title="Activité des VA jailbreak + pénalités">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+    Activité VA
+  </button>
 </div>
 
 <div class="section-label">Contenu</div>
@@ -26637,6 +26641,12 @@ def create_app():
     app.secret_key = os.environ.get("WEB_SECRET", os.urandom(24).hex())
     # Demarre l'auto-scrape Instagram en background
     _start_auto_scrape_daemon()
+    # Job quotidien "Activité VA" (scan comptes JB + pénalités)
+    try:
+        import jb_activity
+        jb_activity.start_daily()
+    except Exception as _e:
+        log.warning(f"jb_activity daily non démarré: {_e}")
 
     # ============ PERF : gzip compression + cache headers ============
     import gzip as _gz_mod
@@ -30065,6 +30075,142 @@ def create_app():
         if not p.exists():
             return "", 404
         return send_file(str(p), mimetype="video/mp4", conditional=True)
+
+    # ---------------- Activité VA (comptes jailbreak) ----------------
+    @app.route("/jbactivity")
+    def jbactivity_page():
+        if not is_auth():
+            return redirect("/")
+        from flask import request as _rq
+        import time as _t
+        from datetime import datetime as _dt
+        try:
+            import jb_activity as JA
+        except Exception as e:
+            return f"<p style='color:#eee;background:#0f0f0f;padding:20px'>Module indispo : {e}</p>", 500
+        month = (_rq.args.get("month") or "").strip() or _dt.now().strftime("%Y-%m")
+        rows = JA.va_summary(month=month)
+        st = JA.scan_status()
+        now = _t.time()
+
+        def _ago(ts):
+            if not ts:
+                return "—"
+            d = now - ts
+            if d < 3600:
+                return f"il y a {int(d//60)} min"
+            if d < 86400:
+                return f"il y a {int(d//3600)} h"
+            return f"il y a {int(d//86400)} j"
+
+        # KPIs
+        tot_va = len(rows)
+        tot_pen = sum(r["penalties_month"] for r in rows)
+        tot_silent = sum(r["silent_now"] for r in rows)
+        tot_acc = sum(r["accounts"] for r in rows)
+
+        trs = []
+        for r in rows:
+            pen = r["penalties_month"]
+            pen_badge = (f"<span style='background:{'#dc2626' if pen>=3 else ('#f59e0b' if pen>0 else '#1f2937')};"
+                         f"color:#fff;font-weight:800;padding:3px 12px;border-radius:20px;font-size:13px'>{pen}</span>")
+            silent = r["silent_now"]
+            sil = (f"<span style='color:{'#f87171' if silent else '#4ade80'};font-weight:700'>{silent}</span>"
+                   f"<span style='color:#666'> / {r['accounts']}</span>")
+            nod = f"<span style='color:#888'>{r['no_data']}</span>" if r["no_data"] else "<span style='color:#444'>0</span>"
+            idents = ", ".join(html_escape(i) for i in r["identities"][:6])
+            v14 = _format_count(r["views_14d"]) if r["views_14d"] else "—"
+            trs.append(
+                f"<tr style='border-bottom:1px solid #1c2230'>"
+                f"<td style='padding:11px 14px;font-weight:700;color:#fff'>{html_escape(r['va'])}"
+                f"<div style='font-size:11px;color:#5a6178;font-weight:400'>{idents}</div></td>"
+                f"<td style='padding:11px 14px;text-align:center'>{r['accounts']}</td>"
+                f"<td style='padding:11px 14px;text-align:center'>{sil}</td>"
+                f"<td style='padding:11px 14px;text-align:center'>{nod}</td>"
+                f"<td style='padding:11px 14px;text-align:center;color:#cbd5e1'>{v14}</td>"
+                f"<td style='padding:11px 14px;text-align:center'>{pen_badge}"
+                f"<button onclick=\"jbaPen('{html_escape(r['va'])}','add')\" title='+1 pénalité' style='margin-left:8px;width:22px;height:22px;border-radius:6px;border:1px solid #2a2a2a;background:#161a26;color:#f87171;cursor:pointer'>+</button>"
+                f"<button onclick=\"jbaPen('{html_escape(r['va'])}','remove')\" title='-1 pénalité' style='margin-left:4px;width:22px;height:22px;border-radius:6px;border:1px solid #2a2a2a;background:#161a26;color:#4ade80;cursor:pointer'>−</button>"
+                f"</td></tr>")
+        table_body = "".join(trs) or ("<tr><td colspan='6' style='padding:24px;text-align:center;color:#5a6178'>"
+                                      "Aucun VA / aucune donnée. Lance un scan.</td></tr>")
+        scan_line = (f"⏳ scan en cours… {st.get('done',0)}/{st.get('total',0)}"
+                     if st.get("on") else
+                     (f"dernier scan : {html_escape(st.get('last_scan') or 'jamais')}"))
+        MONTH = html_escape(month)
+        return f"""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Activité VA</title>
+<style>
+body{{margin:0;background:#0b0d12;color:#e8eaf2;font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}}
+a{{color:#3b82f6;text-decoration:none}}
+.kpi{{background:#12151f;border:1px solid #1e2430;border-radius:14px;padding:16px 18px;flex:1;min-width:130px}}
+.kpi .v{{font-size:26px;font-weight:800}}.kpi .l{{font-size:11px;color:#8a91a8;text-transform:uppercase;letter-spacing:.08em;margin-top:2px}}
+table{{width:100%;border-collapse:collapse;background:#0f1219;border:1px solid #1e2430;border-radius:14px;overflow:hidden}}
+th{{background:#1e293b;color:#cbd5e1;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:11px 14px;text-align:center;position:sticky;top:0}}
+th:first-child,td:first-child{{text-align:left}}
+button:hover{{filter:brightness(1.2)}}
+.btn{{padding:10px 18px;border-radius:10px;border:0;font-weight:700;cursor:pointer;font-size:13px}}
+</style></head><body>
+<div style="max-width:1000px;margin:0 auto">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+    <a href="/" style="color:#8a91a8">← Dashboard</a>
+  </div>
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:18px">
+    <div><h1 style="margin:0;font-size:24px">⚠️ Activité VA <span style="color:#5a6178;font-size:15px;font-weight:500">— {MONTH}</span></h1>
+    <div style="font-size:12px;color:#5a6178;margin-top:4px">1 pénalité par VA et par jour si ≥1 compte n'a pas posté depuis +48 h · {html_escape(scan_line)}</div></div>
+    <button class="btn" style="background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff" onclick="jbaScan(this)">🔍 Scanner maintenant</button>
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+    <div class="kpi"><div class="v">{tot_va}</div><div class="l">VA</div></div>
+    <div class="kpi"><div class="v">{tot_acc}</div><div class="l">Comptes</div></div>
+    <div class="kpi"><div class="v" style="color:#f87171">{tot_silent}</div><div class="l">Silencieux &gt;48h</div></div>
+    <div class="kpi"><div class="v" style="color:#f59e0b">{tot_pen}</div><div class="l">Pénalités du mois</div></div>
+  </div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>VA</th><th>Comptes</th><th>Silencieux &gt;48h</th><th>Sans data</th><th>Vues 14j</th><th>Pénalités {MONTH}</th></tr></thead>
+    <tbody>{table_body}</tbody>
+  </table></div>
+  <div style="font-size:11.5px;color:#5a6178;margin-top:12px">« Sans data » = compte pas encore scanné / privé / erreur (pas pénalisé). Scan auto 1×/jour.</div>
+</div>
+<script>
+function jbaScan(b){{ b.disabled=true; b.textContent='⏳ scan lancé…';
+  fetch('/jbactivity/scan',{{method:'POST'}}).then(r=>r.json()).then(function(){{
+    setTimeout(function(){{ location.reload(); }}, 2500);
+  }}).catch(function(){{ b.disabled=false; b.textContent='🔍 Scanner maintenant'; }}); }}
+function jbaPen(va, act){{ var fd=new FormData(); fd.set('va',va); fd.set('action',act);
+  fetch('/jbactivity/penalty',{{method:'POST',body:fd}}).then(r=>r.json()).then(function(){{ location.reload(); }}); }}
+</script>
+</body></html>"""
+
+    @app.route("/jbactivity/scan", methods=["POST"])
+    def jbactivity_scan():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import jb_activity as JA
+            JA.scan_async()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/jbactivity/penalty", methods=["POST"])
+    def jbactivity_penalty():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import jb_activity as JA
+            va = (request.form.get("va") or "").strip()
+            act = (request.form.get("action") or "").strip()
+            if act == "add":
+                JA.add_manual_penalty(va)
+            elif act == "remove":
+                JA.remove_penalty(va)
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
