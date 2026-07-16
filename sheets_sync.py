@@ -361,7 +361,58 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool, save_cfg: bool =
             sh.reorder_worksheets(others + idents + views)
         except Exception:
             pass
-    return list(wanted.keys())
+    return wanted   # {clé onglet -> worksheet} (VA views créées)
+
+
+# ---------- Mise en forme "pro" des classeurs ----------
+_HDR_BG = {"red": 0.118, "green": 0.161, "blue": 0.231}   # bleu nuit
+_BAND2 = {"red": 0.949, "green": 0.965, "blue": 0.980}    # ligne paire très claire
+_WHITE = {"red": 1, "green": 1, "blue": 1}
+
+
+def _beautify_sheet(sh, tab_ncols: dict) -> None:
+    """Applique un style pro à des onglets d'un classeur, en UN SEUL batch :
+    en-tête bleu nuit figé (texte blanc gras) + colonnes auto-ajustées + lignes
+    alternées + filtre. Idempotent (supprime les bandes existantes avant)."""
+    if not tab_ncols:
+        return
+    try:
+        meta = sh.fetch_sheet_metadata()
+    except Exception:
+        return
+    reqs = []
+    # 1) supprime les bandes existantes (sinon addBanding échoue au 2e passage)
+    for s in meta.get("sheets", []):
+        for b in (s.get("bandedRanges") or []):
+            reqs.append({"deleteBanding": {"bandedRangeId": b["bandedRangeId"]}})
+    for s in meta.get("sheets", []):
+        sid = s["properties"]["sheetId"]
+        if sid not in tab_ncols:
+            continue
+        ncols = max(1, int(tab_ncols[sid]))
+        rowcount = int(s["properties"].get("gridProperties", {}).get("rowCount", 1000))
+        full = {"sheetId": sid, "startRowIndex": 0, "endRowIndex": rowcount,
+                "startColumnIndex": 0, "endColumnIndex": ncols}
+        head = {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                "startColumnIndex": 0, "endColumnIndex": ncols}
+        reqs += [
+            {"updateSheetProperties": {"properties": {"sheetId": sid,
+                "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}},
+            {"repeatCell": {"range": head, "cell": {"userEnteredFormat": {
+                "backgroundColor": _HDR_BG, "verticalAlignment": "MIDDLE",
+                "textFormat": {"foregroundColor": _WHITE, "bold": True, "fontSize": 10}}},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)"}},
+            {"autoResizeDimensions": {"dimensions": {"sheetId": sid,
+                "dimension": "COLUMNS", "startIndex": 0, "endIndex": ncols}}},
+            {"addBanding": {"bandedRange": {"range": full, "rowProperties": {
+                "headerColor": _HDR_BG, "firstBandColor": _WHITE, "secondBandColor": _BAND2}}}},
+            {"setBasicFilter": {"filter": {"range": full}}},
+        ]
+    if reqs:
+        try:
+            sh.batch_update({"requests": reqs})
+        except Exception as e:
+            print(f"[sheets_sync] beautify: {e}", flush=True)
 
 
 # ---------- Site -> Sheet ----------
@@ -446,13 +497,19 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 rows = [HEADER] + [_acct_row(a) for a in accts]
                 ws.clear()
                 _ws_write(ws, rows)
+                tab_ncols = {ws.id: len(HEADER)}   # onglet principal = 7 colonnes
                 # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
                 # pour la config (pas d'écrasement entre classeurs).
                 try:
                     existing = {w.title.strip().lower(): w for w in sh.worksheets()}
-                    all_views += _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
+                    va_wanted = _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
+                    all_views += list(va_wanted.keys())
+                    for vw in va_wanted.values():
+                        tab_ncols[vw.id] = len(_VIEW_HEADER)   # onglets VA = 6 colonnes
                 except Exception as e:
                     print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
+                # Mise en forme "pro" de tout le classeur (1 batch)
+                _beautify_sheet(sh, tab_ncols)
                 _last_hash[identity] = h
                 _LAST_FOLDER["ok"] += 1
             # sauvegarde unique de la liste des vues (tous classeurs confondus)
