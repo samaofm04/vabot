@@ -275,8 +275,8 @@ def _is_va_tab(title: str) -> bool:
     return t.startswith("👤") or t in _view_tab_names()
 
 
-def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
-    """Un onglet LECTURE SEULE par couple (identité, VA), nommé 'identité va' (ex
+def _push_va_views(sh, existing: dict, data: dict, force: bool, save_cfg: bool = True) -> list:
+    """Un onglet par couple (identité, VA), nommé 'identité va' (ex
     'lola jhon'), trié pour grouper les mêmes identités côte à côte. Le poller les
     ignore (le nom n'est pas une identité). Nettoie les vues obsolètes (suivi via
     config 'va_view_tabs' + anciens onglets 👤). Réordonne si la structure change."""
@@ -339,13 +339,15 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
                 changed = True
             except Exception:
                 pass
-    # Mémoriser la liste des vues (nettoyage futur + skip du poller)
-    try:
-        cfg = load_config()
-        cfg["va_view_tabs"] = sorted(wanted.keys())
-        save_config(cfg)
-    except Exception:
-        pass
+    # Mémoriser la liste des vues (nettoyage futur). En mode dossier on accumule
+    # côté appelant (save_cfg=False) pour ne pas écraser les vues des autres classeurs.
+    if save_cfg:
+        try:
+            cfg = load_config()
+            cfg["va_view_tabs"] = sorted(wanted.keys())
+            save_config(cfg)
+        except Exception:
+            pass
     # Réordonner : autres (Feuille 1) + identités triées + vues triées (groupées par identité)
     if changed or force:
         try:
@@ -359,6 +361,7 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool) -> None:
             sh.reorder_worksheets(others + idents + views)
         except Exception:
             pass
+    return list(wanted.keys())
 
 
 # ---------- Site -> Sheet ----------
@@ -416,6 +419,7 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
     cfg = load_config()
     _LAST_FOLDER["ok"] = 0
     _LAST_FOLDER["err"] = ""
+    all_views = []
     try:
         with _lock:
             gc = _client()
@@ -433,7 +437,7 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                         _LAST_FOLDER["err"] = str(e)[:250]
                     print(f"[sheets_sync] création classeur '{identity}': {e}", flush=True)
                     continue
-                ws = sh.sheet1  # 1re feuille = les comptes de l'identité
+                ws = sh.sheet1  # 1re feuille = TOUS les comptes de l'identité
                 if ws.title.strip().lower() != str(identity).strip().lower():
                     try:
                         ws.update_title(str(identity))
@@ -442,8 +446,22 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 rows = [HEADER] + [_acct_row(a) for a in accts]
                 ws.clear()
                 _ws_write(ws, rows)
+                # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
+                # pour la config (pas d'écrasement entre classeurs).
+                try:
+                    existing = {w.title.strip().lower(): w for w in sh.worksheets()}
+                    all_views += _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
+                except Exception as e:
+                    print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
                 _last_hash[identity] = h
                 _LAST_FOLDER["ok"] += 1
+            # sauvegarde unique de la liste des vues (tous classeurs confondus)
+            try:
+                c2 = load_config()
+                c2["va_view_tabs"] = sorted(set(all_views))
+                save_config(c2)
+            except Exception:
+                pass
             return True
     except Exception as e:
         if not _LAST_FOLDER["err"]:
