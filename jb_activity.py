@@ -241,12 +241,16 @@ def va_summary(month: str = None) -> list:
             u = (a.get("username") or "").strip()
             d = vas.setdefault(vl, {"va": va, "accounts": 0, "silent_now": 0,
                                     "no_data": 0, "banned": 0, "never": 0, "views_14d": 0,
-                                    "identities": set(), "silent_accounts": []})
+                                    "identities": set(), "silent_accounts": [],
+                                    "by_identity": {}})
             d["accounts"] += 1
             d["identities"].add(identity)
             info = act.get(u) or {}
             state = _acct_state(u, info, now, banned)
             d["views_14d"] += info.get("views_14d") or 0
+            last = info.get("last_post_ts") or 0
+            d["by_identity"].setdefault(identity, []).append(
+                {"u": u, "state": state, "ago_h": int((now - last) // 3600) if last else None})
             if state == "banned":
                 d["banned"] += 1
             elif state == "never":
@@ -255,7 +259,6 @@ def va_summary(month: str = None) -> list:
                 d["no_data"] += 1
             elif state == "silent":
                 d["silent_now"] += 1
-                last = info.get("last_post_ts") or 0
                 d["silent_accounts"].append({
                     "u": u, "identity": identity, "hours": int((now - last) // 3600)})
     out = []
@@ -264,6 +267,9 @@ def va_summary(month: str = None) -> list:
         d["penalties_month"] = sum(1 for day in rec.get("days", []) if str(day).startswith(month))
         d["identities"] = sorted(d["identities"])
         d["silent_accounts"].sort(key=lambda x: -x["hours"])
+        _ord = {"silent": 0, "ok": 1, "never": 2, "nodata": 3, "banned": 4}
+        for accts in d["by_identity"].values():
+            accts.sort(key=lambda a: (_ord.get(a["state"], 9), a["u"].lower()))
         out.append(d)
     out.sort(key=lambda x: (-x["penalties_month"], -x["silent_now"], x["va"].lower()))
     return out

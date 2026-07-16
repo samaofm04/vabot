@@ -30137,9 +30137,35 @@ def create_app():
                 _notes.append(f"∅ {never} sans reel")
             ban_html = (f"<div style='font-size:11px;color:#6b7280;font-weight:400'>{' · '.join(_notes)} ignoré(s)</div>" if _notes else "")
             v14 = _format_count(r["views_14d"]) if r["views_14d"] else "—"
+            # --- panneau dépliable : tous les comptes du VA, groupés par identité ---
+            _STDOT = {"silent": "#f87171", "ok": "#4ade80", "never": "#6b7280",
+                      "nodata": "#facc15", "banned": "#9ca3af"}
+            _groups = []
+            for ident in sorted((r.get("by_identity") or {}).keys()):
+                chips = []
+                for a in r["by_identity"][ident]:
+                    u = a["u"]
+                    dot = _STDOT.get(a["state"], "#6b7280")
+                    extra = (f" <span style='color:#7a5a5a'>{a['ago_h']}h</span>"
+                             if a["state"] == "silent" and a.get("ago_h") is not None else "")
+                    tag = {"never": " ∅", "banned": " 🚫"}.get(a["state"], "")
+                    chips.append(
+                        f"<a href='https://instagram.com/{html_escape(u)}' target='_blank' rel='noopener' "
+                        f"style='display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#12151f;"
+                        f"border:1px solid #232838;border-radius:8px;color:#cbd5e1;font-size:12px;text-decoration:none'>"
+                        f"<span style='width:7px;height:7px;border-radius:50%;background:{dot};flex-shrink:0'></span>"
+                        f"{html_escape(u)}{tag}{extra}</a>")
+                _groups.append(
+                    f"<div style='margin-bottom:12px'>"
+                    f"<div style='font-size:11px;color:#8a91a8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>{html_escape(ident)}</div>"
+                    f"<div style='display:flex;flex-wrap:wrap;gap:7px'>{''.join(chips)}</div></div>")
+            detail_html = "".join(_groups) or "<div style='color:#5a6178'>Aucun compte.</div>"
             trs.append(
                 f"<tr style='border-bottom:1px solid #1c2230'>"
-                f"<td style='padding:11px 14px;font-weight:700;color:#fff'>{html_escape(r['va'])}"
+                f"<td style='padding:11px 14px;font-weight:700;color:#fff'>"
+                f"<span onclick='jbaToggle(this)' style='cursor:pointer;user-select:none'>"
+                f"<span class='jba-chev' style='display:inline-block;transition:transform .15s;color:#5a6178;margin-right:6px'>▸</span>"
+                f"{html_escape(r['va'])}</span>"
                 f"<div style='font-size:11px;color:#5a6178;font-weight:400'>{idents}</div>{ban_html}</td>"
                 f"<td style='padding:11px 14px;text-align:center'>{r['accounts']}</td>"
                 f"<td style='padding:11px 14px;text-align:center;vertical-align:top'>{sil}</td>"
@@ -30148,7 +30174,8 @@ def create_app():
                 f"<td style='padding:11px 14px;text-align:center'>{pen_badge}"
                 f"<button onclick=\"jbaPen('{html_escape(r['va'])}','add')\" title='+1 pénalité' style='margin-left:8px;width:22px;height:22px;border-radius:6px;border:1px solid #2a2a2a;background:#161a26;color:#f87171;cursor:pointer'>+</button>"
                 f"<button onclick=\"jbaPen('{html_escape(r['va'])}','remove')\" title='-1 pénalité' style='margin-left:4px;width:22px;height:22px;border-radius:6px;border:1px solid #2a2a2a;background:#161a26;color:#4ade80;cursor:pointer'>−</button>"
-                f"</td></tr>")
+                f"</td></tr>"
+                f"<tr class='jba-d' style='display:none'><td colspan='6' style='padding:14px 18px;background:#0b0e15;border-bottom:1px solid #1c2230'>{detail_html}</td></tr>")
         table_body = "".join(trs) or ("<tr><td colspan='6' style='padding:24px;text-align:center;color:#5a6178'>"
                                       "Aucun VA / aucune donnée. Lance un scan.</td></tr>")
         scan_line = (f"⏳ scan en cours… {st.get('done',0)}/{st.get('total',0)}"
@@ -30197,6 +30224,11 @@ function jbaScan(b){{ b.disabled=true; b.textContent='⏳ scan lancé…';
   }}).catch(function(){{ b.disabled=false; b.textContent='🔍 Scanner maintenant'; }}); }}
 function jbaPen(va, act){{ var fd=new FormData(); fd.set('va',va); fd.set('action',act);
   fetch('/jbactivity/penalty',{{method:'POST',body:fd}}).then(r=>r.json()).then(function(){{ location.reload(); }}); }}
+function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
+  if(!d||!d.classList.contains('jba-d')) return;
+  var open = d.style.display==='none';
+  d.style.display = open ? 'table-row' : 'none';
+  var chev=el.querySelector('.jba-chev'); if(chev) chev.style.transform = open ? 'rotate(90deg)' : 'none'; }}
 </script>
 </body></html>"""
 
