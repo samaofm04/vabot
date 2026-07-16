@@ -64,12 +64,14 @@ class SheetsSync(commands.Cog):
         description="[OWNER] Sync Google Sheet des comptes Jailbreak (setup/test/push/pull/status)",
     )
     @app_commands.describe(
-        action="setup · test · push · pull · status",
+        action="setup · folder · test · push · pull · status",
         sheet_id="(setup) l'ID du Google Sheet — la longue chaîne dans son URL",
         cle="(setup) le fichier JSON du compte de service Google",
+        folder="(folder) le lien du dossier Drive partagé au compte de service (1 classeur/identité)",
     )
     async def sheetsync(self, interaction: discord.Interaction, action: str,
-                        sheet_id: str = None, cle: discord.Attachment = None):
+                        sheet_id: str = None, cle: discord.Attachment = None,
+                        folder: str = None):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -107,6 +109,43 @@ class SheetsSync(commands.Cog):
                 except Exception:
                     pass
             await interaction.followup.send("\n".join(msg), ephemeral=True)
+            return
+
+        if action == "folder":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            link = (folder or sheet_id or "").strip()
+            email = sheets_sync.service_account_email()
+            email_disp = email or "(charge d'abord la clé via /sheetsync setup)"
+            if not link:
+                await interaction.followup.send(
+                    "📁 **Mode « 1 classeur par identité »**\n"
+                    "1. Crée un dossier dans Google Drive (ex : `VA JB`)\n"
+                    f"2. Partage-le en **Éditeur** avec : `{email_disp}`\n"
+                    "3. Refais : `/sheetsync folder folder:<lien_du_dossier>`\n\n"
+                    "Je créerai automatiquement **1 classeur par identité** dedans, et je les synchroniserai "
+                    "dans les 2 sens. ⚠️ L'**API Google Drive** doit être activée sur le projet du compte de service.",
+                    ephemeral=True)
+                return
+            fid = sheets_sync.set_folder(link)
+            import jailbreak as jb
+            ok = await asyncio.to_thread(sheets_sync.push_all, jb._load(), True)
+            if not self.poll.is_running():
+                self.poll.start()
+            cfg = sheets_sync.load_config()
+            n = len(cfg.get("sheets") or {})
+            if ok:
+                await interaction.followup.send(
+                    f"✅ **Mode 1 classeur/identité activé.** Dossier `{fid}`.\n"
+                    f"📗 {n} classeur(s) créé(s)/mis à jour (1 par identité), rangés dans ton dossier.\n"
+                    f"🔁 Poller Sheet→site : ON. Tu peux renommer/éditer chaque classeur, ça se resync.",
+                    ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    "⚠️ Dossier enregistré, mais la création des classeurs a échoué.\n"
+                    "Vérifie : (1) le dossier est partagé en **Éditeur** avec "
+                    f"`{email}`, (2) l'**API Google Drive** est activée sur le projet du compte de service.\n"
+                    "Détails : `/sheetsync status`.",
+                    ephemeral=True)
             return
 
         if action in ("test", "status"):

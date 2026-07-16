@@ -15,6 +15,7 @@ comptes ont change (hash), le pull ne sauve que s'il y a un vrai changement.
 from __future__ import annotations
 
 import json
+import re
 import time
 import hashlib
 import threading
@@ -81,7 +82,19 @@ def gspread_available() -> bool:
 
 
 def is_configured() -> bool:
-    return bool(load_config().get("sheet_id")) and SA_FILE.exists()
+    cfg = load_config()
+    return SA_FILE.exists() and bool(cfg.get("sheet_id") or cfg.get("folder_id"))
+
+
+def set_folder(url_or_id: str) -> str:
+    """Active le mode « 1 classeur par identité » : enregistre le dossier Drive
+    (partagé avec le compte de service). Retourne l'id du dossier."""
+    fid = parse_folder_id(url_or_id)
+    cfg = load_config()
+    cfg["folder_id"] = fid
+    cfg.setdefault("sheets", {})
+    save_config(cfg)
+    return fid
 
 
 def service_account_email() -> str:
@@ -95,9 +108,58 @@ def service_account_email() -> str:
 def _client():
     import gspread
     from google.oauth2.service_account import Credentials
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    # drive : requis pour CRÉER des classeurs + les ranger dans un dossier partagé
+    scopes = ["https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file(str(SA_FILE), scopes=scopes)
     return gspread.authorize(creds)
+
+
+# ---------- Mode « 1 classeur par identité » (dossier Drive) ----------
+def parse_folder_id(url_or_id: str) -> str:
+    """Extrait l'ID d'un dossier Drive depuis un lien complet ou un ID brut."""
+    s = (url_or_id or "").strip()
+    m = re.search(r"/folders/([A-Za-z0-9_-]+)", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", s)
+    if m:
+        return m.group(1)
+    return s  # supposé déjà un ID
+
+
+def folder_mode() -> bool:
+    return bool(load_config().get("folder_id"))
+
+
+def _ensure_identity_sheet(gc, identity: str, cfg: dict):
+    """Retourne le classeur Google de l'identité, en le CRÉANT dans le dossier
+    partagé s'il n'existe pas encore. Mémorise l'id dans cfg['sheets']."""
+    key = str(identity).strip().lower()
+    sheets = cfg.setdefault("sheets", {})
+    sid = sheets.get(key)
+    if sid:
+        try:
+            return gc.open_by_key(sid)
+        except Exception:
+            pass  # supprimé / inaccessible -> on recrée
+    title = f"VA JB — {identity}"
+    fid = cfg.get("folder_id") or None
+    try:
+        sh = gc.create(title, folder_id=fid)
+    except TypeError:
+        # vieux gspread sans folder_id : on crée puis on déplacera via partage
+        sh = gc.create(title)
+    sheets[key] = sh.id
+    save_config(cfg)
+    # Sécurité d'accès : partage direct avec l'owner si un email est configuré
+    owner = cfg.get("share_email")
+    if owner:
+        try:
+            sh.share(owner, perm_type="user", role="writer")
+        except Exception:
+            pass
+    return sh
 
 
 def _open_sheet():
@@ -109,12 +171,21 @@ def test_connection() -> tuple:
     if not gspread_available():
         return False, "Librairie `gspread` absente sur le VPS — fais `pip install gspread`."
     if not is_configured():
-        return False, "Pas encore configuré (clé de service + sheet_id manquants)."
+        return False, "Pas encore configuré (clé de service + sheet_id/dossier manquants)."
+    cfg = load_config()
     try:
+        if cfg.get("folder_id"):
+            gc = _client()
+            sheets = cfg.get("sheets") or {}
+            n = len(sheets)
+            if sheets:
+                sh = gc.open_by_key(next(iter(sheets.values())))
+                return True, f"Mode 1 classeur/identité — {n} classeur(s) (ex : « {sh.title} »)."
+            return True, "Mode 1 classeur/identité — dossier configuré, 0 classeur (fais `/sheetsync push`)."
         sh = _open_sheet()
         return True, f"Connecté au Sheet « {sh.title} »."
     except Exception as e:
-        return False, f"Accès au Sheet impossible : {e}"
+        return False, f"Accès impossible : {e}"
 
 
 # ---------- Helpers ----------
@@ -289,6 +360,57 @@ def _dedup_accounts(data: dict) -> int:
 
 
 def push_all(data: dict, force: bool = False) -> bool:
+    """Dispatcher : mode DOSSIER (1 classeur/identité) si folder_id configuré,
+    sinon ancien mode (1 seul Sheet, N onglets)."""
+    if not (is_configured() and gspread_available()):
+        return False
+    if folder_mode():
+        return _push_all_folder(data, force)
+    return _push_all_single(data, force)
+
+
+def _push_all_folder(data: dict, force: bool = False) -> bool:
+    """1 CLASSEUR par identité (rangé dans le dossier partagé). L'onglet principal
+    est nommé comme l'identité (compat avec pull_and_merge). Best-effort."""
+    try:
+        if _dedup_accounts(data):
+            import jailbreak as jb
+            jb._save(data)
+    except Exception:
+        pass
+    cfg = load_config()
+    try:
+        with _lock:
+            gc = _client()
+            for identity, entry in (data or {}).items():
+                if not isinstance(entry, dict):
+                    continue
+                accts = entry.get("accounts") or []
+                h = _accts_hash(accts)
+                if not force and _last_hash.get(identity) == h:
+                    continue
+                try:
+                    sh = _ensure_identity_sheet(gc, identity, cfg)
+                except Exception as e:
+                    print(f"[sheets_sync] création classeur '{identity}': {e}", flush=True)
+                    continue
+                ws = sh.sheet1  # 1re feuille = les comptes de l'identité
+                if ws.title.strip().lower() != str(identity).strip().lower():
+                    try:
+                        ws.update_title(str(identity))
+                    except Exception:
+                        pass
+                rows = [HEADER] + [_acct_row(a) for a in accts]
+                ws.clear()
+                _ws_write(ws, rows)
+                _last_hash[identity] = h
+            return True
+    except Exception as e:
+        print(f"[sheets_sync] push_all_folder: {e}", flush=True)
+        return False
+
+
+def _push_all_single(data: dict, force: bool = False) -> bool:
     """Ecrit chaque identite dans SON onglet (rewrite). Ne reecrit que les onglets dont
     les comptes ont change (sauf force=True). Best-effort (retourne False si echec)."""
     if not (is_configured() and gspread_available()):
@@ -341,6 +463,51 @@ def push_all_async(data: dict) -> None:
 
 # ---------- Sheet -> Site ----------
 def pull_all() -> dict | None:
+    """Dispatcher : lit les classeurs par identité (mode dossier) OU le Sheet unique.
+    Retourne {titre_onglet: [row dict, ...]}. None si erreur."""
+    if not (is_configured() and gspread_available()):
+        return None
+    if folder_mode():
+        return _pull_all_folder()
+    return _pull_all_single()
+
+
+def _parse_ws(ws) -> list:
+    values = ws.get_all_values()
+    if not values:
+        return []
+    header = [str(h).strip().lower() for h in values[0]]
+    accts = []
+    for r in values[1:]:
+        d = {header[i]: (str(r[i]).strip() if i < len(r) else "")
+             for i in range(len(header))}
+        if not (d.get("username") or "").strip():
+            continue
+        accts.append(d)
+    return accts
+
+
+def _pull_all_folder() -> dict | None:
+    """Lit chaque classeur par identité -> {titre_onglet: rows}. Les titres restent
+    le nom de l'identité (compat pull_and_merge)."""
+    cfg = load_config()
+    try:
+        gc = _client()
+        out = {}
+        for key, sid in (cfg.get("sheets") or {}).items():
+            try:
+                sh = gc.open_by_key(sid)
+            except Exception:
+                continue  # classeur supprimé / inaccessible -> ignoré (pas de wipe)
+            for ws in sh.worksheets():
+                out[ws.title.strip()] = _parse_ws(ws)
+        return out
+    except Exception as e:
+        print(f"[sheets_sync] pull_all_folder: {e}", flush=True)
+        return None
+
+
+def _pull_all_single() -> dict | None:
     """Lit tous les onglets -> {identity_lower: [row dict, ...]}. None si erreur."""
     if not (is_configured() and gspread_available()):
         return None
