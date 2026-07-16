@@ -30115,17 +30115,28 @@ def create_app():
             pen_badge = (f"<span style='background:{'#dc2626' if pen>=3 else ('#f59e0b' if pen>0 else '#1f2937')};"
                          f"color:#fff;font-weight:800;padding:3px 12px;border-radius:20px;font-size:13px'>{pen}</span>")
             silent = r["silent_now"]
+            sa = r.get("silent_accounts") or []
+            sa_html = ""
+            if sa:
+                items = " · ".join(
+                    f"{html_escape(x['u'])} <span style='color:#7a5a5a'>({x['hours']}h)</span>"
+                    for x in sa[:10])
+                if len(sa) > 10:
+                    items += f" <span style='color:#666'>+{len(sa)-10}</span>"
+                sa_html = f"<div style='font-size:11px;color:#f8a4a4;margin-top:4px;line-height:1.6;text-align:left'>{items}</div>"
             sil = (f"<span style='color:{'#f87171' if silent else '#4ade80'};font-weight:700'>{silent}</span>"
-                   f"<span style='color:#666'> / {r['accounts']}</span>")
+                   f"<span style='color:#666'> / {r['accounts']}</span>{sa_html}")
             nod = f"<span style='color:#888'>{r['no_data']}</span>" if r["no_data"] else "<span style='color:#444'>0</span>"
             idents = ", ".join(html_escape(i) for i in r["identities"][:6])
+            ban = r.get("banned") or 0
+            ban_html = (f"<div style='font-size:11px;color:#6b7280;font-weight:400'>🚫 {ban} banni(s) ignoré(s)</div>" if ban else "")
             v14 = _format_count(r["views_14d"]) if r["views_14d"] else "—"
             trs.append(
                 f"<tr style='border-bottom:1px solid #1c2230'>"
                 f"<td style='padding:11px 14px;font-weight:700;color:#fff'>{html_escape(r['va'])}"
-                f"<div style='font-size:11px;color:#5a6178;font-weight:400'>{idents}</div></td>"
+                f"<div style='font-size:11px;color:#5a6178;font-weight:400'>{idents}</div>{ban_html}</td>"
                 f"<td style='padding:11px 14px;text-align:center'>{r['accounts']}</td>"
-                f"<td style='padding:11px 14px;text-align:center'>{sil}</td>"
+                f"<td style='padding:11px 14px;text-align:center;vertical-align:top'>{sil}</td>"
                 f"<td style='padding:11px 14px;text-align:center'>{nod}</td>"
                 f"<td style='padding:11px 14px;text-align:center;color:#cbd5e1'>{v14}</td>"
                 f"<td style='padding:11px 14px;text-align:center'>{pen_badge}"

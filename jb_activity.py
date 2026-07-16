@@ -23,8 +23,22 @@ SCAN_MARK = DATA_DIR / "jb_activity_lastscan.txt"
 
 SILENCE_SEC = 48 * 3600         # >48 h sans poster = en faute
 WEEKS2_SEC = 14 * 24 * 3600     # fenêtre "vues 14 jours"
+_BAN_FILE = DATA_DIR / "va_insta_3_stats_cache.json"   # {handle: {banned: true}}
 _lock = threading.Lock()
 _scanning = {"on": False, "done": 0, "total": 0, "errors": 0}
+
+
+def _banned() -> set:
+    """Usernames (lower) marqués bannis par le scraper -> jamais pénalisés."""
+    out = set()
+    try:
+        d = json.loads(_BAN_FILE.read_text(encoding="utf-8"))
+        for handle, st in (d or {}).items():
+            if isinstance(st, dict) and st.get("banned"):
+                out.add(str(handle).strip().lower())
+    except Exception:
+        pass
+    return out
 
 
 def _load(p: Path) -> dict:
@@ -119,29 +133,38 @@ def compute_penalties(day: str = None) -> dict:
     day = day or _today()
     data = jb._load()
     act = _load(ACT_FILE)
+    banned = _banned()
     now = time.time()
-    faulty = {}  # va_lower -> affichage
+    faulty = {}  # va_lower -> {"va": affichage, "accounts": set(usernames fautifs)}
     for entry in (data or {}).values():
         for a in (entry.get("accounts") or []):
             va = (a.get("va") or "").strip()
             if not va:
                 continue
             u = (a.get("username") or "").strip()
+            if u.lower() in banned:
+                continue  # compte BANNI -> pas de pénalité, on skip
             last = (act.get(u) or {}).get("last_post_ts") or 0
             # pas de données (jamais scrapé / privé / erreur) -> on NE pénalise pas
             if last and (now - last) > SILENCE_SEC:
-                faulty.setdefault(va.lower(), va)
+                f = faulty.setdefault(va.lower(), {"va": va, "accounts": set()})
+                if u:
+                    f["accounts"].add(u)
     with _lock:
         pen = _load(PEN_FILE)
         added = 0
-        for vl, disp in faulty.items():
-            rec = pen.setdefault(vl, {"va": disp, "days": []})
-            rec["va"] = disp
+        for vl, info in faulty.items():
+            rec = pen.setdefault(vl, {"va": info["va"], "days": [], "by_day": {}})
+            rec["va"] = info["va"]
+            rec.setdefault("by_day", {})
             if day not in rec["days"]:
                 rec["days"].append(day)
                 added += 1
+            # quels comptes ont provoqué la pénalité ce jour-là (union)
+            prev = set(rec["by_day"].get(day, []))
+            rec["by_day"][day] = sorted(prev | info["accounts"])
         _save(PEN_FILE, pen)
-    return {"added": added, "vas": sorted(faulty.values())}
+    return {"added": added, "vas": sorted(v["va"] for v in faulty.values())}
 
 
 def add_manual_penalty(va: str, day: str = None) -> bool:
@@ -185,6 +208,7 @@ def va_summary(month: str = None) -> list:
     data = jb._load()
     act = _load(ACT_FILE)
     pen = _load(PEN_FILE)
+    banned = _banned()
     now = time.time()
     vas = {}
     for identity, entry in (data or {}).items():
@@ -193,26 +217,30 @@ def va_summary(month: str = None) -> list:
             if not va:
                 continue
             vl = va.lower()
+            u = (a.get("username") or "").strip()
             d = vas.setdefault(vl, {"va": va, "accounts": 0, "silent_now": 0,
-                                    "no_data": 0, "views_14d": 0, "identities": set(),
-                                    "oldest_post_ts": 0})
+                                    "no_data": 0, "banned": 0, "views_14d": 0,
+                                    "identities": set(), "silent_accounts": []})
             d["accounts"] += 1
             d["identities"].add(identity)
-            info = act.get((a.get("username") or "").strip()) or {}
+            if u.lower() in banned:
+                d["banned"] += 1
+                continue  # banni -> ni silencieux ni sans-data
+            info = act.get(u) or {}
             last = info.get("last_post_ts") or 0
             d["views_14d"] += info.get("views_14d") or 0
             if not last:
                 d["no_data"] += 1
-            else:
-                if (now - last) > SILENCE_SEC:
-                    d["silent_now"] += 1
-                if d["oldest_post_ts"] == 0 or last < d["oldest_post_ts"]:
-                    d["oldest_post_ts"] = last
+            elif (now - last) > SILENCE_SEC:
+                d["silent_now"] += 1
+                d["silent_accounts"].append({
+                    "u": u, "identity": identity, "hours": int((now - last) // 3600)})
     out = []
     for vl, d in vas.items():
         rec = pen.get(vl) or {"days": []}
         d["penalties_month"] = sum(1 for day in rec.get("days", []) if str(day).startswith(month))
         d["identities"] = sorted(d["identities"])
+        d["silent_accounts"].sort(key=lambda x: -x["hours"])
         out.append(d)
     out.sort(key=lambda x: (-x["penalties_month"], -x["silent_now"], x["va"].lower()))
     return out
