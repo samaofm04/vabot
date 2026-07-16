@@ -134,6 +134,15 @@ def folder_mode() -> bool:
     return bool(load_config().get("folder_id"))
 
 
+def identity_names() -> list:
+    """Liste des identités jailbreak (pour dire à l'user quels classeurs créer)."""
+    try:
+        import jailbreak as jb
+        return [str(k) for k in (jb._load() or {}).keys()]
+    except Exception:
+        return []
+
+
 def _ensure_identity_sheet(gc, identity: str, cfg: dict):
     """Retourne le classeur Google de l'identité, en le CRÉANT dans le dossier
     partagé s'il n'existe pas encore. Mémorise l'id dans cfg['sheets']."""
@@ -144,13 +153,37 @@ def _ensure_identity_sheet(gc, identity: str, cfg: dict):
         try:
             return gc.open_by_key(sid)
         except Exception:
-            pass  # supprimé / inaccessible -> on recrée
+            pass  # supprimé / inaccessible -> on retente
     title = f"VA JB — {identity}"
+    # 1) RÉUTILISE un classeur EXISTANT (créé par l'user dans le dossier partagé) ->
+    #    AUCUNE création, donc pas de blocage "quota compte de service". Tolérant sur
+    #    le nom : « VA JB — lola », « lola », ou tout titre contenant « lola ».
+    for cand in (title, str(identity)):
+        try:
+            sh = gc.open(cand)
+            sheets[key] = sh.id
+            save_config(cfg)
+            return sh
+        except Exception:
+            pass
+    try:
+        fid0 = cfg.get("folder_id")
+        if fid0 and hasattr(gc, "list_spreadsheet_files"):
+            for f in gc.list_spreadsheet_files(folder_id=fid0):
+                words = (f.get("name") or "").strip().lower().replace("—", " ").split()
+                if key in words:
+                    sh = gc.open_by_key(f["id"])
+                    sheets[key] = sh.id
+                    save_config(cfg)
+                    return sh
+    except Exception:
+        pass
+    # 2) sinon on TENTE de créer (échoue si compte de service sans quota de stockage
+    #    -> l'appelant remonte l'erreur claire).
     fid = cfg.get("folder_id") or None
     try:
         sh = gc.create(title, folder_id=fid)
     except TypeError:
-        # vieux gspread sans folder_id : on crée puis on déplacera via partage
         sh = gc.create(title)
     sheets[key] = sh.id
     save_config(cfg)

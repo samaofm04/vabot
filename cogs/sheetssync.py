@@ -145,15 +145,24 @@ class SheetsSync(commands.Cog):
             elif err:
                 low = err.lower()
                 hint = ""
-                if "drive" in low and ("disabled" in low or "not been used" in low or "not enabled" in low or "accessNotConfigured" in low.replace(" ", "")):
-                    hint = (f"\n\n👉 **C'est l'API Google Drive : elle n'est pas activée.** Active-la ici puis attends 1-2 min :\n"
-                            f"https://console.cloud.google.com/apis/library/drive.googleapis.com?project={proj}\n"
-                            f"Ensuite relance `/sheetsync folder folder:<lien>`.")
-                elif "permission" in low or "403" in low or "not found" in low or "404" in low:
+                if "storage quota" in low or "quota has been exceeded" in low:
+                    names = sheets_sync.identity_names()
+                    liste = "\n".join(f"• `{n}`" for n in names[:25]) or "(aucune identité)"
+                    if len(names) > 25:
+                        liste += f"\n… +{len(names) - 25} autre(s)"
+                    hint = ("\n\n👉 **Limite Google connue** : un compte de service ne peut PAS *créer* de fichiers "
+                            "(pas de quota de stockage). Mais il peut ÉCRIRE dans des classeurs qui existent déjà.\n"
+                            "**À faire une seule fois :** dans ton dossier, crée un Google Sheets **vide** par identité, "
+                            "nommé EXACTEMENT comme ça :\n"
+                            f"{liste}\n"
+                            "Puis relance `/sheetsync folder folder:<lien>` — je les remplirai et synchroniserai tout seul ensuite.")
+                elif "drive" in low and ("disabled" in low or "not been used" in low or "not enabled" in low or "accessnotconfigured" in low.replace(" ", "")):
+                    hint = (f"\n\n👉 **API Google Drive pas activée.** Active-la ici (attends 1-2 min) :\n"
+                            f"https://console.cloud.google.com/apis/library/drive.googleapis.com?project={proj}")
+                elif "permission" in low or "not found" in low or "404" in low:
                     hint = (f"\n\n👉 **Problème d'accès au dossier.** Partage-le en **Éditeur** avec `{email}`.")
                 await interaction.followup.send(
-                    f"⚠️ Dossier enregistré, mais **0 classeur créé**.\n"
-                    f"Erreur exacte : `{err}`{hint}",
+                    (f"⚠️ **0 classeur créé.** Erreur : `{err}`{hint}")[:1990],
                     ephemeral=True)
             else:
                 await interaction.followup.send(
