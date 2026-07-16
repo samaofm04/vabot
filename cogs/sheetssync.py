@@ -133,18 +133,32 @@ class SheetsSync(commands.Cog):
                 self.poll.start()
             cfg = sheets_sync.load_config()
             n = len(cfg.get("sheets") or {})
-            if ok:
+            created = sheets_sync._LAST_FOLDER.get("ok", 0)
+            err = sheets_sync._LAST_FOLDER.get("err", "")
+            proj = email.split("@")[-1].split(".")[0] if email and "@" in email else "ton-projet"
+            if ok and created > 0:
                 await interaction.followup.send(
                     f"✅ **Mode 1 classeur/identité activé.** Dossier `{fid}`.\n"
-                    f"📗 {n} classeur(s) créé(s)/mis à jour (1 par identité), rangés dans ton dossier.\n"
+                    f"📗 **{created}** classeur(s) synchronisé(s) (1 par identité), rangés dans ton dossier.\n"
                     f"🔁 Poller Sheet→site : ON. Tu peux renommer/éditer chaque classeur, ça se resync.",
+                    ephemeral=True)
+            elif err:
+                low = err.lower()
+                hint = ""
+                if "drive" in low and ("disabled" in low or "not been used" in low or "not enabled" in low or "accessNotConfigured" in low.replace(" ", "")):
+                    hint = (f"\n\n👉 **C'est l'API Google Drive : elle n'est pas activée.** Active-la ici puis attends 1-2 min :\n"
+                            f"https://console.cloud.google.com/apis/library/drive.googleapis.com?project={proj}\n"
+                            f"Ensuite relance `/sheetsync folder folder:<lien>`.")
+                elif "permission" in low or "403" in low or "not found" in low or "404" in low:
+                    hint = (f"\n\n👉 **Problème d'accès au dossier.** Partage-le en **Éditeur** avec `{email}`.")
+                await interaction.followup.send(
+                    f"⚠️ Dossier enregistré, mais **0 classeur créé**.\n"
+                    f"Erreur exacte : `{err}`{hint}",
                     ephemeral=True)
             else:
                 await interaction.followup.send(
-                    "⚠️ Dossier enregistré, mais la création des classeurs a échoué.\n"
-                    "Vérifie : (1) le dossier est partagé en **Éditeur** avec "
-                    f"`{email}`, (2) l'**API Google Drive** est activée sur le projet du compte de service.\n"
-                    "Détails : `/sheetsync status`.",
+                    "ℹ️ Dossier enregistré, mais **aucune identité jailbreak à synchroniser** "
+                    "(la base de comptes JB est vide ?). Ajoute des comptes puis `/sheetsync push`.",
                     ephemeral=True)
             return
 

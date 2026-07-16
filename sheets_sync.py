@@ -57,6 +57,8 @@ def _statut(username: str) -> str:
 
 _lock = threading.Lock()
 _last_hash: dict = {}   # identity -> hash des comptes (evite les reecritures inutiles)
+# Diagnostic du dernier push mode dossier (pour messages d'erreur clairs)
+_LAST_FOLDER: dict = {"ok": 0, "err": ""}
 
 
 # ---------- Config ----------
@@ -379,6 +381,8 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
     except Exception:
         pass
     cfg = load_config()
+    _LAST_FOLDER["ok"] = 0
+    _LAST_FOLDER["err"] = ""
     try:
         with _lock:
             gc = _client()
@@ -392,6 +396,8 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 try:
                     sh = _ensure_identity_sheet(gc, identity, cfg)
                 except Exception as e:
+                    if not _LAST_FOLDER["err"]:
+                        _LAST_FOLDER["err"] = str(e)[:250]
                     print(f"[sheets_sync] création classeur '{identity}': {e}", flush=True)
                     continue
                 ws = sh.sheet1  # 1re feuille = les comptes de l'identité
@@ -404,8 +410,11 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 ws.clear()
                 _ws_write(ws, rows)
                 _last_hash[identity] = h
+                _LAST_FOLDER["ok"] += 1
             return True
     except Exception as e:
+        if not _LAST_FOLDER["err"]:
+            _LAST_FOLDER["err"] = str(e)[:250]
         print(f"[sheets_sync] push_all_folder: {e}", flush=True)
         return False
 
