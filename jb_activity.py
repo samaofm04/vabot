@@ -60,6 +60,29 @@ def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _acct_state(username: str, info: dict, now: float, banned: set) -> str:
+    """État d'un compte pour l'accountability :
+    'banned'  -> banni (exclu)
+    'never'   -> scanné OK mais AUCUN reel jamais posté (exclu)
+    'nodata'  -> jamais scanné / erreur / privé (on ne sait pas -> exclu)
+    'silent'  -> a des reels mais rien depuis >48 h  => PÉNALISÉ
+    'ok'      -> a posté il y a <48 h
+    Seul 'silent' déclenche une pénalité."""
+    if (username or "").strip().lower() in banned:
+        return "banned"
+    if not info or info.get("error"):
+        return "nodata"
+    if info.get("is_private"):
+        return "nodata"
+    # scanné avec succès : jamais posté de reel ?
+    if not (info.get("reels_count") or info.get("last_post_ts")):
+        return "never"
+    last = info.get("last_post_ts") or 0
+    if not last:                 # a des reels mais aucun timestamp exploitable
+        return "nodata"
+    return "silent" if (now - last) > SILENCE_SEC else "ok"
+
+
 # ---------- SCAN (dernier post + vues par compte) ----------
 def scan_all(limit_reels: int = 6, sleep: float = 0.4) -> dict:
     """Scrape chaque compte JB et met à jour jb_activity.json. Best-effort.
@@ -103,6 +126,7 @@ def scan_all(limit_reels: int = 6, sleep: float = 0.4) -> dict:
                     "last_post_ts": last_ts,
                     "last_views": (last_reel or {}).get("views") or 0,
                     "views_14d": v14,
+                    "reels_count": len(reels),
                     "is_private": bool((res.get("profile") or {}).get("is_private")),
                     "scanned_at": now,
                     "error": "",
@@ -142,11 +166,8 @@ def compute_penalties(day: str = None) -> dict:
             if not va:
                 continue
             u = (a.get("username") or "").strip()
-            if u.lower() in banned:
-                continue  # compte BANNI -> pas de pénalité, on skip
-            last = (act.get(u) or {}).get("last_post_ts") or 0
-            # pas de données (jamais scrapé / privé / erreur) -> on NE pénalise pas
-            if last and (now - last) > SILENCE_SEC:
+            # SEUL l'état 'silent' pénalise (banni / jamais posté / sans data = exclus)
+            if _acct_state(u, act.get(u), now, banned) == "silent":
                 f = faulty.setdefault(va.lower(), {"va": va, "accounts": set()})
                 if u:
                     f["accounts"].add(u)
@@ -219,20 +240,22 @@ def va_summary(month: str = None) -> list:
             vl = va.lower()
             u = (a.get("username") or "").strip()
             d = vas.setdefault(vl, {"va": va, "accounts": 0, "silent_now": 0,
-                                    "no_data": 0, "banned": 0, "views_14d": 0,
+                                    "no_data": 0, "banned": 0, "never": 0, "views_14d": 0,
                                     "identities": set(), "silent_accounts": []})
             d["accounts"] += 1
             d["identities"].add(identity)
-            if u.lower() in banned:
-                d["banned"] += 1
-                continue  # banni -> ni silencieux ni sans-data
             info = act.get(u) or {}
-            last = info.get("last_post_ts") or 0
+            state = _acct_state(u, info, now, banned)
             d["views_14d"] += info.get("views_14d") or 0
-            if not last:
+            if state == "banned":
+                d["banned"] += 1
+            elif state == "never":
+                d["never"] += 1           # jamais posté -> exclu (ni pénalité ni "sans data")
+            elif state == "nodata":
                 d["no_data"] += 1
-            elif (now - last) > SILENCE_SEC:
+            elif state == "silent":
                 d["silent_now"] += 1
+                last = info.get("last_post_ts") or 0
                 d["silent_accounts"].append({
                     "u": u, "identity": identity, "hours": int((now - last) // 3600)})
     out = []

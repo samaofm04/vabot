@@ -30129,7 +30129,13 @@ def create_app():
             nod = f"<span style='color:#888'>{r['no_data']}</span>" if r["no_data"] else "<span style='color:#444'>0</span>"
             idents = ", ".join(html_escape(i) for i in r["identities"][:6])
             ban = r.get("banned") or 0
-            ban_html = (f"<div style='font-size:11px;color:#6b7280;font-weight:400'>🚫 {ban} banni(s) ignoré(s)</div>" if ban else "")
+            never = r.get("never") or 0
+            _notes = []
+            if ban:
+                _notes.append(f"🚫 {ban} banni(s)")
+            if never:
+                _notes.append(f"∅ {never} sans reel")
+            ban_html = (f"<div style='font-size:11px;color:#6b7280;font-weight:400'>{' · '.join(_notes)} ignoré(s)</div>" if _notes else "")
             v14 = _format_count(r["views_14d"]) if r["views_14d"] else "—"
             trs.append(
                 f"<tr style='border-bottom:1px solid #1c2230'>"
@@ -30182,7 +30188,7 @@ button:hover{{filter:brightness(1.2)}}
     <thead><tr><th>VA</th><th>Comptes</th><th>Silencieux &gt;48h</th><th>Sans data</th><th>Vues 14j</th><th>Pénalités {MONTH}</th></tr></thead>
     <tbody>{table_body}</tbody>
   </table></div>
-  <div style="font-size:11.5px;color:#5a6178;margin-top:12px">« Sans data » = compte pas encore scanné / privé / erreur (pas pénalisé). Scan auto 1×/jour.</div>
+  <div style="font-size:11.5px;color:#5a6178;margin-top:12px">« Sans data » = pas encore scanné / privé / erreur · « sans reel » = jamais posté · « banni » : tous **exclus** (jamais pénalisés). Seuls les comptes qui ont déjà posté et sont silencieux &gt;48h comptent. Scan auto 1×/jour.</div>
 </div>
 <script>
 function jbaScan(b){{ b.disabled=true; b.textContent='⏳ scan lancé…';
