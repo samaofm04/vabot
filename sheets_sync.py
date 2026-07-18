@@ -134,6 +134,102 @@ def folder_mode() -> bool:
     return bool(load_config().get("folder_id"))
 
 
+def is_paused() -> bool:
+    """Sync gelée (sécurité) : ni push ni pull. Évite d'écraser des données."""
+    return bool(load_config().get("paused"))
+
+
+def set_paused(v: bool) -> bool:
+    cfg = load_config()
+    cfg["paused"] = bool(v)
+    save_config(cfg)
+    return cfg["paused"]
+
+
+def restore_from_single_sheet() -> tuple:
+    """URGENCE — réimporte les comptes depuis l'ANCIEN Sheet unique (sheet_id),
+    en ignorant le mode dossier. 100 % ADDITIF : n'efface JAMAIS rien, ajoute
+    seulement les comptes absents. Reconstruit aussi la liste des VA."""
+    if not (SA_FILE.exists() and gspread_available()):
+        return False, "Clé de service / gspread manquants."
+    cfg = load_config()
+    sid = (cfg.get("sheet_id") or "").strip()
+    if not sid:
+        return False, "Aucun `sheet_id` en config (l'ancien Sheet unique est inconnu)."
+    try:
+        import jailbreak as jb
+        sh = _client().open_by_key(sid)
+    except Exception as e:
+        return False, f"Ancien Sheet inaccessible : {e}"
+    data = jb._load()
+    known = {str(k).strip().lower(): k for k in (data or {}).keys()}
+    used_ids = set()
+    for entry in (data or {}).values():
+        for a in (entry.get("accounts") or []):
+            try:
+                used_ids.add(int(a.get("id", 0)))
+            except Exception:
+                pass
+    nxt = [int(time.time() * 1000)]
+
+    def _gen():
+        while nxt[0] in used_ids:
+            nxt[0] += 1
+        v = nxt[0]
+        used_ids.add(v)
+        nxt[0] += 1
+        return v
+
+    added, tabs = 0, 0
+    for ws in sh.worksheets():
+        title = ws.title.strip()
+        tl = title.lower()
+        identity, va_tab = None, ""
+        if tl in known:
+            identity = known[tl]
+        else:
+            parts = title.split(" ", 1)
+            if len(parts) == 2 and parts[0].strip().lower() in known:
+                identity = known[parts[0].strip().lower()]
+                va_tab = parts[1].strip()
+        if not identity:
+            continue
+        try:
+            rows = _parse_ws(ws)
+        except Exception:
+            continue
+        if not rows:
+            continue
+        tabs += 1
+        entry = data.setdefault(identity, {"vas": [], "accounts": []})
+        entry.setdefault("accounts", [])
+        entry.setdefault("vas", [])
+        by_u = {(a.get("username") or "").strip().lower(): a
+                for a in entry["accounts"] if (a.get("username") or "").strip()}
+        for r in rows:
+            u = (r.get("username") or "").strip()
+            if not u or u.lower() in by_u:
+                continue
+            va = (r.get("va") or "").strip() or va_tab
+            acct = _row_new_account(u, r, va, _gen)
+            entry["accounts"].append(acct)
+            by_u[u.lower()] = acct
+            added += 1
+    # reconstruit la liste des VA à partir des comptes
+    for entry in (data or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        have = {str((v.get("name") if isinstance(v, dict) else v) or "").strip().lower()
+                for v in (entry.get("vas") or [])}
+        for v in sorted({(a.get("va") or "").strip()
+                         for a in (entry.get("accounts") or []) if (a.get("va") or "").strip()}):
+            if v.lower() not in have:
+                entry.setdefault("vas", []).append(v)
+                have.add(v.lower())
+    jb._save(data)
+    return True, f"{added} compte(s) restauré(s) depuis l'ancien Sheet ({tabs} onglet(s) lus)."
+
+
 def identity_names() -> list:
     """Liste des identités jailbreak (pour dire à l'user quels classeurs créer)."""
     try:
@@ -233,6 +329,17 @@ def _acct_row(a: dict) -> list:
 
 def _accts_hash(accts: list) -> str:
     payload = json.dumps([_acct_row(a) for a in accts], ensure_ascii=False)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
+def _entry_hash(entry: dict) -> str:
+    """Hash d'une identité = ses COMPTES **et** sa liste de VA. Indispensable :
+    sinon ajouter un VA sans ajouter de compte laissait l'identité « inchangée »
+    et son onglet VA n'était jamais créé."""
+    accts = entry.get("accounts") or []
+    vas = sorted(str((v.get("name") if isinstance(v, dict) else v) or "").strip().lower()
+                 for v in (entry.get("vas") or []))
+    payload = json.dumps({"a": [_acct_row(a) for a in accts], "v": vas}, ensure_ascii=False)
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 
@@ -451,6 +558,8 @@ def _dedup_accounts(data: dict) -> int:
 def push_all(data: dict, force: bool = False) -> bool:
     """Dispatcher : mode DOSSIER (1 classeur/identité) si folder_id configuré,
     sinon ancien mode (1 seul Sheet, N onglets)."""
+    if is_paused():
+        return False        # sync gelée -> on n'écrase RIEN
     if not (is_configured() and gspread_available()):
         return False
     if folder_mode():
@@ -478,7 +587,7 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 if not isinstance(entry, dict):
                     continue
                 accts = entry.get("accounts") or []
-                h = _accts_hash(accts)
+                h = _entry_hash(entry)
                 if not force and _last_hash.get(identity) == h:
                     continue
                 try:
@@ -547,7 +656,7 @@ def _push_all_single(data: dict, force: bool = False) -> bool:
                 if not isinstance(entry, dict):
                     continue
                 accts = entry.get("accounts") or []
-                h = _accts_hash(accts)
+                h = _entry_hash(entry)
                 if not force and _last_hash.get(identity) == h:
                     continue
                 ws = existing.get(str(identity).strip().lower())
@@ -721,6 +830,8 @@ def pull_and_merge() -> tuple:
     username nouveau -> ajouté. ANTI-WIPE : un onglet VIDE n'entraîne aucune suppression.
     Retourne (changed, summary)."""
     import jailbreak as jb
+    if is_paused():
+        return False, "Sync en PAUSE (aucune modification appliquée)."
     sheet = pull_all()
     if sheet is None:
         return False, "Sheet indisponible"

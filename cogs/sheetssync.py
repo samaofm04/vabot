@@ -171,6 +171,24 @@ class SheetsSync(commands.Cog):
                     ephemeral=True)
             return
 
+        if action in ("pause", "resume"):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            p = sheets_sync.set_paused(action == "pause")
+            await interaction.followup.send(
+                ("⏸️ **Sync GELÉE.** Plus aucun push ni pull — rien ne peut être écrasé.\n"
+                 "Reprends avec `/sheetsync resume`." if p else
+                 "▶️ **Sync réactivée.**"), ephemeral=True)
+            return
+
+        if action == "restore":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            ok, msg = await asyncio.to_thread(sheets_sync.restore_from_single_sheet)
+            await interaction.followup.send(
+                ("✅ " if ok else "❌ ") + msg +
+                ("\n\n(100 % additif : rien n'a été supprimé.)" if ok else ""),
+                ephemeral=True)
+            return
+
         if action in ("test", "status"):
             await interaction.response.defer(ephemeral=True, thinking=True)
             ok, tmsg = await asyncio.to_thread(sheets_sync.test_connection)
