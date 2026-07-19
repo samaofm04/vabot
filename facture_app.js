@@ -19,12 +19,22 @@
     return '$' + (Math.round(v * 100) / 100).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   }
   function moneyShort(v) { return '$' + Math.round(v).toLocaleString('en-US'); }
-  /* Équivalent en euros (taux des Paramètres) affiché sous le montant en $ */
-  function eurHint(usd) {
+  /* Sous le montant NET : le BRUT (si des frais plateforme sont appliqués)
+     puis l'équivalent en euros. Permet de recouper d'un coup d'œil avec
+     OnlyFans/MyM et de repérer une erreur. */
+  function eurHint(usd, feePct) {
+    var parts = [];
+    var f = parseFloat(feePct || 0);
+    if (f > 0 && f < 100 && usd) {
+      parts.push('brut ' + money(usd / (1 - f / 100)));
+    }
     var r = parseFloat(((S.data || {}).settings || {}).eur_usd || 0);
-    if (!r || !usd) return '';
+    if (r && usd) {
+      parts.push('≈ ' + (usd / r).toLocaleString('fr-FR', {maximumFractionDigits: 0}) + ' €');
+    }
+    if (!parts.length) return '';
     return '<div style="font-size:10.5px;color:#77778a;font-weight:600;margin-top:1px">'
-      + '≈ ' + (usd / r).toLocaleString('fr-FR', {maximumFractionDigits: 0}) + ' €</div>';
+      + parts.join(' · ') + '</div>';
   }
   function monthLabel(m) {
     if (!m) return '';
@@ -245,7 +255,7 @@
       linkBtn + payBtn +
       '<span style="font-weight:800;font-size:14px;color:' + (isRev ? '#22c55e' : '#f87171') + ';white-space:nowrap">' +
       (isRev ? '+ ' : '− ') + money(l.usd || 0) + ' <span style="font-size:10px;color:#77778a;font-weight:600">/ mois</span>' +
-      eurHint(l.usd || 0) + '</span>' +
+      eurHint(l.usd || 0, l.fee_pct) + '</span>' +
       '<button class="fx-edit" data-id="' + l.id + '" title="Modifier" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">✎</button>' +
       '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">🗑</button>' +
       '</div></div></div>';
