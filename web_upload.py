@@ -13165,7 +13165,8 @@ def _render_home_dashboard_html() -> str:
             type_totals["Tips"] += amt
         elif "abonnement" in ty or "subscription" in ty:
             type_totals["Subscriptions"] += amt
-        elif "post" in ty:
+        elif "post" in ty or "publication" in ty:
+            # MyPuls est en français : « Publication » ne contient pas « post »
             type_totals["Posts"] += amt
         elif "stream" in ty:
             type_totals["Streams"] += amt
@@ -13217,8 +13218,13 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"</div>"
         )
 
-    # Total = somme des transactions déjà ramenées en USD net (+ revenus manuels)
-    _total_usd = sum(type_totals.values()) + float(manual_total or 0)
+    # Total = TOUTES les transactions converties (+ revenus manuels).
+    # On ne somme PAS type_totals : un libellé inattendu ne tomberait dans aucune
+    # catégorie et serait perdu du total sans qu'on le voie.
+    _total_usd = float(manual_total or 0) + sum(
+        _tx_usd(t.get("amount", 0), t.get("currency"))
+        for t in (mp_data.get("transactions", []) or [])
+        if not _model_match(t.get("creator"), EXCLUDED_MODELS))
 
     # --- Répartition MyM / OF FR / OF US -------------------------------------
     # EUR = MyM. USD = OnlyFans, réparti par MODÈLE (listes explicites).
