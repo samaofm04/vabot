@@ -639,6 +639,22 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
             "ca_tips": _parse_amount(row[7]),
             "ca_total": _parse_amount(row[8]),
         })
+    # CA par DEVISE et par CHATTEUR, reconstruit depuis le log de transactions
+    # (la table perf additionne EUR MyM et USD OnlyFans dans la même colonne :
+    # payer là-dessus en convertissant tout comme des EUR surpaie les ventes OF).
+    _by_chatter_cur: Dict[str, Dict[str, float]] = {}
+    for t in transactions:
+        key = (t.get("chatter") or "").strip().lower()
+        if not key:
+            continue
+        cs = str(t.get("currency") or "").upper()
+        cur = "USD" if ("USD" in cs or "$" in cs) else "EUR"
+        d2 = _by_chatter_cur.setdefault(key, {"EUR": 0.0, "USD": 0.0})
+        d2[cur] += float(t.get("amount") or 0)
+    for c in chatters:
+        split = _by_chatter_cur.get((c.get("name") or "").strip().lower())
+        c["ca_eur"] = round(split["EUR"], 2) if split else None
+        c["ca_usd"] = round(split["USD"], 2) if split else None
     # Tri par CA Total décroissant
     chatters.sort(key=lambda c: c["ca_total"], reverse=True)
 

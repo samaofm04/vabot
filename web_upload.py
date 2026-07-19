@@ -13823,6 +13823,20 @@ body.light .mypuls-bar{background:#e5e7eb}
     rate_info = mypuls.get_eur_usd_rate()
     eur_to_usd = rate_info["rate"]
 
+    def _pay_usd(c, pct):
+        """« À payer » en USD, devise par devise : la part EUR (MyM) est
+        convertie, la part USD (OnlyFans) est prise TELLE QUELLE.
+        (Avant : tout le CA était traité comme des EUR puis multiplié par le
+        taux -> chaque vente OnlyFans était surpayée de ~8 %.)
+        Garde-fou : si le log de transactions ne recoupe pas le CA de la table
+        perf (>5 % d'écart : log tronqué, nom différent), on garde l'ancien
+        calcul pour CE chatteur plutôt que de sous-payer en silence."""
+        ca_eur, ca_usd = c.get("ca_eur"), c.get("ca_usd")
+        if ca_eur is not None and ca_usd is not None and (ca_eur + ca_usd) > 0:
+            if abs((ca_eur + ca_usd) - c["ca_total"]) <= max(1.0, 0.05 * c["ca_total"]):
+                return round((ca_eur * eur_to_usd + ca_usd) * pct / 100.0, 2)
+        return round(c["ca_total"] * pct / 100.0 * eur_to_usd, 2)
+
     # Table chatteurs (top 30) — avec % commission, à payer en USD, screenshot crypto
     chatters_rows = []
     for i, c in enumerate(chatters[:30]):
@@ -13830,8 +13844,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
         meta = mypuls.get_chatter_meta(c["name"])
         commission = meta["commission_pct"]
-        to_pay_eur = round(c["ca_total"] * commission / 100, 2)
-        to_pay = round(to_pay_eur * eur_to_usd, 2)
+        to_pay = _pay_usd(c, commission)
+        # détail affiché au survol : la part de chaque devise
+        _tip_pay = (f"MyM {c['ca_eur']:.2f}€×{eur_to_usd:.4f} + OF ${c['ca_usd']:.2f}"
+                    if c.get("ca_eur") is not None and c.get("ca_usd") is not None
+                    else f"≈ {c['ca_total'] * commission / 100:.2f}€ × {eur_to_usd:.4f}")
         has_crypto = bool(meta["crypto_file"]) or bool(meta["crypto_address"])
         has_screenshot = bool(meta.get("crypto_file"))
         crypto_type = meta.get("crypto_type") or ""
@@ -13983,7 +14000,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<span style='color:#888;font-size:11px'>%</span>"
             f"</form>"
             f"</td>"
-            f"<td class='mp-cell-pay' style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='≈ {to_pay_eur:.2f}€ × {eur_to_usd:.4f}'>${to_pay:.2f}</td>"
+            f"<td class='mp-cell-pay' style='font-weight:700;color:{'#22c55e' if to_pay > 0 else '#444'};font-size:13px' title='{_tip_pay}'>${to_pay:.2f}</td>"
             f"<td>{crypto_cell}</td>"
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
             f"<td style='text-align:center'>"
@@ -14000,13 +14017,13 @@ body.light .mypuls-bar{background:#e5e7eb}
     chatters_empty = "<tr><td colspan='10' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
     chatters_body = "".join(chatters_rows) or chatters_empty
 
-    # Total à payer : TOUS les chatteurs, pas seulement les 30 affichés
-    # (avant, un 31e chatteur sortait silencieusement du total -> sous-paiement)
-    total_to_pay_eur = sum(
-        round(c["ca_total"] * mypuls.get_chatter_meta(c["name"])["commission_pct"] / 100, 2)
+    # Total à payer : TOUS les chatteurs (pas seulement les 30 affichés),
+    # devise par devise via _pay_usd (fin du surpaiement des ventes OF)
+    total_to_pay_usd = round(sum(
+        _pay_usd(c, mypuls.get_chatter_meta(c["name"])["commission_pct"])
         for c in chatters
-    )
-    total_to_pay_usd = round(total_to_pay_eur * eur_to_usd, 2)
+    ), 2)
+    total_to_pay_eur = round(total_to_pay_usd / eur_to_usd, 2) if eur_to_usd else 0.0
 
     # Indicateur de fraîcheur du taux
     rate_age = rate_info.get("cached_age_h", 0)
@@ -14060,8 +14077,14 @@ body.light .mypuls-bar{background:#e5e7eb}
             return int(tm.split(":")[0])
         except Exception:
             return -1
+    def _tx_is_usd(t):
+        cs = str(t.get("currency") or "").upper()
+        return 1 if ("USD" in cs or "$" in cs) else 0
+    # "u": 1 = transaction en USD (OnlyFans) -> le recalcul client du « à payer »
+    # ne doit PAS la convertir comme des EUR (même règle que _pay_usd serveur)
     transactions_js = _json_mod.dumps(
-        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"], "t": _tx_hour(t.get("date", ""))} for t in transactions],
+        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"],
+          "t": _tx_hour(t.get("date", "")), "u": _tx_is_usd(t)} for t in transactions],
         ensure_ascii=False,
     )
     # Liste des chatteurs avec leur présence/réactivité (stats non-recalculables côté client)
@@ -14236,8 +14259,9 @@ function mpRecompute(){
     if(t.y === 'Média privé' || (t.y && t.y.indexOf('PPV') >= 0)) totals.ca_ppv += t.a;
     else if(t.y === 'Pourboires' || (t.y && t.y.indexOf('Tip') >= 0)) totals.ca_tips += t.a;
     var n = t.h || '?';
-    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0};
+    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0, ca_eur:0, ca_usd:0};
     byChat[n].ca_total += t.a;
+    if(t.u) byChat[n].ca_usd += t.a; else byChat[n].ca_eur += t.a;
     if(t.y === 'Média privé') byChat[n].ca_ppv += t.a;
     else if(t.y === 'Pourboires') byChat[n].ca_tips += t.a;
   });
@@ -14298,10 +14322,10 @@ function mpRecompute(){
     // Bar
     var bar = row.querySelector('.mp-bar-fill');
     if(bar) bar.style.width = (data.ca_total / newMax * 100).toFixed(1) + '%';
-    // Commission + à payer
+    // Commission + à payer — devise par devise : la part USD (OnlyFans)
+    // n'est PAS convertie (même règle que le calcul serveur _pay_usd)
     var pct = (window.__mpCryptoData[name] && window.__mpCryptoData[name].commission_pct) || 0;
-    var payEur = data.ca_total * pct / 100;
-    var payUsd = payEur * rate;
+    var payUsd = ((data.ca_eur || 0) * rate + (data.ca_usd || 0)) * pct / 100;
     totalPayUsd += payUsd;
     var cellPay = row.querySelector('.mp-cell-pay');
     if(cellPay){
