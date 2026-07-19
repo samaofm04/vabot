@@ -210,7 +210,18 @@
       origin = l.pct + '% ' + esc(baseLbl);
     } else if (l.form === 'mypuls') {
       origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
-      if (l.cat === 'rev_of') {
+      /* Provenance réelle du montant : API officielle (exact, posts inclus, net)
+         ou repli scraping (incomplet). Si repli, on dit POURQUOI. */
+      var src = l.mp_src;
+      if (src && src.api) {
+        origin += ' <span style="color:#22c55e">net · API</span>';
+      } else if (src) {
+        origin += ' <span style="color:#fbbf24" title="' + esc(src.why || '') +
+          '">⚠ scraping (brut, sans les posts)</span>';
+        if (src.why) {
+          origin += '<div style="color:#fbbf24;font-size:10px;margin-top:2px">' + esc(src.why) + '</div>';
+        }
+      } else if (l.cat === 'rev_of') {
         origin += ' <span style="color:#22c55e">net</span>';
       }
     } else if (l.form === 'mypuls_crm') {
@@ -259,7 +270,10 @@
       linkBtn + payBtn +
       '<span style="font-weight:800;font-size:14px;color:' + (isRev ? '#22c55e' : '#f87171') + ';white-space:nowrap">' +
       (isRev ? '+ ' : '− ') + money(l.usd || 0) + ' <span style="font-size:10px;color:#77778a;font-weight:600">/ mois</span>' +
-      eurHint(l.usd || 0, l.fee_pct, l.cat === 'rev_of') + '</span>' +
+      /* le brut ne se déduit du net que si la source EST nette (API) ; un montant
+         issu du scraping est déjà brut -> pas de division par 0.8 trompeuse */
+      eurHint(l.usd || 0, l.fee_pct,
+        l.cat === 'rev_of' && (!l.mp_src || l.mp_src.api)) + '</span>' +
       '<button class="fx-edit" data-id="' + l.id + '" title="Modifier" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">✎</button>' +
       '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">🗑</button>' +
       '</div></div></div>';
