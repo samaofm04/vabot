@@ -13919,10 +13919,11 @@ body.light .mypuls-bar{background:#e5e7eb}
     chatters_empty = "<tr><td colspan='10' style='text-align:center;padding:30px;color:#888'>Aucun chatteur actif sur la période</td></tr>"
     chatters_body = "".join(chatters_rows) or chatters_empty
 
-    # Total à payer (somme des "à payer" sur les 30 affichés)
+    # Total à payer : TOUS les chatteurs, pas seulement les 30 affichés
+    # (avant, un 31e chatteur sortait silencieusement du total -> sous-paiement)
     total_to_pay_eur = sum(
         round(c["ca_total"] * mypuls.get_chatter_meta(c["name"])["commission_pct"] / 100, 2)
-        for c in chatters[:30]
+        for c in chatters
     )
     total_to_pay_usd = round(total_to_pay_eur * eur_to_usd, 2)
 
@@ -28664,6 +28665,114 @@ def create_app():
             "stats": mypuls.api_creator_stats(cid, d1, d2),
             "revenue_by_day": mypuls.api_revenue_by_day(cid, d1, d2),
         })
+
+    @app.route("/mypuls/api_probe")
+    def mypuls_api_probe():
+        """SONDE one-shot avant migration : tranche les 4 inconnues dont dépendent
+        les chantiers /team/money (page Revenus, paie par shift, réindexation).
+
+        1. les dates de /team/money portent-elles l'HEURE ? (sinon le filtre
+           par shift horaire doit rester sur cookie)
+        2. amount vs net : le brut est-il réellement fourni ?
+        3. quels `kind`/`type` existent vraiment ? (la spec dit ppv|tip ;
+           des lignes Abonnement casseraient les totaux après bascule)
+        4. noms des groupes de fans (équivalents Abonnés/Anciens/Intéressés ?)
+        + bonus : périmètre API vs scraping (créatrices présentes d'un côté
+        seulement) et identité du token via /session.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        if not mypuls.api_configured():
+            return jsonify({"ok": False, "error": "Token API absent (Settings → MyPuls)"})
+        out = {"ok": True}
+
+        # -- 1+2+3 : /team/money sur 7 jours ------------------------------------
+        tm = mypuls.api_get("team/money", {"start": "-7 days", "end": "now",
+                                           "per_page": 200})
+        if tm.get("ok"):
+            rows = (((tm.get("data") or {}).get("data")) or [])
+            avec_heure = sans_heure = 0
+            brut_diff = 0
+            kinds, types, curs = {}, {}, {}
+            exemples = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                d = str(r.get("date") or "")
+                # une heure non-minuit quelque part ? (que des 00:00:00 = suspect)
+                if re.search(r"\d{2}:\d{2}", d) and "00:00:00" not in d:
+                    avec_heure += 1
+                else:
+                    sans_heure += 1
+                try:
+                    if float(r.get("amount") or 0) != float(r.get("net") or 0):
+                        brut_diff += 1
+                except Exception:
+                    pass
+                k = str(r.get("kind") or "?"); kinds[k] = kinds.get(k, 0) + 1
+                t = str(r.get("type") or "?"); types[t] = types.get(t, 0) + 1
+                c = str(r.get("currency") or "?"); curs[c] = curs.get(c, 0) + 1
+                if len(exemples) < 3:
+                    exemples.append({k2: r.get(k2) for k2 in
+                                     ("date", "kind", "type", "amount", "net",
+                                      "currency", "attributed_user",
+                                      "attributed_user_id", "creator")})
+            out["team_money"] = {
+                "transactions_7j": len(rows),
+                "dates_avec_heure": avec_heure, "dates_sans_heure": sans_heure,
+                "verdict_heure": ("OK : l'heure est fournie" if avec_heure
+                                  else "KO : pas d'heure -> le filtre par shift reste sur cookie"),
+                "brut_different_du_net": brut_diff,
+                "kinds": kinds, "types": types, "devises": curs,
+                "exemples": exemples,
+            }
+        else:
+            out["team_money"] = {"erreur": tm.get("error")}
+
+        # -- 4 : groupes de fans des 3 premières créatrices actives -------------
+        grps = {}
+        try:
+            actifs = [c for c in mypuls.api_creators_cached() if c.get("active")][:3]
+            for c in actifs:
+                g = mypuls.api_get(f"creators/{c['id']}/groups")
+                if g.get("ok"):
+                    gd = (g.get("data") or {})
+                    items = gd.get("data") if isinstance(gd, dict) else gd
+                    grps[c.get("pseudo") or c["id"]] = [
+                        {"nom": i.get("name"), "membres": i.get("members_count")
+                         if isinstance(i, dict) else None}
+                        for i in (items or []) if isinstance(i, dict)][:12]
+                else:
+                    grps[c.get("pseudo") or c["id"]] = f"erreur : {g.get('error')}"
+        except Exception as e:
+            grps["erreur"] = str(e)
+        out["groupes_fans"] = grps
+
+        # -- bonus : périmètre API vs scraping + identité du token --------------
+        try:
+            api_names = {(c.get("pseudo") or f"#{c.get('id')}"): c.get("id")
+                         for c in mypuls.api_creators_cached()}
+            scr = (mypuls.list_creators().get("creators") or {})
+            norm = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+            a_keys = {norm(n): n for n in api_names}
+            s_keys = {norm(n): n for n in scr}
+            out["perimetre"] = {
+                "api": len(api_names), "scraping": len(scr),
+                "api_seulement": [a_keys[k] for k in a_keys.keys() - s_keys.keys()],
+                "scraping_seulement": [s_keys[k] for k in s_keys.keys() - a_keys.keys()],
+            }
+        except Exception as e:
+            out["perimetre"] = {"erreur": str(e)}
+        try:
+            out["session"] = mypuls.api_get("session")
+        except Exception as e:
+            out["session"] = {"erreur": str(e)}
+        return jsonify(out)
 
     @app.route("/mypuls/save_cookies", methods=["POST"])
     def mypuls_save_cookies():

@@ -380,6 +380,23 @@ def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     return round(_to_usd(float(line.get("amount") or 0), line.get("currency") or "USD", settings), 2)
 
 
+def _pin_creator_id(month: str, line_id, cid: int) -> None:
+    """Écrit l'ID MyPuls résolu sur une ligne (backfill).
+    Idempotent : n'écrase jamais un ID déjà posé. NB : pas de `with _LOCK` ici,
+    _save() le prend déjà (verrou non réentrant -> deadlock sinon), même idiome
+    que les routes du module."""
+    if not line_id or not cid:
+        return
+    d = _load()
+    for l in ((d["months"].get(month) or {}).get("lines") or []):
+        if l.get("id") == line_id and not l.get("mypuls_creator_id"):
+            l["mypuls_creator_id"] = int(cid)
+            _save(d)
+            print(f"[facture] ID MyPuls #{cid} épinglé sur la ligne "
+                  f"« {l.get('label')} » ({month})", flush=True)
+            break
+
+
 def compute_state(month: str) -> dict:
     """État complet du mois : settings + lignes (montants USD résolus) + totaux."""
     d = _load()
@@ -420,6 +437,16 @@ def compute_state(month: str) -> dict:
             _amt, _cur, _already_net, _info = _mypuls_month_amount(
                 l.get("mypuls_model") or "", month, l.get("mypuls_creator_id"))
             usd = round(_to_usd(_amt, _cur, settings), 2)
+            # BACKFILL : la résolution par nom a trouvé la créatrice -> on épingle
+            # son ID sur la ligne, définitivement. Les prochains rendus prennent
+            # le chemin direct par ID et le résolveur flou meurt de lui-même.
+            if (_already_net and _info.get("creator_id")
+                    and not l.get("mypuls_creator_id")):
+                try:
+                    _pin_creator_id(month, l.get("id"), int(_info["creator_id"]))
+                    l["mypuls_creator_id"] = int(_info["creator_id"])
+                except Exception:
+                    pass
             if l.get("id"):
                 resolved_src[l["id"]] = {
                     "api": _already_net,
