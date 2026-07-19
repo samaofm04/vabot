@@ -13138,9 +13138,25 @@ def _render_home_dashboard_html() -> str:
             return a * (1 - OF_FEE)      # OnlyFans : brut -> net
         return a * _eur_usd              # MyM (EUR) -> USD
 
+    # Modèles qu'on ne suit plus : leurs transactions sont IGNORÉES partout
+    # (total, cartes par type, segments). Pour en retirer une : l'ajouter ici.
+    EXCLUDED_MODELS = {"bella"}
+
+    def _model_match(creator, names):
+        """Compare une créatrice à une liste, sans ponctuation, en début de nom.
+        'amelia_xoxo' matche 'amelia', mais 'itslola_bella' ne matche PAS 'bella'."""
+        c = re.sub(r"[^a-z0-9]", "", (creator or "").lower())
+        for n in names:
+            nn = re.sub(r"[^a-z0-9]", "", (n or "").lower())
+            if nn and (c == nn or c.startswith(nn)):
+                return True
+        return False
+
     type_totals = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
                    "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
     for tx in mp_data.get("transactions", []) or []:
+        if _model_match(tx.get("creator"), EXCLUDED_MODELS):
+            continue
         ty = (tx.get("type", "") or "").lower()
         amt = _tx_usd(tx.get("amount", 0), tx.get("currency"))
         if "média privé" in ty or "media prive" in ty or "ppv" in ty or "message" in ty:
@@ -13212,13 +13228,15 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
     _of_unknown = set()
     for tx in mp_data.get("transactions", []) or []:
+        if _model_match(tx.get("creator"), EXCLUDED_MODELS):
+            continue  # modèle retirée (ex : Bella) -> comptée nulle part
         _c = (tx.get("currency") or "").strip().upper()
         _usd = _tx_usd(tx.get("amount", 0), tx.get("currency"))
         if "USD" in _c or "$" in _c:
-            _cr = (tx.get("creator") or "").strip().lower()
-            if any(u in _cr for u in OF_US_MODELS):
+            _cr = (tx.get("creator") or "").strip()
+            if _model_match(_cr, OF_US_MODELS):
                 _seg["of_us"] += _usd
-            elif any(u in _cr for u in OF_FR_MODELS):
+            elif _model_match(_cr, OF_FR_MODELS):
                 _seg["of_fr"] += _usd
             else:
                 # modèle OF pas encore classée -> comptée en FR, mais on la signale
