@@ -233,6 +233,10 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
     types = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
              "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
+    # split par famille de plateforme : permet au dashboard de calculer un BRUT
+    # par type (les commissions different : OnlyFans 20 %, MyM 26 %)
+    types_of = dict(types)
+    types_mym = dict(types)
     per_creator, errors = [], []
     _MAP = {  # libellés API -> cartes du dashboard
         "message": "Messages", "post": "Posts", "tip": "Tips",
@@ -257,7 +261,9 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         for k, v in (rev.get("by_type") or {}).items():
             bucket = _MAP.get(str(k).strip().lower())
             if bucket:
-                types[bucket] += float(v or 0) * rate
+                _amt = float(v or 0) * rate
+                types[bucket] += _amt
+                (types_of if c.get("platform") == "onlyfans" else types_mym)[bucket] += _amt
         if total_usd:
             per_creator.append({"pseudo": c.get("pseudo"), "usd": round(total_usd, 2),
                                 "platform": c.get("platform")})
@@ -265,6 +271,8 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     out = {"ok": True, "total_usd": round(sum(seg.values()), 2),
            "segments": {k: round(v, 2) for k, v in seg.items()},
            "types": {k: round(v, 2) for k, v in types.items()},
+           "types_of": {k: round(v, 2) for k, v in types_of.items()},
+           "types_mym": {k: round(v, 2) for k, v in types_mym.items()},
            "creators": per_creator, "errors": errors}
     _API_OVERVIEW_CACHE[key] = (_t.time(), out)
     if len(_API_OVERVIEW_CACHE) > 40:

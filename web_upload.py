@@ -3522,22 +3522,42 @@ window.upClearPrefill = function(utab){
 <div class="mnav-backdrop" onclick="toggleMnav()"></div>
 <script>
 function toggleMnav(){document.documentElement.classList.toggle('mnav-open');}
-/* Dashboard : bascule $ / € sur tous les montants (.fx-amt porte data-usd) */
+/* Dashboard : bascule $ / € et Net / Brut sur tous les montants.
+   .fx-amt porte data-usd (net) et, quand la source le permet, data-brut.
+   .fx-alt-hint (sous-lignes) montre l'AUTRE valeur que le mode courant. */
 function fxApplyCur(){
   var b=document.getElementById('fx-cur-toggle'); if(!b) return;
   var eur = localStorage.getItem('vabot_dash_cur')==='EUR';
+  var gross = localStorage.getItem('vabot_dash_mode')==='gross';
   var rate = parseFloat(b.dataset.rate||'1.14')||1.14;
   b.textContent = eur ? '€ EUR' : '$ USD';
-  document.querySelectorAll('.fx-amt').forEach(function(el){
-    var usd = parseFloat(el.dataset.usd||'0')||0;
+  var sel=document.getElementById('fx-mode-sel'); if(sel) sel.value = gross?'gross':'net';
+  var lbl=document.getElementById('fx-mode-lbl');
+  if(lbl){ lbl.textContent = gross?'brut':'net'; lbl.style.color = gross?'#f59e0b':'#22c55e'; }
+  function fmt(usd){
     var v = eur ? usd/rate : usd;
-    el.textContent = (eur?'':'$') + v.toLocaleString(eur?'fr-FR':'en-US',
+    return (eur?'':'$') + v.toLocaleString(eur?'fr-FR':'en-US',
       {minimumFractionDigits:2, maximumFractionDigits:2}) + (eur?' €':'');
+  }
+  document.querySelectorAll('.fx-amt').forEach(function(el){
+    var usd = parseFloat((gross && el.dataset.brut) ? el.dataset.brut : (el.dataset.usd||'0'))||0;
+    el.textContent = fmt(usd);
+  });
+  document.querySelectorAll('.fx-alt-hint').forEach(function(el){
+    var net = parseFloat(el.dataset.net||'0')||0;
+    var brut = parseFloat(el.dataset.brut||'0')||0;
+    if(!brut){ el.style.display='none'; return; }
+    var fee = el.dataset.fee ? " <span style='color:#55607a'>(−"+el.dataset.fee+"%)</span>" : '';
+    el.innerHTML = (gross ? 'net ' : 'brut ≈ ') + '<span>' + fmt(gross?net:brut) + '</span>' + (gross?'':fee);
   });
 }
 function fxToggleCur(){
   localStorage.setItem('vabot_dash_cur',
     localStorage.getItem('vabot_dash_cur')==='EUR' ? 'USD' : 'EUR');
+  fxApplyCur();
+}
+function fxSetMode(m){
+  localStorage.setItem('vabot_dash_mode', m==='gross' ? 'gross' : 'net');
   fxApplyCur();
 }
 document.addEventListener('DOMContentLoaded', fxApplyCur);
@@ -13237,12 +13257,21 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
 </style>
 """
 
+    # libellé FR des cartes -> clé interne des types (pour retrouver le brut)
+    label_key_map = {"Abonnements": "Subscriptions", "Posts": "Posts",
+                     "Messages (PPV)": "Messages", "Pourboires": "Tips",
+                     "Parrainage": "Referrals", "Streams": "Streams"}
+
     def _stat(label, value, color, bg_color, icon_svg):
+        # data-brut : valeur affichée quand le sélecteur Net/Brut est sur Brut
+        # (absent en source scraping -> le mode Brut retombe sur le net)
+        _b = _types_brut.get(label_key_map.get(label, label))
+        brut_attr = f" data-brut='{_b:.2f}'" if _b is not None else ""
         return (
             f"<div class='home-stat'>"
             f"<div class='home-stat-icon' style='background:{bg_color};color:{color}'>{icon_svg}</div>"
             f"<div>"
-            f"<div class='home-stat-value fx-amt' style='color:{color}' data-usd='{value:.2f}'>${value:,.2f}</div>"
+            f"<div class='home-stat-value fx-amt' style='color:{color}' data-usd='{value:.2f}'{brut_attr}>${value:,.2f}</div>"
             f"<div class='home-stat-label'>{label}</div>"
             f"</div>"
             f"</div>"
@@ -13287,6 +13316,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # et elle renvoie déjà du NET (aucune déduction à appliquer). Si elle répond,
     # elle remplace entièrement les chiffres issus du scraping.
     _api_src = False
+    _types_brut = {}          # brut par type (rempli seulement en source API)
     try:
         import mypuls as _mp_api
         if _mp_api.api_configured():
@@ -13297,6 +13327,12 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                 _total_usd = float(_ov.get("total_usd") or 0) + float(manual_total or 0)
                 _of_unknown = set()      # l'API donne la plateforme : plus d'inconnue
                 _api_src = True
+                # brut par TYPE : chaque part remontée au taux de sa plateforme
+                _t_of = _ov.get("types_of") or {}
+                _t_mym = _ov.get("types_mym") or {}
+                _types_brut = {k: (float(_t_of.get(k, 0.0)) / (1 - OF_FEE)
+                                   + float(_t_mym.get(k, 0.0)) / (1 - MYM_FEE))
+                               for k in type_totals}
     except Exception as _e:
         log.warning(f"MyPuls API overview: {_e}")
 
@@ -13310,17 +13346,19 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
 
     def _seg_card(label, value, color, fee=0.0):
         # brut estimé = net / (1 - commission plateforme) : OF 20 %, MyM 26 %
-        sub = ""
+        sub, brut_attr = "", ""
         if fee:
             brut = value / (1 - fee)
-            sub = (f"<div style='font-size:10.5px;color:#8a91a8;margin-top:3px'>brut ≈ "
-                   f"<span class='fx-amt' data-usd='{brut:.2f}'>${brut:,.2f}</span>"
+            brut_attr = f" data-brut='{brut:.2f}'"
+            sub = (f"<div class='fx-alt-hint' style='font-size:10.5px;color:#8a91a8;margin-top:3px' "
+                   f"data-net='{value:.2f}' data-brut='{brut:.2f}' data-fee='{fee * 100:.0f}'>brut ≈ "
+                   f"<span>${brut:,.2f}</span>"
                    f" <span style='color:#55607a'>(−{fee * 100:.0f}%)</span></div>")
         return (
             f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
             f"border-radius:12px;padding:12px 14px'>"
             f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
-            f"<div class='fx-amt' data-usd='{value:.2f}' style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
+            f"<div class='fx-amt' data-usd='{value:.2f}'{brut_attr} style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
             f"${value:,.2f}</div>{sub}</div>")
 
     segments_html = (
@@ -13342,9 +13380,15 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         f"<div class='home-overview-title'>Aperçu des revenus créateur "
         f"<small>UTC{_dt.datetime.now().astimezone().strftime('%z')[:3]}:{_dt.datetime.now().astimezone().strftime('%z')[3:]}</small>"
         "</div>"
+        # sélecteur Net / Brut façon Infloww (Net earnings / Gross earnings)
+        + "<select id='fx-mode-sel' onchange='fxSetMode(this.value)' "
+          "title='Afficher les revenus nets ou bruts' "
+          "style='margin-left:auto;margin-right:10px;padding:7px 11px;background:#161a26;border:1px solid #2a2a2a;"
+          "color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>"
+          "<option value='net'>Net</option><option value='gross'>Brut</option></select>"
         + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
           f"title='Basculer entre dollars et euros' "
-          f"style='margin-left:auto;margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
+          f"style='margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
           f"color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>$ USD</button>"
         + period_switcher
         + "</div>"
@@ -13354,12 +13398,13 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         "<div class='home-hero-icon'>"
         "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
         "</div>"
-        f"<div><div class='home-hero-label'>Total revenus <span style='font-size:10px;color:#22c55e;font-weight:600'>net</span>"
+        f"<div><div class='home-hero-label'>Total revenus <span id='fx-mode-lbl' style='font-size:10px;color:#22c55e;font-weight:600'>net</span>"
         f"{_api_badge}</div>"
-        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}'>${_total_usd:,.2f}</div>"
-        # brut estimé par segment : MyM / 0.74, OnlyFans / 0.80
-        f"<div style='font-size:11.5px;color:#8a91a8;margin-top:2px'>brut ≈ "
-        f"<span class='fx-amt' data-usd='{_total_brut:.2f}'>${_total_brut:,.2f}</span></div></div>"
+        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>${_total_usd:,.2f}</div>"
+        # sous-ligne : montre l'AUTRE valeur que celle du mode courant
+        f"<div class='fx-alt-hint' style='font-size:11.5px;color:#8a91a8;margin-top:2px' "
+        f"data-net='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>brut ≈ "
+        f"<span>${_total_brut:,.2f}</span></div></div>"
         "</div>"
         # 6 small stat cards
         + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
