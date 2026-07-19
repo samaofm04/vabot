@@ -472,15 +472,22 @@
           if (!curv) sel.innerHTML = '<option value="">⚠️ ' + esc(j.error || 'MyPuls indisponible') + '</option>';
           return;
         }
-        var models = j.models || [];
+        /* Chaque option porte son ID MyPuls en data-cid : à la sauvegarde on
+           l'épingle sur la ligne, et le montant n'est plus jamais retrouvé par
+           correspondance de nom (source du montant faux de Jessye/Khloe). */
+        var creators = j.creators || (j.models || []).map(function (n) { return {name: n, id: 0}; });
+        var names = creators.map(function (c) { return c.name; });
         var html = '<option value="">— choisir une créatrice —</option>';
         // La valeur enregistrée n'existe plus/pas dans MyPuls ? On la GARDE quand
         // même (sinon elle serait silencieusement perdue à la sauvegarde).
-        if (curv && models.indexOf(curv) === -1) {
-          html += '<option value="' + esc(curv) + '" selected>' + esc(curv) + ' — ⚠️ introuvable dans MyPuls</option>';
+        if (curv && names.indexOf(curv) === -1) {
+          html += '<option value="' + esc(curv) + '" data-cid="' + (line.mypuls_creator_id || 0) +
+            '" selected>' + esc(curv) + ' — ⚠️ introuvable dans MyPuls</option>';
         }
-        html += models.map(function (n) {
-          return '<option value="' + esc(n) + '"' + (n === curv ? ' selected' : '') + '>' + esc(n) + '</option>';
+        html += creators.map(function (c) {
+          var tag = c.platform ? ' (' + esc(c.platform) + ')' : '';
+          return '<option value="' + esc(c.name) + '" data-cid="' + (c.id || 0) + '"' +
+            (c.name === curv ? ' selected' : '') + '>' + esc(c.name) + tag + '</option>';
         }).join('');
         sel.innerHTML = html;
       }).catch(function () {});
@@ -535,6 +542,11 @@
         form: document.getElementById('fxm-form').value,
         market: document.getElementById('fxm-market').value,
         mypuls_model: (document.getElementById('fxm-mypulsmodel') || {value: ''}).value,
+        mypuls_creator_id: (function () {
+          var s = document.getElementById('fxm-mypulsmodel');
+          var o = s && s.options[s.selectedIndex];
+          return (o && o.getAttribute('data-cid')) || 0;   // ID épinglé
+        })(),
         amount: parseFloat(document.getElementById('fxm-amount').value) || 0,
         currency: document.getElementById('fxm-currency').value,
         pct: parseFloat(document.getElementById('fxm-pct').value) || 0,

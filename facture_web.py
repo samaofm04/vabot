@@ -907,18 +907,52 @@ def register(app, is_auth):
 
     @app.route("/facture/mypuls_models")
     def facture_mypuls_models():
-        """Liste des créatrices MyPuls (pour le select 'CA MyPuls auto')."""
+        """Liste des créatrices MyPuls (pour le select 'CA MyPuls auto').
+
+        L'API est PRIORITAIRE : elle seule fournit l'ID, qu'on épingle ensuite sur
+        la ligne pour ne plus jamais avoir à retrouver la créatrice par son nom
+        (c'était la cause du montant faux de Jessye/Khloe). Le scraping complète
+        la liste : les deux canaux n'ont pas forcément le même périmètre, et une
+        créatrice visible uniquement au scraping ne doit pas disparaître.
+        """
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        force = bool(request.args.get("refresh"))
+        out, errs = [], []
+        seen = set()
         try:
             import mypuls
-            # ?refresh=1 -> ignore le cache 5 min (bouton « ↻ Actualiser la liste »)
-            res = mypuls.list_creators(force_refresh=bool(request.args.get("refresh")))
-            if not res.get("ok"):
-                return jsonify({"ok": False, "error": res.get("error") or "MyPuls indisponible"})
-            return jsonify({"ok": True, "models": sorted(res.get("creators") or {}, key=str.lower)})
+            if mypuls.api_configured():
+                for c in mypuls.api_creators_cached(force=force):
+                    nm = (c.get("pseudo") or "").strip() or f"#{c.get('id')}"
+                    out.append({"name": nm, "id": c.get("id"),
+                                "platform": c.get("platform") or "",
+                                "currency": c.get("currency") or "", "src": "api"})
+                    seen.add(_squash(nm))
         except Exception as e:
-            return jsonify({"ok": False, "error": str(e)})
+            errs.append(f"API : {e}")
+        try:
+            import mypuls
+            res = mypuls.list_creators(force_refresh=force)
+            if res.get("ok") or res.get("creators"):
+                for nm, cid in (res.get("creators") or {}).items():
+                    if _squash(nm) in seen:
+                        continue
+                    out.append({"name": nm, "id": cid, "platform": "",
+                                "currency": "", "src": "scraping"})
+                    seen.add(_squash(nm))
+            elif res.get("error"):
+                errs.append(f"scraping : {res['error']}")
+        except Exception as e:
+            errs.append(f"scraping : {e}")
+        if not out:
+            return jsonify({"ok": False,
+                            "error": " · ".join(errs) or "MyPuls indisponible"})
+        out.sort(key=lambda c: (c["name"] or "").lower())
+        return jsonify({"ok": True,
+                        "models": [c["name"] for c in out],   # rétro-compat
+                        "creators": out,
+                        "warn": " · ".join(errs) or ""})
 
     @app.route("/facture/mypuls_debug")
     def facture_mypuls_debug():
