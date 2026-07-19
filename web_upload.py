@@ -11903,9 +11903,14 @@ def _render_sfs_html() -> str:
         "function renderOfPushes(){"
         "  var data=window.__ofPushData||{items:[],counters:{}};"
         "  var cells={}; document.querySelectorAll('.sfs-day').forEach(function(c){ cells[c.dataset.date]=c; });"
-        "  var items=data.items||[]; var counters=data.counters||{};"
-        "  var byDate={}, placed=0, days=0;"
-        "  items.forEach(function(it){ if(!it.date) return; (byDate[it.date]=byDate[it.date]||[]).push(it); });"
+        "  var all=data.items||[]; var counters=data.counters||{};"
+        # Filtre SFS / hors-SFS : même règle que l'onglet MyM, pilotée par la case
+        # « Afficher aussi les push hors-SFS » (avant, la branche OF sortait AVANT
+        # le filtre : la case n'avait aucun effet ici).
+        "  var items=[], nonSfs=0;"
+        "  all.forEach(function(it){ if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
+        "  var byDate={}, undated=[], placed=0, days=0;"
+        "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
         "  for(var d in byDate){"
         "    var cell=cells[d]; if(!cell) continue; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) continue;"
         "    var list=byDate[d], cap=3;"
@@ -11918,20 +11923,33 @@ def _render_sfs_html() -> str:
         "    if(list.length>cap){ var more=document.createElement('div'); more.className='sfs-push-bar'; more.style.cssText='color:#0099ff;font-size:10px;font-weight:700'; more.textContent='+'+(list.length-cap)+' SFS'; bars.appendChild(more); }"
         "    days++;"
         "  }"
-        "  var undated=items.filter(function(it){ return !it.date; });"
+        # Jours à compteur sans détail : juste le badge « 📅 N programmés ».
+        # (Avant, les messages SANS date étaient dupliqués sous CHAQUE jour à
+        # compteur — le même message semblait programmé partout — et 'placed'
+        # comptait chaque doublon. Ils sont maintenant listés une seule fois
+        # sous le statut, plus bas.)
         "  for(var cd in counters){"
         "    if(byDate[cd]) continue; var cc=cells[cd]; if(!cc) continue; var cb=cc.querySelector('.sfs-day-bars'); if(!cb) continue;"
-        "    if(undated.length){"
-        "      var cap2=3, shown=Math.min(cap2, undated.length);"
-        "      for(var k=0;k<shown;k++){ var u=undated[k]; var ub=document.createElement('div'); ub.className='sfs-push-bar'; ub.title=(u.text||''); ub.style.cssText='background:rgba(0,153,255,.15);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer'; ub.textContent='📨 SFS OF'; (function(D,IT){ ub.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, IT); }; })(cd,u); cb.appendChild(ub); placed++; }"
-        "      var extra=(counters[cd]||0)-shown; if(extra>0){ var mm=document.createElement('div'); mm.className='sfs-push-bar'; mm.style.cssText='color:#0099ff;font-size:10px;font-weight:700'; mm.textContent='+'+extra+' programmés'; cb.appendChild(mm); }"
-        "    } else {"
-        "      var b2=document.createElement('div'); b2.className='sfs-push-bar'; b2.style.cssText='background:rgba(0,153,255,.12);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;text-align:center'; b2.textContent='📅 '+counters[cd]+' programmé'+(counters[cd]>1?'s':''); cb.appendChild(b2);"
-        "    }"
+        "    var b2=document.createElement('div'); b2.className='sfs-push-bar'; b2.style.cssText='background:rgba(0,153,255,.12);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;text-align:center'; b2.textContent='📅 '+counters[cd]+' programmé'+(counters[cd]>1?'s':''); cb.appendChild(b2);"
         "    days++;"
         "  }"
         "  var box=document.getElementById('sfs-pushs-list');"
-        "  if(box){ if(!items.length && !Object.keys(counters).length){ box.innerHTML='Aucun SFS OnlyFans importé. Clique « Importer HAR OnlyFans » et dépose ton fichier .har.'; } else { box.innerHTML='✅ '+placed+' SFS OF placés ('+days+' jour'+(days>1?'s':'')+') · '+items.length+' message(s) importé(s).'; } }"
+        "  if(box){"
+        "    if(!all.length && !Object.keys(counters).length){ box.innerHTML='Aucun SFS OnlyFans importé. Clique « Importer HAR OnlyFans » et dépose ton fichier .har.'; }"
+        "    else {"
+        "      var s='✅ '+placed+' SFS OF placés ('+days+' jour'+(days>1?'s':'')+') · '+all.length+' message(s) importé(s).';"
+        "      if(nonSfs){ s+=' · '+nonSfs+' hors-SFS masqué'+(nonSfs>1?'s':'')+' (coche la case pour les voir)'; }"
+        "      box.innerHTML=s;"
+        # Les messages sans date étaient jetés en silence (« 1 message importé »
+        # mais rien de visible nulle part) : ils sont désormais listés ici.
+        "      undated.forEach(function(u){"
+        "        var d2=document.createElement('div'); d2.style.cssText='margin-top:6px;background:rgba(0,153,255,.1);border-left:3px solid #0099ff;border-radius:4px;padding:5px 8px;font-size:11px;color:#9fd3ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';"
+        "        d2.textContent='📨 (sans date'+(u.time?(' · '+u.time):'')+') '+(u.text||''); d2.title=u.text||'';"
+        "        d2.onclick=function(){ addSfsFromOf(new Date().toISOString().slice(0,10), u); };"
+        "        box.appendChild(d2);"
+        "      });"
+        "    }"
+        "  }"
         "}"
         "function addSfsFromOf(date, it){"
         "  if(typeof openSfsModal!=='function') return;"
