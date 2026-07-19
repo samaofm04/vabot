@@ -165,6 +165,74 @@ def api_revenue_by_day(creator_id, date_from: str = "", date_to: str = "") -> di
     return api_get(f"creators/{creator_id}/revenue-by-day", p)
 
 
+_API_OVERVIEW_CACHE: Dict[str, Any] = {}
+_API_OVERVIEW_TTL = 300  # 5 min
+
+# OnlyFans marché US (ids MyPuls). Le reste des comptes OnlyFans = marché FR.
+OF_US_CREATOR_IDS = {3107, 3108}   # Jessye, Khloe
+
+
+def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
+                 force: bool = False) -> dict:
+    """Revenus agrégés via l'API officielle, sur une période.
+
+    IMPORTANT : l'API renvoie déjà du NET (frais plateforme déduits) — on
+    n'applique donc AUCUNE déduction supplémentaire. Les montants EUR (MyM) sont
+    convertis en USD. Retourne {ok, total_usd, segments, types, creators}.
+    """
+    import time as _t
+    key = f"{date_from}|{date_to}|{eur_usd}"
+    hit = _API_OVERVIEW_CACHE.get(key)
+    if hit and not force and (_t.time() - hit[0]) < _API_OVERVIEW_TTL:
+        return hit[1]
+    if not api_configured():
+        return {"ok": False, "error": "Token API MyPuls absent"}
+    creators = api_creators_parsed()
+    if not creators:
+        return {"ok": False, "error": "Aucun creator renvoyé par l'API"}
+
+    seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
+    types = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
+             "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
+    per_creator, errors = [], []
+    _MAP = {  # libellés API -> cartes du dashboard
+        "message": "Messages", "post": "Posts", "tip": "Tips",
+        "subscription": "Subscriptions", "sub": "Subscriptions",
+        "stream": "Streams", "referral": "Referrals",
+    }
+    for c in creators:
+        if not c.get("active"):
+            continue
+        r = api_creator_stats(c["id"], date_from, date_to)
+        if not r.get("ok"):
+            errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")
+            continue
+        rev = ((r.get("data") or {}).get("revenue") or {})
+        cur = (rev.get("currency") or c.get("currency") or "USD").upper()
+        rate = eur_usd if cur == "EUR" else 1.0
+        total_usd = float(rev.get("total") or 0) * rate
+        if c.get("platform") == "onlyfans":
+            seg["of_us" if c.get("id") in OF_US_CREATOR_IDS else "of_fr"] += total_usd
+        else:
+            seg["mym"] += total_usd
+        for k, v in (rev.get("by_type") or {}).items():
+            bucket = _MAP.get(str(k).strip().lower())
+            if bucket:
+                types[bucket] += float(v or 0) * rate
+        if total_usd:
+            per_creator.append({"pseudo": c.get("pseudo"), "usd": round(total_usd, 2),
+                                "platform": c.get("platform")})
+    per_creator.sort(key=lambda x: -x["usd"])
+    out = {"ok": True, "total_usd": round(sum(seg.values()), 2),
+           "segments": {k: round(v, 2) for k, v in seg.items()},
+           "types": {k: round(v, 2) for k, v in types.items()},
+           "creators": per_creator, "errors": errors}
+    _API_OVERVIEW_CACHE[key] = (_t.time(), out)
+    if len(_API_OVERVIEW_CACHE) > 40:
+        _API_OVERVIEW_CACHE.clear()
+    return out
+
+
 def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg = load_config()
     cfg["PHPSESSID"] = (phpsessid or "").strip()
