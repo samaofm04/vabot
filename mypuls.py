@@ -1031,13 +1031,18 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     return {"ok": True, "creators": creators}
 
 
-def list_pushs(creator_id: int, max_pages: int = 1) -> Dict[str, Any]:
+def list_pushs(creator_id: int, max_pages: int = 1, days: int = 0) -> Dict[str, Any]:
     """Liste les push (messages de masse) d'un creator.
 
     Flux observe : GET /switch-creator/{id}?from=app_pushs (selectionne le creator),
     puis GET /pushs/page/N -> JSON {items:[...], hasMore, page}.
     Chaque item : {id, description, sentAt 'JJ/MM/AAAA HH:MM', types[], price,
     promoPrice, sales, ca, hasMod, medias:[{thumbUrl,...}]}.
+
+    days > 0 : on pagine (dans la limite de max_pages) jusqu'a couvrir `days`
+    jours en arriere — les pushs arrivent tries du plus recent au plus ancien,
+    donc on s'arrete des qu'une page entiere est plus vieille que la fenetre,
+    sans aspirer l'historique complet.
 
     Retourne {ok, pushs:[{id, description, sentAt, types, price, thumb}]}.
     """
@@ -1051,6 +1056,8 @@ def list_pushs(creator_id: int, max_pages: int = 1) -> Dict[str, Any]:
               timeout=TIMEOUT, allow_redirects=True)
     except Exception as e:
         return {"ok": False, "error": f"switch-creator: {e}"}
+    import datetime as _dt
+    cutoff = (_dt.datetime.now() - _dt.timedelta(days=days)) if days > 0 else None
     pushs: List[Dict[str, Any]] = []
     page = 1
     while page <= max(1, max_pages):
@@ -1065,6 +1072,7 @@ def list_pushs(creator_id: int, max_pages: int = 1) -> Dict[str, Any]:
         except Exception:
             break
         items = j.get("items", []) or []
+        page_dates = []
         for it in items:
             if not isinstance(it, dict):
                 continue
@@ -1080,7 +1088,17 @@ def list_pushs(creator_id: int, max_pages: int = 1) -> Dict[str, Any]:
                 "price": it.get("price") or 0,
                 "thumb": thumb,
             })
+            if cutoff is not None:
+                try:
+                    page_dates.append(_dt.datetime.strptime(
+                        (it.get("sentAt") or "").strip(), "%d/%m/%Y %H:%M"))
+                except Exception:
+                    pass
         if not j.get("hasMore"):
+            break
+        # Fenetre couverte ? (le PLUS RECENT de la page est deja hors fenetre
+        # -> toutes les pages suivantes le seront aussi, tri anti-chronologique)
+        if cutoff is not None and page_dates and max(page_dates) < cutoff:
             break
         page += 1
     try:

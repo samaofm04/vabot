@@ -29135,7 +29135,8 @@ def create_app():
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
         """Lecture seule : liste les push (messages de masse) envoyés sur MyPuls
-        pour les modèles SFS MyM. Source : /pushs/page/1 par créateur."""
+        pour les modèles SFS MyM. Source : /pushs/page/N par créateur, paginé
+        jusqu'à couvrir ~3 mois (le calendrier permet de remonter les mois)."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -29164,13 +29165,20 @@ def create_app():
                                 "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
             all_pushs = []
             for ident, label, cid in targets:
-                res = mypuls.list_pushs(cid, max_pages=1)
+                # Avant : max_pages=1 -> seulement la 1re page (les plus recents),
+                # les jours plus anciens du mois restaient VIDES sans prevenir.
+                # Desormais on pagine jusqu'a couvrir 92 jours (mois courant + 2),
+                # borne de securite a 25 pages par creatrice.
+                res = mypuls.list_pushs(cid, max_pages=25, days=92)
                 if not res.get("ok"):
                     continue
                 for p in res.get("pushs", []):
                     p2 = dict(p)
                     p2["creator"] = label
                     p2["identity"] = ident
+                    # tronque : 2000 pushs x descriptions longues feraient sauter
+                    # le quota sessionStorage cote navigateur (~5 Mo)
+                    p2["description"] = (p2.get("description") or "")[:600]
                     all_pushs.append(p2)
             import datetime as _dt
 
@@ -29181,7 +29189,10 @@ def create_app():
                     return _dt.datetime.min
 
             all_pushs.sort(key=_key, reverse=True)
-            return jsonify({"ok": True, "pushs": all_pushs[:200]})
+            # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
+            # pile '200 push au total') et les plus anciens etaient jetes.
+            return jsonify({"ok": True, "pushs": all_pushs[:2000],
+                            "truncated": len(all_pushs) > 2000})
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
 
