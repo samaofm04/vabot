@@ -136,6 +136,11 @@ def _resolve_username(user_id) -> str:
 _DISCORD_RESOLVE_CACHE = {}
 
 
+def _norm_handle(s: str) -> str:
+    """Normalise un pseudo pour comparaison : minuscules, sans ponctuation/espaces."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
 def _resolve_discord_user_by_handle(handle: str):
     """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
 
@@ -166,7 +171,13 @@ def _resolve_discord_user_by_handle(handle: str):
                     name = (getattr(m, "name", "") or "").lower()
                     global_name = (getattr(m, "global_name", "") or "").lower()
                     disp_name = (getattr(m, "display_name", "") or "").lower()
-                    if handle_lc in (name, global_name, disp_name):
+                    nick = (getattr(m, "nick", "") or "").lower()
+                    _cands = (name, global_name, disp_name, nick)
+                    # match exact OU en ignorant ponctuation/espaces (ex "Fahnih 37050"
+                    # vs "fahnih_37050") -> bien plus tolérant qu'avant
+                    if handle_lc in _cands or (
+                            _norm_handle(handle_lc)
+                            and _norm_handle(handle_lc) in {_norm_handle(c) for c in _cands if c}):
                         try:
                             avatar_url = str(m.display_avatar.url)
                         except Exception:
@@ -29469,6 +29480,47 @@ def create_app():
             extra = f" (lié à <code>@{discord_username}</code>)" if discord_username else ""
             return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
         return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
+
+    @app.route("/jailbreak/discord_debug")
+    def jailbreak_discord_debug():
+        """Diagnostic PP Discord : dit si le bot voit les membres et pourquoi un
+        pseudo ne matche pas. Usage : /jailbreak/discord_debug?handle=fahnih_37050"""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        bot = _BOT_REF
+        out = {
+            "ok": True,
+            "bot_connecte": bot is not None,
+            "guilds": len(getattr(bot, "guilds", []) or []) if bot else 0,
+            "membres_en_cache": sum(len(g.members) for g in (getattr(bot, "guilds", []) or [])) if bot else 0,
+        }
+        h = (request.args.get("handle") or "").strip().lstrip("@")
+        if h and bot:
+            info = _resolve_discord_user_by_handle(h)
+            out["handle"] = h
+            out["trouve"] = bool(info)
+            out["resultat"] = info
+            if not info:
+                # propose les pseudos les plus proches (aide à trouver le bon)
+                frag = _norm_handle(h)[:5]
+                near = []
+                try:
+                    for g in bot.guilds:
+                        for m in g.members:
+                            for c in (getattr(m, "name", ""), getattr(m, "global_name", ""),
+                                      getattr(m, "display_name", "")):
+                                if c and frag and frag in _norm_handle(c):
+                                    near.append(c)
+                                    break
+                            if len(near) >= 12:
+                                break
+                        if len(near) >= 12:
+                            break
+                except Exception:
+                    pass
+                out["pseudos_proches"] = sorted(set(near))[:12]
+        return jsonify(out)
 
     @app.route("/jailbreak/update_va", methods=["POST"])
     def jailbreak_update_va():
