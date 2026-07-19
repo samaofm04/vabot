@@ -147,20 +147,33 @@ def set_paused(v: bool) -> bool:
 
 
 def restore_from_single_sheet() -> tuple:
-    """URGENCE — réimporte les comptes depuis l'ANCIEN Sheet unique (sheet_id),
-    en ignorant le mode dossier. 100 % ADDITIF : n'efface JAMAIS rien, ajoute
-    seulement les comptes absents. Reconstruit aussi la liste des VA."""
+    """URGENCE — réimporte les comptes depuis TOUTES les sources Google dispo :
+    les classeurs par identité (mode dossier) ET l'ancien Sheet unique.
+    100 % ADDITIF : n'efface JAMAIS rien, ajoute seulement les comptes absents.
+    Reconstruit aussi la liste des VA."""
     if not (SA_FILE.exists() and gspread_available()):
         return False, "Clé de service / gspread manquants."
     cfg = load_config()
-    sid = (cfg.get("sheet_id") or "").strip()
-    if not sid:
-        return False, "Aucun `sheet_id` en config (l'ancien Sheet unique est inconnu)."
     try:
         import jailbreak as jb
-        sh = _client().open_by_key(sid)
+        gc = _client()
     except Exception as e:
-        return False, f"Ancien Sheet inaccessible : {e}"
+        return False, f"Connexion Google impossible : {e}"
+    # Sources : classeurs par identité + ancien Sheet unique
+    books, errs = [], []
+    for _key, _sid in (cfg.get("sheets") or {}).items():
+        try:
+            books.append(gc.open_by_key(_sid))
+        except Exception as e:
+            errs.append(f"{_key}: {str(e)[:40]}")
+    sid = (cfg.get("sheet_id") or "").strip()
+    if sid:
+        try:
+            books.append(gc.open_by_key(sid))
+        except Exception as e:
+            errs.append(f"ancien Sheet: {str(e)[:40]}")
+    if not books:
+        return False, "Aucun classeur lisible. " + (" · ".join(errs) if errs else "")
     data = jb._load()
     known = {str(k).strip().lower(): k for k in (data or {}).keys()}
     used_ids = set()
@@ -181,7 +194,13 @@ def restore_from_single_sheet() -> tuple:
         return v
 
     added, tabs = 0, 0
-    for ws in sh.worksheets():
+    all_ws = []
+    for _b in books:
+        try:
+            all_ws += list(_b.worksheets())
+        except Exception:
+            pass
+    for ws in all_ws:
         title = ws.title.strip()
         tl = title.lower()
         identity, va_tab = None, ""
@@ -227,7 +246,10 @@ def restore_from_single_sheet() -> tuple:
                 entry.setdefault("vas", []).append(v)
                 have.add(v.lower())
     jb._save(data)
-    return True, f"{added} compte(s) restauré(s) depuis l'ancien Sheet ({tabs} onglet(s) lus)."
+    msg = f"{added} compte(s) restauré(s) — {len(books)} classeur(s), {tabs} onglet(s) lus."
+    if errs:
+        msg += f" (illisibles : {' · '.join(errs[:3])})"
+    return True, msg
 
 
 def identity_names() -> list:
