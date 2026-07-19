@@ -12886,11 +12886,14 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
-def _home_sales_svg(labels, vals) -> str:
-    """Courbe 'Ventes par jour' en SVG PUR généré côté serveur.
+def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False) -> str:
+    """Courbe revenus/ventes par jour en SVG PUR généré côté serveur.
 
     Zéro dépendance (Chart.js pouvait être bloqué côté client -> carte vide),
     rendu instantané, tooltip au survol des points via le handler global .hsc-dot.
+
+    api_src=True : valeurs en USD nets (API, toutes créatrices) -> axe en $ et
+    tooltip $ + équivalent €. Sinon (repli scraping) : affichage € historique.
     """
     W, H = 720.0, 240.0
     ml, mr, mt, mb = 46.0, 14.0, 14.0, 30.0
@@ -12920,13 +12923,14 @@ def _home_sales_svg(labels, vals) -> str:
     else:
         d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}" if pts else ""
     area = d + f" L{pts[-1][0]:.1f},{mt + ih:.1f} L{pts[0][0]:.1f},{mt + ih:.1f} Z" if pts else ""
-    # Grille horizontale + labels €
+    # Grille horizontale + labels de l'axe Y (devise selon la source)
     grid = ""
     for k in range(5):
         gy = mt + ih * k / 4
         gval = ymax * (4 - k) / 4
+        ylab = f"${gval:.0f}" if api_src else f"{gval:.0f}€"
         grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
-                 f"<text x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{gval:.0f}€</text>")
+                 f"<text x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{ylab}</text>")
     # Labels X
     xlbls = ""
     for i, lb in enumerate(labels):
@@ -12935,12 +12939,19 @@ def _home_sales_svg(labels, vals) -> str:
     # Points avec tooltip (data-tip lu par le handler global)
     dots = ""
     for (x, y), lb, v in zip(pts, labels, vals):
+        tip = (f"{lb}\n${v:,.2f} · ≈{v / (eur_usd or 1.14):,.0f} €" if api_src
+               else f"{lb}\n{v:.2f} €")
         dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
-                 f"style='cursor:pointer' data-tip='{lb}\n{v:.2f} €'/>")
+                 f"style='cursor:pointer' data-tip='{tip}'/>")
+    titre = "Revenus par jour" if api_src else "Ventes par jour"
+    badge = (" <span style='font-size:9px;background:rgba(34,197,94,.15);color:#22c55e;"
+             "padding:2px 7px;border-radius:20px;font-weight:700'>API · net</span>" if api_src else "")
+    sous = ("7 derniers jours · toutes créatrices, abos et posts inclus" if api_src
+            else "7 derniers jours")
     return (
         "<div class='home-card' style='margin-top:18px'>"
-        "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Ventes par jour "
-        "<span style='font-size:11px;color:#888;font-weight:500'>7 derniers jours</span></div>"
+        f"<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>{titre}{badge} "
+        f"<span style='font-size:11px;color:#888;font-weight:500'>{sous}</span></div>"
         f"<svg viewBox='0 0 {W:.0f} {H:.0f}' style='width:100%;height:auto;display:block' xmlns='http://www.w3.org/2000/svg'>"
         "<defs><linearGradient id='hscg' x1='0' y1='0' x2='0' y2='1'>"
         "<stop offset='0%' stop-color='#3b82f6' stop-opacity='.26'/>"
@@ -13353,10 +13364,31 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         + "</div>"
     )
 
-    # ---- Courbe "Ventes par jour" (7 derniers jours, indépendante de la période) ----
+    # ---- Courbe revenus par jour (7 derniers jours, indépendante de la période) ----
+    # PRIORITÉ API : toutes les créatrices (le scraping tronquait au top 10),
+    # conversion EUR->USD par devise (le scraping additionnait EUR et USD bruts),
+    # et la courbe s'affiche MÊME cookies morts (hors du gate mp_configured).
+    # NB : la métrique change et c'est assumé dans le titre — API = revenu total
+    # NET (abos/posts inclus), scraping = ventes chatting brutes.
     sales_chart_html = ""
-    if mp_configured and not mp_error:
-        chart_labels, chart_vals = [], []
+    chart_labels, chart_vals = [], []
+    _chart_api = False
+    try:
+        if mypuls.api_configured():
+            wk_start = today - _dt.timedelta(days=6)
+            sres = mypuls.api_revenue_series(wk_start.isoformat(), today.isoformat(), _eur_usd)
+            if sres.get("ok"):
+                for d_raw, s in zip(sres.get("days") or [], sres.get("usd") or []):
+                    try:
+                        dd = _dt.date.fromisoformat(str(d_raw)[:10])
+                        chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
+                    except Exception:
+                        chart_labels.append(str(d_raw))
+                    chart_vals.append(round(float(s or 0), 2))
+                _chart_api = bool(chart_labels)
+    except Exception as _e:
+        log.warning("home chart API: %s", _e)
+    if not chart_labels and mp_configured and not mp_error:
         try:
             wk_start = today - _dt.timedelta(days=6)
             wres = mypuls.fetch_team_stats(wk_start.isoformat(), today.isoformat(), use_cache=True)
@@ -13380,8 +13412,9 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                     chart_vals.append(round(s, 2))
         except Exception:
             pass
-        if chart_labels:
-            sales_chart_html = _home_sales_svg(chart_labels, chart_vals)
+    if chart_labels:
+        sales_chart_html = _home_sales_svg(chart_labels, chart_vals,
+                                           eur_usd=_eur_usd, api_src=_chart_api)
 
     return (
         css

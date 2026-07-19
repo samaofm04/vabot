@@ -272,6 +272,62 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     return out
 
 
+_API_SERIES_CACHE: Dict[str, Any] = {}
+_API_SERIES_TTL = 300
+
+
+def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> dict:
+    """Série journalière AGRÉGÉE toutes créatrices actives, en USD (API officielle).
+
+    Somme les /creators/{id}/revenue-by-day de chaque créatrice active, converti
+    par devise (EUR MyM -> USD au taux fourni). Contrairement au scraping, la
+    série couvre TOUTES les créatrices (le chart scrapé tronquait au top 10) et
+    convertit au lieu d'additionner EUR et USD bruts. Cache 5 min.
+    Retourne {ok, days:[...], usd:[...], errors:[...]}.
+    """
+    import time as _t
+    key = f"{date_from}|{date_to}|{eur_usd}"
+    hit = _API_SERIES_CACHE.get(key)
+    if hit and (_t.time() - hit[0]) < _API_SERIES_TTL:
+        return hit[1]
+    if not api_configured():
+        return {"ok": False, "error": "Token API MyPuls absent"}
+    creators = api_creators_cached()
+    if not creators:
+        return {"ok": False, "error": "Aucun creator renvoyé par l'API"}
+    sums: Dict[str, float] = {}
+    order: List[str] = []          # ordre des jours du 1er retour OK (même
+    errors = []                    # période partout -> mêmes labels)
+    for c in creators:
+        if not c.get("active"):
+            continue
+        r = api_revenue_by_day(c["id"], date_from, date_to)
+        if not r.get("ok"):
+            errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")
+            continue
+        dd = (r.get("data") or {})
+        labels = [str(x) for x in (dd.get("labels") or [])]
+        vals = dd.get("revenue_by_day") or []
+        cur = (dd.get("currency") or c.get("currency") or "USD").upper()
+        rate = eur_usd if cur == "EUR" else 1.0
+        if not order:
+            order = labels
+        for d_i, v in zip(labels, vals):
+            try:
+                sums[d_i] = sums.get(d_i, 0.0) + float(v or 0) * rate
+            except Exception:
+                pass
+    days = [d for d in order if d in sums] + sorted(k for k in sums if k not in order)
+    out = {"ok": bool(days), "days": days,
+           "usd": [round(sums[d], 2) for d in days], "errors": errors}
+    if not days:
+        out["error"] = "; ".join(errors) or "Aucune donnée"
+    _API_SERIES_CACHE[key] = (_t.time(), out)
+    if len(_API_SERIES_CACHE) > 40:
+        _API_SERIES_CACHE.clear()
+    return out
+
+
 def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg = load_config()
     cfg["PHPSESSID"] = (phpsessid or "").strip()
