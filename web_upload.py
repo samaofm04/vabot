@@ -159,42 +159,50 @@ def _resolve_discord_user_by_handle(handle: str):
     _hit = _DISCORD_RESOLVE_CACHE.get(handle_lc)
     if _hit is not None and (_now_dr - _hit[0]) < 120:
         return _hit[1]
-    seen_ids = set()
-    _result = None
-    try:
-        for g in _BOT_REF.guilds:
-            try:
-                for m in g.members:
-                    if m.id in seen_ids:
-                        continue
-                    seen_ids.add(m.id)
-                    name = (getattr(m, "name", "") or "").lower()
-                    global_name = (getattr(m, "global_name", "") or "").lower()
-                    disp_name = (getattr(m, "display_name", "") or "").lower()
-                    nick = (getattr(m, "nick", "") or "").lower()
-                    _cands = (name, global_name, disp_name, nick)
-                    # match exact OU en ignorant ponctuation/espaces (ex "Fahnih 37050"
-                    # vs "fahnih_37050") -> bien plus tolérant qu'avant
-                    if handle_lc in _cands or (
-                            _norm_handle(handle_lc)
-                            and _norm_handle(handle_lc) in {_norm_handle(c) for c in _cands if c}):
-                        try:
-                            avatar_url = str(m.display_avatar.url)
-                        except Exception:
-                            avatar_url = ""
-                        _result = {
-                            "id": str(m.id),
-                            "username": getattr(m, "name", "") or "",
-                            "display_name": getattr(m, "display_name", "") or getattr(m, "name", ""),
-                            "avatar_url": avatar_url,
-                        }
-                        break  # match trouve -> sort du for m
-            except Exception:
-                continue
-            if _result is not None:
-                break  # sort du for g
-    except Exception:
-        pass
+    def _scan(target: str):
+        """Cherche un membre dont un des pseudos correspond à `target`
+        (exact, ou en ignorant ponctuation/espaces)."""
+        tn = _norm_handle(target)
+        seen_ids = set()
+        try:
+            for g in _BOT_REF.guilds:
+                try:
+                    for m in g.members:
+                        if m.id in seen_ids:
+                            continue
+                        seen_ids.add(m.id)
+                        _cands = (
+                            (getattr(m, "name", "") or "").lower(),
+                            (getattr(m, "global_name", "") or "").lower(),
+                            (getattr(m, "display_name", "") or "").lower(),
+                            (getattr(m, "nick", "") or "").lower(),
+                        )
+                        if target in _cands or (
+                                tn and tn in {_norm_handle(c) for c in _cands if c}):
+                            try:
+                                avatar_url = str(m.display_avatar.url)
+                            except Exception:
+                                avatar_url = ""
+                            return {
+                                "id": str(m.id),
+                                "username": getattr(m, "name", "") or "",
+                                "display_name": getattr(m, "display_name", "") or getattr(m, "name", ""),
+                                "avatar_url": avatar_url,
+                            }
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
+
+    _result = _scan(handle_lc)
+    # 2e passe : les pseudos enregistrés traînent souvent un suffixe numérique en
+    # trop (« priscah0908_23400 » alors que le vrai pseudo est « priscah0908 »).
+    # On retente une fois sans ce suffixe -> corrige tous les VA d'un coup.
+    if _result is None:
+        _base = re.sub(r"[_\-. ]?\d+$", "", handle_lc)
+        if _base and _base != handle_lc and len(_base) >= 3:
+            _result = _scan(_base)
     # Memoize (succes ET echec) pour 120s
     try:
         _DISCORD_RESOLVE_CACHE[handle_lc] = (_now_dr, _result)
