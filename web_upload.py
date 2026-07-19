@@ -3551,6 +3551,18 @@ function fxApplyCur(){
     var fee = el.dataset.fee ? " <span style='color:#55607a'>(−"+el.dataset.fee+"%)</span>" : '';
     el.innerHTML = (gross ? 'net ' : 'brut ≈ ') + '<span>' + fmt(gross?net:brut) + '</span>' + (gross?'':fee);
   });
+  /* courbe accueil : Net/Brut = bascule entre les 2 SVG ; $/€ = reformater
+     l'axe Y et les tooltips (data-usd posé seulement en source API) */
+  var svgN=document.getElementById('hsc-net'), svgB=document.getElementById('hsc-brut');
+  if(svgN && svgB){ svgN.style.display = gross?'none':'block'; svgB.style.display = gross?'block':'none'; }
+  document.querySelectorAll('.hsc-ylab').forEach(function(el){
+    var usd=parseFloat(el.dataset.usd||'0')||0;
+    var v = eur ? usd/rate : usd;
+    el.textContent = eur ? Math.round(v).toLocaleString('fr-FR')+'€' : '$'+Math.round(v).toLocaleString('en-US');
+  });
+  document.querySelectorAll('.hsc-dot[data-usd]').forEach(function(el){
+    el.setAttribute('data-tip', (el.dataset.lb||'') + '\n' + fmt(parseFloat(el.dataset.usd||'0')||0));
+  });
 }
 function fxToggleCur(){
   localStorage.setItem('vabot_dash_cur',
@@ -12908,80 +12920,92 @@ def _render_depenses_html() -> str:
     return "".join(rows)
 
 
-def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False) -> str:
+def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
+                    vals_brut=None) -> str:
     """Courbe revenus/ventes par jour en SVG PUR généré côté serveur.
 
     Zéro dépendance (Chart.js pouvait être bloqué côté client -> carte vide),
     rendu instantané, tooltip au survol des points via le handler global .hsc-dot.
 
-    api_src=True : valeurs en USD nets (API, toutes créatrices) -> axe en $ et
-    tooltip $ + équivalent €. Sinon (repli scraping) : affichage € historique.
+    api_src=True : valeurs en USD nets (API, toutes créatrices). Les labels Y
+    (.hsc-ylab) et les points portent data-usd -> le toggle $/€ les reformate.
+    vals_brut : série BRUTE alignée sur labels -> un 2e SVG caché (#hsc-brut),
+    le bouton Net/Brut bascule l'affichage entre les deux.
     """
-    W, H = 720.0, 240.0
-    ml, mr, mt, mb = 46.0, 14.0, 14.0, 30.0
-    iw, ih = W - ml - mr, H - mt - mb
-    n = len(vals)
-    vmax = max(vals) if vals else 0
-    if vmax <= 0:
-        vmax = 1.0
-    # Échelle Y "propre" (arrondie au palier supérieur)
-    step = 10 ** max(0, len(str(int(vmax))) - 1)
-    ymax = ((int(vmax) // step) + 1) * step
-    pts = []
-    for i, v in enumerate(vals):
-        x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
-        y = mt + ih - (ih * min(v, ymax) / ymax)
-        pts.append((x, y))
-    # Path lissé (Catmull-Rom -> Bézier)
-    if len(pts) > 1:
-        d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}"
-        for i in range(len(pts) - 1):
-            p0 = pts[max(0, i - 1)]
-            p1, p2 = pts[i], pts[i + 1]
-            p3 = pts[min(len(pts) - 1, i + 2)]
-            c1x, c1y = p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6
-            c2x, c2y = p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6
-            d += f" C{c1x:.1f},{c1y:.1f} {c2x:.1f},{c2y:.1f} {p2[0]:.1f},{p2[1]:.1f}"
-    else:
-        d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}" if pts else ""
-    area = d + f" L{pts[-1][0]:.1f},{mt + ih:.1f} L{pts[0][0]:.1f},{mt + ih:.1f} Z" if pts else ""
-    # Grille horizontale + labels de l'axe Y (devise selon la source)
-    grid = ""
-    for k in range(5):
-        gy = mt + ih * k / 4
-        gval = ymax * (4 - k) / 4
-        ylab = f"${gval:.0f}" if api_src else f"{gval:.0f}€"
-        grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
-                 f"<text x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{ylab}</text>")
-    # Labels X
-    xlbls = ""
-    for i, lb in enumerate(labels):
-        x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
-        xlbls += f"<text x='{x:.1f}' y='{H - 8}' text-anchor='middle' font-size='10' fill='#888'>{lb}</text>"
-    # Points avec tooltip (data-tip lu par le handler global)
-    dots = ""
-    for (x, y), lb, v in zip(pts, labels, vals):
-        tip = (f"{lb}\n${v:,.2f} · ≈{v / (eur_usd or 1.14):,.0f} €" if api_src
-               else f"{lb}\n{v:.2f} €")
-        dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
-                 f"style='cursor:pointer' data-tip='{tip}'/>")
+    def _svg(serie, svg_id, hidden):
+        W, H = 720.0, 240.0
+        ml, mr, mt, mb = 46.0, 14.0, 14.0, 30.0
+        iw, ih = W - ml - mr, H - mt - mb
+        n = len(serie)
+        vmax = max(serie) if serie else 0
+        if vmax <= 0:
+            vmax = 1.0
+        # Échelle Y "propre" (arrondie au palier supérieur)
+        step = 10 ** max(0, len(str(int(vmax))) - 1)
+        ymax = ((int(vmax) // step) + 1) * step
+        pts = []
+        for i, v in enumerate(serie):
+            x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
+            y = mt + ih - (ih * min(v, ymax) / ymax)
+            pts.append((x, y))
+        # Path lissé (Catmull-Rom -> Bézier)
+        if len(pts) > 1:
+            d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}"
+            for i in range(len(pts) - 1):
+                p0 = pts[max(0, i - 1)]
+                p1, p2 = pts[i], pts[i + 1]
+                p3 = pts[min(len(pts) - 1, i + 2)]
+                c1x, c1y = p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6
+                c2x, c2y = p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6
+                d += f" C{c1x:.1f},{c1y:.1f} {c2x:.1f},{c2y:.1f} {p2[0]:.1f},{p2[1]:.1f}"
+        else:
+            d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}" if pts else ""
+        area = d + f" L{pts[-1][0]:.1f},{mt + ih:.1f} L{pts[0][0]:.1f},{mt + ih:.1f} Z" if pts else ""
+        # Grille + labels Y : data-usd pour que le toggle $/€ reformate
+        grid = ""
+        for k in range(5):
+            gy = mt + ih * k / 4
+            gval = ymax * (4 - k) / 4
+            ylab = f"${gval:.0f}" if api_src else f"{gval:.0f}€"
+            ydata = f" class='hsc-ylab' data-usd='{gval:.2f}'" if api_src else ""
+            grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
+                     f"<text{ydata} x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{ylab}</text>")
+        # Labels X
+        xlbls = ""
+        for i, lb in enumerate(labels):
+            x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
+            xlbls += f"<text x='{x:.1f}' y='{H - 8}' text-anchor='middle' font-size='10' fill='#888'>{lb}</text>"
+        # Points : data-usd + data-lb -> tooltip reformaté par le toggle $/€
+        dots = ""
+        for (x, y), lb, v in zip(pts, labels, serie):
+            tip = f"{lb}\n${v:,.2f}" if api_src else f"{lb}\n{v:.2f} €"
+            extra = f" data-usd='{v:.2f}' data-lb='{lb}'" if api_src else ""
+            dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
+                     f"style='cursor:pointer'{extra} data-tip='{tip}'/>")
+        style = "width:100%;height:auto;" + ("display:none" if hidden else "display:block")
+        return (
+            f"<svg id='{svg_id}' viewBox='0 0 {W:.0f} {H:.0f}' style='{style}' xmlns='http://www.w3.org/2000/svg'>"
+            f"<defs><linearGradient id='{svg_id}-g' x1='0' y1='0' x2='0' y2='1'>"
+            "<stop offset='0%' stop-color='#3b82f6' stop-opacity='.26'/>"
+            "<stop offset='100%' stop-color='#3b82f6' stop-opacity='0'/>"
+            "</linearGradient></defs>"
+            + grid
+            + (f"<path d='{area}' fill='url(#{svg_id}-g)'/>" if area else "")
+            + (f"<path d='{d}' fill='none' stroke='#3b82f6' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/>" if d else "")
+            + dots + xlbls
+            + "</svg>")
+
     titre = "Revenus par jour" if api_src else "Ventes par jour"
     sous = ("7 derniers jours · toutes créatrices" if api_src
             else "7 derniers jours")
+    body = _svg(vals, "hsc-net", False)
+    if api_src and vals_brut:
+        body += _svg(vals_brut, "hsc-brut", True)
     return (
         "<div class='home-card' style='margin-top:18px'>"
         f"<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>{titre} "
         f"<span style='font-size:11px;color:#888;font-weight:500'>{sous}</span></div>"
-        f"<svg viewBox='0 0 {W:.0f} {H:.0f}' style='width:100%;height:auto;display:block' xmlns='http://www.w3.org/2000/svg'>"
-        "<defs><linearGradient id='hscg' x1='0' y1='0' x2='0' y2='1'>"
-        "<stop offset='0%' stop-color='#3b82f6' stop-opacity='.26'/>"
-        "<stop offset='100%' stop-color='#3b82f6' stop-opacity='0'/>"
-        "</linearGradient></defs>"
-        + grid
-        + (f"<path d='{area}' fill='url(#hscg)'/>" if area else "")
-        + (f"<path d='{d}' fill='none' stroke='#3b82f6' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/>" if d else "")
-        + dots + xlbls
-        + "</svg></div>"
+        + body + "</div>"
     )
 
 
@@ -13419,20 +13443,26 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # NB : la métrique change et c'est assumé dans le titre — API = revenu total
     # NET (abos/posts inclus), scraping = ventes chatting brutes.
     sales_chart_html = ""
-    chart_labels, chart_vals = [], []
+    chart_labels, chart_vals, chart_brut = [], [], []
     _chart_api = False
     try:
         if mypuls.api_configured():
             wk_start = today - _dt.timedelta(days=6)
             sres = mypuls.api_revenue_series(wk_start.isoformat(), today.isoformat(), _eur_usd)
             if sres.get("ok"):
-                for d_raw, s in zip(sres.get("days") or [], sres.get("usd") or []):
+                _s_of = sres.get("usd_of") or []
+                _s_mym = sres.get("usd_mym") or []
+                for i, (d_raw, s) in enumerate(zip(sres.get("days") or [], sres.get("usd") or [])):
                     try:
                         dd = _dt.date.fromisoformat(str(d_raw)[:10])
                         chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
                     except Exception:
                         chart_labels.append(str(d_raw))
                     chart_vals.append(round(float(s or 0), 2))
+                    # brut du jour : chaque plateforme remontée à son taux
+                    _of = float(_s_of[i]) if i < len(_s_of) else 0.0
+                    _my = float(_s_mym[i]) if i < len(_s_mym) else 0.0
+                    chart_brut.append(round(_of / (1 - OF_FEE) + _my / (1 - MYM_FEE), 2))
                 _chart_api = bool(chart_labels)
     except Exception as _e:
         log.warning("home chart API: %s", _e)
@@ -13462,7 +13492,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             pass
     if chart_labels:
         sales_chart_html = _home_sales_svg(chart_labels, chart_vals,
-                                           eur_usd=_eur_usd, api_src=_chart_api)
+                                           eur_usd=_eur_usd, api_src=_chart_api,
+                                           vals_brut=chart_brut if _chart_api else None)
 
     return (
         css

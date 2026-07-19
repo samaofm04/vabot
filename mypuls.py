@@ -304,6 +304,8 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
     if not creators:
         return {"ok": False, "error": "Aucun creator renvoyé par l'API"}
     sums: Dict[str, float] = {}
+    sums_of: Dict[str, float] = {}    # split par plateforme : permet au
+    sums_mym: Dict[str, float] = {}   # dashboard de calculer un BRUT par jour
     order: List[str] = []          # ordre des jours du 1er retour OK (même
     errors = []                    # période partout -> mêmes labels)
     for c in creators:
@@ -318,21 +320,32 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
         vals = dd.get("revenue_by_day") or []
         cur = (dd.get("currency") or c.get("currency") or "USD").upper()
         rate = eur_usd if cur == "EUR" else 1.0
+        bucket = sums_of if c.get("platform") == "onlyfans" else sums_mym
         if not order:
             order = labels
         for d_i, v in zip(labels, vals):
             try:
-                sums[d_i] = sums.get(d_i, 0.0) + float(v or 0) * rate
+                amt = float(v or 0) * rate
+                sums[d_i] = sums.get(d_i, 0.0) + amt
+                bucket[d_i] = bucket.get(d_i, 0.0) + amt
             except Exception:
                 pass
     days = [d for d in order if d in sums] + sorted(k for k in sums if k not in order)
+    if not days and hit:
+        # API en vrac (429, timeout) -> on ressert la dernière bonne série
+        # plutôt que de faire retomber la courbe sur le scraping
+        return hit[1]
     out = {"ok": bool(days), "days": days,
-           "usd": [round(sums[d], 2) for d in days], "errors": errors}
+           "usd": [round(sums[d], 2) for d in days],
+           "usd_of": [round(sums_of.get(d, 0.0), 2) for d in days],
+           "usd_mym": [round(sums_mym.get(d, 0.0), 2) for d in days],
+           "errors": errors}
     if not days:
         out["error"] = "; ".join(errors) or "Aucune donnée"
-    _API_SERIES_CACHE[key] = (_t.time(), out)
-    if len(_API_SERIES_CACHE) > 40:
-        _API_SERIES_CACHE.clear()
+    if out["ok"]:                       # jamais d'échec en cache : un raté ne
+        _API_SERIES_CACHE[key] = (_t.time(), out)   # doit pas coller 5 min
+        if len(_API_SERIES_CACHE) > 40:
+            _API_SERIES_CACHE.clear()
     return out
 
 
