@@ -30250,7 +30250,8 @@ function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
                     if not parsed:
                         report_html = "<div style='color:#f87171'>Aucune donnée lisible dans ce fichier.</div>"
                     else:
-                        rep = jb_import.restore(parsed)
+                        rep = jb_import.restore(
+                            parsed, overwrite=bool(request.form.get("overwrite")))
                         lines = "".join(
                             f"<tr><td style='padding:7px 12px;color:#fff'>{html_escape(k)}</td>"
                             f"<td style='padding:7px 12px;text-align:center;color:#4ade80;font-weight:700'>+{v['added']}</td>"
@@ -30287,6 +30288,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         style="background:#12151f;border:1px solid #1e2430;border-radius:14px;padding:22px;margin-top:18px">
     <input type="file" name="backup" accept=".zip,.xlsx" required
            style="width:100%;padding:12px;background:#0b0e15;border:1px dashed #2a3245;border-radius:10px;color:#cbd5e1;margin-bottom:14px">
+    <label style="display:flex;align-items:center;gap:9px;font-size:13px;color:#cbd5e1;margin-bottom:16px;cursor:pointer">
+      <input type="checkbox" name="overwrite" value="1" style="width:16px;height:16px;cursor:pointer">
+      Écraser les infos existantes (mot de passe, 2FA, VA…) par celles du fichier
+      <span style="color:#5a6178">— sinon on complète seulement les champs vides</span>
+    </label>
     <button type="submit" style="padding:11px 22px;background:linear-gradient(135deg,#22c55e,#15803d);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px">
       ♻️ Restaurer les comptes
     </button>

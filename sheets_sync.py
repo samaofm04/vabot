@@ -580,8 +580,11 @@ def _dedup_accounts(data: dict) -> int:
 def push_all(data: dict, force: bool = False) -> bool:
     """Dispatcher : mode DOSSIER (1 classeur/identité) si folder_id configuré,
     sinon ancien mode (1 seul Sheet, N onglets)."""
-    if is_paused():
-        return False        # sync gelée -> on n'écrase RIEN
+    # En PAUSE : on bloque les push AUTOMATIQUES, mais un push MANUEL (force=True)
+    # reste autorisé — c'est le sens site -> Sheet, il ne peut pas vider le site,
+    # et il est indispensable pour repeupler les classeurs après une restauration.
+    if is_paused() and not force:
+        return False
     if not (is_configured() and gspread_available()):
         return False
     if folder_mode():

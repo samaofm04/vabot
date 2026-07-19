@@ -97,8 +97,10 @@ def parse_upload(filename: str, blob: bytes) -> dict:
     return out
 
 
-def restore(parsed: dict) -> dict:
-    """Fusion ADDITIVE dans jailbreak.json. Retourne un rapport détaillé."""
+def restore(parsed: dict, overwrite: bool = False) -> dict:
+    """Fusion dans jailbreak.json. Ne SUPPRIME jamais rien.
+    overwrite=False : complète seulement les champs vides (défaut, le plus sûr).
+    overwrite=True  : remplace aussi les champs déjà remplis par ceux du fichier."""
     import time
     import jailbreak as jb
     data = jb._load() or {}
@@ -147,11 +149,14 @@ def restore(parsed: dict) -> dict:
                 by_u[u.lower()] = acct
                 added += 1
             else:
-                # complète les champs VIDES uniquement (jamais d'écrasement)
                 ch = False
                 for f in ("password", "email", "two_fa", "notes", "va"):
                     v = (r.get(f) or "").strip()
-                    if v and not (cur.get(f) or "").strip():
+                    if not v:
+                        continue
+                    cur_v = (cur.get(f) or "").strip()
+                    # défaut : ne remplit que le vide. overwrite : remplace tout.
+                    if not cur_v or (overwrite and cur_v != v):
                         cur[f] = v
                         ch = True
                 if ch:
