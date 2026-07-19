@@ -19,6 +19,13 @@
     return '$' + (Math.round(v * 100) / 100).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   }
   function moneyShort(v) { return '$' + Math.round(v).toLocaleString('en-US'); }
+  /* Équivalent en euros (taux des Paramètres) affiché sous le montant en $ */
+  function eurHint(usd) {
+    var r = parseFloat(((S.data || {}).settings || {}).eur_usd || 0);
+    if (!r || !usd) return '';
+    return '<div style="font-size:10.5px;color:#77778a;font-weight:600;margin-top:1px">'
+      + '≈ ' + (usd / r).toLocaleString('fr-FR', {maximumFractionDigits: 0}) + ' €</div>';
+  }
   function monthLabel(m) {
     if (!m) return '';
     var y = m.slice(0, 4), mm = parseInt(m.slice(5, 7), 10);
@@ -189,6 +196,9 @@
       origin = l.pct + '% ' + esc(baseLbl);
     } else if (l.form === 'mypuls') {
       origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
+      if (l.fee_pct > 0) {
+        origin += ' <span style="color:#f59e0b">− ' + l.fee_pct + '% frais</span>';
+      }
     } else if (l.form === 'mypuls_crm') {
       origin = '🧾 Factures CRM MyPuls du mois <span style="color:#4ade80">(auto)</span>';
     } else if (l.form === 'va_clicks') {
@@ -234,7 +244,8 @@
       '<div style="display:flex;align-items:center;gap:9px;margin-left:auto">' +
       linkBtn + payBtn +
       '<span style="font-weight:800;font-size:14px;color:' + (isRev ? '#22c55e' : '#f87171') + ';white-space:nowrap">' +
-      (isRev ? '+ ' : '− ') + money(l.usd || 0) + ' <span style="font-size:10px;color:#77778a;font-weight:600">/ mois</span></span>' +
+      (isRev ? '+ ' : '− ') + money(l.usd || 0) + ' <span style="font-size:10px;color:#77778a;font-weight:600">/ mois</span>' +
+      eurHint(l.usd || 0) + '</span>' +
       '<button class="fx-edit" data-id="' + l.id + '" title="Modifier" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">✎</button>' +
       '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">🗑</button>' +
       '</div></div></div>';

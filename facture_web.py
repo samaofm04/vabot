@@ -269,6 +269,10 @@ def compute_state(month: str) -> dict:
             usd = round(_to_usd(_mypuls_ca(l.get("mypuls_model") or "", month), "EUR", settings), 2)
         else:
             continue  # % d'un autre revenu -> résolu ensuite via rev_bases
+        # Frais plateforme (ex OnlyFans 20 %) : le montant est BRUT -> on garde le NET
+        _fee = float(l.get("fee_pct") or 0)
+        if _fee > 0:
+            usd = round(usd * (1 - _fee / 100.0), 2)
         if l.get("id"):
             resolved_rev[l["id"]] = usd
             rev_bases[f"line:{l['id']}"] = usd
@@ -384,6 +388,12 @@ def _sanitize_line(raw: dict) -> dict:
         line["pct"] = round(float(raw.get("pct") or 0), 2)
     except Exception:
         line["pct"] = 0.0
+    # Frais de plateforme (%) retenus SUR un revenu : le montant saisi/récupéré est
+    # BRUT, on affiche et on compte le NET. Ex : OnlyFans prend 20 %.
+    try:
+        line["fee_pct"] = min(100.0, max(0.0, round(float(raw.get("fee_pct") or 0), 2)))
+    except Exception:
+        line["fee_pct"] = 0.0
     pct_of = str(raw.get("pct_of") or "")[:1500]
     # base valide : catégorie connue, UNE ligne "line:<id>" ou PLUSIEURS "lines:<id>,<id>,..."
     line["pct_of"] = pct_of if (
@@ -667,6 +677,30 @@ def _seed_of_amelia_mrn():
         pass
 
 
+def _seed_of_fee_amelia_mypuls():
+    """One-shot (19/07/2026) : la ligne OF d'Amelia tirée de MyPuls est du BRUT.
+    OnlyFans retient 20 % -> on pose fee_pct=20 pour que la facture compte le NET."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_of_fee_amelia_20260719"):
+            return
+        changed = False
+        for m in d.get("months", {}).values():
+            for l in m.get("lines", []):
+                if (l.get("type") == "rev" and l.get("form") == "mypuls"
+                        and "amelia" in (l.get("mypuls_model") or "").lower()
+                        and not float(l.get("fee_pct") or 0)):
+                    l["fee_pct"] = 20.0
+                    if "frais OnlyFans" not in (l.get("notes") or ""):
+                        l["notes"] = ((l.get("notes") or "") + " · net (frais OnlyFans 20% déduits)").strip(" ·")
+                    changed = True
+        d["settings"]["seed_of_fee_amelia_20260719"] = True
+        if changed or True:
+            _save(d)
+    except Exception:
+        pass
+
+
 # ---------- routes ----------
 def register(app, is_auth):
     from flask import request, jsonify, send_file
@@ -678,6 +712,7 @@ def register(app, is_auth):
     _seed_va_classique_20260709()  # one-shot : ligne auto VA classique (clics x 0.07$)
     _seed_frais_crm_20260709()  # one-shot : ligne auto Frais CRM MyPuls (factures du mois)
     _seed_of_amelia_mrn()  # one-shot : OF amelia.mrn (CA auto MyPuls) + paye 30%
+    _seed_of_fee_amelia_mypuls()  # one-shot : OF Amelia (MyPuls) = brut -> net (-20%)
 
     @app.route("/facture/app.js")
     def facture_app_js():
