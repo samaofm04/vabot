@@ -30232,6 +30232,67 @@ function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
 </script>
 </body></html>"""
 
+    @app.route("/jbimport", methods=["GET", "POST"])
+    def jbimport_page():
+        """Restauration des comptes Jailbreak depuis l'export Drive (.zip / .xlsx).
+        100 % additif : n'efface rien, ne duplique rien."""
+        if not is_auth():
+            return redirect("/")
+        report_html = ""
+        if request.method == "POST":
+            f = request.files.get("backup")
+            if not f or not f.filename:
+                report_html = "<div style='color:#f87171'>Aucun fichier sélectionné.</div>"
+            else:
+                try:
+                    import jb_import
+                    parsed = jb_import.parse_upload(f.filename, f.read())
+                    if not parsed:
+                        report_html = "<div style='color:#f87171'>Aucune donnée lisible dans ce fichier.</div>"
+                    else:
+                        rep = jb_import.restore(parsed)
+                        lines = "".join(
+                            f"<tr><td style='padding:7px 12px;color:#fff'>{html_escape(k)}</td>"
+                            f"<td style='padding:7px 12px;text-align:center;color:#4ade80;font-weight:700'>+{v['added']}</td>"
+                            f"<td style='padding:7px 12px;text-align:center;color:#facc15'>{v['filled']}</td>"
+                            f"<td style='padding:7px 12px;text-align:center;color:#cbd5e1'>{v['total']}</td></tr>"
+                            for k, v in sorted(rep["identities"].items()))
+                        report_html = (
+                            f"<div style='background:#0d2818;border:1px solid #22c55e;border-radius:12px;padding:16px;margin-bottom:18px'>"
+                            f"<div style='font-size:17px;font-weight:800;color:#4ade80'>✅ Restauration terminée</div>"
+                            f"<div style='color:#a7f3d0;margin-top:4px'><b>{rep['added']}</b> compte(s) ajouté(s) · "
+                            f"<b>{rep['filled']}</b> complété(s) (champs vides remplis) · aucune suppression.</div></div>"
+                            f"<table style='width:100%;border-collapse:collapse;background:#0f1219;border:1px solid #1e2430;border-radius:12px;overflow:hidden'>"
+                            f"<thead><tr style='background:#1e293b'><th style='padding:9px 12px;text-align:left;font-size:11px;color:#cbd5e1'>IDENTITÉ</th>"
+                            f"<th style='padding:9px 12px;font-size:11px;color:#cbd5e1'>AJOUTÉS</th>"
+                            f"<th style='padding:9px 12px;font-size:11px;color:#cbd5e1'>COMPLÉTÉS</th>"
+                            f"<th style='padding:9px 12px;font-size:11px;color:#cbd5e1'>TOTAL</th></tr></thead>"
+                            f"<tbody>{lines}</tbody></table>")
+                except Exception as e:
+                    report_html = f"<div style='color:#f87171'>Erreur : {html_escape(str(e))}</div>"
+        return f"""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Restaurer les comptes JB</title>
+<style>body{{margin:0;background:#0b0d12;color:#e8eaf2;font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}}
+a{{color:#3b82f6;text-decoration:none}}</style></head><body>
+<div style="max-width:820px;margin:0 auto">
+  <a href="/" style="color:#8a91a8">← Dashboard</a>
+  <h1 style="font-size:23px;margin:10px 0 4px">♻️ Restaurer les comptes Jailbreak</h1>
+  <div style="color:#8a91a8;font-size:13px;margin-bottom:20px">
+    Envoie le <b>.zip</b> du dossier Google Drive « VA JB » (ou un <b>.xlsx</b> seul).
+    L'import est <b>100 % additif</b> : il n'efface rien, n'écrase aucun mot de passe,
+    ne crée pas de doublon — il remet seulement les comptes manquants.
+  </div>
+  {report_html}
+  <form method="POST" enctype="multipart/form-data"
+        style="background:#12151f;border:1px solid #1e2430;border-radius:14px;padding:22px;margin-top:18px">
+    <input type="file" name="backup" accept=".zip,.xlsx" required
+           style="width:100%;padding:12px;background:#0b0e15;border:1px dashed #2a3245;border-radius:10px;color:#cbd5e1;margin-bottom:14px">
+    <button type="submit" style="padding:11px 22px;background:linear-gradient(135deg,#22c55e,#15803d);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px">
+      ♻️ Restaurer les comptes
+    </button>
+  </form>
+</div></body></html>"""
+
     @app.route("/jbactivity/scan", methods=["POST"])
     def jbactivity_scan():
         from flask import jsonify
