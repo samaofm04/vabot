@@ -13149,6 +13149,7 @@ def _render_home_dashboard_html() -> str:
     # On ramène TOUT en USD : OnlyFans net (frais 20 % déduits), MyM converti.
     # Sans ça on additionnait des € et des $ sans conversion.
     OF_FEE = 0.20
+    MYM_FEE = 0.26   # commission MyM -> brut estimé = net / 0.74
     _eur_usd = 1.14
     try:
         _fx = json.loads((DATA_DIR / "facture.json").read_text(encoding="utf-8"))
@@ -13303,19 +13304,30 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _api_badge = ("<span style='font-size:9.5px;color:#3b82f6;font-weight:700;"
                   "margin-left:5px'>API</span>" if _api_src else "")
 
-    def _seg_card(label, value, color):
+    # Brut TOTAL estimé (pour la carte héro) : chaque segment remonté à son taux
+    _total_brut = (_seg["mym"] / (1 - MYM_FEE)
+                   + (_seg["of_fr"] + _seg["of_us"]) / (1 - OF_FEE))
+
+    def _seg_card(label, value, color, fee=0.0):
+        # brut estimé = net / (1 - commission plateforme) : OF 20 %, MyM 26 %
+        sub = ""
+        if fee:
+            brut = value / (1 - fee)
+            sub = (f"<div style='font-size:10.5px;color:#8a91a8;margin-top:3px'>brut ≈ "
+                   f"<span class='fx-amt' data-usd='{brut:.2f}'>${brut:,.2f}</span>"
+                   f" <span style='color:#55607a'>(−{fee * 100:.0f}%)</span></div>")
         return (
             f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
             f"border-radius:12px;padding:12px 14px'>"
             f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
             f"<div class='fx-amt' data-usd='{value:.2f}' style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
-            f"${value:,.2f}</div></div>")
+            f"${value:,.2f}</div>{sub}</div>")
 
     segments_html = (
         "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
-        + _seg_card("MyM", _seg["mym"], "#a855f7")
-        + _seg_card("OnlyFans FR", _seg["of_fr"], "#3b82f6")
-        + _seg_card("OnlyFans US", _seg["of_us"], "#22c55e")
+        + _seg_card("MyM", _seg["mym"], "#a855f7", fee=MYM_FEE)
+        + _seg_card("OnlyFans FR", _seg["of_fr"], "#3b82f6", fee=OF_FEE)
+        + _seg_card("OnlyFans US", _seg["of_us"], "#22c55e", fee=OF_FEE)
         + "</div>"
         + (f"<div style='margin-top:7px;font-size:11.5px;color:#f59e0b'>"
            f"⚠️ Modèle(s) OnlyFans non classée(s), comptée(s) en FR : "
@@ -13344,7 +13356,10 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         "</div>"
         f"<div><div class='home-hero-label'>Total revenus <span style='font-size:10px;color:#22c55e;font-weight:600'>net</span>"
         f"{_api_badge}</div>"
-        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}'>${_total_usd:,.2f}</div></div>"
+        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}'>${_total_usd:,.2f}</div>"
+        # brut estimé par segment : MyM / 0.74, OnlyFans / 0.80
+        f"<div style='font-size:11.5px;color:#8a91a8;margin-top:2px'>brut ≈ "
+        f"<span class='fx-amt' data-usd='{_total_brut:.2f}'>${_total_brut:,.2f}</span></div></div>"
         "</div>"
         # 6 small stat cards
         + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
