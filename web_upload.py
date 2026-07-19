@@ -13270,6 +13270,10 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     except Exception as _e:
         log.warning(f"MyPuls API overview: {_e}")
 
+    # badge « API » à côté du total (précalculé : pas de backslash en f-string)
+    _api_badge = ("<span style='font-size:9.5px;color:#3b82f6;font-weight:700;"
+                  "margin-left:5px'>API</span>" if _api_src else "")
+
     def _seg_card(label, value, color):
         return (
             f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
@@ -13310,7 +13314,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
         "</div>"
         f"<div><div class='home-hero-label'>Total revenus <span style='font-size:10px;color:#22c55e;font-weight:600'>net</span>"
-        f"{'<span style=\"font-size:9.5px;color:#3b82f6;font-weight:700;margin-left:5px\">API</span>' if _api_src else ''}</div>"
+        f"{_api_badge}</div>"
         f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}'>${_total_usd:,.2f}</div></div>"
         "</div>"
         # 6 small stat cards
