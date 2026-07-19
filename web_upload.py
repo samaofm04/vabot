@@ -13205,15 +13205,26 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _total_usd = sum(type_totals.values()) + float(manual_total or 0)
 
     # --- Répartition MyM / OF FR / OF US -------------------------------------
-    # EUR = MyM. USD = OnlyFans, réparti FR/US selon la créatrice (US_MODELS).
-    US_MODELS = {"khloe", "jessye"}
+    # EUR = MyM. USD = OnlyFans, réparti par MODÈLE (listes explicites).
+    # Pour ajouter une modèle plus tard, il suffit de la mettre dans la bonne liste.
+    OF_US_MODELS = {"jessye", "khloe"}
+    OF_FR_MODELS = {"amelia", "julia", "lola"}   # lola : pas encore dans MyPuls
     _seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
+    _of_unknown = set()
     for tx in mp_data.get("transactions", []) or []:
         _c = (tx.get("currency") or "").strip().upper()
         _usd = _tx_usd(tx.get("amount", 0), tx.get("currency"))
         if "USD" in _c or "$" in _c:
             _cr = (tx.get("creator") or "").strip().lower()
-            _seg["of_us" if any(u in _cr for u in US_MODELS) else "of_fr"] += _usd
+            if any(u in _cr for u in OF_US_MODELS):
+                _seg["of_us"] += _usd
+            elif any(u in _cr for u in OF_FR_MODELS):
+                _seg["of_fr"] += _usd
+            else:
+                # modèle OF pas encore classée -> comptée en FR, mais on la signale
+                _seg["of_fr"] += _usd
+                if tx.get("creator"):
+                    _of_unknown.add(str(tx.get("creator")).strip())
         else:
             _seg["mym"] += _usd
 
@@ -13231,6 +13242,10 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         + _seg_card("OnlyFans FR", _seg["of_fr"], "#3b82f6")
         + _seg_card("OnlyFans US", _seg["of_us"], "#22c55e")
         + "</div>"
+        + (f"<div style='margin-top:7px;font-size:11.5px;color:#f59e0b'>"
+           f"⚠️ Modèle(s) OnlyFans non classée(s), comptée(s) en FR : "
+           f"<b>{html_escape(', '.join(sorted(_of_unknown)))}</b> — dis-moi si c'est FR ou US.</div>"
+           if _of_unknown else "")
     )
 
     # 6 stat cards comme Infloww
