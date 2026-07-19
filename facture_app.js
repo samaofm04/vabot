@@ -415,18 +415,45 @@
       document.getElementById('fxm-multibox').style.display = this.value === 'multi' ? 'block' : 'none';
     });
     // Liste des créatrices MyPuls (pour la forme 'CA MyPuls auto')
-    fetch('/facture/mypuls_models').then(function (r) { return r.json(); }).then(function (j) {
+    function loadMypulsModels(force) {
       var sel = document.getElementById('fxm-mypulsmodel');
       if (!sel) return;
-      if (!j.ok) {
-        if (!line.mypuls_model) sel.innerHTML = '<option value="">⚠️ ' + esc(j.error || 'MyPuls indisponible') + '</option>';
-        return;
-      }
-      var curv = line.mypuls_model || '';
-      sel.innerHTML = '<option value="">— choisir une créatrice —</option>' + (j.models || []).map(function (n) {
-        return '<option value="' + esc(n) + '"' + (n === curv ? ' selected' : '') + '>' + esc(n) + '</option>';
-      }).join('');
-    }).catch(function () {});
+      var curv = (sel.value || line.mypuls_model || '');
+      fetch('/facture/mypuls_models' + (force ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) {
+          if (!curv) sel.innerHTML = '<option value="">⚠️ ' + esc(j.error || 'MyPuls indisponible') + '</option>';
+          return;
+        }
+        var models = j.models || [];
+        var html = '<option value="">— choisir une créatrice —</option>';
+        // La valeur enregistrée n'existe plus/pas dans MyPuls ? On la GARDE quand
+        // même (sinon elle serait silencieusement perdue à la sauvegarde).
+        if (curv && models.indexOf(curv) === -1) {
+          html += '<option value="' + esc(curv) + '" selected>' + esc(curv) + ' — ⚠️ introuvable dans MyPuls</option>';
+        }
+        html += models.map(function (n) {
+          return '<option value="' + esc(n) + '"' + (n === curv ? ' selected' : '') + '>' + esc(n) + '</option>';
+        }).join('');
+        sel.innerHTML = html;
+      }).catch(function () {});
+    }
+    loadMypulsModels(false);
+    // petit bouton ↻ pour forcer la resynchro de la liste (cache MyPuls : 5 min)
+    (function () {
+      var sel = document.getElementById('fxm-mypulsmodel');
+      if (!sel || document.getElementById('fxm-mypuls-refresh')) return;
+      var b = document.createElement('button');
+      b.id = 'fxm-mypuls-refresh';
+      b.type = 'button';
+      b.textContent = '↻ Actualiser la liste';
+      b.style.cssText = 'margin-top:6px;padding:5px 10px;background:#161a26;border:1px solid #2a2a2a;color:#9aa0b4;border-radius:7px;font-size:11.5px;cursor:pointer';
+      b.addEventListener('click', function () {
+        b.disabled = true; b.textContent = '↻ …';
+        loadMypulsModels(true);
+        setTimeout(function () { b.disabled = false; b.textContent = '↻ Actualiser la liste'; }, 1200);
+      });
+      sel.insertAdjacentElement('afterend', b);
+    })();
     document.getElementById('fxm-type').addEventListener('change', function () {
       document.getElementById('fxm-nextpay-wrap').style.display = this.value === 'rev' ? 'block' : 'none';
     });

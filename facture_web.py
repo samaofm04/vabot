@@ -707,7 +707,8 @@ def register(app, is_auth):
             return jsonify({"ok": False, "error": "unauth"}), 401
         try:
             import mypuls
-            res = mypuls.list_creators()
+            # ?refresh=1 -> ignore le cache 5 min (bouton « ↻ Actualiser la liste »)
+            res = mypuls.list_creators(force_refresh=bool(request.args.get("refresh")))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "MyPuls indisponible"})
             return jsonify({"ok": True, "models": sorted(res.get("creators") or {}, key=str.lower)})
