@@ -627,6 +627,46 @@ def render_page() -> str:
     )
 
 
+def _seed_of_amelia_mrn():
+    """One-shot (demande user du 19/07/2026) : nouvelle modèle OF « amelia.mrn »
+    ajoutée dans MyPuls -> ligne de revenu AUTO (CA MyPuls du mois) + sa paye 30 %
+    liée à cette ligne. Idempotent : ne crée rien si les lignes existent déjà."""
+    try:
+        d = _load()
+        if d["settings"].get("seed_amelia_mrn_20260719"):
+            return
+        month = _cur_month()
+        m = d["months"].setdefault(month, {"lines": []})
+        lines = m.setdefault("lines", [])
+        model = "amelia.mrn"
+        # déjà présente ? (par mypuls_model ou par label)
+        rev = next((l for l in lines
+                    if l.get("type") == "rev"
+                    and (model in (l.get("mypuls_model") or "").lower()
+                         or model in (l.get("label") or "").lower())), None)
+        base = {"currency": "USD", "freq": "monthly", "start": "", "end": "", "link": "",
+                "next_pay": "", "paid": False, "paid_at": "", "mypuls_model": "",
+                "phases": [], "market": MARKET_DEFAULT}
+        if rev is None:
+            rid = uuid.uuid4().hex[:12]
+            rev = dict(base, id=rid, label=f"OF {model} (auto)", type="rev",
+                       cat="rev_of", form="mypuls", amount=0.0, pct=0.0,
+                       pct_of="rev_total", mypuls_model=model,
+                       notes="CA MyPuls du mois, tiré automatiquement")
+            lines.append(rev)
+        ref = f"line:{rev['id']}"
+        # paye 30 % liée à CETTE ligne (si pas déjà là)
+        if not any(l.get("form") == "pct" and l.get("pct_of") == ref for l in lines):
+            lines.append(dict(base, id=uuid.uuid4().hex[:12],
+                              label=f"Paye {model} (30%)", type="exp", cat="model",
+                              form="pct", amount=0.0, pct=30.0, pct_of=ref,
+                              notes="créée automatiquement : 30% du CA OF"))
+        d["settings"]["seed_amelia_mrn_20260719"] = True
+        _save(d)
+    except Exception:
+        pass
+
+
 # ---------- routes ----------
 def register(app, is_auth):
     from flask import request, jsonify, send_file
@@ -637,6 +677,7 @@ def register(app, is_auth):
     _seed_chatters_mym_20260709()  # CORRECTIF : chatteurs % -> CA MyPuls (toutes sauf Amelia)
     _seed_va_classique_20260709()  # one-shot : ligne auto VA classique (clics x 0.07$)
     _seed_frais_crm_20260709()  # one-shot : ligne auto Frais CRM MyPuls (factures du mois)
+    _seed_of_amelia_mrn()  # one-shot : OF amelia.mrn (CA auto MyPuls) + paye 30%
 
     @app.route("/facture/app.js")
     def facture_app_js():
