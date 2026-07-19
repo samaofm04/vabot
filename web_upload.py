@@ -26647,6 +26647,12 @@ def create_app():
         jb_activity.start_daily()
     except Exception as _e:
         log.warning(f"jb_activity daily non démarré: {_e}")
+    # Auto-récupération des comptes JB depuis Google Sheets (une seule fois)
+    try:
+        import sheets_sync as _ss
+        _ss.auto_recover_once()
+    except Exception as _e:
+        log.warning(f"auto-récupération JB non démarrée: {_e}")
 
     # ============ PERF : gzip compression + cache headers ============
     import gzip as _gz_mod

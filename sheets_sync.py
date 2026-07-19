@@ -134,6 +134,40 @@ def folder_mode() -> bool:
     return bool(load_config().get("folder_id"))
 
 
+RECOVER_MARK = DATA_DIR / "sheets_recovered.txt"
+
+
+def auto_recover_once(delay: float = 45.0) -> None:
+    """AU DÉMARRAGE, UNE SEULE FOIS : réimporte automatiquement les comptes
+    manquants depuis les classeurs Google (100 % additif), puis repousse pour
+    que Sheets et site soient de nouveau alignés. Aucune action utilisateur."""
+    if getattr(auto_recover_once, "_started", False):
+        return
+    auto_recover_once._started = True
+
+    def _run():
+        try:
+            time.sleep(delay)
+            if RECOVER_MARK.exists():
+                return
+            if not (SA_FILE.exists() and gspread_available() and is_configured()):
+                return
+            ok, msg = restore_from_single_sheet()
+            print(f"[sheets_sync] auto-récupération : {msg}", flush=True)
+            if ok:
+                try:
+                    import jailbreak as jb
+                    push_all(jb._load(), True)   # repeuple les classeurs (push manuel)
+                except Exception as e:
+                    print(f"[sheets_sync] auto-récup push: {e}", flush=True)
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            RECOVER_MARK.write_text(msg[:300], encoding="utf-8")
+        except Exception as e:
+            print(f"[sheets_sync] auto-récupération: {e}", flush=True)
+
+    threading.Thread(target=_run, daemon=True, name="jb-recover").start()
+
+
 def is_paused() -> bool:
     """Sync gelée (sécurité) : ni push ni pull. Évite d'écraser des données."""
     return bool(load_config().get("paused"))
@@ -930,7 +964,7 @@ def pull_and_merge() -> tuple:
         # suppressions volontaires en masse passent par /jailbreakreset ou le site.
         n_before = len(accts)
         deleted = set()
-        if to_delete and len(to_delete) > max(10, int(n_before * 0.4)):
+        if to_delete and len(to_delete) > max(5, int(n_before * 0.25)):
             print(f"[sheets_sync] anti-mass-delete {identity}: -{len(to_delete)}/{n_before} IGNORÉ",
                   flush=True)
         else:
