@@ -3531,7 +3531,8 @@ function fxApplyCur(){
   var gross = localStorage.getItem('vabot_dash_mode')==='gross';
   var rate = parseFloat(b.dataset.rate||'1.14')||1.14;
   b.textContent = eur ? '€ EUR' : '$ USD';
-  var sel=document.getElementById('fx-mode-sel'); if(sel) sel.value = gross?'gross':'net';
+  var mb=document.getElementById('fx-mode-toggle');
+  if(mb){ mb.textContent = gross?'Brut':'Net'; mb.style.color = gross?'#f59e0b':'#cbd5e1'; }
   var lbl=document.getElementById('fx-mode-lbl');
   if(lbl){ lbl.textContent = gross?'brut':'net'; lbl.style.color = gross?'#f59e0b':'#22c55e'; }
   function fmt(usd){
@@ -3556,8 +3557,9 @@ function fxToggleCur(){
     localStorage.getItem('vabot_dash_cur')==='EUR' ? 'USD' : 'EUR');
   fxApplyCur();
 }
-function fxSetMode(m){
-  localStorage.setItem('vabot_dash_mode', m==='gross' ? 'gross' : 'net');
+function fxToggleMode(){
+  localStorage.setItem('vabot_dash_mode',
+    localStorage.getItem('vabot_dash_mode')==='gross' ? 'net' : 'gross');
   fxApplyCur();
 }
 document.addEventListener('DOMContentLoaded', fxApplyCur);
@@ -13380,16 +13382,16 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         f"<div class='home-overview-title'>Aperçu des revenus créateur "
         f"<small>UTC{_dt.datetime.now().astimezone().strftime('%z')[:3]}:{_dt.datetime.now().astimezone().strftime('%z')[3:]}</small>"
         "</div>"
-        # sélecteur Net / Brut façon Infloww (Net earnings / Gross earnings)
-        + "<select id='fx-mode-sel' onchange='fxSetMode(this.value)' "
-          "title='Afficher les revenus nets ou bruts' "
-          "style='margin-left:auto;margin-right:10px;padding:7px 11px;background:#161a26;border:1px solid #2a2a2a;"
-          "color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>"
-          "<option value='net'>Net</option><option value='gross'>Brut</option></select>"
         + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
           f"title='Basculer entre dollars et euros' "
-          f"style='margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
+          f"style='margin-left:auto;margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
           f"color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>$ USD</button>"
+        # bouton Net / Brut : même style toggle que $/€, juste à gauche
+        # de « Aujourd'hui » (un <select> prenait toute la largeur et cassait la ligne)
+        + "<button id='fx-mode-toggle' onclick='fxToggleMode()' "
+          "title='Basculer entre revenus nets et bruts' "
+          "style='margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
+          "color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>Net</button>"
         + period_switcher
         + "</div>"
         "<div class='home-grid'>"
