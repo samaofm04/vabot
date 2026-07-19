@@ -12966,13 +12966,11 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False) 
         dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
                  f"style='cursor:pointer' data-tip='{tip}'/>")
     titre = "Revenus par jour" if api_src else "Ventes par jour"
-    badge = (" <span style='font-size:9px;background:rgba(34,197,94,.15);color:#22c55e;"
-             "padding:2px 7px;border-radius:20px;font-weight:700'>API · net</span>" if api_src else "")
-    sous = ("7 derniers jours · toutes créatrices, abos et posts inclus" if api_src
+    sous = ("7 derniers jours · toutes créatrices" if api_src
             else "7 derniers jours")
     return (
         "<div class='home-card' style='margin-top:18px'>"
-        f"<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>{titre}{badge} "
+        f"<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>{titre} "
         f"<span style='font-size:11px;color:#888;font-weight:500'>{sous}</span></div>"
         f"<svg viewBox='0 0 {W:.0f} {H:.0f}' style='width:100%;height:auto;display:block' xmlns='http://www.w3.org/2000/svg'>"
         "<defs><linearGradient id='hscg' x1='0' y1='0' x2='0' y2='1'>"
@@ -13338,30 +13336,21 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     except Exception as _e:
         log.warning(f"MyPuls API overview: {_e}")
 
-    # badge « API » à côté du total (précalculé : pas de backslash en f-string)
-    _api_badge = ("<span style='font-size:9.5px;color:#3b82f6;font-weight:700;"
-                  "margin-left:5px'>API</span>" if _api_src else "")
 
     # Brut TOTAL estimé (pour la carte héro) : chaque segment remonté à son taux
     _total_brut = (_seg["mym"] / (1 - MYM_FEE)
                    + (_seg["of_fr"] + _seg["of_us"]) / (1 - OF_FEE))
 
     def _seg_card(label, value, color, fee=0.0):
-        # brut estimé = net / (1 - commission plateforme) : OF 20 %, MyM 26 %
-        sub, brut_attr = "", ""
-        if fee:
-            brut = value / (1 - fee)
-            brut_attr = f" data-brut='{brut:.2f}'"
-            sub = (f"<div class='fx-alt-hint' style='font-size:10.5px;color:#8a91a8;margin-top:3px' "
-                   f"data-net='{value:.2f}' data-brut='{brut:.2f}' data-fee='{fee * 100:.0f}'>brut ≈ "
-                   f"<span>${brut:,.2f}</span>"
-                   f" <span style='color:#55607a'>(−{fee * 100:.0f}%)</span></div>")
+        # data-brut = net / (1 - commission) : OF 20 %, MyM 26 %. Pas de
+        # sous-ligne (épuré à la demande) : le bouton Net/Brut bascule la valeur.
+        brut_attr = f" data-brut='{value / (1 - fee):.2f}'" if fee else ""
         return (
             f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
             f"border-radius:12px;padding:12px 14px'>"
             f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
             f"<div class='fx-amt' data-usd='{value:.2f}'{brut_attr} style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
-            f"${value:,.2f}</div>{sub}</div>")
+            f"${value:,.2f}</div></div>")
 
     segments_html = (
         "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
@@ -13400,13 +13389,10 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         "<div class='home-hero-icon'>"
         "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
         "</div>"
-        f"<div><div class='home-hero-label'>Total revenus <span id='fx-mode-lbl' style='font-size:10px;color:#22c55e;font-weight:600'>net</span>"
-        f"{_api_badge}</div>"
-        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>${_total_usd:,.2f}</div>"
-        # sous-ligne : montre l'AUTRE valeur que celle du mode courant
-        f"<div class='fx-alt-hint' style='font-size:11.5px;color:#8a91a8;margin-top:2px' "
-        f"data-net='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>brut ≈ "
-        f"<span>${_total_brut:,.2f}</span></div></div>"
+        # épuré à la demande : pas de mention net/brut ni API ici, le bouton
+        # Net/Brut de l'entête dit déjà dans quel mode on est
+        f"<div><div class='home-hero-label'>Total revenus</div>"
+        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>${_total_usd:,.2f}</div></div>"
         "</div>"
         # 6 small stat cards
         + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
