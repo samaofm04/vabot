@@ -3561,7 +3561,10 @@ function fxApplyCur(){
     el.textContent = eur ? Math.round(v).toLocaleString('fr-FR')+'€' : '$'+Math.round(v).toLocaleString('en-US');
   });
   document.querySelectorAll('.hsc-dot[data-usd]').forEach(function(el){
-    el.setAttribute('data-tip', (el.dataset.lb||'') + '\n' + fmt(parseFloat(el.dataset.usd||'0')||0));
+    /* String.fromCharCode(10) et pas un litteral : cette source JS vit dans une
+       chaine Python NON-raw, un backslash-n y devient un VRAI saut de ligne et
+       casse tout le script (= les toggles morts) */
+    el.setAttribute('data-tip', (el.dataset.lb||'') + String.fromCharCode(10) + fmt(parseFloat(el.dataset.usd||'0')||0));
   });
 }
 function fxToggleCur(){
