@@ -13204,6 +13204,35 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # Total = somme des transactions déjà ramenées en USD net (+ revenus manuels)
     _total_usd = sum(type_totals.values()) + float(manual_total or 0)
 
+    # --- Répartition MyM / OF FR / OF US -------------------------------------
+    # EUR = MyM. USD = OnlyFans, réparti FR/US selon la créatrice (US_MODELS).
+    US_MODELS = {"khloe", "jessye"}
+    _seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
+    for tx in mp_data.get("transactions", []) or []:
+        _c = (tx.get("currency") or "").strip().upper()
+        _usd = _tx_usd(tx.get("amount", 0), tx.get("currency"))
+        if "USD" in _c or "$" in _c:
+            _cr = (tx.get("creator") or "").strip().lower()
+            _seg["of_us" if any(u in _cr for u in US_MODELS) else "of_fr"] += _usd
+        else:
+            _seg["mym"] += _usd
+
+    def _seg_card(label, value, color):
+        return (
+            f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
+            f"border-radius:12px;padding:12px 14px'>"
+            f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
+            f"<div class='fx-amt' data-usd='{value:.2f}' style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
+            f"${value:,.2f}</div></div>")
+
+    segments_html = (
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
+        + _seg_card("MyM", _seg["mym"], "#a855f7")
+        + _seg_card("OnlyFans FR", _seg["of_fr"], "#3b82f6")
+        + _seg_card("OnlyFans US", _seg["of_us"], "#22c55e")
+        + "</div>"
+    )
+
     # 6 stat cards comme Infloww
     overview_html = (
         "<div class='home-overview'>"
@@ -13240,6 +13269,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         + _stat("Streams", type_totals["Streams"], "#3b82f6", "rgba(59,130,246,.15)",
                 "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><line x1='8' y1='6' x2='21' y2='6'/><line x1='8' y1='12' x2='21' y2='12'/><line x1='8' y1='18' x2='21' y2='18'/><line x1='3' y1='6' x2='3.01' y2='6'/><line x1='3' y1='12' x2='3.01' y2='12'/><line x1='3' y1='18' x2='3.01' y2='18'/></svg>")
         + "</div>"
+        + segments_html
         + "</div>"
     )
 
