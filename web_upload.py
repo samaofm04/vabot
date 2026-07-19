@@ -18096,9 +18096,17 @@ def _render_jailbreak_html() -> str:
         "       var card = b.closest('.jb-side-va, .jb-va-card, li, div');"
         "       var lbl = card ? card.querySelector('.jb-side-va-name, .jb-va-name') : null;"
         "       if(lbl) lbl.textContent = j.name;"
+        "       if(card && j.avatar){"
+        "         var av = card.querySelector('.jb-side-va-fb, img');"
+        "         if(av){ var im = document.createElement('img'); im.src = j.avatar;"
+        "           im.alt = '@' + (j.discord||''); im.className = av.className || '';"
+        "           av.replaceWith(im); }"
+        "       }"
         "     }"
         "     jbCloseEditVaModal();"
-        "     if(typeof showToast==='function') showToast('✅ VA mis à jour', 'success');"
+        "     if(j.discord && !j.discord_found){"
+        "       if(typeof showToast==='function') showToast('⚠️ VA enregistré, mais pseudo Discord introuvable sur ton serveur — pas de photo', 'error');"
+        "     } else if(typeof showToast==='function') showToast('✅ VA mis à jour', 'success');"
         "   })"
         "   .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=old; }"
         "     if(typeof showToast==='function') showToast('Erreur : ' + e, 'error'); });"
@@ -29554,8 +29562,22 @@ def create_app():
         # qui régénère des centaines de comptes -> c'était ça, la lenteur).
         if request.form.get("ajax"):
             from flask import jsonify
+            # Résout la PP Discord TOUT DE SUITE (cache vidé pour ce pseudo, sinon
+            # un ancien "introuvable" resterait collé 2 min) -> l'avatar se met à
+            # jour sans recharger la page.
+            avatar, found = "", False
+            if discord_username:
+                try:
+                    _DISCORD_RESOLVE_CACHE.pop(discord_username.strip().lower(), None)
+                    info = _resolve_discord_user_by_handle(discord_username)
+                    if info:
+                        found = True
+                        avatar = info.get("avatar_url") or ""
+                except Exception:
+                    pass
             return jsonify({"ok": bool(ok), "name": new_name or old_name,
                             "discord": discord_username,
+                            "avatar": avatar, "discord_found": found,
                             "error": "" if ok else "Conflit de nom ou VA introuvable"})
         if ok:
             return _success(f"✅ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
