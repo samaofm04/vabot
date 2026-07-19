@@ -215,6 +215,28 @@ def _clean_cell(html: str) -> str:
     return txt
 
 
+def _norm_currency(c: str) -> str:
+    """'€'/'eur' -> EUR, '$'/'usd' -> USD. Défaut EUR (MyM)."""
+    c = (c or "").strip().upper()
+    if "USD" in c or "$" in c:
+        return "USD"
+    if "EUR" in c or "€" in c:
+        return "EUR"
+    return "EUR"
+
+
+def _ca_by_currency(transactions) -> dict:
+    """Somme des montants par devise (EUR = MyM, USD = OnlyFans)."""
+    out: Dict[str, float] = {}
+    for t in (transactions or []):
+        cur = _norm_currency(t.get("currency"))
+        try:
+            out[cur] = round(out.get(cur, 0.0) + float(t.get("amount") or 0), 2)
+        except Exception:
+            pass
+    return out
+
+
 def _parse_amount(s: str) -> float:
     """Parse '18,32' ou '18,32 EUR' -> 18.32"""
     if not s:
@@ -346,6 +368,10 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         "ca_total": round(sum(c["ca_total"] for c in chatters), 2),
         "ca_ppv": round(sum(c["ca_ppv"] for c in chatters), 2),
         "ca_tips": round(sum(c["ca_tips"] for c in chatters), 2),
+        # CA ventilé PAR DEVISE (depuis les transactions, seule table qui la porte).
+        # EUR = MyM, USD = OnlyFans -> permet de convertir proprement et
+        # d'appliquer les frais OF, au lieu d'additionner des € et des $.
+        "ca_by_currency": _ca_by_currency(transactions),
         "nb_transactions": len(transactions),
         "nb_chatters": len(chatters),
         "active_chatters": sum(1 for c in chatters if c["ca_total"] > 0),
