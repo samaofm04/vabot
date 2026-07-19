@@ -28596,17 +28596,33 @@ def create_app():
         out["session"] = mypuls.api_session()
         cr = mypuls.api_creators()
         out["creators"] = cr
-        # aide au branchement : extrait id + nom si la forme est reconnue
         try:
-            data = cr.get("data")
-            items = data if isinstance(data, list) else (data or {}).get("data") or (data or {}).get("creators")
-            if isinstance(items, list):
-                out["creators_resume"] = [
-                    {"id": i.get("id"), "name": i.get("name") or i.get("username") or i.get("display_name")}
-                    for i in items[:30] if isinstance(i, dict)]
+            out["creators_resume"] = mypuls.api_creators_parsed()
         except Exception:
             pass
         return jsonify(out)
+
+    @app.route("/mypuls/api_stats_test")
+    def mypuls_api_stats_test():
+        """Voir le FORMAT des revenus renvoyés par l'API pour une créatrice.
+        Ex : /mypuls/api_stats_test?id=3107&from=2026-07-18&to=2026-07-18"""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        cid = (request.args.get("id") or "").strip()
+        if not cid:
+            return jsonify({"ok": False, "error": "Ajoute ?id=<creator_id> (ex 3107 pour Jessye)"})
+        d1 = (request.args.get("from") or "").strip()
+        d2 = (request.args.get("to") or "").strip()
+        return jsonify({
+            "creator_id": cid, "from": d1, "to": d2,
+            "stats": mypuls.api_creator_stats(cid, d1, d2),
+            "revenue_by_day": mypuls.api_revenue_by_day(cid, d1, d2),
+        })
 
     @app.route("/mypuls/save_cookies", methods=["POST"])
     def mypuls_save_cookies():

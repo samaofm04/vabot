@@ -119,6 +119,32 @@ def api_creators() -> dict:
     return api_get("creators")
 
 
+def api_creators_parsed() -> list:
+    """Créateurs normalisés : [{id, pseudo, platform, currency, active}].
+    L'API donne EXPLICITEMENT la plateforme (mym/onlyfans) et la devise ->
+    plus besoin de deviner à partir du nom ou de la devise."""
+    res = api_creators()
+    if not res.get("ok"):
+        return []
+    d = res.get("data")
+    items = d if isinstance(d, list) else None
+    if items is None and isinstance(d, dict):
+        inner = d.get("data")
+        items = inner.get("data") if isinstance(inner, dict) else inner
+    out = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        out.append({
+            "id": it.get("id"),
+            "pseudo": (it.get("pseudo") or it.get("name") or "").strip(),
+            "platform": (it.get("platform") or "").strip().lower(),
+            "currency": (it.get("currency") or "").strip().upper(),
+            "active": bool(it.get("active", True)),
+        })
+    return out
+
+
 def api_creator_stats(creator_id, date_from: str = "", date_to: str = "") -> dict:
     """Statistiques d'un creator sur une période (GET /creators/{id}/stats)."""
     p = {}
