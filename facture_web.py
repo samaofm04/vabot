@@ -96,6 +96,34 @@ _MYPULS_CACHE_FILE = DATA_DIR / "facture_mypuls_cache.json"
 _MYPULS_MONTH_CACHE: dict = {}
 
 
+def _mypuls_month_amount(model: str, month: str):
+    """CA du mois d'une créatrice -> (montant, devise, deja_net).
+
+    PRIORITÉ à l'API officielle : montant EXACT, posts inclus, DÉJÀ NET, et
+    surtout avec la BONNE devise (le scraping était toujours supposé en EUR,
+    ce qui gonflait les créatrices OnlyFans facturées en USD).
+    Repli : scraping (brut, sans les posts, supposé EUR).
+    """
+    want = (model or "").strip().lower()
+    try:
+        import calendar
+        import mypuls
+        if want and mypuls.api_configured():
+            for c in mypuls.api_creators_parsed():
+                if (c.get("pseudo") or "").strip().lower() == want:
+                    y, m = int(month[:4]), int(month[5:7])
+                    last = calendar.monthrange(y, m)[1]
+                    r = mypuls.api_creator_stats(c["id"], f"{month}-01", f"{month}-{last:02d}")
+                    if r.get("ok"):
+                        rev = ((r.get("data") or {}).get("revenue") or {})
+                        cur = (rev.get("currency") or c.get("currency") or "USD").upper()
+                        return float(rev.get("total") or 0), cur, True
+                    break
+    except Exception:
+        pass
+    return float(_mypuls_ca(model, month) or 0), "EUR", False
+
+
 def _mypuls_ca(model: str, month: str) -> float:
     """CA MyPuls (EUR) d'une créatrice sur un mois entier.
     Mois PASSÉS : cache disque permanent (le CA ne bouge plus une fois le mois
@@ -266,12 +294,15 @@ def compute_state(month: str) -> dict:
         if form == "fixed":
             usd = _to_usd(float(l.get("amount") or 0), l.get("currency") or "USD", settings)
         elif form == "mypuls":
-            usd = round(_to_usd(_mypuls_ca(l.get("mypuls_model") or "", month), "EUR", settings), 2)
+            _amt, _cur, _already_net = _mypuls_month_amount(l.get("mypuls_model") or "", month)
+            usd = round(_to_usd(_amt, _cur, settings), 2)
         else:
             continue  # % d'un autre revenu -> résolu ensuite via rev_bases
-        # Frais plateforme (ex OnlyFans 20 %) : le montant est BRUT -> on garde le NET
+        # Frais plateforme (ex OnlyFans 20 %) : le montant est BRUT -> on garde le NET.
+        # Si la source est l'API MyPuls, elle est DÉJÀ nette -> aucune déduction
+        # (sinon on retirerait les 20 % deux fois).
         _fee = float(l.get("fee_pct") or 0)
-        if _fee > 0:
+        if _fee > 0 and not _already_net:
             usd = round(usd * (1 - _fee / 100.0), 2)
         if l.get("id"):
             resolved_rev[l["id"]] = usd
