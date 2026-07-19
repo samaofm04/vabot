@@ -17776,8 +17776,9 @@ def _render_jailbreak_html() -> str:
         "<div class='jb-modal' onclick='event.stopPropagation()'>"
         "<div style='padding:24px'>"
         "<h3>✎ Modifier le VA</h3>"
-        "<form id='jb-edit-va-form' method='POST' action='/jailbreak/update_va'>"
+        "<form id='jb-edit-va-form' method='POST' action='/jailbreak/update_va' onsubmit='return jbSaveVaAjax(event)'>"
         "<input type='hidden' name='back_tab' value='jailbreak'>"
+        "<input type='hidden' name='ajax' value='1'>"
         "<input type='hidden' name='identity' id='jb-edit-va-identity'>"
         "<input type='hidden' name='old_name' id='jb-edit-va-oldname'>"
         "<label>Nom affiché (blaze) <span style='color:#ef4444'>*</span></label>"
@@ -18048,6 +18049,7 @@ def _render_jailbreak_html() -> str:
         "      if(typeof showToast === 'function') showToast('Erreur : modal Modifier VA introuvable', 'error');"
         "      return;"
         "    }"
+        "    window.__jbEditVaBtn = btn;"
         "    idEl.value = d.identity || '';"
         "    oldEl.value = d.vaName || '';"
         "    nameEl.value = d.vaName || '';"
@@ -18057,6 +18059,31 @@ def _render_jailbreak_html() -> str:
         "  } catch(e){"
         "    if(typeof showToast === 'function') showToast('Erreur ouverture modal : ' + e.message, 'error');"
         "  }"
+        "}"
+        "function jbSaveVaAjax(ev){"
+        "  ev.preventDefault();"
+        "  var form = ev.target;"
+        "  var btn = form.querySelector('button[type=submit]');"
+        "  var old = btn ? btn.textContent : '';"
+        "  if(btn){ btn.disabled = true; btn.textContent = '⏳…'; }"
+        "  fetch(form.action, {method:'POST', body:new FormData(form)})"
+        "   .then(function(r){ return r.json(); })"
+        "   .then(function(j){"
+        "     if(btn){ btn.disabled=false; btn.textContent=old; }"
+        "     if(!j.ok){ if(typeof showToast==='function') showToast('❌ ' + (j.error||'échec'), 'error'); return; }"
+        "     var b = window.__jbEditVaBtn;"
+        "     if(b){"
+        "       b.dataset.vaName = j.name; b.dataset.vaDiscord = j.discord;"
+        "       var card = b.closest('.jb-side-va, .jb-va-card, li, div');"
+        "       var lbl = card ? card.querySelector('.jb-side-va-name, .jb-va-name') : null;"
+        "       if(lbl) lbl.textContent = j.name;"
+        "     }"
+        "     jbCloseEditVaModal();"
+        "     if(typeof showToast==='function') showToast('✅ VA mis à jour', 'success');"
+        "   })"
+        "   .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=old; }"
+        "     if(typeof showToast==='function') showToast('Erreur : ' + e, 'error'); });"
+        "  return false;"
         "}"
         "function jbCloseEditVaModal(){"
         "  var o = document.getElementById('jb-edit-va-overlay');"
@@ -29462,7 +29489,15 @@ def create_app():
         if new_name:
             kwargs["new_name"] = new_name
         kwargs["discord_username"] = discord_username
-        if jb.update_va(identity, old_name, **kwargs):
+        ok = jb.update_va(identity, old_name, **kwargs)
+        # AJAX : réponse instantanée (évite de re-rendre toute la page Jailbreak,
+        # qui régénère des centaines de comptes -> c'était ça, la lenteur).
+        if request.form.get("ajax"):
+            from flask import jsonify
+            return jsonify({"ok": bool(ok), "name": new_name or old_name,
+                            "discord": discord_username,
+                            "error": "" if ok else "Conflit de nom ou VA introuvable"})
+        if ok:
             return _success(f"✅ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
         return _error("❌ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
 
