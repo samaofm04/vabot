@@ -65,8 +65,16 @@ def save_config(cfg: dict):
 def save_api_token(token: str) -> bool:
     cfg = load_config()
     cfg["api_token"] = (token or "").strip()
+    cfg["api_token_ok"] = False   # revalidé juste après par l'appelant
     save_config(cfg)
     return bool(cfg["api_token"])
+
+
+def set_api_token_ok(ok: bool) -> None:
+    """Mémorise si le token a été accepté par MyPuls (pour l'affichage)."""
+    cfg = load_config()
+    cfg["api_token_ok"] = bool(ok)
+    save_config(cfg)
 
 
 def api_token() -> str:

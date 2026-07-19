@@ -25408,16 +25408,20 @@ def _render_mypuls_cookies_settings() -> str:
         import mypuls
         cfg = mypuls.load_config()
         configured = bool(cfg.get("PHPSESSID"))
-        api_on = bool(cfg.get("api_token"))
+        # « connectée » = token présent ET validé par MyPuls (pas juste enregistré)
+        api_on = bool(cfg.get("api_token")) and bool(cfg.get("api_token_ok"))
+        api_saved_ko = bool(cfg.get("api_token")) and not api_on
     except Exception:
-        pass
+        api_saved_ko = False
     # --- Bloc API officielle (X-API-TOKEN) : source complète (posts inclus) ---
     api_block = (
         "<div class='box' style='border:2px solid #22c55e;margin-bottom:16px'>"
         "<h3 style='margin-top:0'>🔑 API MyPuls "
         + ("<span style='background:#22c55e;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>CONNECTÉE</span>"
            if api_on else
-           "<span style='background:#f59e0b;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>RECOMMANDÉ</span>")
+           ("<span style='background:#dc2626;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>TOKEN REFUSÉ</span>"
+            if api_saved_ko else
+            "<span style='background:#f59e0b;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>RECOMMANDÉ</span>"))
         + "</h3>"
         "<small style='color:#8a91a8'>L'API officielle donne <b>tous</b> les revenus — y compris les "
         "<b>Publications (posts)</b> que le tableau des ventes ne contient pas. Ton token est dans "
@@ -28570,6 +28574,7 @@ def create_app():
             return _error("❌ Token trop court", tab="smypuls")
         mypuls.save_api_token(tok)
         ok = mypuls.api_session()
+        mypuls.set_api_token_ok(bool(ok.get("ok")))
         if ok.get("ok"):
             return _success("✅ Token API MyPuls enregistré et <b>validé</b>. "
                             "Les revenus (posts inclus) peuvent maintenant venir de l'API.",
