@@ -25403,12 +25403,35 @@ def _render_mypuls_cookies_settings() -> str:
     /mypuls/save_cookies et /mypuls/clear_cookies existaient déjà.
     """
     configured = False
+    api_on = False
     try:
         import mypuls
         cfg = mypuls.load_config()
         configured = bool(cfg.get("PHPSESSID"))
+        api_on = bool(cfg.get("api_token"))
     except Exception:
         pass
+    # --- Bloc API officielle (X-API-TOKEN) : source complète (posts inclus) ---
+    api_block = (
+        "<div class='box' style='border:2px solid #22c55e;margin-bottom:16px'>"
+        "<h3 style='margin-top:0'>🔑 API MyPuls "
+        + ("<span style='background:#22c55e;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>CONNECTÉE</span>"
+           if api_on else
+           "<span style='background:#f59e0b;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>RECOMMANDÉ</span>")
+        + "</h3>"
+        "<small style='color:#8a91a8'>L'API officielle donne <b>tous</b> les revenus — y compris les "
+        "<b>Publications (posts)</b> que le tableau des ventes ne contient pas. Ton token est dans "
+        "ton <b>profil MyPuls</b>. Il est stocké sur ton serveur, il n'est jamais affiché ensuite.</small>"
+        "<form method='POST' action='/mypuls/save_api_token' style='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap'>"
+        "<input type='password' name='api_token' required placeholder='Colle ton X-API-TOKEN ici' "
+        "style='flex:1;min-width:240px;padding:10px;background:#0b0e15;border:1px solid #2a3245;color:#e8eaf2;border-radius:8px'>"
+        "<button type='submit' style='padding:10px 18px;background:linear-gradient(135deg,#22c55e,#15803d);"
+        "border:0;color:#fff;border-radius:8px;font-weight:700;cursor:pointer'>Enregistrer</button>"
+        "</form>"
+        "<div style='margin-top:10px'><a href='/mypuls/api_test' target='_blank' "
+        "style='color:#3b82f6;font-size:12.5px'>🔎 Tester la connexion API</a></div>"
+        "</div>"
+    )
     if configured:
         status = (
             "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
@@ -25425,7 +25448,8 @@ def _render_mypuls_cookies_settings() -> str:
             "</div>"
         )
     return (
-        status
+        api_block
+        + status
         + "<form method='POST' action='/mypuls/save_cookies' style='display:flex;flex-direction:column;gap:8px;margin-bottom:14px'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Cookie PHPSESSID (obligatoire)</label>"
         "<input type='password' name='phpsessid' placeholder='9c1f82750ae5104c5d326e57150fe0c9' required minlength='16' style='font-family:monospace;font-size:12px'>"
@@ -28532,6 +28556,52 @@ def create_app():
             return jsonify({"ok": False, "error": str(e)})
 
     # ============ MYPULS ============
+
+    @app.route("/mypuls/save_api_token", methods=["POST"])
+    def mypuls_save_api_token():
+        if not is_auth():
+            return redirect("/")
+        try:
+            import mypuls
+        except Exception as e:
+            return _error(f"❌ Module indispo : {e}", tab="smypuls")
+        tok = (request.form.get("api_token") or "").strip()
+        if len(tok) < 10:
+            return _error("❌ Token trop court", tab="smypuls")
+        mypuls.save_api_token(tok)
+        ok = mypuls.api_session()
+        if ok.get("ok"):
+            return _success("✅ Token API MyPuls enregistré et <b>validé</b>. "
+                            "Les revenus (posts inclus) peuvent maintenant venir de l'API.",
+                            tab="smypuls")
+        return _error(f"⚠️ Token enregistré mais refusé par MyPuls : {html_escape(str(ok.get('error'))[:180])}",
+                      tab="smypuls")
+
+    @app.route("/mypuls/api_test")
+    def mypuls_api_test():
+        """Diagnostic API MyPuls : session + liste des creators."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        out = {"token_configure": mypuls.api_configured()}
+        out["session"] = mypuls.api_session()
+        cr = mypuls.api_creators()
+        out["creators"] = cr
+        # aide au branchement : extrait id + nom si la forme est reconnue
+        try:
+            data = cr.get("data")
+            items = data if isinstance(data, list) else (data or {}).get("data") or (data or {}).get("creators")
+            if isinstance(items, list):
+                out["creators_resume"] = [
+                    {"id": i.get("id"), "name": i.get("name") or i.get("username") or i.get("display_name")}
+                    for i in items[:30] if isinstance(i, dict)]
+        except Exception:
+            pass
+        return jsonify(out)
 
     @app.route("/mypuls/save_cookies", methods=["POST"])
     def mypuls_save_cookies():

@@ -57,6 +57,80 @@ def save_config(cfg: dict):
     _os.replace(str(tmp), str(CONFIG_FILE))
 
 
+# ---------------------------------------------------------------------------
+# API OFFICIELLE MyPuls (X-API-TOKEN). Bien plus fiable que le scraping HTML et
+# surtout COMPLÈTE : le tableau des ventes scrapé ne contient pas les revenus
+# "Publications" (posts), l'API si.
+# ---------------------------------------------------------------------------
+def save_api_token(token: str) -> bool:
+    cfg = load_config()
+    cfg["api_token"] = (token or "").strip()
+    save_config(cfg)
+    return bool(cfg["api_token"])
+
+
+def api_token() -> str:
+    return (load_config().get("api_token") or "").strip()
+
+
+def api_configured() -> bool:
+    return bool(api_token())
+
+
+def api_get(path: str, params: dict = None) -> dict:
+    """GET sur l'API MyPuls. Retourne {ok, data} ou {ok: False, error}."""
+    tok = api_token()
+    if not tok:
+        return {"ok": False, "error": "Aucun token API MyPuls (Settings → MyPuls)"}
+    import requests
+    url = f"{BASE_URL}/api/v1/{path.lstrip('/')}"
+    try:
+        r = requests.get(url, headers={"X-API-TOKEN": tok, "Accept": "application/json"},
+                         params=params or {}, timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"Connexion API impossible : {e}"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "error": f"Token API refusé (HTTP {r.status_code})"}
+    if r.status_code == 404:
+        return {"ok": False, "error": f"Endpoint introuvable : {url}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:200]}"}
+    try:
+        return {"ok": True, "data": r.json()}
+    except Exception:
+        return {"ok": False, "error": f"Réponse non-JSON : {r.text[:150]}"}
+
+
+def api_session() -> dict:
+    """Vérifie le token (GET /session)."""
+    return api_get("session")
+
+
+def api_creators() -> dict:
+    """Liste des creators du périmètre (GET /creators)."""
+    return api_get("creators")
+
+
+def api_creator_stats(creator_id, date_from: str = "", date_to: str = "") -> dict:
+    """Statistiques d'un creator sur une période (GET /creators/{id}/stats)."""
+    p = {}
+    if date_from:
+        p["from"] = date_from
+    if date_to:
+        p["to"] = date_to
+    return api_get(f"creators/{creator_id}/stats", p)
+
+
+def api_revenue_by_day(creator_id, date_from: str = "", date_to: str = "") -> dict:
+    """Revenus journaliers d'un creator (GET /creators/{id}/revenue-by-day)."""
+    p = {}
+    if date_from:
+        p["from"] = date_from
+    if date_to:
+        p["to"] = date_to
+    return api_get(f"creators/{creator_id}/revenue-by-day", p)
+
+
 def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg = load_config()
     cfg["PHPSESSID"] = (phpsessid or "").strip()
