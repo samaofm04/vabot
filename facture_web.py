@@ -95,10 +95,6 @@ def _to_usd(amount: float, currency: str, settings: dict) -> float:
 _MYPULS_CACHE_FILE = DATA_DIR / "facture_mypuls_cache.json"
 _MYPULS_MONTH_CACHE: dict = {}
 
-# Pourquoi on est retombé sur le scraping (diagnostic, cf /facture/mypuls_debug)
-_MYPULS_SRC: dict = {"why": ""}
-
-
 def _norm_model(s: str) -> str:
     """Clé de comparaison d'un pseudo : sans emoji, sans accent, sans ponctuation.
     « Khloe 💕 » et « khloe » donnent la même clé."""
@@ -109,45 +105,144 @@ def _norm_model(s: str) -> str:
     return " ".join("".join(keep).split())
 
 
-def _mypuls_month_amount(model: str, month: str):
-    """CA du mois d'une créatrice -> (montant, devise, deja_net).
+def _squash(s: str) -> str:
+    """Clé ultra-tolérante : lettres/chiffres seulement.
+    « Amelia_xoxo », « amelia.xoxo », « Amelia XOXO » -> « ameliaxoxo »."""
+    return re.sub(r"[^a-z0-9]", "", _norm_model(s))
 
-    PRIORITÉ à l'API officielle : montant EXACT, posts inclus, DÉJÀ NET, et
-    surtout avec la BONNE devise (le scraping était toujours supposé en EUR,
-    ce qui gonflait les créatrices OnlyFans facturées en USD).
-    Repli : scraping (brut, sans les posts, supposé EUR).
+
+def _resolve_api_creator(model: str, creators: list):
+    """Retrouve la créatrice de l'API correspondant au libellé stocké sur la ligne.
+
+    Le libellé vient du SCRAPING (le select est rempli par list_creators(), qui
+    lit le HTML), alors qu'on le compare au champ `pseudo` de l'API REST : deux
+    référentiels de noms distincts, donc l'égalité stricte casse facilement.
+    4 passes du plus strict au plus large, une passe n'étant retenue que si elle
+    donne UN SEUL candidat (jamais d'appariement ambigu), puis repli par ID.
+    Retourne (creator|None, explication).
     """
-    want = _norm_model(model)
-    _MYPULS_SRC["why"] = ""
+    want_n, want_s = _norm_model(model), _squash(model)
+    if not want_s:
+        return None, "libellé de créatrice vide sur la ligne"
+
+    def _uniq(cands):
+        return cands[0] if len(cands) == 1 else None
+
+    # 1) égalité normalisée sur le pseudo (comportement historique)
+    for c in creators:
+        if want_n and _norm_model(c.get("pseudo")) == want_n:
+            return c, "pseudo exact"
+    # 2) égalité « squash » : underscore / point / espace ignorés
+    m = _uniq([c for c in creators if _squash(c.get("pseudo")) == want_s])
+    if m:
+        return m, "pseudo squash"
+    # Les passes floues ne s'appliquent qu'à un libellé assez long pour être
+    # discriminant : sur 3-4 lettres, un préfixe attrape n'importe qui.
+    if len(want_s) >= 5:
+        # 3) préfixe dans un sens ou dans l'autre (handle vs prénom)
+        m = _uniq([c for c in creators
+                   if _squash(c.get("pseudo"))
+                   and (_squash(c.get("pseudo")).startswith(want_s)
+                        or want_s.startswith(_squash(c.get("pseudo"))))])
+        if m:
+            return m, "pseudo préfixe"
+        # 4) sous-chaîne
+        m = _uniq([c for c in creators
+                   if _squash(c.get("pseudo"))
+                   and (want_s in _squash(c.get("pseudo"))
+                        or _squash(c.get("pseudo")) in want_s)])
+        if m:
+            return m, "pseudo sous-chaîne"
+    # 5) REPLI PAR ID : marche même si `pseudo` est null (autorisé par la spec)
+    # ou si la créatrice n'est pas listée. list_creators() renvoie {nom: id}
+    # dans le MÊME espace d'ID que l'API.
     try:
-        import calendar
         import mypuls
-        if not want:
-            _MYPULS_SRC["why"] = "aucune créatrice sur la ligne"
-        elif not mypuls.api_configured():
-            _MYPULS_SRC["why"] = "token API absent"
-        else:
-            creators = mypuls.api_creators_parsed()
-            if not creators:
-                _MYPULS_SRC["why"] = "l'API ne renvoie aucune créatrice"
-            match = next((c for c in creators if _norm_model(c.get("pseudo")) == want), None)
-            if creators and not match:
-                _MYPULS_SRC["why"] = (f"« {model} » introuvable dans l'API "
-                                      f"(dispo : {', '.join(c.get('pseudo') or '' for c in creators[:8])})")
-            elif match:
-                y, m = int(month[:4]), int(month[5:7])
-                last = calendar.monthrange(y, m)[1]
-                r = mypuls.api_creator_stats(match["id"], f"{month}-01", f"{month}-{last:02d}")
+        scraped = (mypuls.list_creators().get("creators") or {})
+        cid = next((i for n, i in scraped.items() if _squash(n) == want_s), None)
+        if cid is None and len(want_s) >= 5:
+            cid = next((i for n, i in scraped.items()
+                        if _squash(n) and (_squash(n).startswith(want_s)
+                                           or want_s.startswith(_squash(n)))), None)
+        if cid is not None:
+            byid = next((c for c in creators if c.get("id") == cid), None)
+            return (byid or {"id": cid, "pseudo": model, "currency": "", "platform": ""}), \
+                   f"repli par ID scraping (#{cid})"
+    except Exception as e:
+        return None, f"repli par ID impossible : {type(e).__name__}: {e}"
+    dispo = ", ".join((c.get("pseudo") or f"#{c.get('id')}") for c in creators[:10])
+    return None, f"aucune correspondance (API : {dispo})"
+
+
+def _mypuls_month_amount(model: str, month: str, creator_id=None):
+    """CA du mois d'une créatrice -> (montant, devise, deja_net, info).
+
+    info = {"api", "why", "creator_id", "resolution", "api_configured"}
+    PRIORITÉ ABSOLUE à l'API : montant EXACT, posts inclus, DÉJÀ NET, bonne
+    devise (le scraping était toujours supposé en EUR, ce qui gonflait de 8 %
+    les créatrices OnlyFans facturées en USD).
+    Tout repli sur le scraping est LOGGÉ et REMONTÉ à l'interface : si le token
+    API est là, un montant scrapé n'est JAMAIS présenté comme net.
+    """
+    import calendar
+    import traceback
+    info = {"api": False, "why": "", "creator_id": None, "resolution": "",
+            "api_configured": False}
+    try:
+        import mypuls
+        info["api_configured"] = mypuls.api_configured()
+    except Exception as e:
+        info["why"] = f"module mypuls indisponible : {type(e).__name__}: {e}"
+        print("[facture] " + traceback.format_exc(), flush=True)
+
+    if info["api_configured"]:
+        try:
+            y, m = int(month[:4]), int(month[5:7])
+            last = calendar.monthrange(y, m)[1]
+            d_from = f"{month}-01"
+            # Borne de fin JAMAIS dans le futur : même convention que le scraping
+            # (min(last, today)) et que le dashboard (end=today).
+            d_to = min(datetime.date(y, m, last), datetime.date.today()).isoformat()
+            if d_to < d_from:
+                return 0.0, "USD", True, dict(info, api=True, resolution="mois futur")
+
+            creators = mypuls.api_creators_cached()
+            match, why_res = None, ""
+            if creator_id:                       # ID épinglé sur la ligne : chemin roi
+                try:
+                    _cid = int(creator_id)
+                    match = next((c for c in creators if c.get("id") == _cid),
+                                 {"id": _cid, "pseudo": model, "currency": "", "platform": ""})
+                    why_res = f"ID épinglé (#{_cid})"
+                except Exception:
+                    match = None
+            if match is None:
+                match, why_res = _resolve_api_creator(model, creators)
+            info["resolution"] = why_res
+
+            if match is None:
+                info["why"] = f"« {model} » : {why_res}"
+            else:
+                info["creator_id"] = match.get("id")
+                r = mypuls.api_creator_stats_cached(match["id"], d_from, d_to)
+                if not r.get("ok") and d_to != f"{month}-{last:02d}":
+                    # 2e chance avec la borne pleine du mois
+                    r = mypuls.api_creator_stats_cached(match["id"], d_from, f"{month}-{last:02d}")
                 if r.get("ok"):
                     rev = ((r.get("data") or {}).get("revenue") or {})
                     cur = (rev.get("currency") or match.get("currency") or "USD").upper()
-                    return float(rev.get("total") or 0), cur, True
-                _MYPULS_SRC["why"] = f"stats API KO : {str(r.get('error'))[:90]}"
-    except Exception as e:
-        _MYPULS_SRC["why"] = f"exception : {type(e).__name__}: {str(e)[:90]}"
-    if _MYPULS_SRC["why"]:
-        print(f"[facture] repli scraping pour « {model} » : {_MYPULS_SRC['why']}", flush=True)
-    return float(_mypuls_ca(model, month) or 0), "EUR", False
+                    return float(rev.get("total") or 0), cur, True, dict(info, api=True)
+                info["why"] = (f"stats API KO (créatrice #{match.get('id')}) : "
+                               f"{str(r.get('error'))[:120]}")
+        except Exception as e:
+            info["why"] = f"exception : {type(e).__name__}: {e}"
+            print("[facture] " + traceback.format_exc(), flush=True)   # PLUS JAMAIS avalée
+    elif not info["why"]:
+        info["why"] = "token API absent (Settings → MyPuls)"
+
+    # ---- REPLI SCRAPING : brut, supposé EUR, jamais silencieux ----
+    print(f"[facture] repli scraping « {model} » ({month}) : {info['why']}", flush=True)
+    return float(_mypuls_ca(model, month) or 0), "EUR", False, info
 
 
 def _mypuls_ca(model: str, month: str) -> float:
@@ -322,10 +417,19 @@ def compute_state(month: str) -> dict:
         if form == "fixed":
             usd = _to_usd(float(l.get("amount") or 0), l.get("currency") or "USD", settings)
         elif form == "mypuls":
-            _amt, _cur, _already_net = _mypuls_month_amount(l.get("mypuls_model") or "", month)
+            _amt, _cur, _already_net, _info = _mypuls_month_amount(
+                l.get("mypuls_model") or "", month, l.get("mypuls_creator_id"))
             usd = round(_to_usd(_amt, _cur, settings), 2)
             if l.get("id"):
-                resolved_src[l["id"]] = {"api": _already_net, "why": _MYPULS_SRC.get("why") or ""}
+                resolved_src[l["id"]] = {
+                    "api": _already_net,
+                    "why": _info.get("why") or "",
+                    "creator_id": _info.get("creator_id"),
+                    "resolution": _info.get("resolution") or "",
+                    # token présent MAIS repli scraping -> ERREUR visible (rouge).
+                    # Interdit de servir un montant scrapé qui a l'air net.
+                    "error": bool(_info.get("api_configured")) and not _already_net,
+                }
         else:
             continue  # % d'un autre revenu -> résolu ensuite via rev_bases
         # Frais plateforme (ex OnlyFans 20 %) : le montant est BRUT -> on garde le NET.
@@ -432,6 +536,9 @@ def _sanitize_line(raw: dict) -> dict:
         "cat": raw.get("cat") if raw.get("cat") in CATS else "other",
         "form": raw.get("form") if raw.get("form") in ("fixed", "pct", "mypuls", "mypuls_crm", "va_clicks") else "fixed",
         "mypuls_model": s("mypuls_model", 80),
+        # ID API épinglé : une fois renseigné, plus aucun appariement par nom
+        "mypuls_creator_id": (int(raw["mypuls_creator_id"])
+                              if str(raw.get("mypuls_creator_id") or "").isdigit() else 0),
         "market": raw.get("market") if raw.get("market") in MARKETS else MARKET_DEFAULT,
         "currency": "EUR" if (raw.get("currency") or "").upper() == "EUR" else "USD",
         "freq": raw.get("freq") if raw.get("freq") in ("monthly", "biweekly", "weekly", "once") else "monthly",
@@ -831,10 +938,13 @@ def register(app, is_auth):
             ]
         except Exception as e:
             out["erreur_api"] = f"{type(e).__name__}: {e}"
-        amt, cur, net = _mypuls_month_amount(model, month)
+        amt, cur, net, info = _mypuls_month_amount(model, month,
+                                                   request.args.get("creator_id"))
         out["resultat"] = {"montant": amt, "devise": cur, "deja_net": net,
-                           "source": "API MyPuls" if net else "scraping (repli)"}
-        out["repli_cause"] = _MYPULS_SRC.get("why") or None
+                           "source": "API MyPuls" if net else "scraping (repli)",
+                           "creator_id": info.get("creator_id"),
+                           "resolution": info.get("resolution")}
+        out["repli_cause"] = info.get("why") or None
         return jsonify(out)
 
     @app.route("/facture/line/save", methods=["POST"])

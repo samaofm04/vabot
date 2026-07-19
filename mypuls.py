@@ -145,6 +145,45 @@ def api_creators_parsed() -> list:
     return out
 
 
+_API_CREATORS_CACHE: Dict[str, Any] = {}     # {"t": ts, "v": [...]}
+_API_CREATORS_TTL = 300                      # 5 min, comme _API_OVERVIEW_TTL
+
+
+def api_creators_cached(force: bool = False) -> list:
+    """api_creators_parsed() avec cache 5 min PARTAGÉ dashboard + facture.
+    La page Facture appelait /creators une fois PAR LIGNE (N+1) : ici, 1 fois."""
+    import time as _t
+    hit = _API_CREATORS_CACHE.get("v")
+    if hit and not force and (_t.time() - _API_CREATORS_CACHE.get("t", 0)) < _API_CREATORS_TTL:
+        return hit
+    out = api_creators_parsed()
+    if out:                      # on ne met JAMAIS une liste vide en cache
+        _API_CREATORS_CACHE["v"] = out
+        _API_CREATORS_CACHE["t"] = _t.time()
+        return out
+    return hit or []             # API en vrac -> on ressert le dernier bon état
+
+
+_API_STATS_CACHE: Dict[str, Any] = {}
+_API_STATS_TTL = 300
+
+
+def api_creator_stats_cached(creator_id, date_from: str, date_to: str) -> dict:
+    """api_creator_stats() avec cache 5 min par (créatrice, période).
+    Les ÉCHECS ne sont pas mis en cache : un 429 passager se rattrape seul."""
+    import time as _t
+    key = f"{creator_id}|{date_from}|{date_to}"
+    hit = _API_STATS_CACHE.get(key)
+    if hit and (_t.time() - hit[0]) < _API_STATS_TTL:
+        return hit[1]
+    r = api_creator_stats(creator_id, date_from, date_to)
+    if r.get("ok"):
+        _API_STATS_CACHE[key] = (_t.time(), r)
+        if len(_API_STATS_CACHE) > 200:
+            _API_STATS_CACHE.clear()
+    return r
+
+
 def api_creator_stats(creator_id, date_from: str = "", date_to: str = "") -> dict:
     """Statistiques d'un creator sur une période (GET /creators/{id}/stats)."""
     p = {}
@@ -187,7 +226,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         return hit[1]
     if not api_configured():
         return {"ok": False, "error": "Token API MyPuls absent"}
-    creators = api_creators_parsed()
+    creators = api_creators_cached(force=force)
     if not creators:
         return {"ok": False, "error": "Aucun creator renvoyé par l'API"}
 
@@ -203,7 +242,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     for c in creators:
         if not c.get("active"):
             continue
-        r = api_creator_stats(c["id"], date_from, date_to)
+        r = api_creator_stats_cached(c["id"], date_from, date_to)
         if not r.get("ok"):
             errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")
             continue

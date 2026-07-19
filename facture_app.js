@@ -215,11 +215,20 @@
       var src = l.mp_src;
       if (src && src.api) {
         origin += ' <span style="color:#22c55e">net · API</span>';
+        /* comment la créatrice a été retrouvée : tout ce qui n'est pas
+           « pseudo exact » mérite une relecture à l'œil, une fois. */
+        if (src.resolution && src.resolution !== 'pseudo exact') {
+          origin += ' <span style="color:#64748b;font-size:10px">(' + esc(src.resolution) + ')</span>';
+        }
       } else if (src) {
-        origin += ' <span style="color:#fbbf24" title="' + esc(src.why || '') +
-          '">⚠ scraping (brut, sans les posts)</span>';
+        /* token API présent mais on sert du scraping = montant NON FIABLE
+           (brut, sans les posts, supposé EUR) -> rouge, pas ambre. */
+        var col = src.error ? '#ef4444' : '#fbbf24';
+        var lbl = src.error ? '⛔ MONTANT NON FIABLE — repli scraping'
+                            : '⚠ scraping (brut, sans les posts)';
+        origin += ' <span style="color:' + col + '" title="' + esc(src.why || '') + '">' + lbl + '</span>';
         if (src.why) {
-          origin += '<div style="color:#fbbf24;font-size:10px;margin-top:2px">' + esc(src.why) + '</div>';
+          origin += '<div style="color:' + col + ';font-size:10px;margin-top:2px">' + esc(src.why) + '</div>';
         }
       } else if (l.cat === 'rev_of') {
         origin += ' <span style="color:#22c55e">net</span>';
