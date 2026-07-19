@@ -30256,8 +30256,30 @@ function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
                     if not parsed:
                         report_html = "<div style='color:#f87171'>Aucune donnée lisible dans ce fichier.</div>"
                     else:
-                        rep = jb_import.restore(
-                            parsed, overwrite=bool(request.form.get("overwrite")))
+                        # Tout est orchestré ici pour que l'user n'ait QU'À envoyer
+                        # le fichier : on gèle la synchro (sinon un pull pourrait
+                        # re-vider), on restaure, on repeuple les classeurs, on
+                        # réactive.
+                        import sheets_sync as _ss
+                        _was_paused = _ss.is_paused()
+                        try:
+                            _ss.set_paused(True)
+                        except Exception:
+                            pass
+                        try:
+                            rep = jb_import.restore(
+                                parsed, overwrite=bool(request.form.get("overwrite")))
+                            try:
+                                import jailbreak as _jb
+                                _ss.push_all(_jb._load(), True)   # push manuel : repeuple Google
+                            except Exception as _pe:
+                                log.warning(f"jbimport push: {_pe}")
+                        finally:
+                            if not _was_paused:
+                                try:
+                                    _ss.set_paused(False)
+                                except Exception:
+                                    pass
                         lines = "".join(
                             f"<tr><td style='padding:7px 12px;color:#fff'>{html_escape(k)}</td>"
                             f"<td style='padding:7px 12px;text-align:center;color:#4ade80;font-weight:700'>+{v['added']}</td>"
@@ -30268,7 +30290,9 @@ function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
                             f"<div style='background:#0d2818;border:1px solid #22c55e;border-radius:12px;padding:16px;margin-bottom:18px'>"
                             f"<div style='font-size:17px;font-weight:800;color:#4ade80'>✅ Restauration terminée</div>"
                             f"<div style='color:#a7f3d0;margin-top:4px'><b>{rep['added']}</b> compte(s) ajouté(s) · "
-                            f"<b>{rep['filled']}</b> complété(s) (champs vides remplis) · aucune suppression.</div></div>"
+                            f"<b>{rep['filled']}</b> complété(s) · aucune suppression.</div>"
+                            f"<div style='color:#6ee7b7;font-size:12.5px;margin-top:6px'>"
+                            f"Synchro gelée pendant l'opération, classeurs Google repeuplés, puis réactivée — rien d'autre à faire.</div></div>"
                             f"<table style='width:100%;border-collapse:collapse;background:#0f1219;border:1px solid #1e2430;border-radius:12px;overflow:hidden'>"
                             f"<thead><tr style='background:#1e293b'><th style='padding:9px 12px;text-align:left;font-size:11px;color:#cbd5e1'>IDENTITÉ</th>"
                             f"<th style='padding:9px 12px;font-size:11px;color:#cbd5e1'>AJOUTÉS</th>"
