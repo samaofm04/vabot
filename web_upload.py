@@ -3522,6 +3522,25 @@ window.upClearPrefill = function(utab){
 <div class="mnav-backdrop" onclick="toggleMnav()"></div>
 <script>
 function toggleMnav(){document.documentElement.classList.toggle('mnav-open');}
+/* Dashboard : bascule $ / € sur tous les montants (.fx-amt porte data-usd) */
+function fxApplyCur(){
+  var b=document.getElementById('fx-cur-toggle'); if(!b) return;
+  var eur = localStorage.getItem('vabot_dash_cur')==='EUR';
+  var rate = parseFloat(b.dataset.rate||'1.14')||1.14;
+  b.textContent = eur ? '€ EUR' : '$ USD';
+  document.querySelectorAll('.fx-amt').forEach(function(el){
+    var usd = parseFloat(el.dataset.usd||'0')||0;
+    var v = eur ? usd/rate : usd;
+    el.textContent = (eur?'':'$') + v.toLocaleString(eur?'fr-FR':'en-US',
+      {minimumFractionDigits:2, maximumFractionDigits:2}) + (eur?' €':'');
+  });
+}
+function fxToggleCur(){
+  localStorage.setItem('vabot_dash_cur',
+    localStorage.getItem('vabot_dash_cur')==='EUR' ? 'USD' : 'EUR');
+  fxApplyCur();
+}
+document.addEventListener('DOMContentLoaded', fxApplyCur);
 /* fermer le tiroir quand on clique un vrai lien de nav (pas un groupe pliable) */
 document.addEventListener('click',function(e){
   if(e.target.closest && e.target.closest('.sidebar a,.sidebar .solo-item,.sidebar .item,.sidebar .logout-btn'))
@@ -13097,11 +13116,33 @@ def _render_home_dashboard_html() -> str:
         warning = ""
 
     # Breakdown par type de revenu (matching Infloww layout)
+    # --- Devises : MyPuls renvoie du BRUT, en EUR (MyM) ou USD (OnlyFans).
+    # On ramène TOUT en USD : OnlyFans net (frais 20 % déduits), MyM converti.
+    # Sans ça on additionnait des € et des $ sans conversion.
+    OF_FEE = 0.20
+    _eur_usd = 1.14
+    try:
+        _fx = json.loads((DATA_DIR / "facture.json").read_text(encoding="utf-8"))
+        _eur_usd = float((_fx.get("settings") or {}).get("eur_usd") or _eur_usd)
+    except Exception:
+        pass
+
+    def _tx_usd(amount, currency):
+        """Montant d'une transaction ramené en USD NET."""
+        try:
+            a = float(amount or 0)
+        except Exception:
+            return 0.0
+        c = (currency or "").strip().upper()
+        if "USD" in c or "$" in c:
+            return a * (1 - OF_FEE)      # OnlyFans : brut -> net
+        return a * _eur_usd              # MyM (EUR) -> USD
+
     type_totals = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
                    "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
     for tx in mp_data.get("transactions", []) or []:
         ty = (tx.get("type", "") or "").lower()
-        amt = tx.get("amount", 0)
+        amt = _tx_usd(tx.get("amount", 0), tx.get("currency"))
         if "média privé" in ty or "media prive" in ty or "ppv" in ty or "message" in ty:
             type_totals["Messages"] += amt
         elif "pourboire" in ty or "tip" in ty:
@@ -13154,11 +13195,14 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"<div class='home-stat'>"
             f"<div class='home-stat-icon' style='background:{bg_color};color:{color}'>{icon_svg}</div>"
             f"<div>"
-            f"<div class='home-stat-value' style='color:{color}'>{value:,.2f}€</div>"
+            f"<div class='home-stat-value fx-amt' style='color:{color}' data-usd='{value:.2f}'>${value:,.2f}</div>"
             f"<div class='home-stat-label'>{label}</div>"
             f"</div>"
             f"</div>"
         )
+
+    # Total = somme des transactions déjà ramenées en USD net (+ revenus manuels)
+    _total_usd = sum(type_totals.values()) + float(manual_total or 0)
 
     # 6 stat cards comme Infloww
     overview_html = (
@@ -13167,6 +13211,10 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         f"<div class='home-overview-title'>Aperçu des revenus créateur "
         f"<small>UTC{_dt.datetime.now().astimezone().strftime('%z')[:3]}:{_dt.datetime.now().astimezone().strftime('%z')[3:]}</small>"
         "</div>"
+        + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
+          f"title='Basculer entre dollars et euros' "
+          f"style='margin-left:auto;margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
+          f"color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>$ USD</button>"
         + period_switcher
         + "</div>"
         "<div class='home-grid'>"
@@ -13175,8 +13223,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         "<div class='home-hero-icon'>"
         "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
         "</div>"
-        f"<div><div class='home-hero-label'>Total revenus</div>"
-        f"<div class='home-hero-value'>{ca_total + manual_total:,.2f}€</div></div>"
+        f"<div><div class='home-hero-label'>Total revenus <span style='font-size:10px;color:#22c55e;font-weight:600'>net</span></div>"
+        f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}'>${_total_usd:,.2f}</div></div>"
         "</div>"
         # 6 small stat cards
         + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
