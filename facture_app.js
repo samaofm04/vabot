@@ -22,12 +22,16 @@
   /* Sous le montant NET : le BRUT (si des frais plateforme sont appliqués)
      puis l'équivalent en euros. Permet de recouper d'un coup d'œil avec
      OnlyFans/MyM et de repérer une erreur. */
-  function eurHint(usd, feePct) {
+  function eurHint(usd, feePct, isOf) {
     var parts = [];
     var f = parseFloat(feePct || 0);
+    var gross = 0;
     if (f > 0 && f < 100 && usd) {
-      parts.push('brut ' + money(usd / (1 - f / 100)));
+      gross = usd / (1 - f / 100);            // frais explicites sur la ligne
+    } else if (isOf && usd) {
+      gross = usd / 0.8;                      // OnlyFans retient 20 % (montant déjà net)
     }
+    if (gross) parts.push('brut ' + money(gross));
     var r = parseFloat(((S.data || {}).settings || {}).eur_usd || 0);
     if (r && usd) {
       parts.push('≈ ' + (usd / r).toLocaleString('fr-FR', {maximumFractionDigits: 0}) + ' €');
@@ -206,8 +210,8 @@
       origin = l.pct + '% ' + esc(baseLbl);
     } else if (l.form === 'mypuls') {
       origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
-      if (l.fee_pct > 0) {
-        origin += ' <span style="color:#f59e0b">− ' + l.fee_pct + '% frais</span>';
+      if (l.cat === 'rev_of') {
+        origin += ' <span style="color:#22c55e">net</span>';
       }
     } else if (l.form === 'mypuls_crm') {
       origin = '🧾 Factures CRM MyPuls du mois <span style="color:#4ade80">(auto)</span>';
@@ -255,7 +259,7 @@
       linkBtn + payBtn +
       '<span style="font-weight:800;font-size:14px;color:' + (isRev ? '#22c55e' : '#f87171') + ';white-space:nowrap">' +
       (isRev ? '+ ' : '− ') + money(l.usd || 0) + ' <span style="font-size:10px;color:#77778a;font-weight:600">/ mois</span>' +
-      eurHint(l.usd || 0, l.fee_pct) + '</span>' +
+      eurHint(l.usd || 0, l.fee_pct, l.cat === 'rev_of') + '</span>' +
       '<button class="fx-edit" data-id="' + l.id + '" title="Modifier" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">✎</button>' +
       '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">🗑</button>' +
       '</div></div></div>';
