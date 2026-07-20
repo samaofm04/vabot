@@ -12355,6 +12355,13 @@ function refreshSfsCalendar(){{
   if(typeof renderSfsPushes === 'function') renderSfsPushes();
 }}
 
+function sfsPushCardClick(i){{
+  /* clic sur une carte push du panneau jour -> même modale pré-remplie que le
+     clic sur la barre orange du calendrier (identité, heure, texte du push) */
+  var p = (window.__sfsDayPushes || [])[i];
+  if(p && typeof addSfsFromPush === 'function') addSfsFromPush(p.date, p.creator, p.time);
+}}
+
 function selectSfsDay(date){{
   window.__selectedSfsDate = date;
   refreshSfsDayPanel();
@@ -12396,18 +12403,22 @@ function refreshSfsDayPanel(){{
       else if(dmy.length===3){{ iso=dmy[2]+'-'+dmy[1].padStart(2,'0')+'-'+dmy[0].padStart(2,'0'); }}
       if(iso!==date) return;
       if(!window.__sfsShowAll && typeof isSfsPush==='function' && !isSfsPush(p.description)) return;
-      dayPushes.push({{time:parts[1]||'', creator:p.creator||'', desc:p.description||'', types:p.types||[], thumb:p.thumb||''}});
+      dayPushes.push({{date:date, time:parts[1]||'', creator:p.creator||'', desc:p.description||'', types:p.types||[], thumb:p.thumb||''}});
     }});
     dayPushes.sort(function(a,b){{ return (a.time||'').localeCompare(b.time||''); }});
+    window.__sfsDayPushes = dayPushes;
     if(dayPushes.length){{
       pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#a855f7;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Push MyPuls (' + dayPushes.length + ')</div>';
-      dayPushes.forEach(function(p){{
+      dayPushes.forEach(function(p, pi){{
         var th=p.thumb?('<img src="'+p.thumb+'" style="width:34px;height:34px;border-radius:6px;object-fit:cover;flex-shrink:0" onerror="this.remove()">'):'';
         var typ=(p.types||[]).map(function(t){{ return aud[t]||t; }}).join(', ');
-        pushHtml += '<div style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid #f59e0b;border-radius:8px;padding:10px;margin-bottom:8px">'
+        pushHtml += '<div onclick="sfsPushCardClick('+pi+')" title="Créer / modifier un SFS depuis ce push" '
+          + 'style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid #f59e0b;border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:background .15s" '
+          + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+th
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#f59e0b">'+String(p.creator).replace(/</g,"&lt;")+'</div>'
-          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + ' &middot; ' + typ + '</div></div></div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + ' &middot; ' + typ + '</div></div>'
+          + '<div style="color:#556;font-size:15px">✎</div></div>'
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.desc).replace(/</g,"&lt;")+'</div>'
           + '</div>';
       }});
