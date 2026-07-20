@@ -11539,6 +11539,29 @@ def _render_sfs_html() -> str:
     except Exception:
         pass
     ident_model_json = _json.dumps(_ident_model)
+    # Même mapping mais vers les profils ONLYFANS (API platform=onlyfans) :
+    # amelia -> Amelia, julia -> Julia ; lola -> rien (pas encore de compte OF).
+    # C'est CE mapping qui relie les identités aux messages SFS côté OF.
+    _ident_model_of = {}
+    try:
+        import mypuls as _mp_of
+        if _mp_of.api_configured():
+            _of_names = sorted(((c.get("pseudo") or "").strip()
+                                for c in _mp_of.api_creators_cached()
+                                if c.get("active") and c.get("platform") == "onlyfans"
+                                and (c.get("pseudo") or "").strip()), key=str.lower)
+            for _id in _list_content_identities():
+                _idl = (_id or "").lower().strip()
+                if not _idl:
+                    continue
+                for _c in _of_names:
+                    _cl = str(_c).lower()
+                    if _cl.startswith(_idl) or _cl.replace("_", "").replace(".", "").startswith(_idl):
+                        _ident_model_of[_idl] = str(_c)
+                        break
+    except Exception:
+        pass
+    ident_model_of_json = _json.dumps(_ident_model_of)
     # SFS OnlyFans importés via HAR (lecture seule)
     of_pushs_json = _json.dumps(_load_of_pushs())
 
@@ -11713,13 +11736,17 @@ def _render_sfs_html() -> str:
                 f"<svg viewBox='0 0 24 24' width='9' height='9' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9'/><path d='M10.3 21a1.94 1.94 0 0 0 3.4 0'/></svg>{count}</span>"
             )
         _model_name = _ident_model.get(ident.lower().strip(), "")
+        _of_name = _ident_model_of.get(ident.lower().strip(), "")
+        # Onglet initial = OF -> le sous-titre montre le profil OF (Amelia,
+        # Julia...), PAS le profil MyM (Amelia_xoxo, Julia_dv). Le switch
+        # d'onglet met à jour le texte depuis data-model-mym / data-model-of.
         model_sub = (
-            f"<span style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_model_name}</span>"
-            if _model_name else ""
+            f"<span class='sfs-ident-sub' style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_of_name}</span>"
         )
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
             f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' data-model='{_model_name}' "
+            f"data-model-mym='{_model_name}' data-model-of='{_of_name}' "
             f"style='display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
             f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
@@ -12123,7 +12150,8 @@ window.__sfsData = {sfs_by_date_json};
 window.__platformIdents = {platform_idents_json};
 window.__allIdentities = {all_identities_json};
 window.__mypulsCreators = {mypuls_creators_json};
-window.__sfsIdentModel = {ident_model_json};
+window.__sfsIdentModelByPlat = {{MYM: {ident_model_json}, OF: {ident_model_of_json}}};
+window.__sfsIdentModel = window.__sfsIdentModelByPlat.OF;   /* onglet initial = OF */
 window.__ofPushData = {of_pushs_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
@@ -12138,6 +12166,15 @@ function identityAvatarHtml(ident, size){{
 
 function switchSfsPlatform(btn, platform){{
   window.__currentSfsPlatform = platform;
+  /* mapping identite -> profil de LA plateforme active (amelia -> Amelia_xoxo
+     cote MyM, -> Amelia cote OF) + mise a jour des sous-titres violets */
+  window.__sfsIdentModel = (window.__sfsIdentModelByPlat || {{}})[platform] || {{}};
+  document.querySelectorAll('.sfs-ident-row[data-ident]').forEach(function(r){{
+    var s = r.querySelector('.sfs-ident-sub');
+    if(!s) return;
+    var nm = (platform === 'MYM' ? r.getAttribute('data-model-mym') : r.getAttribute('data-model-of')) || '';
+    s.textContent = nm;
+  }});
   document.querySelectorAll('.sfs-platform-tab').forEach(function(b){{
     b.style.color = '#888';
     b.style.borderBottomColor = 'transparent';
