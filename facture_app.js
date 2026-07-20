@@ -547,6 +547,10 @@
           var o = s && s.options[s.selectedIndex];
           return (o && o.getAttribute('data-cid')) || 0;   // ID épinglé
         })(),
+        /* pas de champ dans le modal -> on RENVOIE la valeur existante, sinon le
+           serveur la remet à 0 et les frais plateforme (OF 20 %) disparaissent
+           silencieusement à chaque modification de la ligne */
+        fee_pct: line.fee_pct || 0,
         amount: parseFloat(document.getElementById('fxm-amount').value) || 0,
         currency: document.getElementById('fxm-currency').value,
         pct: parseFloat(document.getElementById('fxm-pct').value) || 0,

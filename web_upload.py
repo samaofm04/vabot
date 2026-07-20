@@ -13197,10 +13197,17 @@ def _render_home_dashboard_html() -> str:
     # Sans ça on additionnait des € et des $ sans conversion.
     OF_FEE = 0.20
     MYM_FEE = 0.26   # commission MyM -> brut estimé = net / 0.74
-    _eur_usd = 1.14
+    # Taux EUR->USD UNIQUE (même règle que la Facture et la paie chatteurs) :
+    # override settings.eur_usd s'il est posé, sinon taux BCE live (cache 24 h),
+    # repli 1.10. Avant : 1.14 en dur ici, 1.08 Facture, BCE paie -> le même
+    # revenu MyM affichait trois valeurs selon la page.
+    try:
+        _eur_usd = float(mypuls.get_eur_usd_rate()["rate"])
+    except Exception:
+        _eur_usd = 1.10
     try:
         _fx = json.loads((DATA_DIR / "facture.json").read_text(encoding="utf-8"))
-        _eur_usd = float((_fx.get("settings") or {}).get("eur_usd") or _eur_usd)
+        _eur_usd = float((_fx.get("settings") or {}).get("eur_usd") or 0) or _eur_usd
     except Exception:
         pass
 

@@ -85,8 +85,21 @@ def _month_bounds(month: str):
     return datetime.date(y, m, 1), datetime.date(y, m, last)
 
 
+def _live_eur_usd() -> float:
+    """Taux EUR->USD UNIQUE pour tout le site : le taux BCE live (cache 24 h),
+    repli 1.10. Avant : la Facture convertissait à 1.08, la home à 1.14 et la
+    paie chatteurs au taux BCE -> trois valeurs différentes pour le même revenu
+    (jusqu'à ~8 % d'écart sur la part lead). settings.eur_usd reste prioritaire
+    si l'utilisateur l'a fixé explicitement."""
+    try:
+        import mypuls
+        return float(mypuls.get_eur_usd_rate()["rate"])
+    except Exception:
+        return 1.10
+
+
 def _to_usd(amount: float, currency: str, settings: dict) -> float:
-    rate = float(settings.get("eur_usd") or 1.08)
+    rate = float(settings.get("eur_usd") or 0) or _live_eur_usd()
     if (currency or "USD").upper() == "EUR":
         return amount * rate
     return amount
@@ -401,7 +414,7 @@ def compute_state(month: str) -> dict:
     """État complet du mois : settings + lignes (montants USD résolus) + totaux."""
     d = _load()
     settings = {
-        "eur_usd": float(d["settings"].get("eur_usd") or 1.08),
+        "eur_usd": float(d["settings"].get("eur_usd") or 0) or _live_eur_usd(),
         "cutoff": int(d["settings"].get("cutoff") or 15),
         "associates": d["settings"].get("associates") or [],
     }
@@ -1081,7 +1094,9 @@ def register(app, is_auth):
         d = _load()
         st = d["settings"]
         try:
-            st["eur_usd"] = max(0.5, min(2.0, float(request.form.get("eur_usd") or 1.08)))
+            _r = float(request.form.get("eur_usd") or 0)
+            # champ vide = auto (taux BCE live) ; une valeur = override explicite
+            st["eur_usd"] = max(0.5, min(2.0, _r)) if _r else 0
         except Exception:
             pass
         try:
