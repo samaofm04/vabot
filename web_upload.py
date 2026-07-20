@@ -20409,6 +20409,17 @@ def _sfssetup_identities(platform: str) -> list:
     if platform == "mym":
         try:
             import mypuls
+            # L'API donne la PLATEFORME de chaque créatrice : l'onglet MyM ne
+            # liste plus les modèles OnlyFans (Jessye, Khloe, Amelia/Julia côté
+            # OF) — le scraping, lui, ne sait pas les distinguer et mettait
+            # tout le monde dans MyM.
+            if mypuls.api_configured():
+                api = sorted((c.get("pseudo") or "").strip()
+                             for c in mypuls.api_creators_cached()
+                             if c.get("active") and c.get("platform") == "mym"
+                             and (c.get("pseudo") or "").strip())
+                if api:
+                    return sorted(api, key=str.lower)
             if mypuls.is_configured():
                 res = mypuls.list_creators()
                 if res.get("ok"):
@@ -20433,6 +20444,20 @@ def _sfssetup_identities(platform: str) -> list:
                 identities.append(s)
     except Exception:
         pass
+    if platform == "of":
+        # + les créatrices OnlyFans vues par l'API MyPuls (Jessye, Khloe,
+        # Amelia/Julia côté OF) : elles étaient rangées à tort dans MyM
+        try:
+            import mypuls
+            if mypuls.api_configured():
+                existing_lower = {x.lower() for x in identities}
+                for c in mypuls.api_creators_cached():
+                    nm = (c.get("pseudo") or "").strip()
+                    if (c.get("active") and c.get("platform") == "onlyfans"
+                            and nm and nm.lower() not in existing_lower):
+                        identities.append(nm)
+        except Exception:
+            pass
     return identities
 
 
