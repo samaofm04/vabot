@@ -29308,6 +29308,53 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
+    @app.route("/admin/backup_data")
+    def admin_backup_data():
+        """CHECKPOINT des données du VPS : zippe data/ (hors médias lourds
+        régénérables) dans data_backups/checkpoint_<horodatage>.zip.
+        ?list=1 pour lister les sauvegardes existantes."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import zipfile
+        import datetime as _dtb
+        dest_dir = Path("data_backups")
+        dest_dir.mkdir(exist_ok=True)
+        if request.args.get("list"):
+            lst = sorted(dest_dir.glob("checkpoint_*.zip"), reverse=True)
+            return jsonify({"ok": True, "sauvegardes": [
+                {"fichier": p.name, "taille_mo": round(p.stat().st_size / 1e6, 2)}
+                for p in lst[:20]]})
+        stamp = _dtb.datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = dest_dir / f"checkpoint_{stamp}.zip"
+        # exclus : médias lourds régénérables (les reels se re-téléchargent,
+        # les miniatures se régénèrent) — tout le reste de data/ est inclus
+        skip_parts = {"videos", "tg_tmp", "thumbs"}
+        skip_ext = {".mp4", ".mov", ".zip"}
+        n, skipped = 0, 0
+        try:
+            with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+                for p in Path("data").rglob("*"):
+                    if p.is_dir():
+                        continue
+                    rel = p.relative_to("data")
+                    if (any(part in skip_parts for part in rel.parts)
+                            or p.suffix.lower() in skip_ext):
+                        skipped += 1
+                        continue
+                    try:
+                        z.write(p, str(rel))
+                        n += 1
+                    except Exception:
+                        skipped += 1
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        return jsonify({"ok": True, "fichier": str(dest), "fichiers_inclus": n,
+                        "medias_exclus": skipped,
+                        "taille_mo": round(dest.stat().st_size / 1e6, 2),
+                        "note": "Pour restaurer : demande-le, rien n'est écrasé "
+                                "automatiquement."})
+
     @app.route("/mypuls/pushs_refresh_probe")
     def mypuls_pushs_refresh_probe():
         """DÉCOUVERTE (lecture seule) : trouve la requête envoyée par le bouton
