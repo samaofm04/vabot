@@ -11852,7 +11852,7 @@ def _render_sfs_html() -> str:
         "function sfsEsc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }"
         "async function loadSfsInbox(force){"
         "  var box=document.getElementById('sfs-inbox-list'); if(!box) return;"
-        "  box.innerHTML='⏳ Synchro des messages entrants…';"
+        "  if(!window.__sfsInbox){ box.innerHTML='⏳ Synchro des messages entrants…'; }"
         "  try{"
         "    var r=await fetch('/sfssetup/sfs_inbox'+(force?'?refresh=1':'')); var j=await r.json();"
         "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'API indisponible'); return; }"
@@ -12097,7 +12097,10 @@ def _render_sfs_html() -> str:
         "document.addEventListener('DOMContentLoaded',function(){"
         "  try{ var c=sessionStorage.getItem('sfsPushCache'); if(c){ window.__sfsPushCache=JSON.parse(c); } }catch(e){}"
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "  if(typeof loadSfsInbox==='function') loadSfsInbox(false);"
+        "  if(typeof loadSfsInbox==='function'){"
+        "    loadSfsInbox(false);"
+        "    setInterval(function(){ loadSfsInbox(false); }, 180000);"
+        "  }"
         "});"
         "</script>"
     )
@@ -27196,6 +27199,13 @@ def create_app():
         jb_activity.start_daily()
     except Exception as _e:
         log.warning(f"jb_activity daily non démarré: {_e}")
+    # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
+    # MyPuls — sans elle, un message lu vite par un chatteur serait raté
+    try:
+        import mypuls as _mp_inbox
+        _mp_inbox.start_sfs_inbox_poller(300)
+    except Exception as _e:
+        log.warning(f"sfs-inbox poller non démarré: {_e}")
     # Auto-récupération des comptes JB depuis Google Sheets (une seule fois)
     try:
         import sheets_sync as _ss

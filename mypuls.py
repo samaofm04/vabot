@@ -437,6 +437,44 @@ def api_sfs_inbox(force: bool = False) -> dict:
     return out
 
 
+_SFS_POLLER = {"on": False}
+
+
+def start_sfs_inbox_poller(interval: int = 300) -> bool:
+    """Collecte AUTOMATIQUE des SFS reçus, en tâche de fond (thread démon).
+
+    L'API ne liste que les conversations NON LUES : plus on passe souvent,
+    moins on rate de messages lus rapidement par un chatteur. Toutes les
+    `interval` secondes (min 60) : 1 appel API par créatrice active, fusion
+    dans data/sfs_inbox.json. Si le token API n'est pas (encore) configuré,
+    le cycle est simplement sauté — le poser plus tard suffit, sans redémarrage.
+    """
+    if _SFS_POLLER["on"]:
+        return False
+    import threading
+    import time as _t
+
+    def _loop():
+        while True:
+            try:
+                if api_configured():
+                    r = api_sfs_inbox(force=True)
+                    n = r.get("nouveaux") or 0
+                    if n:
+                        print(f"[sfs-inbox] {n} nouveau(x) message(s) entrant(s) archivé(s)",
+                              flush=True)
+                    for e in (r.get("errors") or [])[:3]:
+                        print(f"[sfs-inbox] {e}", flush=True)
+            except Exception as e:
+                print(f"[sfs-inbox] poller: {type(e).__name__}: {e}", flush=True)
+            _t.sleep(max(60, interval))
+
+    threading.Thread(target=_loop, daemon=True, name="sfs-inbox-poller").start()
+    _SFS_POLLER["on"] = True
+    print(f"[sfs-inbox] collecte auto démarrée (toutes les {max(60, interval)}s)", flush=True)
+    return True
+
+
 def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg = load_config()
     cfg["PHPSESSID"] = (phpsessid or "").strip()
