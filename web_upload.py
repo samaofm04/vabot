@@ -11640,46 +11640,8 @@ def _render_sfs_html() -> str:
     sfs_by_date_json = _json.dumps(sfs_by_date_simple)
 
     rows = []
-    # Alerte "semaine en danger" : modeles qui n ont pas atteint 3 SFS recus cette semaine
-    try:
-        wkly = sfs_weekly_received(target_per_week=3)
-        in_danger = wkly.get("in_danger") or []
-        if in_danger:
-            danger_cards = []
-            for d in in_danger:
-                ident = d["identity"]
-                recv = d["received"]
-                miss = d["missing"]
-                pp = _identity_avatar_html(ident, size=28)
-                color = "#ef4444" if recv == 0 else "#f59e0b"
-                danger_cards.append(
-                    f"<div style='display:flex;align-items:center;gap:10px;background:rgba(239,68,68,.06);"
-                    f"border:1px solid {color}40;border-radius:8px;padding:8px 14px'>"
-                    f"{pp}"
-                    f"<div style='flex:1'>"
-                    f"<div style='font-weight:700;font-size:13px;color:{color}'>@{ident}</div>"
-                    f"<div style='font-size:11px;color:#888'>{recv}/{wkly['target']} SFS reçus · <b style='color:{color}'>−{miss}</b> manquant{'s' if miss > 1 else ''}</div>"
-                    f"</div>"
-                    f"</div>"
-                )
-            rows.append(
-                "<div style='background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.3);"
-                "border-radius:12px;padding:14px 18px;margin-bottom:16px'>"
-                f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
-                f"<span style='font-size:18px'>⚠️</span>"
-                f"<div style='flex:1'>"
-                f"<div style='font-weight:800;font-size:14px;color:#ef4444'>Alerte — Semaine en danger</div>"
-                f"<div style='font-size:11px;color:#888'>Semaine du <b>{wkly['week_start']}</b> au <b>{wkly['week_end']}</b> · objectif <b>{wkly['target']}</b> SFS reçus/modèle</div>"
-                f"</div>"
-                f"<div style='font-size:24px;font-weight:800;color:#ef4444'>{len(in_danger)}</div>"
-                f"</div>"
-                f"<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px'>"
-                + "".join(danger_cards)
-                + "</div>"
-                "</div>"
-            )
-    except Exception:
-        pass
+    # (L'ancienne bannière rouge « Alerte — Semaine en danger » a été retirée à
+    # la demande de l'utilisateur : trop encombrante et pas actionnable ici.)
     # Stats
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
@@ -11815,7 +11777,7 @@ def _render_sfs_html() -> str:
     rows.append(
         "<div id='sfs-pushs-panel' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
         "<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'>"
-        "<h3 id='sfs-pushs-title' style='margin:0;font-size:15px;font-weight:800'>📨 Mes push (MyPuls)</h3>"
+        "<h3 id='sfs-pushs-title' style='margin:0;font-size:15px;font-weight:800'>SFS Planning</h3>"
         # Un SEUL bouton « Actions » -> menu déroulant avec toutes les commandes
         # (Sync, MAJ profils, cookies HAR, import OF) : demande utilisateur,
         # la rangée de 3 boutons prenait trop de place
@@ -11846,12 +11808,12 @@ def _render_sfs_html() -> str:
         "<input type='checkbox' id='sfs-show-all' onchange='window.__sfsShowAll=this.checked; if(typeof renderSfsPushes===\"function\") renderSfsPushes();' style='accent-color:#a855f7'>"
         "Afficher aussi les push hors-SFS (messages fans, sans lien mym.fans ni @)"
         "</label>"
-        "<div id='sfs-pushs-list' style='color:#888;font-size:13px'>"
-        "Clique sur « Sync MyPuls » : met à jour les counts du setup (abonnés/anciens/intéressés) ET place tes push dans le calendrier (repère orange par jour)."
-        "</div>"
+        # ligne de statut : VIDE et masquée par défaut (ne sert que pendant une
+        # synchro / MAJ) — les phrases de recap « N SFS placés... » sont retirées
+        "<div id='sfs-pushs-list' style='display:none;color:#888;font-size:13px'></div>"
         # SFS RECUS : DM entrants des fans/partenaires, lus via l'API MyPuls
         # (MyM ET OnlyFans). Historique accumule cote serveur (sfs_inbox.json).
-        "<div style='margin-top:12px;border-top:1px solid #262636;padding-top:10px'>"
+        "<div id='sfs-inbox-wrap' style='display:none;margin-top:12px;border-top:1px solid #262636;padding-top:10px'>"
         "<div style='display:flex;align-items:center;gap:10px'>"
         "<span style='font-weight:800;font-size:13px;color:#e879f9'>📩 SFS reçus (messages entrants)</span>"
         "<button type='button' onclick='loadSfsInbox(true)' "
@@ -11876,7 +11838,7 @@ def _render_sfs_html() -> str:
         "  if(m && m.style.display==='block' && !e.target.closest('#sfs-actions-menu') && !e.target.closest('#sfs-actions-btn')){ m.style.display='none'; }"
         "});"
         "async function majAllPushs(){"
-        "  var b=document.getElementById('sfs-maj-btn'); var box=document.getElementById('sfs-pushs-list');"
+        "  var b=document.getElementById('sfs-maj-btn'); var box=document.getElementById('sfs-pushs-list'); if(box) box.style.display='';"
         "  if(b){ b.disabled=true; b.style.opacity='.6'; b.textContent='⟳ MAJ en cours…'; }"
         "  function done(){ if(b){ b.disabled=false; b.style.opacity='1'; b.textContent='⟳ MAJ profils'; } }"
         "  try{"
@@ -11887,7 +11849,7 @@ def _render_sfs_html() -> str:
         "    var iv=setInterval(function(){"
         "      left-=10;"
         "      if(left>0){ if(box) box.innerHTML='🟠 MyPuls resynchronise ses données — resync auto dans '+left+' s…'; return; }"
-        "      clearInterval(iv); done();"
+        "      clearInterval(iv); done(); if(box){ box.innerHTML=''; box.style.display='none'; }"
         "      if(typeof loadSfsPushes==='function') loadSfsPushes();"
         "      if(typeof loadSfsInbox==='function') loadSfsInbox(true);"
         "    },10000);"
@@ -11898,10 +11860,10 @@ def _render_sfs_html() -> str:
         "  if(!window.__sfsInbox){ box.innerHTML='⏳ Synchro des messages entrants…'; }"
         "  try{"
         "    var r=await fetch('/sfssetup/sfs_inbox'+(force?'?refresh=1':'')); var j=await r.json();"
-        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'API indisponible'); return; }"
+        "    if(!j.ok){ var w1=document.getElementById('sfs-inbox-wrap'); if(w1)w1.style.display=''; box.innerHTML='❌ '+(j.error||'API indisponible'); return; }"
         "    window.__sfsInbox=j.items||[];"
         "    renderSfsInbox();"
-        "  }catch(e){ box.innerHTML='❌ '+e; }"
+        "  }catch(e){ var w2=document.getElementById('sfs-inbox-wrap'); if(w2)w2.style.display=''; box.innerHTML='❌ '+e; }"
         "}"
         "function renderSfsInbox(){"
         "  var box=document.getElementById('sfs-inbox-list'); if(!box || !window.__sfsInbox) return;"
@@ -11912,11 +11874,14 @@ def _render_sfs_html() -> str:
         "    if(!window.__sfsShowAll && !isSfsPush(it.content)){ hidden++; return; }"
         "    items.push(it);"
         "  });"
+        # rien à montrer -> la section entière se replie (pas de phrase moche)
+        "  var wrap=document.getElementById('sfs-inbox-wrap');"
         "  if(!items.length){"
-        "    box.innerHTML='Aucun SFS reçu côté '+(plat==='mym'?'MyM':'OnlyFans')"
-        "      +(hidden?(' · '+hidden+' message(s) hors-SFS masqué(s), coche la case pour les voir'):'')+'.';"
+        "    if(wrap) wrap.style.display='none';"
+        "    box.innerHTML='';"
         "    return;"
         "  }"
+        "  if(wrap) wrap.style.display='';"
         "  var h='';"
         "  items.slice(0,40).forEach(function(it){"
         "    var d=(it.at||'').replace('T',' ').slice(0,16);"
@@ -11938,9 +11903,10 @@ def _render_sfs_html() -> str:
         "  var onPlat=(plat==='MYM'||plat==='OF');"
         "  if(panel) panel.style.display=onPlat?'':'none';"
         "  if(typeof renderSfsInbox==='function') renderSfsInbox();"
-        "  var ttlEl=document.getElementById('sfs-pushs-title'); var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import'); var bMaj=document.getElementById('sfs-maj-btn');"
-        "  if(plat==='OF'){ if(ttlEl)ttlEl.textContent='📨 Mes SFS OnlyFans (importés)'; if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bOf)bOf.style.display='flex'; }"
-        "  else if(plat==='MYM'){ if(ttlEl)ttlEl.textContent='📨 Mes push (MyPuls)'; if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bOf)bOf.style.display='none'; }"
+        # titre fixe « SFS Planning » (plus de renommage par onglet)
+        "  var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import'); var bMaj=document.getElementById('sfs-maj-btn');"
+        "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bOf)bOf.style.display='flex'; }"
+        "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bOf)bOf.style.display='none'; }"
         "  if(!onPlat) return;"
         "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
         "  const ps=window.__sfsPushCache; if(!ps) return;"
@@ -11967,29 +11933,26 @@ def _render_sfs_html() -> str:
         "    if(!iso){ parseFail++; continue; }"
         "    (byDate[iso]=byDate[iso]||[]).push({creator:p.creator||'', time:parts[1]||'', desc:p.description||''});"
         "  }"
-        "  let placed=0, days=0;"
+        # UNE barre compacte par jour (façon file d'attente MyM) : compteur +
+        # barre pleine, sans pseudo répété. Clic = ouvre le panneau du jour
+        # (les cartes y sont cliquables pour créer/modifier un SFS).
         "  for(const iso in byDate){"
         "    const cell=cells[iso]; if(!cell) continue;"
         "    const bars=cell.querySelector('.sfs-day-bars'); if(!bars) continue;"
-        "    const list=byDate[iso]; const cap=3;"
-        "    for(let i=0;i<Math.min(cap,list.length);i++){"
-        "      const it=list[i];"
-        "      const bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "      bar.title=it.time+' — '+it.creator+' : '+it.desc;"
-        "      bar.style.cssText='background:rgba(245,158,11,.15);border-left:3px solid #f59e0b;color:#f59e0b;font-size:10px;padding:2px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer';"
-        "      bar.textContent='📨 '+(it.creator||'push');"
-        "      bar.onclick=function(e){ e.stopPropagation(); addSfsFromPush(iso, it.creator, it.time); };"
-        "      bars.appendChild(bar); placed++;"
-        "    }"
-        "    if(list.length>cap){"
-        "      const more=document.createElement('div'); more.className='sfs-push-bar';"
-        "      more.style.cssText='color:#f59e0b;font-size:10px;font-weight:700'; more.textContent='+'+(list.length-cap)+' push';"
-        "      bars.appendChild(more);"
-        "    }"
-        "    days++;"
+        "    const list=byDate[iso];"
+        "    const bar=document.createElement('div'); bar.className='sfs-push-bar';"
+        "    bar.title=list.length+' push — '+list.map(function(x){ return (x.time||'')+' '+(x.creator||''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
+        "    bar.style.cssText='background:#f59e0b;color:#111;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
+        "    const n=document.createElement('span');"
+        "    n.style.cssText='background:rgba(0,0,0,.55);color:#fbbf24;border-radius:3px;padding:0 5px;line-height:14px';"
+        "    n.textContent=list.length;"
+        "    bar.appendChild(n);"
+        "    bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(iso); };"
+        "    bars.appendChild(bar);"
         "  }"
+        # plus de phrase de recap : la ligne de statut reste masquée hors synchro
         "  const box=document.getElementById('sfs-pushs-list');"
-        "  if(box) box.innerHTML='✅ '+placed+' SFS placés ce mois ('+days+' jour'+(days>1?'s':'')+')'+(nonSfs?(' · '+nonSfs+' push hors-SFS masqués'):'')+' · '+ps.length+' push au total. Change de mois pour voir les autres.';"
+        "  if(box){ box.innerHTML=''; box.style.display='none'; }"
         "}"
         "function addSfsFromPush(date, creator, time){"
         "  if(typeof openSfsModal!=='function') return;"
@@ -12032,7 +11995,7 @@ def _render_sfs_html() -> str:
         "}"
         "async function loadSfsPushes(){"
         "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
-        "  box.innerHTML='⏳ Synchro MyPuls… (counts du setup + push, quelques secondes)';"
+        "  box.style.display=''; box.innerHTML='⏳ Synchro MyPuls…';"
         "  let subs=-1;"
         "  try{ const rs=await fetch('/sfssetup/fetch_mypuls_subs'); const js=await rs.json(); if(js && js.ok) subs=js.applied||0; }catch(e){}"
         "  try{"
@@ -12042,15 +12005,14 @@ def _render_sfs_html() -> str:
         "    window.__sfsPushCache=ps;"
         "    try{ sessionStorage.setItem('sfsPushCache', JSON.stringify(ps)); }catch(e){}"
         "    renderSfsPushes();"
-        "    const prefix=(subs>=0?('🔄 Setup: '+subs+' modèle(s) à jour · '):'');"
-        "    if(!ps.length && j.note){ box.innerHTML=prefix+j.note; }"
-        "    else if(prefix){ box.innerHTML=prefix+box.innerHTML; }"
-        "  }catch(err){ box.innerHTML='❌ '+err; }"
+        # succès : pas de phrase de recap, la ligne de statut se replie
+        "    if(!ps.length && j.note){ box.style.display=''; box.innerHTML=j.note; }"
+        "  }catch(err){ box.style.display=''; box.innerHTML='❌ '+err; }"
         "}"
         "function mypulsHarPick(){ var el=document.getElementById('sfs-mym-har-file'); if(el) el.click(); }"
         "async function importMypulsHar(input){"
         "  if(!input||!input.files||!input.files[0]) return;"
-        "  var box=document.getElementById('sfs-pushs-list'); if(box) box.innerHTML='⏳ Import du HAR MyPuls (cookies)…';"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='⏳ Import du HAR MyPuls (cookies)…'; }"
         "  var fd=new FormData(); fd.append('har', input.files[0]);"
         "  try{"
         "    var r=await fetch('/mypuls/import_har',{method:'POST',body:fd}); var j=await r.json();"
@@ -12063,14 +12025,14 @@ def _render_sfs_html() -> str:
         "function ofHarPick(){ var el=document.getElementById('sfs-of-har'); if(el) el.click(); }"
         "async function importOfHar(input){"
         "  if(!input || !input.files || !input.files[0]) return;"
-        "  var box=document.getElementById('sfs-pushs-list'); if(box) box.innerHTML='⏳ Import du HAR OnlyFans…';"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='⏳ Import du HAR OnlyFans…'; }"
         "  var fd=new FormData(); fd.append('har', input.files[0]);"
         "  try{"
         "    var r=await fetch('/sfssetup/import_of_har',{method:'POST',body:fd}); var j=await r.json();"
         "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
         "    window.__ofPushData=j.data||window.__ofPushData;"
         "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "    if(box) box.innerHTML='✅ Import OK : '+j.items+' message(s) · '+j.dates+' date(s) placés sur le calendrier.';"
+        "    if(box){ box.style.display=''; box.innerHTML='✅ Import OK : '+j.items+' message(s) importé(s).'; }"
         "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
         "}"
         "function renderOfPushes(){"
@@ -12082,20 +12044,20 @@ def _render_sfs_html() -> str:
         # le filtre : la case n'avait aucun effet ici).
         "  var items=[], nonSfs=0;"
         "  all.forEach(function(it){ if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
-        "  var byDate={}, undated=[], placed=0, days=0;"
+        "  var byDate={}, undated=[];"
         "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
-        "  for(var d in byDate){"
-        "    var cell=cells[d]; if(!cell) continue; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) continue;"
-        "    var list=byDate[d], cap=3;"
-        "    for(var i=0;i<Math.min(cap,list.length);i++){"
-        "      var it=list[i]; var bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "      bar.title=(it.time||'')+' : '+(it.text||''); bar.style.cssText='background:rgba(0,153,255,.15);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer';"
-        "      bar.textContent='📨 SFS OF'; (function(D,IT){ bar.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, IT); }; })(d,it);"
-        "      bars.appendChild(bar); placed++;"
-        "    }"
-        "    if(list.length>cap){ var more=document.createElement('div'); more.className='sfs-push-bar'; more.style.cssText='color:#0099ff;font-size:10px;font-weight:700'; more.textContent='+'+(list.length-cap)+' SFS'; bars.appendChild(more); }"
-        "    days++;"
-        "  }"
+        # même style compact que MyM : UNE barre bleue avec le compte par jour
+        "  Object.keys(byDate).forEach(function(d){"
+        "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
+        "    var list=byDate[d];"
+        "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
+        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return x.time||''; }).slice(0,5).join(' · ');"
+        "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
+        "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
+        "    bar.appendChild(n);"
+        "    (function(D,L){ bar.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, L[0]); }; })(d,list);"
+        "    bars.appendChild(bar);"
+        "  });"
         # Jours à compteur sans détail : juste le badge « 📅 N programmés ».
         # (Avant, les messages SANS date étaient dupliqués sous CHAQUE jour à
         # compteur — le même message semblait programmé partout — et 'placed'
@@ -12103,25 +12065,26 @@ def _render_sfs_html() -> str:
         # sous le statut, plus bas.)
         "  for(var cd in counters){"
         "    if(byDate[cd]) continue; var cc=cells[cd]; if(!cc) continue; var cb=cc.querySelector('.sfs-day-bars'); if(!cb) continue;"
-        "    var b2=document.createElement('div'); b2.className='sfs-push-bar'; b2.style.cssText='background:rgba(0,153,255,.12);border-left:3px solid #0099ff;color:#0099ff;font-size:10px;padding:2px 5px;border-radius:3px;text-align:center'; b2.textContent='📅 '+counters[cd]+' programmé'+(counters[cd]>1?'s':''); cb.appendChild(b2);"
-        "    days++;"
+        "    var b2=document.createElement('div'); b2.className='sfs-push-bar';"
+        "    b2.title=counters[cd]+' programmé'+(counters[cd]>1?'s':'');"
+        "    b2.style.cssText='background:rgba(0,153,255,.35);color:#bfe6ff;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px';"
+        "    var n2=document.createElement('span'); n2.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n2.textContent=counters[cd];"
+        "    b2.appendChild(n2); cb.appendChild(b2);"
         "  }"
+        # ligne de statut : rien hors synchro ; seuls les messages SANS date
+        # restent listés (sinon ils seraient invisibles)
         "  var box=document.getElementById('sfs-pushs-list');"
         "  if(box){"
-        "    if(!all.length && !Object.keys(counters).length){ box.innerHTML='Aucun SFS OnlyFans importé. Clique « Importer HAR OnlyFans » et dépose ton fichier .har.'; }"
-        "    else {"
-        "      var s='✅ '+placed+' SFS OF placés ('+days+' jour'+(days>1?'s':'')+') · '+all.length+' message(s) importé(s).';"
-        "      if(nonSfs){ s+=' · '+nonSfs+' hors-SFS masqué'+(nonSfs>1?'s':'')+' (coche la case pour les voir)'; }"
-        "      box.innerHTML=s;"
-        # Les messages sans date étaient jetés en silence (« 1 message importé »
-        # mais rien de visible nulle part) : ils sont désormais listés ici.
+        "    box.innerHTML='';"
+        "    if(undated.length){"
+        "      box.style.display='';"
         "      undated.forEach(function(u){"
         "        var d2=document.createElement('div'); d2.style.cssText='margin-top:6px;background:rgba(0,153,255,.1);border-left:3px solid #0099ff;border-radius:4px;padding:5px 8px;font-size:11px;color:#9fd3ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';"
         "        d2.textContent='📨 (sans date'+(u.time?(' · '+u.time):'')+') '+(u.text||''); d2.title=u.text||'';"
         "        d2.onclick=function(){ addSfsFromOf(new Date().toISOString().slice(0,10), u); };"
         "        box.appendChild(d2);"
         "      });"
-        "    }"
+        "    } else { box.style.display='none'; }"
         "  }"
         "}"
         "function addSfsFromOf(date, it){"
