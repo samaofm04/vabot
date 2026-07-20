@@ -10625,8 +10625,19 @@ def _render_insta_accounts_html() -> str:
                     f"<div style='width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);"
                     f"display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:18px'>{u[0].upper()}</div>"
                 )
+            # compte « profil introuvable » : carte ROUGE + compte à rebours
+            # avant retrait automatique (7 jours, purge du démon de scrape)
+            _dd = it.get("dead_days")
+            _dead_html = ""
+            _card_border = "#2a2a2a"
+            if _dd is not None:
+                _card_border = "#ef4444"
+                _restant = max(0, 7 - int(_dd))
+                _dead_html = (
+                    f"<div style='font-size:11px;color:#ef4444;font-weight:700'>"
+                    f"⛔ Profil introuvable depuis {int(_dd)} j — retrait auto dans {_restant} j</div>")
             rows.append(
-                f"<div class='cloud-card' data-insta-user='{u}' style='background:#0f0f0f;border:1px solid #2a2a2a;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;position:relative'>"
+                f"<div class='cloud-card' data-insta-user='{u}' style='background:#0f0f0f;border:1px solid {_card_border};border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;position:relative'>"
                 f"<div style='display:flex;align-items:center;gap:12px'>"
                 f"{avatar_html}"
                 f"<div style='flex:1;min-width:0'>"
@@ -10646,6 +10657,7 @@ def _render_insta_accounts_html() -> str:
                 f"<div class='ig-reels-count'><b style='color:#fff'>{it['nb_reels']}</b> reels</div>"
                 f"</div>"
                 f"<div class='ig-scraped-at' style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
+                f"{_dead_html}"
                 f"<div style='display:flex;gap:6px;margin-top:auto'>"
                 f"<button type='button' data-username='{u}' onclick='igScrapeOne(this)' style='flex:1;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
                 f"<button type='button' data-username='{u}' onclick='igRemoveOne(this)' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ?\">×</button>"
@@ -27272,7 +27284,14 @@ def _start_auto_scrape_daemon():
         _t.sleep(60)  # wait bot init
         while True:
             try:
-                from insta_scraper import load_watchlist, scrape_profile
+                from insta_scraper import load_watchlist, scrape_profile, purge_dead_watchlist
+                # comptes « profil introuvable » depuis > 7 jours : retirés
+                try:
+                    _dead = purge_dead_watchlist(7)
+                    if _dead:
+                        log.info(f"[insta-bg-scrape] retirés (injoignables 7 j+): {_dead}")
+                except Exception as _e:
+                    log.warning(f"[insta-bg-scrape] purge: {_e}")
                 wl = load_watchlist() or []
                 if wl:
                     log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL <1 mois...")

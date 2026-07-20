@@ -769,7 +769,83 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
     return result
 
 
+HEALTH_FILE = INSTA_DIR / "watchlist_health.json"
+
+
+def _load_health() -> dict:
+    try:
+        h = json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
+        return h if isinstance(h, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_health(h: dict):
+    try:
+        HEALTH_FILE.write_text(json.dumps(h, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        log.warning(f"watchlist_health: {e}")
+
+
+def record_scrape_result(username: str, result: dict):
+    """Suivi de santé d'un compte de la watchlist.
+
+    Succès -> le compte est blanchi. Erreur DÉFINITIVE (« profil introuvable »
+    = supprimé/banni/renommé) -> horodatée à la première occurrence. Les
+    erreurs TRANSITOIRES (quota RapidAPI, cookies, réseau) ne comptent PAS :
+    sinon une panne globale ferait supprimer toute la watchlist.
+    """
+    import time as _t
+    u = _clean_username(username)
+    if not u:
+        return
+    h = _load_health()
+    err = str((result or {}).get("error") or "")
+    if not err:
+        if u in h:
+            h.pop(u, None)
+            _save_health(h)
+        return
+    low = err.lower()
+    if not ("introuvable" in low or "not found" in low or "user_not_found" in low):
+        return
+    e = h.get(u) or {}
+    if not e.get("failed_since"):
+        e["failed_since"] = int(_t.time())
+    e["last_error"] = err[:200]
+    h[u] = e
+    _save_health(h)
+
+
+def purge_dead_watchlist(days: int = 7) -> list:
+    """Retire de la watchlist les comptes injoignables depuis plus de `days`
+    jours (marqués par record_scrape_result). Retourne les retirés."""
+    import time as _t
+    h = _load_health()
+    wl = load_watchlist()
+    cutoff = _t.time() - days * 86400
+    dead = [u for u in wl if float((h.get(u) or {}).get("failed_since") or 9e18) < cutoff]
+    if dead:
+        save_watchlist([u for u in wl if u not in dead])
+        for u in dead:
+            h.pop(u, None)
+        _save_health(h)
+        log.info(f"watchlist: {len(dead)} compte(s) injoignable(s) retiré(s) : {dead}")
+    return dead
+
+
 def scrape_profile(username: str, limit: int = 50) -> dict:
+    """Scrape un profil (voir _scrape_profile_impl) + suivi de santé watchlist :
+    un « profil introuvable » est horodaté, un succès blanchit le compte."""
+    result = _scrape_profile_impl(username, limit)
+    try:
+        record_scrape_result(username, result)
+    except Exception as e:
+        log.warning(f"record_scrape_result: {e}")
+    return result
+
+
+def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
     Ordre de tentatives :
@@ -959,10 +1035,17 @@ def get_all_cached_reels() -> list:
 
 
 def watchlist_status() -> list:
-    """Liste enrichie : username + last_scrape + nb_reels + profile_pic."""
+    """Liste enrichie : username + last_scrape + nb_reels + profile_pic
+    + état de santé (dead_days = jours depuis « profil introuvable »)."""
+    import time as _t
     wl = load_watchlist()
+    health = _load_health()
     out = []
     for u in wl:
+        hs = health.get(u) or {}
+        dead_days = None
+        if hs.get("failed_since"):
+            dead_days = max(0, int((_t.time() - float(hs["failed_since"])) // 86400))
         data = get_cached(u)
         if data:
             prof = data.get("profile", {})
@@ -974,6 +1057,7 @@ def watchlist_status() -> list:
                 "full_name": prof.get("full_name", ""),
                 "profile_pic_url": prof.get("profile_pic_url", ""),
                 "is_verified": prof.get("is_verified", False),
+                "dead_days": dead_days,
             })
         else:
             out.append({
@@ -984,5 +1068,6 @@ def watchlist_status() -> list:
                 "full_name": "",
                 "profile_pic_url": "",
                 "is_verified": False,
+                "dead_days": dead_days,
             })
     return out
