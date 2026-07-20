@@ -11489,7 +11489,7 @@ def _render_sfs_html() -> str:
     for _p, _il in platform_idents.items():
         _all_idents_set.update(_il)
     all_identities_json = _json.dumps(sorted(_all_idents_set))
-    # MyPuls creators (pour le dropdown receveur quand plateforme = MYM)
+    # MyPuls creators (sidebar + dropdown receveur quand plateforme = MYM)
     _mypuls_creators = []
     _mypuls_creators_map = {}  # {name: creator_id} pour les avatars
     try:
@@ -11499,6 +11499,18 @@ def _render_sfs_html() -> str:
             if _cr_res.get("ok"):
                 _mypuls_creators_map = _cr_res.get("creators") or {}
                 _mypuls_creators = sorted(_mypuls_creators_map.keys(), key=str.lower)
+        # Le scraping liste TOUTES les créatrices MyPuls sans distinguer la
+        # plateforme -> Jessye/Khloe/Amelia-OF apparaissaient dans l'onglet MYM.
+        # L'API connaît platform mym|onlyfans : on ne garde côté MYM que les
+        # vraies créatrices MyM (match insensible ponctuation/emoji).
+        if _mypuls.api_configured():
+            _mym_keys = {re.sub(r"[^a-z0-9]", "", (c.get("pseudo") or "").lower())
+                         for c in _mypuls.api_creators_cached()
+                         if c.get("active") and c.get("platform") == "mym"}
+            if _mym_keys:
+                _mypuls_creators = [
+                    n for n in _mypuls_creators
+                    if re.sub(r"[^a-z0-9]", "", n.lower()) in _mym_keys]
     except Exception:
         pass
     mypuls_creators_json = _json.dumps(_mypuls_creators)
