@@ -11864,10 +11864,12 @@ def _render_sfs_html() -> str:
         "  sfsShowAllLabel();"
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "}"
+        # état explicite 'block'/'none' : avec display='' la bascule voyait
+        # toujours « fermé » et chaque clic RE-OUVRAIT (le ✕ semblait mort)
         "function toggleSfsBilan(){"
         "  var p=document.getElementById('sfs-bilan-panel'); if(!p) return;"
-        "  if(p.style.display==='none'||!p.style.display){ renderSfsBilan(); p.style.display=''; p.scrollIntoView({behavior:'smooth',block:'start'}); }"
-        "  else p.style.display='none';"
+        "  if(p.style.display==='block'){ p.style.display='none'; }"
+        "  else { renderSfsBilan(); p.style.display='block'; p.scrollIntoView({behavior:'smooth',block:'start'}); }"
         "}"
         "function renderSfsBilan(){"
         "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
