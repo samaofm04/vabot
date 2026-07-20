@@ -11835,7 +11835,7 @@ def _render_sfs_html() -> str:
         "<h3 style='margin:0;font-size:15px;font-weight:800'>Bilan SFS</h3>"
         "<span style='font-size:11px;color:#778'>objectif : 1 SFS (@) tous les 2 jours · fenêtre 14 jours</span>"
         "<button type='button' onclick='toggleSfsBilan()' "
-        "style='margin-left:auto;background:transparent;border:0;color:#778;cursor:pointer;font-size:15px;padding:2px 6px'>✕</button>"
+        "style='margin-left:auto;background:#26263a;border:1px solid #3a3a4e;color:#cbd5e1;cursor:pointer;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px'>✕ Fermer le bilan</button>"
         "</div>"
         "<div id='sfs-bilan-content' style='font-size:12.5px;color:#aab'>—</div>"
         "</div>"
