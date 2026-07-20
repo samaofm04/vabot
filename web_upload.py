@@ -29151,6 +29151,39 @@ def create_app():
                                    "(~1 min). Vérifie l'heure « MAJ » sur MyPuls dans "
                                    "2-3 min, puis relance un Sync MyPuls sur la page SFS."})
 
+    @app.route("/mypuls/calendar_probe")
+    def mypuls_calendar_probe():
+        """DÉCOUVERTE (lecture seule) : le calendrier de planification MyPuls
+        contient-il les PUSHS PROGRAMMÉS (pas encore envoyés) ? Si oui, on
+        pourra les afficher sur le calendrier SFS AVANT leur envoi."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import datetime as _dtm
+            import mypuls
+            import mypuls_scheduler as sched
+            cr = mypuls.list_creators()
+            ids = list((cr.get("creators") or {}).values())
+            if not ids:
+                return jsonify({"ok": False, "error": cr.get("error") or "0 créatrice"})
+            now = _dtm.datetime.now()
+            r = sched.list_calendar_events(
+                ids, now.strftime("%Y-%m-%dT00:00:00"),
+                (now + _dtm.timedelta(days=8)).strftime("%Y-%m-%dT00:00:00"))
+            if not r.get("ok"):
+                return jsonify({"ok": False, "error": r.get("error")})
+            evs = r.get("events") or []
+            types = {}
+            for e in evs:
+                t = str((e or {}).get("type") or "?")
+                types[t] = types.get(t, 0) + 1
+            return jsonify({"ok": True, "periode": "8 prochains jours",
+                            "nb_events": len(evs), "types": types,
+                            "extraits": evs[:12]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
     @app.route("/mypuls/pushs_refresh_probe")
     def mypuls_pushs_refresh_probe():
         """DÉCOUVERTE (lecture seule) : trouve la requête envoyée par le bouton
