@@ -10087,6 +10087,10 @@ document.addEventListener('click', function(e){
       wrap.innerHTML = html;
       wrap.style.opacity = '1';
       wrap.style.pointerEvents = '';
+      /* le fragment arrive rendu en USD / Net par defaut : re-appliquer les
+         modes memorises, sinon changer de periode faisait retomber tout
+         l'apercu sur dollars/Net sans toucher aux boutons */
+      try { if(typeof fxApplyCur === 'function') fxApplyCur(); } catch(e3){}
       try { history.replaceState(null, '', '?tab=home&home_period=' + p); } catch(e2){}
     })
     .catch(function(){
@@ -13220,7 +13224,10 @@ def _render_home_dashboard_html() -> str:
         c = (currency or "").strip().upper()
         if "USD" in c or "$" in c:
             return a * (1 - OF_FEE)      # OnlyFans : brut -> net
-        return a * _eur_usd              # MyM (EUR) -> USD
+        # MyM aussi est du BRUT scrapé : mêmes règles que OnlyFans, sinon la
+        # carte MyM affichait un « net » jamais déduit des 26 % (et le mode
+        # Brut le re-gonflait par-dessus)
+        return a * (1 - MYM_FEE) * _eur_usd
 
     # Modèles qu'on ne suit plus : leurs transactions sont IGNORÉES partout
     # (total, cartes par type, segments). Pour en retirer une : l'ajouter ici.
@@ -13311,10 +13318,14 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"</div>"
         )
 
+    # Revenus manuels (Business) : saisis en EUR -> convertis, avant ils étaient
+    # ajoutés tels quels à un total en USD
+    _manual_usd = float(manual_total or 0) * _eur_usd
+
     # Total = TOUTES les transactions converties (+ revenus manuels).
     # On ne somme PAS type_totals : un libellé inattendu ne tomberait dans aucune
     # catégorie et serait perdu du total sans qu'on le voie.
-    _total_usd = float(manual_total or 0) + sum(
+    _total_usd = _manual_usd + sum(
         _tx_usd(t.get("amount", 0), t.get("currency"))
         for t in (mp_data.get("transactions", []) or [])
         if not _model_match(t.get("creator"), EXCLUDED_MODELS))
@@ -13354,13 +13365,23 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     try:
         import mypuls as _mp_api
         if _mp_api.api_configured():
-            _ov = _mp_api.api_overview(start.isoformat(), end.isoformat(), _eur_usd)
+            _ov = _mp_api.api_overview(start.isoformat(), end.isoformat(), _eur_usd,
+                                       exclude=EXCLUDED_MODELS)
             if _ov.get("ok"):
                 type_totals = {k: float(_ov["types"].get(k, 0.0)) for k in type_totals}
                 _seg = {k: float(_ov["segments"].get(k, 0.0)) for k in _seg}
-                _total_usd = float(_ov.get("total_usd") or 0) + float(manual_total or 0)
+                _total_usd = float(_ov.get("total_usd") or 0) + _manual_usd
                 _of_unknown = set()      # l'API donne la plateforme : plus d'inconnue
                 _api_src = True
+                # l'API a répondu : le bandeau « cookies expirés » n'a plus de sens
+                warning = ""
+                if _ov.get("errors"):
+                    warning = (
+                        "<div style='padding:10px 14px;background:rgba(251,191,36,.08);"
+                        "border:1px solid rgba(251,191,36,.3);border-radius:10px;"
+                        "margin-bottom:18px;font-size:12.5px;color:#fbbf24'>"
+                        f"⚠ Total PARTIEL : {len(_ov['errors'])} créatrice(s) en erreur "
+                        "— recharge dans une minute pour le chiffre complet.</div>")
                 # brut par TYPE : chaque part remontée au taux de sa plateforme
                 _t_of = _ov.get("types_of") or {}
                 _t_mym = _ov.get("types_mym") or {}
@@ -13371,9 +13392,12 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         log.warning(f"MyPuls API overview: {_e}")
 
 
-    # Brut TOTAL estimé (pour la carte héro) : chaque segment remonté à son taux
+    # Brut TOTAL estimé (pour la carte héro) : chaque segment remonté à son taux,
+    # + les revenus manuels (sans frais plateforme : net = brut), sinon le mode
+    # Brut « perdait » ces revenus par rapport au mode Net
     _total_brut = (_seg["mym"] / (1 - MYM_FEE)
-                   + (_seg["of_fr"] + _seg["of_us"]) / (1 - OF_FEE))
+                   + (_seg["of_fr"] + _seg["of_us"]) / (1 - OF_FEE)
+                   + _manual_usd)
 
     def _seg_card(label, value, color, fee=0.0):
         # data-brut = net / (1 - commission) : OF 20 %, MyM 26 %. Pas de

@@ -212,7 +212,7 @@ OF_US_CREATOR_IDS = {3107, 3108}   # Jessye, Khloe
 
 
 def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
-                 force: bool = False) -> dict:
+                 force: bool = False, exclude=None) -> dict:
     """Revenus agrégés via l'API officielle, sur une période.
 
     IMPORTANT : l'API renvoie déjà du NET (frais plateforme déduits) — on
@@ -220,7 +220,9 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     convertis en USD. Retourne {ok, total_usd, segments, types, creators}.
     """
     import time as _t
-    key = f"{date_from}|{date_to}|{eur_usd}"
+    # modèles écartées (ex bella) : mêmes règles de match que le chemin scraping
+    _excl = {re.sub(r"[^a-z0-9]", "", str(x).lower()) for x in (exclude or set())}
+    key = f"{date_from}|{date_to}|{eur_usd}|{','.join(sorted(_excl))}"
     hit = _API_OVERVIEW_CACHE.get(key)
     if hit and not force and (_t.time() - hit[0]) < _API_OVERVIEW_TTL:
         return hit[1]
@@ -246,6 +248,9 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     for c in creators:
         if not c.get("active"):
             continue
+        _ps = re.sub(r"[^a-z0-9]", "", str(c.get("pseudo") or "").lower())
+        if _excl and any(_ps == e or _ps.startswith(e) for e in _excl):
+            continue      # modèle écartée (le scraping l'excluait, l'API doit aussi)
         r = api_creator_stats_cached(c["id"], date_from, date_to)
         if not r.get("ok"):
             errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")
@@ -274,9 +279,12 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
            "types_of": {k: round(v, 2) for k, v in types_of.items()},
            "types_mym": {k: round(v, 2) for k, v in types_mym.items()},
            "creators": per_creator, "errors": errors}
-    _API_OVERVIEW_CACHE[key] = (_t.time(), out)
-    if len(_API_OVERVIEW_CACHE) > 40:
-        _API_OVERVIEW_CACHE.clear()
+    # un agrégat AMPUTÉ (créatrice en 429/timeout) n'est jamais mis en cache :
+    # sinon un total partiel s'affichait comme complet pendant 5 minutes
+    if not errors:
+        _API_OVERVIEW_CACHE[key] = (_t.time(), out)
+        if len(_API_OVERVIEW_CACHE) > 40:
+            _API_OVERVIEW_CACHE.clear()
     return out
 
 
