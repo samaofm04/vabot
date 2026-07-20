@@ -29755,7 +29755,14 @@ def create_app():
         applied = sfs_setup.autofill_mypuls_if_stale(force=True)
         if applied == 0:
             return jsonify({"ok": True, "applied": 0, "note": "MyPuls non configure ou pas de donnees"})
-        return jsonify({"ok": True, "applied": applied})
+        # diagnostic : quels noms ont été réellement parsés (permet de voir
+        # si une créatrice manque à cause du parsing de SA carte)
+        noms = []
+        try:
+            noms = sorted(sfs_setup.fetch_mypuls_subscribers().keys())
+        except Exception:
+            pass
+        return jsonify({"ok": True, "applied": applied, "noms": noms})
 
     @app.route("/sfssetup/generate", methods=["GET"])
     def sfssetup_generate():
@@ -29858,6 +29865,14 @@ def create_app():
             if not targets:
                 return jsonify({"ok": True, "pushs": [],
                                 "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
+            # au passage : compteurs d'abonnés du Setup rafraîchis si périmés
+            # (TTL interne) — le tri par abonnés de la sidebar reste à jour
+            # sans que l'utilisateur clique quoi que ce soit
+            try:
+                import sfs_setup as _sfs_auto
+                _sfs_auto.autofill_mypuls_if_stale()
+            except Exception:
+                pass
             all_pushs = []
             for ident, label, cid in targets:
                 # Avant : max_pages=1 -> seulement la 1re page (les plus recents),

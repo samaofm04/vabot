@@ -510,6 +510,15 @@ def start_pushs_refresh_daily(hour: int = 0, minute: int = 5) -> bool:
                     _t.sleep(120)              # laisser MyPuls resynchroniser
                     if api_configured():
                         api_sfs_inbox(force=True)
+                    # compteurs d'abonnés du Setup SFS : mis à jour chaque nuit
+                    # (le tri de la sidebar par audience reste juste tout seul)
+                    try:
+                        import sfs_setup
+                        n = sfs_setup.autofill_mypuls_if_stale(force=True)
+                        print(f"[refresh-pushs] compteurs abonnés : {n} identité(s) à jour",
+                              flush=True)
+                    except Exception as e:
+                        print(f"[refresh-pushs] autofill subs: {e}", flush=True)
             except Exception as e:
                 print(f"[refresh-pushs] nightly: {type(e).__name__}: {e}", flush=True)
 
