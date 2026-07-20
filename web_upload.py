@@ -11785,13 +11785,17 @@ def _render_sfs_html() -> str:
         "<button type='button' id='sfs-actions-btn' onclick='toggleSfsActions()' "
         "style='background:#26263a;color:#e2e8f0;border:1px solid #3a3a4e;padding:8px 16px;border-radius:9px;cursor:pointer;font-weight:800;font-size:13px'>⚙ Actions ▾</button>"
         "<div id='sfs-actions-menu' style='display:none;position:absolute;right:0;top:112%;background:#1b1b26;border:1px solid #2e2e3e;border-radius:10px;padding:6px;z-index:60;min-width:250px;box-shadow:0 10px 28px rgba(0,0,0,.55)'>"
-        "<button type='button' id='sfs-mym-sync' onclick='toggleSfsActions();loadSfsPushes()' "
+        "<button type='button' id='sfs-mym-sync' onclick='toggleSfsActions();loadSfsPushes(true)' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#e9d5ff;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
         "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>🔄 Sync MyPuls</button>"
         "<button type='button' id='sfs-maj-btn' onclick='toggleSfsActions();majAllPushs()' "
         "title='Force MyPuls à rafraîchir les pushs de TOUTES les créatrices, puis resynchronise ici' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#fbbf24;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
         "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>⟳ MAJ profils (tous)</button>"
+        "<button type='button' id='sfs-showall-btn' onclick='toggleSfsShowAll()' "
+        "title='Afficher aussi les push classiques (sans @ ni lien mym.fans)' "
+        "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#cbd5e1;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>👁 Push hors-SFS : OFF</button>"
         "<button type='button' id='sfs-bilan-btn' onclick='toggleSfsActions();toggleSfsBilan()' "
         "title='Qui respecte la règle 1 SFS (@) tous les 2 jours — par modèle et au global' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#93c5fd;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
@@ -11808,11 +11812,7 @@ def _render_sfs_html() -> str:
         "<input type='file' id='sfs-mym-har-file' accept='.har,application/json' style='display:none' onchange='importMypulsHar(this)'>"
         "<input type='file' id='sfs-of-har' accept='.har,application/json' style='display:none' onchange='importOfHar(this)'>"
         "</div>"
-        "<label style='display:flex;align-items:center;gap:6px;font-size:11px;color:#888;margin-bottom:8px;cursor:pointer'>"
-        "<input type='checkbox' id='sfs-show-all' onchange='window.__sfsShowAll=this.checked; if(typeof renderSfsPushes===\"function\") renderSfsPushes();' style='accent-color:#a855f7'>"
-        "Afficher aussi les push hors-SFS (messages fans, sans lien mym.fans ni @)"
-        "</label>"
-        # ligne de statut : VIDE et masquée par défaut (ne sert que pendant une
+                # ligne de statut : VIDE et masquée par défaut (ne sert que pendant une
         # synchro / MAJ) — les phrases de recap « N SFS placés... » sont retirées
         "<div id='sfs-pushs-list' style='display:none;color:#888;font-size:13px'></div>"
         # SFS RECUS : DM entrants des fans/partenaires, lus via l'API MyPuls
@@ -11854,6 +11854,16 @@ def _render_sfs_html() -> str:
         "  var m=document.getElementById('sfs-actions-menu');"
         "  if(m && m.style.display==='block' && !e.target.closest('#sfs-actions-menu') && !e.target.closest('#sfs-actions-btn')){ m.style.display='none'; }"
         "});"
+        "function sfsShowAllLabel(){"
+        "  var b=document.getElementById('sfs-showall-btn'); if(!b) return;"
+        "  b.innerHTML='👁 Push hors-SFS : '+(window.__sfsShowAll?'<b style=\"color:#22c55e\">ON</b>':'<b style=\"color:#8890a4\">OFF</b>');"
+        "}"
+        "function toggleSfsShowAll(){"
+        "  window.__sfsShowAll=!window.__sfsShowAll;"
+        "  try{ localStorage.setItem('sfsShowAll', window.__sfsShowAll?'1':''); }catch(e){}"
+        "  sfsShowAllLabel();"
+        "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "}"
         "function toggleSfsBilan(){"
         "  var p=document.getElementById('sfs-bilan-panel'); if(!p) return;"
         "  if(p.style.display==='none'||!p.style.display){ renderSfsBilan(); p.style.display=''; p.scrollIntoView({behavior:'smooth',block:'start'}); }"
@@ -11921,7 +11931,7 @@ def _render_sfs_html() -> str:
         "      left-=10;"
         "      if(left>0){ if(box) box.innerHTML='🟠 MyPuls resynchronise ses données — resync auto dans '+left+' s…'; return; }"
         "      clearInterval(iv); done(); if(box){ box.innerHTML=''; box.style.display='none'; }"
-        "      if(typeof loadSfsPushes==='function') loadSfsPushes();"
+        "      if(typeof loadSfsPushes==='function') loadSfsPushes(true);"
         "      if(typeof loadSfsInbox==='function') loadSfsInbox(true);"
         "    },10000);"
         "  }catch(e){ if(box) box.innerHTML='❌ '+e; done(); }"
@@ -12064,21 +12074,21 @@ def _render_sfs_html() -> str:
         "  var hint=zone.querySelector('.proof-hint'); if(hint){ hint.textContent='✓ '+input.files[0].name; hint.style.color='#22c55e'; }"
         "  zone.classList.add('filled'); zone.style.borderColor='#22c55e';"
         "}"
-        "async function loadSfsPushes(){"
+        "async function loadSfsPushes(force){"
         "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
-        "  box.style.display=''; box.innerHTML='⏳ Synchro MyPuls…';"
+        "  if(force){ box.style.display=''; box.innerHTML='⏳ Synchro MyPuls…'; }"
         "  let subs=-1;"
-        "  try{ const rs=await fetch('/sfssetup/fetch_mypuls_subs'); const js=await rs.json(); if(js && js.ok) subs=js.applied||0; }catch(e){}"
+        "  if(force){ try{ const rs=await fetch('/sfssetup/fetch_mypuls_subs'); const js=await rs.json(); if(js && js.ok) subs=js.applied||0; }catch(e){} }"
         "  try{"
-        "    const r=await fetch('/sfssetup/mypuls_pushes'); const j=await r.json();"
-        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
+        "    const r=await fetch('/sfssetup/mypuls_pushes'+(force?'?refresh=1':'')); const j=await r.json();"
+        "    if(!j.ok){ if(force){ box.innerHTML='❌ '+(j.error||'Erreur'); } return; }"
         "    const ps=j.pushs||[];"
         "    window.__sfsPushCache=ps;"
         "    try{ sessionStorage.setItem('sfsPushCache', JSON.stringify(ps)); }catch(e){}"
         "    renderSfsPushes();"
         # succès : pas de phrase de recap, la ligne de statut se replie
-        "    if(!ps.length && j.note){ box.style.display=''; box.innerHTML=j.note; }"
-        "  }catch(err){ box.style.display=''; box.innerHTML='❌ '+err; }"
+        "    if(force && !ps.length && j.note){ box.style.display=''; box.innerHTML=j.note; }"
+        "  }catch(err){ if(force){ box.style.display=''; box.innerHTML='❌ '+err; } }"
         "}"
         "function mypulsHarPick(){ var el=document.getElementById('sfs-mym-har-file'); if(el) el.click(); }"
         "async function importMypulsHar(input){"
@@ -12089,7 +12099,7 @@ def _render_sfs_html() -> str:
         "    var r=await fetch('/mypuls/import_har',{method:'POST',body:fd}); var j=await r.json();"
         "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); input.value=''; return; }"
         "    if(box) box.innerHTML='✅ Cookies MyPuls à jour ('+(j.email||'?')+').'+(j.note||'')+' Synchro en cours…';"
-        "    setTimeout(loadSfsPushes, 600);"
+        "    setTimeout(function(){ loadSfsPushes(true); }, 600);"
         "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
         "  input.value='';"
         "}"
@@ -12173,7 +12183,10 @@ def _render_sfs_html() -> str:
         "}"
         "document.addEventListener('DOMContentLoaded',function(){"
         "  try{ var c=sessionStorage.getItem('sfsPushCache'); if(c){ window.__sfsPushCache=JSON.parse(c); } }catch(e){}"
+        "  try{ window.__sfsShowAll = !!localStorage.getItem('sfsShowAll'); }catch(e){}"
+        "  sfsShowAllLabel();"
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "  if(typeof loadSfsPushes==='function') loadSfsPushes(false);"
         "  if(typeof loadSfsInbox==='function'){"
         "    loadSfsInbox(false);"
         "    setInterval(function(){ loadSfsInbox(false); }, 180000);"
@@ -29778,11 +29791,24 @@ def create_app():
     def sfssetup_mypuls_pushes():
         """Lecture seule : liste les push (messages de masse) envoyés sur MyPuls
         pour les modèles SFS MyM. Source : /pushs/page/N par créateur, paginé
-        jusqu'à couvrir ~3 mois (le calendrier permet de remonter les mois)."""
+        jusqu'à couvrir ~3 mois (le calendrier permet de remonter les mois).
+
+        MÉMOIRE : le dernier résultat est persisté sur disque et resservi
+        instantanément (< 30 min, ou ?refresh=1 pour forcer le live) — le
+        calendrier se remplit à l'ouverture du site sans cliquer Sync."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
+        _cache_f = DATA_DIR / "sfs_pushs_cache.json"
+        if not request.args.get("refresh"):
+            try:
+                _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
+                if time.time() - float(_blob.get("ts") or 0) < 1800:
+                    return jsonify({"ok": True, "pushs": _blob.get("pushs") or [],
+                                    "cached": True})
+            except Exception:
+                pass
         try:
             import mypuls
         except Exception as e:
@@ -29833,6 +29859,23 @@ def create_app():
             all_pushs.sort(key=_key, reverse=True)
             # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
             # pile '200 push au total') et les plus anciens etaient jetes.
+            if not all_pushs:
+                # collecte vide (cookies morts ?) -> ressert la dernière bonne
+                # version plutôt qu'un calendrier soudainement vide
+                try:
+                    _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
+                    if _blob.get("pushs"):
+                        return jsonify({"ok": True, "pushs": _blob["pushs"],
+                                        "cached": True, "stale": True})
+                except Exception:
+                    pass
+            else:
+                try:
+                    _cache_f.write_text(json.dumps(
+                        {"ts": time.time(), "pushs": all_pushs[:2000]},
+                        ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
             return jsonify({"ok": True, "pushs": all_pushs[:2000],
                             "truncated": len(all_pushs) > 2000})
         except Exception as e:
