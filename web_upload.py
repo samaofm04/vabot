@@ -29092,6 +29092,50 @@ def create_app():
             out["session"] = {"erreur": str(e)}
         return jsonify(out)
 
+    @app.route("/mypuls/pushs_refresh_probe")
+    def mypuls_pushs_refresh_probe():
+        """DÉCOUVERTE (lecture seule) : trouve la requête envoyée par le bouton
+        orange « MAJ » de la page Pushs MyPuls, pour pouvoir l'automatiser
+        chaque nuit. Récupère le HTML de /pushs (cookies du VPS) et liste les
+        endpoints candidats (refresh/sync/update...) + le contexte du bouton."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+            if not mypuls.is_configured():
+                return jsonify({"ok": False, "error": "Cookies MyPuls absents"})
+            s = mypuls._make_session()
+            cr = mypuls.list_creators()
+            ids = list((cr.get("creators") or {}).items())
+            if not ids:
+                return jsonify({"ok": False, "error": f"Aucune créatrice : {cr.get('error')}"})
+            name, cid = ids[0]
+            s.get(f"{mypuls.BASE_URL}/switch-creator/{int(cid)}?from=app_pushs",
+                  timeout=20, allow_redirects=True)
+            r = s.get(f"{mypuls.BASE_URL}/pushs", timeout=20)
+            if r.status_code != 200 or mypuls._detect_login_redirect(r.text):
+                return jsonify({"ok": False, "error": f"HTTP {r.status_code} / login"})
+            html = r.text
+            hits = set()
+            for pat in (r"(?:href|action|data-url|data-action|data-href|data-route)="
+                        r"[\"']([^\"']*(?:refresh|sync|update|scrap|reload|maj)[^\"']*)[\"']",
+                        r"fetch\([\"']([^\"']+)[\"']",
+                        r"\$\.(?:get|post|ajax)\([\"']([^\"']+)[\"']",
+                        r"axios\.[a-z]+\([\"']([^\"']+)[\"']"):
+                for m in re.findall(pat, html, re.I):
+                    hits.add(m)
+            out = {"ok": True, "creatrice_test": name,
+                   "candidats": sorted(hits)[:40]}
+            i = html.find("MAJ")
+            if i < 0:
+                i = html.lower().find("nouveau push")
+            out["contexte_bouton"] = (html[max(0, i - 900):i + 300]
+                                      .replace("\n", " ")[:1400] if i >= 0 else "non trouvé")
+            return jsonify(out)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
     @app.route("/mypuls/save_cookies", methods=["POST"])
     def mypuls_save_cookies():
         if not is_auth():
