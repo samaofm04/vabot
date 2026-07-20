@@ -308,31 +308,34 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     except Exception:
         return out
 
-    pattern = _re.compile(
-        r'<h5\s+class="[^"]*fw-bold[^"]*">([^<]+)</h5>'
-        r'.*?'
-        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
-        r'<div\s+class="stat-lbl">Abonn[eé]s</div>'
-        r'.*?'
-        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
-        r'<div\s+class="stat-lbl">Anciens</div>'
-        r'.*?'
-        r'<div\s+class="stat-val">([\d,. ]+)</div>\s*'
-        r'<div\s+class="stat-lbl">Int[eé]ress[eé]s</div>',
-        _re.DOTALL,
-    )
-
-    def _clean_num(v: str) -> str:
-        # Retire espaces et separateurs de milliers
-        return _re.sub(r'[\s.,]', '', v).strip()
-
-    for m in pattern.finditer(r.text):
-        name = m.group(1).strip()
+    # Parse CARTE PAR CARTE (split sur creator-card) et stats indépendantes.
+    # L'ancienne regex exigeait les 3 stats dans l'ordre au sein d'un .*? DOTALL
+    # global : une carte sans stats faisait DÉBORDER le match sur la carte
+    # suivante -> la créatrice héritait des chiffres de sa voisine, et la
+    # voisine disparaissait (c'est pour ça qu'il manquait des créatrices par
+    # paires : amelia_xoxo, klarahockey...).
+    chunks = _re.split(r'<div\s+class="creator-card', r.text)
+    for chunk in chunks[1:]:
+        nm = _re.search(r'<h5\s+class="[^"]*fw-bold[^"]*">([^<]+)</h5>', chunk)
+        if not nm:
+            continue
+        name = nm.group(1).strip()
         if not name:
             continue
-        out[name.lower().strip()] = {
-            "abonnes": _clean_num(m.group(2)),
-            "anciens": _clean_num(m.group(3)),
-            "interesses": _clean_num(m.group(4)),
-        }
+        vals: Dict[str, str] = {}
+        for m2 in _re.finditer(
+                r'<div\s+class="stat-val">\s*([^<]*?)\s*</div>\s*'
+                r'<div\s+class="stat-lbl">\s*([^<]+?)\s*</div>', chunk):
+            v = _re.sub(r'[\s., \xa0]', '', m2.group(1))
+            if not v.isdigit():
+                continue                     # '—', vide, 'N/A'... -> stat absente
+            lbl = m2.group(2).lower()
+            if "ancien" in lbl:              # 'Anciens' / 'Anciens abonnés'
+                vals["anciens"] = v
+            elif "abonn" in lbl:
+                vals["abonnes"] = v
+            elif "inter" in lbl or "intér" in lbl:
+                vals["interesses"] = v
+        if vals:                             # partiel accepté (autofill ne pose
+            out[name.lower().strip()] = vals  # que les clés présentes)
     return out
