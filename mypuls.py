@@ -437,6 +437,88 @@ def api_sfs_inbox(force: bool = False) -> dict:
     return out
 
 
+def refresh_pushs(creator_id) -> Dict[str, Any]:
+    """Déclenche le bouton orange « MAJ » de la page Pushs d'une créatrice.
+
+    Endpoint découvert par la sonde : /creator/{id}/refresh-push (attribut rel
+    du bouton #action-btn). Demande à MYPULS de resynchroniser SES données —
+    aucun appel vers OnlyFans/MyM de notre côté. POST d'abord, repli GET.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Session MyPuls indisponible"}
+    url = f"{BASE_URL}/creator/{int(creator_id)}/refresh-push"
+    try:
+        r = s.post(url, timeout=TIMEOUT,
+                   headers={"X-Requested-With": "XMLHttpRequest"})
+        if r.status_code in (404, 405):
+            r = s.get(url, timeout=TIMEOUT,
+                      headers={"X-Requested-With": "XMLHttpRequest"})
+        _save_rotated_cookies(s)
+        # un refresh déjà en cours / cooldown peut répondre autre chose que 200 :
+        # on remonte le statut, l'appelant loggue sans s'arrêter
+        return {"ok": r.status_code in (200, 202), "status": r.status_code,
+                "body": (r.text or "")[:160]}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def refresh_all_pushs(pause_s: float = 4.0) -> Dict[str, Any]:
+    """Clique « MAJ » pour TOUTES les créatrices, avec une pause entre chaque
+    (on reste poli avec MyPuls). Retourne le détail par créatrice."""
+    import time as _t
+    cr = list_creators()
+    creators = cr.get("creators") or {}
+    if not creators:
+        return {"ok": False, "error": cr.get("error") or "Aucune créatrice"}
+    detail, ok_n = {}, 0
+    for name, cid in creators.items():
+        r = refresh_pushs(cid)
+        detail[name] = r.get("status") or r.get("error")
+        if r.get("ok"):
+            ok_n += 1
+        _t.sleep(max(1.0, pause_s))
+    print(f"[refresh-pushs] {ok_n}/{len(creators)} créatrices rafraîchies", flush=True)
+    return {"ok": ok_n > 0, "reussites": ok_n, "total": len(creators), "detail": detail}
+
+
+_PUSH_REFRESH_DAILY = {"on": False}
+
+
+def start_pushs_refresh_daily(hour: int = 0, minute: int = 5) -> bool:
+    """Chaque nuit à 00h05 (heure serveur) : clique « MAJ » pour chaque
+    créatrice, attend 2 min que MyPuls resynchronise, puis recollecte les SFS
+    reçus. Plus jamais de pushs figés depuis une semaine."""
+    if _PUSH_REFRESH_DAILY["on"]:
+        return False
+    import threading
+    import time as _t
+    import datetime as _dt
+
+    def _loop():
+        while True:
+            now = _dt.datetime.now()
+            nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if nxt <= now:
+                nxt += _dt.timedelta(days=1)
+            _t.sleep(max(60, (nxt - now).total_seconds()))
+            try:
+                if is_configured():
+                    refresh_all_pushs()
+                    _t.sleep(120)              # laisser MyPuls resynchroniser
+                    if api_configured():
+                        api_sfs_inbox(force=True)
+            except Exception as e:
+                print(f"[refresh-pushs] nightly: {type(e).__name__}: {e}", flush=True)
+
+    threading.Thread(target=_loop, daemon=True, name="pushs-refresh-daily").start()
+    _PUSH_REFRESH_DAILY["on"] = True
+    print(f"[refresh-pushs] job nocturne armé ({hour:02d}h{minute:02d})", flush=True)
+    return True
+
+
 _SFS_POLLER = {"on": False}
 
 

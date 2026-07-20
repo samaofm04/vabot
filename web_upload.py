@@ -27206,6 +27206,13 @@ def create_app():
         _mp_inbox.start_sfs_inbox_poller(300)
     except Exception as _e:
         log.warning(f"sfs-inbox poller non démarré: {_e}")
+    # Chaque nuit à 00h05 : « clic » MAJ des pushs MyPuls pour chaque créatrice
+    # (sans ça, MyPuls sert des pushs figés tant qu'on ne clique pas le bouton)
+    try:
+        import mypuls as _mp_rf
+        _mp_rf.start_pushs_refresh_daily(0, 5)
+    except Exception as _e:
+        log.warning(f"refresh-pushs nocturne non démarré: {_e}")
     # Auto-récupération des comptes JB depuis Google Sheets (une seule fois)
     try:
         import sheets_sync as _ss
@@ -29091,6 +29098,35 @@ def create_app():
         except Exception as e:
             out["session"] = {"erreur": str(e)}
         return jsonify(out)
+
+    @app.route("/mypuls/refresh_pushs_now")
+    def mypuls_refresh_pushs_now():
+        """Déclenche MAINTENANT le « clic MAJ » pour toutes les créatrices
+        (ce que le job nocturne fera chaque nuit à 00h05). Tourne en fond :
+        ~1 min pour 15 créatrices, puis recollecte des SFS reçus."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import threading
+
+        def _run():
+            try:
+                import mypuls
+                r = mypuls.refresh_all_pushs()
+                print(f"[refresh-pushs] manuel: {r.get('reussites')}/{r.get('total')} "
+                      f"détail={r.get('detail')}", flush=True)
+                import time as _t
+                _t.sleep(120)
+                if mypuls.api_configured():
+                    mypuls.api_sfs_inbox(force=True)
+            except Exception as e:
+                print(f"[refresh-pushs] manuel: {e}", flush=True)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return jsonify({"ok": True,
+                        "message": "Rafraîchissement lancé pour toutes les créatrices "
+                                   "(~1 min). Vérifie l'heure « MAJ » sur MyPuls dans "
+                                   "2-3 min, puis relance un Sync MyPuls sur la page SFS."})
 
     @app.route("/mypuls/pushs_refresh_probe")
     def mypuls_pushs_refresh_probe():
