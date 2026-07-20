@@ -357,6 +357,86 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
     return out
 
 
+SFS_INBOX_FILE = DATA_DIR / "sfs_inbox.json"
+_SFS_INBOX_CACHE: Dict[str, Any] = {}
+_SFS_INBOX_TTL = 120
+
+
+def api_sfs_inbox(force: bool = False) -> dict:
+    """Messages ENTRANTS des fans (propositions SFS potentielles), via l'API.
+
+    Source : GET /creators/{id}/conversations/unread pour chaque créatrice
+    active (1 appel chacune — MyM ET OnlyFans, l'API couvre les deux). L'API ne
+    liste QUE les non-lues : chaque passage FUSIONNE dans data/sfs_inbox.json
+    (jamais d'écrasement) pour qu'un message déjà lu par un chatteur ne
+    disparaisse pas de l'historique. Cache mémoire 2 min.
+    Retourne {ok, items:[{key, creator, platform, fan_id, fan_name, content,
+    at, seen_at}]} trié du plus récent au plus ancien.
+    """
+    import time as _t
+    hit = _SFS_INBOX_CACHE.get("v")
+    if hit and not force and (_t.time() - _SFS_INBOX_CACHE.get("t", 0)) < _SFS_INBOX_TTL:
+        return hit
+    if not api_configured():
+        return {"ok": False, "error": "Token API MyPuls absent"}
+    try:
+        store = json.loads(SFS_INBOX_FILE.read_text(encoding="utf-8"))
+        if not isinstance(store, dict):
+            store = {}
+    except Exception:
+        store = {}
+    items: Dict[str, Any] = store.get("items") or {}
+    errors = []
+    nouveaux = 0
+    for c in api_creators_cached():
+        if not c.get("active"):
+            continue
+        r = api_get(f"creators/{c['id']}/conversations/unread")
+        if not r.get("ok"):
+            errors.append(f"{c.get('pseudo') or c['id']}: {str(r.get('error'))[:60]}")
+            continue
+        data = ((r.get("data") or {}).get("data")) or []
+        for conv in data:
+            if not isinstance(conv, dict):
+                continue
+            lm = conv.get("last_message") or {}
+            if (lm.get("from") or "") != "fan":
+                continue                      # on ne garde que l'ENTRANT
+            key = f"{c['id']}|{conv.get('chat_ref') or conv.get('fan_id')}|{lm.get('at') or ''}"
+            if key in items:
+                continue
+            items[key] = {
+                "key": key,
+                "creator": (c.get("pseudo") or "").strip() or f"#{c['id']}",
+                "creator_id": c.get("id"),
+                "platform": c.get("platform") or "",
+                "fan_id": conv.get("fan_id"),
+                "fan_name": (conv.get("fan_name") or "").strip(),
+                "content": str(lm.get("content") or "")[:600],
+                "at": lm.get("at") or "",
+                "unread_count": conv.get("unread_count") or 0,
+                "seen_at": int(_t.time()),
+            }
+            nouveaux += 1
+    if nouveaux:
+        try:
+            # borne : garder les 3000 plus récents (par date de découverte)
+            if len(items) > 3000:
+                keep = sorted(items.values(), key=lambda x: x.get("seen_at", 0),
+                              reverse=True)[:3000]
+                items = {x["key"]: x for x in keep}
+            SFS_INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+            SFS_INBOX_FILE.write_text(json.dumps({"items": items}, ensure_ascii=False),
+                                      encoding="utf-8")
+        except Exception as e:
+            errors.append(f"sauvegarde: {e}")
+    lst = sorted(items.values(), key=lambda x: str(x.get("at") or ""), reverse=True)
+    out = {"ok": True, "items": lst[:400], "nouveaux": nouveaux, "errors": errors}
+    _SFS_INBOX_CACHE["v"] = out
+    _SFS_INBOX_CACHE["t"] = _t.time()
+    return out
+
+
 def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg = load_config()
     cfg["PHPSESSID"] = (phpsessid or "").strip()

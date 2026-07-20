@@ -11832,6 +11832,16 @@ def _render_sfs_html() -> str:
         "<div id='sfs-pushs-list' style='color:#888;font-size:13px'>"
         "Clique sur « Sync MyPuls » : met à jour les counts du setup (abonnés/anciens/intéressés) ET place tes push dans le calendrier (repère orange par jour)."
         "</div>"
+        # SFS RECUS : DM entrants des fans/partenaires, lus via l'API MyPuls
+        # (MyM ET OnlyFans). Historique accumule cote serveur (sfs_inbox.json).
+        "<div style='margin-top:12px;border-top:1px solid #262636;padding-top:10px'>"
+        "<div style='display:flex;align-items:center;gap:10px'>"
+        "<span style='font-weight:800;font-size:13px;color:#e879f9'>📩 SFS reçus (messages entrants)</span>"
+        "<button type='button' onclick='loadSfsInbox(true)' "
+        "style='background:#26263a;color:#cbd5e1;border:1px solid #333;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;margin-left:auto'>↻ Actualiser</button>"
+        "</div>"
+        "<div id='sfs-inbox-list' style='color:#889;font-size:12.5px;margin-top:6px'>⏳ Chargement…</div>"
+        "</div>"
         "</div>"
     )
     rows.append(
@@ -11839,12 +11849,52 @@ def _render_sfs_html() -> str:
         "window.__sfsPushCache=null;"
         "window.__sfsShowAll=false;"
         "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /@[a-z0-9_.]/i.test(d); }"
+        "function sfsEsc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }"
+        "async function loadSfsInbox(force){"
+        "  var box=document.getElementById('sfs-inbox-list'); if(!box) return;"
+        "  box.innerHTML='⏳ Synchro des messages entrants…';"
+        "  try{"
+        "    var r=await fetch('/sfssetup/sfs_inbox'+(force?'?refresh=1':'')); var j=await r.json();"
+        "    if(!j.ok){ box.innerHTML='❌ '+(j.error||'API indisponible'); return; }"
+        "    window.__sfsInbox=j.items||[];"
+        "    renderSfsInbox();"
+        "  }catch(e){ box.innerHTML='❌ '+e; }"
+        "}"
+        "function renderSfsInbox(){"
+        "  var box=document.getElementById('sfs-inbox-list'); if(!box || !window.__sfsInbox) return;"
+        "  var plat=(window.__currentSfsPlatform==='MYM')?'mym':'onlyfans';"
+        "  var items=[], hidden=0;"
+        "  window.__sfsInbox.forEach(function(it){"
+        "    if((it.platform||'')!==plat) return;"
+        "    if(!window.__sfsShowAll && !isSfsPush(it.content)){ hidden++; return; }"
+        "    items.push(it);"
+        "  });"
+        "  if(!items.length){"
+        "    box.innerHTML='Aucun SFS reçu côté '+(plat==='mym'?'MyM':'OnlyFans')"
+        "      +(hidden?(' · '+hidden+' message(s) hors-SFS masqué(s), coche la case pour les voir'):'')+'.';"
+        "    return;"
+        "  }"
+        "  var h='';"
+        "  items.slice(0,40).forEach(function(it){"
+        "    var d=(it.at||'').replace('T',' ').slice(0,16);"
+        "    h+='<div style=\"background:#101623;border-left:3px solid #e879f9;border-radius:6px;padding:7px 10px;margin-top:6px;font-size:12px\">'"
+        "      +'<div style=\"display:flex;gap:8px;font-weight:700;font-size:11px;flex-wrap:wrap\"><span style=\"color:#e879f9\">'+sfsEsc(it.creator)+'</span>'"
+        "      +'<span style=\"color:#667\">←</span><span style=\"color:#a5b4fc\">'+sfsEsc(it.fan_name||('fan #'+it.fan_id))+'</span>'"
+        "      +(it.unread_count>1?('<span style=\"color:#f59e0b\">('+it.unread_count+' non lus)</span>'):'')"
+        "      +'<span style=\"margin-left:auto;color:#556;font-weight:500\">'+sfsEsc(d)+'</span></div>'"
+        "      +'<div style=\"color:#cdd3e1;margin-top:3px;white-space:pre-wrap\">'+sfsEsc(it.content)+'</div></div>';"
+        "  });"
+        "  if(hidden){ h+='<div style=\"color:#889;font-size:11px;margin-top:6px\">'+hidden+' message(s) hors-SFS masqué(s) — coche la case pour les voir.</div>'; }"
+        "  if(items.length>40){ h+='<div style=\"color:#889;font-size:11px;margin-top:4px\">Affichage limité aux 40 plus récents ('+items.length+' au total).</div>'; }"
+        "  box.innerHTML=h;"
+        "}"
         "function renderSfsPushes(){"
         "  document.querySelectorAll('.sfs-push-bar').forEach(function(el){ el.remove(); });"
         "  var panel=document.getElementById('sfs-pushs-panel');"
         "  var plat=window.__currentSfsPlatform;"
         "  var onPlat=(plat==='MYM'||plat==='OF');"
         "  if(panel) panel.style.display=onPlat?'':'none';"
+        "  if(typeof renderSfsInbox==='function') renderSfsInbox();"
         "  var ttlEl=document.getElementById('sfs-pushs-title'); var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import');"
         "  if(plat==='OF'){ if(ttlEl)ttlEl.textContent='📨 Mes SFS OnlyFans (importés)'; if(bMym)bMym.style.display='none'; if(bOf)bOf.style.display=''; }"
         "  else if(plat==='MYM'){ if(ttlEl)ttlEl.textContent='📨 Mes push (MyPuls)'; if(bMym)bMym.style.display=''; if(bOf)bOf.style.display='none'; }"
@@ -12047,6 +12097,7 @@ def _render_sfs_html() -> str:
         "document.addEventListener('DOMContentLoaded',function(){"
         "  try{ var c=sessionStorage.getItem('sfsPushCache'); if(c){ window.__sfsPushCache=JSON.parse(c); } }catch(e){}"
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "  if(typeof loadSfsInbox==='function') loadSfsInbox(false);"
         "});"
         "</script>"
     )
@@ -29497,6 +29548,20 @@ def create_app():
         return jsonify({"ok": True, "items": len(parsed.get("items", [])),
                         "dates": len(parsed.get("counters", {})),
                         "data": {"items": parsed.get("items", []), "counters": parsed.get("counters", {})}})
+
+    @app.route("/sfssetup/sfs_inbox", methods=["GET"])
+    def sfssetup_sfs_inbox():
+        """Messages SFS REÇUS (DM entrants des fans/partenaires) via l'API.
+        Couvre MyM ET OnlyFans ; historique accumulé dans data/sfs_inbox.json."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls
+            return jsonify(mypuls.api_sfs_inbox(
+                force=bool(request.args.get("refresh"))))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
