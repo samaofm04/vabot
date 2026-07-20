@@ -11513,6 +11513,21 @@ def _render_sfs_html() -> str:
                     if re.sub(r"[^a-z0-9]", "", n.lower()) in _mym_keys]
     except Exception:
         pass
+    # Abonnés par nom (Setup SFS : 'abonnes' côté MyM, 'sub_total' côté OF,
+    # remplis par la synchro) -> tri de la sidebar par taille d'audience
+    _subs_by_name = {}
+    try:
+        import sfs_setup as _sfs_su
+        for _plat, _fld in (("mym", "abonnes"), ("of", "sub_total")):
+            for _k, _inf in (_sfs_su.all_info(_plat) or {}).items():
+                _digits = re.sub(r"[^0-9]", "", str((_inf or {}).get(_fld) or ""))
+                if _digits:
+                    _subs_by_name[_k.lower().strip()] = int(_digits)
+    except Exception:
+        pass
+    # plus d'abonnés d'abord ; sans compteur connu -> à la fin, ordre alpha
+    _mypuls_creators.sort(
+        key=lambda n: (-_subs_by_name.get(n.lower().strip(), -1), n.lower()))
     mypuls_creators_json = _json.dumps(_mypuls_creators)
     # Map identite -> modele MyPuls (relie la sidebar/filtre aux push MyPuls).
     # 1) mapping explicite (model_map) ; 2) sinon match par prefixe de nom
@@ -11684,7 +11699,10 @@ def _render_sfs_html() -> str:
         ident = it.get("identity", "")
         if ident:
             sfs_count_by_ident[ident] = sfs_count_by_ident.get(ident, 0) + 1
-    for ident in sorted(_list_content_identities()):  # masque Jessye (jailbreak-only)
+    # tri par abonnés décroissant (sans compteur -> fin de liste, alpha)
+    for ident in sorted(_list_content_identities(),
+                        key=lambda n: (-_subs_by_name.get(str(n).lower().strip(), -1),
+                                       str(n).lower())):  # masque Jessye (jailbreak-only)
         avatar = _identity_avatar_html(ident, size=36)
         count = sfs_count_by_ident.get(ident, 0)
         # Plateformes auxquelles cette identité appartient
@@ -11702,8 +11720,13 @@ def _render_sfs_html() -> str:
         # Onglet initial = OF -> le sous-titre montre le profil OF (Amelia,
         # Julia...), PAS le profil MyM (Amelia_xoxo, Julia_dv). Le switch
         # d'onglet met à jour le texte depuis data-model-mym / data-model-of.
+        _nsubs = _subs_by_name.get(ident.lower().strip())
+        _subs_line = (f"<span style='font-size:10px;color:#64748b'>"
+                      f"{_nsubs:,} abonnés</span>".replace(",", " ")
+                      if _nsubs else "")
         model_sub = (
             f"<span class='sfs-ident-sub' style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_of_name}</span>"
+            f"{_subs_line}"
         )
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
@@ -11754,7 +11777,12 @@ def _render_sfs_html() -> str:
             f"<div style='position:relative'>{_av}"
             f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
             f"</div>"
+            f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
             f"<span style='font-weight:600;font-size:13px;color:#fff'>{_cre}</span>"
+            + ((f"<span style='font-size:10px;color:#64748b'>"
+                f"{_subs_by_name.get(str(_cre).lower().strip()):,} abonnés</span>").replace(",", " ")
+               if _subs_by_name.get(str(_cre).lower().strip()) else "")
+            + f"</div>"
             f"{_cbadge}"
             f"</div>"
         )
