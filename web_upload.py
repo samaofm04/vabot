@@ -14098,7 +14098,9 @@ body.light .mypuls-bar{background:#e5e7eb}
     # Construire la map JSON {chatter: {type, network, address, has_screenshot, commission}}
     import json as _json_mod
     crypto_data_js = {}
-    for c in chatters[:30]:
+    # TOUS les chatteurs (pas [:30]) : le recalcul client du Total a payer somme
+    # sur byChat entier et a besoin de la commission des rangs 31+
+    for c in chatters:
         m = mypuls.get_chatter_meta(c["name"])
         crypto_data_js[c["name"]] = {
             "type": m.get("crypto_type", "") or "",
@@ -14367,7 +14369,6 @@ function mpRecompute(){
     // n'est PAS convertie (même règle que le calcul serveur _pay_usd)
     var pct = (window.__mpCryptoData[name] && window.__mpCryptoData[name].commission_pct) || 0;
     var payUsd = ((data.ca_eur || 0) * rate + (data.ca_usd || 0)) * pct / 100;
-    totalPayUsd += payUsd;
     var cellPay = row.querySelector('.mp-cell-pay');
     if(cellPay){
       cellPay.textContent = '$' + payUsd.toFixed(2);
@@ -14379,7 +14380,15 @@ function mpRecompute(){
   if(statActive){
     statActive.innerHTML = activeCount + '<span style="font-size:14px;color:#666">/' + (window.__mpChattersBase || []).length + '</span>';
   }
-  // Update total à payer
+  // Update total à payer — somme sur TOUS les chatteurs de byChat, pas
+  // seulement les 30 lignes rendues (avant, filtrer sur 'Tous' faisait
+  // tomber le total des rangs 31+ -> sous-paiement silencieux)
+  totalPayUsd = 0;
+  Object.keys(byChat).forEach(function(n){
+    var d2 = byChat[n];
+    var p2 = (window.__mpCryptoData[n] && window.__mpCryptoData[n].commission_pct) || 0;
+    totalPayUsd += ((d2.ca_eur || 0) * rate + (d2.ca_usd || 0)) * p2 / 100;
+  });
   var totalUsdEl = document.querySelector('[data-mp-stat="total_pay_usd"]');
   if(totalUsdEl) totalUsdEl.textContent = '$' + totalPayUsd.toFixed(2);
   var totalEurEl = document.querySelector('[data-mp-stat="total_pay_eur"]');
@@ -14485,7 +14494,11 @@ document.addEventListener('DOMContentLoaded', function(){
     var rowIdx = sel.getAttribute('data-row');
     var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
     if(!typeSel || !typeSel.value) return;
-    sel.setAttribute('data-saved', (window.__mpCryptoData_byRow || {})[rowIdx] || '');
+    /* NE PAS toucher data-saved : le serveur l'a rendu avec le reseau
+       enregistre du chatteur. L'ancien code l'ecrasait avec une variable
+       inexistante (__mpCryptoData_byRow) -> '' -> le select retombait sur le
+       PREMIER reseau de la liste, silencieusement re-enregistre au prochain
+       Enregistrer -> payout crypto envoye sur la mauvaise blockchain. */
     mpUpdateInlineNetworks(rowIdx);
   });
   // Spinner sur tous les boutons Save MyPuls quand le form est submit
