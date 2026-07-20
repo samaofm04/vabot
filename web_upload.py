@@ -12775,33 +12775,9 @@ window.addEventListener('DOMContentLoaded', function(){{
             )
         rows.append("</table></div>")
 
-    # === CONFIG des plateformes ===
-    rows.append("<div class='box'>")
-    rows.append("<h4 style='margin-top:0'>⚙️ Mes identités par plateforme</h4>")
-    rows.append("<small>Active/désactive les plateformes pour chaque identité (affecte ce qu'on peut sélectionner dans le form).</small>")
-    rows.append("<form method='POST' action='/business/identity_platforms' style='margin-top:14px'>")
-    rows.append("<table style='width:100%;border-collapse:collapse'>")
-    rows.append("<tr style='background:#1a1a1a'><th style='padding:8px;text-align:left'>Identité</th>")
-    for p in PLATFORMS:
-        rows.append(f"<th style='padding:8px;text-align:center'>{p}</th>")
-    rows.append("</tr>")
-    _hidden_jb = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-    all_idents = {i for i in (set(platforms_map.keys()) | set(_list_identities()))
-                  if i.lower() not in _hidden_jb}  # masque Jessye (jailbreak-only)
-    for ident in sorted(all_idents):
-        rows.append(f"<tr style='border-bottom:1px solid #2a2a2a'><td style='padding:8px;font-weight:600'>{ident}</td>")
-        active_plats = platforms_map.get(ident, [])
-        for p in PLATFORMS:
-            checked = "checked" if p in active_plats else ""
-            rows.append(
-                f"<td style='padding:8px;text-align:center'>"
-                f"<input type='checkbox' name='platform_{ident}' value='{p}' {checked} style='width:18px;height:18px;accent-color:#3b82f6'>"
-                f"</td>"
-            )
-        rows.append("</tr>")
-    rows.append("</table>")
-    rows.append("<button type='submit' style='margin-top:14px'>Sauver la config plateformes</button>")
-    rows.append("</form></div>")
+    # (Le tableau « Mes identités par plateforme » a été retiré à la demande
+    # de l'utilisateur — platforms_map reste en données et la route POST
+    # /business/identity_platforms existe toujours si besoin un jour.)
 
     return "".join(rows)
 
