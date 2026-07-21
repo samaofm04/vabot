@@ -1759,9 +1759,26 @@ window.igRefreshDlBar = function(){
         }
         txt.textContent = s;
       }
+      window.__igDlLast = !!d.running;   // cadence du prochain refresh
       var b = document.getElementById('ig-dl-now');
       if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
              b.textContent = d.running ? '⏳ En cours…' : '⚡ Télécharger'; }
+      // suivi visuel : la/les carte(s) en cours passent en bleu clair + filigrane
+      var act = {}; (d.active || []).forEach(function(sc){ act[sc] = 1; });
+      document.querySelectorAll('.reel-card').forEach(function(card){
+        var u = card.dataset.url || '';
+        var m = u.match(/\\/(?:p|reel|reels)\\/([A-Za-z0-9_-]+)/);
+        if(!m) return;
+        var sc = m[1];
+        if(act[sc]){
+          card.classList.add('reel-dling');
+          var bd = card.querySelector('.reel-dl-badge'); if(bd) bd.style.display = 'none';
+        } else if(card.classList.contains('reel-dling')){
+          // etait en cours, plus dans la liste -> termine : retire bleu + badge
+          card.classList.remove('reel-dling');
+          var bd2 = card.querySelector('.reel-dl-badge'); if(bd2) bd2.remove();
+        }
+      });
     }).catch(function(){});
 };
 window.igDownloadNow = function(btn){
@@ -1779,10 +1796,17 @@ window.igDownloadNow = function(btn){
     .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='⚡ Télécharger'; } });
 };
 (function(){
-  // au chargement + toutes les 20 s (le démon télécharge en continu)
-  function boot(){ if(document.getElementById('ig-dl-bar')){ igRefreshDlBar(); setInterval(igRefreshDlBar, 20000); } }
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  // rafraichissement auto-adaptatif : 2.5 s pendant un telechargement (pour
+  // suivre le bleu qui descend), 20 s au repos. igRefreshDlBar met a jour
+  // window.__igDlLast, on reprogramme selon cet etat.
+  window.__igDlLast = false;
+  function loop(){
+    if(!document.getElementById('ig-dl-bar')) return;
+    igRefreshDlBar();
+    setTimeout(loop, window.__igDlLast ? 2500 : 20000);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loop);
+  else loop();
 })();
 // Arret automatique quand un reel en lecture sort de l'ecran (fini le son
 // fantome quand on scrolle). Un seul observer global, reutilise.
@@ -9937,6 +9961,16 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 /* En PAUSE (clic manuel sur PC) : re-afficher le bouton ▶ meme sous la media
    query hover (feedback visuel du seul moyen de couper le son sur PC) */
 .reel-media.reel-paused .reel-play-overlay{display:flex!important;opacity:1!important}
+
+/* Reel EN COURS de telechargement : teinte bleu clair + filigrane anime, pour
+   suivre visuellement quel reel descend (du plus recent au plus vieux). */
+.reel-card.reel-dling .reel-media::after{
+  content:'⬇ Téléchargement…';position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;background:rgba(56,132,255,.32);color:#fff;font-size:12px;font-weight:800;
+  letter-spacing:.4px;z-index:6;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.6);
+  animation:dlPulse 1.1s ease-in-out infinite}
+.reel-card.reel-dling{outline:2px solid #60a5fa;outline-offset:-2px;border-radius:14px}
+@keyframes dlPulse{0%,100%{opacity:.75}50%{opacity:1}}
 
 /* PC (souris precise) : pas de bouton play sur les reels — la lecture se fait
    au survol. Le bouton ne reste que sur tactile (telephone/tablette). */
@@ -27443,7 +27477,8 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     # PRIORITE AUX PLUS RECENTES : taken_at décroissant (0 = date inconnue -> fin)
     todo.sort(key=lambda x: x[0], reverse=True)
     todo = [(sc, purl, vurl) for (_ta, sc, purl, vurl) in todo]
-    _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo), "ts": _t2.time()})
+    _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo),
+                         "ts": _t2.time(), "active": set()})
 
     # APIFY (si configuré) : résout les video_url EN BATCH via un service tiers
     # qui extrait avec SES proxies -> zéro cookie, zéro risque de ban, et couvre
@@ -27460,9 +27495,12 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     def _one(item, apify_url=""):
         sc, purl, vurl = item
         f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
+        _act = _PREDL_STATE.get("active")
         try:
             if f.exists():
                 return
+            if isinstance(_act, set):
+                _act.add(sc)   # ce reel devient "en cours" -> carte bleue cote UI
             # TOUT sans cookie : 0) lien Apify (le plus fiable), 1) lien direct
             # CDN du scrape, 2) scrape page publique, 3) yt-dlp public.
             if apify_url and _download_reel_video(sc, apify_url):
@@ -27491,6 +27529,8 @@ def _predownload_missing(max_workers: int = 4) -> dict:
         except Exception:
             pass
         finally:
+            if isinstance(_act, set):
+                _act.discard(sc)
             _PREDL_STATE["done"] += 1
 
     # LOT PAR LOT, les plus RÉCENTES d'abord : pour chaque paquet de 12 (todo est
@@ -29891,10 +29931,12 @@ def create_app():
                 f = INSTA_VIDEOS_DIR / f"{m.group(1)}.mp4"
                 if f.exists() and f.stat().st_size > 1024:
                     ready += 1
+            _active = _PREDL_STATE.get("active")
             return jsonify({"ok": True, "ready": ready, "total": total,
                             "running": bool(_PREDL_STATE.get("running")),
                             "pass_done": int(_PREDL_STATE.get("done") or 0),
                             "pass_total": int(_PREDL_STATE.get("total") or 0),
+                            "active": list(_active) if isinstance(_active, set) else [],
                             "apify": _PREDL_STATE.get("apify") or {}})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
