@@ -1746,8 +1746,25 @@ window.igRefreshDlBar = function(){
       var pct = d.total ? Math.round(d.ready / d.total * 100) : 100;
       var fill = document.getElementById('ig-dl-fill'); if(fill) fill.style.width = pct + '%';
       var txt = document.getElementById('ig-dl-txt');
-      if(txt) txt.textContent = d.ready + ' / ' + d.total + (pct >= 100 && d.total ? ' ✅' : '');
+      if(txt) txt.textContent = d.ready + ' / ' + d.total + (d.running ? ' ⏳' : (pct >= 100 && d.total ? ' ✅' : ''));
+      var b = document.getElementById('ig-dl-now');
+      if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
+             b.textContent = d.running ? '⏳ En cours…' : '⚡ Télécharger'; }
     }).catch(function(){});
+};
+window.igDownloadNow = function(btn){
+  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '⏳ …'; }
+  fetch('/insta/download_now', {method:'POST', credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(typeof showToast === 'function') showToast(
+        d && d.ok ? (d.already ? 'Téléchargement déjà en cours…' : '⚡ Téléchargement lancé') : 'Erreur',
+        d && d.ok ? 'success' : 'error');
+      igRefreshDlBar();
+      // pendant le DL, rafraichir plus vite pour voir la barre monter
+      var n = 0, iv = setInterval(function(){ igRefreshDlBar(); if(++n > 40) clearInterval(iv); }, 3000);
+    })
+    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='⚡ Télécharger'; } });
 };
 (function(){
   // au chargement + toutes les 20 s (le démon télécharge en continu)
@@ -11334,6 +11351,9 @@ def _render_insta_trends_grid_html() -> str:
         "<div id='ig-dl-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);"
         "border-radius:5px;transition:width .4s'></div></div>"
         "<span id='ig-dl-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
+        "<button type='button' id='ig-dl-now' onclick='igDownloadNow(this)' "
+        "title='Télécharger maintenant toutes les vidéos manquantes (en fond)' "
+        "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>⚡ Télécharger</button>"
         "</div>",
         "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
     for r in reels[:1000]:
@@ -27329,6 +27349,78 @@ def _ensure_video_state(sc: str) -> dict:
         return _ENSURE_VIDEO_STATE.setdefault(sc, {})
 
 
+_PREDL_STATE = {"running": False, "done": 0, "total": 0, "ts": 0}
+
+
+def _predownload_missing(max_workers: int = 4) -> dict:
+    """Télécharge EN PARALLÈLE (sans cookie) les mp4 manquants des reels vidéo
+    des 7 derniers jours déjà scrapés. Réutilisé par le démon ET le bouton
+    « télécharger maintenant ». Cookie-free -> on peut paralléliser sans risque.
+    """
+    import time as _t2
+    if _PREDL_STATE["running"]:
+        return {"running": True, "done": _PREDL_STATE["done"], "total": _PREDL_STATE["total"]}
+    try:
+        from insta_scraper import get_all_cached_reels, load_watchlist
+        import veille_telegram as _vt
+        from concurrent.futures import ThreadPoolExecutor
+    except Exception as e:
+        return {"error": str(e)}
+    wl = {str(u or "").lower().strip().lstrip("@") for u in (load_watchlist() or [])}
+    cutoff = _t2.time() - 7 * 86400
+    todo = []
+    for r in get_all_cached_reels():
+        if not r.get("is_video"):
+            continue
+        if str(r.get("_owner") or "").lower().strip().lstrip("@") not in wl:
+            continue
+        ta = r.get("taken_at") or 0
+        if ta and ta < cutoff:
+            continue
+        m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+        if not m:
+            continue
+        sc = m.group(1)
+        if (INSTA_VIDEOS_DIR / f"{sc}.mp4").exists():
+            continue
+        todo.append((sc, r.get("url") or "", r.get("video_url") or ""))
+    _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo), "ts": _t2.time()})
+
+    def _one(item):
+        sc, purl, vurl = item
+        f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
+        try:
+            if f.exists():
+                return
+            # 1) lien direct CDN (zéro cookie), 2) yt-dlp public
+            if vurl and _download_reel_video(sc, vurl):
+                return
+            info = {}
+            yb = _vt.download_via_ytdlp(purl or f"https://www.instagram.com/reel/{sc}/",
+                                        timeout=30, info=info, use_cookies=False)
+            if yb:
+                INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = INSTA_VIDEOS_DIR / f"{sc}.mp4.part"
+                tmp.write_bytes(yb)
+                os.replace(str(tmp), str(f))
+                if info.get("description"):
+                    try:
+                        (INSTA_VIDEOS_DIR / f"{sc}.txt").write_text(info["description"], encoding="utf-8")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        finally:
+            _PREDL_STATE["done"] += 1
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
+            list(ex.map(_one, todo))
+    finally:
+        _PREDL_STATE["running"] = False
+    return {"downloaded_attempt": len(todo)}
+
+
 def _ensure_video_worker(sc: str, url: str):
     """Télécharge le mp4 manquant via yt-dlp (hors requête HTTP). Marque
     'dead' si le reel est réellement inaccessible (supprimé, restreint)."""
@@ -27497,7 +27589,7 @@ def _start_auto_scrape_daemon():
         return
     _start_auto_scrape_daemon._started = True
 
-    SCRAPE_INTERVAL_SEC = 3 * 60 * 60  # 3 heures
+    SCRAPE_INTERVAL_SEC = 60 * 60  # 1 heure (le DL est sans cookie = safe plus souvent)
     DELAY_BETWEEN_PROFILES = 8  # 8s entre comptes
     # Fenetre de PRE-TELECHARGEMENT : uniquement les reels des 7 derniers jours
     # (le contenu regarde). Au-dela, la preparation a la demande suffit.
@@ -27533,67 +27625,27 @@ def _start_auto_scrape_daemon():
                     log.warning(f"[insta-bg-scrape] purge: {_e}")
                 wl = load_watchlist() or []
                 if wl:
-                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL 7 derniers jours...")
-                    ok = 0
-                    fail = 0
-                    total_dl = 0
-                    cutoff_taken = _t.time() - DL_AGE_SEC   # 7 jours
-                    import veille_telegram as _vtd
+                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes...")
+                    ok = fail = 0
+                    # 1) SCRAPE des comptes (RapidAPI, garde le delai anti-429)
                     for u in wl:
                         try:
                             r = scrape_profile(u, limit=200)
-                            if "error" not in r:
-                                ok += 1
-                                # DL les reels video des 7 DERNIERS JOURS uniquement
-                                reels = r.get("reels", [])
-                                for rr in reels:
-                                    sc_dl = rr.get("shortcode") or ""
-                                    if not (rr.get("is_video") and sc_dl):
-                                        continue
-                                    ta = rr.get("taken_at") or 0
-                                    # taken_at=0 = date inconnue, on DL quand meme
-                                    if ta and ta < cutoff_taken:
-                                        continue
-                                    if (INSTA_VIDEOS_DIR / f"{sc_dl}.mp4").exists():
-                                        continue
-                                    # 1) LIEN DIRECT (URL CDN de RapidAPI) : simple
-                                    # telechargement, ZERO cookie -> aucun risque de ban.
-                                    if rr.get("video_url"):
-                                        if _download_reel_video(sc_dl, rr["video_url"]):
-                                            total_dl += 1
-                                            continue
-                                    # 2) Pas d'URL CDN -> yt-dlp en mode PUBLIC
-                                    # (use_cookies=False) : on ne touche JAMAIS au cookie
-                                    # IG dans ce pre-telechargement de masse.
-                                    try:
-                                        _yi = {}
-                                        _purl = (rr.get("permalink")
-                                                 or f"https://www.instagram.com/reel/{sc_dl}/")
-                                        _yb = _vtd.download_via_ytdlp(
-                                            _purl, timeout=25, info=_yi, use_cookies=False)
-                                        if _yb:
-                                            INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-                                            _tmp = INSTA_VIDEOS_DIR / f"{sc_dl}.mp4.part"
-                                            _tmp.write_bytes(_yb)
-                                            os.replace(str(_tmp), str(INSTA_VIDEOS_DIR / f"{sc_dl}.mp4"))
-                                            if _yi.get("description"):
-                                                try:
-                                                    (INSTA_VIDEOS_DIR / f"{sc_dl}.txt").write_text(
-                                                        _yi["description"], encoding="utf-8")
-                                                except Exception:
-                                                    pass
-                                            total_dl += 1
-                                        _t.sleep(2)   # politesse entre 2 telechargements
-                                    except Exception:
-                                        pass
-                            else:
-                                fail += 1
+                            ok += 1 if "error" not in r else 0
+                            fail += 0 if "error" not in r else 1
                         except Exception as e:
                             log.warning(f"[insta-bg-scrape] {u}: {e}")
                             fail += 1
                         _t.sleep(DELAY_BETWEEN_PROFILES)
-                    cleaned = cleanup_old_videos()
-                    log.info(f"[insta-bg-scrape] OK: {ok} fail: {fail} DL: {total_dl} cleanup: -{cleaned} files")
+                    # 2) TELECHARGEMENT PARALLELE (4 en meme temps, sans cookie)
+                    #    des mp4 manquants des 7 derniers jours -> bien plus rapide
+                    #    que l'ancienne boucle sequentielle avec sleep.
+                    try:
+                        dl = _predownload_missing(max_workers=4)
+                        log.info(f"[insta-bg-scrape] OK:{ok} fail:{fail} DL:{dl}")
+                    except Exception as _e:
+                        log.warning(f"[insta-bg-scrape] predownload: {_e}")
+                    cleanup_old_videos()
             except Exception as e:
                 log.error(f"[insta-bg-scrape] cycle err: {e}")
             _t.sleep(SCRAPE_INTERVAL_SEC)
@@ -29619,6 +29671,21 @@ def create_app():
                              daemon=True).start()
         return jsonify({"ready": False, "downloading": True})
 
+    @app.route("/insta/download_now", methods=["POST"])
+    def insta_download_now():
+        """Force un passage de téléchargement MAINTENANT (bouton ⚡), en fond,
+        parallélisé et sans cookie."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        if _PREDL_STATE.get("running"):
+            return jsonify({"ok": True, "already": True,
+                            "done": _PREDL_STATE["done"], "total": _PREDL_STATE["total"]})
+        import threading
+        threading.Thread(target=lambda: _predownload_missing(max_workers=4),
+                         daemon=True).start()
+        return jsonify({"ok": True, "started": True})
+
     @app.route("/insta/dl_status")
     def insta_dl_status():
         """Compte des vidéos prêtes (mp4 en local) sur les reels vidéo des 7
@@ -29647,7 +29714,8 @@ def create_app():
                 f = INSTA_VIDEOS_DIR / f"{m.group(1)}.mp4"
                 if f.exists() and f.stat().st_size > 1024:
                     ready += 1
-            return jsonify({"ok": True, "ready": ready, "total": total})
+            return jsonify({"ok": True, "ready": ready, "total": total,
+                            "running": bool(_PREDL_STATE.get("running"))})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
