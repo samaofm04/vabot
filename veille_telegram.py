@@ -131,7 +131,8 @@ def _find_ig_cookies() -> Optional[str]:
 
 
 def download_via_ytdlp(post_url: str, timeout: int = 25,
-                       info: Optional[Dict[str, Any]] = None) -> Optional[bytes]:
+                       info: Optional[Dict[str, Any]] = None,
+                       use_cookies: bool = True) -> Optional[bytes]:
     """Telecharge la video d'un permalink IG via yt-dlp (comme le bot ig-downloader).
 
     C'est la methode la PLUS FIABLE : yt-dlp gere l'extraction + l'auth via les
@@ -139,6 +140,10 @@ def download_via_ytdlp(post_url: str, timeout: int = 25,
     public ne voit pas. Retourne les bytes (<50MB) ou None ; info['reason'] est
     rempli en cas d'echec ('ytdlp_absent', 'audience_restreinte',
     'login_requis_cookies', 'trop_gros_50mb', ...).
+
+    use_cookies=False : extraction PUBLIQUE, sans toucher au cookie IG (aucun
+    risque de ban). Utilise pour le pre-telechargement de masse des reels
+    recents (le cookie n'est consomme que pour un download unitaire a la demande).
     """
     def _set(reason: str):
         if info is not None:
@@ -168,7 +173,7 @@ def download_via_ytdlp(post_url: str, timeout: int = 25,
         "socket_timeout": timeout,
         "max_filesize": 50 * 1024 * 1024,  # Telegram cap : yt-dlp skip si >50MB
     }
-    cookies = _find_ig_cookies()
+    cookies = _find_ig_cookies() if use_cookies else None
     if cookies:
         opts["cookiefile"] = cookies
     try:

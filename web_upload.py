@@ -27299,7 +27299,8 @@ def _ensure_video_worker(sc: str, url: str):
         import veille_telegram as _vt
         info = {}
         purl = url or f"https://www.instagram.com/reel/{sc}/"
-        vb = _vt.download_via_ytdlp(purl, timeout=40, info=info)
+        # use_cookies=False : téléchargement PUBLIC, on ne touche pas au cookie IG
+        vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=False)
         if vb:
             INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
             tmp = INSTA_VIDEOS_DIR / f"{sc}.mp4.part"
@@ -27312,9 +27313,8 @@ def _ensure_video_worker(sc: str, url: str):
                 except Exception:
                     pass
         else:
-            # échec définitif (audience restreinte / supprimé) -> on le note
-            if info.get("reason") in ("audience_restreinte",) or not _vt._find_ig_cookies():
-                st["dead"] = True
+            # échec (reel supprimé/privé, non téléchargeable en public) -> on le note
+            st["dead"] = True
     except Exception as _e:
         log.warning(f"[ensure_video] {sc}: {_e}")
     finally:
@@ -27453,7 +27453,10 @@ def _start_auto_scrape_daemon():
 
     SCRAPE_INTERVAL_SEC = 3 * 60 * 60  # 3 heures
     DELAY_BETWEEN_PROFILES = 8  # 8s entre comptes
-    MAX_AGE_SEC = 31 * 24 * 60 * 60  # 1 mois - on DL tous les reels < 1 mois
+    # Fenetre de PRE-TELECHARGEMENT : uniquement les reels des 7 derniers jours
+    # (le contenu regarde). Au-dela, la preparation a la demande suffit.
+    DL_AGE_SEC = 7 * 24 * 60 * 60
+    MAX_AGE_SEC = 31 * 24 * 60 * 60  # purge disque : on garde jusqu'a 1 mois
 
     def cleanup_old_videos():
         """Supprime les .mp4 plus vieux que 1 mois (par mtime du fichier)."""
@@ -27484,52 +27487,49 @@ def _start_auto_scrape_daemon():
                     log.warning(f"[insta-bg-scrape] purge: {_e}")
                 wl = load_watchlist() or []
                 if wl:
-                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL <1 mois...")
+                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes + DL 7 derniers jours...")
                     ok = 0
                     fail = 0
                     total_dl = 0
-                    cutoff_taken = _t.time() - MAX_AGE_SEC
+                    cutoff_taken = _t.time() - DL_AGE_SEC   # 7 jours
+                    import veille_telegram as _vtd
                     for u in wl:
                         try:
-                            r = scrape_profile(u, limit=500)  # plus large pour couvrir 1 mois
+                            r = scrape_profile(u, limit=200)
                             if "error" not in r:
                                 ok += 1
-                                # DL tous les reels video < 1 mois
+                                # DL les reels video des 7 DERNIERS JOURS uniquement
                                 reels = r.get("reels", [])
-                                ytdlp_left = 15   # budget yt-dlp par COMPTE (protège le cookie)
                                 for rr in reels:
                                     sc_dl = rr.get("shortcode") or ""
                                     if not (rr.get("is_video") and sc_dl):
                                         continue
                                     ta = rr.get("taken_at") or 0
-                                    # taken_at=0 = on ne sait pas, on DL quand meme
+                                    # taken_at=0 = date inconnue, on DL quand meme
                                     if ta and ta < cutoff_taken:
                                         continue
                                     if (INSTA_VIDEOS_DIR / f"{sc_dl}.mp4").exists():
                                         continue
+                                    # 1) LIEN DIRECT (URL CDN de RapidAPI) : simple
+                                    # telechargement, ZERO cookie -> aucun risque de ban.
                                     if rr.get("video_url"):
                                         if _download_reel_video(sc_dl, rr["video_url"]):
                                             total_dl += 1
                                             continue
-                                    # PAS de video_url (RapidAPI n'en donne pas pour la
-                                    # plupart des reels) OU CDN mort -> repli yt-dlp.
-                                    # C'était LA cause des cartes « Vidéo expirée » :
-                                    # ces reels n'étaient JAMAIS télechargés.
-                                    if ytdlp_left <= 0:
-                                        continue
+                                    # 2) Pas d'URL CDN -> yt-dlp en mode PUBLIC
+                                    # (use_cookies=False) : on ne touche JAMAIS au cookie
+                                    # IG dans ce pre-telechargement de masse.
                                     try:
-                                        import veille_telegram as _vtd
-                                        if not _vtd._find_ig_cookies():
-                                            ytdlp_left = 0
-                                            continue
                                         _yi = {}
                                         _purl = (rr.get("permalink")
                                                  or f"https://www.instagram.com/reel/{sc_dl}/")
-                                        _yb = _vtd.download_via_ytdlp(_purl, timeout=25, info=_yi)
-                                        ytdlp_left -= 1
+                                        _yb = _vtd.download_via_ytdlp(
+                                            _purl, timeout=25, info=_yi, use_cookies=False)
                                         if _yb:
                                             INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-                                            (INSTA_VIDEOS_DIR / f"{sc_dl}.mp4").write_bytes(_yb)
+                                            _tmp = INSTA_VIDEOS_DIR / f"{sc_dl}.mp4.part"
+                                            _tmp.write_bytes(_yb)
+                                            os.replace(str(_tmp), str(INSTA_VIDEOS_DIR / f"{sc_dl}.mp4"))
                                             if _yi.get("description"):
                                                 try:
                                                     (INSTA_VIDEOS_DIR / f"{sc_dl}.txt").write_text(
@@ -27537,7 +27537,7 @@ def _start_auto_scrape_daemon():
                                                 except Exception:
                                                     pass
                                             total_dl += 1
-                                        _t.sleep(3)   # politesse entre 2 yt-dlp
+                                        _t.sleep(2)   # politesse entre 2 telechargements
                                     except Exception:
                                         pass
                             else:
