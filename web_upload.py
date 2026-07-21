@@ -1736,6 +1736,25 @@ window.igStopOtherReels = function(except){
 window.igStopAllReels = function(){
   document.querySelectorAll('.reel-media.reel-playing').forEach(igStopInline);
 };
+// Barre « Vidéos prêtes » : X/Y reels des 7 derniers jours déjà en local.
+window.igRefreshDlBar = function(){
+  var bar = document.getElementById('ig-dl-bar'); if(!bar) return;
+  fetch('/insta/dl_status', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok) return;
+      var pct = d.total ? Math.round(d.ready / d.total * 100) : 100;
+      var fill = document.getElementById('ig-dl-fill'); if(fill) fill.style.width = pct + '%';
+      var txt = document.getElementById('ig-dl-txt');
+      if(txt) txt.textContent = d.ready + ' / ' + d.total + (pct >= 100 && d.total ? ' ✅' : '');
+    }).catch(function(){});
+};
+(function(){
+  // au chargement + toutes les 20 s (le démon télécharge en continu)
+  function boot(){ if(document.getElementById('ig-dl-bar')){ igRefreshDlBar(); setInterval(igRefreshDlBar, 20000); } }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
 // Arret automatique quand un reel en lecture sort de l'ecran (fini le son
 // fantome quand on scrolle). Un seul observer global, reutilise.
 window.__igReelObs = null;
@@ -11303,7 +11322,18 @@ def _render_insta_trends_grid_html() -> str:
     cutoff_30d = _time.time() - 30 * 86400
     reels = [r for r in reels if (r.get("taken_at") or 0) >= cutoff_30d or not r.get("taken_at")]
     reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
-    cards = ["<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
+    # Barre de progression du pré-téléchargement (7 derniers jours) : combien de
+    # vidéos sont déjà prêtes en local. Rafraîchie en JS via /insta/dl_status.
+    cards = [
+        "<div id='ig-dl-bar' style='margin:14px 0 0;background:#12121a;border:1px solid #26263a;"
+        "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
+        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>📥 Vidéos prêtes</span>"
+        "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
+        "<div id='ig-dl-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);"
+        "border-radius:5px;transition:width .4s'></div></div>"
+        "<span id='ig-dl-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
+        "</div>",
+        "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
     for r in reels[:1000]:
         thumb = r.get("thumbnail_url") or ""
         owner = r.get("_owner", "?")
@@ -27299,8 +27329,13 @@ def _ensure_video_worker(sc: str, url: str):
         import veille_telegram as _vt
         info = {}
         purl = url or f"https://www.instagram.com/reel/{sc}/"
-        # use_cookies=False : téléchargement PUBLIC, on ne touche pas au cookie IG
+        # 1) tentative PUBLIQUE (sans cookie). 2) si echec, UNE tentative avec
+        # cookie : c'est un seul reel demande explicitement par un clic — le
+        # meme geste que regarder la video soi-meme sur Insta, risque negligeable
+        # (a l'oppose du telechargement de masse qui, lui, reste sans cookie).
         vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=False)
+        if not vb:
+            vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=True)
         if vb:
             INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
             tmp = INSTA_VIDEOS_DIR / f"{sc}.mp4.part"
@@ -29572,6 +29607,38 @@ def create_app():
             threading.Thread(target=_ensure_video_worker, args=(sc, url),
                              daemon=True).start()
         return jsonify({"ready": False, "downloading": True})
+
+    @app.route("/insta/dl_status")
+    def insta_dl_status():
+        """Compte des vidéos prêtes (mp4 en local) sur les reels vidéo des 7
+        derniers jours — alimente la barre de progression de Trends."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            from insta_scraper import get_all_cached_reels, load_watchlist
+            import time as _t2
+            wl = {str(u or "").lower().strip().lstrip("@") for u in (load_watchlist() or [])}
+            cutoff = _t2.time() - 7 * 86400
+            total = ready = 0
+            for r in get_all_cached_reels():
+                if not r.get("is_video"):
+                    continue
+                if str(r.get("_owner") or "").lower().strip().lstrip("@") not in wl:
+                    continue
+                ta = r.get("taken_at") or 0
+                if ta and ta < cutoff:
+                    continue
+                m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+                if not m:
+                    continue
+                total += 1
+                f = INSTA_VIDEOS_DIR / f"{m.group(1)}.mp4"
+                if f.exists() and f.stat().st_size > 1024:
+                    ready += 1
+            return jsonify({"ok": True, "ready": ready, "total": total})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @app.route("/admin/backup_data")
     def admin_backup_data():
