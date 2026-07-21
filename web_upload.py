@@ -1751,6 +1751,12 @@ window.igRefreshDlBar = function(){
         var s = _n(d.ready) + ' / ' + _n(d.total) + ' vidéos';
         if(d.running && d.pass_total){ s += ' · ⏳ ' + _n(d.pass_done) + '/' + _n(d.pass_total) + ' en cours'; }
         else if(pct >= 100 && d.total){ s += ' ✅'; }
+        // diagnostic Apify visible ici (les URL manuelles deconnectent)
+        var a = d.apify;
+        if(a && (a.error || a.resolved !== undefined)){
+          if(a.error){ s += ' · ⚠ Apify: ' + a.error; }
+          else { s += ' · 🎬 Apify: ' + _n(a.resolved || 0) + ' résolus'; }
+        }
         txt.textContent = s;
       }
       var b = document.getElementById('ig-dl-now');
@@ -27444,23 +27450,35 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     # les reels que nos méthodes publiques ratent. On remplit un cache {sc:vurl}
     # pour que _one() télécharge directement le lien fourni.
     _apify_vurl: Dict[str, str] = {}
+    _PREDL_STATE["apify"] = {}
     try:
         import apify_reels as _ap
         if _ap.configured() and todo:
-            for i in range(0, len(todo), 40):   # lots de 40 reels par run
-                chunk = todo[i:i + 40]
+            _resolved = 0
+            _last_diag = {}
+            for i in range(0, len(todo), 15):   # lots de 15 (run-sync a un timeout)
+                chunk = todo[i:i + 15]
                 purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v) in chunk]
-                res = _ap.fetch_video_urls(purls)
+                _d = {}
+                res = _ap.fetch_video_urls(purls, diag=_d)
+                _last_diag = _d
                 for sc2, d2 in res.items():
                     if d2.get("video_url"):
                         _apify_vurl[sc2] = d2["video_url"]
+                        _resolved += 1
                     if d2.get("caption"):   # bonus : caption sauvée en sidecar
                         try:
                             (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
                                 d2["caption"], encoding="utf-8")
                         except Exception:
                             pass
+                # état visible : dernier diag + total résolu jusqu'ici
+                _PREDL_STATE["apify"] = {"resolved": _resolved,
+                                         "status": _last_diag.get("status"),
+                                         "error": _last_diag.get("error") or "",
+                                         "sample": _last_diag.get("sample")}
     except Exception as _e:
+        _PREDL_STATE["apify"] = {"error": f"{type(_e).__name__}: {_e}"}
         log.warning(f"[predownload] apify: {_e}")
 
     def _one(item):
@@ -29872,7 +29890,8 @@ def create_app():
             return jsonify({"ok": True, "ready": ready, "total": total,
                             "running": bool(_PREDL_STATE.get("running")),
                             "pass_done": int(_PREDL_STATE.get("done") or 0),
-                            "pass_total": int(_PREDL_STATE.get("total") or 0)})
+                            "pass_total": int(_PREDL_STATE.get("total") or 0),
+                            "apify": _PREDL_STATE.get("apify") or {}})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 

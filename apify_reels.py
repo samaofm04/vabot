@@ -75,16 +75,21 @@ def test_token() -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def fetch_video_urls(reel_urls: List[str], timeout: int = 240) -> Dict[str, Dict[str, Any]]:
+def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
+                     diag: Dict[str, Any] = None) -> Dict[str, Dict[str, Any]]:
     """Résout une liste de liens reels via l'actor Apify (un seul run batch).
 
     Retourne {shortcode: {video_url, caption, likes, comments, owner}}.
-    Silencieux en cas d'erreur (retourne ce qu'il a) : l'appelant retombe sur
-    ses autres méthodes.
+    `diag` (optionnel) est rempli avec {sent, status, resolved, error, sample}
+    pour le diagnostic — l'appelant retombe sur ses autres méthodes en cas d'échec.
     """
     tok = get_token()
     urls = [u for u in (reel_urls or []) if u]
+    if diag is not None:
+        diag.update({"sent": len(urls), "status": None, "resolved": 0, "error": ""})
     if not tok or not urls:
+        if diag is not None:
+            diag["error"] = "token ou urls vide"
         return {}
     out: Dict[str, Dict[str, Any]] = {}
     try:
@@ -93,11 +98,20 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240) -> Dict[str, Dict
             json={"reelLinks": urls, "proxyConfiguration": {"useApifyProxy": True}},
             timeout=timeout,
         )
+        if diag is not None:
+            diag["status"] = r.status_code
         if r.status_code not in (200, 201):
+            if diag is not None:
+                diag["error"] = f"HTTP {r.status_code}: {r.text[:180]}"
             return {}
         items = r.json()
         if not isinstance(items, list):
+            if diag is not None:
+                diag["error"] = f"reponse inattendue: {str(items)[:180]}"
             return {}
+        if diag is not None and items:
+            diag["sample"] = {k: (str(v)[:60]) for k, v in list(items[0].items())[:8]} \
+                if isinstance(items[0], dict) else str(items[0])[:120]
         # repli positionnel : si l'actor renvoie autant d'items que d'URLs
         # envoyées et sans champ source, item[i] correspond à urls[i]
         positional = len(items) == len(urls)
@@ -120,6 +134,10 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240) -> Dict[str, Dict
                 "comments": it.get("comments"),
                 "owner": it.get("owner_username") or "",
             }
-    except Exception:
+        if diag is not None:
+            diag["resolved"] = len(out)
+    except Exception as e:
+        if diag is not None:
+            diag["error"] = f"{type(e).__name__}: {str(e)[:150]}"
         return out
     return out
