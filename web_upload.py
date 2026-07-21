@@ -2102,6 +2102,9 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
     });
 };
 // Overlay erreur : bouton "Voir sur IG" + diagnostic en bas
+// Video pas encore sur le serveur : au lieu d'une carte « Vidéo expirée », on
+// PREPARE la video en fond (telechargement serveur) et on la LANCE des qu'elle
+// est prete. Plus de carte d'erreur pour du contenu recent.
 window.igShowCardErrorClean = function(card){
   if(!card) return;
   var media = card.querySelector('.reel-media');
@@ -2111,34 +2114,52 @@ window.igShowCardErrorClean = function(card){
     if(el) el.remove();
   });
   var url = card.getAttribute('data-url') || '';
-  var videoUrl = card.getAttribute('data-video-url') || '';
-  var owner = card.getAttribute('data-owner') || '';
+  igStopInline(media);
   var ov = document.createElement('div');
   ov.className = 'reel-error-overlay';
-  ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center';
-  ov.innerHTML = ''
-    + '<div style="font-size:32px;margin-bottom:6px">📺</div>'
-    + '<div style="font-weight:700;font-size:13px;margin-bottom:10px">Vidéo expirée</div>'
-    + '<a href="' + url + '" target="_blank" rel="noopener" '
-    +    'style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;'
-    +    'padding:10px 18px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none;margin-bottom:10px">'
-    +    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="5"/></svg>'
-    +    'Voir sur Instagram'
-    + '</a>'
-    + '<div class="reel-err-diag" style="font-size:11px;color:#fbbf24;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:6px;max-width:280px;line-height:1.4;word-break:break-word;max-height:120px;overflow:auto;text-align:left">⏳ Vérification...</div>';
-  ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
+  ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:#fff;z-index:8;text-align:center;gap:10px';
+  ov.innerHTML = '<div style="width:38px;height:38px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite"></div>'
+    + '<div style="font-size:12.5px;font-weight:600;color:#ddd">Préparation de la vidéo…</div>';
+  ov.addEventListener('click', function(e){ e.stopPropagation(); });
   media.appendChild(ov);
-  // Fetch le proxy pour montrer la raison precise
-  var p = [];
-  if(videoUrl) p.push('vurl=' + encodeURIComponent(videoUrl));
-  if(url) p.push('url=' + encodeURIComponent(url));
-  if(owner) p.push('owner=' + encodeURIComponent(owner));
-  fetch('/insta/proxy_video?' + p.join('&'))
-    .then(function(r){ return r.text().then(function(b){ return r.status + ': ' + b; }); })
-    .then(function(msg){
-      var d = ov.querySelector('.reel-err-diag');
-      if(d) d.textContent = msg.substring(0, 300);
-    }).catch(function(){});
+  if(!url){ igCardUnavailable(card, ov); return; }
+  var tries = 0, maxTries = 24;   // ~24 x 2.5s = 60s max
+  function poll(){
+    tries++;
+    fetch('/insta/ensure_video?url=' + encodeURIComponent(url), {credentials:'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d && d.ready){
+          if(ov.parentNode) ov.remove();
+          // la video est maintenant sur le serveur -> pointe le <video> sur le
+          // fichier local et relance la lecture, comme un reel normal
+          var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+          if(m){
+            card.setAttribute('data-video-url',
+              '/insta/proxy_video?url=' + encodeURIComponent(url) +
+              '&owner=' + encodeURIComponent(card.getAttribute('data-owner')||''));
+          }
+          var vv = media.querySelector('.reel-video'); if(vv){ try{ vv.removeAttribute('src'); vv.load(); }catch(e){} }
+          igPlayInline(media);
+          return;
+        }
+        if((d && d.dead) || tries >= maxTries){ igCardUnavailable(card, ov); return; }
+        setTimeout(poll, 2500);
+      })
+      .catch(function(){ if(tries >= maxTries){ igCardUnavailable(card, ov); } else { setTimeout(poll, 2500); } });
+  }
+  poll();
+};
+// Dernier recours SEULEMENT (reel supprime/restreint/introuvable > 60s) :
+// message sobre, sans « Vérification » ni diagnostic technique.
+window.igCardUnavailable = function(card, ov){
+  var url = card.getAttribute('data-url') || '';
+  if(!ov){ return; }
+  ov.style.cursor = 'default';
+  ov.innerHTML = '<div style="font-size:28px">🔒</div>'
+    + '<div style="font-weight:700;font-size:12.5px">Vidéo indisponible</div>'
+    + (url ? ('<a href="' + url + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.14);color:#fff;padding:8px 14px;border-radius:9px;font-weight:700;font-size:11.5px;text-decoration:none">Voir sur Instagram</a>') : '');
+  ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); });
 };
 window.igStopInline = function(media){
   if(!media) return;
@@ -27256,6 +27277,49 @@ def _render_upload_inner(msg=None, error=None):
 
 INSTA_VIDEOS_DIR = Path("data/insta/videos")
 
+# Préparation à la demande des reels manquants (route /insta/ensure_video) :
+# état par shortcode + verrou pour ne lancer qu'UN yt-dlp par reel, en fond.
+_ENSURE_VIDEO_STATE: dict = {}
+_ENSURE_VIDEO_LOCK = __import__("threading").Lock()
+
+
+def _ensure_video_state(sc: str) -> dict:
+    with _ENSURE_VIDEO_LOCK:
+        return _ENSURE_VIDEO_STATE.setdefault(sc, {})
+
+
+def _ensure_video_worker(sc: str, url: str):
+    """Télécharge le mp4 manquant via yt-dlp (hors requête HTTP). Marque
+    'dead' si le reel est réellement inaccessible (supprimé, restreint)."""
+    st = _ensure_video_state(sc)
+    try:
+        f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
+        if f.exists() and f.stat().st_size > 1024:
+            return
+        import veille_telegram as _vt
+        info = {}
+        purl = url or f"https://www.instagram.com/reel/{sc}/"
+        vb = _vt.download_via_ytdlp(purl, timeout=40, info=info)
+        if vb:
+            INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = INSTA_VIDEOS_DIR / f"{sc}.mp4.part"
+            tmp.write_bytes(vb)
+            os.replace(str(tmp), str(f))   # atomique : jamais de mp4 tronqué servi
+            if info.get("description"):
+                try:
+                    (INSTA_VIDEOS_DIR / f"{sc}.txt").write_text(
+                        info["description"], encoding="utf-8")
+                except Exception:
+                    pass
+        else:
+            # échec définitif (audience restreinte / supprimé) -> on le note
+            if info.get("reason") in ("audience_restreinte",) or not _vt._find_ig_cookies():
+                st["dead"] = True
+    except Exception as _e:
+        log.warning(f"[ensure_video] {sc}: {_e}")
+    finally:
+        st["running"] = False
+
 
 def _scrape_ig_page_for_video(shortcode: str) -> str:
     """Scrape directement les pages /p/SHORTCODE/ et /p/SHORTCODE/embed/ pour
@@ -29480,6 +29544,34 @@ def create_app():
                             "extraits": evs[:12]})
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    @app.route("/insta/ensure_video")
+    def insta_ensure_video():
+        """Prépare la vidéo d'un reel EN FOND (jamais dans la requête) et dit où
+        elle en est. Remplace la carte « Vidéo expirée » : le client poll ceci
+        et lance la lecture des que ready=True.
+        Réponse : {ready, downloading, dead}."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ready": False}), 401
+        url = (request.args.get("url") or "").strip()
+        m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url)
+        if not m:
+            return jsonify({"ready": False, "dead": True})
+        sc = m.group(1)
+        f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
+        if f.exists() and f.stat().st_size > 1024:
+            return jsonify({"ready": True})
+        # état de préparation partagé (verrou + statut par shortcode)
+        st = _ensure_video_state(sc)
+        if st.get("dead"):
+            return jsonify({"ready": False, "dead": True})
+        if not st.get("running"):
+            st["running"] = True
+            import threading
+            threading.Thread(target=_ensure_video_worker, args=(sc, url),
+                             daemon=True).start()
+        return jsonify({"ready": False, "downloading": True})
 
     @app.route("/admin/backup_data")
     def admin_backup_data():
