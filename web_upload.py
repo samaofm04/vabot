@@ -3482,7 +3482,7 @@ window.upClearPrefill = function(utab){
     if(localStorage.getItem('vault_sfw') === '1'){
       var ss = document.createElement('style');
       ss.id = '__sfw-pre';
-      ss.textContent = '.vault-gallery img,.vault-thumb img,.file-thumb img,.preview-card img{filter:blur(22px) saturate(.5)}#lightbox img,#lightbox video,.lightbox-content img,.lightbox-content video{filter:none!important}';
+      ss.textContent = '.vault-gallery img,.vault-thumb img,.file-thumb img,.preview-card img,.reel-thumb,.reel-video{filter:blur(22px) saturate(.5)}#lightbox img,#lightbox video,.lightbox-content img,.lightbox-content video,#reel-details-modal img,#reel-details-modal video{filter:none!important}';
       document.head.appendChild(ss);
     }
   }catch(e){}
@@ -9785,9 +9785,9 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 
 /* === SFW blur mode === */
 /* Tout flou par defaut quand SFW est ON */
-body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img{filter:blur(22px) saturate(.5);transition:filter .25s}
-/* Pas d unblur au hover. Seul la lightbox (clic) affiche net. */
-body.sfw-on #lightbox img,body.sfw-on #lightbox video,body.sfw-on .lightbox-content img,body.sfw-on .lightbox-content video{filter:none!important}
+body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img,body.sfw-on .reel-thumb,body.sfw-on .reel-video{filter:blur(22px) saturate(.5);transition:filter .25s}
+/* Pas d unblur au hover. Seul la lightbox / le detail (clic) affiche net. */
+body.sfw-on #lightbox img,body.sfw-on #lightbox video,body.sfw-on .lightbox-content img,body.sfw-on .lightbox-content video,body.sfw-on #reel-details-modal img,body.sfw-on #reel-details-modal video{filter:none!important}
 
 /* SFW floating toggle (style iOS, dark theme adapte) */
 #sfw-floating{}
@@ -10310,8 +10310,11 @@ document.addEventListener('drop', function(e){
 
 // === SFW toggle global (floute toutes les images de la dashboard) ===
 function toggleSFW(){
-  document.body.classList.toggle('sfw-on');
-  localStorage.setItem('vault_sfw', document.body.classList.contains('sfw-on') ? '1' : '0');
+  var on = document.body.classList.toggle('sfw-on');
+  localStorage.setItem('vault_sfw', on ? '1' : '0');
+  // le pre-flou (__sfw-pre) est NON conditionnel : sans ca, desactiver SFW ne
+  // defloutait qu'apres un rechargement de page
+  if(!on){ var pre=document.getElementById('__sfw-pre'); if(pre) pre.remove(); }
 }
 // Init : si SFW etait actif a la derniere visite, ré-applique direct
 (function(){
