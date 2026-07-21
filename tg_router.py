@@ -937,24 +937,43 @@ def bound_models() -> dict:
 
 
 def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str = "",
-                         overlay=None) -> dict:
-    """Envoie une veille (vidéo via file_id Telegram) dans le sujet IG CONTENT
-    de la modèle + l'enregistre : elle apparaît aussi « en attente » dans le
-    sujet de la modèle du groupe destination. Appelé par le SITE (bouton veille).
+                         overlay=None, src_chat_id=None, src_msg_id=None) -> dict:
+    """Envoie une veille dans le sujet IG CONTENT de la modèle + l'enregistre.
+
+    FORWARD/TRANSFER (src_chat_id + src_msg_id fournis) : la vidéo est COPIÉE
+    depuis le message déjà posté dans le canal Veille (copyMessage) — transfert
+    Telegram natif, aucune ré-upload. Sinon repli : sendVideo via file_id.
     NB: le poller ne voit pas les messages du bot lui-même -> on enregistre ici."""
     bm = bound_models().get((model or "").lower())
     if not bm:
         return {"ok": False, "error": f"« {model} » non branchée (/setmodel dans son groupe)"}
     cfg = _load()
-    p = {"chat_id": bm["chat_id"], "video": tg_file_id, "supports_streaming": True}
-    if link:
-        p["caption"] = link[:1020]
-    if bm.get("thread"):
-        p["message_thread_id"] = bm["thread"]
-    res = _api("sendVideo", p)
-    if not res.get("ok"):
-        return {"ok": False, "error": res.get("description", "?")}
-    vid_msg = (res.get("result") or {}).get("message_id")
+    vid_msg = None
+    if src_chat_id and src_msg_id:
+        # TRANSFERT depuis la Veille : copyMessage (pas de "forwarded from",
+        # rendu propre) — la vidéo n'est jamais ré-uploadée.
+        cp = {"chat_id": bm["chat_id"], "from_chat_id": src_chat_id,
+              "message_id": src_msg_id}
+        if link:
+            cp["caption"] = link[:1020]
+        if bm.get("thread"):
+            cp["message_thread_id"] = bm["thread"]
+        rc = _api("copyMessage", cp)
+        if rc.get("ok"):
+            vid_msg = (rc.get("result") or {}).get("message_id")
+    if vid_msg is None:
+        # repli : envoi direct via file_id (si pas de source ou copie ratée)
+        if not tg_file_id:
+            return {"ok": False, "error": "ni source Veille ni file_id"}
+        p = {"chat_id": bm["chat_id"], "video": tg_file_id, "supports_streaming": True}
+        if link:
+            p["caption"] = link[:1020]
+        if bm.get("thread"):
+            p["message_thread_id"] = bm["thread"]
+        res = _api("sendVideo", p)
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("description", "?")}
+        vid_msg = (res.get("result") or {}).get("message_id")
     # 3 MESSAGES SÉPARÉS : ① la vidéo, ② la caption incrustée, ③ la description.
     # Les deux textes répondent TOUJOURS à la vidéo (copie facile, contexte clair).
     def _send_reply_text(txt):

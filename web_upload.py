@@ -32253,9 +32253,16 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                         # overlay pré-validé sur le site (caption incrustée lue via
                         # « Préparer la veille »). None = pas fourni -> OCR côté TG.
                         overlay_val = request.form.get("overlay")
+                        # source du FORWARD : le message vidéo déjà posté dans le
+                        # canal Veille -> chaque model reçoit une COPIE (transfert
+                        # natif Telegram), la vidéo n'est jamais ré-uploadée.
+                        _src_chat = res.get("chat_id")
+                        _src_msg = res.get("message_id")
                         for m in to_models:
                             r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final,
-                                                                overlay=overlay_val)
+                                                                overlay=overlay_val,
+                                                                src_chat_id=_src_chat,
+                                                                src_msg_id=_src_msg)
                             if r2.get("ok"):
                                 sent_m.append(m)
                             else:
