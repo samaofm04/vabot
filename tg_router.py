@@ -134,7 +134,17 @@ def _api(method: str, payload: dict, timeout=20):
         return {"ok": False, "description": "bot_token manquant (Settings → Veille Telegram)"}
     try:
         r = requests.post(f"{TG}/bot{token}/{method}", json=payload, timeout=timeout)
-        return r.json()
+        j = r.json()
+        # 429 : Telegram donne retry_after -> on attend et on retente UNE fois.
+        # Sans ça, les envois par file_id (instantanés donc en rafale) perdaient
+        # des messages en silence (~20 msg/min max par groupe).
+        if r.status_code == 429 or (not j.get("ok") and j.get("error_code") == 429):
+            import time as _t
+            wait = float(((j.get("parameters") or {}).get("retry_after")) or 3)
+            _t.sleep(min(wait + 0.5, 35))
+            r = requests.post(f"{TG}/bot{token}/{method}", json=payload, timeout=timeout)
+            j = r.json()
+        return j
     except Exception as e:
         return {"ok": False, "description": str(e)}
 

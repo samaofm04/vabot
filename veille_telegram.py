@@ -392,6 +392,81 @@ def refresh_post_data(post_url: str, owner: str = "") -> Dict[str, str]:
     return out
 
 
+# ---- Cache PERSISTANT des file_id Telegram, par shortcode ------------------
+# Un reel uploadé UNE fois n'est plus jamais retéléchargé ni re-uploadé :
+# Telegram garde sa copie, on renvoie par file_id (instantané). Le self-lookup
+# de send_video_from_url fait profiter TOUTES les routes (send unitaire,
+# send_day, banger) sans changer leurs appels.
+import threading as _threading
+
+FILEID_FILE = Path("data/veille_tg_fileids.json")
+_FILEID_LOCK = _threading.Lock()
+_FILEID_MEM: Dict[str, Any] = {}
+
+
+def _fileid_all() -> Dict[str, Any]:
+    global _FILEID_MEM
+    if not _FILEID_MEM and FILEID_FILE.exists():
+        try:
+            d = json.loads(FILEID_FILE.read_text(encoding="utf-8"))
+            _FILEID_MEM = d if isinstance(d, dict) else {}
+        except Exception:
+            _FILEID_MEM = {}
+    return _FILEID_MEM
+
+
+def _fileid_save():
+    try:
+        FILEID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        FILEID_FILE.write_text(json.dumps(_FILEID_MEM, ensure_ascii=False),
+                               encoding="utf-8")
+    except Exception:
+        pass
+
+
+def fileid_get(shortcode: str) -> str:
+    if not shortcode:
+        return ""
+    with _FILEID_LOCK:
+        return str((_fileid_all().get(shortcode) or {}).get("file_id") or "")
+
+
+def fileid_put(shortcode: str, file_id: str):
+    if not shortcode or not file_id:
+        return
+    import time as _t
+    with _FILEID_LOCK:
+        _fileid_all()[shortcode] = {"file_id": file_id, "ts": int(_t.time())}
+        _fileid_save()
+
+
+def fileid_drop(shortcode: str):
+    """file_id refusé par Telegram (invalide/expiré) : purgé pour ne pas
+    réessayer en boucle."""
+    if not shortcode:
+        return
+    with _FILEID_LOCK:
+        if shortcode in _fileid_all():
+            _fileid_all().pop(shortcode, None)
+            _fileid_save()
+
+
+def _tg_post(url: str, *, data=None, json_payload=None, files=None, timeout=30):
+    """requests.post vers l'API Telegram avec UNE relance sur 429 (retry_after).
+    Sans ça, les envois par file_id (instantanés donc en rafale) perdaient des
+    messages en silence (limite ~20 msg/min par groupe)."""
+    r = requests.post(url, data=data, json=json_payload, files=files, timeout=timeout)
+    if r.status_code == 429:
+        try:
+            wait = float(((r.json().get("parameters") or {}).get("retry_after")) or 3)
+        except Exception:
+            wait = 3.0
+        import time as _t
+        _t.sleep(min(wait + 0.5, 35))
+        r = requests.post(url, data=data, json=json_payload, files=files, timeout=timeout)
+    return r
+
+
 def send_video_from_url(video_url: str, caption: str = "",
                         fallback_url: str = "",
                         followup_text: str = "",
@@ -422,12 +497,23 @@ def send_video_from_url(video_url: str, caption: str = "",
     if not token or not chat_id:
         return {"ok": False, "error": "Bot Telegram non configure"}
 
+    # Shortcode extrait TOUT DE SUITE : sert au self-lookup file_id, au cache
+    # disque et au stockage après upload.
+    import re as _re_v
+    from pathlib import Path as _Pv
+    _scm = _re_v.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', fallback_url or "")
+    _sc = _scm.group(1) if _scm else ""
+
     # 0bis) REUTILISATION du file_id Telegram : si ce reel a deja ete envoye en
     # VIDEO, Telegram a garde sa copie -> on renvoie via le file_id = INSTANTANE
     # (zero telechargement, zero upload). Le vrai "copier-coller" de la video.
+    # Self-lookup : même si l'appelant n'a pas fourni tg_file_id (send_day,
+    # banger, modal Préparer...), le cache central par shortcode est consulté.
+    if not tg_file_id and _sc:
+        tg_file_id = fileid_get(_sc)
     if tg_file_id:
         try:
-            _rf = requests.post(
+            _rf = _tg_post(
                 f"{TG_API_BASE}/bot{token}/sendVideo",
                 data={"chat_id": chat_id, "caption": (caption or "")[:1024],
                       "video": tg_file_id, "supports_streaming": "true"},
@@ -436,18 +522,25 @@ def send_video_from_url(video_url: str, caption: str = "",
             _jf = _rf.json()
             if _rf.status_code == 200 and _jf.get("ok"):
                 _midf = _jf.get("result", {}).get("message_id")
+                fileid_put(_sc, tg_file_id)
                 if followup_text and followup_text.strip():
                     try:
-                        requests.post(
+                        _tg_post(
                             f"{TG_API_BASE}/bot{token}/sendMessage",
-                            json={"chat_id": chat_id, "text": followup_text.strip()[:4000],
-                                  "disable_web_page_preview": True, "reply_to_message_id": _midf},
+                            json_payload={"chat_id": chat_id, "text": followup_text.strip()[:4000],
+                                          "disable_web_page_preview": True, "reply_to_message_id": _midf},
                             timeout=15)
                     except Exception:
                         pass
                 return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id,
                         "has_desc": bool(followup_text and followup_text.strip()),
                         "description": (followup_text or "")}
+            # Telegram a répondu mais a REFUSÉ le file_id (invalide/expiré) :
+            # on le purge pour ne plus le retenter, et on télécharge normalement
+            _desc_err = str(_jf.get("description") or "").lower()
+            if "file" in _desc_err or _rf.status_code == 400:
+                fileid_drop(_sc)
+                tg_file_id = ""
         except Exception:
             pass  # file_id invalide/expire -> on retombe sur le telechargement normal
 
@@ -487,10 +580,7 @@ def send_video_from_url(video_url: str, caption: str = "",
     # CACHE disque PARTAGE avec la lecture Trends (data/insta/videos/{sc}.mp4) : un
     # reel deja telecharge (lu sur Trends OU envoye avant) est REUTILISE -> renvoi
     # INSTANTANE + zero appel yt-dlp (donc moins de rate-limit / risque de ban).
-    import re as _re_v
-    from pathlib import Path as _Pv
-    _scm = _re_v.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', fallback_url or "")
-    _sc = _scm.group(1) if _scm else ""
+    # (_sc / _re_v / _Pv déjà posés en tête de fonction pour le self-lookup)
     _cache_f = (_Pv("data/insta/videos") / f"{_sc}.mp4") if _sc else None
     _desc_f = (_Pv("data/insta/videos") / f"{_sc}.txt") if _sc else None  # sidecar description
     yt_info: Dict[str, Any] = {}
@@ -565,7 +655,7 @@ def send_video_from_url(video_url: str, caption: str = "",
 
     # 2) Upload via sendVideo (multipart, fichier en memoire)
     try:
-        r = requests.post(
+        r = _tg_post(
             f"{TG_API_BASE}/bot{token}/sendVideo",
             data={
                 "chat_id": chat_id,
@@ -595,6 +685,9 @@ def send_video_from_url(video_url: str, caption: str = "",
         # file_id de la video uploadee -> permet un renvoi INSTANTANE plus tard
         _new_fid = ((_res.get("video") or {}).get("file_id")
                     or (_res.get("document") or {}).get("file_id") or "")
+        # stocké dans le cache CENTRAL : toutes les routes en profitent
+        if _new_fid and _sc:
+            fileid_put(_sc, _new_fid)
     except Exception as e:
         return _fallback(f"Reponse invalide : {e}")
 

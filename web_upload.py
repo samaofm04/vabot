@@ -31676,9 +31676,23 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not reel:
             return jsonify({"ok": False, "error": "Reel introuvable"})
         url = (reel.get("url") or "").strip()
-        # 1) Download : yt-dlp d'abord (le plus fiable), puis la chaine de secours
+        # 0) CACHE DISQUE d'abord (data/insta/videos/{sc}.mp4, partagé avec la
+        # lecture et la veille) : un reel déjà téléchargé part sans yt-dlp.
+        # (Le file_id Telegram ne sert PAS ici : le banger poste sur DISCORD,
+        # qui a besoin des octets — et getFile Telegram est plafonné à 20 Mo.)
         info = {}
-        video_bytes = veille_telegram.download_via_ytdlp(url, info=info) if url else None
+        video_bytes = None
+        _scb = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url or "")
+        if _scb:
+            _fcb = Path("data/insta/videos") / f"{_scb.group(1)}.mp4"
+            if _fcb.exists() and 1024 < _fcb.stat().st_size <= 50 * 1024 * 1024:
+                try:
+                    video_bytes = _fcb.read_bytes()
+                except Exception:
+                    video_bytes = None
+        # 1) Download : yt-dlp (le plus fiable), puis la chaine de secours
+        if not video_bytes:
+            video_bytes = veille_telegram.download_via_ytdlp(url, info=info) if url else None
         if not video_bytes and info.get("reason") not in ("audience_restreinte", "trop_gros_50mb"):
             fresh = veille_telegram.refresh_post_data(url, owner=reel.get("owner", "")) if url else {}
             vu = (fresh.get("video_url") or reel.get("video_url") or "").strip()
@@ -31718,8 +31732,17 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             if r.get("sent_to_telegram"):
                 continue
             url = (r.get("url") or "").strip()
-            # Refresh caption/video_url si manquants
-            if url and (not (r.get("caption") or "").strip() or not (r.get("video_url") or "").strip()):
+            # Un reel déjà uploadé (file_id central) ou déjà sur disque n'a
+            # besoin d'AUCUNE re-résolution RapidAPI+instaloader (2-10 s/reel) :
+            # cette cascade ne sert qu'aux reels froids sans caption/video_url.
+            _scm2 = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url or "")
+            _sc2 = _scm2.group(1) if _scm2 else ""
+            _has_asset = bool(
+                (r.get("tg_file_id") or "").strip()
+                or (_sc2 and veille_telegram.fileid_get(_sc2))
+                or (_sc2 and (Path("data/insta/videos") / f"{_sc2}.mp4").exists()))
+            if url and not _has_asset and (not (r.get("caption") or "").strip()
+                                           or not (r.get("video_url") or "").strip()):
                 fresh = veille_telegram.refresh_post_data(url, owner=r.get("owner", ""))
                 if fresh.get("caption") and not (r.get("caption") or "").strip():
                     r["caption"] = fresh["caption"]
@@ -31734,9 +31757,19 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 fallback_url=url,
                 followup_text=description,
                 owner=r.get("owner", ""),
+                tg_file_id=(r.get("tg_file_id") or ""),
             )
             if res.get("ok"):
                 veille.mark_sent(r["id"])
+                # aligné sur /veille/send : on persiste ce que l'envoi a appris
+                # (file_id -> renvois instantanés ; description récupérée)
+                try:
+                    if res.get("tg_file_id"):
+                        veille.update_reel(r["id"], tg_file_id=res["tg_file_id"])
+                    if res.get("description") and not (r.get("caption") or "").strip():
+                        veille.update_reel(r["id"], caption=res["description"])
+                except Exception:
+                    pass
                 sent += 1
             else:
                 failed += 1
