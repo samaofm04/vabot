@@ -20282,13 +20282,20 @@ function veilleModelsSelected(){
 async function veilleInitModelChips(){
   const btn = document.getElementById('veille-send-selected-btn');
   if(!btn || document.getElementById('veille-model-chips')) return;
-  let models = [];
-  try {
-    const r = await fetch('/veille/models');
-    const j = await r.json();
-    models = (j.ok && j.models) || [];
-  } catch(e){}
+  if(window.__veilleChipsBusy) return;   // un init est deja en vol (fetch async)
+  window.__veilleChipsBusy = true;
+  let models = window.__veilleModels || [];   // cache : pas de re-fetch a chaque recreation
+  if(!models.length){
+    try {
+      const r = await fetch('/veille/models');
+      const j = await r.json();
+      models = (j.ok && j.models) || [];
+    } catch(e){}
+    if(models.length) window.__veilleModels = models;
+  }
+  window.__veilleChipsBusy = false;
   if(!models.length) return;
+  if(document.getElementById('veille-model-chips')) return;   // re-check apres l'await
   let sel = veilleModelsSelected().filter(function(m){ return models.indexOf(m) !== -1; });
   const bar = document.createElement('div');
   bar.id = 'veille-model-chips';
@@ -20323,7 +20330,15 @@ async function veilleInitModelChips(){
   const anchor = btn.closest('div');
   if(anchor && anchor.parentElement) anchor.parentElement.insertBefore(bar, anchor);
 }
-document.addEventListener('DOMContentLoaded', function(){ setTimeout(veilleInitModelChips, 800); });
+// Gardien AUTO-RÉPARANT : la section Veille est re-rendue en AJAX
+// (refreshVeilleSection remplace tout le HTML -> la barre à chips était effacée
+// et ne revenait qu'au reload complet). Toutes les 2 s : si le bouton Envoyer
+// existe mais que la barre manque, on la recrée (models en cache, chips en
+// localStorage -> la sélection est conservée).
+document.addEventListener('DOMContentLoaded', function(){
+  setTimeout(veilleInitModelChips, 800);
+  setInterval(veilleInitModelChips, 2000);
+});
 
 // ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
 window.__bangerIdentities = null;
@@ -31811,10 +31826,60 @@ def create_app():
         }
         vurl = (reel.get("video_url") or "").strip()
         res = None
+        proxy_url = ""
+        # shortcode du reel (l'id veille est un uuid) -> cache vidéo PARTAGÉ avec
+        # les pré-téléchargements Trends et l'envoi (data/insta/videos/{sc}.mp4)
+        _m_sc = re.search(r"/(?:p|reel|reels)/([A-Za-z0-9_-]+)", reel.get("url") or "")
+        _sc = _m_sc.group(1) if _m_sc else ""
+        _cache_f = (INSTA_VIDEOS_DIR / f"{_sc}.mp4") if _sc else None
+        # 0) CACHE DISQUE d'abord : vidéo déjà téléchargée (Trends ou envoi
+        #    précédent) -> OCR local instantané, zéro réseau, jamais expiré.
+        if _cache_f and _cache_f.exists() and _cache_f.stat().st_size > 1024:
+            res = tg_router.ocr_video_url(str(_cache_f), second=second, headers=None, full=full, end=end)
+            if res and res.get("ok"):
+                proxy_url = f"/veille/reelvideo?reel_id={rid}"
         # 1) RAPIDE : ffmpeg lit les frames DIRECTEMENT depuis l'URL (pas de download 50 Mo)
-        if vurl:
+        if not (res and res.get("ok")) and vurl:
             res = tg_router.ocr_video_url(vurl, second=second, headers=ig_headers, full=full, end=end)
-        # 2) URL KO/expirée -> on re-résout puis retente
+        # 2) APIFY : résout un video_url FRAIS via le scraper officiel (ZERO
+        #    cookie, pas de 429) -> download dans le cache partagé -> OCR local.
+        #    Même source fiable que l'ENVOI ; évite le yt-dlp qui se fait jeter.
+        ap_reason = ""
+        if not (res and res.get("ok")):
+            try:
+                import apify_reels as _ap
+                if _ap.configured():
+                    _apdiag = {}
+                    _ar = _ap.fetch_video_urls([reel.get("url", "")], timeout=120, diag=_apdiag)
+                    _ad = _ar.get(_sc) or (next(iter(_ar.values())) if _ar else None)
+                    if _ad and _ad.get("video_url"):
+                        veille.update_reel(rid, video_url=_ad["video_url"])
+                        vurl = _ad["video_url"]
+                        if _ad.get("caption") and not (reel.get("caption") or "").strip():
+                            veille.update_reel(rid, caption=_ad["caption"])
+                        vb = veille_telegram.download_video_bytes(_ad["video_url"])
+                        if vb and _cache_f:
+                            try:
+                                _cache_f.parent.mkdir(parents=True, exist_ok=True)
+                                _cache_f.write_bytes(vb)
+                                if _ad.get("caption"):
+                                    _cache_f.with_suffix(".txt").write_text(_ad["caption"], encoding="utf-8")
+                            except Exception:
+                                pass
+                        if vb and _cache_f and _cache_f.exists():
+                            res = tg_router.ocr_video_url(str(_cache_f), second=second, headers=None, full=full, end=end)
+                            if res and res.get("ok"):
+                                proxy_url = f"/veille/reelvideo?reel_id={rid}"
+                        else:
+                            # pas de cache possible -> OCR direct depuis l'URL fraîche
+                            res = tg_router.ocr_video_url(_ad["video_url"], second=second, headers=ig_headers, full=full, end=end)
+                    else:
+                        ap_reason = (_apdiag.get("error") or "aucune vidéo résolue")
+                else:
+                    ap_reason = "non configuré"
+            except Exception as e:
+                ap_reason = f"exception: {str(e)[:60]}"
+        # 3) URL KO/expirée -> on re-résout puis retente
         if not (res and res.get("ok")):
             try:
                 data = veille_telegram.refresh_post_data(reel.get("url", ""), reel.get("owner", ""))
@@ -31827,23 +31892,21 @@ def create_app():
                     vurl = vurl2
             except Exception:
                 pass
-        # 3) le file_id Telegram (download, mais fiable) — si le reel a déjà été envoyé
+        # 4) le file_id Telegram (download, mais fiable) — si le reel a déjà été envoyé
         if not (res and res.get("ok")):
             fid = (reel.get("tg_file_id") or "").strip()
             if fid:
                 vb = tg_router.download_file_bytes(fid)
                 if vb:
                     res = tg_router.ocr_video_bytes(vb, second=second)
-        # 4) LE PLUS FIABLE : yt-dlp depuis le permalink (cookies IG) -> fichier
-        #    local -> OCR complet (garde les modes « toute la vidéo » / « jusqu'ici »).
-        #    C'est la même méthode que l'ENVOI : marche même quand l'URL CDN a expiré.
-        #    On GARDE le fichier en cache -> le lecteur du modal le lit via /veille/reelvideo.
-        proxy_url = ""
+        # 5) DERNIER recours : yt-dlp PUBLIC (sans cookie, comme l'envoi) ->
+        #    fichier local -> OCR complet. On GARDE le fichier en cache -> le
+        #    lecteur du modal le lit via /veille/reelvideo.
         yt_reason = ""
         if not (res and res.get("ok")):
             try:
                 yt_info = {}
-                vb = veille_telegram.download_via_ytdlp(reel.get("url", ""), info=yt_info)
+                vb = veille_telegram.download_via_ytdlp(reel.get("url", ""), info=yt_info, use_cookies=False)
                 yt_reason = yt_info.get("reason", "")
                 if vb:
                     cdir = DATA_DIR / "tg_tmp"
@@ -31865,9 +31928,11 @@ def create_app():
             except Exception as e:
                 yt_reason = f"exception: {str(e)[:60]}"
         if not (res and res.get("ok")):
-            # message DIAGNOSTIC : dit exactement ce qui a échoué (URL, yt-dlp, file_id)
+            # message DIAGNOSTIC : dit exactement ce qui a échoué (URL, Apify, yt-dlp, file_id)
             diag = []
             diag.append("URL directe expirée" if vurl else "aucune URL stockée")
+            if ap_reason:
+                diag.append("Apify → " + ap_reason)
             if yt_reason:
                 diag.append("yt-dlp → " + yt_reason)
             else:
@@ -31893,6 +31958,16 @@ def create_app():
         if not rid or not re.match(r"^[A-Za-z0-9_-]+$", rid):
             return "", 404
         p = DATA_DIR / "tg_tmp" / f"reelvid_{rid}.mp4"
+        if not p.exists():
+            # fallback : cache PARTAGÉ Trends/envoi (data/insta/videos/{shortcode}.mp4)
+            try:
+                import veille as _v
+                _r0 = _v.get_reel(rid) or {}
+                _m = re.search(r"/(?:p|reel|reels)/([A-Za-z0-9_-]+)", _r0.get("url") or "")
+                if _m:
+                    p = INSTA_VIDEOS_DIR / f"{_m.group(1)}.mp4"
+            except Exception:
+                pass
         if not p.exists():
             return "", 404
         return send_file(str(p), mimetype="video/mp4", conditional=True)
