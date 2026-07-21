@@ -11238,10 +11238,10 @@ def _render_insta_trends_grid_html() -> str:
         if trending_x:
             # Badge plus clean : pill avec icone trending + valeur
             trending_html = (
-                '<div style="display:inline-flex;align-items:center;gap:5px;color:#22c55e;font-weight:800;font-size:12px;margin-bottom:6px;'
-                'background:rgba(34,197,94,.15);padding:3px 9px;border-radius:8px;letter-spacing:.2px;'
-                'border:1px solid rgba(34,197,94,.35);text-shadow:0 0 4px rgba(0,0,0,.6)">'
-                '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+                '<div style="display:inline-flex;align-items:center;gap:5px;color:#fff;font-weight:800;font-size:12px;margin-bottom:6px;'
+                'background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px;letter-spacing:.2px;'
+                'text-shadow:0 1px 3px rgba(0,0,0,.9)">'
+                '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
                 '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
                 f'{trending_x}</div>'
             )
@@ -11300,9 +11300,9 @@ def _render_insta_trends_grid_html() -> str:
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
       <!-- Stats : TOUJOURS visibles (de base), colonne verticale a droite. Remontent quand la description s ouvre. -->
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;margin-bottom:6px;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none">
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>{_format_count(views)}</div>
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>{_format_count(likes)}</div>
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>{_format_count(comments)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>{_format_count(views)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>{_format_count(likes)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>{_format_count(comments)}</div>
       </div>
       <!-- Description (legende + son) : FERMEE par defaut, s ouvre AU CLIC sur la barre @compte -->
       <div class="reel-expand" style="max-height:0;overflow:hidden;border-top:0 solid rgba(255,255,255,.12);transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
@@ -19949,9 +19949,9 @@ def _render_veille_feed_html() -> str:
     <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.95),rgba(0,0,0,.75) 60%,transparent);padding:8px 10px;z-index:10">
       <!-- Stats : toujours visibles, colonne a droite (icones Lucide, comme Trends) -->
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;margin-bottom:6px;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none">
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>{_format_count(d_views)}</div>
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>{_format_count(d_likes)}</div>
-        <div style="display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>{_format_count(d_comments)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>{_format_count(d_views)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>{_format_count(d_likes)}</div>
+        <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>{_format_count(d_comments)}</div>
       </div>
       <div class="reel-expand" style="max-height:0;overflow:hidden;border-top:0 solid rgba(255,255,255,.12);transition:max-height .3s ease;color:#fff;font-size:12.5px;line-height:1.45">
         <div class="reel-expand-inner" style="padding:6px 0">
