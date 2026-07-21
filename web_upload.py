@@ -26099,6 +26099,50 @@ def _render_aikey_settings() -> str:
         "</ol>"
         "<p style='margin-top:8px;color:#666'>Le site redémarre ~3 s après l'enregistrement pour activer la clé.</p>"
         "</details>"
+        + _render_apify_settings()
+    )
+
+
+def _render_apify_settings() -> str:
+    """Token Apify (Instagram Reel Downloader) : télécharge les vidéos des reels
+    via un service tiers, SANS jamais utiliser le compte Instagram."""
+    try:
+        import apify_reels as _ap
+        ok = _ap.configured()
+    except Exception:
+        ok = False
+    status = (
+        "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
+        "border-radius:8px;margin-bottom:12px;font-size:13px;color:#34d399'>"
+        "✅ Apify connecté — les vidéos des reels se téléchargent via Apify "
+        "(sans toucher ton compte Instagram).</div>"
+        if ok else
+        "<div style='padding:12px 16px;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);"
+        "border-radius:8px;margin-bottom:12px;font-size:13px;color:#94a3b8'>"
+        "Optionnel mais recommandé : récupère les vidéos des reels que les "
+        "méthodes gratuites ratent, sans jamais utiliser ton cookie Instagram "
+        "(zéro risque de ban).</div>"
+    )
+    return (
+        "<div style='margin-top:22px;border-top:1px solid #26263a;padding-top:18px'>"
+        "<div style='font-weight:800;font-size:14px;margin-bottom:10px'>🎬 Apify — téléchargement des reels</div>"
+        + status
+        + "<form method='POST' action='/settings/apify_token' style='display:flex;flex-direction:column;gap:8px'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Token API Apify (apify_api_…)</label>"
+        "<input type='password' name='apify_token' placeholder='apify_api_…' autocomplete='off' "
+        "style='font-family:monospace;font-size:12px' minlength='20'>"
+        "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer le token Apify</button>"
+        "</form>"
+        + ("<button type='button' onclick=\"fetch('/settings/apify_test').then(r=>r.json()).then(d=>{if(typeof showToast==='function')showToast(d.ok?('✅ Apify OK ('+(d.user||'?')+')'):('❌ '+(d.error||'?')),d.ok?'success':'error');})\" "
+           "style='width:100%;margin-top:8px;background:#26263a;color:#cbd5e1;border:1px solid #333'>Tester la connexion</button>" if ok else "")
+        + "<details style='font-size:12px;color:#888;margin-top:14px'>"
+        "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Où trouver mon token ?</summary>"
+        "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+        "<li>Va sur <a href='https://console.apify.com/account/integrations' target='_blank' style='color:#3b82f6'>console.apify.com → Integrations</a></li>"
+        "<li>Copie ton <b>Personal API token</b> (commence par <code>apify_api_…</code>)</li>"
+        "<li>Colle-le ici. Apify a un quota gratuit ; au-delà c'est payant.</li>"
+        "</ol></details>"
+        "</div>"
     )
 
 
@@ -27395,14 +27439,40 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     todo = [(sc, purl, vurl) for (_ta, sc, purl, vurl) in todo]
     _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo), "ts": _t2.time()})
 
+    # APIFY (si configuré) : résout les video_url EN BATCH via un service tiers
+    # qui extrait avec SES proxies -> zéro cookie, zéro risque de ban, et couvre
+    # les reels que nos méthodes publiques ratent. On remplit un cache {sc:vurl}
+    # pour que _one() télécharge directement le lien fourni.
+    _apify_vurl: Dict[str, str] = {}
+    try:
+        import apify_reels as _ap
+        if _ap.configured() and todo:
+            for i in range(0, len(todo), 40):   # lots de 40 reels par run
+                chunk = todo[i:i + 40]
+                purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v) in chunk]
+                res = _ap.fetch_video_urls(purls)
+                for sc2, d2 in res.items():
+                    if d2.get("video_url"):
+                        _apify_vurl[sc2] = d2["video_url"]
+                    if d2.get("caption"):   # bonus : caption sauvée en sidecar
+                        try:
+                            (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
+                                d2["caption"], encoding="utf-8")
+                        except Exception:
+                            pass
+    except Exception as _e:
+        log.warning(f"[predownload] apify: {_e}")
+
     def _one(item):
         sc, purl, vurl = item
         f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
         try:
             if f.exists():
                 return
-            # TOUT sans cookie : 1) lien direct CDN, 2) scrape page publique du
-            # reel (autre video_url), 3) yt-dlp public. Aucun n'utilise le compte.
+            # TOUT sans cookie : 0) lien Apify (le plus fiable), 1) lien direct
+            # CDN du scrape, 2) scrape page publique, 3) yt-dlp public.
+            if _apify_vurl.get(sc) and _download_reel_video(sc, _apify_vurl[sc]):
+                return
             if vurl and _download_reel_video(sc, vurl):
                 return
             try:
@@ -27448,15 +27518,27 @@ def _ensure_video_worker(sc: str, url: str):
         import veille_telegram as _vt
         info = {}
         purl = url or f"https://www.instagram.com/reel/{sc}/"
-        # TOUT sans cookie (choix utilisateur) : scrape page publique -> yt-dlp
-        # public. Si les deux echouent, le reel est marque indisponible.
+        # TOUT sans cookie : Apify (fiable) -> scrape page publique -> yt-dlp
+        # public. Si tout echoue, le reel est marque indisponible.
         vb = None
         try:
-            pub = _scrape_ig_page_for_video(sc)
-            if pub:
-                vb = _vt.download_video_bytes(pub, timeout=40)
+            import apify_reels as _ap
+            if _ap.configured():
+                _res = _ap.fetch_video_urls([purl], timeout=90)
+                _d = _res.get(sc) or (list(_res.values())[0] if _res else None)
+                if _d and _d.get("video_url"):
+                    vb = _vt.download_video_bytes(_d["video_url"], timeout=40)
+                    if _d.get("caption"):
+                        info["description"] = _d["caption"]
         except Exception:
             pass
+        if not vb:
+            try:
+                pub = _scrape_ig_page_for_video(sc)
+                if pub:
+                    vb = _vt.download_video_bytes(pub, timeout=40)
+            except Exception:
+                pass
         if not vb:
             vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=False)
         if vb:
@@ -34251,6 +34333,36 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         _schedule_restart(2.0)
         return _success("✅ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
                         "Le site redémarre dans 2 s.", tab="saikey")
+
+    @app.route("/settings/apify_token", methods=["POST"])
+    def settings_apify_token():
+        if not is_auth():
+            return redirect("/")
+        tok = (request.form.get("apify_token") or "").strip()
+        if len(tok) < 20 or " " in tok:
+            return _error("❌ Token Apify invalide (copie le token complet)", tab="saikey")
+        try:
+            import apify_reels
+            apify_reels.save_token(tok)
+            r = apify_reels.test_token()
+        except Exception as e:
+            return _error(f"❌ {e}", tab="saikey")
+        if not r.get("ok"):
+            return _error(f"❌ Token refusé par Apify : {r.get('error')}", tab="saikey")
+        return _success(f"✅ Apify connecté ({r.get('user')}). Les vidéos des reels se "
+                        "téléchargent maintenant via Apify, sans toucher ton compte Instagram.",
+                        tab="saikey")
+
+    @app.route("/settings/apify_test")
+    def settings_apify_test():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import apify_reels
+            return jsonify(apify_reels.test_token())
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @app.route("/settings/gemini_key", methods=["POST"])
     def settings_gemini_key():
