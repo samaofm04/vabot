@@ -1848,6 +1848,7 @@ window.igPlayInline = function(media){
     var _ovf = media.querySelector('.reel-play-overlay'); if(_ovf) _ovf.style.opacity = '0';
     v.removeAttribute('controls');
     v.muted = false; v.style.opacity = '1'; v.style.zIndex = '2';
+    var _bf = card.querySelector('.reel-dl-badge'); if(_bf) _bf.remove();
     igAttachPauseFeedback(media, v);
     igObserveReel(card);
     var _pf = v.play(); if(_pf && _pf.catch) _pf.catch(function(){});
@@ -1872,6 +1873,7 @@ window.igPlayInline = function(media){
     if(revealedVideo) return;
     revealedVideo = true;
     v.style.opacity = '1';
+    var _b = card.querySelector('.reel-dl-badge'); if(_b) _b.remove();  // la video joue = elle est prete
   }
   v.addEventListener('loadeddata', reveal, {once:true});
   v.addEventListener('playing', reveal, {once:true});
@@ -11392,6 +11394,14 @@ def _render_insta_trends_grid_html() -> str:
         # mp4 déjà sur disque -> on sert le fichier local (proxy ÉTAPE 0) au
         # lieu de l'URL CDN qui expire et déclenche le mur de vérification
         video_url = _local_reel_src(url, owner, video_url)
+        # Marqueur « déjà sur le serveur » : _local_reel_src ne renvoie l'URL du
+        # proxy local QUE si le mp4 existe sur disque.
+        dl_ready = video_url.startswith("/insta/proxy_video")
+        dl_badge = "" if (dl_ready or not is_video) else (
+            "<div class='reel-dl-badge' style='position:absolute;top:10px;left:50%;transform:translateX(-50%);"
+            "background:rgba(0,0,0,.62);backdrop-filter:blur(6px);color:#fbbf24;font-size:10px;font-weight:700;"
+            "padding:4px 9px;border-radius:9px;z-index:3;display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap'>"
+            "⏳ pas encore téléchargé</div>")
         # Video preview au hover
         video_html = ""
         if is_video and video_url:
@@ -11409,6 +11419,7 @@ def _render_insta_trends_grid_html() -> str:
        onclick='igPlayInline(this)'>
     <img src="{thumb}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html}
+    {dl_badge}
     <!-- Play overlay (visible quand pas en lecture / paused) -->
     <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
       <div style="width:52px;height:52px;background:rgba(0,0,0,.45);backdrop-filter:blur(8px);border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.45);box-shadow:0 4px 16px rgba(0,0,0,.4)">
