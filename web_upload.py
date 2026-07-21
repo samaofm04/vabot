@@ -11122,6 +11122,28 @@ def _start_insta_trends_scheduler():
     print("[insta-trends-sched] thread démarré — scrape 00h / 12h Paris", flush=True)
 
 
+def _local_reel_src(url: str, owner: str, cdn_url: str) -> str:
+    """URL vidéo à mettre dans la carte d'un reel.
+
+    Si le mp4 est DÉJÀ sur disque (téléchargé par le démon), on renvoie l'URL
+    du proxy qui sert directement le fichier local (ÉTAPE 0 de proxy_video) :
+    lecture instantanée, JAMAIS d'appel au CDN Instagram (qui expire et affiche
+    parfois un mur de vérification). Sinon on garde l'URL CDN d'origine.
+    """
+    try:
+        import re as _re
+        from urllib.parse import quote as _q
+        m = _re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url or "")
+        if m:
+            f = INSTA_VIDEOS_DIR / f"{m.group(1)}.mp4"
+            if f.exists() and f.stat().st_size > 1024:
+                return (f"/insta/proxy_video?url={_q(url, safe='')}"
+                        f"&owner={_q(owner or '', safe='')}")
+    except Exception:
+        pass
+    return cdn_url or ""
+
+
 def _render_insta_trends_grid_html() -> str:
     """Grille des reels scrapés depuis tous les comptes en watchlist."""
     try:
@@ -11219,6 +11241,9 @@ def _render_insta_trends_grid_html() -> str:
         avatar = ""
         if owner_pic:
             avatar = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+        # mp4 déjà sur disque -> on sert le fichier local (proxy ÉTAPE 0) au
+        # lieu de l'URL CDN qui expire et déclenche le mur de vérification
+        video_url = _local_reel_src(url, owner, video_url)
         # Video preview au hover
         video_html = ""
         if is_video and video_url:
@@ -19860,6 +19885,9 @@ def _render_veille_feed_html() -> str:
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 12 10 18 20 6'/></svg>"
                 f"</span></label>"
             )
+            # mp4 déjà sur disque -> fichier local (proxy ÉTAPE 0) au lieu du
+            # CDN expirable (source des murs de vérification à la lecture)
+            video_url = _local_reel_src(url, owner, video_url)
             # Video element (reutilise meme structure que Trends)
             # Toujours emettre le <video> (meme si video_url vide/expire) : igPlayInline
             # bascule alors sur le proxy via le permalink IG. Sinon la carte reste morte.
@@ -33298,6 +33326,37 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not m:
             return jsonify({"ok": False, "error": "shortcode introuvable dans url"})
         shortcode = m.group(1)
+        # CACHE : sidecar .txt écrit par la Veille / le proxy quand la vidéo a
+        # été téléchargée -> zéro yt-dlp+cookie. AVANT, chaque carte visible
+        # (IntersectionObserver) + chaque play lançait un process yt-dlp avec le
+        # cookie : c'était le principal consommateur du cookie IG (donc la
+        # cause des murs de vérification). On lit le fichier local d'abord.
+        try:
+            _side = INSTA_VIDEOS_DIR / f"{shortcode}.txt"
+            if _side.exists():
+                _c = _side.read_text(encoding="utf-8").strip()
+                if _c:
+                    return jsonify({"ok": True, "caption": _c[:1000], "cached": True})
+        except Exception:
+            pass
+        # cache mémoire (persisté aussi en sidecar dès qu'on trouve la caption)
+        if not hasattr(insta_fetch_caption, "_cap_cache"):
+            insta_fetch_caption._cap_cache = {}
+        _cap_hit = insta_fetch_caption._cap_cache.get(shortcode)
+        if _cap_hit:
+            return jsonify({"ok": True, "caption": _cap_hit[:1000], "cached": True})
+
+        def _remember(cap: str):
+            """Mémorise la caption trouvée : mémoire + sidecar disque (partagé
+            avec la Veille) pour ne plus jamais relancer yt-dlp dessus."""
+            try:
+                insta_fetch_caption._cap_cache[shortcode] = cap
+                _sf = INSTA_VIDEOS_DIR / f"{shortcode}.txt"
+                if not _sf.exists():
+                    _sf.parent.mkdir(parents=True, exist_ok=True)
+                    _sf.write_text(cap, encoding="utf-8")
+            except Exception:
+                pass
         # yt-dlp + cookie IG : recupere la VRAIE description (fiable). Tente en
         # PREMIER si un cookie est configure (la page publique est souvent bloquee
         # par Instagram). skip_download -> rapide (metadonnees seules).
@@ -33311,6 +33370,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                     _info = _yd.extract_info(url, download=False)
                 _desc = (_info.get("description") or "").strip()
                 if _desc:
+                    _remember(_desc)
                     return jsonify({"ok": True, "caption": _desc[:1000]})
         except Exception:
             pass
@@ -33375,6 +33435,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                             cap = cap.strip().strip('.')
                             # Skip si c'est juste le titre/username sans contenu utile
                             if cap and len(cap) > 5 and not cap.startswith("Instagram"):
+                                _remember(cap)
                                 return jsonify({"ok": True, "caption": cap[:1000]})
                 except Exception:
                     continue
