@@ -27449,39 +27449,15 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     # qui extrait avec SES proxies -> zéro cookie, zéro risque de ban, et couvre
     # les reels que nos méthodes publiques ratent. On remplit un cache {sc:vurl}
     # pour que _one() télécharge directement le lien fourni.
-    _apify_vurl: Dict[str, str] = {}
     _PREDL_STATE["apify"] = {}
+    _apify_total = {"n": 0}
+
     try:
         import apify_reels as _ap
-        if _ap.configured() and todo:
-            _resolved = 0
-            _last_diag = {}
-            for i in range(0, len(todo), 15):   # lots de 15 (run-sync a un timeout)
-                chunk = todo[i:i + 15]
-                purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v) in chunk]
-                _d = {}
-                res = _ap.fetch_video_urls(purls, diag=_d)
-                _last_diag = _d
-                for sc2, d2 in res.items():
-                    if d2.get("video_url"):
-                        _apify_vurl[sc2] = d2["video_url"]
-                        _resolved += 1
-                    if d2.get("caption"):   # bonus : caption sauvée en sidecar
-                        try:
-                            (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
-                                d2["caption"], encoding="utf-8")
-                        except Exception:
-                            pass
-                # état visible : dernier diag + total résolu jusqu'ici
-                _PREDL_STATE["apify"] = {"resolved": _resolved,
-                                         "status": _last_diag.get("status"),
-                                         "error": _last_diag.get("error") or "",
-                                         "sample": _last_diag.get("sample")}
-    except Exception as _e:
-        _PREDL_STATE["apify"] = {"error": f"{type(_e).__name__}: {_e}"}
-        log.warning(f"[predownload] apify: {_e}")
+    except Exception:
+        _ap = None
 
-    def _one(item):
+    def _one(item, apify_url=""):
         sc, purl, vurl = item
         f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
         try:
@@ -27489,7 +27465,7 @@ def _predownload_missing(max_workers: int = 4) -> dict:
                 return
             # TOUT sans cookie : 0) lien Apify (le plus fiable), 1) lien direct
             # CDN du scrape, 2) scrape page publique, 3) yt-dlp public.
-            if _apify_vurl.get(sc) and _download_reel_video(sc, _apify_vurl[sc]):
+            if apify_url and _download_reel_video(sc, apify_url):
                 return
             if vurl and _download_reel_video(sc, vurl):
                 return
@@ -27517,12 +27493,40 @@ def _predownload_missing(max_workers: int = 4) -> dict:
         finally:
             _PREDL_STATE["done"] += 1
 
+    # LOT PAR LOT, les plus RÉCENTES d'abord : pour chaque paquet de 12 (todo est
+    # trié récent->ancien), on résout les video_url via Apify PUIS on télécharge
+    # ce paquet en parallèle. La barre monte tout de suite (au lieu d'attendre
+    # que TOUT soit résolu), et les récentes sont prêtes en premier.
     try:
         with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
-            list(ex.map(_one, todo))
+            for i in range(0, len(todo), 12):
+                batch = todo[i:i + 12]
+                apify_map: Dict[str, str] = {}
+                if _ap and _ap.configured():
+                    _d = {}
+                    purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v) in batch]
+                    try:
+                        res = _ap.fetch_video_urls(purls, diag=_d)
+                        for sc2, d2 in res.items():
+                            if d2.get("video_url"):
+                                apify_map[sc2] = d2["video_url"]
+                                _apify_total["n"] += 1
+                            if d2.get("caption"):
+                                try:
+                                    (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
+                                        d2["caption"], encoding="utf-8")
+                                except Exception:
+                                    pass
+                    except Exception as _e:
+                        _d = {"error": f"{type(_e).__name__}: {_e}"}
+                    _PREDL_STATE["apify"] = {"resolved": _apify_total["n"],
+                                             "status": _d.get("status"),
+                                             "error": _d.get("error") or ""}
+                # télécharge ce paquet en parallèle avant de résoudre le suivant
+                list(ex.map(lambda it: _one(it, apify_map.get(it[0], "")), batch))
     finally:
         _PREDL_STATE["running"] = False
-    return {"downloaded_attempt": len(todo)}
+    return {"downloaded_attempt": len(todo), "apify_resolved": _apify_total["n"]}
 
 
 def _ensure_video_worker(sc: str, url: str):
