@@ -607,10 +607,34 @@ def send_video_from_url(video_url: str, caption: str = "",
                     followup_text = _ds
             except Exception:
                 pass
-    # 0) yt-dlp depuis le permalink (auth via cookies) si PAS en cache. Recupere
-    #    AUSSI la description (yt_info['description']).
+    # 0a) APIFY d'abord (si configuré) : résout le video_url + caption via le
+    #     scraper officiel (ZERO cookie, pas de 429) et télécharge. C'est LA
+    #     source fiable pour la veille — évite le yt-dlp qui se fait jeter (429).
+    if not video_bytes and fallback_url:
+        try:
+            import apify_reels as _ap
+            if _ap.configured():
+                _ar = _ap.fetch_video_urls([fallback_url], timeout=90)
+                _ad = _ar.get(_sc) or (list(_ar.values())[0] if _ar else None)
+                if _ad and _ad.get("video_url"):
+                    video_bytes = download_video_bytes(_ad["video_url"])
+                    if video_bytes:
+                        if _ad.get("caption") and (not followup_text or not followup_text.strip()):
+                            followup_text = _ad["caption"]
+                        if _cache_f:   # met en cache (partagé Trends) + sidecar desc
+                            try:
+                                _cache_f.parent.mkdir(parents=True, exist_ok=True)
+                                _cache_f.write_bytes(video_bytes)
+                                if _ad.get("caption") and _desc_f:
+                                    _desc_f.write_text(_ad["caption"], encoding="utf-8")
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+    # 0b) yt-dlp depuis le permalink (PUBLIC, sans cookie) si Apify n'a rien.
+    #     Recupere AUSSI la description (yt_info['description']).
     if not video_bytes:
-        video_bytes = download_via_ytdlp(fallback_url, info=yt_info) if fallback_url else None
+        video_bytes = download_via_ytdlp(fallback_url, info=yt_info, use_cookies=False) if fallback_url else None
         yt_reason = yt_info.get("reason", "")
         # Si yt-dlp dit "audience restreinte" ou "trop gros", c'est definitif -> lien
         if not video_bytes and yt_reason in ("audience_restreinte", "trop_gros_50mb"):
