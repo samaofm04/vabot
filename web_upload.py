@@ -29327,33 +29327,45 @@ def create_app():
                 for p in lst[:20]]})
         stamp = _dtb.datetime.now().strftime("%Y%m%d_%H%M%S")
         dest = dest_dir / f"checkpoint_{stamp}.zip"
-        # exclus : médias lourds régénérables (les reels se re-téléchargent,
-        # les miniatures se régénèrent) — tout le reste de data/ est inclus
-        skip_parts = {"videos", "tg_tmp", "thumbs"}
-        skip_ext = {".mp4", ".mov", ".zip"}
-        n, skipped = 0, 0
-        try:
-            with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
-                for p in Path("data").rglob("*"):
-                    if p.is_dir():
-                        continue
-                    rel = p.relative_to("data")
-                    if (any(part in skip_parts for part in rel.parts)
-                            or p.suffix.lower() in skip_ext):
-                        skipped += 1
-                        continue
-                    try:
-                        z.write(p, str(rel))
-                        n += 1
-                    except Exception:
-                        skipped += 1
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
-        return jsonify({"ok": True, "fichier": str(dest), "fichiers_inclus": n,
-                        "medias_exclus": skipped,
-                        "taille_mo": round(dest.stat().st_size / 1e6, 2),
-                        "note": "Pour restaurer : demande-le, rien n'est écrasé "
-                                "automatiquement."})
+        import threading
+
+        def _zip_bg():
+            # EN FOND : le zip de data/ peut dépasser le timeout du proxy (502
+            # observé) — la requête rend la main immédiatement, l'état se lit
+            # avec ?list=1 (le .part disparaît quand c'est fini)
+            skip_parts = {"videos", "tg_tmp", "thumbs"}
+            skip_ext = {".mp4", ".mov", ".zip"}
+            n = 0
+            part = dest.with_suffix(".part")
+            try:
+                with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
+                    for p in Path("data").rglob("*"):
+                        if p.is_dir():
+                            continue
+                        rel = p.relative_to("data")
+                        if (any(prt in skip_parts for prt in rel.parts)
+                                or p.suffix.lower() in skip_ext):
+                            continue
+                        try:
+                            z.write(p, str(rel))
+                            n += 1
+                        except Exception:
+                            pass
+                os.replace(str(part), str(dest))
+                print(f"[backup] {dest.name} : {n} fichiers, "
+                      f"{dest.stat().st_size / 1e6:.1f} Mo", flush=True)
+            except Exception as e:
+                print(f"[backup] échec : {type(e).__name__}: {e}", flush=True)
+                try:
+                    part.unlink()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_zip_bg, daemon=True).start()
+        return jsonify({"ok": True, "lance": True, "fichier": str(dest),
+                        "note": "Sauvegarde lancée en arrière-plan (~1-2 min). "
+                                "Vérifie avec /admin/backup_data?list=1 : le zip "
+                                "apparaît quand c'est terminé."})
 
     @app.route("/mypuls/pushs_refresh_probe")
     def mypuls_pushs_refresh_probe():
