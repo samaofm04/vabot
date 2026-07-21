@@ -27401,9 +27401,16 @@ def _predownload_missing(max_workers: int = 4) -> dict:
         try:
             if f.exists():
                 return
-            # 1) lien direct CDN (zéro cookie), 2) yt-dlp public
+            # TOUT sans cookie : 1) lien direct CDN, 2) scrape page publique du
+            # reel (autre video_url), 3) yt-dlp public. Aucun n'utilise le compte.
             if vurl and _download_reel_video(sc, vurl):
                 return
+            try:
+                pub = _scrape_ig_page_for_video(sc)
+                if pub and _download_reel_video(sc, pub):
+                    return
+            except Exception:
+                pass
             info = {}
             yb = _vt.download_via_ytdlp(purl or f"https://www.instagram.com/reel/{sc}/",
                                         timeout=30, info=info, use_cookies=False)
@@ -27441,13 +27448,17 @@ def _ensure_video_worker(sc: str, url: str):
         import veille_telegram as _vt
         info = {}
         purl = url or f"https://www.instagram.com/reel/{sc}/"
-        # 1) tentative PUBLIQUE (sans cookie). 2) si echec, UNE tentative avec
-        # cookie : c'est un seul reel demande explicitement par un clic — le
-        # meme geste que regarder la video soi-meme sur Insta, risque negligeable
-        # (a l'oppose du telechargement de masse qui, lui, reste sans cookie).
-        vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=False)
+        # TOUT sans cookie (choix utilisateur) : scrape page publique -> yt-dlp
+        # public. Si les deux echouent, le reel est marque indisponible.
+        vb = None
+        try:
+            pub = _scrape_ig_page_for_video(sc)
+            if pub:
+                vb = _vt.download_video_bytes(pub, timeout=40)
+        except Exception:
+            pass
         if not vb:
-            vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=True)
+            vb = _vt.download_via_ytdlp(purl, timeout=40, info=info, use_cookies=False)
         if vb:
             INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
             tmp = INSTA_VIDEOS_DIR / f"{sc}.mp4.part"
