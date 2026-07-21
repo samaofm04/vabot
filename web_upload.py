@@ -29773,6 +29773,59 @@ def create_app():
                              daemon=True).start()
         return jsonify({"ready": False, "downloading": True})
 
+    @app.route("/insta/apify_diag")
+    def insta_apify_diag():
+        """TEST Apify de bout en bout : prend quelques reels non téléchargés,
+        demande leurs video_url à Apify, tente le téléchargement, et rapporte
+        le résultat — sans jamais exposer le token."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import apify_reels as _ap
+            from insta_scraper import get_all_cached_reels, load_watchlist
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        if not _ap.configured():
+            return jsonify({"ok": False, "error": "Token Apify absent"})
+        wl = {str(u or "").lower().strip().lstrip("@") for u in (load_watchlist() or [])}
+        sample = []
+        for r in sorted(get_all_cached_reels(), key=lambda x: x.get("taken_at") or 0, reverse=True):
+            if not r.get("is_video"):
+                continue
+            if str(r.get("_owner") or "").lower().strip().lstrip("@") not in wl:
+                continue
+            m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+            if not m:
+                continue
+            sc = m.group(1)
+            if (INSTA_VIDEOS_DIR / f"{sc}.mp4").exists():
+                continue
+            sample.append((sc, r.get("url")))
+            if len(sample) >= 3:
+                break
+        if not sample:
+            return jsonify({"ok": True, "note": "Aucun reel manquant à tester (tout est déjà téléchargé ?)"})
+        res = _ap.fetch_video_urls([u for _s, u in sample])
+        import veille_telegram as _vt
+        out = []
+        for sc, u in sample:
+            d = res.get(sc)
+            entry = {"shortcode": sc, "apify_video_url": bool(d and d.get("video_url"))}
+            if d and d.get("video_url"):
+                try:
+                    b = _vt.download_video_bytes(d["video_url"], timeout=40)
+                    entry["telecharge_ko"] = round(len(b) / 1024) if b else 0
+                    if b:
+                        INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+                        (INSTA_VIDEOS_DIR / f"{sc}.mp4").write_bytes(b)
+                        entry["ecrit_disque"] = True
+                except Exception as e:
+                    entry["erreur_dl"] = str(e)[:120]
+            out.append(entry)
+        return jsonify({"ok": True, "apify_a_repondu": len(res), "testes": len(sample),
+                        "detail": out})
+
     @app.route("/insta/download_now", methods=["POST"])
     def insta_download_now():
         """Force un passage de téléchargement MAINTENANT (bouton ⚡), en fond,
