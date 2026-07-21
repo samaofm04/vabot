@@ -1746,7 +1746,13 @@ window.igRefreshDlBar = function(){
       var pct = d.total ? Math.round(d.ready / d.total * 100) : 100;
       var fill = document.getElementById('ig-dl-fill'); if(fill) fill.style.width = pct + '%';
       var txt = document.getElementById('ig-dl-txt');
-      if(txt) txt.textContent = d.ready + ' / ' + d.total + (d.running ? ' ⏳' : (pct >= 100 && d.total ? ' ✅' : ''));
+      function _n(x){ return (x||0).toLocaleString('fr-FR'); }  // 1 234 au lieu de 1234
+      if(txt){
+        var s = _n(d.ready) + ' / ' + _n(d.total) + ' vidéos';
+        if(d.running && d.pass_total){ s += ' · ⏳ ' + _n(d.pass_done) + '/' + _n(d.pass_total) + ' en cours'; }
+        else if(pct >= 100 && d.total){ s += ' ✅'; }
+        txt.textContent = s;
+      }
       var b = document.getElementById('ig-dl-now');
       if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
              b.textContent = d.running ? '⏳ En cours…' : '⚡ Télécharger'; }
@@ -27383,7 +27389,10 @@ def _predownload_missing(max_workers: int = 4) -> dict:
         sc = m.group(1)
         if (INSTA_VIDEOS_DIR / f"{sc}.mp4").exists():
             continue
-        todo.append((sc, r.get("url") or "", r.get("video_url") or ""))
+        todo.append((ta or 0, sc, r.get("url") or "", r.get("video_url") or ""))
+    # PRIORITE AUX PLUS RECENTES : taken_at décroissant (0 = date inconnue -> fin)
+    todo.sort(key=lambda x: x[0], reverse=True)
+    todo = [(sc, purl, vurl) for (_ta, sc, purl, vurl) in todo]
     _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo), "ts": _t2.time()})
 
     def _one(item):
@@ -29715,7 +29724,9 @@ def create_app():
                 if f.exists() and f.stat().st_size > 1024:
                     ready += 1
             return jsonify({"ok": True, "ready": ready, "total": total,
-                            "running": bool(_PREDL_STATE.get("running"))})
+                            "running": bool(_PREDL_STATE.get("running")),
+                            "pass_done": int(_PREDL_STATE.get("done") or 0),
+                            "pass_total": int(_PREDL_STATE.get("total") or 0)})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
