@@ -21,7 +21,9 @@ import requests
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "apify_config.json"
-ACTOR = "presetshubham~instagram-reel-downloader"
+# Actor OFFICIEL Apify (inclus dans le forfait, pas de "full access" a approuver
+# comme l'actor tiers). Prend directUrls + resultsType=reels -> videoUrl.
+ACTOR = "apify~instagram-scraper"
 BASE = "https://api.apify.com/v2"
 
 
@@ -95,7 +97,9 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
     try:
         r = requests.post(
             f"{BASE}/acts/{ACTOR}/run-sync-get-dataset-items?token={tok}",
-            json={"reelLinks": urls, "proxyConfiguration": {"useApifyProxy": True}},
+            json={"resultsType": "reels", "directUrls": urls,
+                  "resultsLimit": len(urls),
+                  "addParentData": False},
             timeout=timeout,
         )
         if diag is not None:
@@ -118,11 +122,13 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
         for idx, it in enumerate(items):
             if not isinstance(it, dict):
                 continue
-            vu = (it.get("video_url") or "").strip()
+            # scraper officiel : champ 'videoUrl' (+ 'shortCode', 'ownerUsername',
+            # 'likesCount', 'commentsCount'). On garde les variantes par prudence.
+            vu = (it.get("videoUrl") or it.get("video_url") or "").strip()
             if not vu:
                 continue
-            sc = (it.get("shortcode") or _shortcode(it.get("url") or "")
-                  or _shortcode(it.get("reelLink") or ""))
+            sc = (it.get("shortCode") or it.get("shortcode")
+                  or _shortcode(it.get("url") or "") or _shortcode(it.get("inputUrl") or ""))
             if not sc and positional:
                 sc = _shortcode(urls[idx])
             if not sc:
@@ -130,9 +136,9 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
             out[sc] = {
                 "video_url": vu,
                 "caption": (it.get("caption") or "").strip(),
-                "likes": it.get("likes"),
-                "comments": it.get("comments"),
-                "owner": it.get("owner_username") or "",
+                "likes": it.get("likesCount") or it.get("likes"),
+                "comments": it.get("commentsCount") or it.get("comments"),
+                "owner": it.get("ownerUsername") or it.get("owner_username") or "",
             }
         if diag is not None:
             diag["resolved"] = len(out)
