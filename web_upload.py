@@ -27355,17 +27355,50 @@ def _start_auto_scrape_daemon():
                                 ok += 1
                                 # DL tous les reels video < 1 mois
                                 reels = r.get("reels", [])
+                                ytdlp_left = 15   # budget yt-dlp par COMPTE (protège le cookie)
                                 for rr in reels:
-                                    if not (rr.get("is_video")
-                                            and rr.get("video_url")
-                                            and rr.get("shortcode")):
+                                    sc_dl = rr.get("shortcode") or ""
+                                    if not (rr.get("is_video") and sc_dl):
                                         continue
                                     ta = rr.get("taken_at") or 0
                                     # taken_at=0 = on ne sait pas, on DL quand meme
                                     if ta and ta < cutoff_taken:
                                         continue
-                                    if _download_reel_video(rr["shortcode"], rr["video_url"]):
-                                        total_dl += 1
+                                    if (INSTA_VIDEOS_DIR / f"{sc_dl}.mp4").exists():
+                                        continue
+                                    if rr.get("video_url"):
+                                        if _download_reel_video(sc_dl, rr["video_url"]):
+                                            total_dl += 1
+                                            continue
+                                    # PAS de video_url (RapidAPI n'en donne pas pour la
+                                    # plupart des reels) OU CDN mort -> repli yt-dlp.
+                                    # C'était LA cause des cartes « Vidéo expirée » :
+                                    # ces reels n'étaient JAMAIS télechargés.
+                                    if ytdlp_left <= 0:
+                                        continue
+                                    try:
+                                        import veille_telegram as _vtd
+                                        if not _vtd._find_ig_cookies():
+                                            ytdlp_left = 0
+                                            continue
+                                        _yi = {}
+                                        _purl = (rr.get("permalink")
+                                                 or f"https://www.instagram.com/reel/{sc_dl}/")
+                                        _yb = _vtd.download_via_ytdlp(_purl, timeout=25, info=_yi)
+                                        ytdlp_left -= 1
+                                        if _yb:
+                                            INSTA_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+                                            (INSTA_VIDEOS_DIR / f"{sc_dl}.mp4").write_bytes(_yb)
+                                            if _yi.get("description"):
+                                                try:
+                                                    (INSTA_VIDEOS_DIR / f"{sc_dl}.txt").write_text(
+                                                        _yi["description"], encoding="utf-8")
+                                                except Exception:
+                                                    pass
+                                            total_dl += 1
+                                        _t.sleep(3)   # politesse entre 2 yt-dlp
+                                    except Exception:
+                                        pass
                             else:
                                 fail += 1
                         except Exception as e:
