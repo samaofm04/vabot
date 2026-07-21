@@ -1712,6 +1712,47 @@ window.igIsMouse = function(){
   try{ return window.matchMedia('(hover: hover) and (pointer: fine)').matches; }
   catch(e){ return true; }
 };
+// Feedback pause/play : bouton ▶ au centre quand on met en pause (le seul
+// moyen de couper le son sur PC) + classe reel-paused pour l'afficher.
+window.igAttachPauseFeedback = function(media, v){
+  if(!media || !v || v.__igPf) return;
+  v.__igPf = true;
+  v.addEventListener('pause', function(){
+    if(v.ended) return;
+    media.classList.add('reel-paused');
+    var ov = media.querySelector('.reel-play-overlay'); if(ov) ov.style.opacity = '1';
+  });
+  v.addEventListener('play', function(){
+    media.classList.remove('reel-paused');
+    var ov = media.querySelector('.reel-play-overlay'); if(ov) ov.style.opacity = '0';
+  });
+};
+// UNE SEULE lecture a la fois : coupe le son de tous les reels sauf celui-ci.
+window.igStopOtherReels = function(except){
+  document.querySelectorAll('.reel-media.reel-playing').forEach(function(m){
+    if(m !== except) igStopInline(m);
+  });
+};
+window.igStopAllReels = function(){
+  document.querySelectorAll('.reel-media.reel-playing').forEach(igStopInline);
+};
+// Arret automatique quand un reel en lecture sort de l'ecran (fini le son
+// fantome quand on scrolle). Un seul observer global, reutilise.
+window.__igReelObs = null;
+window.igObserveReel = function(card){
+  if(!card || !('IntersectionObserver' in window)) return;
+  if(!window.__igReelObs){
+    window.__igReelObs = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.intersectionRatio < 0.35){
+          var m = en.target.querySelector('.reel-media.reel-playing');
+          if(m) igStopInline(m);
+        }
+      });
+    }, {threshold:[0, 0.35]});
+  }
+  try{ window.__igReelObs.observe(card); }catch(e){}
+};
 window.igHoverPlay = function(media){
   if(!media || !window.igIsMouse()) return;
   // Skip si deja en lecture inline
@@ -1778,7 +1819,25 @@ window.igPlayInline = function(media){
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s;background:transparent';
     media.appendChild(v);
   }
+  // FAST-PATH : la video joue deja (survol muet) et est chargee -> on active
+  // juste le SON, sans recharger. Sinon reassigner v.src relance le media de
+  // ZERO (flash de miniature + spinner + lecture qui repart au debut).
+  if(v && v.getAttribute('src') && v.readyState >= 2 && !v.error){
+    igStopOtherReels(media);
+    media.classList.add('reel-playing');
+    media.classList.remove('reel-paused');
+    var _ovf = media.querySelector('.reel-play-overlay'); if(_ovf) _ovf.style.opacity = '0';
+    v.removeAttribute('controls');
+    v.muted = false; v.style.opacity = '1'; v.style.zIndex = '2';
+    igAttachPauseFeedback(media, v);
+    igObserveReel(card);
+    var _pf = v.play(); if(_pf && _pf.catch) _pf.catch(function(){});
+    return;
+  }
   media.classList.add('reel-playing');
+  media.classList.remove('reel-paused');
+  igStopOtherReels(media);
+  igObserveReel(card);
   // Hide play overlay
   var overlay = media.querySelector('.reel-play-overlay');
   if(overlay) overlay.style.opacity = '0';
@@ -1823,17 +1882,8 @@ window.igPlayInline = function(media){
   }
   v.addEventListener('loadeddata', onReady, {once:true});
   v.addEventListener('playing', onReady, {once:true});
-  // Quand l'user pause la video -> show le play overlay (bouton ▶ au centre)
-  // Quand l'user reprend -> hide
-  v.addEventListener('pause', function(){
-    if(v.ended) return;
-    var ov = media.querySelector('.reel-play-overlay');
-    if(ov) ov.style.opacity = '1';
-  });
-  v.addEventListener('play', function(){
-    var ov = media.querySelector('.reel-play-overlay');
-    if(ov) ov.style.opacity = '0';
-  });
+  // Pause/reprise manuelle -> feedback bouton ▶ (via helper partage)
+  igAttachPauseFeedback(media, v);
   // Tentative 1 : URL directe (rapide si fresh)
   var triedProxy = false;
   function tryProxy(){
@@ -2647,6 +2697,7 @@ function lbRender(){
 function lbPrev(){ if(lbIndex > 0){ lbIndex--; lbRender(); } }
 function lbNext(){ if(lbIndex < lbGallery.length - 1){ lbIndex++; lbRender(); } }
 function openLightbox(url, isVideo, filename, fileId, exampleUrl){
+  if(typeof igStopAllReels==="function") igStopAllReels();
   lbCollectGallery();
   lbIndex = 0;
   for(var i = 0; i < lbGallery.length; i++){
@@ -3073,6 +3124,7 @@ function deleteSelected(){
   );
 }
 function showTab(group,name,title,subtitle){
+  if(typeof igStopAllReels==="function") igStopAllReels();
   // (Revenus chatteurs : pas de rechargement au clic d'onglet -> ouverture instantanée.
   //  La tranche de dates est restaurée seulement après un VRAI reload, via le script HEAD.)
   // Retirer le style initial injecté en HEAD (pour le pre-paint)
@@ -3345,6 +3397,20 @@ document.addEventListener('DOMContentLoaded', function(){
   setTimeout(igSetupCaptionObserver, 500);
 });
 // Toggle Veille : add si pas dedans, remove si deja dedans
+// Lit le payload depuis les data-attributs de la carte (deja echappes par le
+// serveur) au lieu d'un JSON inline dans onclick : une apostrophe ou un saut
+// de ligne dans la caption cassait tout l'attribut -> bouton 🔖 mort.
+window.addToVeilleFromCard = function(btn){
+  var card = btn.closest('.reel-card'); if(!card) return;
+  var d = card.dataset;
+  addToVeille(btn, {
+    url: d.url || '', video_url: d.videoUrl || '', thumb: d.thumb || '',
+    owner: d.owner || '', owner_pp: d.ownerPp || '', caption: d.caption || '',
+    views: parseInt(d.views || '0', 10) || 0,
+    likes: parseInt(d.likes || '0', 10) || 0,
+    comments: parseInt(d.comments || '0', 10) || 0
+  });
+};
 window.addToVeille = async function(btn, payload){
   if(!payload || !payload.url) return;
   const orig = btn.innerHTML;
@@ -4156,6 +4222,7 @@ document.addEventListener('click',function(e){
 </div>
 <script>
 function showFeed(btn,name){
+  if(typeof igStopAllReels==="function") igStopAllReels();
   document.querySelectorAll('.ig-feed-tab').forEach(function(b){
     b.style.color='#888';
     b.style.borderBottomColor='transparent';
@@ -9796,6 +9863,10 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 .vault-img-load{opacity:0}
 .vault-img-load.loaded{opacity:1}
 
+/* En PAUSE (clic manuel sur PC) : re-afficher le bouton ▶ meme sous la media
+   query hover (feedback visuel du seul moyen de couper le son sur PC) */
+.reel-media.reel-paused .reel-play-overlay{display:flex!important;opacity:1!important}
+
 /* PC (souris precise) : pas de bouton play sur les reels — la lecture se fait
    au survol. Le bouton ne reste que sur tactile (telephone/tablette). */
 @media (hover:hover) and (pointer:fine){ .reel-play-overlay{display:none!important} }
@@ -10327,6 +10398,7 @@ document.addEventListener('drop', function(e){
 
 // === SFW toggle global (floute toutes les images de la dashboard) ===
 function toggleSFW(){
+  if(typeof igStopAllReels==="function") igStopAllReels();  // coupe le son d'un reel en cours avant de flouter
   var on = document.body.classList.toggle('sfw-on');
   localStorage.setItem('vault_sfw', on ? '1' : '0');
   // le pre-flou (__sfw-pre) est NON conditionnel : sans ca, desactiver SFW ne
@@ -11220,7 +11292,12 @@ def _render_insta_trends_grid_html() -> str:
         views = r.get("views") or 0
         likes = r.get("likes", 0)
         comments = r.get("comments", 0)
-        caption = (r.get("caption") or "").strip().replace('"', '&quot;')
+        # échappe " ET ' (les data-attrs de la carte sont en simple quote) +
+        # < > : sinon une apostrophe dans la caption cassait l'attribut ->
+        # bouton 🔖 mort. Aligné sur la Veille (:19909).
+        caption = ((r.get("caption") or "").strip()
+                   .replace('"', "&quot;").replace("'", "&#39;")
+                   .replace("<", "&lt;").replace(">", "&gt;"))
         caption_short = caption[:100]
         # Construire le contenu HTML de la caption (ou fallback avec lien IG)
         if caption:
@@ -11293,7 +11370,7 @@ def _render_insta_trends_grid_html() -> str:
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;text-decoration:none">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
-      <button onclick='addToVeille(this, {{"url":"{url}","video_url":"{video_url}","thumb":"{thumb}","owner":"{owner}","owner_pp":"{owner_pic}","caption":"{caption}","views":{d_views},"likes":{d_likes},"comments":{d_comments}}})' title="Ajouter à la Veille" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
+      <button onclick='addToVeilleFromCard(this)' title="Ajouter à la Veille" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
       </button>
       <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0">
