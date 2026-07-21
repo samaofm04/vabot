@@ -3089,7 +3089,8 @@ function showTab(group,name,title,subtitle){
     var lazy = sec.querySelector('[data-lazy-tab]');
     if(lazy && !sec.dataset.lazyLoaded && !sec.dataset.lazyLoading){
       sec.dataset.lazyLoading = '1';
-      fetch('/?lazy=' + encodeURIComponent(name), {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
+      var _q = (window.location.search || '').replace(/^[?]/, '');
+      fetch('/?lazy=' + encodeURIComponent(name) + (_q ? '&' + _q : ''), {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
         .then(function(r){ if(!r.ok) throw 0; return r.text(); })
         .then(function(htmlFrag){
           sec.innerHTML = htmlFrag;
@@ -27106,7 +27107,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
         .replace("{va_list_html}", _g("valist", _render_va_list_html))
-        .replace("{identity_stats_html}", _g("vastats", _render_identity_stats_html))
+        .replace("{identity_stats_html}", _lazy("vastats"))
         .replace("{home_dashboard_html}", _g("home", _render_home_dashboard_html))
         .replace("{stat_va_count}", str(va_count))
         .replace("{stat_identities}", str(len(identities_list)))
@@ -27125,32 +27126,33 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{facture_html}", _g("facture", _render_facture_html))
         .replace("{depenses_html}", _g("depenses", _render_depenses_html))
         .replace("{paievas_html}", _g("paievas", _render_paievas_html))
-        .replace("{biolinks_html}", _g("biolinks", _render_biolinks_html))
-        .replace("{onboarding_html}", _g("onboarding", _render_onboarding_html))
-        .replace("{textpool_html}", _g("textpool", _render_textpool_html))
-        .replace("{geelark_html}", _g("geelark", _render_geelark_html))
+        .replace("{biolinks_html}", _lazy("biolinks"))
+        .replace("{onboarding_html}", _lazy("onboarding"))
+        .replace("{textpool_html}", _lazy("textpool"))
+        .replace("{geelark_html}", _lazy("geelark"))
         .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
         .replace("{gms_html}", _lazy("gms"))
         .replace("{linkscale_html}", _lazy("linkscale"))
-        .replace("{schedule_html}", _g("schedule", _render_schedule_html))
-        .replace("{sfssetupmym_html}", _g("sfssetupmym", lambda: _render_sfssetup_html("mym")))
-        .replace("{sfssetupof_html}", _g("sfssetupof", lambda: _render_sfssetup_html("of")))
-        .replace("{vtg_html}", _g("vtg", _render_vtg_html))
+        .replace("{schedule_html}", _lazy("schedule"))
+        .replace("{sfssetupmym_html}", _lazy("sfssetupmym"))
+        .replace("{sfssetupof_html}", _lazy("sfssetupof"))
+        .replace("{vtg_html}", _lazy("vtg"))
         .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
-        .replace("{videocrea_html}", _g("videocrea", _render_videocrea_html))
+        .replace("{videocrea_html}", _lazy("videocrea"))
         .replace("{bilan_html}", _lazy("bilan"))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
         .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
-        .replace("{role_settings_html}", _g("srole", _render_role_settings_html))
+        .replace("{role_settings_html}", _lazy("srole"))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
-        .replace("{employees_table_html}", _g("semp", _render_employees_table_html))
+        .replace("{employees_table_html}", _lazy("semp"))
         .replace("{insta_auth_status}", _render_insta_auth_status())
         .replace("{insta_accounts_html}", _g("igaccounts", _render_insta_accounts_html))
-        .replace("{insta_accounts_html_for_trends}", _g("igtrends", _render_insta_accounts_html))
+        # ({insta_accounts_html_for_trends} : placeholder inexistant dans
+        # UPLOAD_HTML -> le rendu complet etait JETE a chaque GET / ; supprime)
         .replace("{insta_trends_html_or_empty}", _g("igtrends", lambda: (_render_insta_trends_grid_html() or
             "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
             "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:14px'><polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/><polyline points='16 7 22 7 22 13'/></svg>"
@@ -27632,6 +27634,20 @@ def create_app():
                 "linkscale": _render_linkscale_html,
                 # bilan : recalculé à chaque ouverture (suit les modifs Facture)
                 "bilan": _render_bilan_html,
+                # rafale SAFE_LAZY (audit vitesse) : scripts sans init
+                # DOMContentLoaded -> injectables tels quels
+                "vastats": _render_identity_stats_html,
+                "geelark": _render_geelark_html,
+                "sfssetupmym": lambda: _render_sfssetup_html("mym"),
+                "sfssetupof": lambda: _render_sfssetup_html("of"),
+                "vtg": _render_vtg_html,
+                "semp": _render_employees_table_html,
+                "schedule": _render_schedule_html,
+                "textpool": _render_textpool_html,
+                "biolinks": _render_biolinks_html,
+                "onboarding": _render_onboarding_html,
+                "videocrea": _render_videocrea_html,
+                "srole": _render_role_settings_html,
             }
             _prod = _prods.get(_name)
             if _prod is None:
