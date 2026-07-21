@@ -1704,8 +1704,16 @@ window.debugReel = async function(url){
 };
 
 // === Reel hover play + expand panel ===
+// PC (souris) : lecture au survol, stop en sortant, PAS de bouton play (cache
+// en CSS). Telephone (tactile) : bouton + tap uniquement — sans ce garde, un
+// tap declenchait AUSSI mouseenter -> lecture muette + lecture normale en
+// meme temps = le bug de lancement aleatoire constate.
+window.igIsMouse = function(){
+  try{ return window.matchMedia('(hover: hover) and (pointer: fine)').matches; }
+  catch(e){ return true; }
+};
 window.igHoverPlay = function(media){
-  if(!media) return;
+  if(!media || !window.igIsMouse()) return;
   // Skip si deja en lecture inline
   if(media.classList.contains('reel-playing')) return;
   var v = media.querySelector('.reel-video');
@@ -1716,7 +1724,7 @@ window.igHoverPlay = function(media){
   if(p && p.catch) p.catch(function(){});
 };
 window.igHoverStop = function(media){
-  if(!media) return;
+  if(!media || !window.igIsMouse()) return;
   if(media.classList.contains('reel-playing')) return;
   var v = media.querySelector('.reel-video');
   if(!v) return;
@@ -9787,6 +9795,10 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 /* L image apparait en fade quand elle a chargee */
 .vault-img-load{opacity:0}
 .vault-img-load.loaded{opacity:1}
+
+/* PC (souris precise) : pas de bouton play sur les reels — la lecture se fait
+   au survol. Le bouton ne reste que sur tactile (telephone/tablette). */
+@media (hover:hover) and (pointer:fine){ .reel-play-overlay{display:none!important} }
 
 /* === SFW blur mode === */
 /* Tout flou par defaut quand SFW est ON */
