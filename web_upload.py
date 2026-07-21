@@ -890,7 +890,11 @@ UPLOAD_HTML = """
 <html><head><meta charset="utf-8"><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<!-- Fonts NON bloquantes (media=print + onload) : le premier rendu n'attend
+     plus fonts.googleapis.com — le texte s'affiche en police systeme puis
+     bascule sur Inter (display=swap). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"></noscript>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <style>
 *{box-sizing:border-box}
@@ -11243,7 +11247,7 @@ def _render_insta_trends_grid_html() -> str:
         # Avatar
         avatar = ""
         if owner_pic:
-            avatar = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+            avatar = f"<img src='{owner_pic}' loading='lazy' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
         # mp4 déjà sur disque -> on sert le fichier local (proxy ÉTAPE 0) au
         # lieu de l'URL CDN qui expire et déclenche le mur de vérification
         video_url = _local_reel_src(url, owner, video_url)
@@ -19839,7 +19843,7 @@ def _render_veille_feed_html() -> str:
             owner_pic = r.get("owner_pp") or ""
             avatar_v = ""
             if owner_pic:
-                avatar_v = f"<img src='{owner_pic}' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+                avatar_v = f"<img src='{owner_pic}' loading='lazy' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
             # Ribbon sent / prêt (mutuellement exclusifs : un reel envoyé n'est
             # plus « à préparer »). PRÊT = brouillon caption+desc enregistré.
             prepared = bool(r.get("prepared")) and not sent

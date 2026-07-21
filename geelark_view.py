@@ -93,12 +93,25 @@ def _bearer() -> Optional[str]:
     return tok or None
 
 
+_GROUPS_CACHE: Dict[str, Any] = {}
+
+
 def list_geelark_groups() -> List[Dict[str, Any]]:
     """Fetch les groupes GeeLark via l API. Retourne [{id, name}, ...].
 
     Utilise EXACTEMENT le meme endpoint que le cog Discord :
     POST /open/v1/group/list avec {page, pageSize} et reponse dans data.list.
+
+    Cache mémoire 5 min (succès) / 60 s (échec ou vide) : cette fonction était
+    appelée par le rendu de la page SANS aucun cache — jusqu'à 15 s de timeout
+    API payés à CHAQUE chargement quand GeeLark rame.
     """
+    import time as _t
+    hit = _GROUPS_CACHE.get("v")
+    if hit is not None:
+        age = _t.time() - _GROUPS_CACHE.get("t", 0)
+        if age < (300 if hit else 60):
+            return hit
     tok = _bearer()
     if not tok:
         return []
@@ -135,7 +148,11 @@ def list_geelark_groups() -> List[Dict[str, Any]]:
                 break
             page += 1
     except Exception:
+        _GROUPS_CACHE["v"] = out
+        _GROUPS_CACHE["t"] = _t.time()
         return out
+    _GROUPS_CACHE["v"] = out
+    _GROUPS_CACHE["t"] = _t.time()
     return out
 
 

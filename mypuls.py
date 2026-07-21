@@ -811,6 +811,18 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         cached = _STATS_CACHE.get(cache_key)
         if cached and (_t.time() - cached["ts"]) < _STATS_CACHE_TTL:
             return cached["data"]
+        # CACHE NÉGATIF 60 s : seul le SUCCÈS était mis en cache — cookies
+        # morts = chaque chargement de page re-payait un scrape/timeout de
+        # 2-30 s. Une erreur récente est resservie telle quelle 1 min.
+        _neg = cached.get("neg") if cached else None
+        if _neg and (_t.time() - _neg["ts"]) < 60:
+            return _neg["data"]
+
+    def _fail_ts(err: str) -> Dict[str, Any]:
+        out = {"ok": False, "error": err}
+        _STATS_CACHE.setdefault(cache_key, {"ts": 0, "data": None})["neg"] = {
+            "ts": _t.time(), "data": out}
+        return out
 
     # Convertir end inclusif (UI) → end exclusif (MyPuls)
     try:
@@ -823,11 +835,11 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     try:
         r = s.get(url, timeout=TIMEOUT)
     except Exception as e:
-        return {"ok": False, "error": f"Erreur réseau : {e}"}
+        return _fail_ts(f"Erreur réseau : {e}")
     if r.status_code != 200:
-        return {"ok": False, "error": f"HTTP {r.status_code}"}
+        return _fail_ts(f"HTTP {r.status_code}")
     if _detect_login_redirect(r.text):
-        return {"ok": False, "error": "Cookies expirés — reconnecte-toi sur MyPuls et recopie tes cookies"}
+        return _fail_ts("Cookies expirés — reconnecte-toi sur MyPuls et recopie tes cookies")
     # Sauvegarder les cookies rotatés (REMEMBERME prolongé)
     _save_rotated_cookies(s)
 
@@ -1294,15 +1306,30 @@ def list_creators(force_refresh: bool = False) -> Dict[str, Any]:
     if not force_refresh and cache and (_t.time() - cache_ts) < 300:
         return {"ok": True, "creators": cache}
 
+    # CACHE NÉGATIF (mémoire, 60 s) : list_creators est appelé par ~6 rendus du
+    # chargement de page. Sans lui, cookies morts = chaque GET / re-payait un
+    # scrape de 30 s (TIMEOUT) -> les gros pics de lenteur constatés.
+    _neg = getattr(list_creators, "_neg", None)
+    if not force_refresh and _neg and (_t.time() - _neg[0]) < 60:
+        return _neg[1]
+
+    def _fail(err: str) -> Dict[str, Any]:
+        out = {"ok": False, "error": err}
+        if cache:
+            out["creators"] = cache      # on ressert le dernier bon état connu
+        list_creators._neg = (_t.time(), out)
+        return out
+
     s = _make_session()
     if s is None:
-        return {"ok": False, "error": "Cookies non configurés"}
+        return _fail("Cookies non configurés")
     try:
         r = s.get(f"{BASE_URL}/creators", timeout=TIMEOUT)
     except Exception as e:
-        return {"ok": False, "error": f"Erreur réseau : {e}"}
+        return _fail(f"Erreur réseau : {e}")
     if r.status_code != 200 or _detect_login_redirect(r.text):
-        return {"ok": False, "error": "Cookies expirés"}
+        return _fail("Cookies expirés")
+    list_creators._neg = None
 
     creators: Dict[str, int] = {}
     chunks = re.split(r'<div\s+class="creator-card', r.text)
