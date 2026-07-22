@@ -503,6 +503,17 @@ def send_video_from_url(video_url: str, caption: str = "",
     if not token or not chat_id:
         return {"ok": False, "error": "Bot Telegram non configure"}
 
+    # Verrou d'ORDRE global (RLock réentrant) résolu UNE fois : sérialise TOUS les
+    # chemins de post canal (fast-path file_id, download, fallback lien) -> deux
+    # reels envoyés en parallèle n'entrelacent jamais leurs messages. Le download,
+    # lui, reste hors verrou (téléchargements parallèles OK).
+    try:
+        import tg_router as _tgr
+        _order_lock = _tgr._POST_LOCK
+    except Exception:
+        import contextlib as _cl
+        _order_lock = _cl.nullcontext()
+
     # Shortcode extrait TOUT DE SUITE : sert au self-lookup file_id, au cache
     # disque et au stockage après upload.
     import re as _re_v
@@ -518,62 +529,68 @@ def send_video_from_url(video_url: str, caption: str = "",
     if not tg_file_id and _sc:
         tg_file_id = fileid_get(_sc)
     if tg_file_id:
+        # fast-path SOUS le verrou d'ordre : sendVideo + followup d'un bloc
+        # (c'est le cas COURANT — un reel déjà en cache -> renvoi instantané).
         try:
-            _rf = _tg_post(
-                f"{TG_API_BASE}/bot{token}/sendVideo",
-                data={"chat_id": chat_id, "caption": (caption or "")[:1024],
-                      "video": tg_file_id, "supports_streaming": "true"},
-                timeout=30,
-            )
-            _jf = _rf.json()
-            if _rf.status_code == 200 and _jf.get("ok"):
-                _midf = _jf.get("result", {}).get("message_id")
-                fileid_put(_sc, tg_file_id)
-                if followup_text and followup_text.strip():
-                    try:
-                        _tg_post(
-                            f"{TG_API_BASE}/bot{token}/sendMessage",
-                            json_payload={"chat_id": chat_id, "text": followup_text.strip()[:4000],
-                                          "disable_web_page_preview": True, "reply_to_message_id": _midf},
-                            timeout=15)
-                    except Exception:
-                        pass
-                return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id,
-                        "chat_id": chat_id,   # canal Veille -> permet le forward vers les models
-                        "has_desc": bool(followup_text and followup_text.strip()),
-                        "description": (followup_text or "")}
-            # Telegram a répondu mais a REFUSÉ le file_id (invalide/expiré) :
-            # on le purge pour ne plus le retenter, et on télécharge normalement
-            _desc_err = str(_jf.get("description") or "").lower()
-            if "file" in _desc_err or _rf.status_code == 400:
-                fileid_drop(_sc)
-                tg_file_id = ""
+            with _order_lock:
+                _rf = _tg_post(
+                    f"{TG_API_BASE}/bot{token}/sendVideo",
+                    data={"chat_id": chat_id, "caption": (caption or "")[:1024],
+                          "video": tg_file_id, "supports_streaming": "true"},
+                    timeout=30,
+                )
+                _jf = _rf.json()
+                if _rf.status_code == 200 and _jf.get("ok"):
+                    _midf = _jf.get("result", {}).get("message_id")
+                    fileid_put(_sc, tg_file_id)
+                    if followup_text and followup_text.strip():
+                        try:
+                            _tg_post(
+                                f"{TG_API_BASE}/bot{token}/sendMessage",
+                                json_payload={"chat_id": chat_id, "text": followup_text.strip()[:4000],
+                                              "disable_web_page_preview": True, "reply_to_message_id": _midf},
+                                timeout=15)
+                        except Exception:
+                            pass
+                    return {"ok": True, "mode": "video", "message_id": _midf, "tg_file_id": tg_file_id,
+                            "chat_id": chat_id,   # canal Veille -> permet le forward vers les models
+                            "has_desc": bool(followup_text and followup_text.strip()),
+                            "description": (followup_text or "")}
+                # Telegram a répondu mais a REFUSÉ le file_id (invalide/expiré) :
+                # on le purge pour ne plus le retenter, et on télécharge normalement
+                _desc_err = str(_jf.get("description") or "").lower()
+                if "file" in _desc_err or _rf.status_code == 400:
+                    fileid_drop(_sc)
+                    tg_file_id = ""
         except Exception:
             pass  # file_id invalide/expire -> on retombe sur le telechargement normal
 
     def _fallback(reason: str) -> Dict[str, Any]:
         if not fallback_url:
             return {"ok": False, "error": reason}
-        # Lien Instagram en premier message
-        res = send_url(fallback_url, caption=caption)
-        if res.get("ok"):
-            res["mode"] = "link"
-            res["fallback_reason"] = reason
-            # 2e message texte avec la description si dispo
-            if followup_text and followup_text.strip():
-                try:
-                    requests.post(
-                        f"{TG_API_BASE}/bot{token}/sendMessage",
-                        json={
-                            "chat_id": chat_id,
-                            "text": followup_text.strip()[:4000],
-                            "disable_web_page_preview": True,
-                            "reply_to_message_id": res.get("message_id"),
-                        },
-                        timeout=15,
-                    )
-                except Exception:
-                    pass
+        # POST lien + description SOUS le verrou d'ordre (RLock réentrant : ok même
+        # si appelé depuis le bloc download déjà verrouillé) -> ordre préservé.
+        with _order_lock:
+            # Lien Instagram en premier message
+            res = send_url(fallback_url, caption=caption)
+            if res.get("ok"):
+                res["mode"] = "link"
+                res["fallback_reason"] = reason
+                # 2e message texte avec la description si dispo
+                if followup_text and followup_text.strip():
+                    try:
+                        requests.post(
+                            f"{TG_API_BASE}/bot{token}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": followup_text.strip()[:4000],
+                                "disable_web_page_preview": True,
+                                "reply_to_message_id": res.get("message_id"),
+                            },
+                            timeout=15,
+                        )
+                    except Exception:
+                        pass
         return res
 
     _readable = {
@@ -690,17 +707,9 @@ def send_video_from_url(video_url: str, caption: str = "",
     if not video_bytes:
         return _fallback(f"Telechargement impossible : {last_err or yt_reason or '?'}")
 
-    # 2+3) POST sous le verrou d'ORDRE global : vidéo PUIS description partent
-    # d'un bloc -> deux reels envoyés en parallèle n'entrelacent jamais leurs
-    # messages dans le canal Veille. Le DOWNLOAD (au-dessus) reste HORS du verrou
-    # -> plusieurs reels peuvent télécharger en même temps, seul le post est
-    # sérialisé. Import lazy pour éviter tout cycle d'import.
-    try:
-        import tg_router as _tgr
-        _order_lock = _tgr._POST_LOCK
-    except Exception:
-        import contextlib
-        _order_lock = contextlib.nullcontext()
+    # 2+3) POST sous le verrou d'ORDRE global (déjà résolu en tête) : vidéo PUIS
+    # description partent d'un bloc -> deux reels envoyés en parallèle n'entrelacent
+    # jamais leurs messages. Le DOWNLOAD (au-dessus) reste HORS du verrou.
     with _order_lock:
         # 2) Upload via sendVideo (multipart, fichier en memoire)
         try:
