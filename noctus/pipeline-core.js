@@ -198,6 +198,32 @@ function _measureLine(ctx, text, emojiSize) {
   return w;
 }
 
+// Rectangle arrondi (fond "bulle" derrière le texte)
+function _roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+// Effet de texte (bouton "Effets") : ombre portée / néon (glow couleur)
+function _fxOn(ctx, fx, fs, col) {
+  if (fx === 'shadow') {
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = Math.round(fs * 0.12);
+    ctx.shadowOffsetX = Math.round(fs * 0.04); ctx.shadowOffsetY = Math.round(fs * 0.07);
+  } else if (fx === 'neon') {
+    ctx.shadowColor = col; ctx.shadowBlur = Math.round(fs * 0.5);
+    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+  }
+}
+function _fxOff(ctx) {
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+}
+
 const VARIATIONS = [
   { label: 'zoom_normal',    zoom: 1.00, brightness:  0.00, saturation: 1.0,  hue:   0 },
   { label: 'zoom_chaud',     zoom: 1.02, brightness:  0.03, saturation: 1.1,  hue:   5 },
@@ -386,10 +412,13 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const CX = Math.round(W * capX);
   // Position custom -> micro-jitter anti-fingerprint seulement (le ±300px casserait le placement)
   const effYOffset = hasCustomY ? Math.max(-14, Math.min(14, yOffset)) : yOffset;
-  // ── Styles CapCut par caption : alignement / casse / souligné ──
+  // ── Styles CapCut par caption : alignement / casse / souligné / bulle / effet ──
   const alignSt = (st.align === 'left' || st.align === 'right') ? st.align : 'center';
   const caseSt  = (st.case === 'upper' || st.case === 'lower' || st.case === 'title') ? st.case : 'none';
   const underlineSt = st.underline === true;
+  const boxSt = st.box === true;   // "Bulle" = fond derrière le texte
+  const boxColor = (typeof st.boxColor === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(st.boxColor)) ? st.boxColor : '#000000';
+  const effectSt = (st.effect === 'shadow' || st.effect === 'neon') ? st.effect : 'none';   // "Effets"
   // Police texte selectionnee (fallback Arial si non disponible)
   // Bebas/Anton sont des fontes "Regular" qui font deja un effet bold visuel
   // InterRegular/InterMedium sont des poids legers (style TikTok native)
@@ -491,6 +520,30 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const baseY  = Math.round(H * capY) + effYOffset;
   const startY = baseY - totalH / 2;
 
+  // "Bulle" : fond arrondi derrière tout le bloc de texte (dessiné AVANT le texte)
+  if (boxSt) {
+    let bl = Infinity, br = -Infinity;
+    for (let i = 0; i < finalLines.length; i++) {
+      const fl = finalLines[i];
+      ctx.font = FONT(fl.fontSize);
+      const lw = _measureLine(ctx, fl.text, Math.round(fl.fontSize * 1.15));
+      let sx;
+      if (alignSt === 'left') sx = CX - maxW / 2;
+      else if (alignSt === 'right') sx = CX + maxW / 2 - lw;
+      else sx = CX - lw / 2;
+      if (lw > 0) { bl = Math.min(bl, sx); br = Math.max(br, sx + lw); }
+    }
+    if (isFinite(bl) && br > bl) {
+      const padX = Math.round(BASE * 0.40), padY = Math.round(BASE * 0.30);
+      const bx = bl - padX, bw = (br - bl) + padX * 2;
+      const bTop = startY - Math.round(BASE * 0.62) - padY;
+      const bBot = startY + (finalLines.length - 1) * lineH + Math.round(BASE * 0.62) + padY;
+      ctx.fillStyle = (boxColor.toLowerCase() === '#000000') ? 'rgba(0,0,0,0.5)' : boxColor;
+      _roundRect(ctx, bx, bTop, bw, bBot - bTop, Math.round(BASE * 0.24));
+      ctx.fill();
+    }
+  }
+
   for (let i = 0; i < finalLines.length; i++) {
     const { text, fontSize } = finalLines[i];
     const emojiSize = Math.round(fontSize * 1.15);
@@ -512,16 +565,20 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     if (!hasEmoji) {
       ctx.strokeStyle = 'rgba(0,0,0,1)';
       ctx.strokeText(text, startX, y);
+      _fxOn(ctx, effectSt, fontSize, fillColor);
       ctx.fillStyle = fillColor;
       ctx.fillText(text, startX, y);
+      _fxOff(ctx);
     } else {
       let curX = Math.round(startX);
       for (const run of runs) {
         if (run.type === 'text') {
           ctx.strokeStyle = 'rgba(0,0,0,1)';
           ctx.strokeText(run.content, curX, y);
+          _fxOn(ctx, effectSt, fontSize, fillColor);
           ctx.fillStyle = fillColor;
           ctx.fillText(run.content, curX, y);
+          _fxOff(ctx);
           curX += ctx.measureText(run.content).width;
         } else {
           const img = await _loadEmojiImg(run.content);

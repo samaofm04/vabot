@@ -3013,6 +3013,7 @@ function nxMRealCap(text, font){
   fd.set('size', s.size||44); fd.set('color', s.color||'#ffffff');
   fd.set('align', s.align||'center'); fd.set('case', s.case||'none');
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
+  fd.set('box', s.box?'1':'0'); fd.set('effect', s.effect||'none');
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0; return r.blob();
   }).then(function(b){
@@ -3023,25 +3024,30 @@ function nxMRealCap(text, font){
 }
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
 function nxMStyleInit(){
-  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false};
+  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,effect:'none'};
   nxMState.rimg={}; nxMState.rpend={};
   var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
   var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
   var cp=document.getElementById('nx-m-color'); if(cp) cp.value='#ffffff';
   nxMStylePaint();
 }
-function nxMStyleSig(){ var s=nxMState.style||{}; return [s.size||44,s.color||'#fff',s.align||'center',s['case']||'none',s.bold?1:0,s.italic?1:0,s.underline?1:0].join(','); }
+function nxMStyleSig(){ var s=nxMState.style||{}; return [s.size||44,s.color||'#fff',s.align||'center',s['case']||'none',s.bold?1:0,s.italic?1:0,s.underline?1:0,s.box?1:0,s.effect||'none'].join(','); }
 function nxMStyleSize(v){ if(!nxMState.style)nxMStyleInit(); nxMState.style.size=parseInt(v)||44; var e=document.getElementById('nx-m-size-val'); if(e)e.textContent=v; nxMStyleRefresh(); }
 function nxMStyleToggle(k){ if(!nxMState.style)nxMStyleInit(); nxMState.style[k]=!nxMState.style[k]; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleCase(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style['case']=(nxMState.style['case']===c)?'none':c; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleColor(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style.color=c; var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(c))cp.value=c; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleAlign(a){ if(!nxMState.style)nxMStyleInit(); nxMState.style.align=a; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStyleBox(){ if(!nxMState.style)nxMStyleInit(); nxMState.style.box=!nxMState.style.box; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStyleEffect(e){ if(!nxMState.style)nxMStyleInit(); nxMState.style.effect=(nxMState.style.effect===e)?'none':e; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStylePaint(){
   var s=nxMState.style||{};
   function tg(id,on){ var e=document.getElementById(id); if(e)e.classList.toggle('on',!!on); }
   tg('nxs-bold', s.bold===true); tg('nxs-italic', s.italic); tg('nxs-underline', s.underline);
   tg('nxc-upper', s['case']==='upper'); tg('nxc-lower', s['case']==='lower'); tg('nxc-title', s['case']==='title');
   tg('nxa-left', s.align==='left'); tg('nxa-center', s.align!=='left'&&s.align!=='right'); tg('nxa-right', s.align==='right');
+  var bb=document.getElementById('nxb-box'); if(bb){ bb.classList.toggle('on',!!s.box); bb.textContent=s.box?'Bulle ✓':'Aucun'; }
+  var ef=s.effect||'none';
+  tg('nxe-none', ef==='none'); tg('nxe-shadow', ef==='shadow'); tg('nxe-neon', ef==='neon');
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
@@ -5196,6 +5202,16 @@ body.light .action-icon{color:#666}
             <button type="button" id="nxa-left" class="nxm-tg" onclick="nxMStyleAlign('left')" title="Gauche">⟵</button>
             <button type="button" id="nxa-center" class="nxm-tg on" onclick="nxMStyleAlign('center')" title="Centre">≡</button>
             <button type="button" id="nxa-right" class="nxm-tg" onclick="nxMStyleAlign('right')" title="Droite">⟶</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Fond (bulle)</span>
+            <button type="button" id="nxb-box" class="nxm-tg" onclick="nxMStyleBox()">Aucun</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Effet</span>
+            <button type="button" id="nxe-none" class="nxm-tg on" onclick="nxMStyleEffect('none')">Aucun</button>
+            <button type="button" id="nxe-shadow" class="nxm-tg" onclick="nxMStyleEffect('shadow')">Ombre</button>
+            <button type="button" id="nxe-neon" class="nxm-tg" onclick="nxMStyleEffect('neon')">Néon</button>
           </div>
           <div style="height:1px;background:#2a2a30;margin:16px 0"></div>
           <div class="nxm-plabel">⏱ Quand afficher</div>
@@ -29106,6 +29122,10 @@ def create_app():
             _v = request.form.get(_k)
             if _v is not None:
                 _spec[_k] = (_v == "1" or _v == "true")
+        if request.form.get("box") in ("1", "true"):
+            _spec["box"] = True
+        if request.form.get("effect") in ("shadow", "neon"):
+            _spec["effect"] = request.form.get("effect")
         src = BOT_DIR / "noctus"
         cdir = Path(tempfile.gettempdir()) / "noctus_capprev"
         try:
@@ -29197,6 +29217,10 @@ def create_app():
             for k in ("bold", "italic", "underline"):
                 if k in raw:
                     out[k] = bool(raw[k])
+            if raw.get("box") in (True, "1", "true"):
+                out["box"] = True
+            if raw.get("effect") in ("shadow", "neon"):
+                out["effect"] = raw["effect"]
             return out
         _style = {}
         try:
