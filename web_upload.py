@@ -3051,9 +3051,10 @@ function nxMBeginDrag(e,i,mode){
   var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
   var c=nxMState.caps[i]; if(!c) return;
   var os=(c.start==null?0:c.start), oe=(c.start==null?dur:c.end), len=oe-os;
-  var startX=e.clientX, el=e.currentTarget, MINW=0.2, nxMDragLast=null;
+  var startX=e.clientX, el=e.currentTarget, MINW=0.2, nxMDragLast=null, moved=false;
   try{ el.setPointerCapture(e.pointerId); }catch(_){}
   function mv(ev){
+    if(!moved && Math.abs(ev.clientX-startX)>4) moved=true;
     var dt=(ev.clientX-startX)/pps, ns=os, ne=oe;
     if(mode==='move'){
       ns=os+dt; if(ns<0)ns=0; if(ns+len>dur)ns=dur-len;
@@ -3083,8 +3084,28 @@ function nxMBeginDrag(e,i,mode){
     if(nxMDragLast){ nxMState.caps[i].start=Math.round(nxMDragLast[0]*100)/100; nxMState.caps[i].end=Math.round(nxMDragLast[1]*100)/100; nxMDragLast=null; }
     nxMState.snap=null;
     nxMRenderCaps();
+    // clic (sans glisser) sur le bloc "move" -> ouvre la caption pour l'éditer
+    if(mode==='move' && !moved){ try{ nxMEditCap(i); }catch(e){} }
   }
   el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
+}
+// Génère la bande de miniatures de la vidéo (piste vidéo timeline, façon CapCut).
+// Utilise une vidéo cachée (clone du src) pour ne pas perturber la lecture.
+function nxMBuildThumbs(){
+  var v=document.getElementById('nx-m-video');
+  if(!v||!v.src) return;
+  if(nxMState.thumbsSrc===v.src) return;   // déjà généré pour cette vidéo
+  nxMState.thumbsSrc=v.src; nxMState.thumbs=null;
+  var N=10, hv=document.createElement('video');
+  hv.muted=true; hv.preload='auto'; hv.playsInline=true;
+  var cv=document.createElement('canvas'); cv.width=60; cv.height=106; var cx=cv.getContext('2d');
+  var out=[], i=0, dur=0;
+  function done(){ nxMState.thumbs=out.slice(); try{ if(nxMState.thumbsSrc===v.src) nxMRenderCaps(); }catch(e){} }
+  function seekNext(){ if(i>=N){ done(); return; } var t=(dur*(i+0.5))/N; try{ hv.currentTime=Math.min(Math.max(0,dur-0.05),Math.max(0,t)); }catch(e){ i++; seekNext(); } }
+  hv.addEventListener('loadeddata',function(){ dur=hv.duration||0; if(!dur){ done(); return; } seekNext(); });
+  hv.addEventListener('seeked',function(){ if(i>=N)return; try{ cx.drawImage(hv,0,0,cv.width,cv.height); out.push(cv.toDataURL('image/jpeg',0.55)); }catch(e){ out.push(''); } i++; seekNext(); });
+  hv.addEventListener('error',function(){ /* échec -> piste vidéo sans miniatures */ });
+  hv.src=v.src; try{ hv.load(); }catch(e){}
 }
 function nxMRenderCaps(){
   var dur=nxMDur(), caps=nxMState.caps||[];
@@ -3096,7 +3117,7 @@ function nxMRenderCaps(){
     var t=(c.start==null)?'toute la vidéo':(nxMFmt(c.start)+'s → '+nxMFmt(c.end)+'s');
     lh+='<div style="display:flex;align-items:center;gap:8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:7px;padding:6px 9px;margin-bottom:5px">'
       +'<span style="background:#2a2a2a;color:#aaa;font-size:10px;border-radius:4px;padding:1px 6px">'+(i+1)+'</span>'
-      +'<span style="flex:1;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">« '+nxMEsc(c.text)+' »</span>'
+      +'<span data-edit="'+i+'" title="Cliquer pour modifier" style="flex:1;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">« '+nxMEsc(c.text)+' »</span>'
       +'<span style="font-size:11px;color:#888;white-space:nowrap">'+t+'</span>'
       +'<button type="button" data-edit="'+i+'" title="Modifier le texte" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✏️</button>'
       +'<button type="button" data-del="'+i+'" title="Supprimer" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:13px;padding:0">🗑</button></div>';
@@ -3105,12 +3126,12 @@ function nxMRenderCaps(){
   list.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
   list.querySelectorAll('[data-del]').forEach(function(el){ el.addEventListener('click',function(){ nxMDelCap(parseInt(el.getAttribute('data-del'),10)); }); });
   // --- TIMELINE ---
-  if(!caps.length){ wrap.innerHTML='<div style="font-size:11px;color:#555;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">Aucune caption — vidéo générée <b>sans texte</b>. Ajoute-en une ☝️</div>'; return; }
   if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
   var W=wrap.clientWidth||480, pps=W/dur;
   nxMState.dur=dur; nxMState.pps=pps;
-  var La=nxMLanes(), nLanes=La.n, laneH=26, gap=5, rulerH=22;
-  var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+4;
+  var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=26, gap=5, rulerH=22;
+  var vidTrackH=46;   // piste vidéo (miniatures) façon CapCut
+  var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+4;
   var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
   var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
@@ -3132,9 +3153,15 @@ function nxMRenderCaps(){
       +'<div class="nxm-h" data-i="'+i+'" data-mode="right" style="position:absolute;right:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:0 6px 6px 0;touch-action:none"></div>'
       +'</div>';
   });
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique la règle ▸ pour la lecture · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
+  // Piste VIDEO (bande de miniatures) en bas, façon CapCut
+  var vtop=rulerH+tracksH+gap;
+  var thumbs=nxMState.thumbs||[]; var strip='';
+  if(thumbs.length){ var cw=W/thumbs.length; thumbs.forEach(function(u,k){ if(u) strip+='<img src="'+u+'" style="position:absolute;left:'+Math.round(k*cw)+'px;top:0;width:'+Math.ceil(cw+1)+'px;height:'+vidTrackH+'px;object-fit:cover;pointer-events:none">'; }); }
+  else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">⏳ miniatures…</div>'; }
+  var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">🎬 '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique une caption pour la modifier · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
-    + grid + rulerStrip
+    + grid + rulerStrip + vtrack
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
@@ -3193,7 +3220,8 @@ async function nxMontageOpen(fid, exampleUrl){
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
+  nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc='';
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
