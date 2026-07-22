@@ -4952,37 +4952,38 @@ body.light .action-icon{color:#666}
 
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
-.nxm-card{background:#0f1117;border:1px solid #232838;border-radius:18px;width:100%;max-width:980px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.7)}
-.nxm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 22px;border-bottom:1px solid #1d2230;flex-shrink:0}
-.nxm-badge{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
-.nxm-h1{font-size:16px;font-weight:800;color:#fff}
-.nxm-sub{font-size:12px;color:#8a91a8}
-.nxm-x{background:#161a26;border:1px solid #262b3a;color:#8a91a8;width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;flex-shrink:0}
-.nxm-x:hover{color:#fff;border-color:#3a4256}
-.nxm-body{display:grid;grid-template-columns:300px 1fr;flex:1;min-height:0;overflow:hidden}
-.nxm-left{padding:18px;border-right:1px solid #1d2230;background:#0c0e15;overflow-y:auto}
-.nxm-right{padding:18px 22px;overflow-y:auto}
-.nxm-plabel{font-size:11px;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
-.nxm-vwrap{position:relative;width:100%;aspect-ratio:9/16;border-radius:12px;overflow:hidden;background:#000}
-.nxm-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:12px;background:#000;border:1px solid #232838}
-.nxm-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:12px}
-.nxm-sec{font-size:11px;font-weight:800;color:#8a91a8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:11px}
-.nxm-ta{width:100%;min-height:66px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:10px;padding:11px 13px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
+/* Style éditeur type CapCut : sombre neutre, panneaux, inspecteur à droite */
+.nxm-card{background:#1b1b1e;border:1px solid #2e2e34;border-radius:14px;width:100%;max-width:1000px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.75)}
+.nxm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;border-bottom:1px solid #2a2a30;background:#202024;flex-shrink:0}
+.nxm-badge{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.nxm-h1{font-size:15px;font-weight:800;color:#f2f2f5}
+.nxm-sub{font-size:11.5px;color:#8b8b95}
+.nxm-x{background:#2a2a30;border:1px solid #35353c;color:#9a9aa6;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:12px;flex-shrink:0}
+.nxm-x:hover{color:#fff;background:#35353c}
+.nxm-body{display:grid;grid-template-columns:1fr 340px;flex:1;min-height:0;overflow:hidden}
+.nxm-left{padding:20px;background:#141416;overflow-y:auto;display:flex;flex-direction:column;align-items:center}
+.nxm-right{padding:16px 18px;overflow-y:auto;background:#1f1f23;border-left:1px solid #2a2a30}
+.nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;align-self:flex-start}
+.nxm-vwrap{position:relative;width:100%;max-width:300px;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.nxm-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;background:#000}
+.nxm-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:10px}
+.nxm-sec{font-size:12px;font-weight:700;color:#e6e6ea;margin-bottom:11px;padding-bottom:9px;border-bottom:1px solid #2a2a30}
+.nxm-ta{width:100%;min-height:64px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
 .nxm-ta:focus{border-color:#a855f7}
-.nxm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c9cede}
-.nxm-lbl{font-size:11px;font-weight:700;color:#8a91a8;text-transform:uppercase;letter-spacing:.04em}
-.nxm-inp{background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:8px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
-.nxm-num{width:66px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:8px;padding:7px 9px;font-size:13px;box-sizing:border-box}
+.nxm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c4c4cc}
+.nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:60px}
+.nxm-inp{flex:1;min-width:120px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
+.nxm-num{width:62px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box}
 .nxm-tlbl{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
-.nxm-hint{font-size:11px;color:#6b7280;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
-.nxm-chip{background:#161a26;border:1px solid #262b3a;border-radius:7px;padding:5px 11px;font-size:11.5px;cursor:pointer}
-.nxm-chip:hover{border-color:#3a4256}
-.nxm-add{margin-top:15px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:9px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer}
+.nxm-hint{font-size:11px;color:#75757f;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
+.nxm-chip{background:#2a2a30;border:1px solid #35353c;border-radius:6px;padding:5px 11px;font-size:11.5px;cursor:pointer}
+.nxm-chip:hover{background:#35353c}
+.nxm-add{margin-top:15px;width:100%;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;padding:11px 18px;font-size:13px;font-weight:700;cursor:pointer}
 .nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
-.nxm-foot{display:flex;gap:14px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #1d2230}
-.nxm-gen{padding:12px 30px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:11px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 6px 18px rgba(34,197,94,.25)}
-.nxm-prog{flex:1;font-size:12px;color:#8a91a8}
-@media(max-width:780px){.nxm-body{grid-template-columns:1fr;overflow-y:auto}.nxm-left{border-right:0;border-bottom:1px solid #1d2230}.nxm-vwrap{max-width:230px;margin:0 auto}}
+.nxm-foot{display:flex;gap:14px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #2a2a30}
+.nxm-gen{flex:1;padding:12px 24px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 6px 18px rgba(34,197,94,.22)}
+.nxm-prog{font-size:12px;color:#8b8b95}
+@media(max-width:820px){.nxm-body{grid-template-columns:1fr;overflow-y:auto}.nxm-right{border-left:0;border-top:1px solid #2a2a30}.nxm-vwrap{max-width:210px}}
 </style>
 <div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(2,4,10,.8);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px">
   <div onclick="event.stopPropagation()" class="nxm-card">
