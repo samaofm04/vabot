@@ -5022,7 +5022,7 @@ body.light .action-icon{color:#666}
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
 /* ===== Éditeur vidéo type CapCut ===== accent vert-cyan #00d9c0 ===== */
-.ce-app{background:#1a1a1e;border:1px solid #2e2e34;border-radius:12px;width:100%;max-width:1280px;height:94vh;display:grid;grid-template-rows:38px minmax(0,1fr) auto;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.8)}
+.ce-app{background:#1a1a1e;border:0;border-radius:0;width:100vw;max-width:100vw;height:100vh;display:grid;grid-template-rows:38px minmax(0,1fr) auto;overflow:hidden}
 .ce-title{display:flex;align-items:center;gap:10px;padding:0 12px;background:#202024;border-bottom:1px solid #2a2a30;font-size:12px;color:#c4c4cc}
 .ce-app-name{font-weight:800;color:#00d9c0;display:flex;align-items:center;gap:6px;font-size:13px}
 .ce-menu{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer}
@@ -5095,7 +5095,7 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
-<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(2,4,10,.82);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:14px">
+<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:#000;align-items:center;justify-content:center;padding:0">
   <div onclick="event.stopPropagation()" class="ce-app">
     <!-- 1) BARRE DE TITRE -->
     <div class="ce-title">
