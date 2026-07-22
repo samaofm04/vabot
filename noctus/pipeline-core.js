@@ -978,4 +978,4 @@ async function runFFmpegImage(inputPath, outputPath, variation) {
   });
 }
 
-module.exports = { runPipeline, stopPipeline, addFolderToRunning, VARIATIONS, buildVideoFilter, loadEmojiImg: _loadEmojiImg, splitRuns: _splitRuns, measureLine: _measureLine };
+module.exports = { runPipeline, stopPipeline, addFolderToRunning, VARIATIONS, buildVideoFilter, renderCaptionsPng, loadEmojiImg: _loadEmojiImg, splitRuns: _splitRuns, measureLine: _measureLine };

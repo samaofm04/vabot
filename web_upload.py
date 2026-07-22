@@ -2970,18 +2970,44 @@ function nxMUpdatePreview(){
   if(!act.length){ ov.innerHTML=''; return; }
   var lines=[];
   act.forEach(function(c){ String(c.text||'').split(/\\r?\\n/).forEach(function(ln){ lines.push(ln); }); });
-  // aperçu WYSIWYG : la VRAIE police (@font-face) + contour + taille proportionnelle
-  if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
   var _fsel=(document.getElementById('nx-m-font')||{}).value||'Strong';
+  // 1) VRAI rendu (moteur Node) = pixel-perfect. On overlaye le PNG exact.
+  if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
+  var _keys=act.map(function(c){ return (String(c.text||'').trim())+'|'+_fsel; });
+  var _allReal=_keys.length>0 && _keys.every(function(k){ return nxMState.rimg[k]; });
+  if(_allReal){
+    ov.innerHTML=_keys.map(function(k){ return '<img src="'+nxMState.rimg[k]+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none">'; }).join('');
+    return;
+  }
+  act.forEach(function(c){ nxMRealCap(String(c.text||'').trim(), _fsel); });   // déclenche le vrai rendu (async)
+  // 2) En attendant : fallback CSS (vraie police @font-face + contour + taille proportionnelle)
+  if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
   var _fam=_fsel, _ital='', _wt='800';
-  if(_fsel==='Strong'){ _fam='Poppins'; _ital='font-style:italic;'; }        // Strong = Poppins italique (comme le rendu)
-  if(_fsel==='BebasNeue'||_fsel==='Anton'){ _wt='400'; }                     // déjà grasses
+  if(_fsel==='Strong'){ _fam='Poppins'; _ital='font-style:italic;'; }
+  if(_fsel==='BebasNeue'||_fsel==='Anton'){ _wt='400'; }
   var _vw=(v&&v.clientWidth)||270;
-  var _fpx=Math.max(11, Math.min(30, Math.round(44*_vw/1080)));              // taille proportionnelle au rendu 1080
-  var _stk=Math.max(1, _fpx*0.19/2);                                          // contour = même ratio que le rendu
+  var _fpx=Math.max(11, Math.min(30, Math.round(44*_vw/1080)));
+  var _stk=Math.max(1, _fpx*0.19/2);
   var _sty='color:#fff;font-family:'+_fam+',Arial;font-weight:'+_wt+';'+_ital+'font-size:'+_fpx+'px;line-height:1.22;-webkit-text-stroke:'+_stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word';
   var inner=lines.map(function(ln){ return '<div style="'+_sty+'">'+nxMEsc(ln)+'</div>'; }).join('');
   ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
+}
+// Demande au MOTEUR Node le PNG exact d'une caption (mis en cache), puis rafraîchit
+// l'aperçu -> WYSIWYG pixel-perfect. Échec silencieux -> on garde le fallback CSS.
+function nxMRealCap(text, font){
+  text=(text||'').trim(); if(!text) return;
+  if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
+  var key=text+'|'+font;
+  if(nxMState.rimg[key]||nxMState.rpend[key]) return;   // déjà rendu / en cours
+  nxMState.rpend[key]=1;
+  var fd=new FormData(); fd.set('text',text); fd.set('font',font);
+  fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
+    if(!r.ok) throw 0; return r.blob();
+  }).then(function(b){
+    if(b && b.size>200) nxMState.rimg[key]=URL.createObjectURL(b);
+    delete nxMState.rpend[key];
+    try{ nxMUpdatePreview(); }catch(e){}
+  }).catch(function(){ delete nxMState.rpend[key]; });
 }
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
@@ -28803,6 +28829,50 @@ def create_app():
         if not p.exists():
             return "", 404
         return send_file(str(p), conditional=True, max_age=604800)
+
+    @app.route("/noctus/caption_preview", methods=["POST"])
+    def noctus_caption_preview():
+        """Aperçu PIXEL-PERFECT : rend UNE caption via le MÊME moteur Node que la
+        vidéo finale (render_caption.js -> renderCaptionsPng) et renvoie le PNG
+        transparent 1080x1920. L'éditeur l'overlaye sur la vidéo."""
+        from flask import send_file
+        if not is_auth():
+            return "", 401
+        text = (request.form.get("text") or "").strip()
+        font = (request.form.get("font") or "Strong").strip()
+        if not text:
+            return "", 204
+        try:
+            import noctus_web
+        except Exception:
+            return "", 503
+        if not noctus_web.setup_ok():
+            return "", 503          # setup Node/ffmpeg pas fait -> le client garde le fallback CSS
+        node = noctus_web._node_bin()
+        if not node:
+            return "", 503
+        import subprocess, tempfile, json as _json, hashlib, time as _t
+        src = BOT_DIR / "noctus"
+        cdir = Path(tempfile.gettempdir()) / "noctus_capprev"
+        try:
+            cdir.mkdir(parents=True, exist_ok=True)
+            for _f in cdir.glob("*.png"):   # purge best-effort > 1 h
+                if _t.time() - _f.stat().st_mtime > 3600:
+                    _f.unlink()
+        except Exception:
+            pass
+        key = hashlib.md5((text + "|" + font).encode("utf-8")).hexdigest()[:20]
+        outp = cdir / f"{key}.png"
+        try:
+            if not (outp.exists() and outp.stat().st_size > 200):
+                arg = _json.dumps({"text": text, "font": font, "out": str(outp)})
+                r = subprocess.run([node, "render_caption.js", arg], cwd=str(src),
+                                   capture_output=True, timeout=25)
+                if r.returncode != 0 or not (outp.exists() and outp.stat().st_size > 200):
+                    return "", 500
+            return send_file(str(outp), mimetype="image/png", conditional=True)
+        except Exception:
+            return "", 500
 
     @app.route("/noctus/montage_gen", methods=["POST"])
     def noctus_montage_gen():
