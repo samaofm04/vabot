@@ -2970,10 +2970,17 @@ function nxMUpdatePreview(){
   if(!act.length){ ov.innerHTML=''; return; }
   var lines=[];
   act.forEach(function(c){ String(c.text||'').split(/\\r?\\n/).forEach(function(ln){ lines.push(ln); }); });
-  // aperçu : penché quand la police « Strong » (look Instagram) est choisie
-  var _fsel=(document.getElementById('nx-m-font')||{}).value||'';
-  var _ital=(_fsel==='Strong')?'font-style:italic;':'';
-  var inner=lines.map(function(ln){ return '<div style="color:#fff;font-weight:800;'+_ital+'font-size:13px;line-height:1.25;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:pre-wrap;word-break:break-word">'+nxMEsc(ln)+'</div>'; }).join('');
+  // aperçu WYSIWYG : la VRAIE police (@font-face) + contour + taille proportionnelle
+  if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
+  var _fsel=(document.getElementById('nx-m-font')||{}).value||'Strong';
+  var _fam=_fsel, _ital='', _wt='800';
+  if(_fsel==='Strong'){ _fam='Poppins'; _ital='font-style:italic;'; }        // Strong = Poppins italique (comme le rendu)
+  if(_fsel==='BebasNeue'||_fsel==='Anton'){ _wt='400'; }                     // déjà grasses
+  var _vw=(v&&v.clientWidth)||270;
+  var _fpx=Math.max(11, Math.min(30, Math.round(44*_vw/1080)));              // taille proportionnelle au rendu 1080
+  var _stk=Math.max(1, _fpx*0.19/2);                                          // contour = même ratio que le rendu
+  var _sty='color:#fff;font-family:'+_fam+',Arial;font-weight:'+_wt+';'+_ital+'font-size:'+_fpx+'px;line-height:1.22;-webkit-text-stroke:'+_stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word';
+  var inner=lines.map(function(ln){ return '<div style="'+_sty+'">'+nxMEsc(ln)+'</div>'; }).join('');
   ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
 }
 function nxMBeginDrag(e,i,mode){
@@ -28766,6 +28773,36 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
+
+    @app.route("/noctus/fonts.css")
+    def noctus_fonts_css():
+        """@font-face des polices captions -> l'aperçu de l'éditeur affiche la
+        VRAIE police (Poppins pour Strong, etc.), pas un gras générique."""
+        from flask import Response
+        faces = [
+            ("Poppins", "Poppins-Bold.ttf", "truetype"),
+            ("TikTokSans", "TikTokSans-Bold.woff2", "woff2"),
+            ("Inter", "Inter-Bold.ttf", "truetype"),
+            ("Montserrat", "Montserrat-Bold.ttf", "truetype"),
+            ("BebasNeue", "BebasNeue-Regular.ttf", "truetype"),
+            ("Anton", "Anton-Regular.ttf", "truetype"),
+        ]
+        css = "".join(
+            f"@font-face{{font-family:'{fam}';src:url('/noctus/font/{fn}') format('{fmt}');font-display:swap}}"
+            for fam, fn, fmt in faces
+        )
+        return Response(css, mimetype="text/css")
+
+    @app.route("/noctus/font/<name>")
+    def noctus_font(name):
+        """Sert un fichier de police depuis noctus/fonts (pour @font-face)."""
+        from flask import send_file
+        if not re.match(r"^[A-Za-z0-9_.-]+$", name):
+            return "", 404
+        p = BOT_DIR / "noctus" / "fonts" / name
+        if not p.exists():
+            return "", 404
+        return send_file(str(p), conditional=True, max_age=604800)
 
     @app.route("/noctus/montage_gen", methods=["POST"])
     def noctus_montage_gen():
