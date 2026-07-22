@@ -3,7 +3,9 @@
  * moteur que la vidéo finale (renderCaptionsPng de pipeline-core.js).
  * Sert l'aperçu WYSIWYG de l'éditeur : ce que montre ce PNG = ce qui sera incrusté.
  *
- * Usage : node render_caption.js '{"text":"...","font":"Strong","out":"/tmp/x.png"}'
+ * Usage : node render_caption.js '{"text":"...","font":"Strong","size":48,
+ *          "color":"#ffffff","align":"center","case":"none","bold":true,
+ *          "italic":false,"underline":false,"out":"/tmp/x.png"}'
  * offset Y = 0 (pas de jitter anti-fingerprint pour l'aperçu -> position stable).
  */
 const core = require('./pipeline-core.js');
@@ -14,7 +16,8 @@ const core = require('./pipeline-core.js');
     const out = String(arg.out || '');
     if (!out) { process.stderr.write('out manquant'); process.exit(1); }
     const cap = { text: String(arg.text || '') };
-    if (arg.font) cap.font = arg.font;
+    ['font', 'size', 'color', 'x', 'y', 'align', 'case', 'bold', 'italic', 'underline']
+      .forEach(k => { if (arg[k] !== undefined && arg[k] !== null) cap[k] = arg[k]; });
     await core.renderCaptionsPng([cap], out, 0, arg.font || null);
     process.stdout.write('OK');
   } catch (e) {

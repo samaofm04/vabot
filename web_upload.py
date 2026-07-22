@@ -2971,36 +2971,48 @@ function nxMUpdatePreview(){
   var lines=[];
   act.forEach(function(c){ String(c.text||'').split(/\\r?\\n/).forEach(function(ln){ lines.push(ln); }); });
   var _fsel=(document.getElementById('nx-m-font')||{}).value||'Strong';
+  if(!nxMState.style) nxMStyleInit();
+  var _s=nxMState.style||{};
   // 1) VRAI rendu (moteur Node) = pixel-perfect. On overlaye le PNG exact.
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
-  var _keys=act.map(function(c){ return (String(c.text||'').trim())+'|'+_fsel; });
+  var _sig=nxMStyleSig();
+  var _keys=act.map(function(c){ return (String(c.text||'').trim())+'|'+_fsel+'|'+_sig; });
   var _allReal=_keys.length>0 && _keys.every(function(k){ return nxMState.rimg[k]; });
   if(_allReal){
     ov.innerHTML=_keys.map(function(k){ return '<img src="'+nxMState.rimg[k]+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none">'; }).join('');
     return;
   }
   act.forEach(function(c){ nxMRealCap(String(c.text||'').trim(), _fsel); });   // déclenche le vrai rendu (async)
-  // 2) En attendant : fallback CSS (vraie police @font-face + contour + taille proportionnelle)
+  // 2) En attendant : fallback CSS (vraie police @font-face + style approximatif)
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
-  var _fam=_fsel, _ital='', _wt='800';
+  var _fam=_fsel, _ital=(_s.italic?'font-style:italic;':''), _wt=(_s.bold===false?'400':'800');
   if(_fsel==='Strong'){ _fam='Poppins'; _ital='font-style:italic;'; }
-  if(_fsel==='BebasNeue'||_fsel==='Anton'){ _wt='400'; }
+  if(_fsel==='BebasNeue'||_fsel==='Anton'){ if(_s.bold!==false)_wt='400'; }
   var _vw=(v&&v.clientWidth)||270;
-  var _fpx=Math.max(11, Math.min(30, Math.round(44*_vw/1080)));
+  var _fpx=Math.max(9, Math.min(44, Math.round((_s.size||44)*_vw/1080)));
   var _stk=Math.max(1, _fpx*0.19/2);
-  var _sty='color:#fff;font-family:'+_fam+',Arial;font-weight:'+_wt+';'+_ital+'font-size:'+_fpx+'px;line-height:1.22;-webkit-text-stroke:'+_stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word';
+  var _col=(/^#[0-9a-fA-F]{3,8}$/.test(_s.color||''))?_s.color:'#fff';
+  var _al=(_s.align==='left'?'left':(_s.align==='right'?'right':'center'));
+  var _tt=(_s['case']==='upper'?'uppercase':(_s['case']==='lower'?'lowercase':(_s['case']==='title'?'capitalize':'none')));
+  var _ul=(_s.underline?'text-decoration:underline;':'');
+  var _sty='color:'+_col+';font-family:'+_fam+',Arial;font-weight:'+_wt+';'+_ital+_ul+'text-transform:'+_tt+';font-size:'+_fpx+'px;line-height:1.22;-webkit-text-stroke:'+_stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word';
   var inner=lines.map(function(ln){ return '<div style="'+_sty+'">'+nxMEsc(ln)+'</div>'; }).join('');
-  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
+  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:'+_al+'">'+inner+'</div>';
 }
 // Demande au MOTEUR Node le PNG exact d'une caption (mis en cache), puis rafraîchit
 // l'aperçu -> WYSIWYG pixel-perfect. Échec silencieux -> on garde le fallback CSS.
 function nxMRealCap(text, font){
   text=(text||'').trim(); if(!text) return;
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
-  var key=text+'|'+font;
+  if(!nxMState.style) nxMStyleInit();
+  var key=text+'|'+font+'|'+nxMStyleSig();
   if(nxMState.rimg[key]||nxMState.rpend[key]) return;   // déjà rendu / en cours
   nxMState.rpend[key]=1;
+  var s=nxMState.style||{};
   var fd=new FormData(); fd.set('text',text); fd.set('font',font);
+  fd.set('size', s.size||44); fd.set('color', s.color||'#ffffff');
+  fd.set('align', s.align||'center'); fd.set('case', s.case||'none');
+  fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0; return r.blob();
   }).then(function(b){
@@ -3009,6 +3021,29 @@ function nxMRealCap(text, font){
     try{ nxMUpdatePreview(); }catch(e){}
   }).catch(function(){ delete nxMState.rpend[key]; });
 }
+// ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
+function nxMStyleInit(){
+  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false};
+  nxMState.rimg={}; nxMState.rpend={};
+  var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
+  var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
+  var cp=document.getElementById('nx-m-color'); if(cp) cp.value='#ffffff';
+  nxMStylePaint();
+}
+function nxMStyleSig(){ var s=nxMState.style||{}; return [s.size||44,s.color||'#fff',s.align||'center',s['case']||'none',s.bold?1:0,s.italic?1:0,s.underline?1:0].join(','); }
+function nxMStyleSize(v){ if(!nxMState.style)nxMStyleInit(); nxMState.style.size=parseInt(v)||44; var e=document.getElementById('nx-m-size-val'); if(e)e.textContent=v; nxMStyleRefresh(); }
+function nxMStyleToggle(k){ if(!nxMState.style)nxMStyleInit(); nxMState.style[k]=!nxMState.style[k]; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStyleCase(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style['case']=(nxMState.style['case']===c)?'none':c; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStyleColor(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style.color=c; var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(c))cp.value=c; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStyleAlign(a){ if(!nxMState.style)nxMStyleInit(); nxMState.style.align=a; nxMStylePaint(); nxMStyleRefresh(); }
+function nxMStylePaint(){
+  var s=nxMState.style||{};
+  function tg(id,on){ var e=document.getElementById(id); if(e)e.classList.toggle('on',!!on); }
+  tg('nxs-bold', s.bold===true); tg('nxs-italic', s.italic); tg('nxs-underline', s.underline);
+  tg('nxc-upper', s['case']==='upper'); tg('nxc-lower', s['case']==='lower'); tg('nxc-title', s['case']==='title');
+  tg('nxa-left', s.align==='left'); tg('nxa-center', s.align!=='left'&&s.align!=='right'); tg('nxa-right', s.align==='right');
+}
+function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
   var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
@@ -3160,9 +3195,7 @@ async function nxMontageOpen(fid, exampleUrl){
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
   else { if(exV) exV.src=''; if(exWrap) exWrap.style.display='none'; }
-  var vf=document.getElementById('nx-m-vfolders'); vf.innerHTML='';
-  for(var i=1;i<=10;i++){ var v='V'+i; var ck=(i<=3)?'checked':'';
-    vf.innerHTML+='<label style="display:inline-flex;align-items:center;gap:4px;background:#1a1a1a;border:1px solid #2a2a2a;padding:5px 9px;border-radius:7px;font-size:12px;cursor:pointer"><input type="checkbox" class="nx-m-vf" value="'+v+'" '+ck+' style="accent-color:#a855f7"> '+v+'</label>'; }
+  nxMStyleInit();   // réglages texte (taille/couleur/gras… ) remis au défaut
   document.getElementById('nx-m-results').innerHTML='';
   document.getElementById('nx-m-prog').textContent='';
   document.getElementById('nx-m-gen').disabled=false;
@@ -3178,15 +3211,14 @@ async function nxMontageOpen(fid, exampleUrl){
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; var ov=document.getElementById('nx-m-overlay'); if(ov) ov.innerHTML=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
-  var folders=Array.from(document.querySelectorAll('.nx-m-vf:checked')).map(function(c){return c.value;});
-  if(!folders.length){ alert('Coche au moins une variation'); return; }
   // si une caption est en cours de saisie mais pas encore ajoutée, on l'ajoute
   if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
   var fd=new FormData();
   fd.set('file_id', nxMState.fid);
   fd.set('font', document.getElementById('nx-m-font').value);
-  fd.set('folders', folders.join(','));
+  fd.set('folders', 'V1');   // une seule vidéo en sortie (plus de choix V1-V10)
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
+  fd.set('style', JSON.stringify(nxMState.style||{}));   // réglages texte CapCut
   document.getElementById('nx-m-gen').disabled=true;
   document.getElementById('nx-m-prog').textContent='⏳ génération…';
   try{
@@ -4978,6 +5010,12 @@ body.light .action-icon{color:#666}
 .nxm-hint{font-size:11px;color:#75757f;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
 .nxm-chip{background:#2a2a30;border:1px solid #35353c;border-radius:6px;padding:5px 11px;font-size:11.5px;cursor:pointer}
 .nxm-chip:hover{background:#35353c}
+.nxm-tg{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;min-width:32px;height:30px;padding:0 9px;font-size:13px;cursor:pointer;line-height:1}
+.nxm-tg:hover{background:#35353c}
+.nxm-tg.on{background:#a855f7;border-color:#a855f7;color:#fff}
+.nxm-sw{width:24px;height:24px;border-radius:6px;cursor:pointer;border:2px solid #3a3a42;display:inline-block;box-sizing:border-box}
+.nxm-sw.on{border-color:#a855f7;box-shadow:0 0 0 2px rgba(168,85,247,.35)}
+.nxm-slider{flex:1;accent-color:#a855f7;cursor:pointer}
 .nxm-add{margin-top:15px;width:100%;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;padding:11px 18px;font-size:13px;font-weight:700;cursor:pointer}
 .nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
 .nxm-foot{display:flex;gap:14px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #2a2a30}
@@ -5015,7 +5053,38 @@ body.light .action-icon{color:#666}
         <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" class="nxm-ta"></textarea>
         <div class="nxm-row">
           <span class="nxm-lbl">Police</span>
-          <select id="nx-m-font" onchange="try{nxMUpdatePreview()}catch(e){}" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+          <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+        </div>
+        <div class="nxm-row">
+          <span class="nxm-lbl">Taille</span>
+          <input id="nx-m-size" type="range" min="24" max="120" value="44" oninput="nxMStyleSize(this.value)" class="nxm-slider">
+          <span id="nx-m-size-val" style="min-width:32px;text-align:right;color:#c4c4cc;font-size:12px">44</span>
+        </div>
+        <div class="nxm-row">
+          <span class="nxm-lbl">Style</span>
+          <button type="button" id="nxs-bold" class="nxm-tg on" onclick="nxMStyleToggle('bold')" style="font-weight:800">B</button>
+          <button type="button" id="nxs-italic" class="nxm-tg" onclick="nxMStyleToggle('italic')" style="font-style:italic">I</button>
+          <button type="button" id="nxs-underline" class="nxm-tg" onclick="nxMStyleToggle('underline')" style="text-decoration:underline">U</button>
+          <span style="width:6px"></span>
+          <button type="button" id="nxc-upper" class="nxm-tg" onclick="nxMStyleCase('upper')" title="MAJUSCULES">TT</button>
+          <button type="button" id="nxc-lower" class="nxm-tg" onclick="nxMStyleCase('lower')" title="minuscules">tt</button>
+          <button type="button" id="nxc-title" class="nxm-tg" onclick="nxMStyleCase('title')" title="Majuscule Par Mot">Tt</button>
+        </div>
+        <div class="nxm-row">
+          <span class="nxm-lbl">Couleur</span>
+          <span class="nxm-sw on" id="nxk-fff" style="background:#ffffff" onclick="nxMStyleColor('#ffffff')"></span>
+          <span class="nxm-sw" style="background:#111111" onclick="nxMStyleColor('#111111')"></span>
+          <span class="nxm-sw" style="background:#ffe14d" onclick="nxMStyleColor('#ffe14d')"></span>
+          <span class="nxm-sw" style="background:#ff4d6d" onclick="nxMStyleColor('#ff4d6d')"></span>
+          <span class="nxm-sw" style="background:#4dd2ff" onclick="nxMStyleColor('#4dd2ff')"></span>
+          <span class="nxm-sw" style="background:#7cfc4d" onclick="nxMStyleColor('#7cfc4d')"></span>
+          <input type="color" id="nx-m-color" value="#ffffff" oninput="nxMStyleColor(this.value)" style="width:30px;height:26px;border:0;background:none;cursor:pointer;padding:0" title="Couleur perso">
+        </div>
+        <div class="nxm-row">
+          <span class="nxm-lbl">Alignement</span>
+          <button type="button" id="nxa-left" class="nxm-tg" onclick="nxMStyleAlign('left')" title="Gauche">⟵</button>
+          <button type="button" id="nxa-center" class="nxm-tg on" onclick="nxMStyleAlign('center')" title="Centre">≡</button>
+          <button type="button" id="nxa-right" class="nxm-tg" onclick="nxMStyleAlign('right')" title="Droite">⟶</button>
         </div>
         <div class="nxm-row">
           <span class="nxm-lbl">⏱ Quand</span>
@@ -5038,10 +5107,9 @@ body.light .action-icon{color:#666}
         </div>
         <div id="nx-m-frise" style="margin-top:16px"></div>
         <div id="nx-m-caplist" style="margin-top:8px"></div>
-        <div class="nxm-sec" style="margin-top:20px">2 · Variations à générer</div>
-        <div id="nx-m-vfolders" class="nxm-vf"></div>
+        <div id="nx-m-vfolders" class="nxm-vf" style="display:none"></div>
         <div class="nxm-foot">
-          <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer</button>
+          <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer la vidéo</button>
           <div id="nx-m-prog" class="nxm-prog"></div>
         </div>
         <div id="nx-m-results" style="margin-top:16px"></div>
@@ -28897,6 +28965,25 @@ def create_app():
         if not node:
             return "", 503
         import subprocess, tempfile, json as _json, hashlib, time as _t
+        # Style texte (réglages CapCut) — validé côté moteur ; on nettoie pour la clé cache
+        _spec = {"text": text, "font": font}
+        try:
+            _sz = request.form.get("size")
+            if _sz:
+                _spec["size"] = max(16, min(160, int(float(_sz))))
+        except Exception:
+            pass
+        _col = request.form.get("color")
+        if _col and re.match(r"^#[0-9a-fA-F]{3,8}$", _col):
+            _spec["color"] = _col
+        if request.form.get("align") in ("left", "center", "right"):
+            _spec["align"] = request.form.get("align")
+        if request.form.get("case") in ("upper", "lower", "title", "none"):
+            _spec["case"] = request.form.get("case")
+        for _k in ("bold", "italic", "underline"):
+            _v = request.form.get(_k)
+            if _v is not None:
+                _spec[_k] = (_v == "1" or _v == "true")
         src = BOT_DIR / "noctus"
         cdir = Path(tempfile.gettempdir()) / "noctus_capprev"
         try:
@@ -28906,11 +28993,12 @@ def create_app():
                     _f.unlink()
         except Exception:
             pass
-        key = hashlib.md5((text + "|" + font).encode("utf-8")).hexdigest()[:20]
+        key = hashlib.md5(_json.dumps(_spec, sort_keys=True).encode("utf-8")).hexdigest()[:20]
         outp = cdir / f"{key}.png"
         try:
             if not (outp.exists() and outp.stat().st_size > 200):
-                arg = _json.dumps({"text": text, "font": font, "out": str(outp)})
+                _spec["out"] = str(outp)
+                arg = _json.dumps(_spec)
                 r = subprocess.run([node, "render_caption.js", arg], cwd=str(src),
                                    capture_output=True, timeout=25)
                 if r.returncode != 0 or not (outp.exists() and outp.stat().st_size > 200):
@@ -28966,6 +29054,35 @@ def create_app():
             s = sec - h * 3600 - m * 60
             return f"{h:02d}:{m:02d}:{s:06.3f}"
 
+        # Style texte GLOBAL (réglages CapCut) appliqué à toutes les captions.
+        # Nettoyé ici ; le moteur (renderCaptionsPng) re-valide de toute façon.
+        def _clean_style(raw):
+            out = {}
+            if not isinstance(raw, dict):
+                return out
+            try:
+                if raw.get("size") is not None:
+                    out["size"] = max(16, min(160, int(float(raw["size"]))))
+            except Exception:
+                pass
+            c = raw.get("color")
+            if isinstance(c, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", c):
+                out["color"] = c
+            if raw.get("align") in ("left", "center", "right"):
+                out["align"] = raw["align"]
+            if raw.get("case") in ("upper", "lower", "title", "none"):
+                out["case"] = raw["case"]
+            for k in ("bold", "italic", "underline"):
+                if k in raw:
+                    out[k] = bool(raw[k])
+            return out
+        _style = {}
+        try:
+            import json as _js
+            _style = _clean_style(_js.loads(request.form.get("style") or "{}"))
+        except Exception:
+            _style = {}
+
         # Plusieurs captions chronométrées (liste + frise) -> champ 'segments' JSON.
         # Chaque segment = {text, start, end} en secondes (start/end null = toute la vidéo).
         segments = []
@@ -28989,7 +29106,9 @@ def create_app():
                         start, end = "00:00:00", "99:99:99"
                     else:
                         start, end = _hms(st), _hms(en)
-                    segments.append({"start": start, "end": end, "text": txt})
+                    seg = {"start": start, "end": end, "text": txt}
+                    seg.update(_style)   # applique le style global à chaque caption
+                    segments.append(seg)
 
         if segments:
             caps.append({"label": label, "font": font, "captions": segments})

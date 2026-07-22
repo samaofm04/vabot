@@ -386,6 +386,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const CX = Math.round(W * capX);
   // Position custom -> micro-jitter anti-fingerprint seulement (le ±300px casserait le placement)
   const effYOffset = hasCustomY ? Math.max(-14, Math.min(14, yOffset)) : yOffset;
+  // ── Styles CapCut par caption : alignement / casse / souligné ──
+  const alignSt = (st.align === 'left' || st.align === 'right') ? st.align : 'center';
+  const caseSt  = (st.case === 'upper' || st.case === 'lower' || st.case === 'title') ? st.case : 'none';
+  const underlineSt = st.underline === true;
   // Police texte selectionnee (fallback Arial si non disponible)
   // Bebas/Anton sont des fontes "Regular" qui font deja un effet bold visuel
   // InterRegular/InterMedium sont des poids legers (style TikTok native)
@@ -396,8 +400,12 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const isPreBold  = realFamily === 'BebasNeue' || realFamily === 'Anton';
   const isLight    = LIGHT_WEIGHT_FONTS.has(realFamily);
   const usePrefix  = !isPreBold && !isLight;
+  // Gras/italique manuels (boutons B/I) : st.bold/st.italic surchargent le défaut
+  const wantBold   = (st.bold === true) ? true : (st.bold === false ? false : usePrefix);
+  const wantItalic = (italicPart !== '') || (st.italic === true);
+  const stylePrefix = (wantItalic ? 'italic ' : '') + (wantBold ? 'bold ' : '');
   const fontStack = realFamily
-    ? `${italicPart}${usePrefix ? 'bold ' : ''}${'%S%px'} "${realFamily}", ArialBold, Arial, sans-serif`
+    ? `${stylePrefix}${'%S%px'} "${realFamily}", ArialBold, Arial, sans-serif`
     : `bold ${'%S%px'} ArialBold, LinuxBold, Arial, sans-serif`;
   const FONT = size => fontStack.replace('%S%', size);
   // Contour noir MARQUÉ (style TikTok/Insta) : plus épais qu'avant pour bien
@@ -410,9 +418,18 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   ctx.clearRect(0, 0, W, H);
   ctx.textBaseline = 'middle';
 
+  // Casse (boutons TT / tt / Tt de CapCut)
+  function _applyCase(s) {
+    if (caseSt === 'upper') return s.toUpperCase();
+    if (caseSt === 'lower') return s.toLowerCase();
+    if (caseSt === 'title') return s.replace(/\p{L}[\p{L}\p{M}']*/gu,
+      w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    return s;
+  }
+
   const finalLines = [];
   for (const cap of captions) {
-    const raw = (cap.text || '').trim();
+    const raw = _applyCase((cap.text || '').trim());
     if (!raw) continue;
     const emojiSize = Math.round(BASE * 1.15);
     ctx.font = FONT(BASE);
@@ -484,20 +501,21 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
 
     const runs     = _splitRuns(text);
     const hasEmoji = runs.some(r => r.type === 'emoji');
+    const lineW    = _measureLine(ctx, text, emojiSize);
+    // Alignement (boutons gauche/centre/droite) : boîte centrée sur CX, largeur maxW
+    let startX;
+    if (alignSt === 'left')       startX = CX - maxW / 2;
+    else if (alignSt === 'right') startX = CX + maxW / 2 - lineW;
+    else                          startX = CX - lineW / 2;
 
+    ctx.textAlign = 'left';
     if (!hasEmoji) {
-      // Texte pur — rendu centré sur CX (custom éditeur ou centre)
-      ctx.textAlign   = 'center';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.strokeText(text, CX, y);
+      ctx.strokeText(text, startX, y);
       ctx.fillStyle = fillColor;
-      ctx.fillText(text, CX, y);
+      ctx.fillText(text, startX, y);
     } else {
-      // Mixte texte + emoji — mesure totale puis dessin gauche→droite
-      ctx.textAlign = 'left';
-      const totalW  = _measureLine(ctx, text, emojiSize);
-      let curX      = Math.round(CX - totalW / 2);
-
+      let curX = Math.round(startX);
       for (const run of runs) {
         if (run.type === 'text') {
           ctx.strokeStyle = 'rgba(0,0,0,1)';
@@ -513,6 +531,16 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
           curX += emojiSize;
         }
       }
+    }
+    // Souligné (bouton U) : trait couleur + contour noir, sur la largeur du texte
+    if (underlineSt && text) {
+      const uy  = Math.round(y + fontSize * 0.42);
+      const uh  = Math.max(2, Math.round(fontSize * 0.07));
+      const pad = Math.max(2, Math.round(fontSize * strokeMul / 2));
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+      ctx.fillRect(startX - pad, uy - uh / 2 - pad, lineW + pad * 2, uh + pad * 2);
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(startX, uy - uh / 2, lineW, uh);
     }
     await yieldLoop();
   }
