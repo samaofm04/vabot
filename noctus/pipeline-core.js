@@ -400,9 +400,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     ? `${italicPart}${usePrefix ? 'bold ' : ''}${'%S%px'} "${realFamily}", ArialBold, Arial, sans-serif`
     : `bold ${'%S%px'} ArialBold, LinuxBold, Arial, sans-serif`;
   const FONT = size => fontStack.replace('%S%', size);
-  // Stroke fin pour les fontes regular (effet TikTok), epais pour les bold classiques
-  const strokeMul = isLight ? 0.07 : 0.14;
-  const strokeMin = isLight ? 2    : 5;
+  // Contour noir MARQUÉ (style TikTok/Insta) : plus épais qu'avant pour bien
+  // détacher le texte du fond. Un peu plus fin pour les fontes légères.
+  const strokeMul = isLight ? 0.11 : 0.19;
+  const strokeMin = isLight ? 3    : 7;
 
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
@@ -487,7 +488,7 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     if (!hasEmoji) {
       // Texte pur — rendu centré sur CX (custom éditeur ou centre)
       ctx.textAlign   = 'center';
-      ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
       ctx.strokeText(text, CX, y);
       ctx.fillStyle = fillColor;
       ctx.fillText(text, CX, y);
@@ -499,7 +500,7 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
 
       for (const run of runs) {
         if (run.type === 'text') {
-          ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
           ctx.strokeText(run.content, curX, y);
           ctx.fillStyle = fillColor;
           ctx.fillText(run.content, curX, y);
