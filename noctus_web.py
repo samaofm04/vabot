@@ -285,7 +285,7 @@ def run(model_id: str, folders=None, captions=None, targets=None):
     return proc
 
 
-def gen_from_path(src_path, caption="", font="TikTokSans", folders=None,
+def gen_from_path(src_path, caption="", font="Strong", folders=None,
                   start="00:00:00", end="99:99:99", model=None):
     """Prépare un modèle à partir d'UNE vidéo + lance la génération.
     Retourne le model_id (à poller via status()) ou None. Réutilisé par /reeltest."""
@@ -307,7 +307,7 @@ def gen_from_path(src_path, caption="", font="TikTokSans", folders=None,
     label = ("rt_" + model)[:40]
     caps = [c for c in read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
     if caption:
-        caps.append({"label": label, "font": font or "TikTokSans",
+        caps.append({"label": label, "font": font or "Strong",
                      "captions": [{"start": start, "end": end, "text": caption}]})
         sel = [label]
     else:
@@ -407,16 +407,17 @@ def render_page() -> str:
     if not model_opts:
         model_opts = "<option value=''>(aucun modèle — crée-en un)</option>"
 
-    FONTS = ["TikTokSans", "Inter", "Poppins", "Montserrat", "BebasNeue", "Anton"]
-    # TikTokSans = police par défaut (1er + selected)
-    font_opts = "".join(f"<option{' selected' if f == 'TikTokSans' else ''}>{f}</option>" for f in FONTS)
+    # "Strong" = reproduction de la police Instagram Stories (Poppins italique gras)
+    FONTS = ["Strong", "TikTokSans", "Inter", "Poppins", "Montserrat", "BebasNeue", "Anton"]
+    # Strong = police par défaut (1er + selected)
+    font_opts = "".join(f"<option{' selected' if f == 'Strong' else ''}>{f}</option>" for f in FONTS)
 
     cap_rows = ""
     for c in caps:
         if not isinstance(c, dict):
             continue
         lbl = c.get("label", "")
-        font = c.get("font", "TikTokSans") or "TikTokSans"
+        font = c.get("font", "Strong") or "Strong"
         txt = "  ·  ".join(
             (seg.get("text", "") or "").replace("\n", " ")
             for seg in c.get("captions", []) if isinstance(seg, dict)
@@ -552,7 +553,7 @@ def render_page() -> str:
   <!-- Captions editor -->
   <details style="background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:14px 18px;margin-bottom:30px">
     <summary style="cursor:pointer;font-weight:700;font-size:14px;color:#ddd">📝 Éditer les captions (JSON)</summary>
-    <p style="color:#888;font-size:12px;margin:10px 0">Format : liste de versions {{label, font, captions:[{{start,end,text}}]}}. Fonts : Inter, Poppins, Montserrat, BebasNeue, Anton, TikTokSans.</p>
+    <p style="color:#888;font-size:12px;margin:10px 0">Format : liste de versions {{label, font, captions:[{{start,end,text}}]}}. Fonts : Strong (police Instagram), TikTokSans, Inter, Poppins, Montserrat, BebasNeue, Anton.</p>
     <textarea id="nx-capsjson" spellcheck="false" style="width:100%;min-height:200px;background:#0a0a0a;border:1px solid #2a2a2a;color:#8ef;border-radius:10px;padding:12px;font-family:monospace;font-size:12px">{caps_json}</textarea>
     <button onclick="nxSaveCaptions()" style="margin-top:10px;padding:9px 16px;background:#1a1a1a;border:1px solid #3a3a3a;color:#ddd;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px">💾 Sauver les captions</button>
     <span id="nx-capsmsg" style="margin-left:10px;font-size:12px"></span>
@@ -892,7 +893,7 @@ def register(app, is_auth, error_fn, success_fn):
         text = (request.form.get("text") or "").strip()
         if not text:
             return jsonify({"ok": False, "error": "texte vide"})
-        font = (request.form.get("font") or "TikTokSans").strip() or "TikTokSans"
+        font = (request.form.get("font") or "Strong").strip() or "Strong"
 
         def _sec_to_hms(v):
             # garde les décimales (millisecondes) -> timing précis au centième

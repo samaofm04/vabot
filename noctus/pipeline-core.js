@@ -389,11 +389,15 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   // Police texte selectionnee (fallback Arial si non disponible)
   // Bebas/Anton sont des fontes "Regular" qui font deja un effet bold visuel
   // InterRegular/InterMedium sont des poids legers (style TikTok native)
-  const isPreBold  = fontFamily === 'BebasNeue' || fontFamily === 'Anton';
-  const isLight    = LIGHT_WEIGHT_FONTS.has(fontFamily);
+  // "Strong" = reproduction de la police Instagram Stories = Poppins gras + ITALIQUE penché
+  const STRONG_ALIAS = { 'Strong': 'Poppins' };
+  const realFamily = (fontFamily && STRONG_ALIAS[fontFamily]) ? STRONG_ALIAS[fontFamily] : fontFamily;
+  const italicPart = (fontFamily && STRONG_ALIAS[fontFamily]) ? 'italic ' : '';
+  const isPreBold  = realFamily === 'BebasNeue' || realFamily === 'Anton';
+  const isLight    = LIGHT_WEIGHT_FONTS.has(realFamily);
   const usePrefix  = !isPreBold && !isLight;
-  const fontStack = fontFamily
-    ? `${usePrefix ? 'bold ' : ''}${'%S%px'} "${fontFamily}", ArialBold, Arial, sans-serif`
+  const fontStack = realFamily
+    ? `${italicPart}${usePrefix ? 'bold ' : ''}${'%S%px'} "${realFamily}", ArialBold, Arial, sans-serif`
     : `bold ${'%S%px'} ArialBold, LinuxBold, Arial, sans-serif`;
   const FONT = size => fontStack.replace('%S%', size);
   // Stroke fin pour les fontes regular (effet TikTok), epais pour les bold classiques
