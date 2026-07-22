@@ -792,8 +792,10 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
           const brightJitter   = parseFloat(((Math.random() * 0.02) - 0.01).toFixed(3));
           const contrastJitter = parseFloat(((Math.random() * 0.02) - 0.01).toFixed(3));
           const trimSec        = (50 + Math.floor(Math.random() * 51)) / 1000;
-          // Offset Y aleatoire des captions (-300..+300 px) anti-fingerprint Insta
-          const captionYOffset = Math.floor(Math.random() * 601) - 300;
+          // Micro-offset Y aleatoire des captions (-25..+25 px) : assez pour varier
+          // l'empreinte entre variations, MAIS le texte reste la ou l'apercu le
+          // montre (avant c'etait ±300px -> le rendu ne matchait pas l'apercu).
+          const captionYOffset = Math.floor(Math.random() * 51) - 25;
           log(`  📐 Caption Y offset: ${captionYOffset >= 0 ? '+' : ''}${captionYOffset}px [V${vi+1}/${cap.label}/${baseName}]`, `📐 offset Y: ${captionYOffset}px`);
           const uid            = randomId(4);
           const capLabel       = sanitizeName(cap.label);

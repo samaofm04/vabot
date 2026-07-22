@@ -2974,7 +2974,7 @@ function nxMUpdatePreview(){
   var _fsel=(document.getElementById('nx-m-font')||{}).value||'';
   var _ital=(_fsel==='Strong')?'font-style:italic;':'';
   var inner=lines.map(function(ln){ return '<div style="color:#fff;font-weight:800;'+_ital+'font-size:13px;line-height:1.25;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:pre-wrap;word-break:break-word">'+nxMEsc(ln)+'</div>'; }).join('');
-  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:58%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
+  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:center">'+inner+'</div>';
 }
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
