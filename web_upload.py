@@ -4985,7 +4985,8 @@ body.light .action-icon{color:#666}
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
 /* Style éditeur type CapCut : sombre neutre, panneaux, inspecteur à droite */
-.nxm-card{background:#1b1b1e;border:1px solid #2e2e34;border-radius:14px;width:100%;max-width:1000px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.75)}
+.nxm-card{background:#1b1b1e;border:1px solid #2e2e34;border-radius:14px;width:100%;max-width:1120px;height:90vh;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.75)}
+.nxm-bottom{border-top:1px solid #2a2a30;background:#161618;padding:12px 18px 16px;overflow-y:auto;flex-shrink:0;max-height:34vh}
 .nxm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;border-bottom:1px solid #2a2a30;background:#202024;flex-shrink:0}
 .nxm-badge{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
 .nxm-h1{font-size:15px;font-weight:800;color:#f2f2f5}
@@ -5105,15 +5106,19 @@ body.light .action-icon{color:#666}
           <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">➕ Ajouter cette caption</button>
           <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24"></span>
         </div>
-        <div id="nx-m-frise" style="margin-top:16px"></div>
-        <div id="nx-m-caplist" style="margin-top:8px"></div>
-        <div id="nx-m-vfolders" class="nxm-vf" style="display:none"></div>
-        <div class="nxm-foot">
-          <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer la vidéo</button>
-          <div id="nx-m-prog" class="nxm-prog"></div>
-        </div>
-        <div id="nx-m-results" style="margin-top:16px"></div>
       </div>
+    </div>
+    <!-- Zone du bas pleine largeur : timeline + génération (façon CapCut) -->
+    <div class="nxm-bottom">
+      <div class="nxm-plabel" style="margin-bottom:7px">Timeline — place tes captions dans le temps</div>
+      <div id="nx-m-frise"></div>
+      <div id="nx-m-caplist" style="margin-top:8px"></div>
+      <div id="nx-m-vfolders" class="nxm-vf" style="display:none"></div>
+      <div class="nxm-foot" style="margin-top:14px">
+        <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer la vidéo</button>
+        <div id="nx-m-prog" class="nxm-prog"></div>
+      </div>
+      <div id="nx-m-results" style="margin-top:14px"></div>
     </div>
   </div>
 </div>
