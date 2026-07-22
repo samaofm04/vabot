@@ -31733,8 +31733,19 @@ def create_app():
             reel = veille.get_reel((request.args.get("reel_id") or "").strip())
             if not reel:
                 return jsonify({"ok": False, "error": "Reel introuvable"})
+            # Lecteur : PRÉFÈRE le mp4 local (cache Trends/envoi/analyse — jamais
+            # expiré) à l'URL CDN Instagram qui meurt en quelques heures.
+            _vurl = reel.get("video_url") or ""
+            try:
+                _rid0 = reel.get("id") or ""
+                _msc = re.search(r"/(?:p|reel|reels)/([A-Za-z0-9_-]+)", reel.get("url") or "")
+                if (_msc and (INSTA_VIDEOS_DIR / f"{_msc.group(1)}.mp4").exists()) \
+                        or (DATA_DIR / "tg_tmp" / f"reelvid_{_rid0}.mp4").exists():
+                    _vurl = f"/veille/reelvideo?reel_id={_rid0}"
+            except Exception:
+                pass
             return jsonify({"ok": True,
-                            "video_url": reel.get("video_url") or "",
+                            "video_url": _vurl,
                             "caption": reel.get("caption") or "",
                             # brouillon « prêt » enregistré (pré-remplit le modal)
                             "prepared": bool(reel.get("prepared")),
@@ -31838,6 +31849,14 @@ def create_app():
             res = tg_router.ocr_video_url(str(_cache_f), second=second, headers=None, full=full, end=end)
             if res and res.get("ok"):
                 proxy_url = f"/veille/reelvideo?reel_id={rid}"
+        # 0bis) cache yt-dlp de CETTE route (tg_tmp/reelvid_{rid}.mp4) : une analyse
+        #       précédente l'a déjà téléchargé -> ré-analyse instantanée (cas _sc
+        #       introuvable où le cache partagé n'a pas pu être écrit).
+        _yt_f = DATA_DIR / "tg_tmp" / f"reelvid_{rid}.mp4"
+        if not (res and res.get("ok")) and _yt_f.exists() and _yt_f.stat().st_size > 1024:
+            res = tg_router.ocr_video_url(str(_yt_f), second=second, headers=None, full=full, end=end)
+            if res and res.get("ok"):
+                proxy_url = f"/veille/reelvideo?reel_id={rid}"
         # 1) RAPIDE : ffmpeg lit les frames DIRECTEMENT depuis l'URL (pas de download 50 Mo)
         if not (res and res.get("ok")) and vurl:
             res = tg_router.ocr_video_url(vurl, second=second, headers=ig_headers, full=full, end=end)
@@ -31921,6 +31940,17 @@ def create_app():
                         pass
                     cpath = cdir / f"reelvid_{rid}.mp4"
                     cpath.write_bytes(vb)
+                    # miroir dans le cache PARTAGÉ (data/insta/videos/{sc}.mp4) ->
+                    # les ré-analyses ET l'envoi le réutilisent (fini le re-download
+                    # yt-dlp à chaque clic + le 429 associé).
+                    if _cache_f:
+                        try:
+                            _cache_f.parent.mkdir(parents=True, exist_ok=True)
+                            _cache_f.write_bytes(vb)
+                            if yt_info.get("description"):
+                                _cache_f.with_suffix(".txt").write_text(yt_info["description"], encoding="utf-8")
+                        except Exception:
+                            pass
                     res = tg_router.ocr_video_url(str(cpath), second=second, headers=None, full=full, end=end)
                     proxy_url = f"/veille/reelvideo?reel_id={rid}"
                     if not (res and res.get("ok")):
@@ -32248,6 +32278,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
+    _vsend_inflight: dict = {}   # rid -> timestamp : verrou anti double-envoi
+
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
         if not is_auth():
@@ -32265,88 +32297,147 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         reel = veille.get_reel(rid)
         if not reel:
             return jsonify({"ok": False, "error": "Reel introuvable"})
-        if not veille_telegram.is_configured():
-            return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
-        url = (reel.get("url") or "").strip()
-        # PLUS de re-scrape lent (refresh_post_data) ici : yt-dlp, dans
-        # send_video_from_url, telecharge la video ET recupere la description depuis
-        # le permalink, et le cache disque sert les reels deja telecharges. On evite
-        # donc un re-scrape RapidAPI+instaloader a CHAQUE envoi -> bien plus rapide.
-        caption = _veille_caption(reel)
-        description = (reel.get("caption") or "").strip()
-        # Le client peut envoyer la caption DEJA AFFICHEE sur la carte (recuperee cote
-        # navigateur via igAutoFetchCaption, mais PAS persistee serveur). On l'utilise
-        # -> garantit que la description VISIBLE part bien (le vrai "copier-coller").
-        _client_cap = (request.form.get("caption") or "").strip()
-        if _client_cap and "pas de caption" not in _client_cap.lower():
-            description = _client_cap
-        # 1) Tente download + sendVideo, fallback sur lien si echec
-        #    + followup texte avec la description IG si elle existe
-        #    owner = @compte source -> permet de re-resoudre le video_url via
-        #    les reels du compte si l'URL stockee a expire.
-        res = veille_telegram.send_video_from_url(
-            reel.get("video_url", ""),
-            caption=caption,
-            fallback_url=url,
-            followup_text=description,
-            owner=reel.get("owner", ""),
-            tg_file_id=reel.get("tg_file_id", ""),
-        )
-        if res.get("ok"):
-            veille.mark_sent(rid)
-            # le reel devient « ENVOYÉ » -> plus de brouillon « prêt » en attente
-            try:
-                veille.clear_prepared(rid)
-            except Exception:
-                pass
-            _upd = {}
-            # file_id Telegram -> renvoi INSTANTANE la prochaine fois
-            if res.get("tg_file_id"):
-                _upd["tg_file_id"] = res["tg_file_id"]
-            # Description recuperee -> persiste sur le reel = copier-coller instantane
-            # au prochain envoi (plus de re-fetch), et dispo sur la grille.
-            if res.get("description") and not (reel.get("caption") or "").strip():
-                _upd["caption"] = res["description"]
-            if _upd:
+        # Verrou par reel : double-clic, bulk + modal en même temps, ou re-clic
+        # après un timeout réseau -> UN seul envoi passe, pas de double post.
+        import time as _t
+        _now = _t.time()
+        for _k in [k for k, ts in _vsend_inflight.items() if _now - ts > 240]:
+            _vsend_inflight.pop(_k, None)
+        if rid in _vsend_inflight:
+            return jsonify({"ok": False, "error": "Envoi déjà en cours pour ce reel — attends qu'il se termine"})
+        # set IMMÉDIAT après le check (aucun yield entre les deux -> atomique sous
+        # le GIL) : deux threads concurrents ne peuvent pas passer tous les deux.
+        _vsend_inflight[rid] = _now
+        # try/finally : le verrou est TOUJOURS relâché (même exception) -> jamais
+        # de reel bloqué 240 s ; et on renvoie du JSON même en cas d'erreur (plus
+        # de page 500 HTML -> plus de « SyntaxError » côté client).
+        try:
+            if not veille_telegram.is_configured():
+                return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
+            url = (reel.get("url") or "").strip()
+            # PLUS de re-scrape lent (refresh_post_data) ici : yt-dlp, dans
+            # send_video_from_url, telecharge la video ET recupere la description depuis
+            # le permalink, et le cache disque sert les reels deja telecharges. On evite
+            # donc un re-scrape RapidAPI+instaloader a CHAQUE envoi -> bien plus rapide.
+            caption = _veille_caption(reel)
+            # ---- Description finale ----
+            # desc_set=1 (modal « Préparer la veille ») : le champ caption du form est
+            # EXPLICITE — même VIDE. Vide = pas de description (avant, on retombait
+            # sur la caption du reel : impossible de la vider).
+            _desc_explicit = bool(request.form.get("desc_set"))
+            _client_cap = (request.form.get("caption") or "").strip()
+            if _desc_explicit:
+                description = _client_cap
+            else:
+                description = (reel.get("caption") or "").strip()
+                # Le client peut envoyer la caption DEJA AFFICHEE sur la carte (recuperee
+                # cote navigateur via igAutoFetchCaption, mais PAS persistee serveur).
+                if _client_cap and "pas de caption" not in _client_cap.lower():
+                    description = _client_cap
+                # Brouillon « prêt » : l'envoi depuis la CARTE (sans modal) respecte le
+                # draft — avant, « Marquer prêt » n'était utilisé que via le modal.
+                if reel.get("prepared") and "prep_desc" in reel:
+                    description = (reel.get("prep_desc") or "").strip()
+                    _desc_explicit = True   # le draft fait foi, même vide
+            # ---- Overlay (texte incrusté) : form > brouillon « prêt » > None (OCR TG)
+            overlay_val = request.form.get("overlay")
+            if overlay_val is None and reel.get("prepared") and (reel.get("prep_overlay") or "").strip():
+                overlay_val = reel.get("prep_overlay")
+            # ---- Modèles : form > brouillon « prêt ». models_set=1 (modal) rend le
+            # form EXPLICITE : vide = aucun modèle (envoi canal seulement), pas de
+            # fallback draft. Le fallback ne joue que pour carte/bulk (sans models_set).
+            to_models = [m.strip().lower() for m in (request.form.get("to_models") or "").split(",") if m.strip()]
+            if not to_models and not request.form.get("models_set") and reel.get("prepared"):
+                to_models = [m.strip().lower() for m in (reel.get("prep_models") or "").split(",") if m.strip()]
+            # ---- forward_only=1 : RETRY modèles. La vidéo est DÉJÀ dans le canal
+            # Veille -> on ne la re-poste PAS. Sans vidéo Telegram stockée (1er envoi
+            # parti en LIEN), on REFUSE : un envoi complet re-posterait le lien.
+            forward_only = bool(request.form.get("forward_only"))
+            if forward_only and not reel.get("tg_file_id"):
+                return jsonify({"ok": False, "error": "Le 1er envoi est parti en LIEN (vidéo introuvable) — rien à re-forwarder. Récupère d'abord la vidéo (🔍 Analyser) puis renvoie."})
+            if forward_only:
+                res = {"ok": True, "mode": "video",
+                       "tg_file_id": reel.get("tg_file_id"),
+                       "chat_id": reel.get("veille_chat_id"),
+                       "message_id": reel.get("veille_msg_id"),
+                       "description": description}
+            else:
+                # 1) Tente download + sendVideo, fallback sur lien si echec
+                #    + followup texte avec la description IG si elle existe
+                #    owner = @compte source -> permet de re-resoudre le video_url via
+                #    les reels du compte si l'URL stockee a expire.
+                res = veille_telegram.send_video_from_url(
+                    reel.get("video_url", ""),
+                    caption=caption,
+                    fallback_url=url,
+                    followup_text=description,
+                    owner=reel.get("owner", ""),
+                    tg_file_id=reel.get("tg_file_id", ""),
+                    followup_final=_desc_explicit,
+                )
+            if res.get("ok"):
+                veille.mark_sent(rid)
+                # le reel devient « ENVOYÉ » -> plus de brouillon « prêt » en attente
                 try:
-                    veille.update_reel(rid, **_upd)
+                    veille.clear_prepared(rid)
                 except Exception:
                     pass
-            # --- Envoi AUSSI dans les sujets IG CONTENT des modèles choisies ---
-            # (le routeur enregistre la veille -> apparaît « en attente » dans
-            # le sujet de la modèle du groupe VEILLE ID)
-            to_models = [m.strip().lower() for m in (request.form.get("to_models") or "").split(",") if m.strip()]
-            if to_models:
-                fid = res.get("tg_file_id") or reel.get("tg_file_id") or ""
-                sent_m, err_m = [], []
-                if res.get("mode") != "video" or not fid:
-                    err_m = [f"{m} (envoyé en lien, pas en vidéo)" for m in to_models]
-                else:
+                _upd = {}
+                # file_id Telegram -> renvoi INSTANTANE la prochaine fois
+                if res.get("tg_file_id"):
+                    _upd["tg_file_id"] = res["tg_file_id"]
+                # message Veille posté -> stocké pour les retries forward_only
+                # (re-forward aux modèles SANS re-poster la vidéo dans le canal)
+                if res.get("chat_id") and res.get("message_id"):
+                    _upd["veille_chat_id"] = res["chat_id"]
+                    _upd["veille_msg_id"] = res["message_id"]
+                # Description recuperee -> persiste sur le reel = copier-coller instantane
+                # au prochain envoi (plus de re-fetch), et dispo sur la grille.
+                if res.get("description") and not (reel.get("caption") or "").strip():
+                    _upd["caption"] = res["description"]
+                if _upd:
                     try:
-                        import tg_router
-                        desc_final = (res.get("description") or description or "").strip()
-                        # overlay pré-validé sur le site (caption incrustée lue via
-                        # « Préparer la veille »). None = pas fourni -> OCR côté TG.
-                        overlay_val = request.form.get("overlay")
-                        # source du FORWARD : le message vidéo déjà posté dans le
-                        # canal Veille -> chaque model reçoit une COPIE (transfert
-                        # natif Telegram), la vidéo n'est jamais ré-uploadée.
-                        _src_chat = res.get("chat_id")
-                        _src_msg = res.get("message_id")
-                        for m in to_models:
-                            r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final,
-                                                                overlay=overlay_val,
-                                                                src_chat_id=_src_chat,
-                                                                src_msg_id=_src_msg)
-                            if r2.get("ok"):
-                                sent_m.append(m)
+                        veille.update_reel(rid, **_upd)
+                    except Exception:
+                        pass
+                # --- Envoi AUSSI dans les sujets IG CONTENT des modèles choisies ---
+                # (le routeur enregistre la veille -> apparaît « en attente » dans
+                # le sujet de la modèle du groupe VEILLE ID)
+                if to_models:
+                    fid = res.get("tg_file_id") or reel.get("tg_file_id") or ""
+                    sent_m, err_m = [], []
+                    if res.get("mode") != "video" or not fid:
+                        err_m = [f"{m} (envoyé en lien, pas en vidéo)" for m in to_models]
+                    else:
+                        try:
+                            import tg_router
+                            if _desc_explicit:
+                                desc_final = description   # le modal/draft fait foi, même vide
                             else:
-                                err_m.append(f"{m} ({r2.get('error', '?')})")
-                    except Exception as e:
-                        err_m.append(str(e))
-                res["models_sent"] = sent_m
-                res["models_err"] = err_m
-        return jsonify(res)
+                                desc_final = (res.get("description") or description or "").strip()
+                            # source du FORWARD : le message vidéo déjà posté dans le
+                            # canal Veille -> chaque model reçoit une COPIE (transfert
+                            # natif Telegram), la vidéo n'est jamais ré-uploadée.
+                            _src_chat = res.get("chat_id")
+                            _src_msg = res.get("message_id")
+                            for m in to_models:
+                                r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final,
+                                                                    overlay=overlay_val,
+                                                                    src_chat_id=_src_chat,
+                                                                    src_msg_id=_src_msg)
+                                if r2.get("ok"):
+                                    sent_m.append(m)
+                                else:
+                                    err_m.append(f"{m} ({r2.get('error', '?')})")
+                        except Exception as e:
+                            err_m.append(str(e))
+                    res["models_sent"] = sent_m
+                    res["models_err"] = err_m
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        finally:
+            _vsend_inflight.pop(rid, None)
 
     @app.route("/veille/models", methods=["GET"])
     def veille_models():
@@ -32466,6 +32557,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                     r["video_url"] = fresh["video_url"]
             caption = _veille_caption(r)
             description = (r.get("caption") or "").strip()
+            _dfinal = False
+            # brouillon « prêt » : le draft fait foi (comme /veille/send), même vide
+            if r.get("prepared") and "prep_desc" in r:
+                description = (r.get("prep_desc") or "").strip()
+                _dfinal = True
+            # capture du brouillon AVANT l'envoi (clear_prepared le supprimera)
+            _pm = [m.strip().lower() for m in (r.get("prep_models") or "").split(",")
+                   if m.strip()] if r.get("prepared") else []
+            _pov = r.get("prep_overlay") if (r.get("prepared") and (r.get("prep_overlay") or "").strip()) else None
             res = veille_telegram.send_video_from_url(
                 r.get("video_url", ""),
                 caption=caption,
@@ -32473,16 +32573,45 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 followup_text=description,
                 owner=r.get("owner", ""),
                 tg_file_id=(r.get("tg_file_id") or ""),
+                followup_final=_dfinal,
             )
             if res.get("ok"):
                 veille.mark_sent(r["id"])
                 # aligné sur /veille/send : on persiste ce que l'envoi a appris
-                # (file_id -> renvois instantanés ; description récupérée)
+                # (file_id -> renvois instantanés ; description ; message Veille)
                 try:
+                    _u = {}
                     if res.get("tg_file_id"):
-                        veille.update_reel(r["id"], tg_file_id=res["tg_file_id"])
+                        _u["tg_file_id"] = res["tg_file_id"]
+                    if res.get("chat_id") and res.get("message_id"):
+                        _u["veille_chat_id"] = res["chat_id"]
+                        _u["veille_msg_id"] = res["message_id"]
                     if res.get("description") and not (r.get("caption") or "").strip():
-                        veille.update_reel(r["id"], caption=res["description"])
+                        _u["caption"] = res["description"]
+                    if _u:
+                        veille.update_reel(r["id"], **_u)
+                except Exception:
+                    pass
+                # forward AUSSI aux modèles du brouillon (comme /veille/send) puis
+                # purge le brouillon -> plus de draft fantôme après envoi.
+                _fid = res.get("tg_file_id") or r.get("tg_file_id") or ""
+                if _pm and res.get("mode") == "video" and _fid:
+                    try:
+                        import tg_router
+                        for m in _pm:
+                            try:
+                                r2 = tg_router.send_veille_to_model(
+                                    m, _fid, link=url, desc=description, overlay=_pov,
+                                    src_chat_id=res.get("chat_id"),
+                                    src_msg_id=res.get("message_id"))
+                                if not r2.get("ok"):
+                                    failed += 1
+                            except Exception:
+                                failed += 1
+                    except Exception:
+                        pass
+                try:
+                    veille.clear_prepared(r["id"])
                 except Exception:
                     pass
                 sent += 1

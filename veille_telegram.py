@@ -476,7 +476,8 @@ def send_video_from_url(video_url: str, caption: str = "",
                         fallback_url: str = "",
                         followup_text: str = "",
                         owner: str = "",
-                        tg_file_id: str = "") -> Dict[str, Any]:
+                        tg_file_id: str = "",
+                        followup_final: bool = False) -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
 
     Comportement comme un bot downloader Discord/Telegram :
@@ -600,7 +601,10 @@ def send_video_from_url(video_url: str, caption: str = "",
         # CACHE HIT : yt-dlp ne tourne pas -> on relit la description sauvegardee a
         # cote (sinon la description manquerait sur un renvoi). Garde l'ordre
         # video -> lien -> description meme depuis le cache.
-        if video_bytes and _desc_f and _desc_f.exists() and (not followup_text or not followup_text.strip()):
+        # followup_final : la description a été fixée EXPLICITEMENT (modal/brouillon),
+        # même vide -> on ne la re-remplit jamais depuis le sidecar/yt-dlp/Apify
+        if video_bytes and _desc_f and _desc_f.exists() and not followup_final \
+                and (not followup_text or not followup_text.strip()):
             try:
                 _ds = _desc_f.read_text(encoding="utf-8").strip()
                 if _ds:
@@ -619,7 +623,8 @@ def send_video_from_url(video_url: str, caption: str = "",
                 if _ad and _ad.get("video_url"):
                     video_bytes = download_video_bytes(_ad["video_url"])
                     if video_bytes:
-                        if _ad.get("caption") and (not followup_text or not followup_text.strip()):
+                        if _ad.get("caption") and not followup_final \
+                                and (not followup_text or not followup_text.strip()):
                             followup_text = _ad["caption"]
                         if _cache_f:   # met en cache (partagé Trends) + sidecar desc
                             try:
@@ -650,7 +655,9 @@ def send_video_from_url(video_url: str, caption: str = "",
             except Exception:
                 pass
     # Description : si aucune fournie, utilise celle que yt-dlp a recuperee
-    if (not followup_text or not followup_text.strip()) and yt_info.get("description"):
+    # (sauf followup_final : description explicitement fixee, meme vide)
+    if not followup_final and (not followup_text or not followup_text.strip()) \
+            and yt_info.get("description"):
         followup_text = yt_info["description"]
 
     # 1) Fallback : URL CDN directe stockee
