@@ -3044,6 +3044,8 @@ function nxMStylePaint(){
   tg('nxa-left', s.align==='left'); tg('nxa-center', s.align!=='left'&&s.align!=='right'); tg('nxa-right', s.align==='right');
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
+function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
+function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} }
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
   var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
@@ -3189,6 +3191,7 @@ function nxMSetTime(which){
 async function nxMontageOpen(fid, exampleUrl){
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
+  var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
   if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
@@ -4984,141 +4987,224 @@ body.light .action-icon{color:#666}
 
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
-/* Style éditeur type CapCut : sombre neutre, panneaux, inspecteur à droite */
-.nxm-card{background:#1b1b1e;border:1px solid #2e2e34;border-radius:14px;width:100%;max-width:1120px;height:90vh;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.75)}
-.nxm-bottom{border-top:1px solid #2a2a30;background:#161618;padding:12px 18px 16px;overflow-y:auto;flex-shrink:0;max-height:34vh}
-.nxm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;border-bottom:1px solid #2a2a30;background:#202024;flex-shrink:0}
-.nxm-badge{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
-.nxm-h1{font-size:15px;font-weight:800;color:#f2f2f5}
-.nxm-sub{font-size:11.5px;color:#8b8b95}
-.nxm-x{background:#2a2a30;border:1px solid #35353c;color:#9a9aa6;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:12px;flex-shrink:0}
-.nxm-x:hover{color:#fff;background:#35353c}
-.nxm-body{display:grid;grid-template-columns:1fr 340px;flex:1;min-height:0;overflow:hidden}
-.nxm-left{padding:20px;background:#141416;overflow-y:auto;display:flex;flex-direction:column;align-items:center}
-.nxm-right{padding:16px 18px;overflow-y:auto;background:#1f1f23;border-left:1px solid #2a2a30}
-.nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;align-self:flex-start}
-.nxm-vwrap{position:relative;width:100%;max-width:300px;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.5)}
-.nxm-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;background:#000}
-.nxm-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:10px}
-.nxm-sec{font-size:12px;font-weight:700;color:#e6e6ea;margin-bottom:11px;padding-bottom:9px;border-bottom:1px solid #2a2a30}
-.nxm-ta{width:100%;min-height:64px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
-.nxm-ta:focus{border-color:#a855f7}
-.nxm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c4c4cc}
-.nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:60px}
-.nxm-inp{flex:1;min-width:120px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
-.nxm-num{width:62px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box}
+/* ===== Éditeur vidéo type CapCut ===== accent vert-cyan #00d9c0 ===== */
+.ce-app{background:#1a1a1e;border:1px solid #2e2e34;border-radius:12px;width:100%;max-width:1280px;height:94vh;display:grid;grid-template-rows:38px minmax(0,1fr) auto;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.8)}
+.ce-title{display:flex;align-items:center;gap:10px;padding:0 12px;background:#202024;border-bottom:1px solid #2a2a30;font-size:12px;color:#c4c4cc}
+.ce-app-name{font-weight:800;color:#00d9c0;display:flex;align-items:center;gap:6px;font-size:13px}
+.ce-menu{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer}
+.ce-saved{color:#6d6d77;font-size:10.5px;display:flex;align-items:center;gap:5px}
+.ce-proj{flex:1;text-align:center;font-weight:700;color:#e6e6ea;font-size:12.5px}
+.ce-btn{background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
+.ce-btn:hover{background:#35353c}
+.ce-btn.accent{background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;font-weight:800}
+.ce-btn.warn{background:#332a17;border-color:#5a4a25;color:#fbbf24}
+.ce-x{background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px;width:26px;height:24px;border-radius:5px}
+.ce-x:hover{background:#35353c;color:#fff}
+.ce-dot{width:12px;height:12px;border-radius:50%;background:#3a3a42;display:inline-block}
+.ce-main{display:grid;grid-template-columns:224px minmax(0,1fr) 300px;min-height:0;overflow:hidden}
+/* Bibliothèque gauche */
+.ce-lib{background:#202024;border-right:1px solid #2a2a30;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.ce-libtabs{display:flex;flex-wrap:wrap;gap:2px;padding:7px 6px;border-bottom:1px solid #2a2a30}
+.ce-libtab{display:flex;flex-direction:column;align-items:center;gap:3px;width:50px;padding:6px 2px;border-radius:7px;font-size:9px;color:#8b8b95;cursor:pointer;background:none;border:0}
+.ce-libtab svg{width:17px;height:17px}
+.ce-libtab.on{background:#2e2e34;color:#00d9c0}
+.ce-libtab:hover{background:#2a2a30}
+.ce-libcontent{flex:1;overflow-y:auto;padding:12px}
+.ce-card{background:#2a2a30;border:1px dashed #454550;border-radius:8px;height:66px;display:flex;align-items:center;justify-content:center;color:#d4d4dc;font-style:italic;cursor:pointer;font-size:13px;font-weight:700}
+.ce-card:hover{border-color:#00d9c0;color:#00d9c0}
+/* Centre lecteur */
+.ce-center{display:flex;flex-direction:column;min-height:0;background:#141416}
+.ce-chead{font-size:11.5px;color:#9a9aa6;padding:9px 14px;border-bottom:1px solid #2a2a30}
+.ce-stage{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;min-height:0;padding:14px}
+.ce-vwrap{position:relative;height:100%;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.55)}
+.ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+.ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
+.ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
+/* Inspecteur droite */
+.ce-right{background:#1f1f23;border-left:1px solid #2a2a30;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.ce-rtabs{display:flex;gap:2px;padding:8px;border-bottom:1px solid #2a2a30;overflow-x:auto}
+.ce-rtab{padding:6px 9px;border-radius:6px;color:#8b8b95;cursor:pointer;background:none;border:0;font-size:11.5px;white-space:nowrap}
+.ce-rtab.on{background:#2e2e34;color:#e6e6ea;font-weight:700}
+.ce-subtabs{display:flex;gap:2px;padding:8px 12px 0}
+.ce-subtab{padding:6px 12px;border-radius:6px 6px 0 0;color:#8b8b95;cursor:pointer;background:none;border:0;font-size:11.5px}
+.ce-subtab.on{background:#131316;color:#e6e6ea;font-weight:700}
+.ce-inspect{flex:1;overflow-y:auto;padding:14px}
+/* Timeline bas */
+.ce-tl{background:#161618;border-top:1px solid #2a2a30;padding:8px 12px 12px;max-height:34vh;overflow-y:auto}
+.ce-tlbar{display:flex;align-items:center;gap:5px;margin-bottom:9px}
+.ce-tlic{background:#2a2a30;border:1px solid #35353c;color:#9a9aa6;border-radius:6px;width:30px;height:28px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}
+.ce-tlic:hover{background:#35353c;color:#e6e6ea}
+/* Contrôles (réutilisés) */
+.nxm-ta{width:100%;min-height:60px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
+.nxm-ta:focus{border-color:#00d9c0}
+.nxm-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c4c4cc}
+.nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:82px}
+.nxm-inp{flex:1;min-width:110px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
+.nxm-num{width:56px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box}
 .nxm-tlbl{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
 .nxm-hint{font-size:11px;color:#75757f;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
 .nxm-chip{background:#2a2a30;border:1px solid #35353c;border-radius:6px;padding:5px 11px;font-size:11.5px;cursor:pointer}
 .nxm-chip:hover{background:#35353c}
 .nxm-tg{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;min-width:32px;height:30px;padding:0 9px;font-size:13px;cursor:pointer;line-height:1}
 .nxm-tg:hover{background:#35353c}
-.nxm-tg.on{background:#a855f7;border-color:#a855f7;color:#fff}
-.nxm-sw{width:24px;height:24px;border-radius:6px;cursor:pointer;border:2px solid #3a3a42;display:inline-block;box-sizing:border-box}
-.nxm-sw.on{border-color:#a855f7;box-shadow:0 0 0 2px rgba(168,85,247,.35)}
-.nxm-slider{flex:1;accent-color:#a855f7;cursor:pointer}
-.nxm-add{margin-top:15px;width:100%;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:8px;padding:11px 18px;font-size:13px;font-weight:700;cursor:pointer}
+.nxm-tg.on{background:#00d9c0;border-color:#00d9c0;color:#042925}
+.nxm-sw{width:23px;height:23px;border-radius:6px;cursor:pointer;border:2px solid #3a3a42;display:inline-block;box-sizing:border-box}
+.nxm-sw.on{border-color:#00d9c0}
+.nxm-slider{flex:1;accent-color:#00d9c0;cursor:pointer}
+.nxm-add{margin-top:15px;width:100%;background:#2a2a30;border:1px solid #00d9c0;color:#00d9c0;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer}
+.nxm-add:hover{background:rgba(0,217,192,.12)}
 .nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
-.nxm-foot{display:flex;gap:14px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #2a2a30}
-.nxm-gen{flex:1;padding:12px 24px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 6px 18px rgba(34,197,94,.22)}
+.nxm-foot{display:flex;gap:14px;align-items:center;margin-top:12px}
+.nxm-gen{padding:11px 26px;background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px}
 .nxm-prog{font-size:12px;color:#8b8b95}
-@media(max-width:820px){.nxm-body{grid-template-columns:1fr;overflow-y:auto}.nxm-right{border-left:0;border-top:1px solid #2a2a30}.nxm-vwrap{max-width:210px}}
+.nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+@media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
-<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(2,4,10,.8);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px">
-  <div onclick="event.stopPropagation()" class="nxm-card">
-    <div class="nxm-head">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div class="nxm-badge">🎬</div>
-        <div><div class="nxm-h1">Montage du reel</div><div class="nxm-sub">Ajoute tes captions, choisis le timing, puis génère tes variations</div></div>
-      </div>
-      <button onclick="nxMontageClose()" class="nxm-x">✕</button>
+<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(2,4,10,.82);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:14px">
+  <div onclick="event.stopPropagation()" class="ce-app">
+    <!-- 1) BARRE DE TITRE -->
+    <div class="ce-title">
+      <span class="ce-app-name">🎬 Montage</span>
+      <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
+      <span class="ce-saved">● Enregistré auto</span>
+      <div class="ce-proj" id="nx-m-proj">Mon reel</div>
+      <button class="ce-btn warn" onclick="nxMSoon()">🔓 Pro</button>
+      <button class="ce-btn" onclick="nxMSoon()">Partager</button>
+      <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬆ Exporter</button>
+      <span class="ce-dot"></span><button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
-    <div class="nxm-body">
-      <!-- Colonne gauche : aperçu vidéo -->
-      <div class="nxm-left">
-        <div class="nxm-plabel">Ton reel — aperçu live</div>
-        <div class="nxm-vwrap">
-          <video id="nx-m-video" controls muted playsinline class="nxm-video"></video>
-          <div id="nx-m-overlay" class="nxm-ovl"></div>
+    <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
+    <div class="ce-main">
+      <!-- GAUCHE : bibliothèque -->
+      <div class="ce-lib">
+        <div class="ce-libtabs">
+          <button class="ce-libtab" onclick="nxMSoon()"><span>🎞️</span>Multimédia</button>
+          <button class="ce-libtab on"><span>🔤</span>Texte</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>😀</span>Stickers</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>✨</span>Effets</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>⇄</span>Transitions</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>💬</span>Légendes</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>🎛️</span>Filtres</button>
+          <button class="ce-libtab" onclick="nxMSoon()"><span>🎚️</span>Ajustement</button>
         </div>
-        <div id="nx-m-example-wrap" style="display:none;margin-top:16px">
-          <div class="nxm-plabel" style="color:#fbbf24">📋 Exemple (à recopier)</div>
-          <div class="nxm-vwrap" style="max-width:170px">
-            <video id="nx-m-example" controls muted loop playsinline class="nxm-video" style="border-color:#fbbf24"></video>
+        <div class="ce-libcontent">
+          <div class="nxm-plabel">Ajouter du texte</div>
+          <div class="ce-card" onclick="try{document.getElementById('nx-m-caption').focus()}catch(e){}">Texte par défaut</div>
+          <div id="nx-m-example-wrap" style="display:none;margin-top:16px">
+            <div class="nxm-plabel" style="color:#fbbf24">📋 Exemple à recopier</div>
+            <video id="nx-m-example" controls muted loop playsinline style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000;border:1px solid #fbbf24"></video>
           </div>
         </div>
       </div>
-      <!-- Colonne droite : contrôles -->
-      <div class="nxm-right">
-        <div class="nxm-sec">1 · Caption</div>
-        <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" class="nxm-ta"></textarea>
-        <div class="nxm-row">
-          <span class="nxm-lbl">Police</span>
-          <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+      <!-- CENTRE : lecteur -->
+      <div class="ce-center">
+        <div class="ce-chead">Lecteur · Chronologie 01</div>
+        <div class="ce-stage">
+          <div class="ce-vwrap">
+            <video id="nx-m-video" controls muted playsinline class="ce-video"></video>
+            <div id="nx-m-overlay" class="ce-ovl"></div>
+          </div>
         </div>
-        <div class="nxm-row">
-          <span class="nxm-lbl">Taille</span>
-          <input id="nx-m-size" type="range" min="24" max="120" value="44" oninput="nxMStyleSize(this.value)" class="nxm-slider">
-          <span id="nx-m-size-val" style="min-width:32px;text-align:right;color:#c4c4cc;font-size:12px">44</span>
+        <div class="ce-ctrl">
+          <span id="nx-m-tc">00:00.00</span>
+          <div style="flex:1"></div>
+          <button class="ce-play" onclick="nxMPlayPause()">▶</button>
+          <div style="flex:1"></div>
+          <span>9:16 · 1080×1920</span>
         </div>
-        <div class="nxm-row">
-          <span class="nxm-lbl">Style</span>
-          <button type="button" id="nxs-bold" class="nxm-tg on" onclick="nxMStyleToggle('bold')" style="font-weight:800">B</button>
-          <button type="button" id="nxs-italic" class="nxm-tg" onclick="nxMStyleToggle('italic')" style="font-style:italic">I</button>
-          <button type="button" id="nxs-underline" class="nxm-tg" onclick="nxMStyleToggle('underline')" style="text-decoration:underline">U</button>
-          <span style="width:6px"></span>
-          <button type="button" id="nxc-upper" class="nxm-tg" onclick="nxMStyleCase('upper')" title="MAJUSCULES">TT</button>
-          <button type="button" id="nxc-lower" class="nxm-tg" onclick="nxMStyleCase('lower')" title="minuscules">tt</button>
-          <button type="button" id="nxc-title" class="nxm-tg" onclick="nxMStyleCase('title')" title="Majuscule Par Mot">Tt</button>
+      </div>
+      <!-- DROITE : inspecteur -->
+      <div class="ce-right">
+        <div class="ce-rtabs">
+          <button class="ce-rtab on">Texte</button>
+          <button class="ce-rtab" onclick="nxMSoon()">Animation</button>
+          <button class="ce-rtab" onclick="nxMSoon()">Suivi</button>
+          <button class="ce-rtab" onclick="nxMSoon()">Voix</button>
         </div>
-        <div class="nxm-row">
-          <span class="nxm-lbl">Couleur</span>
-          <span class="nxm-sw on" id="nxk-fff" style="background:#ffffff" onclick="nxMStyleColor('#ffffff')"></span>
-          <span class="nxm-sw" style="background:#111111" onclick="nxMStyleColor('#111111')"></span>
-          <span class="nxm-sw" style="background:#ffe14d" onclick="nxMStyleColor('#ffe14d')"></span>
-          <span class="nxm-sw" style="background:#ff4d6d" onclick="nxMStyleColor('#ff4d6d')"></span>
-          <span class="nxm-sw" style="background:#4dd2ff" onclick="nxMStyleColor('#4dd2ff')"></span>
-          <span class="nxm-sw" style="background:#7cfc4d" onclick="nxMStyleColor('#7cfc4d')"></span>
-          <input type="color" id="nx-m-color" value="#ffffff" oninput="nxMStyleColor(this.value)" style="width:30px;height:26px;border:0;background:none;cursor:pointer;padding:0" title="Couleur perso">
+        <div class="ce-subtabs">
+          <button class="ce-subtab on">Basique</button>
+          <button class="ce-subtab" onclick="nxMSoon()">Bulle</button>
+          <button class="ce-subtab" onclick="nxMSoon()">Effets</button>
         </div>
-        <div class="nxm-row">
-          <span class="nxm-lbl">Alignement</span>
-          <button type="button" id="nxa-left" class="nxm-tg" onclick="nxMStyleAlign('left')" title="Gauche">⟵</button>
-          <button type="button" id="nxa-center" class="nxm-tg on" onclick="nxMStyleAlign('center')" title="Centre">≡</button>
-          <button type="button" id="nxa-right" class="nxm-tg" onclick="nxMStyleAlign('right')" title="Droite">⟶</button>
-        </div>
-        <div class="nxm-row">
-          <span class="nxm-lbl">⏱ Quand</span>
-          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> 📍 au curseur (2s)</label>
-          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> toute la vidéo</label>
-          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
-          <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled class="nxm-num">
-          <span>à</span>
-          <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled class="nxm-num"><span>s</span>
-        </div>
-        <div class="nxm-hint">
-          <span>▶ joue la vidéo et mets pause au bon moment, puis :</span>
-          <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#c084fc">📍 début ici</button>
-          <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">📍 fin ici (cut)</button>
-          <span id="nx-m-timeinfo" style="color:#6b7280"></span>
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="ce-inspect">
+          <textarea id="nx-m-caption" placeholder="Texte de la caption…  (écris, puis « Ajouter »)" class="nxm-ta"></textarea>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Police</span>
+            <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Taille de la police</span>
+            <input id="nx-m-size" type="range" min="24" max="120" value="44" oninput="nxMStyleSize(this.value)" class="nxm-slider">
+            <span id="nx-m-size-val" style="min-width:28px;text-align:right;color:#c4c4cc;font-size:12px">44</span>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Motif</span>
+            <button type="button" id="nxs-bold" class="nxm-tg on" onclick="nxMStyleToggle('bold')" style="font-weight:800">B</button>
+            <button type="button" id="nxs-italic" class="nxm-tg" onclick="nxMStyleToggle('italic')" style="font-style:italic">I</button>
+            <button type="button" id="nxs-underline" class="nxm-tg" onclick="nxMStyleToggle('underline')" style="text-decoration:underline">U</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Casse</span>
+            <button type="button" id="nxc-upper" class="nxm-tg" onclick="nxMStyleCase('upper')" title="MAJUSCULES">TT</button>
+            <button type="button" id="nxc-lower" class="nxm-tg" onclick="nxMStyleCase('lower')" title="minuscules">tt</button>
+            <button type="button" id="nxc-title" class="nxm-tg" onclick="nxMStyleCase('title')" title="Majuscule Par Mot">Tt</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Couleur</span>
+            <span class="nxm-sw on" id="nxk-fff" style="background:#ffffff" onclick="nxMStyleColor('#ffffff')"></span>
+            <span class="nxm-sw" style="background:#111111" onclick="nxMStyleColor('#111111')"></span>
+            <span class="nxm-sw" style="background:#ffe14d" onclick="nxMStyleColor('#ffe14d')"></span>
+            <span class="nxm-sw" style="background:#ff4d6d" onclick="nxMStyleColor('#ff4d6d')"></span>
+            <span class="nxm-sw" style="background:#4dd2ff" onclick="nxMStyleColor('#4dd2ff')"></span>
+            <span class="nxm-sw" style="background:#7cfc4d" onclick="nxMStyleColor('#7cfc4d')"></span>
+            <input type="color" id="nx-m-color" value="#ffffff" oninput="nxMStyleColor(this.value)" style="width:28px;height:24px;border:0;background:none;cursor:pointer;padding:0" title="Couleur perso">
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Alignement</span>
+            <button type="button" id="nxa-left" class="nxm-tg" onclick="nxMStyleAlign('left')" title="Gauche">⟵</button>
+            <button type="button" id="nxa-center" class="nxm-tg on" onclick="nxMStyleAlign('center')" title="Centre">≡</button>
+            <button type="button" id="nxa-right" class="nxm-tg" onclick="nxMStyleAlign('right')" title="Droite">⟶</button>
+          </div>
+          <div style="height:1px;background:#2a2a30;margin:16px 0"></div>
+          <div class="nxm-plabel">⏱ Quand afficher</div>
+          <div class="nxm-row" style="margin-top:8px">
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> 📍 au curseur (2s)</label>
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> toute la vidéo</label>
+          </div>
+          <div class="nxm-row">
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> de</label>
+            <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled class="nxm-num">
+            <span>à</span>
+            <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled class="nxm-num"><span>s</span>
+          </div>
+          <div class="nxm-hint">
+            <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#00d9c0">📍 début ici</button>
+            <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">📍 fin ici (cut)</button>
+            <span id="nx-m-timeinfo" style="color:#6b7280"></span>
+          </div>
           <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">➕ Ajouter cette caption</button>
-          <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24"></span>
+          <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24;display:block;margin-top:6px"></span>
         </div>
       </div>
     </div>
-    <!-- Zone du bas pleine largeur : timeline + génération (façon CapCut) -->
-    <div class="nxm-bottom">
-      <div class="nxm-plabel" style="margin-bottom:7px">Timeline — place tes captions dans le temps</div>
+    <!-- 3) TIMELINE pleine largeur -->
+    <div class="ce-tl">
+      <div class="ce-tlbar">
+        <button class="ce-tlic" onclick="nxMSoon()" title="Annuler">↶</button>
+        <button class="ce-tlic" onclick="nxMSoon()" title="Refaire">↷</button>
+        <span style="width:8px"></span>
+        <button class="ce-tlic" onclick="nxMSoon()" title="Scinder">✂</button>
+        <button class="ce-tlic" onclick="nxMSoon()" title="Dupliquer">⧉</button>
+        <button class="ce-tlic" onclick="nxMSoon()" title="Supprimer">🗑</button>
+        <div style="flex:1"></div>
+        <div id="nx-m-prog" class="nxm-prog"></div>
+        <button class="ce-tlic" onclick="nxMSoon()" title="Zoom">🔍</button>
+      </div>
       <div id="nx-m-frise"></div>
       <div id="nx-m-caplist" style="margin-top:8px"></div>
       <div id="nx-m-vfolders" class="nxm-vf" style="display:none"></div>
-      <div class="nxm-foot" style="margin-top:14px">
-        <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer la vidéo</button>
-        <div id="nx-m-prog" class="nxm-prog"></div>
-      </div>
-      <div id="nx-m-results" style="margin-top:14px"></div>
+      <div id="nx-m-results" style="margin-top:12px"></div>
     </div>
   </div>
 </div>
