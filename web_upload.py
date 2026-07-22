@@ -5103,10 +5103,8 @@ body.light .action-icon{color:#666}
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <span class="ce-saved">● Enregistré auto</span>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
-      <button class="ce-btn warn" onclick="nxMSoon()">🔓 Pro</button>
-      <button class="ce-btn" onclick="nxMSoon()">Partager</button>
-      <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬆ Exporter</button>
-      <span class="ce-dot"></span><button class="ce-x" onclick="nxMontageClose()">✕</button>
+      <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬇ Télécharger</button>
+      <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
     <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
     <div class="ce-main">
@@ -5155,14 +5153,6 @@ body.light .action-icon{color:#666}
       <div class="ce-right">
         <div class="ce-rtabs">
           <button class="ce-rtab on">Texte</button>
-          <button class="ce-rtab" onclick="nxMSoon()">Animation</button>
-          <button class="ce-rtab" onclick="nxMSoon()">Suivi</button>
-          <button class="ce-rtab" onclick="nxMSoon()">Voix</button>
-        </div>
-        <div class="ce-subtabs">
-          <button class="ce-subtab on">Basique</button>
-          <button class="ce-subtab" onclick="nxMSoon()">Bulle</button>
-          <button class="ce-subtab" onclick="nxMSoon()">Effets</button>
         </div>
         <div class="ce-inspect">
           <textarea id="nx-m-caption" placeholder="Texte de la caption…  (écris, puis « Ajouter »)" class="nxm-ta"></textarea>
