@@ -4951,57 +4951,101 @@ body.light .action-icon{color:#666}
 </style>
 
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
-<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px">
-  <div onclick="event.stopPropagation()" style="background:#121212;border:1px solid #2f2f2f;border-radius:16px;max-width:580px;width:100%;max-height:90vh;overflow:auto;padding:20px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div style="font-size:17px;font-weight:800;color:#fff">🎬 Montage du reel</div>
-      <button onclick="nxMontageClose()" style="background:none;border:0;color:#888;font-size:24px;cursor:pointer;line-height:1">×</button>
+<style>
+.nxm-card{background:#0f1117;border:1px solid #232838;border-radius:18px;width:100%;max-width:980px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.7)}
+.nxm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 22px;border-bottom:1px solid #1d2230;flex-shrink:0}
+.nxm-badge{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#a855f7,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
+.nxm-h1{font-size:16px;font-weight:800;color:#fff}
+.nxm-sub{font-size:12px;color:#8a91a8}
+.nxm-x{background:#161a26;border:1px solid #262b3a;color:#8a91a8;width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;flex-shrink:0}
+.nxm-x:hover{color:#fff;border-color:#3a4256}
+.nxm-body{display:grid;grid-template-columns:300px 1fr;flex:1;min-height:0;overflow:hidden}
+.nxm-left{padding:18px;border-right:1px solid #1d2230;background:#0c0e15;overflow-y:auto}
+.nxm-right{padding:18px 22px;overflow-y:auto}
+.nxm-plabel{font-size:11px;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.nxm-vwrap{position:relative;width:100%;aspect-ratio:9/16;border-radius:12px;overflow:hidden;background:#000}
+.nxm-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:12px;background:#000;border:1px solid #232838}
+.nxm-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:12px}
+.nxm-sec{font-size:11px;font-weight:800;color:#8a91a8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:11px}
+.nxm-ta{width:100%;min-height:66px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:10px;padding:11px 13px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
+.nxm-ta:focus{border-color:#a855f7}
+.nxm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c9cede}
+.nxm-lbl{font-size:11px;font-weight:700;color:#8a91a8;text-transform:uppercase;letter-spacing:.04em}
+.nxm-inp{background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:8px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
+.nxm-num{width:66px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:8px;padding:7px 9px;font-size:13px;box-sizing:border-box}
+.nxm-tlbl{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.nxm-hint{font-size:11px;color:#6b7280;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
+.nxm-chip{background:#161a26;border:1px solid #262b3a;border-radius:7px;padding:5px 11px;font-size:11.5px;cursor:pointer}
+.nxm-chip:hover{border-color:#3a4256}
+.nxm-add{margin-top:15px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:0;color:#fff;border-radius:9px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer}
+.nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
+.nxm-foot{display:flex;gap:14px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #1d2230}
+.nxm-gen{padding:12px 30px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:11px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 6px 18px rgba(34,197,94,.25)}
+.nxm-prog{flex:1;font-size:12px;color:#8a91a8}
+@media(max-width:780px){.nxm-body{grid-template-columns:1fr;overflow-y:auto}.nxm-left{border-right:0;border-bottom:1px solid #1d2230}.nxm-vwrap{max-width:230px;margin:0 auto}}
+</style>
+<div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(2,4,10,.8);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px">
+  <div onclick="event.stopPropagation()" class="nxm-card">
+    <div class="nxm-head">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="nxm-badge">🎬</div>
+        <div><div class="nxm-h1">Montage du reel</div><div class="nxm-sub">Ajoute tes captions, choisis le timing, puis génère tes variations</div></div>
+      </div>
+      <button onclick="nxMontageClose()" class="nxm-x">✕</button>
     </div>
-    <div style="display:flex;gap:12px;align-items:flex-start;justify-content:center;margin-bottom:12px;flex-wrap:wrap">
-      <div style="text-align:center">
-        <div style="position:relative;width:182px;aspect-ratio:9/16">
-          <video id="nx-m-video" controls muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;background:#000"></video>
-          <div id="nx-m-overlay" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:10px"></div>
+    <div class="nxm-body">
+      <!-- Colonne gauche : aperçu vidéo -->
+      <div class="nxm-left">
+        <div class="nxm-plabel">Ton reel — aperçu live</div>
+        <div class="nxm-vwrap">
+          <video id="nx-m-video" controls muted playsinline class="nxm-video"></video>
+          <div id="nx-m-overlay" class="nxm-ovl"></div>
         </div>
-        <div style="font-size:10px;color:#a855f7;margin-top:3px;font-weight:700">Ton reel — aperçu live</div>
+        <div id="nx-m-example-wrap" style="display:none;margin-top:16px">
+          <div class="nxm-plabel" style="color:#fbbf24">📋 Exemple (à recopier)</div>
+          <div class="nxm-vwrap" style="max-width:170px">
+            <video id="nx-m-example" controls muted loop playsinline class="nxm-video" style="border-color:#fbbf24"></video>
+          </div>
+        </div>
       </div>
-      <div id="nx-m-example-wrap" style="display:none;text-align:center">
-        <video id="nx-m-example" controls muted loop playsinline style="width:124px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;background:#000;border:1px solid #fbbf24"></video>
-        <div style="font-size:10px;color:#fbbf24;margin-top:3px;line-height:1.2">📋 Exemple<br>(à recopier)</div>
+      <!-- Colonne droite : contrôles -->
+      <div class="nxm-right">
+        <div class="nxm-sec">1 · Caption</div>
+        <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" class="nxm-ta"></textarea>
+        <div class="nxm-row">
+          <span class="nxm-lbl">Police</span>
+          <select id="nx-m-font" onchange="try{nxMUpdatePreview()}catch(e){}" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+        </div>
+        <div class="nxm-row">
+          <span class="nxm-lbl">⏱ Quand</span>
+          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> 📍 au curseur (2s)</label>
+          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> toute la vidéo</label>
+          <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
+          <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled class="nxm-num">
+          <span>à</span>
+          <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled class="nxm-num"><span>s</span>
+        </div>
+        <div class="nxm-hint">
+          <span>▶ joue la vidéo et mets pause au bon moment, puis :</span>
+          <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#c084fc">📍 début ici</button>
+          <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">📍 fin ici (cut)</button>
+          <span id="nx-m-timeinfo" style="color:#6b7280"></span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">➕ Ajouter cette caption</button>
+          <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24"></span>
+        </div>
+        <div id="nx-m-frise" style="margin-top:16px"></div>
+        <div id="nx-m-caplist" style="margin-top:8px"></div>
+        <div class="nxm-sec" style="margin-top:20px">2 · Variations à générer</div>
+        <div id="nx-m-vfolders" class="nxm-vf"></div>
+        <div class="nxm-foot">
+          <button id="nx-m-gen" onclick="nxMontageGen()" class="nxm-gen">🎬 Générer</button>
+          <div id="nx-m-prog" class="nxm-prog"></div>
+        </div>
+        <div id="nx-m-results" style="margin-top:16px"></div>
       </div>
     </div>
-    <div style="font-size:12px;color:#a855f7;font-weight:700;margin-bottom:6px">Captions — tu peux en mettre plusieurs à des moments différents :</div>
-    <textarea id="nx-m-caption" placeholder="Texte de cette caption…  (écris, choisis le timing, puis ➕ Ajouter)" style="width:100%;min-height:54px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:8px;padding:10px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;font-size:12px;color:#aaa">
-      <span>Police :</span>
-      <select id="nx-m-font" onchange="try{nxMUpdatePreview()}catch(e){}" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:7px;padding:6px 10px;font-family:inherit"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
-      <span style="margin-left:6px">⏱</span>
-      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#a855f7"> 📍 au curseur (2s)</label>
-      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> tout</label>
-      <label style="cursor:pointer"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#a855f7"> de</label>
-      <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled style="width:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px">
-      <span>à</span>
-      <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled style="width:62px;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;border-radius:6px;padding:4px"><span>s</span>
-    </div>
-    <div style="font-size:11px;color:#888;margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span>▶ joue la vidéo et mets pause au bon moment, puis :</span>
-      <button type="button" onclick="nxMSetTime('start')" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#a855f7;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer">📍 début ici</button>
-      <button type="button" onclick="nxMSetTime('end')" style="background:#1a1a1a;border:1px solid #3a3a3a;color:#fbbf24;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer">📍 fin ici (cut)</button>
-      <span id="nx-m-timeinfo" style="color:#666"></span>
-    </div>
-    <div style="margin-top:10px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
-      <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" style="background:#a855f7;border:0;color:#fff;border-radius:8px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer">➕ Ajouter cette caption</button>
-      <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24"></span>
-    </div>
-    <div id="nx-m-frise" style="margin-top:12px"></div>
-    <div id="nx-m-caplist" style="margin-top:8px"></div>
-    <div style="font-size:12px;color:#888;margin:14px 0 6px">Variations à générer :</div>
-    <div id="nx-m-vfolders" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-    <div style="display:flex;gap:12px;align-items:center;margin-top:14px;clear:both">
-      <button id="nx-m-gen" onclick="nxMontageGen()" style="padding:11px 24px;background:linear-gradient(135deg,#22c55e,#16a34a);border:0;color:#fff;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px">🎬 Générer</button>
-      <div id="nx-m-prog" style="flex:1;font-size:12px;color:#888"></div>
-    </div>
-    <div id="nx-m-results" style="margin-top:14px"></div>
   </div>
 </div>
 
