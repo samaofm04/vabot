@@ -5091,10 +5091,8 @@ body.light .action-icon{color:#666}
         <div class="ce-libcontent">
           <div class="nxm-plabel">Ajouter du texte</div>
           <div class="ce-card" onclick="try{document.getElementById('nx-m-caption').focus()}catch(e){}">Texte par défaut</div>
-          <div id="nx-m-example-wrap" style="display:none;margin-top:16px">
-            <div class="nxm-plabel" style="color:#fbbf24">📋 Exemple à recopier</div>
-            <video id="nx-m-example" controls muted loop playsinline style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000;border:1px solid #fbbf24"></video>
-          </div>
+          <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Écris ta caption à droite → règle le style → « Ajouter » → place-la sur la timeline → <b style="color:#00d9c0">Exporter</b>.</div>
         </div>
       </div>
       <!-- CENTRE : lecteur -->
@@ -5104,6 +5102,11 @@ body.light .action-icon{color:#666}
           <div class="ce-vwrap">
             <video id="nx-m-video" controls muted playsinline class="ce-video"></video>
             <div id="nx-m-overlay" class="ce-ovl"></div>
+            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#00d9c0;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">TON REEL</span>
+          </div>
+          <div id="nx-m-example-wrap" class="ce-vwrap" style="display:none;border:1px solid #fbbf24">
+            <video id="nx-m-example" controls muted loop playsinline class="ce-video"></video>
+            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fbbf24;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">📋 EXEMPLE</span>
           </div>
         </div>
         <div class="ce-ctrl">
