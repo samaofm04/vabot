@@ -690,68 +690,80 @@ def send_video_from_url(video_url: str, caption: str = "",
     if not video_bytes:
         return _fallback(f"Telechargement impossible : {last_err or yt_reason or '?'}")
 
-    # 2) Upload via sendVideo (multipart, fichier en memoire)
+    # 2+3) POST sous le verrou d'ORDRE global : vidéo PUIS description partent
+    # d'un bloc -> deux reels envoyés en parallèle n'entrelacent jamais leurs
+    # messages dans le canal Veille. Le DOWNLOAD (au-dessus) reste HORS du verrou
+    # -> plusieurs reels peuvent télécharger en même temps, seul le post est
+    # sérialisé. Import lazy pour éviter tout cycle d'import.
     try:
-        r = _tg_post(
-            f"{TG_API_BASE}/bot{token}/sendVideo",
-            data={
-                "chat_id": chat_id,
-                "caption": (caption or "")[:1024],
-                "supports_streaming": "true",
-            },
-            files={"video": ("reel.mp4", video_bytes, "video/mp4")},
-            timeout=60,  # 60s suffit pour un upload de <50MB
-        )
-    except Exception as e:
-        return _fallback(f"Erreur reseau Telegram : {e}")
+        import tg_router as _tgr
+        _order_lock = _tgr._POST_LOCK
+    except Exception:
+        import contextlib
+        _order_lock = contextlib.nullcontext()
+    with _order_lock:
+        # 2) Upload via sendVideo (multipart, fichier en memoire)
+        try:
+            r = _tg_post(
+                f"{TG_API_BASE}/bot{token}/sendVideo",
+                data={
+                    "chat_id": chat_id,
+                    "caption": (caption or "")[:1024],
+                    "supports_streaming": "true",
+                },
+                files={"video": ("reel.mp4", video_bytes, "video/mp4")},
+                timeout=60,  # 60s suffit pour un upload de <50MB
+            )
+        except Exception as e:
+            return _fallback(f"Erreur reseau Telegram : {e}")
 
-    if r.status_code != 200:
+        if r.status_code != 200:
+            try:
+                j = r.json()
+                return _fallback(f"HTTP {r.status_code}: {j.get('description', '?')}")
+            except Exception:
+                return _fallback(f"HTTP {r.status_code}")
+
+        _new_fid = ""
         try:
             j = r.json()
-            return _fallback(f"HTTP {r.status_code}: {j.get('description', '?')}")
-        except Exception:
-            return _fallback(f"HTTP {r.status_code}")
+            if not j.get("ok"):
+                return _fallback(j.get("description", "Reponse Telegram non ok"))
+            _res = j.get("result", {})
+            msg_id = _res.get("message_id")
+            # file_id de la video uploadee -> permet un renvoi INSTANTANE plus tard
+            _new_fid = ((_res.get("video") or {}).get("file_id")
+                        or (_res.get("document") or {}).get("file_id") or "")
+            # stocké dans le cache CENTRAL : toutes les routes en profitent
+            if _new_fid and _sc:
+                fileid_put(_sc, _new_fid)
+        except Exception as e:
+            return _fallback(f"Reponse invalide : {e}")
 
-    _new_fid = ""
-    try:
-        j = r.json()
-        if not j.get("ok"):
-            return _fallback(j.get("description", "Reponse Telegram non ok"))
-        _res = j.get("result", {})
-        msg_id = _res.get("message_id")
-        # file_id de la video uploadee -> permet un renvoi INSTANTANE plus tard
-        _new_fid = ((_res.get("video") or {}).get("file_id")
-                    or (_res.get("document") or {}).get("file_id") or "")
-        # stocké dans le cache CENTRAL : toutes les routes en profitent
-        if _new_fid and _sc:
-            fileid_put(_sc, _new_fid)
-    except Exception as e:
-        return _fallback(f"Reponse invalide : {e}")
-
-    # 3) Followup texte (la description IG) en message separe
-    if followup_text and followup_text.strip():
-        try:
-            requests.post(
-                f"{TG_API_BASE}/bot{token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": followup_text.strip()[:4000],  # Telegram cap 4096
-                    "disable_web_page_preview": True,  # Pas d apercu, c est juste du texte
-                    "reply_to_message_id": msg_id,  # Threade sous la video
-                },
-                timeout=15,
-            )
-        except Exception:
-            pass  # Followup pas critique, on log pas
-    return {
-        "ok": True,
-        "mode": "video",
-        "message_id": msg_id,
-        "tg_file_id": _new_fid,
-        "chat_id": chat_id,   # canal Veille -> permet le forward vers les models
-        "has_desc": bool(followup_text and followup_text.strip()),
-        "description": (followup_text or ""),
-    }
+        # 3) Followup texte (la description IG) en message separe
+        if followup_text and followup_text.strip():
+            try:
+                requests.post(
+                    f"{TG_API_BASE}/bot{token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": followup_text.strip()[:4000],  # Telegram cap 4096
+                        "disable_web_page_preview": True,  # Pas d apercu, c est juste du texte
+                        "reply_to_message_id": msg_id,  # Threade sous la video
+                    },
+                    timeout=15,
+                )
+            except Exception:
+                pass  # Followup pas critique, on log pas
+        return {
+            "ok": True,
+            "mode": "video",
+            "message_id": msg_id,
+            "tg_file_id": _new_fid,
+            "chat_id": chat_id,   # canal Veille -> permet le forward vers les models
+            "has_desc": bool(followup_text and followup_text.strip()),
+            "description": (followup_text or ""),
+        }
 
 
 def test_connection() -> Dict[str, Any]:

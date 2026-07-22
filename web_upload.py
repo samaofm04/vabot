@@ -32279,6 +32279,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False, "error": str(e)})
 
     _vsend_inflight: dict = {}   # rid -> timestamp : verrou anti double-envoi
+    _vsend_lock = threading.Lock()   # protège la purge/check/set du dict (multi-thread)
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():
@@ -32301,13 +32302,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # après un timeout réseau -> UN seul envoi passe, pas de double post.
         import time as _t
         _now = _t.time()
-        for _k in [k for k, ts in _vsend_inflight.items() if _now - ts > 240]:
-            _vsend_inflight.pop(_k, None)
-        if rid in _vsend_inflight:
-            return jsonify({"ok": False, "error": "Envoi déjà en cours pour ce reel — attends qu'il se termine"})
-        # set IMMÉDIAT après le check (aucun yield entre les deux -> atomique sous
-        # le GIL) : deux threads concurrents ne peuvent pas passer tous les deux.
-        _vsend_inflight[rid] = _now
+        # purge + check + set sous un même lock : l'itération de la compréhension
+        # ne peut plus lever RuntimeError (dict muté par un pop concurrent), et
+        # deux threads ne peuvent pas passer le check tous les deux.
+        with _vsend_lock:
+            for _k in [k for k, ts in list(_vsend_inflight.items()) if _now - ts > 240]:
+                _vsend_inflight.pop(_k, None)
+            if rid in _vsend_inflight:
+                return jsonify({"ok": False, "error": "Envoi déjà en cours pour ce reel — attends qu'il se termine"})
+            _vsend_inflight[rid] = _now
         # try/finally : le verrou est TOUJOURS relâché (même exception) -> jamais
         # de reel bloqué 240 s ; et on renvoie du JSON même en cas d'erreur (plus
         # de page 500 HTML -> plus de « SyntaxError » côté client).
@@ -32437,7 +32440,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         finally:
-            _vsend_inflight.pop(rid, None)
+            with _vsend_lock:
+                _vsend_inflight.pop(rid, None)
 
     @app.route("/veille/models", methods=["GET"])
     def veille_models():
@@ -32533,7 +32537,10 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
         by_day = veille.reels_by_day()
         reels = by_day.get(day, [])
-        sent, failed = 0, 0
+        # sent/failed = partition des REELS (posté / non posté) ; fwd_failed =
+        # forwards modèles ratés (ne doit pas polluer failed, sinon sent+failed
+        # dépasse le nb de reels).
+        sent, failed, fwd_failed = 0, 0, 0
         for r in reels:
             if r.get("sent_to_telegram"):
                 continue
@@ -32605,9 +32612,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                                     src_chat_id=res.get("chat_id"),
                                     src_msg_id=res.get("message_id"))
                                 if not r2.get("ok"):
-                                    failed += 1
+                                    fwd_failed += 1
                             except Exception:
-                                failed += 1
+                                fwd_failed += 1
                     except Exception:
                         pass
                 try:
@@ -32617,7 +32624,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 sent += 1
             else:
                 failed += 1
-        return jsonify({"ok": True, "sent": sent, "failed": failed})
+        return jsonify({"ok": True, "sent": sent, "failed": failed, "forward_failed": fwd_failed})
 
     @app.route("/settings/veille_telegram", methods=["POST"])
     def settings_veille_telegram():

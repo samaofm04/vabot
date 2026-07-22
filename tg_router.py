@@ -38,6 +38,12 @@ CACHE_FILE = DATA_DIR / "tg_router_cache.json"
 TG = "https://api.telegram.org"
 _LOCK = threading.Lock()
 _CACHE_LOCK = threading.Lock()   # protège l'écriture du cache (routages concurrents)
+# Verrou d'ORDRE global : sérialise le POST des messages d'une veille (vidéo +
+# texte incrusté + description) vers Telegram — canal Veille ET sujets modèles.
+# Deux reels envoyés en même temps (2 requêtes /veille/send concurrentes sur des
+# rids différents) ne peuvent plus entrelacer leurs 3 messages -> l'ordre à
+# l'écran ne bouge JAMAIS. RLock : réentrant si un même thread l'imbrique.
+_POST_LOCK = threading.RLock()
 _THREAD = None
 _STOP = threading.Event()
 STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
@@ -957,6 +963,16 @@ def send_veille_to_model(model: str, tg_file_id: str, link: str = "", desc: str 
     bm = bound_models().get((model or "").lower())
     if not bm:
         return {"ok": False, "error": f"« {model} » non branchée (/setmodel dans son groupe)"}
+    # ORDRE : tout le POST (vidéo + texte incrusté + description) sous le verrou
+    # global -> les 3 messages d'un reel sortent d'un bloc, jamais entrelacés avec
+    # ceux d'un autre reel envoyé en parallèle. On garde le lock jusqu'au return.
+    with _POST_LOCK:
+      return _send_veille_to_model_locked(model, tg_file_id, link, desc, overlay,
+                                          src_chat_id, src_msg_id, bm)
+
+
+def _send_veille_to_model_locked(model, tg_file_id, link, desc, overlay,
+                                 src_chat_id, src_msg_id, bm) -> dict:
     cfg = _load()
     vid_msg = None
     if src_chat_id and src_msg_id:

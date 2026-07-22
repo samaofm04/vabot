@@ -201,9 +201,23 @@
   function loadInfo() {
     var g = S.gen;
     beginBusy();
-    fetch('/veille/reelinfo?reel_id=' + encodeURIComponent(S.rid))
+    // borné (comme analyze/send) : sans timeout, un /veille/reelinfo qui ne
+    // répond jamais laissait busyN coincé -> Envoyer/Marquer prêt grisés à vie.
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var settled = false;
+    function done() { if (settled) return true; settled = true; clearTimeout(to); return false; }
+    var to = setTimeout(function () {
+      if (done()) return;
+      if (ctrl) ctrl.abort();
+      endBusy(g);                              // libère Envoyer / Marquer prêt
+      if (g !== S.gen) return;
+      playerMsg('🚫 Lecteur indisponible — lance 🔍 Analyser pour récupérer la vidéo.');
+      if (!S.inflight && !S.analyzed) analyze('', false, null, true);
+    }, 30000);
+    fetch('/veille/reelinfo?reel_id=' + encodeURIComponent(S.rid), { signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json(); })
       .then(function (j) {
+        if (done()) return;
         if (g !== S.gen) return;              // modal fermé/changé de reel entre-temps
         endBusy(g);
         if (!j.ok) { if (!S.inflight && !S.analyzed) analyze('', false, null, true); return; }
@@ -229,7 +243,11 @@
           // n'a déjà été lancée depuis l'ouverture (en vol OU déjà terminée)
           if (!S.inflight && !S.analyzed) analyze('', false, null, true);
         }
-      }).catch(function () { if (g !== S.gen) return; endBusy(g); if (!S.inflight && !S.analyzed) analyze('', false, null, true); });
+      }).catch(function () {
+        if (done()) return;
+        if (g !== S.gen) return; endBusy(g);
+        if (!S.inflight && !S.analyzed) analyze('', false, null, true);
+      });
   }
 
   /* ── Marquer « prêt » : enregistre le brouillon SANS envoyer ── */
@@ -268,8 +286,12 @@
     fd.set('overlay', (el('vprep-cap').value || '').trim());
     fd.set('caption', (el('vprep-desc').value || '').trim());
     fd.set('to_models', Object.keys(S.selected).join(','));
-    fetch('/veille/prepare_save', { method: 'POST', body: fd }).then(function (r) { return r.json(); })
+    // borné : sans timeout, un /veille/prepare_save qui hang laissait busyN coincé
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var to = ctrl ? setTimeout(function () { ctrl.abort(); }, 30000) : 0;
+    fetch('/veille/prepare_save', { method: 'POST', body: fd, signal: ctrl ? ctrl.signal : undefined }).then(function (r) { return r.json(); })
       .then(function (j) {
+        clearTimeout(to);
         endBusy(g); if (g === S.gen && el('vprep-ready')) el('vprep-ready').innerHTML = orig;
         if (!j.ok) { toast('Erreur : ' + (j.error || '?'), 'error'); return; }
         toast('✓ Marqué prêt — brouillon enregistré');
@@ -278,7 +300,12 @@
         // compteurs « prêts » du header re-rendus depuis l'état serveur
         if (typeof window.refreshVeilleSection === 'function') window.refreshVeilleSection();
       })
-      .catch(function (e) { endBusy(g); if (g === S.gen && el('vprep-ready')) el('vprep-ready').innerHTML = orig; toast('Erreur : ' + e, 'error'); });
+      .catch(function (e) {
+        clearTimeout(to);
+        endBusy(g); if (g === S.gen && el('vprep-ready')) el('vprep-ready').innerHTML = orig;
+        var msg = (e && e.name === 'AbortError') ? '⚠️ trop long — réessaie' : ('Erreur : ' + e);
+        toast(msg, 'error');
+      });
   }
 
   /* ── Analyse OCR ── */
@@ -498,15 +525,29 @@
           if (g === S.gen) close();
           // tuiles Envoyés / A envoyer + compteurs par jour : re-render AJAX
           if (typeof window.refreshVeilleSection === 'function') window.refreshVeilleSection();
-        } else {
-          // vidéo postée dans la Veille mais 0 modèle servi : PAS de faux « ✓ ENVOYÉ ».
-          // Retry proposé UNIQUEMENT si une vidéo Telegram existe (mode video) —
-          // en mode lien il n'y a rien à re-forwarder, le re-clic re-posterait.
-          if (j.mode === 'video' && j.tg_file_id) {
-            var cardR = document.querySelector('.veille-card[data-rid="' + rid + '"]');
-            if (cardR) cardR.dataset.retryModels = '1';   // survit à la fermeture du modal
-            if (b2) { b2.dataset.retry = '1'; b2.innerHTML = '🔁 Réessayer les modèles'; }
+        } else if (j.mode === 'video' && j.tg_file_id) {
+          // vidéo bien postée dans la Veille mais 0 modèle servi. La vidéo EST
+          // dans le canal (serveur : mark_sent déjà fait) -> on marque la carte
+          // ENVOYÉE pour qu'une re-sélection groupée ne re-poste PAS la vidéo,
+          // MAIS on garde le retry (forward_only) pour re-servir les modèles.
+          var cardR = document.querySelector('.veille-card[data-rid="' + rid + '"]');
+          if (cardR) {
+            cardR.dataset.retryModels = '1';   // survit à la fermeture du modal
+            var cbR = cardR.querySelector('.veille-cb'); if (cbR) cbR.checked = false;
+            cardR.classList.remove('is-picked');
+            if (cardR.getAttribute('data-sent') !== '1') {
+              if (typeof window.veilleReadyVisual === 'function') window.veilleReadyVisual(cardR, false);
+              var lblR = cardR.querySelector('.vl-rdy'); if (lblR) lblR.style.display = 'none';
+              var medR = cardR.querySelector('.reel-media');
+              if (medR && !medR.querySelector('.vl-ready-badge')) {
+                var bd = document.createElement('div'); bd.className = 'vl-ready-badge';
+                bd.style.cssText = 'position:absolute;top:11px;left:46px;background:#f59e0b;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6';
+                bd.textContent = '⚠ MODELS KO'; medR.appendChild(bd);
+              }
+              cardR.setAttribute('data-sent', '1');
+            }
           }
+          if (b2) { b2.dataset.retry = '1'; b2.innerHTML = '🔁 Réessayer les modèles'; }
         }
       })
       .catch(function (e) {
