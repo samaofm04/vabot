@@ -3824,6 +3824,10 @@ document.addEventListener('click',function(e){
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
   🎞️ Création de vidéos
 </button>
+<button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','Rendre chaque vidéo unique — iPhone + GPS + filtres (façon TikFusion)')">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z" fill="currentColor"/></svg>
+  🎬 Métadonnées vidéo
+</button>
 
 <div class="section-label">Management</div>
 
@@ -4820,6 +4824,15 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🧠 Clé IA (Anthropic)</h3>
 <small>Sert à : lire le texte incrusté sur les vidéos de veille (Telegram) + générer les bios IA. Une seule clé pour les deux.</small>
 <div style="margin-top:14px">{aikey_html}</div>
+</div>
+</div>
+
+<!-- SETTINGS - UNIQUIFICATION VIDÉO (ton TikFusion) -->
+<div class="form-section" id="form-svideo" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🎬 Uniquification vidéo</h3>
+<small>Ton « TikFusion » intégré : rend chaque copie d'une vidéo unique (métadonnées iPhone + GPS + filtres image/audio) pour que Meta ne détecte pas de doublon. S'applique quand une VA fait <b>/reel</b> sur Discord.</small>
+<div style="margin-top:14px">{video_manager_html}</div>
 </div>
 </div>
 
@@ -26201,6 +26214,195 @@ def _render_apify_settings() -> str:
     )
 
 
+# ===== Gestionnaire vidéo (uniquification style TikFusion) =====
+# Options « plage » (case + Min/Max). L'ORDRE = celui affiché dans la grille.
+_VT_RANGE_OPTS = [
+    ("framerate",          "Framerate (img/s)"),
+    ("video_bitrate_kbps", "Bitrate vidéo (kbps)"),
+    ("audio_bitrate_kbps", "Bitrate audio (kbps)"),
+    ("saturation",         "Saturation"),
+    ("contrast",           "Contraste"),
+    ("brightness",         "Luminosité"),
+    ("gamma",              "Gamma"),
+    ("vignette_angle",     "Vignette"),
+    ("speed",              "Vitesse"),
+    ("zoom",               "Zoom"),
+    ("noise_strength",     "Grain (noise)"),
+    ("rotation_degrees",   "Rotation (°)"),
+    ("cut_start_seconds",  "Couper début (s)"),
+    ("cut_end_seconds",    "Couper fin (s)"),
+    ("volume",             "Volume audio"),
+    ("waveform_shift",     "Décalage audio (ms)"),
+    ("pixel_shift",        "Pixel shift (px)"),
+    ("lens_correction",    "Correction objectif"),
+]
+# Options « interrupteur seul » (case, pas de Min/Max)
+_VT_BOOL_OPTS = [
+    ("random_us_metadata",     "📍 Métadonnées iPhone + GPS",
+     "Faux iPhone + ville française + coordonnées GPS réelles + date récente"),
+    ("random_9_16_dimensions", "Résolution 9:16 aléatoire",
+     "Choisit une résolution parmi des formats de téléphone courants"),
+    ("hflip",                  "Miroir horizontal",
+     "Retourne la vidéo — ⚠️ inverse aussi le texte à l'écran"),
+]
+
+
+def _vt_card_range(cfg, key, label):
+    o = cfg.get(key) or {}
+    on = bool(o.get("enabled"))
+    mn = o.get("min", "")
+    mx = o.get("max", "")
+    cls = "vt-card on" if on else "vt-card"
+    chk = "checked" if on else ""
+    return (
+        "<div class='" + cls + "'>"
+        "<label class='vt-h'><input type='checkbox' name='" + key + "__en' " + chk +
+        " onchange='vtCard(this)'> " + label + "</label>"
+        "<div class='vt-mm'><span>Min</span><input name='" + key + "__min' value='" + str(mn) + "'>"
+        "<span>Max</span><input name='" + key + "__max' value='" + str(mx) + "'></div>"
+        "</div>"
+    )
+
+
+def _vt_card_bool(cfg, key, label, desc):
+    o = cfg.get(key) or {}
+    on = bool(o.get("enabled"))
+    cls = "vt-card on" if on else "vt-card"
+    chk = "checked" if on else ""
+    return (
+        "<div class='" + cls + "'>"
+        "<label class='vt-h'><input type='checkbox' name='" + key + "__en' " + chk +
+        " onchange='vtCard(this)'> " + label + "</label>"
+        "<div class='vt-desc'>" + desc + "</div>"
+        "</div>"
+    )
+
+
+def _vt_card_dims(cfg):
+    o = cfg.get("dimensions") or {}
+    on = bool(o.get("enabled"))
+    w = o.get("width", 1080)
+    h = o.get("height", 1920)
+    cls = "vt-card on" if on else "vt-card"
+    chk = "checked" if on else ""
+    return (
+        "<div class='" + cls + "'>"
+        "<label class='vt-h'><input type='checkbox' name='dimensions__en' " + chk +
+        " onchange='vtCard(this)'> Dimensions fixes</label>"
+        "<div class='vt-mm'><span>L</span><input name='dimensions__width' value='" + str(w) + "'>"
+        "<span>H</span><input name='dimensions__height' value='" + str(h) + "'></div>"
+        "</div>"
+    )
+
+
+_VT_HEAD = """
+<style>
+.vt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:10px;margin:14px 0}
+.vt-card{background:#12151f;border:1px solid #262b3a;border-radius:10px;padding:11px 13px;transition:border-color .15s,background .15s}
+.vt-card.on{border-color:rgba(59,130,246,.6);background:rgba(59,130,246,.07)}
+.vt-h{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#e8eaf2;cursor:pointer;user-select:none}
+.vt-h input{width:16px;height:16px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
+.vt-mm{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:11px;color:#8a91a8}
+.vt-mm input{width:100%;min-width:0;padding:5px 7px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:6px;font-size:12px;box-sizing:border-box}
+.vt-desc{margin-top:7px;font-size:10.5px;color:#6b7280;line-height:1.45}
+</style>
+<script>
+function vtCard(cb){var c=cb.closest('.vt-card'); if(c) c.classList.toggle('on', cb.checked);}
+function vtPaint(btn,on){
+  btn.textContent = on ? '🟢 ACTIVÉ — clique pour couper' : '⚪ DÉSACTIVÉ — clique pour activer';
+  btn.style.background = on ? 'linear-gradient(135deg,#16a34a,#15803d)' : '#26263a';
+}
+function vtToggle(btn){
+  btn.disabled=true;
+  fetch('/settings/video_transform_toggle',{method:'POST',credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;
+      if(!d||!d.ok){ if(typeof showToast==='function') showToast('Erreur','error'); return; }
+      vtPaint(btn,d.enabled);
+      if(typeof showToast==='function') showToast(d.enabled?'✅ Uniquification ACTIVÉE':'⛔ Uniquification désactivée', d.enabled?'success':'info');
+    })
+    .catch(function(){ btn.disabled=false; if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+}
+</script>
+"""
+
+
+def _render_video_manager() -> str:
+    """Gestionnaire d'uniquification vidéo (l'équivalent de TikFusion, intégré au
+    site) : un interrupteur ON/OFF instantané + toutes les options en cases avec
+    Min/Max. Écrit dans data/transform_config.json (lu par /reel)."""
+    try:
+        import video_transform as vt
+        cfg = vt.load_config()
+        ff_ok = vt.is_ffmpeg_available()
+    except Exception as e:
+        return "<div style='color:#f99;padding:14px'>Module vidéo indisponible : " + str(e) + "</div>"
+
+    enabled = bool(cfg.get("enabled"))
+    meta_only = bool(cfg.get("metadata_only", True))
+    del_src = bool(cfg.get("delete_source_after_use"))
+
+    ff_line = (
+        "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;"
+        "background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);color:#34d399'>✅ ffmpeg présent</div>"
+        if ff_ok else
+        "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;"
+        "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
+        "❌ ffmpeg absent sur le VPS — les transformations ne s'appliqueront pas tant qu'il n'est pas installé.</div>"
+    )
+
+    btn_txt = "🟢 ACTIVÉ — clique pour couper" if enabled else "⚪ DÉSACTIVÉ — clique pour activer"
+    btn_bg = "linear-gradient(135deg,#16a34a,#15803d)" if enabled else "#26263a"
+    toggle_btn = (
+        "<button type='button' onclick='vtToggle(this)' style='width:100%;padding:15px;font-size:15px;"
+        "font-weight:800;border:0;border-radius:12px;color:#fff;cursor:pointer;background:" + btn_bg + "'>"
+        + btn_txt + "</button>"
+        "<div style='font-size:11px;color:#6b7280;margin:7px 0 18px;text-align:center'>"
+        "Interrupteur instantané — s'applique au prochain /reel. Les réglages ci-dessous se règlent séparément (bouton Enregistrer).</div>"
+    )
+
+    # Mode metadata-only vs complet
+    meta_chk = "checked" if meta_only else ""
+    full_chk = "" if meta_only else "checked"
+    mode_html = (
+        "<div style='font-size:11px;color:#8a91a8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Mode</div>"
+        "<div style='display:flex;flex-direction:column;gap:8px;margin-bottom:8px'>"
+        "<label style='display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#e8eaf2;cursor:pointer'>"
+        "<input type='radio' name='mode' value='meta' " + meta_chk + " style='margin-top:2px;accent-color:#3b82f6'>"
+        "<span><b>Métadonnées seules</b> — rapide, aucune perte de qualité. Change juste l'identité du fichier "
+        "(iPhone + GPS + date). <b>Les options image/audio ci-dessous sont ignorées.</b></span></label>"
+        "<label style='display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#e8eaf2;cursor:pointer'>"
+        "<input type='radio' name='mode' value='full' " + full_chk + " style='margin-top:2px;accent-color:#3b82f6'>"
+        "<span><b>Transformation complète</b> — ré-encode et applique TOUTES les options cochées (comme TikFusion). "
+        "Plus lent.</span></label>"
+        "</div>"
+    )
+
+    del_chk = "checked" if del_src else ""
+    del_html = (
+        "<label style='display:flex;gap:9px;align-items:center;font-size:12.5px;color:#c9cede;cursor:pointer;margin-bottom:6px'>"
+        "<input type='checkbox' name='delete_source' " + del_chk + " style='accent-color:#3b82f6'>"
+        "Supprimer la vidéo source après le /reel</label>"
+    )
+
+    cards = "".join(_vt_card_range(cfg, k, lbl) for k, lbl in _VT_RANGE_OPTS)
+    cards += _vt_card_dims(cfg)
+    cards += "".join(_vt_card_bool(cfg, k, lbl, d) for k, lbl, d in _VT_BOOL_OPTS)
+
+    form = (
+        "<form method='POST' action='/settings/video_transform'>"
+        + mode_html + del_html
+        + "<div class='vt-grid'>" + cards + "</div>"
+        + "<button type='submit' style='width:100%;padding:13px;font-size:14px;font-weight:800;border:0;"
+          "border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;cursor:pointer'>"
+          "💾 Enregistrer les réglages</button>"
+        "</form>"
+    )
+
+    return _VT_HEAD + ff_line + toggle_btn + form
+
+
 def _render_mypuls_cookies_settings() -> str:
     """Section Settings : cookies MyPuls (statut + formulaire + effacer).
 
@@ -27422,6 +27624,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
         .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
+        .replace("{video_manager_html}", _g("svideo", _render_video_manager))
         .replace("{role_settings_html}", _lazy("srole"))
         .replace("{role_dropdown_options}", _render_role_dropdown_options())
         .replace("{employees_table_html}", _lazy("semp"))
@@ -34699,6 +34902,69 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify(apify_reels.test_token())
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/settings/video_transform_toggle", methods=["POST"])
+    def settings_video_transform_toggle():
+        """Interrupteur INSTANTANÉ on/off de l'uniquification vidéo (AJAX)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import video_transform as vt
+            cfg = vt.load_config()
+            cfg["enabled"] = not bool(cfg.get("enabled"))
+            vt.save_config(cfg)
+            return jsonify({"ok": True, "enabled": cfg["enabled"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/settings/video_transform", methods=["POST"])
+    def settings_video_transform_save():
+        """Enregistre TOUTES les options du gestionnaire vidéo (mode + cases +
+        Min/Max). Le master on/off reste géré par l'interrupteur instantané."""
+        if not is_auth():
+            return redirect("/")
+        try:
+            import video_transform as vt
+            cfg = vt.load_config()
+        except Exception as e:
+            return _error(f"❌ Module vidéo indispo : {e}", tab="svideo")
+        f = request.form
+        cfg["metadata_only"] = (f.get("mode") != "full")
+        cfg["delete_source_after_use"] = bool(f.get("delete_source"))
+        # options « plage » (case + Min/Max)
+        for key, _lbl in _VT_RANGE_OPTS:
+            o = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
+            o["enabled"] = bool(f.get(key + "__en"))
+            for b in ("min", "max"):
+                v = (f.get(key + "__" + b) or "").strip().replace(",", ".")
+                if v != "":
+                    try:
+                        o[b] = float(v)
+                    except Exception:
+                        pass
+            cfg[key] = o
+        # options « interrupteur seul »
+        for key, _lbl, _d in _VT_BOOL_OPTS:
+            o = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
+            o["enabled"] = bool(f.get(key + "__en"))
+            cfg[key] = o
+        # dimensions fixes
+        d = cfg.get("dimensions") if isinstance(cfg.get("dimensions"), dict) else {}
+        d["enabled"] = bool(f.get("dimensions__en"))
+        for b in ("width", "height"):
+            v = (f.get("dimensions__" + b) or "").strip()
+            if v != "":
+                try:
+                    d[b] = int(float(v))
+                except Exception:
+                    pass
+        cfg["dimensions"] = d
+        try:
+            vt.save_config(cfg)
+        except Exception as e:
+            return _error(f"❌ Erreur sauvegarde : {e}", tab="svideo")
+        return _success("✅ Réglages vidéo enregistrés.", tab="svideo")
 
     @app.route("/settings/gemini_key", methods=["POST"])
     def settings_gemini_key():
