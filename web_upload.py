@@ -3302,7 +3302,7 @@ async function nxMontageResults(){
     if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); });
     // remonte les résultats devant les yeux + lance le téléchargement auto
     try{ wrap.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-    // Pas de téléchargement AUTO : l'utilisateur clique « Tout télécharger » quand il veut.
+    nxMDownloadAll(dls);   // télécharge direct sur le PC dès que le rendu est prêt
   }catch(e){ wrap.textContent='Erreur chargement résultats'; }
 }
 // Télécharge chaque vidéo générée (délai entre chaque -> pas bloqué par le navigateur)
