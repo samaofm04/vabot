@@ -3135,9 +3135,9 @@ function nxMRenderCaps(){
   if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
   var W=wrap.clientWidth||480, pps=W/dur;
   nxMState.dur=dur; nxMState.pps=pps;
-  var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=26, gap=5, rulerH=22;
-  var vidTrackH=46;   // piste vidéo (miniatures) façon CapCut
-  var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+4;
+  var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=38, gap=9, rulerH=28;
+  var vidTrackH=70;   // piste vidéo (miniatures) façon CapCut — bien haute pour cliquer facile
+  var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+6;
   var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
   var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
@@ -5065,7 +5065,7 @@ body.light .action-icon{color:#666}
 .ce-subtab.on{background:#131316;color:#e6e6ea;font-weight:700}
 .ce-inspect{flex:1;overflow-y:auto;padding:14px}
 /* Timeline bas */
-.ce-tl{background:#161618;border-top:1px solid #2a2a30;padding:8px 12px 12px;max-height:34vh;overflow-y:auto}
+.ce-tl{background:#161618;border-top:1px solid #2a2a30;padding:10px 14px 14px;max-height:42vh;overflow-y:auto}
 .ce-tlbar{display:flex;align-items:center;gap:5px;margin-bottom:9px}
 .ce-tlic{background:#2a2a30;border:1px solid #35353c;color:#9a9aa6;border-radius:6px;width:30px;height:28px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}
 .ce-tlic:hover{background:#35353c;color:#e6e6ea}
