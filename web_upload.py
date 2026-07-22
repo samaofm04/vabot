@@ -3179,9 +3179,14 @@ async function nxMontageResults(){
     var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
     var o=j.outputs||{}; var keys=Object.keys(o);
     if(!keys.length){ wrap.innerHTML='<span style="color:#666;font-size:12px">aucun résultat</span>'; return; }
-    var html='<div style="font-size:12px;color:#888;margin-bottom:6px">Variations générées (📤 = envoyer dans banger-'+nxMState.identity+') :</div><div style="display:flex;flex-wrap:wrap;gap:10px">';
+    var dls=[];
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+      +'<span style="font-size:13px;color:#22c55e;font-weight:800">✅ Rendu prêt</span>'
+      +'<button id="nx-m-dlall" style="background:#22c55e;border:0;color:#fff;font-size:12px;font-weight:700;border-radius:8px;padding:8px 15px;cursor:pointer">⬇ Tout télécharger</button></div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:10px">';
     keys.forEach(function(v){ o[v].forEach(function(f){
       var url='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f);
+      dls.push({url:url+'?dl=1', file:f});
       html+='<div style="width:120px"><video src="'+url+'#t=0.1" controls muted playsinline preload="metadata" style="width:120px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video>'
         +'<div style="font-size:10px;color:#a855f7;text-align:center">'+v+'</div>'
         +'<div style="display:flex;gap:4px;margin-top:2px"><a href="'+url+'?dl=1" download="'+f+'" style="flex:1;text-align:center;color:#8ef;font-size:10px;text-decoration:none;line-height:20px">⬇</a>'
@@ -3191,7 +3196,21 @@ async function nxMontageResults(){
     wrap.querySelectorAll('.nxm-send').forEach(function(b){
       b.addEventListener('click', function(){ nxMontageSend(b.getAttribute('data-vf'), b.getAttribute('data-file'), b); });
     });
+    var dlBtn=document.getElementById('nx-m-dlall');
+    if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); });
+    // remonte les résultats devant les yeux + lance le téléchargement auto
+    try{ wrap.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
+    nxMDownloadAll(dls);
   }catch(e){ wrap.textContent='Erreur chargement résultats'; }
+}
+// Télécharge chaque vidéo générée (délai entre chaque -> pas bloqué par le navigateur)
+function nxMDownloadAll(list){
+  (list||[]).forEach(function(d,i){
+    setTimeout(function(){
+      var a=document.createElement('a'); a.href=d.url; a.download=d.file;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }, i*600);
+  });
 }
 async function nxMontageSend(vf,file,btn){
   btn.disabled=true; btn.textContent='⏳';
