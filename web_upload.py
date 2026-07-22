@@ -3302,7 +3302,7 @@ async function nxMontageResults(){
     if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); });
     // remonte les résultats devant les yeux + lance le téléchargement auto
     try{ wrap.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-    nxMDownloadAll(dls);
+    // Pas de téléchargement AUTO : l'utilisateur clique « Tout télécharger » quand il veut.
   }catch(e){ wrap.textContent='Erreur chargement résultats'; }
 }
 // Télécharge chaque vidéo générée (délai entre chaque -> pas bloqué par le navigateur)
@@ -29179,6 +29179,14 @@ def create_app():
                 f.unlink()
             except Exception:
                 pass
+        # Nettoie les sorties précédentes -> UNE seule vidéo à chaque génération
+        # (sinon les générations s'accumulent dans output/ et on voit N versions).
+        _outdir = noctus_web._models_dir() / model / "output"
+        try:
+            if _outdir.exists():
+                _sh.rmtree(str(_outdir), ignore_errors=True)
+        except Exception:
+            pass
         _sh.copy(str(src), str(inp / src.name))
         font = (request.form.get("font") or "Strong").strip() or "Strong"
         folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
