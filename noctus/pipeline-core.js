@@ -395,12 +395,15 @@ function wrapText(ctx, text, maxW, emojiSize) {
 async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = null) {
   const W    = CONFIG.outputWidth;
   const H    = CONFIG.outputHeight;
-  const maxW = CONFIG.maxTextWidth;
+  // Zone texte plus large (~88% de la largeur) -> les grandes tailles rentrent
+  // sans être rétrécies. (avant : 720/1080 = 67% -> le texte long rapetissait.)
+  const maxW = Math.round(W * 0.88);
   // ── Style PAR CAPTION (éditeur CapCut web) : x/y fraction 0-1, size px, color hex,
   //    font par segment. Champs absents -> comportement historique inchangé.
   const st = (captions && captions.length === 1 && captions[0]) || {};
   if (st.font) fontFamily = st.font;
-  const BASE = (Number(st.size) > 0)
+  const hasSize = Number(st.size) > 0;   // taille imposée par l'utilisateur
+  const BASE = hasSize
     ? Math.min(160, Math.max(16, Math.round(Number(st.size))))
     : CONFIG.fontSize;
   const fillColor = (typeof st.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(st.color))
@@ -467,27 +470,26 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     const hasManualBreaks = manualLines.length > 1;
 
     if (hasManualBreaks) {
-      // L'utilisateur a choisi SES lignes -> on reste FIDELE : on ne re-decoupe
-      // pas par largeur. On reduit juste la taille (uniforme pour toutes les
-      // lignes) pour que la plus large tienne dans le cadre. Wrap seulement en
-      // tout dernier recours (ligne vraiment trop longue meme a la taille mini).
+      // Taille imposée (slider) -> on GARDE la taille : les lignes trop longues
+      // passent à la ligne (wrap) au lieu de rétrécir. Sinon (taille auto) ->
+      // ancien comportement : on réduit la taille pour que tout tienne.
       let size = BASE;
-      const widest = () => {
-        ctx.font = FONT(size);
-        const ws = manualLines.filter(l => l).map(
-          l => _measureLine(ctx, l, Math.round(size * 1.15)));
-        return ws.length ? Math.max(...ws) : 0;
-      };
-      while (widest() > maxW && size > 24) size -= 2;
+      if (!hasSize) {
+        const widest = () => {
+          ctx.font = FONT(size);
+          const ws = manualLines.filter(l => l).map(
+            l => _measureLine(ctx, l, Math.round(size * 1.15)));
+          return ws.length ? Math.max(...ws) : 0;
+        };
+        while (widest() > maxW && size > 24) size -= 2;
+      }
+      ctx.font = FONT(size);
       for (const ml of manualLines) {
         if (!ml) {
-          // Ligne vide = espacement (pas de texte a dessiner)
-          finalLines.push({ text: '', fontSize: size });
+          finalLines.push({ text: '', fontSize: size });   // ligne vide = espacement
           continue;
         }
-        ctx.font = FONT(size);
         if (_measureLine(ctx, ml, Math.round(size * 1.15)) > maxW) {
-          // dernier recours : trop long meme a la taille mini -> on wrap cette ligne
           for (const w of wrapText(ctx, ml, maxW, Math.round(size * 1.15)))
             finalLines.push({ text: w, fontSize: size });
         } else {
@@ -495,14 +497,15 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
         }
       }
     } else {
-      // Pas de saut manuel -> comportement d'origine : wrap auto par largeur.
+      // Pas de saut manuel -> wrap auto par largeur.
       const seg = manualLines[0] || '';
       if (!seg) continue;
       const wrapped = wrapText(ctx, seg, maxW, emojiSize);
       for (const line of wrapped) {
         let size = BASE;
         ctx.font = FONT(size);
-        while (_measureLine(ctx, line, Math.round(size * 1.15)) > maxW && size > 18) {
+        // taille auto -> on peut rétrécir une ligne trop large ; taille imposée -> on garde
+        while (!hasSize && _measureLine(ctx, line, Math.round(size * 1.15)) > maxW && size > 18) {
           size -= 2; ctx.font = FONT(size);
         }
         finalLines.push({ text: line, fontSize: size });
