@@ -3135,43 +3135,38 @@ function nxMBeginResize(e,i){
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
-// Tirer une poignée HAUT/BAS (↕) = AGRANDIR le texte en l'étendant vers le bord tiré
-// (le bord opposé reste fixe). Tirer le BAS vers le bas -> plus grand + plus bas.
+// Tirer une poignée HAUT/BAS (↕) = régler le NOMBRE DE LIGNES (retours à la ligne),
+// PAS la taille du texte (la taille = slider police). Tirer le BAS vers le bas ->
+// zone texte plus étroite -> plus de lignes (caption plus longue). Inverse = moins.
 function nxMBeginResizeH(e,i,side){
   e.preventDefault(); e.stopPropagation();
   var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
   var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
-  if(!nxMState.style) nxMStyleInit();
-  var oh=ov.clientHeight||480, baseSize=nxMState.style.size||44;
+  var ovH=ov.clientHeight||480, startY=e.clientY, pid=e.pointerId;
+  var startWrap=(c.wrapW!=null?c.wrapW:0.88);
+  var baseW=wrap.offsetWidth||1, baseH=wrap.offsetHeight||1;
   var wr=wrap.getBoundingClientRect(), ovr=ov.getBoundingClientRect();
-  var baseH=wrap.offsetHeight||1, baseW=wrap.offsetWidth||1;
-  var topOv=wr.top-ovr.top, botOv=wr.bottom-ovr.top, cxOv=wr.left+wr.width/2-ovr.left;
-  var anchorY=(side==='b')?topOv:botOv;     // bord OPPOSÉ (fixe)
-  var startY=e.clientY, pid=e.pointerId, k=1, minK=16/baseSize, maxK=160/baseSize;
+  var cxOv=wr.left+baseW/2-ovr.left, cyOv=wr.top+baseH/2-ovr.top;
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
-    var dy=ev.clientY-startY;
-    var newH=baseH + (side==='b'?dy:-dy);     // tirer vers l'extérieur agrandit
-    k=Math.max(minK, Math.min(maxK, newH/baseH));
-    var nh=baseH*k, nw=baseW*k;
-    var top=(side==='b')?anchorY:(anchorY-nh);  // ancre le bord opposé
-    wrap.style.height=nh.toFixed(1)+'px'; wrap.style.width=nw.toFixed(1)+'px';
-    wrap.style.top=top.toFixed(1)+'px'; wrap.style.left=(cxOv-nw/2).toFixed(1)+'px';
-    c.y=Math.max(0.03,Math.min(0.90,(top+nh/2)/oh));   // le re-rendu tombera au bon endroit
+    var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // + = étendre = plus de lignes
+    var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // étendre -> wrapW plus petit -> + de lignes
+    c.wrapW=w;
+    // aperçu : boîte plus étroite + plus haute (indice visuel "plus de lignes")
+    var r=startWrap/w, nw=baseW/r, nh=baseH*r;
+    wrap.style.width=nw.toFixed(1)+'px'; wrap.style.height=nh.toFixed(1)+'px';
+    wrap.style.left=(cxOv-nw/2).toFixed(1)+'px'; wrap.style.top=(cyOv-nh/2).toFixed(1)+'px';
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
     nxMState.dragging=false; wrap.classList.remove('on');
-    var ns=Math.max(16,Math.min(160,Math.round(baseSize*k)));
-    nxMState.style.size=ns;
-    var sl=document.getElementById('nx-m-size'); if(sl) sl.value=ns;
-    var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=ns;
-    nxMRealCap(c); nxMHistTouch();
+    nxMRealCap(c);   // re-rend le texte re-wrappé (nouveau nombre de lignes), taille INCHANGÉE
+    nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
