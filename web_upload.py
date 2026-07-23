@@ -3044,11 +3044,11 @@ function nxMImgHtml(i,c,rec,ow,oh){
 }
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
-function nxMUpdatePreview(){
+function nxMUpdatePreview(force){
   // Overlay live du texte sur la vidéo (caption(s) active(s) à l'instant courant)
   var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video');
   if(!ov||!v) return;
-  if(nxMState.dragging) return;   // pendant le drag on bouge l'image directement (pas de rebuild)
+  if(nxMState.dragging && !force) return;   // pendant le drag: pas de rebuild, SAUF re-wrap live (poignée ↕)
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
   if(!nxMState._fontsPreload && document.fonts && document.fonts.load){   // précharge les polices -> fallback jamais en "police de base"
     nxMState._fontsPreload=1;
@@ -3149,21 +3149,24 @@ function nxMBeginResizeH(e,i,side){
   var cxOv=wr.left+baseW/2-ovr.left, cyOv=wr.top+baseH/2-ovr.top;
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
+  var lastW=startWrap;
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
     var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // + = étendre = plus de lignes
     var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // étendre -> wrapW plus petit -> + de lignes
-    c.wrapW=w;
-    // aperçu : boîte plus étroite + plus haute (indice visuel "plus de lignes")
-    var r=startWrap/w, nw=baseW/r, nh=baseH*r;
-    wrap.style.width=nw.toFixed(1)+'px'; wrap.style.height=nh.toFixed(1)+'px';
-    wrap.style.left=(cxOv-nw/2).toFixed(1)+'px'; wrap.style.top=(cyOv-nh/2).toFixed(1)+'px';
+    w=Math.round(w*200)/200;                                                 // pas de 0.005 -> évite de spammer le rendu
+    if(w===lastW) return; lastW=w; c.wrapW=w;
+    // PAS de déformation de la boîte (ça écrasait le texte) : on re-rend le texte
+    // re-wrappé en direct (throttle) -> vraies lignes, taille inchangée.
+    clearTimeout(nxMState._hrT);
+    nxMState._hrT=setTimeout(function(){ nxMRealCap(c); }, 120);
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
+    clearTimeout(nxMState._hrT);
     nxMState.dragging=false; wrap.classList.remove('on');
     nxMRealCap(c);   // re-rend le texte re-wrappé (nouveau nombre de lignes), taille INCHANGÉE
     nxMHistTouch();
@@ -3267,7 +3270,8 @@ function nxMRealCap(c){
     delete nxMState.rpend[key];
     if(b && b.size>200 && bbox){
       nxMState.rimg[key]={url:URL.createObjectURL(b), bbox:bbox};
-      try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){}
+      // repaint normal hors drag ; pendant un drag ↕ (re-wrap live) on FORCE l'affichage
+      try{ nxMUpdatePreview(nxMState.dragging===true); }catch(e){}
     } else {
       // pas de boîte -> on N'INSISTE PAS (sinon boucle infinie de requêtes) ; fallback CSS
       nxMState.rfail[key]=1;
