@@ -3211,7 +3211,9 @@ function nxMBeginResizeH(e,i,side){
     var ls=Math.max(0.9, Math.min(3.0, startLS + outward*2.4));              // ne touche QUE la hauteur, pas la largeur
     ls=Math.round(ls*20)/20;
     if(ls===lastLS) return; lastLS=ls; c.lineSpacing=ls;
-    nxMDragPreview(i);   // aperçu INSTANTANÉ (live) — police Strong préchargée
+    // VRAI rendu moteur (police EXACTE) throttlé -> affiché en place dès qu'il est prêt
+    if(!nxMState._hrPending){ nxMState._hrPending=true;
+      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 110); }
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
@@ -3243,7 +3245,9 @@ function nxMBeginResizeW(e,i,side){
     var dxFrac=(ev.clientX-startX)/ovW;
     var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // tirer le bord vers l'extérieur -> box plus large (- de lignes)
     w=Math.round(w*100)/100; if(w===lastW) return; lastW=w; c.wrapW=w;
-    nxMDragPreview(i);   // aperçu INSTANTANÉ (live) — police Strong embarquée
+    // VRAI rendu moteur (police EXACTE) throttlé -> affiché en place dès qu'il est prêt
+    if(!nxMState._hrPending){ nxMState._hrPending=true;
+      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 110); }
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
