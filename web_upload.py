@@ -3161,17 +3161,19 @@ function nxMRenderCaps(){
   if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
   var W=wrap.clientWidth||480, pps=W/dur;
   nxMState.dur=dur; nxMState.pps=pps;
-  var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=38, gap=9, rulerH=28;
+  var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=38, gap=9, rulerH=48;
   var vidTrackH=70;   // piste vidéo (miniatures) façon CapCut — bien haute pour cliquer facile
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+6;
   var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
   var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
-    grid+='<div style="position:absolute;left:'+x+'px;top:0;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
-    rlabels+='<div style="position:absolute;left:'+(x+3)+'px;top:5px;font-size:9px;color:#bbb;pointer-events:none">'+Math.round(s)+'s</div>';
+    grid+='<div style="position:absolute;left:'+x+'px;top:'+rulerH+'px;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
+    rlabels+='<div style="position:absolute;left:'+(x+6)+'px;top:8px;font-size:12px;font-weight:600;color:#dcdcdc;pointer-events:none">'+nxMFmt(s)+'s</div>';
+    rlabels+='<div style="position:absolute;left:'+x+'px;top:'+(rulerH-11)+'px;width:2px;height:11px;background:#6f6f6f;pointer-events:none"></div>';
+    var xh=(s+step/2)*pps; if(s+step/2<=dur+0.001) rlabels+='<div style="position:absolute;left:'+xh+'px;top:'+(rulerH-7)+'px;width:1px;height:7px;background:#454545;pointer-events:none"></div>';
   }
-  // réglette de lecture cliquable/scrubbable (bande dédiée en haut)
-  var rulerStrip='<div id="nx-m-ruler" title="Clique ou glisse ici pour déplacer la lecture de la vidéo" style="position:absolute;left:0;right:0;top:0;height:'+rulerH+'px;background:#1c1c1c;border-bottom:1px solid #2e2e2e;cursor:pointer;z-index:4;touch-action:none">'+rlabels+'</div>';
+  // réglette de lecture cliquable/scrubbable (bande dédiée en haut, bien grande façon CapCut)
+  var rulerStrip='<div id="nx-m-ruler" title="Clique ou glisse ici pour déplacer la lecture de la vidéo" style="position:absolute;left:0;right:0;top:0;height:'+rulerH+'px;background:linear-gradient(#242424,#1a1a1a);border-bottom:1px solid #333;cursor:pointer;z-index:4;touch-action:none">'+rlabels+'</div>';
   var blocks='';
   caps.forEach(function(c,i){
     var perm=(c.start==null), bs=perm?0:c.start, be=perm?dur:c.end;
@@ -3194,7 +3196,7 @@ function nxMRenderCaps(){
   wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique une caption pour la modifier · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
     + grid + rulerStrip + vtrack
-    + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"></div>'
+    + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"><div style="position:absolute;top:0;left:-7px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"></div></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
   var tl=document.getElementById('nx-m-timeline');
