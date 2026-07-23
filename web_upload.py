@@ -3219,14 +3219,14 @@ function nxMBeginResizeW(e,i,side){
   var startWrap=(c.wrapW!=null?c.wrapW:0.88), baseW=wrap.offsetWidth;
   var wr=wrap.getBoundingClientRect(), ovL=ov.getBoundingClientRect().left;
   var cxOv=wr.left+baseW/2-ovL;                 // centre X (px overlay), fixe
-  var dir=(side==='r')?1:-1, lastW=startWrap;
+  var dir=(side==='r')?-1:1, lastW=startWrap;   // FLIP: tirer vers l'extérieur = + de lignes (cohérent avec ↕)
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
     var dxFrac=(ev.clientX-startX)/ovW;
-    var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // bouger un bord de Δ -> largeur ±2Δ (centré)
+    var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // tirer le bord vers l'extérieur -> + de lignes
     w=Math.round(w*100)/100; if(w===lastW) return; lastW=w; c.wrapW=w;
     nxMDragPreview(i);   // aperçu CSS INSTANTANÉ (largeur/lignes changent en direct)
   }
