@@ -3739,7 +3739,7 @@ function nxMGenFail(msg){
 async function nxMontagePoll(){
   if(!nxMState.model) return;
   if(!nxMState.genStart) nxMState.genStart=Date.now();
-  if(Date.now()-nxMState.genStart > 300000){ nxMGenFail('trop long (5 min) — abandonné'); return; }  // garde-fou anti-boucle
+  if(Date.now()-nxMState.genStart > 900000){ nxMGenFail('trop long (15 min) — abandonné'); return; }  // garde-fou anti-boucle (VPS lent : vidéos iPhone lourdes)
   try{
     var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
     var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');

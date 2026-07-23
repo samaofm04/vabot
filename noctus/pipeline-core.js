@@ -728,13 +728,25 @@ function buildVideoFilter(variation, brightJitter = 0, contrastJitter = 0, outW 
 }
 
 // ─── FFmpeg ───────────────────────────────────────────────────────────────────
-function runFFmpeg(modelId, args, timeoutMs = 120000) {
+function runFFmpeg(modelId, args, timeoutMs = 120000, log = null) {
   return new Promise(resolve => {
     const proc = spawn('ffmpeg', args, { stdio: 'pipe' });
     if (!activeProcs.has(modelId)) activeProcs.set(modelId, new Set());
     activeProcs.get(modelId).add(proc);
-    let stderr = '', done = false;
-    proc.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 24000) stderr = stderr.slice(-14000); });
+    let stderr = '', done = false, lastBeat = 0, lastFrame = '';
+    proc.stderr.on('data', d => {
+      stderr += d.toString(); if (stderr.length > 24000) stderr = stderr.slice(-14000);
+      // Heartbeat : ffmpeg écrit sa progression (frame=/time=) sur stderr -> on la logge
+      // toutes les ~5s. Un log qui avance = ffmpeg RAME (pas figé) ; log figé = vrai blocage.
+      if (log) {
+        const m = /frame=\s*(\d+)[\s\S]*?time=(\S+)/.exec(stderr.slice(-260));
+        const now = Date.now();
+        if (m && m[1] !== lastFrame && now - lastBeat > 5000) {
+          lastBeat = now; lastFrame = m[1];
+          try { log(`  ⏳ ffmpeg avance : frame=${m[1]} time=${m[2]}`, `⏳ encodage… ${m[2]}`); } catch (_) {}
+        }
+      }
+    });
     if (proc.stdout) proc.stdout.on('data', () => {});   // draine stdout par sécurité (évite tout blocage de pipe)
     const cleanup = () => {
       const s = activeProcs.get(modelId);
@@ -1035,7 +1047,7 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
             '-c:a',            'aac',
             '-b:a',            '192k',
             '-y',              tmpOut,
-          ]);
+          ], 300000, log);   // 300s : les vidéos iPhone lourdes (HEVC/HDR) mettent > 120s à décoder+encoder sur le VPS
           for (const p of pngPaths) { try { fs.unlinkSync(p); } catch (_) {} }
 
           if (stopFlags.get(modelId)) {
