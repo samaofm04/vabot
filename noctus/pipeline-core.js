@@ -413,8 +413,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const hasCustomX = (st.x != null && isFinite(parseFloat(st.x)));
   const capX = hasCustomX ? Math.min(0.97, Math.max(0.03, parseFloat(st.x))) : 0.5;
   const CX = Math.round(W * capX);
-  // Position custom -> micro-jitter anti-fingerprint seulement (le ±300px casserait le placement)
-  const effYOffset = hasCustomY ? Math.max(-14, Math.min(14, yOffset)) : yOffset;
+  // Position custom (drag éditeur) -> AUCUN jitter : le rendu final tombe exactement
+  // à la position de l'aperçu (WYSIWYG). Le jitter anti-détection reste pour les
+  // captions non positionnées (comportement historique).
+  const effYOffset = hasCustomY ? 0 : yOffset;
   // ── Styles CapCut par caption : alignement / casse / souligné / bulle / effet ──
   const alignSt = (st.align === 'left' || st.align === 'right') ? st.align : 'center';
   const caseSt  = (st.case === 'upper' || st.case === 'lower' || st.case === 'title') ? st.case : 'none';
@@ -523,6 +525,19 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const baseY  = Math.round(H * capY) + effYOffset;
   const startY = baseY - totalH / 2;
 
+  // Largeur réelle du bloc de texte -> on ancre son CENTRE visuel sur CX (=W*x)
+  // pour TOUS les alignements (avant : left/right collaient aux bords d'une boîte
+  // maxW, donc le centre visuel n'était pas x). L'aperçu web (translate -50%) et la
+  // poignée de drag centrent aussi sur x : ainsi rendu final == aperçu, sans saut.
+  let blockW = 0;
+  for (const fl of finalLines) {
+    ctx.font = FONT(fl.fontSize);
+    const w = _measureLine(ctx, fl.text, Math.round(fl.fontSize * 1.15));
+    if (w > blockW) blockW = w;
+  }
+  blockW = Math.min(maxW, blockW);
+  const blockLeft = CX - blockW / 2;
+
   // "Bulle" : fond arrondi derrière tout le bloc de texte (dessiné AVANT le texte)
   if (boxSt) {
     let bl = Infinity, br = -Infinity;
@@ -531,8 +546,8 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
       ctx.font = FONT(fl.fontSize);
       const lw = _measureLine(ctx, fl.text, Math.round(fl.fontSize * 1.15));
       let sx;
-      if (alignSt === 'left') sx = CX - maxW / 2;
-      else if (alignSt === 'right') sx = CX + maxW / 2 - lw;
+      if (alignSt === 'left') sx = blockLeft;
+      else if (alignSt === 'right') sx = blockLeft + blockW - lw;
       else sx = CX - lw / 2;
       if (lw > 0) { bl = Math.min(bl, sx); br = Math.max(br, sx + lw); }
     }
@@ -558,10 +573,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     const runs     = _splitRuns(text);
     const hasEmoji = runs.some(r => r.type === 'emoji');
     const lineW    = _measureLine(ctx, text, emojiSize);
-    // Alignement (boutons gauche/centre/droite) : boîte centrée sur CX, largeur maxW
+    // Alignement (boutons gauche/centre/droite) : bloc centré sur CX (largeur réelle blockW)
     let startX;
-    if (alignSt === 'left')       startX = CX - maxW / 2;
-    else if (alignSt === 'right') startX = CX + maxW / 2 - lineW;
+    if (alignSt === 'left')       startX = blockLeft;
+    else if (alignSt === 'right') startX = blockLeft + blockW - lineW;
     else                          startX = CX - lineW / 2;
 
     ctx.textAlign = 'left';

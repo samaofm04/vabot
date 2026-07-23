@@ -2919,7 +2919,11 @@ function nxMAddCap(){
     end=Math.round(e*100)/100;
   }
   var item={text:txt, start:(mode==='perm'?null:start), end:(mode==='perm'?null:end)};
-  if(nxMState.editIdx>=0){ nxMState.caps[nxMState.editIdx]=item; nxMState.editIdx=-1; }
+  if(nxMState.editIdx>=0){
+    var _old=nxMState.caps[nxMState.editIdx]||{};   // garde la position (drag) du texte
+    if(_old.x!=null) item.x=_old.x; if(_old.y!=null) item.y=_old.y;
+    nxMState.caps[nxMState.editIdx]=item; nxMState.editIdx=-1;
+  }
   else { nxMState.caps.push(item); }
   document.getElementById('nx-m-caption').value='';
   document.getElementById('nx-m-timeinfo').textContent='';
@@ -2928,6 +2932,15 @@ function nxMAddCap(){
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   nxMRenderCaps();
   return true;
+}
+// Écriture EN DIRECT : quand on modifie le texte d'une caption existante (mode édition),
+// l'aperçu sur la vidéo + la liste se mettent à jour immédiatement (pas besoin de « Mettre à jour »).
+function nxMCaptionLive(){
+  if(nxMState.editIdx<0) return;                 // on ÉDITE une caption existante ?
+  var c=nxMState.caps[nxMState.editIdx]; if(!c) return;
+  c.text=(document.getElementById('nx-m-caption').value||'');
+  nxMRenderCaps();       // liste + timeline
+  nxMUpdatePreview();    // écriture sur la vidéo (déclenche le vrai rendu du nouveau texte)
 }
 // ---- Timeline type CapCut : helpers (px/seconde, snapping, lanes, playhead, drag) ----
 function nxMPxPerSec(){ return nxMState.pps||0; }
@@ -2961,65 +2974,156 @@ function nxMSyncPlayhead(){
   if(ph&&v&&pps&&!isNaN(v.currentTime)) ph.style.left=(v.currentTime*pps)+'px';
   var lab=document.getElementById('nx-m-phlabel'); if(lab&&v&&!isNaN(v.currentTime)) lab.textContent=nxMFmt(v.currentTime)+'s';
 }
+// ── Position du texte (drag façon CapCut) : x/y = centre normalisé 0-1 par caption ──
+function nxMDefY(){ return 0.61; }   // même défaut vertical que le moteur (CONFIG.verticalY)
+function nxMCapXY(c){
+  var x=(c&&c.x!=null&&isFinite(c.x))?Math.max(0.03,Math.min(0.97,c.x)):0.5;
+  var y=(c&&c.y!=null&&isFinite(c.y))?Math.max(0.03,Math.min(0.96,c.y)):nxMDefY();
+  return {x:x,y:y};
+}
+function nxMFontFam(font){
+  var s=nxMState.style||{}, fam=font, ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'800');
+  if(font==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
+  if(font==='BebasNeue'||font==='Anton'){ if(s.bold!==false) wt='400'; }
+  return {fam:fam,ital:ital,wt:wt};
+}
+function nxMApplyCase(t){ var cs=(nxMState.style||{})['case'];
+  if(cs==='upper') return t.toUpperCase();
+  if(cs==='lower') return t.toLowerCase();
+  if(cs==='title') return t.replace(/\\S+/g,function(w){return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();});
+  return t; }
+function nxMCapKey(c){
+  var font=(document.getElementById('nx-m-font')||{}).value||'Strong', p=nxMCapXY(c);
+  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig()+'|'+p.x.toFixed(3)+','+p.y.toFixed(3);
+}
+// Bloc CSS d'une caption (fallback avant le PNG, et pendant le drag) positionné à x/y
+function nxMCssBlock(c,ow,extra){
+  var s=nxMState.style||{}, font=(document.getElementById('nx-m-font')||{}).value||'Strong', ff=nxMFontFam(font), p=nxMCapXY(c);
+  var fpx=Math.max(9,(s.size||44)*ow/1080), stk=Math.max(1,fpx*0.19/2);
+  var col=(/^#[0-9a-fA-F]{3,8}$/.test(s.color||''))?s.color:'#fff';
+  var al=(s.align==='left'?'left':(s.align==='right'?'right':'center'));
+  var tt=(s['case']==='upper'?'uppercase':(s['case']==='lower'?'lowercase':(s['case']==='title'?'capitalize':'none')));
+  var ul=(s.underline?'text-decoration:underline;':'');
+  var inner=String(c.text||'').split(/\\r?\\n/).map(function(ln){ return '<div>'+nxMEsc(ln)+'</div>'; }).join('');
+  return '<div style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:92%;text-align:'+al
+    +';color:'+col+';font-family:'+ff.fam+',Arial;font-weight:'+ff.wt+';'+ff.ital+ul+'text-transform:'+tt+';font-size:'+fpx.toFixed(1)+'px;line-height:1.28;'
+    +'-webkit-text-stroke:'+stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word;pointer-events:none;'+(extra||'')+'">'+inner+'</div>';
+}
+// Boîte approximative du texte (px overlay) pour dimensionner la poignée de drag
+function nxMMeasureCap(c,ow){
+  var s=nxMState.style||{}, font=(document.getElementById('nx-m-font')||{}).value||'Strong', ff=nxMFontFam(font);
+  var fpx=Math.max(8,(s.size||44)*ow/1080);
+  nxMState._mc=nxMState._mc||document.createElement('canvas');
+  var mx=nxMState._mc.getContext('2d');
+  var wt=(ff.wt==='400'?'':'bold '), it=(ff.ital?'italic ':'');
+  mx.font=it+wt+fpx+'px '+ff.fam+',Arial';
+  var lines=nxMApplyCase(String(c.text||'')).split(/\\r?\\n/), maxw=0;
+  lines.forEach(function(ln){ var w=mx.measureText(ln||' ').width; if(w>maxw)maxw=w; });
+  maxw=Math.min(maxw,ow*0.92);
+  var lh=fpx*1.30, h=Math.max(lines.length,1)*lh;
+  return {w:Math.max(44,maxw+fpx*0.6),h:h+fpx*0.35};
+}
+// Indices des captions actives à l'instant courant
+function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
 function nxMUpdatePreview(){
   // Overlay live du texte sur la vidéo (caption(s) active(s) à l'instant courant)
   var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video');
   if(!ov||!v) return;
-  var t=isNaN(v.currentTime)?0:v.currentTime;
-  var act=(nxMState.caps||[]).filter(function(c){ if(c.start==null) return true; return t>=c.start-0.001 && t<=c.end+0.001; });
-  if(!act.length){ ov.innerHTML=''; return; }
-  var lines=[];
-  act.forEach(function(c){ String(c.text||'').split(/\\r?\\n/).forEach(function(ln){ lines.push(ln); }); });
-  var _fsel=(document.getElementById('nx-m-font')||{}).value||'Strong';
-  if(!nxMState.style) nxMStyleInit();
-  var _s=nxMState.style||{};
-  // 1) VRAI rendu (moteur Node) = pixel-perfect. On overlaye le PNG exact.
-  if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
-  var _sig=nxMStyleSig();
-  var _keys=act.map(function(c){ return (String(c.text||'').trim())+'|'+_fsel+'|'+_sig; });
-  var _allReal=_keys.length>0 && _keys.every(function(k){ return nxMState.rimg[k]; });
-  if(_allReal){
-    ov.innerHTML=_keys.map(function(k){ return '<img src="'+nxMState.rimg[k]+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none">'; }).join('');
-    return;
-  }
-  act.forEach(function(c){ nxMRealCap(String(c.text||'').trim(), _fsel); });   // déclenche le vrai rendu (async)
-  // 2) En attendant : fallback CSS (vraie police @font-face + style approximatif)
+  if(nxMState.dragging) return;   // pendant le drag c'est nxMDragPaint qui gère l'overlay
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
-  var _fam=_fsel, _ital=(_s.italic?'font-style:italic;':''), _wt=(_s.bold===false?'400':'800');
-  if(_fsel==='Strong'){ _fam='Poppins'; _ital='font-style:italic;'; }
-  if(_fsel==='BebasNeue'||_fsel==='Anton'){ if(_s.bold!==false)_wt='400'; }
-  var _vw=(v&&v.clientWidth)||270;
-  var _fpx=Math.max(9, Math.min(44, Math.round((_s.size||44)*_vw/1080)));
-  var _stk=Math.max(1, _fpx*0.19/2);
-  var _col=(/^#[0-9a-fA-F]{3,8}$/.test(_s.color||''))?_s.color:'#fff';
-  var _al=(_s.align==='left'?'left':(_s.align==='right'?'right':'center'));
-  var _tt=(_s['case']==='upper'?'uppercase':(_s['case']==='lower'?'lowercase':(_s['case']==='title'?'capitalize':'none')));
-  var _ul=(_s.underline?'text-decoration:underline;':'');
-  var _sty='color:'+_col+';font-family:'+_fam+',Arial;font-weight:'+_wt+';'+_ital+_ul+'text-transform:'+_tt+';font-size:'+_fpx+'px;line-height:1.22;-webkit-text-stroke:'+_stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word';
-  var inner=lines.map(function(ln){ return '<div style="'+_sty+'">'+nxMEsc(ln)+'</div>'; }).join('');
-  ov.innerHTML='<div style="position:absolute;left:5px;right:5px;top:61%;transform:translateY(-50%);text-align:'+_al+'">'+inner+'</div>';
+  var t=isNaN(v.currentTime)?0:v.currentTime, idx=nxMActiveIdx(t);
+  if(!idx.length){ ov.innerHTML=''; return; }
+  if(!nxMState.style) nxMStyleInit();
+  if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
+  var ow=ov.clientWidth||270, oh=ov.clientHeight||480, html='';
+  // 1) rendu de chaque caption : PNG pixel-perfect (position x/y cuite par le moteur) sinon fallback CSS
+  idx.forEach(function(i){
+    var c=nxMState.caps[i], key=nxMCapKey(c);
+    if(nxMState.rimg[key]){
+      html+='<img src="'+nxMState.rimg[key]+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none">';
+    } else {
+      nxMRealCap(c);                       // déclenche le vrai rendu (async)
+      html+=nxMCssBlock(c,ow,'');          // fallback au même endroit en attendant
+    }
+  });
+  // 2) poignée déplaçable (une par caption active) — glisser = bouger · clic = éditer
+  idx.forEach(function(i){
+    var c=nxMState.caps[i], p=nxMCapXY(c), m=nxMMeasureCap(c,ow);
+    html+='<div class="nxm-drag" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" style="position:absolute;left:'+(p.x*ow-m.w/2).toFixed(1)+'px;top:'+(p.y*oh-m.h/2).toFixed(1)+'px;width:'+m.w.toFixed(1)+'px;height:'+m.h.toFixed(1)+'px;box-sizing:border-box;cursor:move;pointer-events:auto;touch-action:none;z-index:4"></div>';
+  });
+  // 3) guides d'alignement (cachés) — centre horizontal / vertical
+  html+='<div id="nx-m-gx" style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>';
+  html+='<div id="nx-m-gy" style="position:absolute;top:50%;left:0;right:0;height:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>';
+  ov.innerHTML=html;
+  ov.querySelectorAll('.nxm-drag').forEach(function(el){
+    el.addEventListener('pointerdown',function(e){ nxMBeginTextDrag(e, parseInt(el.getAttribute('data-i'),10)); });
+  });
+}
+// Repeint l'overlay EN DIRECT pendant le drag (ghost CSS bon marché, pas de réseau)
+function nxMDragPaint(dragI){
+  var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video'); if(!ov||!v) return;
+  var t=isNaN(v.currentTime)?0:v.currentTime, ow=ov.clientWidth||270, idx=nxMActiveIdx(t), html='';
+  idx.forEach(function(i){
+    var extra=(i===dragI)?'outline:1.5px dashed #22d3ee;outline-offset:5px;border-radius:4px;':'';
+    html+=nxMCssBlock(nxMState.caps[i],ow,extra);
+  });
+  var pd=nxMCapXY(nxMState.caps[dragI]);
+  html+='<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:'+(Math.abs(pd.x-0.5)<0.0011?'block':'none')+';pointer-events:none;z-index:6"></div>';
+  html+='<div style="position:absolute;top:50%;left:0;right:0;height:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:'+(Math.abs(pd.y-0.5)<0.0011?'block':'none')+';pointer-events:none;z-index:6"></div>';
+  ov.innerHTML=html;
+}
+// Démarre le déplacement d'une caption sur la vidéo
+function nxMBeginTextDrag(e,i){
+  e.preventDefault(); e.stopPropagation();
+  var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
+  var rect=ov.getBoundingClientRect(), sx=e.clientX, sy=e.clientY, moved=false, pid=e.pointerId;
+  nxMState.dragging=true;
+  try{ ov.setPointerCapture(pid); }catch(_){}   // garantit le pointerup même hors fenêtre
+  function move(ev){
+    if(ev.pointerId!=null && ev.pointerId!==pid) return;   // ignore les autres doigts (multitouch)
+    if(ev.buttons===0){ up(ev); return; }                  // bouton relâché ailleurs -> termine
+    if(!moved && (Math.abs(ev.clientX-sx)+Math.abs(ev.clientY-sy))<4) return;   // seuil clic vs drag
+    moved=true;
+    var fx=(ev.clientX-rect.left)/rect.width, fy=(ev.clientY-rect.top)/rect.height;
+    fx=Math.max(0.03,Math.min(0.97,fx)); fy=Math.max(0.03,Math.min(0.90,fy));   // 0.90 = garde la barre vidéo cliquable
+    if(Math.abs(fx-0.5)<0.02) fx=0.5;   // snap centre horizontal
+    if(Math.abs(fy-0.5)<0.02) fy=0.5;   // snap centre vertical
+    c.x=fx; c.y=fy;
+    nxMDragPaint(i);
+  }
+  function up(ev){
+    if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    nxMState.dragging=false;
+    if(!moved){ nxMEditCap(i); return; }   // clic simple (sans bouger) = éditer le texte
+    nxMRealCap(c);        // re-rend le PNG pixel-perfect à la nouvelle position
+    nxMUpdatePreview();
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
 // Demande au MOTEUR Node le PNG exact d'une caption (mis en cache), puis rafraîchit
-// l'aperçu -> WYSIWYG pixel-perfect. Échec silencieux -> on garde le fallback CSS.
-function nxMRealCap(text, font){
-  text=(text||'').trim(); if(!text) return;
+// l'aperçu -> WYSIWYG pixel-perfect (position x/y incluse). Échec silencieux -> fallback CSS.
+function nxMRealCap(c){
+  var text=String((c&&c.text)||'').trim(); if(!text) return;
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
   if(!nxMState.style) nxMStyleInit();
-  var key=text+'|'+font+'|'+nxMStyleSig();
+  var font=(document.getElementById('nx-m-font')||{}).value||'Strong', key=nxMCapKey(c);
   if(nxMState.rimg[key]||nxMState.rpend[key]) return;   // déjà rendu / en cours
   nxMState.rpend[key]=1;
-  var s=nxMState.style||{};
+  var s=nxMState.style||{}, p=nxMCapXY(c);
   var fd=new FormData(); fd.set('text',text); fd.set('font',font);
   fd.set('size', s.size||44); fd.set('color', s.color||'#ffffff');
-  fd.set('align', s.align||'center'); fd.set('case', s.case||'none');
+  fd.set('align', s.align||'center'); fd.set('case', s['case']||'none');
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
   fd.set('box', s.box?'1':'0'); fd.set('effect', s.effect||'none');
+  fd.set('x', p.x.toFixed(4)); fd.set('y', p.y.toFixed(4));
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0; return r.blob();
   }).then(function(b){
     if(b && b.size>200) nxMState.rimg[key]=URL.createObjectURL(b);
     delete nxMState.rpend[key];
-    try{ nxMUpdatePreview(); }catch(e){}
+    try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){}
   }).catch(function(){ delete nxMState.rpend[key]; });
 }
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
@@ -3051,7 +3155,7 @@ function nxMStylePaint(){
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
-function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} }
+function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} var b=document.querySelector('.ce-play'); if(b) setTimeout(function(){ b.textContent=v.paused?'▶':'⏸'; },30); }
 // 💾 Enregistre le brouillon (captions + police + style) pour ce reel
 function nxMontageSave(){
   if(!nxMState.fid) return;
@@ -3334,13 +3438,21 @@ async function nxMontageResults(){
     nxMDownloadAll(dls);   // télécharge direct sur le PC dès que le rendu est prêt
   }catch(e){ wrap.textContent='Erreur chargement résultats'; }
 }
-// Télécharge chaque vidéo générée (délai entre chaque -> pas bloqué par le navigateur)
+// Télécharge chaque vidéo générée. La réponse ?dl=1 est en Content-Disposition:attachment,
+// donc une navigation iframe déclenche le téléchargement SANS geste utilisateur (a.click()
+// programmatique est souvent bloqué par le navigateur -> "ça télécharge rien").
 function nxMDownloadAll(list){
   (list||[]).forEach(function(d,i){
     setTimeout(function(){
-      var a=document.createElement('a'); a.href=d.url; a.download=d.file;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    }, i*600);
+      try{
+        var f=document.createElement('iframe'); f.style.display='none'; f.src=d.url;
+        document.body.appendChild(f);
+        setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 60000);
+      }catch(e){
+        var a=document.createElement('a'); a.href=d.url; a.download=d.file;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }
+    }, i*800);
   });
 }
 async function nxMontageSend(vf,file,btn){
@@ -5082,6 +5194,8 @@ body.light .action-icon{color:#666}
 .ce-vwrap{position:relative;height:100%;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.55)}
 .ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.nxm-drag{border:1.5px dashed rgba(255,255,255,.30);border-radius:5px;transition:border-color .12s,background .12s}
+.nxm-drag:hover{border-color:rgba(34,211,238,.95);background:rgba(34,211,238,.08)}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
@@ -5152,7 +5266,7 @@ body.light .action-icon{color:#666}
         <div class="ce-chead">Lecteur · Chronologie 01</div>
         <div class="ce-stage">
           <div class="ce-vwrap">
-            <video id="nx-m-video" controls muted playsinline class="ce-video"></video>
+            <video id="nx-m-video" muted playsinline class="ce-video" onclick="nxMPlayPause()"></video>
             <div id="nx-m-overlay" class="ce-ovl"></div>
             <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#00d9c0;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">TON REEL</span>
           </div>
@@ -5175,7 +5289,7 @@ body.light .action-icon{color:#666}
           <button class="ce-rtab on">Texte</button>
         </div>
         <div class="ce-inspect">
-          <textarea id="nx-m-caption" placeholder="Texte de la caption…  (écris, puis « Ajouter »)" class="nxm-ta"></textarea>
+          <textarea id="nx-m-caption" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="nxMCaptionLive()"></textarea>
           <div class="nxm-row">
             <span class="nxm-lbl">Police</span>
             <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
@@ -29131,6 +29245,15 @@ def create_app():
             _spec["box"] = True
         if request.form.get("effect") in ("shadow", "neon"):
             _spec["effect"] = request.form.get("effect")
+        for _pk in ("x", "y"):   # position du texte (drag éditeur), fraction 0-1
+            _pv = request.form.get(_pk)
+            if _pv:
+                try:
+                    _pf = float(_pv)
+                    if 0.0 <= _pf <= 1.0:
+                        _spec[_pk] = round(_pf, 4)
+                except Exception:
+                    pass
         src = BOT_DIR / "noctus"
         cdir = Path(tempfile.gettempdir()) / "noctus_capprev"
         try:
@@ -29310,6 +29433,15 @@ def create_app():
                         start, end = _hms(st), _hms(en)
                     seg = {"start": start, "end": end, "text": txt}
                     seg.update(_style)   # applique le style global à chaque caption
+                    for _pk in ("x", "y"):   # position PAR caption (drag éditeur) -> écrase le défaut moteur
+                        _pv = it.get(_pk)
+                        try:
+                            if _pv is not None:
+                                _pf = float(_pv)
+                                if 0.0 <= _pf <= 1.0:
+                                    seg[_pk] = round(_pf, 4)
+                        except Exception:
+                            pass
                     segments.append(seg)
 
         if segments:
