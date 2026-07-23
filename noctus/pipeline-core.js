@@ -993,42 +993,51 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
           filterComplex += `;[${lastOutput}]noise=alls=1:allf=t+u:all_seed=${noiseSeed}[final_${uid}]`;
           lastOutput = `final_${uid}`;
 
-          let _meta = [];
-          try { _meta = appleMetaArgs(); }
-          catch (e) { log(`  ⚠️ metaArgs: ${e.message}`); _meta = ['-metadata', 'make=Apple']; }
+          // ── Pass 1 : RE-ENCODE (filtres) -> fichier temp. AUCUN flag métadonnées
+          // risqué ici : le combo filter_complex + use_metadata_tags/-bitexact fait
+          // planter certains ffmpeg. (C'est la commande qui marchait avant.)
+          const tmpOut = path.join(tempDir, `enc_${modelId}_${uid}_${Date.now()}.mp4`);
           log(`  🎬 encodage ffmpeg… [V${vi+1}/${cap.label}]`);
-          const args = [...ffmpegInputs,
+          const result = await runFFmpeg(modelId, [...ffmpegInputs,
             '-filter_complex', filterComplex,
             '-map',            `[${lastOutput}]`,
             '-map',            '0:a?',
             '-af',             audioFilter,
             '-t',              finalDuration.toFixed(3),
             '-map_metadata',   '-1',
-            ..._meta,          // identité iPhone crédible + GPS ville (comme /reel)
             '-c:v',            'libx264',
             '-preset',         'fast',
             '-crf',            '23',
             '-c:a',            'aac',
             '-b:a',            '192k',
-            // use_metadata_tags : écrit les atomes com.apple.quicktime.* ; -bitexact : efface Lavf/SEI x264
-            '-movflags',       'use_metadata_tags+faststart',
-            '-bitexact',
-            '-y',              outputPath,
-          ];
-
-          const result = await runFFmpeg(modelId, args);
+            '-y',              tmpOut,
+          ]);
           for (const p of pngPaths) { try { fs.unlinkSync(p); } catch (_) {} }
 
           if (stopFlags.get(modelId)) {
-            if (fs.existsSync(outputPath)) try { fs.unlinkSync(outputPath); } catch (_) {}
+            try { fs.unlinkSync(tmpOut); } catch (_) {}
             return;
           }
-          if (result.status === 0) {
-            log(`  ✅ [${folderName}] [${capLabel}] → ${outputName}`, `  ✅ Vidéo créée [${folderName}]`);
-            success++;
-          } else {
+          if (result.status !== 0) {
             log(`  ❌ [${folderName}] [${capLabel}] — ${result.stderr}`, `  ❌ Erreur lors du rendu [${folderName}]`);
             failed++;
+            try { fs.unlinkSync(tmpOut); } catch (_) {}
+          } else {
+            // ── Pass 2 : MÉTADONNÉES iPhone (remux -c copy = recette éprouvée /reel).
+            let _meta = [];
+            try { _meta = appleMetaArgs(); } catch (e) { log(`  ⚠️ metaArgs: ${e.message}`); _meta = []; }
+            const meta = await runFFmpeg(modelId, ['-y', '-i', tmpOut, '-map', '0', '-c', 'copy',
+              '-map_metadata', '-1', ..._meta,
+              '-movflags', 'use_metadata_tags+faststart', '-bitexact', outputPath]);
+            if (meta.status === 0 && fs.existsSync(outputPath)) {
+              try { fs.unlinkSync(tmpOut); } catch (_) {}
+            } else {
+              // Métadonnées KO -> on garde AU MOINS la vidéo encodée (jamais 0 vidéo)
+              log(`  ⚠️ métadonnées échouées (${meta.stderr}) -> vidéo gardée sans identité iPhone`);
+              try { fs.renameSync(tmpOut, outputPath); } catch (_) {}
+            }
+            log(`  ✅ [${folderName}] [${capLabel}] → ${outputName}`, `  ✅ Vidéo créée [${folderName}]`);
+            success++;
           }
           if (notify && totalRenders > 0) {
             doneRenders++;
