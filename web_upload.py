@@ -3020,14 +3020,19 @@ function nxMImgDims(bb,ow,oh){
 // l'image détourée (vraie police). Le wrapper = la poignée de drag ; l'image et
 // les coins sont pointer-events:none -> on glisse depuis n'importe où sur la boîte.
 function nxMImgHtml(i,c,rec,ow,oh){
-  var p=nxMCapXY(c), d=nxMImgDims(rec.bbox,ow,oh);
+  // Position/taille en POURCENTAGES du conteneur (overlay 9:16, aspect préservé) :
+  // aucune dépendance à la largeur mesurée au moment du rendu -> plus de "tout petit
+  // en haut à gauche" quand la mise en page n'est pas encore prête / au resize.
+  var p=nxMCapXY(c), bb=rec.bbox||{}, W=bb.W||1080, H=bb.H||1920;
+  var wpc=Math.max(1,(bb.w||1)/W*100), hpc=Math.max(1,(bb.h||1)/H*100);
+  var left=(p.x*100 - wpc/2), top=(p.y*100 - hpc/2);   // coin haut-gauche (centre = x,y)
   var sel=(nxMState.editIdx===i);
   var cls='nxm-drag'+(sel?' sel':'');
   var cnr=sel?('<span class="nxm-cnr tl" data-i="'+i+'"></span><span class="nxm-cnr tr" data-i="'+i+'"></span>'
              +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'):'';
   return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
-    +'style="position:absolute;left:'+(p.x*ow-d.w/2).toFixed(1)+'px;top:'+(p.y*oh-d.h/2).toFixed(1)+'px;'
-    +'width:'+d.w.toFixed(1)+'px;height:'+d.h.toFixed(1)+'px;cursor:move;pointer-events:auto;'
+    +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
+    +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
     +'touch-action:none;z-index:4;box-sizing:border-box">'
     +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
     +cnr+'</div>';
@@ -3414,7 +3419,17 @@ function nxMSetTime(which){
   var info=document.getElementById('nx-m-timeinfo');
   if(info) info.textContent=(which==='start'?'début':'fin')+' = '+t.toFixed(2)+'s';
 }
+function nxMBindResize(){
+  if(nxMState._resizeBound) return; nxMState._resizeBound=1;
+  window.addEventListener('resize', function(){
+    var m=document.getElementById('nx-montage-modal');
+    if(!m || m.style.display==='none') return;
+    clearTimeout(nxMState._rzT);
+    nxMState._rzT=setTimeout(function(){ try{ nxMRenderCaps(); if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){} },140);
+  });
+}
 async function nxMontageOpen(fid, exampleUrl){
+  nxMBindResize();
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
