@@ -3370,7 +3370,8 @@ function nxMStylePaint(){
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
-function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} var b=document.querySelector('.ce-play'); if(b) setTimeout(function(){ b.textContent=v.paused?'▶':'⏸'; },30); }
+function nxMPlayBtn(){ var v=document.getElementById('nx-m-video'), b=document.querySelector('.ce-play'); if(!v||!b)return; var playing=!v.paused; b.textContent=playing?'⏸':'▶'; b.classList.toggle('playing',playing); }
+function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} setTimeout(nxMPlayBtn,30); }
 // ── Annuler / Refaire (historique captions + style) ──
 // NB: PAS nxMSnap() -> ce nom est déjà pris par l'aimantation timeline (ligne ~2949).
 function nxMHistSnap(){
@@ -3583,7 +3584,7 @@ function nxMRenderCaps(){
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
   var tl=document.getElementById('nx-m-timeline');
-  function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ if(!v.paused){ try{ v.pause(); var pb=document.querySelector('.ce-play'); if(pb) pb.textContent='▶'; }catch(_){} } try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
+  function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ if(!v.paused){ try{ v.pause(); nxMPlayBtn(); }catch(_){} } try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
   // clic sur le fond (hors blocs) = déplace la lecture
   tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')||e.target.closest('#nx-m-ruler')) return; nxMSeekAt(e.clientX); });
   // règle dédiée : clic + glisser pour scrubber la vidéo
@@ -3659,7 +3660,7 @@ async function nxMontageOpen(fid, exampleUrl){
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
   nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc='';
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; }
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); nxMPlayBtn(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onplay=nxMPlayBtn; vid.onpause=nxMPlayBtn; vid.onended=nxMPlayBtn; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
@@ -5541,7 +5542,10 @@ body.light .action-icon{color:#666}
 .nxm-ns{position:absolute;left:50%;transform:translateX(-50%);width:28px;height:9px;background:#fff;border:2px solid #9C4937;border-radius:4px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;cursor:ns-resize;touch-action:none}
 .nxm-ns.t{top:-6px}.nxm-ns.b{bottom:-6px}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
-.ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
+.ce-play{background:#2a2a30;border:0;color:#fff;width:46px;height:40px;border-radius:12px;cursor:pointer;font-size:16px;display:inline-flex;align-items:center;justify-content:center;transition:background .12s,transform .08s}
+.ce-play:hover{background:#3a3a42}
+.ce-play:active{transform:scale(.93)}
+.ce-play.playing{background:#00d9c0;color:#042925}
 /* Inspecteur droite */
 .ce-right{background:#1f1f23;border-left:1px solid #2a2a30;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .ce-rtabs{display:flex;gap:2px;padding:8px;border-bottom:1px solid #2a2a30;overflow-x:auto}
