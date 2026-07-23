@@ -13,7 +13,12 @@ import re
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
+
+# Sérialise lecture+écriture de captions.json (partagé) + spawn du runner, pour ne pas
+# perdre le label d'une génération concurrente (2 VA cliquent « Reel monté » en même temps).
+_GEN_LOCK = threading.Lock()
 
 BOT_DIR = Path(__file__).parent.resolve()
 NOCTUS_SRC = BOT_DIR / "noctus"                 # pipeline-core.js + runner + fonts
@@ -349,6 +354,170 @@ def gen_from_path(src_path, caption="", font="Strong", folders=None,
         sel = ["sans_texte"]
     write_captions(caps)
     proc = run(model, folders, sel, targets=[src.name])
+    return model if proc else None
+
+
+def _hms_seconds(v):
+    """Secondes (float) -> 'HH:MM:SS.mmm' (millisecondes gardées). Miroir du _hms
+    de la route montage_gen (web_upload)."""
+    try:
+        sec = max(0.0, float(v))
+    except Exception:
+        sec = 0.0
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = sec - h * 3600 - m * 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
+def _clean_montage_style(raw):
+    """Nettoie le style GLOBAL (réglages CapCut). Miroir du _clean_style de montage_gen."""
+    import re as _re
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    try:
+        if raw.get("size") is not None:
+            out["size"] = max(16, min(160, int(float(raw["size"]))))
+    except Exception:
+        pass
+    c = raw.get("color")
+    if isinstance(c, str) and _re.match(r"^#[0-9a-fA-F]{3,8}$", c):
+        out["color"] = c
+    if raw.get("align") in ("left", "center", "right"):
+        out["align"] = raw["align"]
+    if raw.get("case") in ("upper", "lower", "title", "none"):
+        out["case"] = raw["case"]
+    for k in ("bold", "italic", "underline"):
+        if k in raw:
+            out[k] = bool(raw[k])
+    if raw.get("box") in (True, "1", "true"):
+        out["box"] = True
+    bc = raw.get("boxColor")
+    if isinstance(bc, str) and _re.match(r"^#[0-9a-fA-F]{3,8}$", bc):
+        out["boxColor"] = bc
+    if raw.get("effect") in ("shadow", "neon"):
+        out["effect"] = raw["effect"]
+    return out
+
+
+def build_montage_caps(draft, label):
+    """Construit l'entrée captions du moteur (segments chronométrés + style + position)
+    à partir d'un brouillon de montage {segments, font, style} (le .montage.json de
+    l'éditeur). Retourne (caps_entry|None, font). Logique = celle de la route montage_gen."""
+    import json as _json
+    font = draft.get("font") if isinstance(draft, dict) else None
+    font = (font.strip() if isinstance(font, str) else "") or "Strong"
+    style_raw = draft.get("style") if isinstance(draft, dict) else None
+    if isinstance(style_raw, str):
+        try:
+            style_raw = _json.loads(style_raw or "{}")
+        except Exception:
+            style_raw = {}
+    _style = _clean_montage_style(style_raw)
+    seg_raw = draft.get("segments") if isinstance(draft, dict) else None
+    if isinstance(seg_raw, str):
+        try:
+            seg_raw = _json.loads(seg_raw or "[]")
+        except Exception:
+            seg_raw = []
+    segments = []
+    if isinstance(seg_raw, list):
+        for it in seg_raw[:40]:                 # garde-fou : 40 captions max
+            if not isinstance(it, dict):
+                continue
+            txt = (it.get("text") or "").strip()
+            if not txt:
+                continue
+            st, en = it.get("start"), it.get("end")
+            if st is None or en is None:
+                start, end = "00:00:00", "99:99:99"
+            else:
+                start, end = _hms_seconds(st), _hms_seconds(en)
+            seg = {"start": start, "end": end, "text": txt}
+            seg.update(_style)
+            for _pk in ("x", "y"):
+                _pv = it.get(_pk)
+                try:
+                    if _pv is not None:
+                        _pf = float(_pv)
+                        if 0.0 <= _pf <= 1.0:
+                            seg[_pk] = round(_pf, 4)
+                except Exception:
+                    pass
+            try:
+                _wv = it.get("wrapW")
+                if _wv is not None:
+                    _wf = float(_wv)
+                    if 0.2 <= _wf <= 0.97:
+                        seg["wrapW"] = round(_wf, 4)
+            except Exception:
+                pass
+            try:
+                _lv = it.get("lineSpacing")
+                if _lv is not None:
+                    _lf = float(_lv)
+                    if 0.9 <= _lf <= 3.0:
+                        seg["lineSpacing"] = round(_lf, 3)
+            except Exception:
+                pass
+            segments.append(seg)
+    if segments:
+        return {"label": label, "font": font, "captions": segments}, font
+    return None, font
+
+
+def gen_from_draft(src_path, draft, folders=None, model=None):
+    """Génère une (ou N) variante MONTÉE d'un reel à partir d'un brouillon de montage
+    {segments, font, style} — même moteur que l'éditeur web. À la demande (VA).
+    Retourne le model_id (à poller via status()) ou None."""
+    import shutil as _sh
+    import re as _re
+    import time as _t
+    import random as _rnd
+    src = Path(src_path)
+    if not src.exists() or not src.is_file():
+        return None
+    if not model:                                 # id UNIQUE par appel -> 2 VA simultanés
+        base = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"vam-{src.stem}")[:26]   # ne collisionnent pas
+        model = f"{base}-{int(_t.time() * 1000) % 1000000}{_rnd.randint(100, 999)}"
+    inp = _models_dir() / model / "input"
+    inp.mkdir(parents=True, exist_ok=True)
+    for f in inp.glob("*"):
+        try:
+            f.unlink()
+        except Exception:
+            pass
+    outdir = _models_dir() / model / "output"     # sorties fraîches à chaque appel
+    try:
+        if outdir.exists():
+            _sh.rmtree(str(outdir), ignore_errors=True)
+    except Exception:
+        pass
+    _sh.copy(str(src), str(inp / src.name))
+    folders = folders or ["V1"]
+    label = ("vam_" + model)[:40]
+    entry, _font = build_montage_caps(draft, label)
+    # captions.json est PARTAGÉ (le runner Node le lit au démarrage) : on sérialise
+    # lecture+écriture+spawn pour ne pas écraser le label d'une génération concurrente.
+    # On garde les captions non-vam_ + les 200 dernières vam_ (évite la croissance infinie).
+    with _GEN_LOCK:
+        existing = read_captions()
+        non_vam = [c for c in existing
+                   if not (isinstance(c, dict) and str(c.get("label", "")).startswith("vam_"))]
+        vam = [c for c in existing
+               if isinstance(c, dict) and str(c.get("label", "")).startswith("vam_")
+               and c.get("label") != label][-200:]
+        caps = non_vam + vam
+        if entry:
+            caps.append(entry)
+            sel = [label]
+        else:
+            if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+                caps.append({"label": "sans_texte", "font": None, "captions": []})
+            sel = ["sans_texte"]
+        write_captions(caps)
+        proc = run(model, folders, sel, targets=[src.name])
     return model if proc else None
 
 

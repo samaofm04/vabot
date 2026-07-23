@@ -825,33 +825,29 @@ def random_n_reels_for(identity, n: int):
     return [(v, *_video_meta(v)) for v in picked]
 
 
-def montaged_reels_for(identity, n: int):
-    """Pioche n reels DEJA MONTES sans remise. Ce sont les reels montes par le boss
-    dans l'editeur Montage du site (caption ecrite a la main + incrustee, uniquifies
-    iPhone), ranges dans IDENTITIES_DIR/<identity>/montes/ (video + .desc.txt option.).
-    Retourne [(video, description)]."""
-    montes_dir = IDENTITIES_DIR / (identity or "").strip().lower() / "montes"
-    if not montes_dir.exists():
+def va_ready_montages_for(identity, n: int):
+    """Reels APPROUVES « Dispo pour les VA » d'une identite : ceux dont le brouillon de
+    montage (<stem>.montage.json a cote de la video) a va_ready=true. La variante MONTEE
+    est generee A LA DEMANDE (pas de fichier pre-genere) -> chaque VA une variante unique.
+    Retourne n au hasard sans remise : [(video_path, draft_dict, description)]."""
+    import json as _json
+    ready = []
+    for v in _list_clean_videos(identity):
+        mj = v.parent / f"{v.stem}.montage.json"
+        if not mj.exists():
+            continue
+        try:
+            draft = _json.loads(mj.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not (isinstance(draft, dict) and draft.get("va_ready")):
+            continue
+        _cap, desc, _ex = _video_meta(v)
+        ready.append((v, draft, desc))
+    if not ready:
         return []
-    vids = [
-        p for p in montes_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-    ]
-    if not vids:
-        return []
-    n = min(n, len(vids))
-    picked = random.sample(vids, n)
-    out = []
-    for v in picked:
-        desc = None
-        dp = v.with_suffix(".desc.txt")
-        if dp.exists():
-            try:
-                desc = dp.read_text(encoding="utf-8").strip().replace("\\n", "\n")
-            except Exception:
-                desc = None
-        out.append((v, desc))
-    return out
+    n = min(n, len(ready))
+    return random.sample(ready, n)
 
 
 def banger_reels_for(identity, limit=15):
@@ -1737,29 +1733,58 @@ class UserCog(commands.Cog):
                 except Exception:
                     pass
 
-    async def _deliver_montaged_loop(self, interaction, montaged, identity, label="REEL MONTÉ"):
-        """Envoie chaque reel DEJA MONTE [(example_video, description)] : la video montee
-        (texte deja incruste) a poster TELLE QUELLE + la description. Pas de caption a
-        ecrire, pas de version clean. Interaction deja defer()."""
-        total = len(montaged)
-        for idx, (video, description) in enumerate(montaged, start=1):
-            intro = (
-                f"🎞️ **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
-                f"📥 Télécharge et poste cette vidéo **telle quelle** — le texte est **déjà incrusté** "
-                f"dessus. Rien à écrire par-dessus."
-            )
+    async def _gen_and_send_montaged(self, interaction, video, draft, description, idx, total, identity):
+        """Génère À LA DEMANDE une variante MONTÉE (texte incrusté) du reel `video` via le
+        pipeline Noctus (draft = son .montage.json), puis l'envoie à poster telle quelle +
+        la description. Chaque appel = une variante UNIQUE (uniquification iPhone). Lent
+        (~15-30s) -> interaction déjà defer()."""
+        import asyncio
+        import noctus_web
+        try:
+            model = await asyncio.to_thread(noctus_web.gen_from_draft, str(video), draft, ["V1"])
+        except Exception:
+            model = None
+        if not model:
+            await interaction.followup.send(f"⚠️ REEL MONTÉ {idx}/{total} : génération impossible.")
+            return
+        state = "running"
+        for _ in range(90):                      # ~3 min max
+            await asyncio.sleep(2)
             try:
-                await interaction.followup.send(
-                    content=intro,
-                    file=discord.File(video, filename=f"reel_monte_{idx}{video.suffix}"))
-            except discord.HTTPException as e:
-                await interaction.followup.send(
-                    f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
-                continue
-            if description:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
-                await interaction.followup.send(description)
+                state = noctus_web.status(model).get("state", "running")
+            except Exception:
+                state = "running"
+            if state in ("done", "error", "stopped"):
+                break
+        if state != "done":
+            err = ""
+            try:
+                err = str(noctus_web.status(model).get("error", ""))[:180]
+            except Exception:
+                pass
+            await interaction.followup.send(
+                f"⚠️ REEL MONTÉ {idx}/{total} : génération échouée ({state}) {err}".strip())
+            return
+        outs = noctus_web.output_paths(model)
+        if not outs:
+            await interaction.followup.send(f"⚠️ REEL MONTÉ {idx}/{total} : aucun fichier produit.")
+            return
+        out = outs[0]
+        intro = (
+            f"🎞️ **REEL MONTÉ {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
+            f"📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
+        )
+        try:
+            await interaction.followup.send(
+                content=intro, file=discord.File(str(out), filename=f"reel_monte_{idx}.mp4"))
+        except discord.HTTPException as e:
+            await interaction.followup.send(
+                f"⚠️ REEL MONTÉ {idx}/{total} : envoi impossible (trop lourd) : {e}")
+            return
+        if description:
+            await interaction.followup.send(
+                f"📄 **DESCRIPTION REEL MONTÉ {idx}/{total}** (à coller dans le **champ légende**) :")
+            await interaction.followup.send(description)
 
     async def _send_banger_reels(self, interaction):
         """Bouton '💥 Reels Banger' : envoie au VA ses reels marques ⭐ banger (dans la
@@ -1838,8 +1863,8 @@ class UserCog(commands.Cog):
         _del = transform_cfg.get("delete_source_after_use", False)
         await self._deliver_reels_loop(interaction, reels, identity, label="REEL", delete_after=_del)
 
-    @app_commands.command(name="reelmonte", description="Génère 3 reels DÉJÀ MONTÉS (texte incrusté) : à poster tels quels + description")
-    @app_commands.describe(nombre="Combien de reels montés envoyer (1-10, defaut 3)")
+    @app_commands.command(name="reelmonte", description="Reels DÉJÀ MONTÉS (texte incrusté), générés à la demande : à poster tels quels + description")
+    @app_commands.describe(nombre="Combien de reels montés (1-10, defaut 3)")
     async def reelmonte(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
         if await self._gate_contenu(interaction):
             return
@@ -1850,28 +1875,39 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        montaged = montaged_reels_for(identity, nombre)
-        if not montaged:
+        ready = va_ready_montages_for(identity, nombre)
+        if not ready:
             await interaction.response.send_message(
-                f"Aucun **reel déjà monté** pour ton identité `{identity}` pour l'instant.\n"
-                "_(Ce sont les reels qui ont une version montée/exemple. Demande à un admin d'en préparer.)_",
+                f"Aucun **reel monté** dispo pour ton identité `{identity}` pour l'instant.\n"
+                "_(Un admin doit ouvrir un reel dans l'éditeur Montage du site et cliquer « 📥 Dispo pour les VA ».)_",
+                ephemeral=True,
+            )
+            return
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Module vidéo indisponible : {e}", ephemeral=True)
+            return
+        if not noctus_web.setup_ok():
+            await interaction.response.send_message(
+                "⚠️ La génération vidéo n'est pas prête sur le serveur (Node/ffmpeg). Préviens un admin.",
                 ephemeral=True,
             )
             return
         await interaction.response.defer()
-        total = len(montaged)
+        total = len(ready)
         await interaction.followup.send(
-            f"🎞️ **{total} reels DÉJÀ MONTÉS pour `{identity}` — {total} comptes**\n\n"
-            f"🚨 **RÈGLE : 1 reel différent par compte.**\n"
-            f"✅ Ces reels ont **le texte déjà incrusté** : poste-les **tels quels**, "
-            f"ajoute juste la **DESCRIPTION** dans le champ légende. Rien à écrire par-dessus."
+            f"🎞️ **{total} reel(s) déjà monté(s) pour `{identity}`** — je les **génère pour toi** "
+            f"(≈15-30s chacun ⏳). Chaque reel est **unique** — jamais le même sur 2 comptes.\n"
+            f"✅ Texte **déjà incrusté** : poste **tel quel** + la **DESCRIPTION** en légende."
         )
         if total < nombre:
             await interaction.followup.send(
-                f"ℹ️ Seulement **{total}** reels montés disponibles pour `{identity}` "
+                f"ℹ️ Seulement **{total}** reel(s) monté(s) approuvé(s) pour `{identity}` "
                 f"(tu en as demandé {nombre})."
             )
-        await self._deliver_montaged_loop(interaction, montaged, identity, label="REEL MONTÉ")
+        for idx, (video, draft, description) in enumerate(ready, start=1):
+            await self._gen_and_send_montaged(interaction, video, draft, description, idx, total, identity)
 
     async def cog_load(self):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
