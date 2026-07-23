@@ -5248,13 +5248,8 @@ body.light .action-icon{color:#666}
       <div class="ce-tlbar">
         <button class="ce-tlic" onclick="nxMSoon()" title="Annuler">↶</button>
         <button class="ce-tlic" onclick="nxMSoon()" title="Refaire">↷</button>
-        <span style="width:8px"></span>
-        <button class="ce-tlic" onclick="nxMSoon()" title="Scinder">✂</button>
-        <button class="ce-tlic" onclick="nxMSoon()" title="Dupliquer">⧉</button>
-        <button class="ce-tlic" onclick="nxMSoon()" title="Supprimer">🗑</button>
         <div style="flex:1"></div>
         <div id="nx-m-prog" class="nxm-prog"></div>
-        <button class="ce-tlic" onclick="nxMSoon()" title="Zoom">🔍</button>
       </div>
       <div id="nx-m-frise"></div>
       <div id="nx-m-caplist" style="margin-top:8px"></div>
