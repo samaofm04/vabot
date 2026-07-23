@@ -31,7 +31,7 @@ _MENU_BTN_FEATURE = {
     "cmenu:reel": "contenu", "cmenu:story": "contenu", "cmenu:post": "contenu",
     "cmenu:storycta": "contenu", "cmenu:pseudo": "contenu", "cmenu:name": "contenu",
     "cmenu:bio": "contenu", "cmenu:pp": "contenu", "cmenu:comptes": "contenu",
-    "cmenu:banger": "contenu",
+    "cmenu:banger": "contenu", "cmenu:reelmonte": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -190,6 +190,7 @@ def _build_menu_embed(identity, guild=None):
         emb.add_field(name=name, value=value, inline=True)
 
     add("cmenu:reel", "contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
+    add("cmenu:reelmonte", "contenu", "🎞️ Reel déjà monté", "Reels montés (texte déjà incrusté) — à poster tels quels")
     add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
     add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
@@ -822,6 +823,22 @@ def random_n_reels_for(identity, n: int):
     n = min(n, len(videos))
     picked = random.sample(videos, n)
     return [(v, *_video_meta(v)) for v in picked]
+
+
+def montaged_reels_for(identity, n: int):
+    """Pioche n reels DEJA MONTES (qui ont une video .example = version montee, texte
+    incruste) sans remise. Retourne [(example_video, description)]. Ne garde que les
+    reels ayant un exemple montre -> sinon rien de "monte" a envoyer."""
+    videos = _list_clean_videos(identity)
+    with_ex = []
+    for v in videos:
+        _cap, desc, example = _video_meta(v)
+        if example:
+            with_ex.append((example, desc))
+    if not with_ex:
+        return []
+    n = min(n, len(with_ex))
+    return random.sample(with_ex, n)
 
 
 def banger_reels_for(identity, limit=15):
@@ -1707,6 +1724,30 @@ class UserCog(commands.Cog):
                 except Exception:
                     pass
 
+    async def _deliver_montaged_loop(self, interaction, montaged, identity, label="REEL MONTÉ"):
+        """Envoie chaque reel DEJA MONTE [(example_video, description)] : la video montee
+        (texte deja incruste) a poster TELLE QUELLE + la description. Pas de caption a
+        ecrire, pas de version clean. Interaction deja defer()."""
+        total = len(montaged)
+        for idx, (video, description) in enumerate(montaged, start=1):
+            intro = (
+                f"🎞️ **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
+                f"📥 Télécharge et poste cette vidéo **telle quelle** — le texte est **déjà incrusté** "
+                f"dessus. Rien à écrire par-dessus."
+            )
+            try:
+                await interaction.followup.send(
+                    content=intro,
+                    file=discord.File(video, filename=f"reel_monte_{idx}{video.suffix}"))
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
+                continue
+            if description:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
+                await interaction.followup.send(description)
+
     async def _send_banger_reels(self, interaction):
         """Bouton '💥 Reels Banger' : envoie au VA ses reels marques ⭐ banger (dans la
         Bibliotheque) pour SON identite. Ne supprime JAMAIS la source."""
@@ -1783,6 +1824,41 @@ class UserCog(commands.Cog):
 
         _del = transform_cfg.get("delete_source_after_use", False)
         await self._deliver_reels_loop(interaction, reels, identity, label="REEL", delete_after=_del)
+
+    @app_commands.command(name="reelmonte", description="Génère 3 reels DÉJÀ MONTÉS (texte incrusté) : à poster tels quels + description")
+    @app_commands.describe(nombre="Combien de reels montés envoyer (1-10, defaut 3)")
+    async def reelmonte(self, interaction: discord.Interaction, nombre: app_commands.Range[int, 1, 10] = 3):
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin de faire `/adduser` sur toi.",
+                ephemeral=True,
+            )
+            return
+        montaged = montaged_reels_for(identity, nombre)
+        if not montaged:
+            await interaction.response.send_message(
+                f"Aucun **reel déjà monté** pour ton identité `{identity}` pour l'instant.\n"
+                "_(Ce sont les reels qui ont une version montée/exemple. Demande à un admin d'en préparer.)_",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        total = len(montaged)
+        await interaction.followup.send(
+            f"🎞️ **{total} reels DÉJÀ MONTÉS pour `{identity}` — {total} comptes**\n\n"
+            f"🚨 **RÈGLE : 1 reel différent par compte.**\n"
+            f"✅ Ces reels ont **le texte déjà incrusté** : poste-les **tels quels**, "
+            f"ajoute juste la **DESCRIPTION** dans le champ légende. Rien à écrire par-dessus."
+        )
+        if total < nombre:
+            await interaction.followup.send(
+                f"ℹ️ Seulement **{total}** reels montés disponibles pour `{identity}` "
+                f"(tu en as demandé {nombre})."
+            )
+        await self._deliver_montaged_loop(interaction, montaged, identity, label="REEL MONTÉ")
 
     async def cog_load(self):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
@@ -3608,6 +3684,10 @@ class ContentMenuView(discord.ui.View):
     async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_banger_reels(interaction)
 
+    @discord.ui.button(label="Reel déjà monté", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu:reelmonte", row=1)
+    async def b_reelmonte(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.reelmonte.callback(self.cog, interaction)
+
     @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
     async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.username.callback(self.cog, interaction)
@@ -3704,6 +3784,10 @@ class CentralMenuView(discord.ui.View):
     @discord.ui.button(label="Reel", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu2:reel", row=0)
     async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._central_run(interaction, self.cog.reel)
+
+    @discord.ui.button(label="Reel déjà monté", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu2:reelmonte", row=0)
+    async def b_reelmonte(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._central_run(interaction, self.cog.reelmonte)
 
     @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="cmenu2:story", row=0)
     async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -3892,6 +3976,7 @@ class _MobileNumberModal(discord.ui.Modal):
 # (cle action, label bouton, attribut commande cog, accepte une quantite ?)
 _JB_ACTIONS = [
     ("reel", "🎬 Reel", "reel", True),
+    ("reelmonte", "🎞️ Reel monté", "reelmonte", True),
     ("story", "📖 Story", "story", True),
     ("post", "🖼️ Post", "post", True),
     ("storycta", "📲 Story CTA", "storycta", True),
