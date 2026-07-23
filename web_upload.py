@@ -3257,7 +3257,7 @@ function nxMStylePreset(name){
   if(!nxMState.style)nxMStyleInit(); var s=nxMState.style;
   if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
   else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#000000'; s.effect='none'; }
-  else if(name==='blackbox'){ s.box=true; s.boxColor='#000000'; s.color='#ffffff'; s.effect='none'; }
+  else if(name==='blackbox'){ s.box=true; s.boxColor='#010101'; s.color='#ffffff'; s.effect='none'; }   // #010101 = noir SOLIDE (pas le #000000 semi-transp)
   var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
   nxMStylePaint(); nxMStyleRefresh();
 }
@@ -3272,7 +3272,7 @@ function nxMStylePaint(){
   tg('nxe-none', ef==='none'); tg('nxe-shadow', ef==='shadow'); tg('nxe-neon', ef==='neon');
   var _bc=(s.boxColor||'').toLowerCase(), _tc=(s.color||'').toLowerCase();
   tg('nxp-whitebox', s.box===true && _bc==='#ffffff' && _tc==='#000000');
-  tg('nxp-blackbox', s.box===true && _bc==='#000000' && _tc==='#ffffff');
+  tg('nxp-blackbox', s.box===true && (_bc==='#010101'||_bc==='#000000') && _tc==='#ffffff');
   tg('nxp-outline', s.box!==true && _tc==='#ffffff');
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
