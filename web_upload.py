@@ -3319,7 +3319,8 @@ function nxMRenderCaps(){
   var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=38, gap=9, rulerH=48;
   var vidTrackH=70;   // piste vidéo (miniatures) façon CapCut — bien haute pour cliquer facile
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+6;
-  var colors=['#7c5cff','#3f7fc2','#c2603f','#3fc27a','#c23f9e','#c2a63f'];
+  // Tons chauds (plus de bleu/violet) — la caption sélectionnée passe en orange #9C4937
+  var colors=['#6e5a4f','#7a5f4a','#6b564d','#755a4a','#6e584a','#725c4d'];
   var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
     grid+='<div style="position:absolute;left:'+x+'px;top:'+rulerH+'px;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
@@ -3351,7 +3352,7 @@ function nxMRenderCaps(){
   if(thumbs.length){ var cw=W/thumbs.length; thumbs.forEach(function(u,k){ if(u) strip+='<img src="'+u+'" style="position:absolute;left:'+Math.round(k*cw)+'px;top:0;width:'+Math.ceil(cw+1)+'px;height:'+vidTrackH+'px;object-fit:cover;pointer-events:none">'; }); }
   else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">⏳ miniatures…</div>'; }
   var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">🎬 '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique une caption pour la modifier · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#7c5cff;font-weight:700">0s</span></div>'
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique une caption pour la modifier · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
     + grid + rulerStrip + vtrack
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"><div style="position:absolute;top:0;left:-7px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"></div></div>'
