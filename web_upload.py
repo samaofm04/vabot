@@ -29526,7 +29526,13 @@ def create_app():
                     _f.unlink()
         except Exception:
             pass
-        key = hashlib.md5(_json.dumps(_spec, sort_keys=True).encode("utf-8")).hexdigest()[:20]
+        # Version du moteur dans la clé -> tout changement du rendu (pipeline-core.js /
+        # render_caption.js) invalide le cache (sinon on ressert un vieux PNG périmé).
+        try:
+            _engver = str(int((src / "pipeline-core.js").stat().st_mtime)) + "_" + str(int((src / "render_caption.js").stat().st_mtime))
+        except Exception:
+            _engver = "0"
+        key = hashlib.md5((_json.dumps(_spec, sort_keys=True) + "|v" + _engver).encode("utf-8")).hexdigest()[:20]
         outp = cdir / f"{key}.png"
         bboxp = cdir / f"{key}.json"     # boîte détourée (x,y,w,h,W,H) dans le cadre 1080x1920
         try:

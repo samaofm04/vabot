@@ -602,6 +602,7 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
     const padY  = Math.round(BASE * 0.24);      // > 0.175*BASE -> les lignes se touchent (pas de trou)
     const halfH = Math.round(BASE * 0.62);
     const rad   = Math.round(BASE * 0.34);
+    const rects = [];
     for (let i = 0; i < finalLines.length; i++) {
       const fl = finalLines[i];
       if (!fl.text) continue;
@@ -612,12 +613,19 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
       if (alignSt === 'left')       sx = blockLeft;
       else if (alignSt === 'right') sx = blockLeft + blockW - lw;
       else                          sx = CX - lw / 2;
-      const y   = Math.round(startY + i * lineH);
-      const bx  = sx - padX, bw = lw + padX * 2;
-      const bTop = y - halfH - padY, bh = (halfH + padY) * 2;
-      _roundRect(ctx, bx, bTop, bw, bh, rad);
-      ctx.fill();
+      const y = Math.round(startY + i * lineH);
+      rects.push([sx - padX, y - halfH - padY, lw + padX * 2, (halfH + padY) * 2]);
     }
+    // Ombre douce -> la bulle ressort même sur fond clair (fond blanc ne se fond plus
+    // dans une vidéo claire). Pass 1 = ombre, pass 2 = bulles nettes dessus (couvre les
+    // ombres internes entre lignes qui se chevauchent).
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.32)';
+    ctx.shadowBlur = Math.round(BASE * 0.17);
+    ctx.shadowOffsetY = Math.round(BASE * 0.06);
+    for (const r of rects) { _roundRect(ctx, r[0], r[1], r[2], r[3], rad); ctx.fill(); }
+    ctx.restore();
+    for (const r of rects) { _roundRect(ctx, r[0], r[1], r[2], r[3], rad); ctx.fill(); }
   }
 
   for (let i = 0; i < finalLines.length; i++) {
