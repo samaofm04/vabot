@@ -607,12 +607,13 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
       if (lw > 0) { bl = Math.min(bl, sx); br = Math.max(br, sx + lw); }
     }
     if (isFinite(bl) && br > bl) {
-      const padX = Math.round(BASE * 0.40), padY = Math.round(BASE * 0.30);
+      const padX = Math.round(BASE * 0.48), padY = Math.round(BASE * 0.34);
       const bx = bl - padX, bw = (br - bl) + padX * 2;
       const bTop = startY - Math.round(BASE * 0.62) - padY;
       const bBot = startY + (finalLines.length - 1) * lineH + Math.round(BASE * 0.62) + padY;
-      ctx.fillStyle = (boxColor.toLowerCase() === '#000000') ? 'rgba(0,0,0,0.5)' : boxColor;
-      _roundRect(ctx, bx, bTop, bw, bBot - bTop, Math.round(BASE * 0.24));
+      // Fond noir "#000000" -> noir bien opaque (lisible) ; sinon la couleur telle quelle.
+      ctx.fillStyle = (boxColor.toLowerCase() === '#000000') ? 'rgba(0,0,0,0.72)' : boxColor;
+      _roundRect(ctx, bx, bTop, bw, bBot - bTop, Math.round(BASE * 0.32));
       ctx.fill();
     }
   }
@@ -636,8 +637,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
 
     ctx.textAlign = 'left';
     if (!hasEmoji) {
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.strokeText(text, startX, y);
+      if (!boxSt) {                         // pas de contour noir sur un fond (bulle) -> texte net façon Insta
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.strokeText(text, startX, y);
+      }
       _fxOn(ctx, effectSt, fontSize, fillColor);
       ctx.fillStyle = fillColor;
       ctx.fillText(text, startX, y);
@@ -646,8 +649,7 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
       let curX = Math.round(startX);
       for (const run of runs) {
         if (run.type === 'text') {
-          ctx.strokeStyle = 'rgba(0,0,0,1)';
-          ctx.strokeText(run.content, curX, y);
+          if (!boxSt) { ctx.strokeStyle = 'rgba(0,0,0,1)'; ctx.strokeText(run.content, curX, y); }
           _fxOn(ctx, effectSt, fontSize, fillColor);
           ctx.fillStyle = fillColor;
           ctx.fillText(run.content, curX, y);
@@ -667,8 +669,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
       const uy  = Math.round(y + fontSize * 0.42);
       const uh  = Math.max(2, Math.round(fontSize * 0.07));
       const pad = Math.max(2, Math.round(fontSize * strokeMul / 2));
-      ctx.fillStyle = 'rgba(0,0,0,1)';
-      ctx.fillRect(startX - pad, uy - uh / 2 - pad, lineW + pad * 2, uh + pad * 2);
+      if (!boxSt) {                         // pas de contour du souligné sur un fond
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.fillRect(startX - pad, uy - uh / 2 - pad, lineW + pad * 2, uh + pad * 2);
+      }
       ctx.fillStyle = fillColor;
       ctx.fillRect(startX, uy - uh / 2, lineW, uh);
     }

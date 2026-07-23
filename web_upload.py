@@ -3257,6 +3257,7 @@ function nxMStylePreset(name){
   if(!nxMState.style)nxMStyleInit(); var s=nxMState.style;
   if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
   else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#000000'; s.effect='none'; }
+  else if(name==='blackbox'){ s.box=true; s.boxColor='#000000'; s.color='#ffffff'; s.effect='none'; }
   var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
   nxMStylePaint(); nxMStyleRefresh();
 }
@@ -3271,6 +3272,7 @@ function nxMStylePaint(){
   tg('nxe-none', ef==='none'); tg('nxe-shadow', ef==='shadow'); tg('nxe-neon', ef==='neon');
   var _bc=(s.boxColor||'').toLowerCase(), _tc=(s.color||'').toLowerCase();
   tg('nxp-whitebox', s.box===true && _bc==='#ffffff' && _tc==='#000000');
+  tg('nxp-blackbox', s.box===true && _bc==='#000000' && _tc==='#ffffff');
   tg('nxp-outline', s.box!==true && _tc==='#ffffff');
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
@@ -5543,7 +5545,8 @@ body.light .action-icon{color:#666}
           <div class="nxm-row">
             <span class="nxm-lbl">Préréglage</span>
             <button type="button" id="nxp-outline" class="nxm-preset" onclick="nxMStylePreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
-            <button type="button" id="nxp-whitebox" class="nxm-preset" onclick="nxMStylePreset('whitebox')" title="Fond blanc, texte noir"><span style="background:#fff;color:#111;font-weight:800;font-style:italic;border-radius:4px;padding:0 5px">Aa</span></button>
+            <button type="button" id="nxp-whitebox" class="nxm-preset" onclick="nxMStylePreset('whitebox')" title="Fond blanc, texte noir"><span style="background:#fff;color:#111;font-weight:800;font-style:italic;border-radius:5px;padding:1px 6px">Aa</span></button>
+            <button type="button" id="nxp-blackbox" class="nxm-preset" onclick="nxMStylePreset('blackbox')" title="Fond noir, texte blanc"><span style="background:#111;color:#fff;font-weight:800;font-style:italic;border-radius:5px;padding:1px 6px">Aa</span></button>
           </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Police</span>
