@@ -3803,6 +3803,15 @@ async function nxMontageSend(vf,file,btn){
     if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
 }
+// Met à jour EN DIRECT le filigrane de la carte du reel dans la Bibliothèque (derrière
+// la modale) — pas besoin de recharger/naviguer pour voir le changement.
+function nxMSyncCardFiligrane(fid, on){
+  if(!fid) return;
+  var cards=document.querySelectorAll('.vault-card-bg[data-fid]');
+  for(var i=0;i<cards.length;i++){
+    if(cards[i].getAttribute('data-fid')===fid){ cards[i].classList.toggle('va-ready', !!on); }
+  }
+}
 // Reflète l'état « dispo VA » sur le bouton (vert + libellé) et mémorise nxMState.vaReady.
 function nxMSetApproveBtn(on){
   nxMState.vaReady=!!on;
@@ -3830,6 +3839,7 @@ function nxMontageApprove(){
       if(btn) btn.disabled=false;
       if(j&&j.ok){
         nxMSetApproveBtn(on);
+        try{ nxMSyncCardFiligrane(nxMState.fid, on); }catch(e){}   // carte mise à jour EN DIRECT (derrière la modale)
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}   // filigrane à jour en revenant sur la VA
         if(typeof showToast==='function') showToast(on?'✅ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque':'➖ Reel retiré des VA — filigrane enlevé','success',5000);
       } else {
@@ -10209,17 +10219,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"box-shadow:0 2px 8px rgba(0,0,0,.2),0 0 0 1px rgba(255,255,255,.4) inset'>{date_short}</div>"
         )
 
-    # Filigrane « DISPO VA » (tuilé) + badge : ce reel est marqué « Dispo pour les VA »
-    va_filigrane = ""
-    if is_va_ready:
-        va_filigrane = (
-            f"<div style=\"position:absolute;inset:0;pointer-events:none;z-index:3;"
-            f"background-image:url('{_VA_READY_WM}');background-repeat:repeat;background-size:150px 96px\"></div>"
-            f"<div style='position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;"
-            f"background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;"
-            f"padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)'>✅ DISPO VA</div>"
-        )
-
+    _va_cls = " va-ready" if is_va_ready else ""   # filigrane « DISPO VA » via CSS (togglable live)
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
@@ -10239,12 +10239,11 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
     media_html = (
         f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\",\"{example_safe}\")' "
-        f"title='{name}' class='vault-card-bg' "
+        f"title='{name}' class='vault-card-bg{_va_cls}' data-fid='{fid_safe}' "
         f"style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden'>"
         f"{img_tag}"
         f"{play_badge}"
         f"{date_badge}"
-        f"{va_filigrane}"
         f"</div>"
     )
 
@@ -10830,6 +10829,10 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 /* L image apparait en fade quand elle a chargee */
 .vault-img-load{opacity:0}
 .vault-img-load.loaded{opacity:1}
+
+/* Filigrane « DISPO VA » : reels marqués « Dispo pour les VA » (classe togglable en direct) */
+.vault-card-bg.va-ready::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background-repeat:repeat;background-size:150px 96px;background-image:url("__VA_WM__")}
+.vault-card-bg.va-ready::after{content:'✅ DISPO VA';position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 
 /* En PAUSE (clic manuel sur PC) : re-afficher le bouton ▶ meme sous la media
    query hover (feedback visuel du seul moyen de couper le son sur PC) */
@@ -11585,6 +11588,7 @@ document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(fu
 });
 </script>
 """
+    css = css.replace("__VA_WM__", _VA_READY_WM)   # injecte le data-URI du filigrane « DISPO VA »
 
     return (
         css
