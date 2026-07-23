@@ -3233,7 +3233,7 @@ function nxMBeginResizeW(e,i,side){
   var startWrap=(c.wrapW!=null?c.wrapW:0.88), baseW=wrap.offsetWidth;
   var wr=wrap.getBoundingClientRect(), ovL=ov.getBoundingClientRect().left;
   var cxOv=wr.left+baseW/2-ovL;                 // centre X (px overlay), fixe
-  var dir=(side==='r')?-1:1, lastW=startWrap;   // FLIP: tirer vers l'extérieur = + de lignes (cohérent avec ↕)
+  var dir=(side==='r')?1:-1, lastW=startWrap;   // NATUREL: tirer le bord vers l'extérieur = box plus large (suit le doigt)
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
   function move(ev){
