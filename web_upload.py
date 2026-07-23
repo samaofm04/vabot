@@ -3091,8 +3091,8 @@ function nxMUpdatePreview(){
   ov.querySelectorAll('.nxm-ew').forEach(function(el){
     el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeW(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('r')?'r':'l'); }catch(err){ nxMState.dragging=false; } });
   });
-  ov.querySelectorAll('.nxm-ns').forEach(function(el){   // haut/bas -> taille du texte (comme les coins)
-    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResize(e, parseInt(el.getAttribute('data-i'),10)); }catch(err){ nxMState.dragging=false; } });
+  ov.querySelectorAll('.nxm-ns').forEach(function(el){   // haut/bas -> agrandit en étendant vers le bord tiré
+    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeH(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('b')?'b':'t'); }catch(err){ nxMState.dragging=false; } });
   });
 }
 // Tirer un coin = AGRANDIR / RÉDUIRE le texte (façon CapCut). On scale l'image en direct
@@ -3132,6 +3132,46 @@ function nxMBeginResize(e,i){
     var c=nxMState.caps[i];
     if(c) nxMRealCap(c);   // re-rend net ; garde le wrapper agrandi le temps du rendu (pas de saut)
     nxMHistTouch();
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
+}
+// Tirer une poignée HAUT/BAS (↕) = AGRANDIR le texte en l'étendant vers le bord tiré
+// (le bord opposé reste fixe). Tirer le BAS vers le bas -> plus grand + plus bas.
+function nxMBeginResizeH(e,i,side){
+  e.preventDefault(); e.stopPropagation();
+  var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
+  var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
+  if(!nxMState.style) nxMStyleInit();
+  var oh=ov.clientHeight||480, baseSize=nxMState.style.size||44;
+  var wr=wrap.getBoundingClientRect(), ovr=ov.getBoundingClientRect();
+  var baseH=wrap.offsetHeight||1, baseW=wrap.offsetWidth||1;
+  var topOv=wr.top-ovr.top, botOv=wr.bottom-ovr.top, cxOv=wr.left+wr.width/2-ovr.left;
+  var anchorY=(side==='b')?topOv:botOv;     // bord OPPOSÉ (fixe)
+  var startY=e.clientY, pid=e.pointerId, k=1, minK=16/baseSize, maxK=160/baseSize;
+  nxMState.dragging=true; wrap.classList.add('on');
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev){
+    if(ev.pointerId!=null && ev.pointerId!==pid) return;
+    if(ev.buttons===0){ up(ev); return; }
+    var dy=ev.clientY-startY;
+    var newH=baseH + (side==='b'?dy:-dy);     // tirer vers l'extérieur agrandit
+    k=Math.max(minK, Math.min(maxK, newH/baseH));
+    var nh=baseH*k, nw=baseW*k;
+    var top=(side==='b')?anchorY:(anchorY-nh);  // ancre le bord opposé
+    wrap.style.height=nh.toFixed(1)+'px'; wrap.style.width=nw.toFixed(1)+'px';
+    wrap.style.top=top.toFixed(1)+'px'; wrap.style.left=(cxOv-nw/2).toFixed(1)+'px';
+    c.y=Math.max(0.03,Math.min(0.90,(top+nh/2)/oh));   // le re-rendu tombera au bon endroit
+  }
+  function up(ev){
+    if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    nxMState.dragging=false; wrap.classList.remove('on');
+    var ns=Math.max(16,Math.min(160,Math.round(baseSize*k)));
+    nxMState.style.size=ns;
+    var sl=document.getElementById('nx-m-size'); if(sl) sl.value=ns;
+    var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=ns;
+    nxMRealCap(c); nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
