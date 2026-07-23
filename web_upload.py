@@ -3034,8 +3034,7 @@ function nxMImgHtml(i,c,rec,ow,oh){
   var cls='nxm-drag'+(sel?' sel':'');
   var cnr=sel?('<span class="nxm-cnr tl" data-i="'+i+'"></span><span class="nxm-cnr tr" data-i="'+i+'"></span>'
              +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'
-             +'<span class="nxm-ew l" data-i="'+i+'"></span><span class="nxm-ew r" data-i="'+i+'"></span>'
-             +'<span class="nxm-ns t" data-i="'+i+'"></span><span class="nxm-ns b" data-i="'+i+'"></span>'):'';
+             +'<span class="nxm-ew l" data-i="'+i+'"></span><span class="nxm-ew r" data-i="'+i+'"></span>'):'';
   return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
     +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
@@ -3147,9 +3146,6 @@ function nxMUpdatePreview(force){
   });
   ov.querySelectorAll('.nxm-ew').forEach(function(el){
     el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeW(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('r')?'r':'l'); }catch(err){ nxMState.dragging=false; } });
-  });
-  ov.querySelectorAll('.nxm-ns').forEach(function(el){   // haut/bas -> agrandit en étendant vers le bord tiré
-    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeH(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('b')?'b':'t'); }catch(err){ nxMState.dragging=false; } });
   });
 }
 // Tirer un coin = AGRANDIR / RÉDUIRE le texte (façon CapCut). On scale l'image en direct
