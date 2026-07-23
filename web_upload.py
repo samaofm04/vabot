@@ -2931,6 +2931,7 @@ function nxMAddCap(){
   document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   nxMRenderCaps();
+  nxMHistTouch();
   return true;
 }
 // Écriture EN DIRECT : quand on modifie le texte d'une caption existante (mode édition),
@@ -2941,6 +2942,7 @@ function nxMCaptionLive(){
   c.text=(document.getElementById('nx-m-caption').value||'');
   nxMRenderCaps();       // liste + timeline
   nxMUpdatePreview();    // écriture sur la vidéo (déclenche le vrai rendu du nouveau texte)
+  nxMHistTouch();
 }
 // ---- Timeline type CapCut : helpers (px/seconde, snapping, lanes, playhead, drag) ----
 function nxMPxPerSec(){ return nxMState.pps||0; }
@@ -3057,13 +3059,16 @@ function nxMUpdatePreview(){
   // Si pas encore rendue : on garde la DERNIÈRE image affichée (jamais "sans police"),
   // sinon fallback CSS le temps du 1er rendu.
   idx.forEach(function(i){
-    var c=nxMState.caps[i], key=nxMCapKey(c), rec=nxMState.rimg[key];
-    if(rec&&rec.url&&rec.bbox){ nxMState.lastImg[i]=rec; html+=nxMImgHtml(i,c,rec,ow,oh); }
+    var c=nxMState.caps[i], key=nxMCapKey(c), rec=nxMState.rimg[key], txt=String(c.text||'');
+    if(rec&&rec.url&&rec.bbox){ nxMState.lastImg[i]={url:rec.url,bbox:rec.bbox,text:txt}; html+=nxMImgHtml(i,c,rec,ow,oh); }
     else {
       nxMRealCap(c);                       // déclenche le vrai rendu (async)
       var prev=nxMState.lastImg[i];
-      if(prev&&prev.url&&prev.bbox) html+=nxMImgHtml(i,c,prev,ow,oh);   // ancienne image en attendant
-      else html+=nxMCssBlock(c,ow,'pointer-events:none;');             // 1er rendu : fallback CSS
+      // On ne réutilise l'ancienne image QUE si le TEXTE est identique (sinon mauvais
+      // nombre de lignes) : si le texte a changé (ex. saut de ligne), fallback CSS qui
+      // respecte les \\n immédiatement.
+      if(prev&&prev.url&&prev.bbox&&prev.text===txt) html+=nxMImgHtml(i,c,prev,ow,oh);
+      else html+=nxMCssBlock(c,ow,'pointer-events:none;');
     }
   });
   // guides d'alignement (cachés) — centre horizontal / vertical
@@ -3116,6 +3121,7 @@ function nxMBeginResize(e,i){
     var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=ns;
     var c=nxMState.caps[i];
     if(c) nxMRealCap(c);   // re-rend net ; garde le wrapper agrandi le temps du rendu (pas de saut)
+    nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
@@ -3149,6 +3155,7 @@ function nxMBeginResizeW(e,i,side){
     try{ ov.releasePointerCapture(pid); }catch(_){}
     nxMState.dragging=false; wrap.classList.remove('on');
     nxMRealCap(c);   // re-rend le texte re-wrappé à la nouvelle largeur
+    nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
@@ -3185,6 +3192,7 @@ function nxMBeginTextDrag(e,i){
     if(gx) gx.style.display='none'; if(gy) gy.style.display='none';
     if(!moved){ nxMEditCap(i); return; }   // clic simple (sans bouger) = éditer le texte
     nxMUpdatePreview();   // position seule modifiée -> pas de re-rendu, on normalise juste
+    nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
@@ -3248,9 +3256,63 @@ function nxMStylePaint(){
   var ef=s.effect||'none';
   tg('nxe-none', ef==='none'); tg('nxe-shadow', ef==='shadow'); tg('nxe-neon', ef==='neon');
 }
-function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
+function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
 function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} var b=document.querySelector('.ce-play'); if(b) setTimeout(function(){ b.textContent=v.paused?'▶':'⏸'; },30); }
+// ── Annuler / Refaire (historique captions + style) ──
+function nxMSnap(){
+  return JSON.stringify({caps:nxMState.caps||[], style:nxMState.style||{}, font:(document.getElementById('nx-m-font')||{}).value||'Strong'});
+}
+function nxMHistInit(){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=nxMSnap(); nxMHistPaint(); }
+function nxMCommit(){
+  var s=nxMSnap();
+  if(!nxMState.undoStack){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=s; nxMHistPaint(); return; }
+  if(s===nxMState.histLast) return;                 // rien de nouveau
+  nxMState.undoStack.push(nxMState.histLast);
+  if(nxMState.undoStack.length>80) nxMState.undoStack.shift();
+  nxMState.histLast=s; nxMState.redoStack=[];
+  nxMHistPaint();
+}
+function nxMHistTouch(){ clearTimeout(nxMState._histT); nxMState._histT=setTimeout(nxMCommit,350); }
+function nxMRestore(snapStr){
+  try{
+    var o=JSON.parse(snapStr);
+    nxMState.caps=Array.isArray(o.caps)?o.caps:[];
+    if(o.style) nxMState.style=Object.assign({}, o.style);
+    var fsel=document.getElementById('nx-m-font'); if(fsel&&o.font) fsel.value=o.font;
+    nxMState.editIdx=-1;
+    var s=nxMState.style||{};
+    var sz=document.getElementById('nx-m-size'); if(sz) sz.value=s.size||44;
+    var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=s.size||44;
+    var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
+    var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
+    var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+    var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
+    try{ nxMStylePaint(); }catch(e){}
+    try{ nxMRenderCaps(); }catch(e){}
+    try{ nxMUpdatePreview(); }catch(e){}
+  }catch(e){}
+}
+function nxMUndo(){
+  if(!nxMState.undoStack||!nxMState.undoStack.length) return;
+  clearTimeout(nxMState._histT);
+  nxMState.redoStack=nxMState.redoStack||[];
+  nxMState.redoStack.push(nxMState.histLast);
+  var prev=nxMState.undoStack.pop(); nxMState.histLast=prev;
+  nxMRestore(prev); nxMHistPaint();
+}
+function nxMRedo(){
+  if(!nxMState.redoStack||!nxMState.redoStack.length) return;
+  clearTimeout(nxMState._histT);
+  nxMState.undoStack.push(nxMState.histLast);
+  var nx=nxMState.redoStack.pop(); nxMState.histLast=nx;
+  nxMRestore(nx); nxMHistPaint();
+}
+function nxMHistPaint(){
+  var u=document.getElementById('nx-m-undo'), r=document.getElementById('nx-m-redo');
+  if(u){ u.style.opacity=(nxMState.undoStack&&nxMState.undoStack.length)?'1':'0.35'; u.style.cursor=(nxMState.undoStack&&nxMState.undoStack.length)?'pointer':'default'; }
+  if(r){ r.style.opacity=(nxMState.redoStack&&nxMState.redoStack.length)?'1':'0.35'; r.style.cursor=(nxMState.redoStack&&nxMState.redoStack.length)?'pointer':'default'; }
+}
 // 💾 Enregistre le brouillon (captions + police + style) pour ce reel
 function nxMontageSave(){
   if(!nxMState.fid) return;
@@ -3279,6 +3341,7 @@ function nxMLoadDraft(fid){
     var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
     try{ nxMStylePaint(); }catch(e){}
     try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+    nxMHistInit();   // baseline = état chargé (undo ne revient pas avant le brouillon)
   }).catch(function(){});
 }
 function nxMBeginDrag(e,i,mode){
@@ -3442,6 +3505,7 @@ function nxMDelCap(i){
   if(nxMState.editIdx===i){ nxMState.editIdx=-1; document.getElementById('nx-m-editnote').textContent=''; document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption'; }
   else if(nxMState.editIdx>i){ nxMState.editIdx--; }
   nxMRenderCaps();
+  nxMHistTouch();
 }
 function nxMTimeToggle(){
   var sel=document.querySelector('input[name=nxmtime]:checked'); var range=sel&&sel.value==='range';
@@ -3465,6 +3529,14 @@ function nxMBindResize(){
     if(!m || m.style.display==='none') return;
     clearTimeout(nxMState._rzT);
     nxMState._rzT=setTimeout(function(){ try{ nxMRenderCaps(); if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){} },140);
+  });
+  // Raccourcis Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) quand l'éditeur est ouvert
+  window.addEventListener('keydown', function(e){
+    var m=document.getElementById('nx-montage-modal');
+    if(!m || m.style.display==='none') return;
+    var k=(e.key||'').toLowerCase();
+    if((e.ctrlKey||e.metaKey) && k==='z' && !e.shiftKey){ e.preventDefault(); nxMUndo(); }
+    else if((e.ctrlKey||e.metaKey) && (k==='y' || (k==='z' && e.shiftKey))){ e.preventDefault(); nxMRedo(); }
   });
 }
 async function nxMontageOpen(fid, exampleUrl){
@@ -3492,6 +3564,7 @@ async function nxMontageOpen(fid, exampleUrl){
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
   document.getElementById('nx-montage-modal').style.display='flex';
   nxMRenderCaps();
+  nxMHistInit();       // baseline historique (sera re-basée si un brouillon se charge)
   nxMLoadDraft(fid);   // recharge ce que tu avais enregistré (captions + style) s'il existe
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; var ov=document.getElementById('nx-m-overlay'); if(ov) ov.innerHTML=''; document.getElementById('nx-montage-modal').style.display='none'; }
@@ -5519,8 +5592,8 @@ body.light .action-icon{color:#666}
     <!-- 3) TIMELINE pleine largeur -->
     <div class="ce-tl">
       <div class="ce-tlbar">
-        <button class="ce-tlic" onclick="nxMSoon()" title="Annuler">↶</button>
-        <button class="ce-tlic" onclick="nxMSoon()" title="Refaire">↷</button>
+        <button class="ce-tlic" id="nx-m-undo" onclick="nxMUndo()" title="Annuler (Ctrl+Z)">↶</button>
+        <button class="ce-tlic" id="nx-m-redo" onclick="nxMRedo()" title="Refaire (Ctrl+Y)">↷</button>
         <div style="flex:1"></div>
         <div id="nx-m-prog" class="nxm-prog"></div>
       </div>
