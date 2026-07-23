@@ -593,27 +593,29 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   blockW = Math.min(maxW, blockW);
   const blockLeft = CX - blockW / 2;
 
-  // "Bulle" : fond arrondi derrière tout le bloc de texte (dessiné AVANT le texte)
+  // "Bulle" : fond arrondi qui ÉPOUSE CHAQUE LIGNE (façon surlignage Insta), pas un
+  // gros rectangle unique. Une boîte par ligne (largeur = celle de la ligne), qui se
+  // chevauchent verticalement -> forme continue qui suit le contour du texte.
   if (boxSt) {
-    let bl = Infinity, br = -Infinity;
+    ctx.fillStyle = (boxColor.toLowerCase() === '#000000') ? 'rgba(0,0,0,0.72)' : boxColor;
+    const padX  = Math.round(BASE * 0.42);
+    const padY  = Math.round(BASE * 0.24);      // > 0.175*BASE -> les lignes se touchent (pas de trou)
+    const halfH = Math.round(BASE * 0.62);
+    const rad   = Math.round(BASE * 0.34);
     for (let i = 0; i < finalLines.length; i++) {
       const fl = finalLines[i];
+      if (!fl.text) continue;
       ctx.font = FONT(fl.fontSize);
       const lw = _measureLine(ctx, fl.text, Math.round(fl.fontSize * 1.15));
+      if (lw <= 0) continue;
       let sx;
-      if (alignSt === 'left') sx = blockLeft;
+      if (alignSt === 'left')       sx = blockLeft;
       else if (alignSt === 'right') sx = blockLeft + blockW - lw;
-      else sx = CX - lw / 2;
-      if (lw > 0) { bl = Math.min(bl, sx); br = Math.max(br, sx + lw); }
-    }
-    if (isFinite(bl) && br > bl) {
-      const padX = Math.round(BASE * 0.48), padY = Math.round(BASE * 0.34);
-      const bx = bl - padX, bw = (br - bl) + padX * 2;
-      const bTop = startY - Math.round(BASE * 0.62) - padY;
-      const bBot = startY + (finalLines.length - 1) * lineH + Math.round(BASE * 0.62) + padY;
-      // Fond noir "#000000" -> noir bien opaque (lisible) ; sinon la couleur telle quelle.
-      ctx.fillStyle = (boxColor.toLowerCase() === '#000000') ? 'rgba(0,0,0,0.72)' : boxColor;
-      _roundRect(ctx, bx, bTop, bw, bBot - bTop, Math.round(BASE * 0.32));
+      else                          sx = CX - lw / 2;
+      const y   = Math.round(startY + i * lineH);
+      const bx  = sx - padX, bw = lw + padX * 2;
+      const bTop = y - halfH - padY, bh = (halfH + padY) * 2;
+      _roundRect(ctx, bx, bTop, bw, bh, rad);
       ctx.fill();
     }
   }
