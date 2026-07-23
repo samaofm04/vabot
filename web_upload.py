@@ -3217,7 +3217,7 @@ function nxMRealCap(c){
   fd.set('size', s.size||44); fd.set('color', s.color||'#ffffff');
   fd.set('align', s.align||'center'); fd.set('case', s['case']||'none');
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
-  fd.set('box', s.box?'1':'0'); fd.set('effect', s.effect||'none');
+  fd.set('box', s.box?'1':'0'); fd.set('boxColor', s.boxColor||'#000000'); fd.set('effect', s.effect||'none');
   if(c.wrapW!=null) fd.set('wrapW', (+c.wrapW).toFixed(4));   // largeur de wrap (poignée ↔)
   var bbox=null;
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
@@ -3237,14 +3237,14 @@ function nxMRealCap(c){
 }
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
 function nxMStyleInit(){
-  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,effect:'none'};
+  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,boxColor:'#000000',effect:'none'};
   nxMState.rimg={}; nxMState.rpend={}; nxMState.lastImg={}; nxMState.rfail={};
   var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
   var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
   var cp=document.getElementById('nx-m-color'); if(cp) cp.value='#ffffff';
   nxMStylePaint();
 }
-function nxMStyleSig(){ var s=nxMState.style||{}; return [s.size||44,s.color||'#fff',s.align||'center',s['case']||'none',s.bold?1:0,s.italic?1:0,s.underline?1:0,s.box?1:0,s.effect||'none'].join(','); }
+function nxMStyleSig(){ var s=nxMState.style||{}; return [s.size||44,s.color||'#fff',s.align||'center',s['case']||'none',s.bold?1:0,s.italic?1:0,s.underline?1:0,s.box?1:0,s.boxColor||'#000',s.effect||'none'].join(','); }
 function nxMStyleSize(v){ if(!nxMState.style)nxMStyleInit(); nxMState.style.size=parseInt(v)||44; var e=document.getElementById('nx-m-size-val'); if(e)e.textContent=v; nxMStyleRefresh(); }
 function nxMStyleToggle(k){ if(!nxMState.style)nxMStyleInit(); nxMState.style[k]=!nxMState.style[k]; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleCase(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style['case']=(nxMState.style['case']===c)?'none':c; nxMStylePaint(); nxMStyleRefresh(); }
@@ -3252,6 +3252,14 @@ function nxMStyleColor(c){ if(!nxMState.style)nxMStyleInit(); nxMState.style.col
 function nxMStyleAlign(a){ if(!nxMState.style)nxMStyleInit(); nxMState.style.align=a; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleBox(){ if(!nxMState.style)nxMStyleInit(); nxMState.style.box=!nxMState.style.box; nxMStylePaint(); nxMStyleRefresh(); }
 function nxMStyleEffect(e){ if(!nxMState.style)nxMStyleInit(); nxMState.style.effect=(nxMState.style.effect===e)?'none':e; nxMStylePaint(); nxMStyleRefresh(); }
+// Préréglages 1 clic : "outline" = blanc + contour noir ; "whitebox" = texte noir sur fond blanc
+function nxMStylePreset(name){
+  if(!nxMState.style)nxMStyleInit(); var s=nxMState.style;
+  if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
+  else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#000000'; s.effect='none'; }
+  var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
+  nxMStylePaint(); nxMStyleRefresh();
+}
 function nxMStylePaint(){
   var s=nxMState.style||{};
   function tg(id,on){ var e=document.getElementById(id); if(e)e.classList.toggle('on',!!on); }
@@ -3261,6 +3269,9 @@ function nxMStylePaint(){
   var bb=document.getElementById('nxb-box'); if(bb){ bb.classList.toggle('on',!!s.box); bb.textContent=s.box?'Bulle ✓':'Aucun'; }
   var ef=s.effect||'none';
   tg('nxe-none', ef==='none'); tg('nxe-shadow', ef==='shadow'); tg('nxe-neon', ef==='neon');
+  var _bc=(s.boxColor||'').toLowerCase(), _tc=(s.color||'').toLowerCase();
+  tg('nxp-whitebox', s.box===true && _bc==='#ffffff' && _tc==='#000000');
+  tg('nxp-outline', s.box!==true && _tc==='#ffffff');
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
@@ -5461,6 +5472,9 @@ body.light .action-icon{color:#666}
 .nxm-tg{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;min-width:32px;height:30px;padding:0 9px;font-size:13px;cursor:pointer;line-height:1}
 .nxm-tg:hover{background:#35353c}
 .nxm-tg.on{background:#00d9c0;border-color:#00d9c0;color:#042925}
+.nxm-preset{background:#1c1c1e;border:1px solid #35353c;border-radius:7px;height:34px;min-width:44px;padding:0 8px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;justify-content:center}
+.nxm-preset:hover{border-color:#5a5a64}
+.nxm-preset.on{border-color:#00d9c0;box-shadow:0 0 0 1px #00d9c0}
 .nxm-sw{width:23px;height:23px;border-radius:6px;cursor:pointer;border:2px solid #3a3a42;display:inline-block;box-sizing:border-box}
 .nxm-sw.on{border-color:#00d9c0}
 .nxm-slider{flex:1;accent-color:#00d9c0;cursor:pointer}
@@ -5526,6 +5540,11 @@ body.light .action-icon{color:#666}
         </div>
         <div class="ce-inspect">
           <textarea id="nx-m-caption" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="nxMCaptionLive()"></textarea>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Préréglage</span>
+            <button type="button" id="nxp-outline" class="nxm-preset" onclick="nxMStylePreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
+            <button type="button" id="nxp-whitebox" class="nxm-preset" onclick="nxMStylePreset('whitebox')" title="Fond blanc, texte noir"><span style="background:#fff;color:#111;font-weight:800;font-style:italic;border-radius:4px;padding:0 5px">Aa</span></button>
+          </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Police</span>
             <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
@@ -29479,6 +29498,9 @@ def create_app():
                 _spec[_k] = (_v == "1" or _v == "true")
         if request.form.get("box") in ("1", "true"):
             _spec["box"] = True
+        _bcol = request.form.get("boxColor")
+        if _bcol and re.match(r"^#[0-9a-fA-F]{3,8}$", _bcol):
+            _spec["boxColor"] = _bcol
         if request.form.get("effect") in ("shadow", "neon"):
             _spec["effect"] = request.form.get("effect")
         _ww = request.form.get("wrapW")   # largeur de wrap (poignée ↔), fraction 0.2-0.97
@@ -29705,6 +29727,9 @@ def create_app():
                     out[k] = bool(raw[k])
             if raw.get("box") in (True, "1", "true"):
                 out["box"] = True
+            bc = raw.get("boxColor")
+            if isinstance(bc, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", bc):
+                out["boxColor"] = bc
             if raw.get("effect") in ("shadow", "neon"):
                 out["effect"] = raw["effect"]
             return out
