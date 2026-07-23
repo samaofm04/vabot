@@ -2994,9 +2994,10 @@ function nxMApplyCase(t){ var cs=(nxMState.style||{})['case'];
   return t; }
 function nxMCapKey(c){
   // Image DÉTOURÉE = indépendante de la position -> pas de x/y dans la clé
-  // (déplacer ne re-rend pas ; changer texte/police/style oui).
+  // (déplacer ne re-rend pas ; changer texte/police/style/largeur oui).
   var font=(document.getElementById('nx-m-font')||{}).value||'Strong';
-  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig();
+  var ww=(c&&c.wrapW!=null)?(+c.wrapW).toFixed(3):'d';
+  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig()+'|w'+ww;
 }
 // Bloc CSS d'une caption (fallback avant le PNG, et pendant le drag) positionné à x/y
 function nxMCssBlock(c,ow,extra){
@@ -3029,7 +3030,8 @@ function nxMImgHtml(i,c,rec,ow,oh){
   var sel=(nxMState.editIdx===i);
   var cls='nxm-drag'+(sel?' sel':'');
   var cnr=sel?('<span class="nxm-cnr tl" data-i="'+i+'"></span><span class="nxm-cnr tr" data-i="'+i+'"></span>'
-             +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'):'';
+             +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'
+             +'<span class="nxm-ew l" data-i="'+i+'"></span><span class="nxm-ew r" data-i="'+i+'"></span>'):'';
   return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
     +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
@@ -3074,6 +3076,9 @@ function nxMUpdatePreview(){
   ov.querySelectorAll('.nxm-cnr').forEach(function(el){
     el.addEventListener('pointerdown',function(e){ try{ nxMBeginResize(e, parseInt(el.getAttribute('data-i'),10)); }catch(err){ nxMState.dragging=false; } });
   });
+  ov.querySelectorAll('.nxm-ew').forEach(function(el){
+    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeW(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('r')?'r':'l'); }catch(err){ nxMState.dragging=false; } });
+  });
 }
 // Tirer un coin = AGRANDIR / RÉDUIRE le texte (façon CapCut). On scale l'image en direct
 // (visuel) puis on re-rend net à la nouvelle taille au relâchement. Taille = réglage global.
@@ -3111,6 +3116,39 @@ function nxMBeginResize(e,i){
     var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=ns;
     var c=nxMState.caps[i];
     if(c) nxMRealCap(c);   // re-rend net ; garde le wrapper agrandi le temps du rendu (pas de saut)
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
+}
+// Tirer une poignée LATÉRALE (↔) = régler la LARGEUR de wrap uniquement (le texte
+// va à la ligne plus tôt/tard). Aperçu visuel pendant le drag, re-rendu net au relâchement.
+function nxMBeginResizeW(e,i,side){
+  e.preventDefault(); e.stopPropagation();
+  var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
+  var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
+  if(!nxMState.style) nxMStyleInit();
+  var ovW=ov.clientWidth||270, startX=e.clientX, pid=e.pointerId;
+  var startWrap=(c.wrapW!=null?c.wrapW:0.88), baseW=wrap.offsetWidth;
+  var wr=wrap.getBoundingClientRect(), ovL=ov.getBoundingClientRect().left;
+  var cxOv=wr.left+baseW/2-ovL;                 // centre X (px overlay), fixe
+  var dir=(side==='r')?1:-1;
+  nxMState.dragging=true; wrap.classList.add('on');
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev){
+    if(ev.pointerId!=null && ev.pointerId!==pid) return;
+    if(ev.buttons===0){ up(ev); return; }
+    var dxFrac=(ev.clientX-startX)/ovW;
+    var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // bouger un bord de Δ -> largeur ±2Δ (centré)
+    c.wrapW=w;
+    var npx=baseW*(w/startWrap);                // aperçu : la boîte s'élargit/rétrécit autour du centre
+    wrap.style.width=npx.toFixed(1)+'px';
+    wrap.style.left=(cxOv-npx/2).toFixed(1)+'px';
+  }
+  function up(ev){
+    if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    nxMState.dragging=false; wrap.classList.remove('on');
+    nxMRealCap(c);   // re-rend le texte re-wrappé à la nouvelle largeur
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
@@ -3166,6 +3204,7 @@ function nxMRealCap(c){
   fd.set('align', s.align||'center'); fd.set('case', s['case']||'none');
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
   fd.set('box', s.box?'1':'0'); fd.set('effect', s.effect||'none');
+  if(c.wrapW!=null) fd.set('wrapW', (+c.wrapW).toFixed(4));   // largeur de wrap (poignée ↔)
   var bbox=null;
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0;
@@ -3512,18 +3551,19 @@ async function nxMontagePoll(){
   }catch(e){ setTimeout(nxMontagePoll,2500); }
 }
 async function nxMontageResults(){
-  // Plus de cartes de résultat sur le site : on télécharge DIRECT sur le PC.
-  // 1 variante -> le fichier ; plusieurs -> 1 seul ZIP (évite le blocage "downloads multiples").
+  // Plus de cartes sur le site : on télécharge DIRECT chaque vidéo sur le PC (pas de ZIP).
   var wrap=document.getElementById('nx-m-results');
   try{
     var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
-    var o=j.outputs||{}, keys=Object.keys(o), n=0, oneUrl='';
-    keys.forEach(function(v){ (o[v]||[]).forEach(function(f){ n++; oneUrl='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1'; }); });
-    if(!n){ nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return; }
-    if(n===1){ nxMDownloadOne(oneUrl); }
-    else { nxMDownloadOne('/noctus/montage_zip?model='+encodeURIComponent(nxMState.model)); }   // ZIP des N variantes
-    if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s (ZIP)':'')+' sur ton PC</div>';
-    if(typeof showToast==='function') showToast('✅ '+n+' vidéo'+(n>1?'s prêtes — ZIP en':' prête — téléchargement en')+' cours sur ton PC','success',6000);
+    var o=j.outputs||{}, dls=[];
+    Object.keys(o).forEach(function(v){ (o[v]||[]).forEach(function(f){
+      dls.push({url:'/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1', file:f});
+    }); });
+    if(!dls.length){ nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return; }
+    nxMDownloadAll(dls);   // chaque vidéo téléchargée directement (le navigateur peut demander 1x l'autorisation pour plusieurs)
+    var n=dls.length;
+    if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s':'')+' sur ton PC'+(n>1?' <span style="color:#9a9aa6;font-weight:500">(autorise « télécharger plusieurs fichiers » si le navigateur demande)</span>':'')+'</div>';
+    if(typeof showToast==='function') showToast('✅ '+n+' vidéo'+(n>1?'s prêtes — téléchargement':' prête — téléchargement')+' en cours sur ton PC','success',6000);
     var gen=document.getElementById('nx-m-gen'), bulk=document.getElementById('nx-m-bulk');
     if(gen){ gen.disabled=false; gen.textContent='✅ Téléchargé !'; }
     if(bulk){ bulk.disabled=false; }
@@ -5310,6 +5350,8 @@ body.light .action-icon{color:#666}
 .nxm-cnr{position:absolute;width:13px;height:13px;background:#fff;border:2px solid #9C4937;border-radius:3px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;touch-action:none}
 .nxm-cnr.tl{left:-7px;top:-7px;cursor:nwse-resize}.nxm-cnr.tr{right:-7px;top:-7px;cursor:nesw-resize}
 .nxm-cnr.bl{left:-7px;bottom:-7px;cursor:nesw-resize}.nxm-cnr.br{right:-7px;bottom:-7px;cursor:nwse-resize}
+.nxm-ew{position:absolute;top:50%;transform:translateY(-50%);width:9px;height:28px;background:#fff;border:2px solid #9C4937;border-radius:4px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;cursor:ew-resize;touch-action:none}
+.nxm-ew.l{left:-6px}.nxm-ew.r{right:-6px}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
@@ -29360,6 +29402,14 @@ def create_app():
             _spec["box"] = True
         if request.form.get("effect") in ("shadow", "neon"):
             _spec["effect"] = request.form.get("effect")
+        _ww = request.form.get("wrapW")   # largeur de wrap (poignée ↔), fraction 0.2-0.97
+        if _ww:
+            try:
+                _wf = float(_ww)
+                if 0.2 <= _wf <= 0.97:
+                    _spec["wrapW"] = round(_wf, 4)
+            except Exception:
+                pass
         # Aperçu = image DÉTOURÉE au texte (l'éditeur la positionne où il veut) :
         # indépendante de x/y -> 1 seul rendu réutilisé quelle que soit la position.
         _spec["tight"] = True
@@ -29620,6 +29670,14 @@ def create_app():
                                     seg[_pk] = round(_pf, 4)
                         except Exception:
                             pass
+                    try:                     # largeur de wrap (poignée ↔)
+                        _wv = it.get("wrapW")
+                        if _wv is not None:
+                            _wf = float(_wv)
+                            if 0.2 <= _wf <= 0.97:
+                                seg["wrapW"] = round(_wf, 4)
+                    except Exception:
+                        pass
                     segments.append(seg)
 
         if segments:

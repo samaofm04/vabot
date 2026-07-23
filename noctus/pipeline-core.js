@@ -447,12 +447,14 @@ function wrapText(ctx, text, maxW, emojiSize) {
 async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = null) {
   const W    = CONFIG.outputWidth;
   const H    = CONFIG.outputHeight;
-  // Zone texte plus large (~88% de la largeur) -> les grandes tailles rentrent
-  // sans être rétrécies. (avant : 720/1080 = 67% -> le texte long rapetissait.)
-  const maxW = Math.round(W * 0.88);
   // ── Style PAR CAPTION (éditeur CapCut web) : x/y fraction 0-1, size px, color hex,
   //    font par segment. Champs absents -> comportement historique inchangé.
   const st = (captions && captions.length === 1 && captions[0]) || {};
+  // Largeur de la zone texte (wrap) : réglable via st.wrapW (poignée ↔ latérale de
+  // l'éditeur). Défaut ~88% de la largeur. Plus petit -> le texte va à la ligne plus tôt.
+  const wrapFrac = (st.wrapW != null && isFinite(parseFloat(st.wrapW)))
+    ? Math.min(0.97, Math.max(0.2, parseFloat(st.wrapW))) : 0.88;
+  const maxW = Math.round(W * wrapFrac);
   if (st.font) fontFamily = st.font;
   const hasSize = Number(st.size) > 0;   // taille imposée par l'utilisateur
   const BASE = hasSize
