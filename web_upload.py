@@ -3023,8 +3023,8 @@ function nxMImgHtml(i,c,rec,ow,oh){
   var p=nxMCapXY(c), d=nxMImgDims(rec.bbox,ow,oh);
   var sel=(nxMState.editIdx===i);
   var cls='nxm-drag'+(sel?' sel':'');
-  var cnr=sel?('<span class="nxm-cnr tl"></span><span class="nxm-cnr tr"></span>'
-             +'<span class="nxm-cnr bl"></span><span class="nxm-cnr br"></span>'):'';
+  var cnr=sel?('<span class="nxm-cnr tl" data-i="'+i+'"></span><span class="nxm-cnr tr" data-i="'+i+'"></span>'
+             +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'):'';
   return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+(p.x*ow-d.w/2).toFixed(1)+'px;top:'+(p.y*oh-d.h/2).toFixed(1)+'px;'
     +'width:'+d.w.toFixed(1)+'px;height:'+d.h.toFixed(1)+'px;cursor:move;pointer-events:auto;'
@@ -3064,8 +3064,50 @@ function nxMUpdatePreview(){
   html+='<div id="nx-m-gy" style="position:absolute;top:50%;left:0;right:0;height:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>';
   ov.innerHTML=html;
   ov.querySelectorAll('.nxm-drag').forEach(function(el){
-    el.addEventListener('pointerdown',function(e){ nxMBeginTextDrag(e, parseInt(el.getAttribute('data-i'),10)); });
+    el.addEventListener('pointerdown',function(e){ try{ nxMBeginTextDrag(e, parseInt(el.getAttribute('data-i'),10)); }catch(err){ nxMState.dragging=false; } });
   });
+  ov.querySelectorAll('.nxm-cnr').forEach(function(el){
+    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResize(e, parseInt(el.getAttribute('data-i'),10)); }catch(err){ nxMState.dragging=false; } });
+  });
+}
+// Tirer un coin = AGRANDIR / RÉDUIRE le texte (façon CapCut). On scale l'image en direct
+// (visuel) puis on re-rend net à la nouvelle taille au relâchement. Taille = réglage global.
+function nxMBeginResize(e,i){
+  e.preventDefault(); e.stopPropagation();
+  var ov=document.getElementById('nx-m-overlay'); if(!ov) return;
+  var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
+  if(!nxMState.style) nxMStyleInit();
+  var baseSize=nxMState.style.size||44;
+  var wr=wrap.getBoundingClientRect(), ovr=ov.getBoundingClientRect();
+  var cxOv=wr.left+wr.width/2-ovr.left, cyOv=wr.top+wr.height/2-ovr.top;   // centre px overlay (fixe)
+  var cxCl=wr.left+wr.width/2, cyCl=wr.top+wr.height/2;                    // centre px client
+  var baseW=wrap.offsetWidth, baseH=wrap.offsetHeight;
+  var startDist=Math.hypot(e.clientX-cxCl, e.clientY-cyCl)||1;
+  var pid=e.pointerId, k=1, minK=16/baseSize, maxK=160/baseSize;
+  nxMState.dragging=true; wrap.classList.add('on');
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev){
+    if(ev.pointerId!=null && ev.pointerId!==pid) return;
+    if(ev.buttons===0){ up(ev); return; }
+    var dist=Math.hypot(ev.clientX-cxCl, ev.clientY-cyCl)||1;
+    k=Math.max(minK, Math.min(maxK, dist/startDist));
+    var nw=baseW*k, nh=baseH*k;
+    wrap.style.width=nw.toFixed(1)+'px'; wrap.style.height=nh.toFixed(1)+'px';
+    wrap.style.left=(cxOv-nw/2).toFixed(1)+'px'; wrap.style.top=(cyOv-nh/2).toFixed(1)+'px';
+  }
+  function up(ev){
+    if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    nxMState.dragging=false; wrap.classList.remove('on');
+    var ns=Math.max(16,Math.min(160,Math.round(baseSize*k)));
+    nxMState.style.size=ns;
+    var sl=document.getElementById('nx-m-size'); if(sl) sl.value=ns;
+    var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=ns;
+    var c=nxMState.caps[i];
+    if(c) nxMRealCap(c);   // re-rend net ; garde le wrapper agrandi le temps du rendu (pas de saut)
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
 // Démarre le déplacement d'une caption sur la vidéo (on bouge la VRAIE image -> police gardée)
 function nxMBeginTextDrag(e,i){
@@ -3110,7 +3152,8 @@ function nxMRealCap(c){
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
   if(!nxMState.style) nxMStyleInit();
   var font=(document.getElementById('nx-m-font')||{}).value||'Strong', key=nxMCapKey(c);
-  if((nxMState.rimg[key]&&nxMState.rimg[key].url)||nxMState.rpend[key]) return;   // déjà rendu / en cours
+  if(!nxMState.rfail) nxMState.rfail={};
+  if((nxMState.rimg[key]&&nxMState.rimg[key].url)||nxMState.rpend[key]||nxMState.rfail[key]) return;   // déjà rendu / en cours / échoué
   nxMState.rpend[key]=1;
   var s=nxMState.style||{};
   var fd=new FormData(); fd.set('text',text); fd.set('font',font);
@@ -3124,15 +3167,20 @@ function nxMRealCap(c){
     try{ var h=r.headers.get('X-BBox'); if(h) bbox=JSON.parse(h); }catch(e){}
     return r.blob();
   }).then(function(b){
-    if(b && b.size>200 && bbox) nxMState.rimg[key]={url:URL.createObjectURL(b), bbox:bbox};
     delete nxMState.rpend[key];
-    try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){}
-  }).catch(function(){ delete nxMState.rpend[key]; });
+    if(b && b.size>200 && bbox){
+      nxMState.rimg[key]={url:URL.createObjectURL(b), bbox:bbox};
+      try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){}
+    } else {
+      // pas de boîte -> on N'INSISTE PAS (sinon boucle infinie de requêtes) ; fallback CSS
+      nxMState.rfail[key]=1;
+    }
+  }).catch(function(){ delete nxMState.rpend[key]; });   // erreur réseau -> retry possible plus tard
 }
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
 function nxMStyleInit(){
   nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,effect:'none'};
-  nxMState.rimg={}; nxMState.rpend={}; nxMState.lastImg={};
+  nxMState.rimg={}; nxMState.rpend={}; nxMState.lastImg={}; nxMState.rfail={};
   var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
   var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
   var cp=document.getElementById('nx-m-color'); if(cp) cp.value='#ffffff';
@@ -3336,8 +3384,8 @@ function nxMEditCap(i){
   nxMState.editIdx=i;
   document.getElementById('nx-m-editnote').textContent='✏️ modif caption '+(i+1)+' — clique « Mettre à jour »';
   document.getElementById('nx-m-addcap').textContent='✔ Mettre à jour';
-  nxMRenderCaps();       // met en surbrillance (orange) la caption sélectionnée
-  nxMUpdatePreview();    // + cadre orange sur la vidéo
+  try{ nxMRenderCaps(); }catch(e){}       // surbrillance de la caption sélectionnée
+  try{ nxMUpdatePreview(); }catch(e){}    // + cadre + poignées sur la vidéo
   try{ document.getElementById('nx-m-caption').focus(); }catch(e){}
 }
 function nxMDelCap(i){
@@ -5203,12 +5251,11 @@ body.light .action-icon{color:#666}
 .ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .nxm-drag{border:1.5px dashed rgba(255,255,255,.5);border-radius:4px;transition:border-color .1s}
-.nxm-drag.sel{border:1.5px solid #fff}
-.nxm-drag:hover{border-color:#22d3ee}
-.nxm-drag.on{border-color:#22d3ee;border-style:solid}
-.nxm-cnr{position:absolute;width:11px;height:11px;background:#fff;border:1.5px solid #9C4937;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:none}
-.nxm-cnr.tl{left:-6px;top:-6px}.nxm-cnr.tr{right:-6px;top:-6px}
-.nxm-cnr.bl{left:-6px;bottom:-6px}.nxm-cnr.br{right:-6px;bottom:-6px}
+.nxm-drag.sel,.nxm-drag.on{border:1.5px solid #fff}
+.nxm-drag:hover{border-color:rgba(255,255,255,.9)}
+.nxm-cnr{position:absolute;width:13px;height:13px;background:#fff;border:2px solid #9C4937;border-radius:3px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;touch-action:none}
+.nxm-cnr.tl{left:-7px;top:-7px;cursor:nwse-resize}.nxm-cnr.tr{right:-7px;top:-7px;cursor:nesw-resize}
+.nxm-cnr.bl{left:-7px;bottom:-7px;cursor:nesw-resize}.nxm-cnr.br{right:-7px;bottom:-7px;cursor:nwse-resize}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
