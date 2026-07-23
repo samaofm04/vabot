@@ -3086,6 +3086,19 @@ function nxMDragPreview(i){
   ov.innerHTML='<div class="nxm-drag sel on" style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);width:'+wpx+'px;pointer-events:none;box-sizing:content-box;display:flex;justify-content:center">'
     +'<div style="'+boxCss+'width:100%;text-align:'+al+';color:'+col+';font-family:'+ff.fam+',Arial;font-weight:'+ff.wt+';'+ff.ital+ul+'text-transform:'+tt+';font-size:'+fpx.toFixed(1)+'px;line-height:'+lh.toFixed(2)+';'+strokeCss+'white-space:pre-wrap;word-break:break-word">'+inner+'</div>'+cnr+'</div>';
 }
+// Précharge les polices caption (appelé APRÈS chargement de fonts.css). Charge tous
+// les styles/poids puis rafraîchit l'aperçu une fois prêtes -> jamais de "police de base".
+function nxMPreloadFonts(){
+  if(nxMState._fontsPreload || !(document.fonts && document.fonts.load)) return;
+  nxMState._fontsPreload=1;
+  try{
+    var proms=[];
+    ['Poppins','TikTokSans','Inter','Montserrat','BebasNeue','Anton'].forEach(function(f){
+      ['','italic ','bold ','italic bold '].forEach(function(pre){ proms.push(document.fonts.load(pre+'40px "'+f+'"')); });
+    });
+    Promise.all(proms).then(function(){ try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){} }).catch(function(){});
+  }catch(e){ nxMState._fontsPreload=0; }
+}
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
 function nxMUpdatePreview(force){
@@ -3093,14 +3106,12 @@ function nxMUpdatePreview(force){
   var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video');
   if(!ov||!v) return;
   if(nxMState.dragging && !force) return;   // pendant le drag: pas de rebuild, SAUF re-wrap live (poignée ↕)
-  if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
-  if(!nxMState._fontsPreload && document.fonts && document.fonts.load){   // précharge les polices -> jamais de "police de base"
-    nxMState._fontsPreload=1;
-    ['Poppins','TikTokSans','Inter','Montserrat','BebasNeue','Anton'].forEach(function(f){
-      // tous les styles/poids -> quel que soit le poids de la @font-face, la face se charge
-      ['','italic ','bold ','italic bold '].forEach(function(pre){ try{ document.fonts.load(pre+'40px "'+f+'"'); }catch(e){} });
-    });
+  if(!document.getElementById('nx-m-fontcss')){
+    var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css?v=3';
+    _lc.onload=function(){ nxMState._fontcssReady=1; nxMPreloadFonts(); };  // précharge APRÈS que la css soit chargée
+    document.head.appendChild(_lc);
   }
+  if(nxMState._fontcssReady) nxMPreloadFonts();
   var t=isNaN(v.currentTime)?0:v.currentTime, idx=nxMActiveIdx(t);
   if(!idx.length){ ov.innerHTML=''; return; }
   if(!nxMState.style) nxMStyleInit();
@@ -29532,7 +29543,9 @@ def create_app():
             f"@font-face{{font-family:'{fam}';src:url('/noctus/font/{fn}') format('{fmt}');font-weight:100 900;font-display:block}}"
             for fam, fn, fmt in faces
         )
-        return Response(css, mimetype="text/css")
+        resp = Response(css, mimetype="text/css")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # toujours la dernière version
+        return resp
 
     @app.route("/noctus/font/<name>")
     def noctus_font(name):
