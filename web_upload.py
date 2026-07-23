@@ -3033,7 +3033,8 @@ function nxMImgHtml(i,c,rec,ow,oh){
   var cls='nxm-drag'+(sel?' sel':'');
   var cnr=sel?('<span class="nxm-cnr tl" data-i="'+i+'"></span><span class="nxm-cnr tr" data-i="'+i+'"></span>'
              +'<span class="nxm-cnr bl" data-i="'+i+'"></span><span class="nxm-cnr br" data-i="'+i+'"></span>'
-             +'<span class="nxm-ew l" data-i="'+i+'"></span><span class="nxm-ew r" data-i="'+i+'"></span>'):'';
+             +'<span class="nxm-ew l" data-i="'+i+'"></span><span class="nxm-ew r" data-i="'+i+'"></span>'
+             +'<span class="nxm-ns t" data-i="'+i+'"></span><span class="nxm-ns b" data-i="'+i+'"></span>'):'';
   return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
     +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
@@ -3089,6 +3090,9 @@ function nxMUpdatePreview(){
   });
   ov.querySelectorAll('.nxm-ew').forEach(function(el){
     el.addEventListener('pointerdown',function(e){ try{ nxMBeginResizeW(e, parseInt(el.getAttribute('data-i'),10), el.classList.contains('r')?'r':'l'); }catch(err){ nxMState.dragging=false; } });
+  });
+  ov.querySelectorAll('.nxm-ns').forEach(function(el){   // haut/bas -> taille du texte (comme les coins)
+    el.addEventListener('pointerdown',function(e){ try{ nxMBeginResize(e, parseInt(el.getAttribute('data-i'),10)); }catch(err){ nxMState.dragging=false; } });
   });
 }
 // Tirer un coin = AGRANDIR / RÉDUIRE le texte (façon CapCut). On scale l'image en direct
@@ -5445,6 +5449,8 @@ body.light .action-icon{color:#666}
 .nxm-cnr.bl{left:-7px;bottom:-7px;cursor:nesw-resize}.nxm-cnr.br{right:-7px;bottom:-7px;cursor:nwse-resize}
 .nxm-ew{position:absolute;top:50%;transform:translateY(-50%);width:9px;height:28px;background:#fff;border:2px solid #9C4937;border-radius:4px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;cursor:ew-resize;touch-action:none}
 .nxm-ew.l{left:-6px}.nxm-ew.r{right:-6px}
+.nxm-ns{position:absolute;left:50%;transform:translateX(-50%);width:28px;height:9px;background:#fff;border:2px solid #9C4937;border-radius:4px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:auto;z-index:5;cursor:ns-resize;touch-action:none}
+.nxm-ns.t{top:-6px}.nxm-ns.b{bottom:-6px}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
