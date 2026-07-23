@@ -711,19 +711,23 @@ function buildVideoFilter(variation, brightJitter = 0, contrastJitter = 0, outW 
 }
 
 // ─── FFmpeg ───────────────────────────────────────────────────────────────────
-function runFFmpeg(modelId, args) {
+function runFFmpeg(modelId, args, timeoutMs = 120000) {
   return new Promise(resolve => {
     const proc = spawn('ffmpeg', args, { stdio: 'pipe' });
     if (!activeProcs.has(modelId)) activeProcs.set(modelId, new Set());
     activeProcs.get(modelId).add(proc);
-    let stderr = '';
-    proc.stderr.on('data', d => { stderr += d.toString(); });
+    let stderr = '', done = false;
+    proc.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 24000) stderr = stderr.slice(-14000); });
+    if (proc.stdout) proc.stdout.on('data', () => {});   // draine stdout par sécurité (évite tout blocage de pipe)
     const cleanup = () => {
       const s = activeProcs.get(modelId);
       if (s) { s.delete(proc); if (!s.size) activeProcs.delete(modelId); }
     };
-    proc.on('close', code => { cleanup(); resolve({ status: code, stderr: stderr.slice(-300) }); });
-    proc.on('error', () => { cleanup(); resolve({ status: -1, stderr: 'ffmpeg introuvable' }); });
+    const finish = (r) => { if (done) return; done = true; clearTimeout(tmr); cleanup(); resolve(r); };
+    // Garde-fou : ffmpeg qui bloque > timeout -> on le tue et on remonte l'erreur (plus de hang infini)
+    const tmr = setTimeout(() => { try { proc.kill('SIGKILL'); } catch (_) {} finish({ status: -2, stderr: `TIMEOUT (>${Math.round(timeoutMs / 1000)}s) — ${stderr.slice(-700)}` }); }, timeoutMs);
+    proc.on('close', code => finish({ status: code, stderr: stderr.slice(-700) }));
+    proc.on('error', () => finish({ status: -1, stderr: 'ffmpeg introuvable' }));
   });
 }
 
@@ -1008,8 +1012,9 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
             '-t',              finalDuration.toFixed(3),
             '-map_metadata',   '-1',
             '-c:v',            'libx264',
-            '-preset',         'fast',
+            '-preset',         'veryfast',
             '-crf',            '23',
+            '-pix_fmt',        'yuv420p',
             '-c:a',            'aac',
             '-b:a',            '192k',
             '-y',              tmpOut,
