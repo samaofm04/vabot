@@ -5545,7 +5545,6 @@ body.light .action-icon{color:#666}
 .ce-play{background:#2a2a30;border:0;color:#fff;width:46px;height:40px;border-radius:12px;cursor:pointer;font-size:16px;display:inline-flex;align-items:center;justify-content:center;transition:background .12s,transform .08s}
 .ce-play:hover{background:#3a3a42}
 .ce-play:active{transform:scale(.93)}
-.ce-play.playing{background:#00d9c0;color:#042925}
 /* Inspecteur droite */
 .ce-right{background:#1f1f23;border-left:1px solid #2a2a30;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .ce-rtabs{display:flex;gap:2px;padding:8px;border-bottom:1px solid #2a2a30;overflow-x:auto}
