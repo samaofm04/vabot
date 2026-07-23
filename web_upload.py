@@ -3108,7 +3108,7 @@ function nxMUpdatePreview(force){
   if(!ov||!v) return;
   if(nxMState.dragging && !force) return;   // pendant le drag: pas de rebuild, SAUF re-wrap live (poignée ↕)
   if(!document.getElementById('nx-m-fontcss')){
-    var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css?v=4';
+    var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css?v=5';
     _lc.onload=function(){ nxMState._fontcssReady=1; nxMPreloadFonts(); };  // précharge APRÈS que la css soit chargée
     document.head.appendChild(_lc);
   }
@@ -3211,9 +3211,7 @@ function nxMBeginResizeH(e,i,side){
     var ls=Math.max(0.9, Math.min(3.0, startLS + outward*2.4));              // ne touche QUE la hauteur, pas la largeur
     ls=Math.round(ls*20)/20;
     if(ls===lastLS) return; lastLS=ls; c.lineSpacing=ls;
-    // VRAI rendu moteur (police exacte), throttlé -> affiché en place quand prêt
-    if(!nxMState._hrPending){ nxMState._hrPending=true;
-      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 120); }
+    nxMDragPreview(i);   // aperçu INSTANTANÉ (live) — police Strong préchargée
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
@@ -3245,9 +3243,7 @@ function nxMBeginResizeW(e,i,side){
     var dxFrac=(ev.clientX-startX)/ovW;
     var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // tirer le bord vers l'extérieur -> box plus large (- de lignes)
     w=Math.round(w*100)/100; if(w===lastW) return; lastW=w; c.wrapW=w;
-    // VRAI rendu moteur (police exacte), throttlé -> affiché en place quand prêt
-    if(!nxMState._hrPending){ nxMState._hrPending=true;
-      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 120); }
+    nxMDragPreview(i);   // aperçu INSTANTANÉ (live) — police Strong embarquée
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
@@ -29541,15 +29537,30 @@ def create_app():
             ("BebasNeue", "BebasNeue-Regular.ttf", "truetype"),
             ("Anton", "Anton-Regular.ttf", "truetype"),
         ]
-        # font-weight:100 900 -> le fichier est utilisé pour TOUT poids demandé (jamais
-        # de repli sur Arial). font-display:block -> pas de flash "police de base" pendant
-        # le (court) chargement ; le préchargement JS l'a de toute façon déjà chargée.
-        css = "".join(
-            f"@font-face{{font-family:'{fam}';src:url('/noctus/font/{fn}') format('{fmt}');font-weight:100 900;font-display:block}}"
-            for fam, fn, fmt in faces
-        )
-        resp = Response(css, mimetype="text/css")
-        resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # toujours la dernière version
+        # Polices EMBARQUÉES en data URI -> dispo dès que la css est parsée (aucune
+        # requête police, aucun repli Arial même une frame). Calculé 1x (cache module).
+        global _FONTS_CSS_CACHE
+        try:
+            _FONTS_CSS_CACHE
+        except NameError:
+            _FONTS_CSS_CACHE = None
+        if _FONTS_CSS_CACHE is None:
+            import base64 as _b64
+            parts = []
+            for fam, fn, fmt in faces:
+                mime = "font/woff2" if fmt == "woff2" else "font/ttf"
+                fp = BOT_DIR / "noctus" / "fonts" / fn
+                src = f"url('/noctus/font/{fn}') format('{fmt}')"   # défaut : fichier
+                try:
+                    if fp.stat().st_size < 260000:   # embarque les polices LÉGÈRES (dispo instant)
+                        data = _b64.b64encode(fp.read_bytes()).decode("ascii")
+                        src = f"url(data:{mime};base64,{data}) format('{fmt}')"
+                except Exception:
+                    pass
+                parts.append(f"@font-face{{font-family:'{fam}';src:{src};font-weight:100 900;font-display:block}}")
+            _FONTS_CSS_CACHE = "".join(parts)
+        resp = Response(_FONTS_CSS_CACHE, mimetype="text/css")
+        resp.headers["Cache-Control"] = "public, max-age=2592000"   # embarqué -> peut être caché (busté par ?v=)
         return resp
 
     @app.route("/noctus/font/<name>")
