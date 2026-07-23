@@ -3186,25 +3186,17 @@ function nxMBeginResizeH(e,i,side){
   var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
   var ovH=ov.clientHeight||480, startY=e.clientY, pid=e.pointerId;
   var startWrap=(c.wrapW!=null?c.wrapW:0.88);
-  var wr=wrap.getBoundingClientRect(), ovr=ov.getBoundingClientRect();
-  var anchorPx=(side==='b')?(wr.top-ovr.top):(wr.bottom-ovr.top);   // bord OPPOSÉ (fixe) en px overlay
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
   var lastW=startWrap;
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
-    var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // + = étendre = plus de lignes
-    var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // étendre -> wrapW plus petit -> + de lignes
+    var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // tirer vers l'extérieur (bas/haut) = + de lignes
+    var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // -> wrapW plus petit -> + de lignes (comme ↔)
     w=Math.round(w*100)/100;
     if(w===lastW) return; lastW=w; c.wrapW=w;
-    nxMDragPreview(i);   // aperçu CSS INSTANTANÉ (on voit les lignes changer en direct)
-    // ancre le bord OPPOSÉ -> la boîte grandit vers la poignée tirée (suit le doigt)
-    var box=ov.querySelector('.nxm-drag'); if(box){ var bh=box.offsetHeight;
-      var centerPx=(side==='b')?(anchorPx+bh/2):(anchorPx-bh/2);
-      box.style.top=centerPx.toFixed(1)+'px';
-      c.y=Math.max(0.03,Math.min(0.94,centerPx/ovH));   // pour le rendu final
-    }
+    nxMDragPreview(i);   // aperçu CSS INSTANTANÉ, boîte centrée (identique à ↔)
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
