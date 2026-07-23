@@ -3504,7 +3504,7 @@ async function nxMontageResults(){
     var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
     var o=j.outputs||{}, keys=Object.keys(o), n=0, oneUrl='';
     keys.forEach(function(v){ (o[v]||[]).forEach(function(f){ n++; oneUrl='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1'; }); });
-    if(!n){ nxMGenFail('aucune vidéo produite'); return; }
+    if(!n){ nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return; }
     if(n===1){ nxMDownloadOne(oneUrl); }
     else { nxMDownloadOne('/noctus/montage_zip?model='+encodeURIComponent(nxMState.model)); }   // ZIP des N variantes
     if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s (ZIP)':'')+' sur ton PC</div>';
@@ -3514,6 +3514,16 @@ async function nxMontageResults(){
     if(bulk){ bulk.disabled=false; }
     setTimeout(nxMGenReset,3000);
   }catch(e){ nxMGenFail('erreur chargement résultats'); }
+}
+// Affiche la fin du log du pipeline dans la zone résultats (pour diagnostiquer un échec)
+function nxMShowGenLog(){
+  var wrap=document.getElementById('nx-m-results'); if(!wrap||!nxMState.model) return;
+  fetch('/noctus/montage_log?model='+encodeURIComponent(nxMState.model),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      var log=(j&&j.log)?j.log:'(log vide)';
+      wrap.innerHTML='<div style="font-size:12px;color:#f87171;font-weight:700;margin-bottom:6px">❌ Échec — détail du rendu :</div>'
+        +'<pre style="white-space:pre-wrap;word-break:break-word;font-size:10px;color:#c4c4cc;background:#131316;border:1px solid #34343a;border-radius:8px;padding:10px;max-height:220px;overflow:auto;margin:0">'+nxMEsc(log)+'</pre>';
+    }).catch(function(){});
 }
 // Déclenche UN téléchargement (attachment) sans geste utilisateur via iframe cachée
 function nxMDownloadOne(url){
@@ -29423,6 +29433,25 @@ def create_app():
             return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8"))})
         except Exception:
             return jsonify({"ok": True, "draft": None})
+
+    @app.route("/noctus/montage_log")
+    def noctus_montage_log():
+        """Renvoie la fin du log du pipeline (_run.log) -> diagnostiquer un échec."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import noctus_web
+        model = noctus_web._safe(request.args.get("model") or "")
+        if not model:
+            return jsonify({"ok": False, "log": ""})
+        logf = noctus_web._models_dir() / model / "_run.log"
+        try:
+            if logf.exists():
+                txt = logf.read_text(encoding="utf-8", errors="ignore")
+                return jsonify({"ok": True, "log": txt[-2500:]})
+        except Exception:
+            pass
+        return jsonify({"ok": True, "log": ""})
 
     @app.route("/noctus/montage_zip")
     def noctus_montage_zip():

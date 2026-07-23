@@ -378,7 +378,6 @@ function appleMetaArgs() {
     '-metadata', `model=${model}`,
     '-metadata', `creation_time=${iso8601}.000000Z`,
     '-metadata:s:v:0', `handler_name=Core Media Video`,
-    '-metadata:s:v:0', `encoder=`,   // efface "Lavc libx264" du flux vidéo (mouchard)
   ];
 }
 
