@@ -2984,7 +2984,7 @@ function nxMCapXY(c){
   return {x:x,y:y};
 }
 function nxMFontFam(font){
-  var s=nxMState.style||{}, fam=font, ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'800');
+  var s=nxMState.style||{}, fam=font, ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
   if(font==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
   if(font==='BebasNeue'||font==='Anton'){ if(s.bold!==false) wt='400'; }
   return {fam:fam,ital:ital,wt:wt};
@@ -3107,7 +3107,7 @@ function nxMUpdatePreview(force){
   if(!ov||!v) return;
   if(nxMState.dragging && !force) return;   // pendant le drag: pas de rebuild, SAUF re-wrap live (poignée ↕)
   if(!document.getElementById('nx-m-fontcss')){
-    var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css?v=3';
+    var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css?v=4';
     _lc.onload=function(){ nxMState._fontcssReady=1; nxMPreloadFonts(); };  // précharge APRÈS que la css soit chargée
     document.head.appendChild(_lc);
   }
