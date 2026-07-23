@@ -3039,7 +3039,7 @@ function nxMImgHtml(i,c,rec,ow,oh){
     +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
     +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
     +'touch-action:none;z-index:4;box-sizing:border-box">'
-    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-select:none;user-select:none">'
+    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
     +cnr+'</div>';
 }
 // Met à jour l'image d'une caption EN PLACE (sans reconstruire l'overlay) : garde les
@@ -3049,12 +3049,18 @@ function nxMLiveWrapImg(i){
   var c=nxMState.caps[i]; if(!c) return;
   var key=nxMCapKey(c), rec=nxMState.rimg[key]; if(!(rec&&rec.url&&rec.bbox)) return;
   var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
-  var img=wrap.querySelector('img'); if(img && img.src!==rec.url) img.src=rec.url;
   var p=nxMCapXY(c), W=rec.bbox.W||1080, H=rec.bbox.H||1920;
   var wpc=Math.max(1,(rec.bbox.w||1)/W*100), hpc=Math.max(1,(rec.bbox.h||1)/H*100);
-  wrap.style.width=wpc.toFixed(3)+'%'; wrap.style.height=hpc.toFixed(3)+'%';
-  wrap.style.left=(p.x*100-wpc/2).toFixed(3)+'%'; wrap.style.top=(p.y*100-hpc/2).toFixed(3)+'%';
-  nxMState.lastImg[i]={url:rec.url,bbox:rec.bbox,text:String(c.text||'')};
+  function applySize(){
+    wrap.style.width=wpc.toFixed(3)+'%'; wrap.style.height=hpc.toFixed(3)+'%';
+    wrap.style.left=(p.x*100-wpc/2).toFixed(3)+'%'; wrap.style.top=(p.y*100-hpc/2).toFixed(3)+'%';
+    nxMState.lastImg[i]={url:rec.url,bbox:rec.bbox,text:String(c.text||'')};
+  }
+  var img=wrap.querySelector('img');
+  // Redimensionne la boîte SEULEMENT quand la nouvelle image est chargée -> boîte et
+  // image toujours à la même taille (jamais de vide transparent ni d'écrasement).
+  if(img && img.src!==rec.url){ img.onload=function(){ img.onload=null; applySize(); }; img.src=rec.url; }
+  else applySize();
 }
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
@@ -3200,25 +3206,26 @@ function nxMBeginResizeW(e,i,side){
   var startWrap=(c.wrapW!=null?c.wrapW:0.88), baseW=wrap.offsetWidth;
   var wr=wrap.getBoundingClientRect(), ovL=ov.getBoundingClientRect().left;
   var cxOv=wr.left+baseW/2-ovL;                 // centre X (px overlay), fixe
-  var dir=(side==='r')?1:-1;
-  nxMState.dragging=true; wrap.classList.add('on');
+  var dir=(side==='r')?1:-1, lastW=startWrap;
+  nxMState.dragging=true; nxMState._liveWrap=i; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
     var dxFrac=(ev.clientX-startX)/ovW;
     var w=Math.max(0.25, Math.min(0.97, startWrap + dir*2*dxFrac));   // bouger un bord de Δ -> largeur ±2Δ (centré)
-    c.wrapW=w;
-    var npx=baseW*(w/startWrap);                // aperçu : la boîte s'élargit/rétrécit autour du centre
-    wrap.style.width=npx.toFixed(1)+'px';
-    wrap.style.left=(cxOv-npx/2).toFixed(1)+'px';
+    w=Math.round(w*50)/50; if(w===lastW) return; lastW=w; c.wrapW=w;
+    // Re-wrap EN DIRECT sans déformer la boîte (maj image en place, throttle ~130ms).
+    if(!nxMState._hrPending){ nxMState._hrPending=true;
+      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 130); }
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
+    clearTimeout(nxMState._hrT); nxMState._hrPending=false; nxMState._liveWrap=null;
     nxMState.dragging=false; wrap.classList.remove('on');
-    nxMRealCap(c);   // re-rend le texte re-wrappé à la nouvelle largeur
+    nxMRealCap(c);   // rendu net final à la nouvelle largeur
     nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
