@@ -3016,15 +3016,21 @@ function nxMImgDims(bb,ow,oh){
   var W=(bb&&bb.W)||1080, H=(bb&&bb.H)||1920;
   return {w:(bb.w||1)*ow/W, h:(bb.h||1)*oh/H};
 }
-// <img> détourée = à la fois l'écriture (vraie police) ET la poignée (cadre net qui l'épouse)
+// Boîte de sélection façon CapCut : wrapper (cadre + poignées de coin) contenant
+// l'image détourée (vraie police). Le wrapper = la poignée de drag ; l'image et
+// les coins sont pointer-events:none -> on glisse depuis n'importe où sur la boîte.
 function nxMImgHtml(i,c,rec,ow,oh){
   var p=nxMCapXY(c), d=nxMImgDims(rec.bbox,ow,oh);
-  var cls='nxm-drag'+((nxMState.editIdx===i)?' sel':'');   // orange si sélectionnée (CapCut)
-  return '<img class="'+cls+'" data-i="'+i+'" src="'+rec.url+'" draggable="false" '
-    +'title="Glisse pour déplacer · clique pour modifier" '
+  var sel=(nxMState.editIdx===i);
+  var cls='nxm-drag'+(sel?' sel':'');
+  var cnr=sel?('<span class="nxm-cnr tl"></span><span class="nxm-cnr tr"></span>'
+             +'<span class="nxm-cnr bl"></span><span class="nxm-cnr br"></span>'):'';
+  return '<div class="'+cls+'" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+(p.x*ow-d.w/2).toFixed(1)+'px;top:'+(p.y*oh-d.h/2).toFixed(1)+'px;'
     +'width:'+d.w.toFixed(1)+'px;height:'+d.h.toFixed(1)+'px;cursor:move;pointer-events:auto;'
-    +'touch-action:none;z-index:4;box-sizing:border-box;-webkit-user-select:none;user-select:none">';
+    +'touch-action:none;z-index:4;box-sizing:border-box">'
+    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
+    +cnr+'</div>';
 }
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
@@ -5196,9 +5202,13 @@ body.light .action-icon{color:#666}
 .ce-vwrap{position:relative;height:100%;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.55)}
 .ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.nxm-drag{border:1.5px dashed rgba(255,255,255,.55);border-radius:4px;transition:border-color .1s}
-.nxm-drag.sel{border-color:#ff9d6b;border-style:solid}
-.nxm-drag:hover,.nxm-drag.on{border-color:#22d3ee}
+.nxm-drag{border:1.5px dashed rgba(255,255,255,.5);border-radius:4px;transition:border-color .1s}
+.nxm-drag.sel{border:1.5px solid #fff}
+.nxm-drag:hover{border-color:#22d3ee}
+.nxm-drag.on{border-color:#22d3ee;border-style:solid}
+.nxm-cnr{position:absolute;width:11px;height:11px;background:#fff;border:1.5px solid #9C4937;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.55);pointer-events:none}
+.nxm-cnr.tl{left:-6px;top:-6px}.nxm-cnr.tr{right:-6px;top:-6px}
+.nxm-cnr.bl{left:-6px;bottom:-6px}.nxm-cnr.br{right:-6px;bottom:-6px}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
