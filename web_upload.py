@@ -3019,7 +3019,8 @@ function nxMImgDims(bb,ow,oh){
 // <img> détourée = à la fois l'écriture (vraie police) ET la poignée (cadre net qui l'épouse)
 function nxMImgHtml(i,c,rec,ow,oh){
   var p=nxMCapXY(c), d=nxMImgDims(rec.bbox,ow,oh);
-  return '<img class="nxm-drag" data-i="'+i+'" src="'+rec.url+'" draggable="false" '
+  var cls='nxm-drag'+((nxMState.editIdx===i)?' sel':'');   // orange si sélectionnée (CapCut)
+  return '<img class="'+cls+'" data-i="'+i+'" src="'+rec.url+'" draggable="false" '
     +'title="Glisse pour déplacer · clique pour modifier" '
     +'style="position:absolute;left:'+(p.x*ow-d.w/2).toFixed(1)+'px;top:'+(p.y*oh-d.h/2).toFixed(1)+'px;'
     +'width:'+d.w.toFixed(1)+'px;height:'+d.h.toFixed(1)+'px;cursor:move;pointer-events:auto;'
@@ -3278,8 +3279,11 @@ function nxMRenderCaps(){
   caps.forEach(function(c,i){
     var perm=(c.start==null), bs=perm?0:c.start, be=perm?dur:c.end;
     var L=La.laneOf[i]||0, top=rulerH+(nLanes-1-L)*(laneH+gap);
-    var left=bs*pps, wpx=Math.max(8,(be-bs)*pps), col=colors[i%colors.length];
-    blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.4)">'
+    var left=bs*pps, wpx=Math.max(8,(be-bs)*pps);
+    var sel=(nxMState.editIdx===i);                       // caption sélectionnée (en cours d'édition)
+    var col=sel?'#9C4937':colors[i%colors.length];        // sélection façon CapCut
+    var deco=sel?'border:2px solid #ff9d6b;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 2px 10px rgba(156,73,55,.65)':'box-shadow:0 1px 3px rgba(0,0,0,.4)';
+    blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;'+deco+'">'
       +'<div class="nxm-h" data-i="'+i+'" data-mode="left" style="position:absolute;left:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:6px 0 0 6px;touch-action:none"></div>'
       +'<div class="nxm-h" data-i="'+i+'" data-mode="move" title="'+nxMEsc(c.text)+'" style="position:absolute;left:11px;right:11px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;padding:0 4px;cursor:grab;overflow:hidden;touch-action:none">'
       +'<span style="color:#fff;font-size:11px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">'+nxMEsc(c.text)+'</span>'
@@ -3326,6 +3330,8 @@ function nxMEditCap(i){
   nxMState.editIdx=i;
   document.getElementById('nx-m-editnote').textContent='✏️ modif caption '+(i+1)+' — clique « Mettre à jour »';
   document.getElementById('nx-m-addcap').textContent='✔ Mettre à jour';
+  nxMRenderCaps();       // met en surbrillance (orange) la caption sélectionnée
+  nxMUpdatePreview();    // + cadre orange sur la vidéo
   try{ document.getElementById('nx-m-caption').focus(); }catch(e){}
 }
 function nxMDelCap(i){
@@ -5191,6 +5197,7 @@ body.light .action-icon{color:#666}
 .ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .nxm-drag{border:1.5px dashed rgba(255,255,255,.55);border-radius:4px;transition:border-color .1s}
+.nxm-drag.sel{border-color:#ff9d6b;border-style:solid}
 .nxm-drag:hover,.nxm-drag.on{border-color:#22d3ee}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
