@@ -3094,10 +3094,11 @@ function nxMUpdatePreview(force){
   if(!ov||!v) return;
   if(nxMState.dragging && !force) return;   // pendant le drag: pas de rebuild, SAUF re-wrap live (poignée ↕)
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
-  if(!nxMState._fontsPreload && document.fonts && document.fonts.load){   // précharge les polices -> fallback jamais en "police de base"
+  if(!nxMState._fontsPreload && document.fonts && document.fonts.load){   // précharge les polices -> jamais de "police de base"
     nxMState._fontsPreload=1;
     ['Poppins','TikTokSans','Inter','Montserrat','BebasNeue','Anton'].forEach(function(f){
-      try{ document.fonts.load('700 48px "'+f+'"'); document.fonts.load('italic 700 48px "'+f+'"'); }catch(e){}
+      // tous les styles/poids -> quel que soit le poids de la @font-face, la face se charge
+      ['','italic ','bold ','italic bold '].forEach(function(pre){ try{ document.fonts.load(pre+'40px "'+f+'"'); }catch(e){} });
     });
   }
   var t=isNaN(v.currentTime)?0:v.currentTime, idx=nxMActiveIdx(t);
@@ -29524,8 +29525,11 @@ def create_app():
             ("BebasNeue", "BebasNeue-Regular.ttf", "truetype"),
             ("Anton", "Anton-Regular.ttf", "truetype"),
         ]
+        # font-weight:100 900 -> le fichier est utilisé pour TOUT poids demandé (jamais
+        # de repli sur Arial). font-display:block -> pas de flash "police de base" pendant
+        # le (court) chargement ; le préchargement JS l'a de toute façon déjà chargée.
         css = "".join(
-            f"@font-face{{font-family:'{fam}';src:url('/noctus/font/{fn}') format('{fmt}');font-display:swap}}"
+            f"@font-face{{font-family:'{fam}';src:url('/noctus/font/{fn}') format('{fmt}');font-weight:100 900;font-display:block}}"
             for fam, fn, fmt in faces
         )
         return Response(css, mimetype="text/css")
