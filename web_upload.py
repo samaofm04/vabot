@@ -3583,7 +3583,7 @@ function nxMRenderCaps(){
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
   var tl=document.getElementById('nx-m-timeline');
-  function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
+  function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ if(!v.paused){ try{ v.pause(); var pb=document.querySelector('.ce-play'); if(pb) pb.textContent='▶'; }catch(_){} } try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
   // clic sur le fond (hors blocs) = déplace la lecture
   tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')||e.target.closest('#nx-m-ruler')) return; nxMSeekAt(e.clientX); });
   // règle dédiée : clic + glisser pour scrubber la vidéo
