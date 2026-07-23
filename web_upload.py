@@ -3336,7 +3336,7 @@ function nxMRenderCaps(){
     var L=La.laneOf[i]||0, top=rulerH+(nLanes-1-L)*(laneH+gap);
     var left=bs*pps, wpx=Math.max(8,(be-bs)*pps);
     var sel=(nxMState.editIdx===i);                       // caption sélectionnée (en cours d'édition)
-    var col=sel?'#9C4937':colors[i%colors.length];        // sélection façon CapCut
+    var col='#9C4937';                                    // couleur caption demandée
     var deco=sel?'border:2px solid #ff9d6b;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 2px 10px rgba(156,73,55,.65)':'box-shadow:0 1px 3px rgba(0,0,0,.4)';
     blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;'+deco+'">'
       +'<div class="nxm-h" data-i="'+i+'" data-mode="left" style="position:absolute;left:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:6px 0 0 6px;touch-action:none"></div>'
