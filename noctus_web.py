@@ -202,15 +202,40 @@ def list_models() -> list:
 
 
 def status(model_id: str) -> dict:
-    f = _models_dir() / _safe(model_id) / "_status.json"
+    mid = _safe(model_id)
+    f = _models_dir() / mid / "_status.json"
+    st = None
     try:
         if f.exists():
-            return json.loads(f.read_text(encoding="utf-8"))
+            st = json.loads(f.read_text(encoding="utf-8"))
     except Exception:
-        pass
-    proc = _PROCS.get(_safe(model_id))
-    if proc and proc.poll() is None:
+        st = None
+    proc = _PROCS.get(mid)
+    proc_dead = (proc is not None) and (proc.poll() is not None)
+
+    def _tail_log():
+        try:
+            logf = _models_dir() / mid / "_run.log"
+            if logf.exists():
+                txt = logf.read_text(encoding="utf-8", errors="ignore").strip()
+                if txt:
+                    return txt[-400:]
+        except Exception:
+            pass
+        return ""
+
+    if st is not None:
+        # Le fichier dit "running" mais le process est MORT -> crash silencieux du pipeline.
+        if st.get("state") == "running" and proc_dead:
+            err = _tail_log() or "le rendu s'est arrêté (crash pipeline)"
+            return {"state": "error", "error": err}
+        return st
+    # Pas de fichier de statut
+    if proc is not None and proc.poll() is None:
         return {"state": "running"}
+    if proc_dead:
+        err = _tail_log() or "le rendu ne s'est pas lancé"
+        return {"state": "error", "error": err}
     return {"state": "idle"}
 
 
@@ -274,11 +299,19 @@ def run(model_id: str, folders=None, captions=None, targets=None):
     if os.name != "nt":
         kwargs["start_new_session"] = True  # groupe de process -> kill propre
     node_bin = _node_bin() or "node"
+    # Logs du pipeline -> _run.log (au lieu de DEVNULL) : si ça crashe, on voit pourquoi
+    # et status() en renvoie un extrait au front.
+    try:
+        mdir = _models_dir() / mid
+        mdir.mkdir(parents=True, exist_ok=True)
+        logf = open(str(mdir / "_run.log"), "wb")
+    except Exception:
+        logf = subprocess.DEVNULL
     proc = subprocess.Popen(
         [node_bin, "noctus_runner.js", json.dumps(payload)],
         cwd=str(NOCTUS_SRC),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=logf,
+        stderr=subprocess.STDOUT,
         **kwargs,
     )
     _PROCS[mid] = proc

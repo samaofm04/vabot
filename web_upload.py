@@ -3457,17 +3457,27 @@ async function nxMontageGen(){
   try{
     var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
     if(!j.ok){ gen.disabled=false; gen.textContent='⬇ Télécharger'; document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
-    nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMontagePoll();
+    nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMState.genStart=Date.now(); nxMontagePoll();
   }catch(e){ gen.disabled=false; gen.textContent='⬇ Télécharger'; if(typeof showToast==='function') showToast('Erreur : '+e,'error'); else alert('Erreur: '+e); }
+}
+function nxMGenFail(msg){
+  var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
+  if(p) p.textContent='❌ '+msg;
+  if(gen){ gen.disabled=false; gen.textContent='⬇ Télécharger'; }
+  nxMState.genStart=0;
+  if(typeof showToast==='function') showToast('❌ Échec du rendu : '+msg,'error',9000);
 }
 async function nxMontagePoll(){
   if(!nxMState.model) return;
+  if(!nxMState.genStart) nxMState.genStart=Date.now();
+  if(Date.now()-nxMState.genStart > 300000){ nxMGenFail('trop long (5 min) — abandonné'); return; }  // garde-fou anti-boucle
   try{
     var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
     var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
-    if(s.state==='running'){ p.textContent='⏳ '+(s.pct||0)+'%'; if(gen) gen.textContent='⏳ '+(s.pct||0)+'%'; setTimeout(nxMontagePoll,1500); }
-    else if(s.state==='done'){ p.textContent='✅ Terminé'; nxMontageResults(); }
-    else if(s.state==='error'){ p.textContent='❌ '+(s.error||'erreur'); if(gen){ gen.disabled=false; gen.textContent='⬇ Télécharger'; } if(typeof showToast==='function') showToast('❌ '+(s.error||'erreur'),'error'); }
+    if(s.state==='running'){ var pc=(s.pct||0); p.textContent='⏳ '+pc+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); if(gen) gen.textContent='⏳ '+pc+'%'; setTimeout(nxMontagePoll,1500); }
+    else if(s.state==='done'){ p.textContent='✅ Terminé'; nxMState.genStart=0; nxMontageResults(); }
+    else if(s.state==='error'){ nxMGenFail((s.error||'erreur').toString().slice(0,180)); }
+    else if(s.state==='idle'||s.state==='stopped'){ nxMGenFail('le rendu a été arrêté'); }
     else { setTimeout(nxMontagePoll,1500); }
   }catch(e){ setTimeout(nxMontagePoll,2500); }
 }
