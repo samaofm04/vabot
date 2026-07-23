@@ -2993,8 +2993,10 @@ function nxMApplyCase(t){ var cs=(nxMState.style||{})['case'];
   if(cs==='title') return t.replace(/\\S+/g,function(w){return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();});
   return t; }
 function nxMCapKey(c){
-  var font=(document.getElementById('nx-m-font')||{}).value||'Strong', p=nxMCapXY(c);
-  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig()+'|'+p.x.toFixed(3)+','+p.y.toFixed(3);
+  // Image DÉTOURÉE = indépendante de la position -> pas de x/y dans la clé
+  // (déplacer ne re-rend pas ; changer texte/police/style oui).
+  var font=(document.getElementById('nx-m-font')||{}).value||'Strong';
+  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig();
 }
 // Bloc CSS d'une caption (fallback avant le PNG, et pendant le drag) positionné à x/y
 function nxMCssBlock(c,ow,extra){
@@ -3009,19 +3011,19 @@ function nxMCssBlock(c,ow,extra){
     +';color:'+col+';font-family:'+ff.fam+',Arial;font-weight:'+ff.wt+';'+ff.ital+ul+'text-transform:'+tt+';font-size:'+fpx.toFixed(1)+'px;line-height:1.28;'
     +'-webkit-text-stroke:'+stk.toFixed(1)+'px #000;paint-order:stroke fill;white-space:pre-wrap;word-break:break-word;pointer-events:none;'+(extra||'')+'">'+inner+'</div>';
 }
-// Boîte approximative du texte (px overlay) pour dimensionner la poignée de drag
-function nxMMeasureCap(c,ow){
-  var s=nxMState.style||{}, font=(document.getElementById('nx-m-font')||{}).value||'Strong', ff=nxMFontFam(font);
-  var fpx=Math.max(8,(s.size||44)*ow/1080);
-  nxMState._mc=nxMState._mc||document.createElement('canvas');
-  var mx=nxMState._mc.getContext('2d');
-  var wt=(ff.wt==='400'?'':'bold '), it=(ff.ital?'italic ':'');
-  mx.font=it+wt+fpx+'px '+ff.fam+',Arial';
-  var lines=nxMApplyCase(String(c.text||'')).split(/\\r?\\n/), maxw=0;
-  lines.forEach(function(ln){ var w=mx.measureText(ln||' ').width; if(w>maxw)maxw=w; });
-  maxw=Math.min(maxw,ow*0.92);
-  var lh=fpx*1.30, h=Math.max(lines.length,1)*lh;
-  return {w:Math.max(44,maxw+fpx*0.6),h:h+fpx*0.35};
+// Taille (px overlay) de l'image détourée à partir de sa boîte (coords cadre 1080x1920)
+function nxMImgDims(bb,ow,oh){
+  var W=(bb&&bb.W)||1080, H=(bb&&bb.H)||1920;
+  return {w:(bb.w||1)*ow/W, h:(bb.h||1)*oh/H};
+}
+// <img> détourée = à la fois l'écriture (vraie police) ET la poignée (cadre net qui l'épouse)
+function nxMImgHtml(i,c,rec,ow,oh){
+  var p=nxMCapXY(c), d=nxMImgDims(rec.bbox,ow,oh);
+  return '<img class="nxm-drag" data-i="'+i+'" src="'+rec.url+'" draggable="false" '
+    +'title="Glisse pour déplacer · clique pour modifier" '
+    +'style="position:absolute;left:'+(p.x*ow-d.w/2).toFixed(1)+'px;top:'+(p.y*oh-d.h/2).toFixed(1)+'px;'
+    +'width:'+d.w.toFixed(1)+'px;height:'+d.h.toFixed(1)+'px;cursor:move;pointer-events:auto;'
+    +'touch-action:none;z-index:4;box-sizing:border-box;-webkit-user-select:none;user-select:none">';
 }
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
@@ -3029,29 +3031,28 @@ function nxMUpdatePreview(){
   // Overlay live du texte sur la vidéo (caption(s) active(s) à l'instant courant)
   var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video');
   if(!ov||!v) return;
-  if(nxMState.dragging) return;   // pendant le drag c'est nxMDragPaint qui gère l'overlay
+  if(nxMState.dragging) return;   // pendant le drag on bouge l'image directement (pas de rebuild)
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
   var t=isNaN(v.currentTime)?0:v.currentTime, idx=nxMActiveIdx(t);
   if(!idx.length){ ov.innerHTML=''; return; }
   if(!nxMState.style) nxMStyleInit();
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
+  if(!nxMState.lastImg) nxMState.lastImg={};
   var ow=ov.clientWidth||270, oh=ov.clientHeight||480, html='';
-  // 1) rendu de chaque caption : PNG pixel-perfect (position x/y cuite par le moteur) sinon fallback CSS
+  // Chaque caption = son IMAGE DÉTOURÉE (vraie police + cadre net = poignée de drag).
+  // Si pas encore rendue : on garde la DERNIÈRE image affichée (jamais "sans police"),
+  // sinon fallback CSS le temps du 1er rendu.
   idx.forEach(function(i){
-    var c=nxMState.caps[i], key=nxMCapKey(c);
-    if(nxMState.rimg[key]){
-      html+='<img src="'+nxMState.rimg[key]+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none">';
-    } else {
+    var c=nxMState.caps[i], key=nxMCapKey(c), rec=nxMState.rimg[key];
+    if(rec&&rec.url&&rec.bbox){ nxMState.lastImg[i]=rec; html+=nxMImgHtml(i,c,rec,ow,oh); }
+    else {
       nxMRealCap(c);                       // déclenche le vrai rendu (async)
-      html+=nxMCssBlock(c,ow,'');          // fallback au même endroit en attendant
+      var prev=nxMState.lastImg[i];
+      if(prev&&prev.url&&prev.bbox) html+=nxMImgHtml(i,c,prev,ow,oh);   // ancienne image en attendant
+      else html+=nxMCssBlock(c,ow,'pointer-events:none;');             // 1er rendu : fallback CSS
     }
   });
-  // 2) poignée déplaçable (une par caption active) — glisser = bouger · clic = éditer
-  idx.forEach(function(i){
-    var c=nxMState.caps[i], p=nxMCapXY(c), m=nxMMeasureCap(c,ow);
-    html+='<div class="nxm-drag" data-i="'+i+'" title="Glisse pour déplacer · clique pour modifier" style="position:absolute;left:'+(p.x*ow-m.w/2).toFixed(1)+'px;top:'+(p.y*oh-m.h/2).toFixed(1)+'px;width:'+m.w.toFixed(1)+'px;height:'+m.h.toFixed(1)+'px;box-sizing:border-box;cursor:move;pointer-events:auto;touch-action:none;z-index:4"></div>';
-  });
-  // 3) guides d'alignement (cachés) — centre horizontal / vertical
+  // guides d'alignement (cachés) — centre horizontal / vertical
   html+='<div id="nx-m-gx" style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>';
   html+='<div id="nx-m-gy" style="position:absolute;top:50%;left:0;right:0;height:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>';
   ov.innerHTML=html;
@@ -3059,25 +3060,15 @@ function nxMUpdatePreview(){
     el.addEventListener('pointerdown',function(e){ nxMBeginTextDrag(e, parseInt(el.getAttribute('data-i'),10)); });
   });
 }
-// Repeint l'overlay EN DIRECT pendant le drag (ghost CSS bon marché, pas de réseau)
-function nxMDragPaint(dragI){
-  var ov=document.getElementById('nx-m-overlay'), v=document.getElementById('nx-m-video'); if(!ov||!v) return;
-  var t=isNaN(v.currentTime)?0:v.currentTime, ow=ov.clientWidth||270, idx=nxMActiveIdx(t), html='';
-  idx.forEach(function(i){
-    var extra=(i===dragI)?'outline:1.5px dashed #22d3ee;outline-offset:5px;border-radius:4px;':'';
-    html+=nxMCssBlock(nxMState.caps[i],ow,extra);
-  });
-  var pd=nxMCapXY(nxMState.caps[dragI]);
-  html+='<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:'+(Math.abs(pd.x-0.5)<0.0011?'block':'none')+';pointer-events:none;z-index:6"></div>';
-  html+='<div style="position:absolute;top:50%;left:0;right:0;height:1px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:'+(Math.abs(pd.y-0.5)<0.0011?'block':'none')+';pointer-events:none;z-index:6"></div>';
-  ov.innerHTML=html;
-}
-// Démarre le déplacement d'une caption sur la vidéo
+// Démarre le déplacement d'une caption sur la vidéo (on bouge la VRAIE image -> police gardée)
 function nxMBeginTextDrag(e,i){
   e.preventDefault(); e.stopPropagation();
   var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
-  var rect=ov.getBoundingClientRect(), sx=e.clientX, sy=e.clientY, moved=false, pid=e.pointerId;
-  nxMState.dragging=true;
+  var el=e.currentTarget||ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!el) return;
+  var rect=ov.getBoundingClientRect(), ow=ov.clientWidth||270, oh=ov.clientHeight||480;
+  var sx=e.clientX, sy=e.clientY, moved=false, pid=e.pointerId;
+  var gx=document.getElementById('nx-m-gx'), gy=document.getElementById('nx-m-gy');
+  nxMState.dragging=true; el.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}   // garantit le pointerup même hors fenêtre
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;   // ignore les autres doigts (multitouch)
@@ -3086,42 +3077,47 @@ function nxMBeginTextDrag(e,i){
     moved=true;
     var fx=(ev.clientX-rect.left)/rect.width, fy=(ev.clientY-rect.top)/rect.height;
     fx=Math.max(0.03,Math.min(0.97,fx)); fy=Math.max(0.03,Math.min(0.90,fy));   // 0.90 = garde la barre vidéo cliquable
-    if(Math.abs(fx-0.5)<0.02) fx=0.5;   // snap centre horizontal
-    if(Math.abs(fy-0.5)<0.02) fy=0.5;   // snap centre vertical
+    var snapX=Math.abs(fx-0.5)<0.02, snapY=Math.abs(fy-0.5)<0.02;
+    if(snapX) fx=0.5; if(snapY) fy=0.5;   // aimante au centre
     c.x=fx; c.y=fy;
-    nxMDragPaint(i);
+    el.style.left=(fx*ow-el.offsetWidth/2).toFixed(1)+'px';   // déplace la vraie image (pas de re-rendu)
+    el.style.top=(fy*oh-el.offsetHeight/2).toFixed(1)+'px';
+    if(gx) gx.style.display=snapX?'block':'none';
+    if(gy) gy.style.display=snapY?'block':'none';
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
-    nxMState.dragging=false;
+    nxMState.dragging=false; el.classList.remove('on');
+    if(gx) gx.style.display='none'; if(gy) gy.style.display='none';
     if(!moved){ nxMEditCap(i); return; }   // clic simple (sans bouger) = éditer le texte
-    nxMRealCap(c);        // re-rend le PNG pixel-perfect à la nouvelle position
-    nxMUpdatePreview();
+    nxMUpdatePreview();   // position seule modifiée -> pas de re-rendu, on normalise juste
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
-// Demande au MOTEUR Node le PNG exact d'une caption (mis en cache), puis rafraîchit
-// l'aperçu -> WYSIWYG pixel-perfect (position x/y incluse). Échec silencieux -> fallback CSS.
+// Demande au MOTEUR Node l'IMAGE DÉTOURÉE d'une caption (texte + sa boîte), mise en cache.
+// -> vraie police (pixel-perfect), positionnable librement. Échec silencieux -> fallback CSS.
 function nxMRealCap(c){
   var text=String((c&&c.text)||'').trim(); if(!text) return;
   if(!nxMState.rimg) nxMState.rimg={}; if(!nxMState.rpend) nxMState.rpend={};
   if(!nxMState.style) nxMStyleInit();
   var font=(document.getElementById('nx-m-font')||{}).value||'Strong', key=nxMCapKey(c);
-  if(nxMState.rimg[key]||nxMState.rpend[key]) return;   // déjà rendu / en cours
+  if((nxMState.rimg[key]&&nxMState.rimg[key].url)||nxMState.rpend[key]) return;   // déjà rendu / en cours
   nxMState.rpend[key]=1;
-  var s=nxMState.style||{}, p=nxMCapXY(c);
+  var s=nxMState.style||{};
   var fd=new FormData(); fd.set('text',text); fd.set('font',font);
   fd.set('size', s.size||44); fd.set('color', s.color||'#ffffff');
   fd.set('align', s.align||'center'); fd.set('case', s['case']||'none');
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
   fd.set('box', s.box?'1':'0'); fd.set('effect', s.effect||'none');
-  fd.set('x', p.x.toFixed(4)); fd.set('y', p.y.toFixed(4));
+  var bbox=null;
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
-    if(!r.ok) throw 0; return r.blob();
+    if(!r.ok) throw 0;
+    try{ var h=r.headers.get('X-BBox'); if(h) bbox=JSON.parse(h); }catch(e){}
+    return r.blob();
   }).then(function(b){
-    if(b && b.size>200) nxMState.rimg[key]=URL.createObjectURL(b);
+    if(b && b.size>200 && bbox) nxMState.rimg[key]={url:URL.createObjectURL(b), bbox:bbox};
     delete nxMState.rpend[key];
     try{ if(!nxMState.dragging) nxMUpdatePreview(); }catch(e){}
   }).catch(function(){ delete nxMState.rpend[key]; });
@@ -3129,7 +3125,7 @@ function nxMRealCap(c){
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
 function nxMStyleInit(){
   nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,effect:'none'};
-  nxMState.rimg={}; nxMState.rpend={};
+  nxMState.rimg={}; nxMState.rpend={}; nxMState.lastImg={};
   var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
   var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
   var cp=document.getElementById('nx-m-color'); if(cp) cp.value='#ffffff';
@@ -5194,8 +5190,8 @@ body.light .action-icon{color:#666}
 .ce-vwrap{position:relative;height:100%;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.55)}
 .ce-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .ce-ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.nxm-drag{border:1.5px dashed rgba(255,255,255,.30);border-radius:5px;transition:border-color .12s,background .12s}
-.nxm-drag:hover{border-color:rgba(34,211,238,.95);background:rgba(34,211,238,.08)}
+.nxm-drag{border:1.5px dashed rgba(255,255,255,.55);border-radius:4px;transition:border-color .1s}
+.nxm-drag:hover,.nxm-drag.on{border-color:#22d3ee}
 .ce-ctrl{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid #2a2a30;font-size:11.5px;color:#9a9aa6}
 .ce-play{background:#2a2a30;border:1px solid #35353c;color:#e6e6ea;width:34px;height:30px;border-radius:7px;cursor:pointer;font-size:13px}
 /* Inspecteur droite */
@@ -29245,15 +29241,9 @@ def create_app():
             _spec["box"] = True
         if request.form.get("effect") in ("shadow", "neon"):
             _spec["effect"] = request.form.get("effect")
-        for _pk in ("x", "y"):   # position du texte (drag éditeur), fraction 0-1
-            _pv = request.form.get(_pk)
-            if _pv:
-                try:
-                    _pf = float(_pv)
-                    if 0.0 <= _pf <= 1.0:
-                        _spec[_pk] = round(_pf, 4)
-                except Exception:
-                    pass
+        # Aperçu = image DÉTOURÉE au texte (l'éditeur la positionne où il veut) :
+        # indépendante de x/y -> 1 seul rendu réutilisé quelle que soit la position.
+        _spec["tight"] = True
         src = BOT_DIR / "noctus"
         cdir = Path(tempfile.gettempdir()) / "noctus_capprev"
         try:
@@ -29265,15 +29255,35 @@ def create_app():
             pass
         key = hashlib.md5(_json.dumps(_spec, sort_keys=True).encode("utf-8")).hexdigest()[:20]
         outp = cdir / f"{key}.png"
+        bboxp = cdir / f"{key}.json"     # boîte détourée (x,y,w,h,W,H) dans le cadre 1080x1920
         try:
-            if not (outp.exists() and outp.stat().st_size > 200):
+            bbox_hdr = ""
+            if outp.exists() and outp.stat().st_size > 200 and bboxp.exists():
+                try:
+                    bbox_hdr = bboxp.read_text(encoding="utf-8")
+                except Exception:
+                    bbox_hdr = ""
+            if not bbox_hdr:
                 _spec["out"] = str(outp)
                 arg = _json.dumps(_spec)
                 r = subprocess.run([node, "render_caption.js", arg], cwd=str(src),
                                    capture_output=True, timeout=25)
                 if r.returncode != 0 or not (outp.exists() and outp.stat().st_size > 200):
                     return "", 500
-            return send_file(str(outp), mimetype="image/png", conditional=True)
+                out_txt = (r.stdout or b"").decode("utf-8", "ignore").strip()
+                if out_txt.startswith("{"):    # {"bbox":{...}} -> on mémorise la boîte
+                    try:
+                        _bb = _json.loads(out_txt).get("bbox")
+                        if _bb:
+                            bbox_hdr = _json.dumps(_bb)
+                            bboxp.write_text(bbox_hdr, encoding="utf-8")
+                    except Exception:
+                        bbox_hdr = ""
+            resp = send_file(str(outp), mimetype="image/png", conditional=True)
+            if bbox_hdr:
+                resp.headers["X-BBox"] = bbox_hdr
+                resp.headers["Access-Control-Expose-Headers"] = "X-BBox"
+            return resp
         except Exception:
             return "", 500
 
