@@ -986,13 +986,17 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
               filterComplex += `;[${inputIndex}:v]format=rgba[ov${inputIndex}];[${lastOutput}][ov${inputIndex}]overlay=0:0:enable='gte(t,${startSec})*lt(t,${endSec})'[${currentOutput}]`;
               lastOutput = currentOutput;
             } catch (err) {
-              log(`  ⚠️ PNG segment ${i} : ${err.message}`);
+              log(`  ⚠️ PNG segment ${i} : ${(err && err.stack) || err.message}`);
             }
           }
 
           filterComplex += `;[${lastOutput}]noise=alls=1:allf=t+u:all_seed=${noiseSeed}[final_${uid}]`;
           lastOutput = `final_${uid}`;
 
+          let _meta = [];
+          try { _meta = appleMetaArgs(); }
+          catch (e) { log(`  ⚠️ metaArgs: ${e.message}`); _meta = ['-metadata', 'make=Apple']; }
+          log(`  🎬 encodage ffmpeg… [V${vi+1}/${cap.label}]`);
           const args = [...ffmpegInputs,
             '-filter_complex', filterComplex,
             '-map',            `[${lastOutput}]`,
@@ -1000,7 +1004,7 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
             '-af',             audioFilter,
             '-t',              finalDuration.toFixed(3),
             '-map_metadata',   '-1',
-            ...appleMetaArgs(),          // identité iPhone crédible + GPS ville (comme /reel)
+            ..._meta,          // identité iPhone crédible + GPS ville (comme /reel)
             '-c:v',            'libx264',
             '-preset',         'fast',
             '-crf',            '23',
@@ -1034,6 +1038,11 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
             const pct     = Math.min(99, Math.round(doneRenders / totalRenders * 100));
             notify({ type: 'progress', current: doneRenders, total: totalRenders, pct, eta });
           }
+        } catch (err) {
+          // Sans ce catch, une erreur ici tuait TOUT le lot en silence (log muet).
+          failed++;
+          log(`  ❌ [${folderName}] [${cap.label}] rendu échoué : ${(err && err.stack) || err}`,
+              `  ❌ Erreur rendu [${folderName}]`);
         } finally {
           sem.release();
         }
