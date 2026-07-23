@@ -3441,29 +3441,44 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMLoadDraft(fid);   // recharge ce que tu avais enregistré (captions + style) s'il existe
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; var ov=document.getElementById('nx-m-overlay'); if(ov) ov.innerHTML=''; document.getElementById('nx-montage-modal').style.display='none'; }
-async function nxMontageGen(){
+function nxMontageGenBulk(){
+  var n=parseInt((document.getElementById('nx-m-bulkn')||{}).value)||5;
+  nxMontageGen(Math.max(1,Math.min(10,n)));
+}
+function nxMGenBtns(dis){
+  var a=document.getElementById('nx-m-gen'), b=document.getElementById('nx-m-bulk');
+  if(a) a.disabled=dis; if(b) b.disabled=dis;
+}
+function nxMGenReset(){
+  var a=document.getElementById('nx-m-gen'), b=document.getElementById('nx-m-bulk');
+  if(a){ a.disabled=false; a.textContent='⬇ Download'; } if(b){ b.disabled=false; b.textContent='⬇ Download bulk'; }
+}
+async function nxMontageGen(count){
+  count=Math.max(1,Math.min(10, parseInt(count)||1));
+  nxMState.bulkN=count;
   // si une caption est en cours de saisie mais pas encore ajoutée, on l'ajoute
   if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
+  var folders=[]; for(var i=1;i<=count;i++) folders.push('V'+i);   // N variantes = N V-folders
   var fd=new FormData();
   fd.set('file_id', nxMState.fid);
   fd.set('font', document.getElementById('nx-m-font').value);
-  fd.set('folders', 'V1');   // une seule vidéo en sortie (plus de choix V1-V10)
+  fd.set('folders', folders.join(','));
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
   fd.set('style', JSON.stringify(nxMState.style||{}));   // réglages texte CapCut
   var gen=document.getElementById('nx-m-gen');
-  gen.disabled=true; gen.textContent='⏳ Génération…';
-  document.getElementById('nx-m-prog').textContent='⏳ génération de la vidéo…';
-  if(typeof showToast==='function') showToast('⏳ Génération de la vidéo en cours…','info');
+  nxMGenBtns(true); gen.textContent='⏳ '+(count>1?('×'+count+' '):'')+'Génération…';
+  document.getElementById('nx-m-prog').textContent='⏳ génération de '+count+' variante(s)…';
+  if(typeof showToast==='function') showToast('⏳ Génération de '+count+' variante(s) en cours…','info');
   try{
     var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
-    if(!j.ok){ gen.disabled=false; gen.textContent='⬇ Télécharger'; document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
+    if(!j.ok){ nxMGenReset(); document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
     nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMState.genStart=Date.now(); nxMontagePoll();
-  }catch(e){ gen.disabled=false; gen.textContent='⬇ Télécharger'; if(typeof showToast==='function') showToast('Erreur : '+e,'error'); else alert('Erreur: '+e); }
+  }catch(e){ nxMGenReset(); if(typeof showToast==='function') showToast('Erreur : '+e,'error'); else alert('Erreur: '+e); }
 }
 function nxMGenFail(msg){
-  var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
+  var p=document.getElementById('nx-m-prog');
   if(p) p.textContent='❌ '+msg;
-  if(gen){ gen.disabled=false; gen.textContent='⬇ Télécharger'; }
+  nxMGenReset();
   nxMState.genStart=0;
   if(typeof showToast==='function') showToast('❌ Échec du rendu : '+msg,'error',9000);
 }
@@ -3482,37 +3497,31 @@ async function nxMontagePoll(){
   }catch(e){ setTimeout(nxMontagePoll,2500); }
 }
 async function nxMontageResults(){
+  // Plus de cartes de résultat sur le site : on télécharge DIRECT sur le PC.
+  // 1 variante -> le fichier ; plusieurs -> 1 seul ZIP (évite le blocage "downloads multiples").
   var wrap=document.getElementById('nx-m-results');
   try{
     var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
-    var o=j.outputs||{}; var keys=Object.keys(o);
-    if(!keys.length){ wrap.innerHTML='<span style="color:#666;font-size:12px">aucun résultat</span>'; return; }
-    var dls=[];
-    var html='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
-      +'<span style="font-size:13px;color:#22c55e;font-weight:800">✅ Rendu prêt</span>'
-      +'<button id="nx-m-dlall" style="background:#22c55e;border:0;color:#fff;font-size:12px;font-weight:700;border-radius:8px;padding:8px 15px;cursor:pointer">⬇ Tout télécharger</button></div>'
-      +'<div style="display:flex;flex-wrap:wrap;gap:10px">';
-    keys.forEach(function(v){ o[v].forEach(function(f){
-      var url='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f);
-      dls.push({url:url+'?dl=1', file:f});
-      html+='<div style="width:120px"><video src="'+url+'#t=0.1" controls muted playsinline preload="metadata" style="width:120px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000"></video>'
-        +'<div style="font-size:10px;color:#a855f7;text-align:center">'+v+'</div>'
-        +'<div style="display:flex;gap:4px;margin-top:2px"><a href="'+url+'?dl=1" download="'+f+'" style="flex:1;text-align:center;color:#8ef;font-size:10px;text-decoration:none;line-height:20px">⬇</a>'
-        +'<button class="nxm-send" data-vf="'+v+'" data-file="'+f+'" style="flex:2;background:#5865f2;border:0;color:#fff;font-size:10px;border-radius:5px;cursor:pointer;padding:3px">📤 Discord</button></div></div>';
-    }); });
-    html+='</div>'; wrap.innerHTML=html;
-    wrap.querySelectorAll('.nxm-send').forEach(function(b){
-      b.addEventListener('click', function(){ nxMontageSend(b.getAttribute('data-vf'), b.getAttribute('data-file'), b); });
-    });
-    var dlBtn=document.getElementById('nx-m-dlall');
-    if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); if(typeof showToast==='function') showToast('⬇ Téléchargement lancé','success'); });
-    // remonte les résultats devant les yeux + lance le téléchargement auto
-    try{ wrap.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-    nxMDownloadAll(dls);   // télécharge direct sur le PC dès que le rendu est prêt
-    if(typeof showToast==='function') showToast('✅ Vidéo prête — téléchargement en cours sur ton PC','success',6000);
-    var gen=document.getElementById('nx-m-gen');
-    if(gen){ gen.disabled=false; gen.textContent='✅ Téléchargé !'; setTimeout(function(){ gen.textContent='⬇ Télécharger'; },3000); }
-  }catch(e){ wrap.textContent='Erreur chargement résultats'; var g=document.getElementById('nx-m-gen'); if(g){ g.disabled=false; g.textContent='⬇ Télécharger'; } }
+    var o=j.outputs||{}, keys=Object.keys(o), n=0, oneUrl='';
+    keys.forEach(function(v){ (o[v]||[]).forEach(function(f){ n++; oneUrl='/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1'; }); });
+    if(!n){ nxMGenFail('aucune vidéo produite'); return; }
+    if(n===1){ nxMDownloadOne(oneUrl); }
+    else { nxMDownloadOne('/noctus/montage_zip?model='+encodeURIComponent(nxMState.model)); }   // ZIP des N variantes
+    if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s (ZIP)':'')+' sur ton PC</div>';
+    if(typeof showToast==='function') showToast('✅ '+n+' vidéo'+(n>1?'s prêtes — ZIP en':' prête — téléchargement en')+' cours sur ton PC','success',6000);
+    var gen=document.getElementById('nx-m-gen'), bulk=document.getElementById('nx-m-bulk');
+    if(gen){ gen.disabled=false; gen.textContent='✅ Téléchargé !'; }
+    if(bulk){ bulk.disabled=false; }
+    setTimeout(nxMGenReset,3000);
+  }catch(e){ nxMGenFail('erreur chargement résultats'); }
+}
+// Déclenche UN téléchargement (attachment) sans geste utilisateur via iframe cachée
+function nxMDownloadOne(url){
+  try{
+    var f=document.createElement('iframe'); f.style.display='none'; f.src=url;
+    document.body.appendChild(f);
+    setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 120000);
+  }catch(e){ try{ window.location.href=url; }catch(_){} }
 }
 // Télécharge chaque vidéo générée. La réponse ?dl=1 est en Content-Disposition:attachment,
 // donc une navigation iframe déclenche le téléchargement SANS geste utilisateur (a.click()
@@ -5326,7 +5335,9 @@ body.light .action-icon{color:#666}
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
-      <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬇ Télécharger</button>
+      <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
+      <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
+      <button class="ce-btn" id="nx-m-bulk" onclick="nxMontageGenBulk()">⬇ Download bulk</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
     <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
@@ -29412,6 +29423,36 @@ def create_app():
             return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8"))})
         except Exception:
             return jsonify({"ok": True, "draft": None})
+
+    @app.route("/noctus/montage_zip")
+    def noctus_montage_zip():
+        """Zippe toutes les variantes générées d'un modèle -> 1 seul téléchargement
+        (bulk). Évite le blocage navigateur des téléchargements multiples."""
+        from flask import send_file
+        if not is_auth():
+            return redirect("/")
+        import noctus_web, io as _io, zipfile as _zip
+        model = noctus_web._safe(request.args.get("model") or "")
+        if not model:
+            return "", 404
+        paths = noctus_web.output_paths(model)
+        if not paths:
+            return "", 404
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_STORED) as z:   # mp4 déjà compressé -> pas de recompression
+            seen = set()
+            for p in paths:
+                name = p.name
+                if name in seen:            # noms uniques dans le zip
+                    name = f"{p.parent.name}_{name}"
+                seen.add(name)
+                try:
+                    z.write(str(p), arcname=name)
+                except Exception:
+                    pass
+        buf.seek(0)
+        return send_file(buf, mimetype="application/zip", as_attachment=True,
+                         download_name=f"variantes_{model[:24]}.zip")
 
     @app.route("/noctus/montage_gen", methods=["POST"])
     def noctus_montage_gen():
