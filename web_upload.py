@@ -2974,16 +2974,11 @@ function nxMSnap(t, ex){
   return best;
 }
 function nxMLanes(){
-  var caps=nxMState.caps||[], dur=nxMState.dur||1;
-  var items=caps.map(function(c,i){ return {i:i, s:(c.start==null?0:c.start), e:(c.start==null?dur:c.end)}; });
-  var order=items.slice().sort(function(a,b){ return (a.s-b.s)||(a.i-b.i); });
-  var laneEnds=[], laneOf={};
-  order.forEach(function(it){
-    var placed=false;
-    for(var L=0;L<laneEnds.length;L++){ if(it.s>=laneEnds[L]-0.001){ laneOf[it.i]=L; laneEnds[L]=it.e; placed=true; break; } }
-    if(!placed){ laneOf[it.i]=laneEnds.length; laneEnds.push(it.e); }
-  });
-  return {laneOf:laneOf, n:Math.max(1,laneEnds.length)};
+  // UNE ligne (lane) par texte -> 2 textes = 2 lignes, 3 = 3 lignes… peu importe si leurs
+  // temps se chevauchent ou non. Le texte 1 est tout en haut, le 2 en dessous, etc.
+  var caps=nxMState.caps||[], laneOf={}, n=caps.length;
+  caps.forEach(function(c,i){ laneOf[i]=n-1-i; });   // top = rulerH + i*(laneH+gap) -> texte 0 en haut
+  return {laneOf:laneOf, n:Math.max(1,n)};
 }
 function nxMSyncPlayhead(){
   var ph=document.getElementById('nx-m-playhead'), v=document.getElementById('nx-m-video'), pps=nxMState.pps||0;
