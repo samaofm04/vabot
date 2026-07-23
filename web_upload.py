@@ -3052,6 +3052,32 @@ function nxMStylePaint(){
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
 function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} }
+// 💾 Enregistre le brouillon (captions + police + style) pour ce reel
+function nxMontageSave(){
+  if(!nxMState.fid) return;
+  var fd=new FormData(); fd.set('file_id',nxMState.fid);
+  fd.set('segments',JSON.stringify(nxMState.caps||[]));
+  fd.set('font',(document.getElementById('nx-m-font')||{}).value||'Strong');
+  fd.set('style',JSON.stringify(nxMState.style||{}));
+  fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
+    if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ce que tu as mis est gardé':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
+  }).catch(function(){ if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+}
+// Recharge le brouillon enregistré (captions + style) à l'ouverture
+function nxMLoadDraft(fid){
+  fetch('/noctus/montage_load?file_id='+encodeURIComponent(fid),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
+    if(!(j.ok && j.draft)) return;
+    try{ var segs=JSON.parse(j.draft.segments||'[]'); if(Array.isArray(segs)&&segs.length) nxMState.caps=segs; }catch(e){}
+    try{ var stl=JSON.parse(j.draft.style||'{}'); if(stl&&typeof stl==='object'){ if(!nxMState.style)nxMStyleInit(); nxMState.style=Object.assign(nxMState.style,stl); } }catch(e){}
+    if(j.draft.font){ var fsel=document.getElementById('nx-m-font'); if(fsel) fsel.value=j.draft.font; }
+    var s=nxMState.style||{};
+    var szel=document.getElementById('nx-m-size'); if(szel) szel.value=s.size||44;
+    var szv=document.getElementById('nx-m-size-val'); if(szv) szv.textContent=s.size||44;
+    var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
+    try{ nxMStylePaint(); }catch(e){}
+    try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+  }).catch(function(){});
+}
 function nxMBeginDrag(e,i,mode){
   e.preventDefault(); e.stopPropagation();
   var dur=nxMState.dur||0, pps=nxMState.pps||0; if(!dur||!pps) return;
@@ -3245,6 +3271,7 @@ async function nxMontageOpen(fid, exampleUrl){
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
   document.getElementById('nx-montage-modal').style.display='flex';
   nxMRenderCaps();
+  nxMLoadDraft(fid);   // recharge ce que tu avais enregistré (captions + style) s'il existe
 }
 function nxMontageClose(){ var v=document.getElementById('nx-m-video'); if(v) v.src=''; var e=document.getElementById('nx-m-example'); if(e) e.src=''; var ov=document.getElementById('nx-m-overlay'); if(ov) ov.innerHTML=''; document.getElementById('nx-montage-modal').style.display='none'; }
 async function nxMontageGen(){
@@ -5103,6 +5130,7 @@ body.light .action-icon{color:#666}
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <span class="ce-saved">● Enregistré auto</span>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
+      <button class="ce-btn" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬇ Télécharger</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
@@ -5110,21 +5138,11 @@ body.light .action-icon{color:#666}
     <div class="ce-main">
       <!-- GAUCHE : bibliothèque -->
       <div class="ce-lib">
-        <div class="ce-libtabs">
-          <button class="ce-libtab" onclick="nxMSoon()"><span>🎞️</span>Multimédia</button>
-          <button class="ce-libtab on"><span>🔤</span>Texte</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>😀</span>Stickers</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>✨</span>Effets</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>⇄</span>Transitions</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>💬</span>Légendes</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>🎛️</span>Filtres</button>
-          <button class="ce-libtab" onclick="nxMSoon()"><span>🎚️</span>Ajustement</button>
-        </div>
         <div class="ce-libcontent">
           <div class="nxm-plabel">Ajouter du texte</div>
           <div class="ce-card" onclick="try{document.getElementById('nx-m-caption').focus()}catch(e){}">Texte par défaut</div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Écris ta caption à droite → règle le style → « Ajouter » → place-la sur la timeline → <b style="color:#00d9c0">Exporter</b>.</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Écris ta caption à droite → règle le style → « Ajouter » → place-la sur la timeline → <b style="color:#00d9c0">Télécharger</b>.</div>
         </div>
       </div>
       <!-- CENTRE : lecteur -->
@@ -29138,6 +29156,49 @@ def create_app():
             return send_file(str(outp), mimetype="image/png", conditional=True)
         except Exception:
             return "", 500
+
+    @app.route("/noctus/montage_save", methods=["POST"])
+    def noctus_montage_save():
+        """Enregistre le BROUILLON du montage (captions + police + style) à côté
+        du reel -> il est rechargé à la réouverture de l'éditeur."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "reel introuvable"})
+        target_dir, src = parsed
+        import json as _js
+        draft = {
+            "segments": request.form.get("segments") or "[]",
+            "font": (request.form.get("font") or "Strong").strip(),
+            "style": request.form.get("style") or "{}",
+        }
+        try:
+            (target_dir / f"{src.stem}.montage.json").write_text(
+                _js.dumps(draft), encoding="utf-8")
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True})
+
+    @app.route("/noctus/montage_load")
+    def noctus_montage_load():
+        """Recharge le brouillon du montage d'un reel (captions + style)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        parsed = _parse_file_id(request.args.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False})
+        target_dir, src = parsed
+        p = target_dir / f"{src.stem}.montage.json"
+        if not p.exists():
+            return jsonify({"ok": True, "draft": None})
+        import json as _js
+        try:
+            return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8"))})
+        except Exception:
+            return jsonify({"ok": True, "draft": None})
 
     @app.route("/noctus/montage_gen", methods=["POST"])
     def noctus_montage_gen():
