@@ -574,7 +574,10 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
 
   if (!finalLines.length) { fs.writeFileSync(pngPath, canvas.toBuffer('image/png')); return; }
 
-  const lineH  = Math.round(BASE * CONFIG.lineSpacing);
+  // Interligne réglable (poignée ↕ de l'éditeur) : ne change QUE la hauteur, pas la largeur.
+  const lineSpVal = (st.lineSpacing != null && isFinite(parseFloat(st.lineSpacing)))
+    ? Math.min(3.0, Math.max(0.9, parseFloat(st.lineSpacing))) : CONFIG.lineSpacing;
+  const lineH  = Math.round(BASE * lineSpVal);
   const totalH = (finalLines.length - 1) * lineH;
   // baseY = position verticale (custom editeur ou ratio config) + offset anti-detection
   const baseY  = Math.round(H * capY) + effYOffset;

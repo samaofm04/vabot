@@ -24,7 +24,7 @@ const fs = require('fs');
     if (!out) { process.stderr.write('out manquant'); process.exit(1); }
     const cap = { text: String(arg.text || '') };
     ['font', 'size', 'color', 'x', 'y', 'align', 'case', 'bold', 'italic', 'underline',
-     'box', 'boxColor', 'effect', 'wrapW']
+     'box', 'boxColor', 'effect', 'wrapW', 'lineSpacing']
       .forEach(k => { if (arg[k] !== undefined && arg[k] !== null) cap[k] = arg[k]; });
     await core.renderCaptionsPng([cap], out, 0, arg.font || null);
 

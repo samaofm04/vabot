@@ -2999,7 +2999,8 @@ function nxMCapKey(c){
   // (déplacer ne re-rend pas ; changer texte/police/style/largeur oui).
   var font=(document.getElementById('nx-m-font')||{}).value||'Strong';
   var ww=(c&&c.wrapW!=null)?(+c.wrapW).toFixed(3):'d';
-  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig()+'|w'+ww;
+  var ls=(c&&c.lineSpacing!=null)?(+c.lineSpacing).toFixed(3):'d';
+  return (String(c.text||'').trim())+'|'+font+'|'+nxMStyleSig()+'|w'+ww+'|l'+ls;
 }
 // Bloc CSS d'une caption (fallback avant le PNG, et pendant le drag) positionné à x/y
 function nxMCssBlock(c,ow,extra){
@@ -3076,13 +3077,14 @@ function nxMDragPreview(i){
   var tt=(s['case']==='upper'?'uppercase':(s['case']==='lower'?'lowercase':(s['case']==='title'?'capitalize':'none')));
   var ul=(s.underline?'text-decoration:underline;':'');
   var wpx=Math.round((c.wrapW!=null?c.wrapW:0.88)*ow);   // largeur de wrap (px overlay)
+  var lh=(c.lineSpacing!=null?c.lineSpacing:1.45);       // interligne (poignée ↕)
   var inner=String(c.text||'').split(/\\r?\\n/).map(function(ln){ return '<div>'+nxMEsc(ln)+'</div>'; }).join('');
   var boxCss='', strokeCss='-webkit-text-stroke:'+stk.toFixed(1)+'px #000;paint-order:stroke fill;';
   if(s.box){ var bc=(/^#[0-9a-fA-F]{3,8}$/.test(s.boxColor||''))?s.boxColor:'#010101'; boxCss='background:'+bc+';border-radius:'+Math.round(fpx*0.3)+'px;padding:'+Math.round(fpx*0.28)+'px '+Math.round(fpx*0.5)+'px;'; strokeCss=''; }
   var cnr='<span class="nxm-cnr tl"></span><span class="nxm-cnr tr"></span><span class="nxm-cnr bl"></span><span class="nxm-cnr br"></span>'
          +'<span class="nxm-ew l"></span><span class="nxm-ew r"></span><span class="nxm-ns t"></span><span class="nxm-ns b"></span>';
   ov.innerHTML='<div class="nxm-drag sel on" style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);width:'+wpx+'px;pointer-events:none;box-sizing:content-box;display:flex;justify-content:center">'
-    +'<div style="'+boxCss+'width:100%;text-align:'+al+';color:'+col+';font-family:'+ff.fam+',Arial;font-weight:'+ff.wt+';'+ff.ital+ul+'text-transform:'+tt+';font-size:'+fpx.toFixed(1)+'px;line-height:1.32;'+strokeCss+'white-space:pre-wrap;word-break:break-word">'+inner+'</div>'+cnr+'</div>';
+    +'<div style="'+boxCss+'width:100%;text-align:'+al+';color:'+col+';font-family:'+ff.fam+',Arial;font-weight:'+ff.wt+';'+ff.ital+ul+'text-transform:'+tt+';font-size:'+fpx.toFixed(1)+'px;line-height:'+lh.toFixed(2)+';'+strokeCss+'white-space:pre-wrap;word-break:break-word">'+inner+'</div>'+cnr+'</div>';
 }
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
@@ -3185,18 +3187,18 @@ function nxMBeginResizeH(e,i,side){
   var ov=document.getElementById('nx-m-overlay'), c=nxMState.caps[i]; if(!ov||!c) return;
   var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
   var ovH=ov.clientHeight||480, startY=e.clientY, pid=e.pointerId;
-  var startWrap=(c.wrapW!=null?c.wrapW:0.88);
+  var startLS=(c.lineSpacing!=null?c.lineSpacing:1.45);
   nxMState.dragging=true; wrap.classList.add('on');
   try{ ov.setPointerCapture(pid); }catch(_){}
-  var lastW=startWrap;
+  var lastLS=startLS;
   function move(ev){
     if(ev.pointerId!=null && ev.pointerId!==pid) return;
     if(ev.buttons===0){ up(ev); return; }
-    var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // tirer vers l'extérieur (bas/haut) = + de lignes
-    var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // -> wrapW plus petit -> + de lignes (comme ↔)
-    w=Math.round(w*100)/100;
-    if(w===lastW) return; lastW=w; c.wrapW=w;
-    nxMDragPreview(i);   // aperçu CSS INSTANTANÉ, boîte centrée (identique à ↔)
+    var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // tirer vers l'extérieur = plus d'INTERLIGNE (plus haut)
+    var ls=Math.max(0.9, Math.min(3.0, startLS + outward*2.4));              // ne touche QUE la hauteur, pas la largeur
+    ls=Math.round(ls*20)/20;
+    if(ls===lastLS) return; lastLS=ls; c.lineSpacing=ls;
+    nxMDragPreview(i);   // aperçu CSS INSTANTANÉ (les lignes s'écartent/rapprochent)
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
@@ -3294,6 +3296,7 @@ function nxMRealCap(c){
   fd.set('bold', s.bold?'1':'0'); fd.set('italic', s.italic?'1':'0'); fd.set('underline', s.underline?'1':'0');
   fd.set('box', s.box?'1':'0'); fd.set('boxColor', s.boxColor||'#000000'); fd.set('effect', s.effect||'none');
   if(c.wrapW!=null) fd.set('wrapW', (+c.wrapW).toFixed(4));   // largeur de wrap (poignée ↔)
+  if(c.lineSpacing!=null) fd.set('lineSpacing', (+c.lineSpacing).toFixed(3));   // interligne (poignée ↕)
   var bbox=null;
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0;
@@ -29594,6 +29597,14 @@ def create_app():
                     _spec["wrapW"] = round(_wf, 4)
             except Exception:
                 pass
+        _ls = request.form.get("lineSpacing")   # interligne (poignée ↕), 0.9-3.0
+        if _ls:
+            try:
+                _lf = float(_ls)
+                if 0.9 <= _lf <= 3.0:
+                    _spec["lineSpacing"] = round(_lf, 3)
+            except Exception:
+                pass
         # Aperçu = image DÉTOURÉE au texte (l'éditeur la positionne où il veut) :
         # indépendante de x/y -> 1 seul rendu réutilisé quelle que soit la position.
         _spec["tight"] = True
@@ -29869,6 +29880,14 @@ def create_app():
                             _wf = float(_wv)
                             if 0.2 <= _wf <= 0.97:
                                 seg["wrapW"] = round(_wf, 4)
+                    except Exception:
+                        pass
+                    try:                     # interligne (poignée ↕)
+                        _lv = it.get("lineSpacing")
+                        if _lv is not None:
+                            _lf = float(_lv)
+                            if 0.9 <= _lf <= 3.0:
+                                seg["lineSpacing"] = round(_lf, 3)
                     except Exception:
                         pass
                     segments.append(seg)
