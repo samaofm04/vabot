@@ -3457,6 +3457,7 @@ function nxMLoadDraft(fid){
     var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
     try{ nxMStylePaint(); }catch(e){}
     try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+    try{ nxMSetApproveBtn(!!j.draft.va_ready); }catch(e){}   // reflète « dispo VA » sur le bouton
     nxMHistInit();   // baseline = état chargé (undo ne revient pas avant le brouillon)
   }).catch(function(){});
 }
@@ -3675,6 +3676,7 @@ async function nxMontageOpen(fid, exampleUrl){
   document.getElementById('nx-m-editnote').textContent='';
   document.getElementById('nx-m-timeinfo').textContent='';
   document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+  nxMSetApproveBtn(false);   // état « dispo VA » par défaut (nxMLoadDraft le corrige si le reel est déjà approuvé)
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
@@ -3801,29 +3803,39 @@ async function nxMontageSend(vf,file,btn){
     if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
 }
-// « 📥 Dispo pour les VA » : marque CE reel comme bon pour les VA (enregistre le
-// montage + va_ready). AUCUNE génération ici — la variante montée est générée À LA
-// DEMANDE quand un VA clique « 🎞️ Reel déjà monté » (chaque VA = une variante unique).
+// Reflète l'état « dispo VA » sur le bouton (vert + libellé) et mémorise nxMState.vaReady.
+function nxMSetApproveBtn(on){
+  nxMState.vaReady=!!on;
+  var btn=document.getElementById('nx-m-approve'); if(!btn) return;
+  btn.textContent = on ? '✅ Dispo VA — retirer' : '📥 Dispo pour les VA';
+  btn.style.background = on ? 'rgba(34,197,94,.22)' : '';
+  btn.style.color = on ? '#22c55e' : '';
+}
+// « 📥 Dispo pour les VA » = TOGGLE. Marque/retire CE reel comme bon pour les VA
+// (va_ready dans son .montage.json). AUCUNE génération ici — la variante montée est
+// générée À LA DEMANDE quand un VA clique « 🎞️ Reel déjà monté » (1 variante unique/VA).
+// Re-cliquer retire l'approbation + le filigrane de la Bibliothèque.
 function nxMontageApprove(){
   if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }  // caption en cours -> ajoutée
-  var btn=document.getElementById('nx-m-approve'); if(btn){ btn.disabled=true; btn.textContent='⏳…'; }
+  var btn=document.getElementById('nx-m-approve'); if(btn) btn.disabled=true;
+  var on=!nxMState.vaReady;                     // état visé (toggle)
+  var url=on?'/noctus/montage_approve':'/noctus/montage_unapprove';
   var fd=new FormData();
   fd.set('file_id', nxMState.fid);
   fd.set('font', document.getElementById('nx-m-font').value);
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
   fd.set('style', JSON.stringify(nxMState.style||{}));
-  fetch('/noctus/montage_approve',{method:'POST',body:fd,credentials:'same-origin'})
+  fetch(url,{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
       if(btn) btn.disabled=false;
       if(j&&j.ok){
-        if(btn) btn.textContent='✅ Dispo VA';
-        if(typeof showToast==='function') showToast('✅ Reel marqué « dispo pour les VA » — ils le recevront monté, à la demande','success',6000);
-        setTimeout(function(){ if(btn) btn.textContent='📥 Dispo pour les VA'; },2500);
+        nxMSetApproveBtn(on);
+        try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}   // filigrane à jour en revenant sur la VA
+        if(typeof showToast==='function') showToast(on?'✅ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque':'➖ Reel retiré des VA — filigrane enlevé','success',5000);
       } else {
-        if(btn) btn.textContent='📥 Dispo pour les VA';
         alert('❌ '+((j&&j.error)||'?'));
       }
-    }).catch(function(e){ if(btn){ btn.disabled=false; btn.textContent='📥 Dispo pour les VA'; } alert('Erreur: '+e); });
+    }).catch(function(e){ if(btn) btn.disabled=false; alert('Erreur: '+e); });
 }
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
@@ -10143,7 +10155,20 @@ def _fmt_size(p) -> str:
         return "?"
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False) -> str:
+def _va_ready_watermark_uri():
+    """Data-URI d'un petit SVG « DISPO VA » incliné -> tuilé en filigrane sur les reels
+    marqués « Dispo pour les VA ». UNIQUEMENT côté Bibliothèque (jamais sur la vidéo)."""
+    import urllib.parse as _u
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='150' height='96'>"
+           "<text x='6' y='58' transform='rotate(-22 75 48)' fill='rgba(34,197,94,0.42)' "
+           "font-family='Arial,Helvetica,sans-serif' font-size='15' font-weight='800'>DISPO VA</text></svg>")
+    return "data:image/svg+xml," + _u.quote(svg)
+
+
+_VA_READY_WM = _va_ready_watermark_uri()
+
+
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -10184,6 +10209,17 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"box-shadow:0 2px 8px rgba(0,0,0,.2),0 0 0 1px rgba(255,255,255,.4) inset'>{date_short}</div>"
         )
 
+    # Filigrane « DISPO VA » (tuilé) + badge : ce reel est marqué « Dispo pour les VA »
+    va_filigrane = ""
+    if is_va_ready:
+        va_filigrane = (
+            f"<div style=\"position:absolute;inset:0;pointer-events:none;z-index:3;"
+            f"background-image:url('{_VA_READY_WM}');background-repeat:repeat;background-size:150px 96px\"></div>"
+            f"<div style='position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;"
+            f"background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;"
+            f"padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)'>✅ DISPO VA</div>"
+        )
+
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
@@ -10208,6 +10244,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"{img_tag}"
         f"{play_badge}"
         f"{date_badge}"
+        f"{va_filigrane}"
         f"</div>"
     )
 
@@ -10623,6 +10660,18 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
+        # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
+        # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
+        _va_ready_stems = set()
+        if is_video and folder.exists():
+            import json as _jvr
+            for _mj in folder.glob("*.montage.json"):
+                try:
+                    _dv = _jvr.loads(_mj.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(_dv, dict) and _dv.get("va_ready"):
+                    _va_ready_stems.add(_mj.name[:-len(".montage.json")])
         # PERF : pré-génère les thumbnails manquants en arrière-plan -> quand le
         # navigateur les demande, ils sont déjà prêts (plus de ffmpeg bloquant).
         try:
@@ -10645,7 +10694,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels)))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_video and p.stem in _va_ready_stems)))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
