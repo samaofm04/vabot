@@ -3039,7 +3039,7 @@ function nxMImgHtml(i,c,rec,ow,oh){
     +'style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;'
     +'width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;'
     +'touch-action:none;z-index:4;box-sizing:border-box">'
-    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
+    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-select:none;user-select:none">'
     +cnr+'</div>';
 }
 // Indices des captions actives à l'instant courant
