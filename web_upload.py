@@ -3049,6 +3049,12 @@ function nxMUpdatePreview(){
   if(!ov||!v) return;
   if(nxMState.dragging) return;   // pendant le drag on bouge l'image directement (pas de rebuild)
   if(!document.getElementById('nx-m-fontcss')){ var _lc=document.createElement('link'); _lc.id='nx-m-fontcss'; _lc.rel='stylesheet'; _lc.href='/noctus/fonts.css'; document.head.appendChild(_lc); }
+  if(!nxMState._fontsPreload && document.fonts && document.fonts.load){   // précharge les polices -> fallback jamais en "police de base"
+    nxMState._fontsPreload=1;
+    ['Poppins','TikTokSans','Inter','Montserrat','BebasNeue','Anton'].forEach(function(f){
+      try{ document.fonts.load('700 48px "'+f+'"'); document.fonts.load('italic 700 48px "'+f+'"'); }catch(e){}
+    });
+  }
   var t=isNaN(v.currentTime)?0:v.currentTime, idx=nxMActiveIdx(t);
   if(!idx.length){ ov.innerHTML=''; return; }
   if(!nxMState.style) nxMStyleInit();
@@ -3059,15 +3065,15 @@ function nxMUpdatePreview(){
   // Si pas encore rendue : on garde la DERNIÈRE image affichée (jamais "sans police"),
   // sinon fallback CSS le temps du 1er rendu.
   idx.forEach(function(i){
-    var c=nxMState.caps[i], key=nxMCapKey(c), rec=nxMState.rimg[key], txt=String(c.text||'');
-    if(rec&&rec.url&&rec.bbox){ nxMState.lastImg[i]={url:rec.url,bbox:rec.bbox,text:txt}; html+=nxMImgHtml(i,c,rec,ow,oh); }
+    var c=nxMState.caps[i], key=nxMCapKey(c), rec=nxMState.rimg[key];
+    if(rec&&rec.url&&rec.bbox){ nxMState.lastImg[i]=rec; html+=nxMImgHtml(i,c,rec,ow,oh); }
     else {
       nxMRealCap(c);                       // déclenche le vrai rendu (async)
+      // On garde la DERNIÈRE image (BONNE police) le temps du recalcul -> jamais de
+      // "police de base" qui clignote. Le nouveau texte/saut de ligne apparaît dès que
+      // le PNG net est prêt (~instant). Fallback CSS seulement au tout 1er rendu (police préchargée).
       var prev=nxMState.lastImg[i];
-      // On ne réutilise l'ancienne image QUE si le TEXTE est identique (sinon mauvais
-      // nombre de lignes) : si le texte a changé (ex. saut de ligne), fallback CSS qui
-      // respecte les \\n immédiatement.
-      if(prev&&prev.url&&prev.bbox&&prev.text===txt) html+=nxMImgHtml(i,c,prev,ow,oh);
+      if(prev&&prev.url&&prev.bbox) html+=nxMImgHtml(i,c,prev,ow,oh);
       else html+=nxMCssBlock(c,ow,'pointer-events:none;');
     }
   });
