@@ -826,19 +826,32 @@ def random_n_reels_for(identity, n: int):
 
 
 def montaged_reels_for(identity, n: int):
-    """Pioche n reels DEJA MONTES (qui ont une video .example = version montee, texte
-    incruste) sans remise. Retourne [(example_video, description)]. Ne garde que les
-    reels ayant un exemple montre -> sinon rien de "monte" a envoyer."""
-    videos = _list_clean_videos(identity)
-    with_ex = []
-    for v in videos:
-        _cap, desc, example = _video_meta(v)
-        if example:
-            with_ex.append((example, desc))
-    if not with_ex:
+    """Pioche n reels DEJA MONTES sans remise. Ce sont les reels montes par le boss
+    dans l'editeur Montage du site (caption ecrite a la main + incrustee, uniquifies
+    iPhone), ranges dans IDENTITIES_DIR/<identity>/montes/ (video + .desc.txt option.).
+    Retourne [(video, description)]."""
+    montes_dir = IDENTITIES_DIR / (identity or "").strip().lower() / "montes"
+    if not montes_dir.exists():
         return []
-    n = min(n, len(with_ex))
-    return random.sample(with_ex, n)
+    vids = [
+        p for p in montes_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+    ]
+    if not vids:
+        return []
+    n = min(n, len(vids))
+    picked = random.sample(vids, n)
+    out = []
+    for v in picked:
+        desc = None
+        dp = v.with_suffix(".desc.txt")
+        if dp.exists():
+            try:
+                desc = dp.read_text(encoding="utf-8").strip().replace("\\n", "\n")
+            except Exception:
+                desc = None
+        out.append((v, desc))
+    return out
 
 
 def banger_reels_for(identity, limit=15):

@@ -3693,12 +3693,14 @@ function nxMGenBtns(dis){
   if(a) a.disabled=dis; if(b) b.disabled=dis;
 }
 function nxMGenReset(){
-  var a=document.getElementById('nx-m-gen'), b=document.getElementById('nx-m-bulk');
+  var a=document.getElementById('nx-m-gen'), b=document.getElementById('nx-m-bulk'), s=document.getElementById('nx-m-store');
   if(a){ a.disabled=false; a.textContent='⬇ Download'; } if(b){ b.disabled=false; b.textContent='⬇ Download bulk'; }
+  if(s){ s.disabled=false; s.textContent='📥 Dispo pour les VA'; }
 }
-async function nxMontageGen(count){
+async function nxMontageGen(count,mode){
   count=Math.max(1,Math.min(10, parseInt(count)||1));
   nxMState.bulkN=count;
+  nxMState.genMode=(mode==='store')?'store':'download';
   // si une caption est en cours de saisie mais pas encore ajoutée, on l'ajoute
   if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
   var folders=[]; for(var i=1;i<=count;i++) folders.push('V'+i);   // N variantes = N V-folders
@@ -3746,9 +3748,10 @@ async function nxMontageResults(){
     var r=await fetch('/noctus/outputs?model='+encodeURIComponent(nxMState.model)); var j=await r.json();
     var o=j.outputs||{}, dls=[];
     Object.keys(o).forEach(function(v){ (o[v]||[]).forEach(function(f){
-      dls.push({url:'/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1', file:f});
+      dls.push({url:'/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1', file:f, vf:v});
     }); });
     if(!dls.length){ nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return; }
+    if(nxMState.genMode==='store'){ return nxMontageStoreResults(dls); }   // « Dispo pour les VA » : range dans le stock au lieu de télécharger
     nxMDownloadAll(dls);   // chaque vidéo téléchargée directement (le navigateur peut demander 1x l'autorisation pour plusieurs)
     var n=dls.length;
     if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s':'')+' sur ton PC'+(n>1?' <span style="color:#9a9aa6;font-weight:500">(autorise « télécharger plusieurs fichiers » si le navigateur demande)</span>':'')+'</div>';
@@ -3800,6 +3803,29 @@ async function nxMontageSend(vf,file,btn){
   try{ var r=await fetch('/noctus/montage_send',{method:'POST',body:fd}); var j=await r.json();
     if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
+}
+// « 📥 Dispo pour les VA » : génère N variantes montées et les RANGE dans le stock de
+// reels montés de l'identité (au lieu de les télécharger). Les VA les reçoivent via
+// le bouton « 🎞️ Reel déjà monté » dans leur menu. N = le champ nombre (comme bulk).
+function nxMontageStore(){
+  var n=parseInt((document.getElementById('nx-m-bulkn')||{}).value)||1;
+  n=Math.max(1,Math.min(10,n));
+  var st=document.getElementById('nx-m-store'); if(st){ st.disabled=true; st.textContent='⏳ Enregistrement…'; }
+  nxMontageGen(n,'store');
+}
+async function nxMontageStoreResults(list){
+  var wrap=document.getElementById('nx-m-results'), okN=0;
+  for(var i=0;i<list.length;i++){
+    var d=list[i], fd=new FormData();
+    fd.set('identity',nxMState.identity); fd.set('model',nxMState.model);
+    fd.set('vf',d.vf); fd.set('file',d.file); fd.set('file_id',nxMState.fid||'');
+    try{ var r=await fetch('/noctus/montage_store',{method:'POST',body:fd}); var j=await r.json(); if(j&&j.ok) okN++; }catch(e){}
+  }
+  nxMState.genMode='download';
+  if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+okN+' reel'+(okN>1?'s':'')+' monté'+(okN>1?'s':'')+' ajouté au stock VA — bouton « 🎞️ Reel déjà monté »</div>';
+  if(typeof showToast==='function') showToast('✅ '+okN+' reel(s) monté(s) dispo pour les VA','success',6000);
+  nxMGenReset();
+  var p=document.getElementById('nx-m-prog'); if(p) p.textContent='';
 }
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
@@ -5603,6 +5629,7 @@ body.light .action-icon{color:#666}
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
       <button class="ce-btn" id="nx-m-bulk" onclick="nxMontageGenBulk()">⬇ Download bulk</button>
+      <button class="ce-btn" id="nx-m-store" onclick="nxMontageStore()" title="Génère le reel monté et le rend dispo aux VA (bouton « Reel déjà monté »). Le nombre = combien de variantes uniques ajoutées.">📥 Dispo pour les VA</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
     <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
@@ -29980,6 +30007,51 @@ def create_app():
         if ok:
             return jsonify({"ok": True, "channel": msg})
         return jsonify({"ok": False, "error": msg})
+
+    @app.route("/noctus/montage_store", methods=["POST"])
+    def noctus_montage_store():
+        """Range une variation montée (sortie de l'éditeur Montage) dans le STOCK
+        persistant de reels montés de l'identité (IDENTITIES_DIR/<id>/montes/), pour
+        que les VA la reçoivent via le bouton « 🎞️ Reel déjà monté »."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import noctus_web
+        import shutil as _sh
+        identity = (request.form.get("identity") or "").strip().lower()
+        model = noctus_web._safe(request.form.get("model") or "")
+        vf = (request.form.get("vf") or "").strip()
+        name = (request.form.get("file") or "").strip()
+        if identity not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if vf not in noctus_web.V_FOLDERS or "/" in name or "\\" in name or ".." in name:
+            return jsonify({"ok": False, "error": "fichier invalide"})
+        base = (noctus_web._models_dir() / model / "output" / vf).resolve()
+        p = (base / name).resolve()
+        if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
+            return jsonify({"ok": False, "error": "fichier introuvable"})
+        dest_dir = IDENTITIES_DIR / identity / "montes"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        n = 1                                   # nom unique anti-écrasement
+        dest = dest_dir / f"monte_{n}{p.suffix.lower()}"
+        while dest.exists():
+            n += 1
+            dest = dest_dir / f"monte_{n}{p.suffix.lower()}"
+        try:
+            _sh.copy(str(p), str(dest))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        # Description : reprend celle du reel source (file_id) si dispo -> le VA la reçoit.
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if parsed:
+            _td, _src = parsed
+            desc_src = _src.with_suffix(".desc.txt")
+            if desc_src.exists():
+                try:
+                    _sh.copy(str(desc_src), str(dest.with_suffix(".desc.txt")))
+                except Exception:
+                    pass
+        return jsonify({"ok": True, "stored": dest.name})
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
