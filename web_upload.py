@@ -3370,7 +3370,9 @@ function nxMStylePaint(){
 }
 function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
-function nxMPlayBtn(){ var v=document.getElementById('nx-m-video'), b=document.querySelector('.ce-play'); if(!v||!b)return; var playing=!v.paused; b.textContent=playing?'⏸':'▶'; b.classList.toggle('playing',playing); }
+var NXM_PLAY_SVG='<svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 4l13 8-13 8z"></path></svg>';
+var NXM_PAUSE_SVG='<svg width="16" height="16" viewBox="0 0 24 24" fill="#111"><rect x="6" y="4" width="4.5" height="16" rx="1.3"></rect><rect x="13.5" y="4" width="4.5" height="16" rx="1.3"></rect></svg>';
+function nxMPlayBtn(){ var v=document.getElementById('nx-m-video'), b=document.querySelector('.ce-play'); if(!v||!b)return; var playing=!v.paused; b.innerHTML=playing?NXM_PAUSE_SVG:NXM_PLAY_SVG; b.classList.toggle('playing',playing); }
 function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} setTimeout(nxMPlayBtn,30); }
 // ── Annuler / Refaire (historique captions + style) ──
 // NB: PAS nxMSnap() -> ce nom est déjà pris par l'aimantation timeline (ligne ~2949).
@@ -5545,6 +5547,8 @@ body.light .action-icon{color:#666}
 .ce-play{background:#2a2a30;border:0;color:#fff;width:46px;height:40px;border-radius:12px;cursor:pointer;font-size:16px;display:inline-flex;align-items:center;justify-content:center;transition:background .12s,transform .08s}
 .ce-play:hover{background:#3a3a42}
 .ce-play:active{transform:scale(.93)}
+.ce-play.playing{background:#fff}
+.ce-play.playing:hover{background:#f0f0f0}
 /* Inspecteur droite */
 .ce-right{background:#1f1f23;border-left:1px solid #2a2a30;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .ce-rtabs{display:flex;gap:2px;padding:8px;border-bottom:1px solid #2a2a30;overflow-x:auto}
@@ -5629,7 +5633,7 @@ body.light .action-icon{color:#666}
         <div class="ce-ctrl">
           <span id="nx-m-tc">00:00.00</span>
           <div style="flex:1"></div>
-          <button class="ce-play" onclick="nxMPlayPause()">▶</button>
+          <button class="ce-play" onclick="nxMPlayPause()"><svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 4l13 8-13 8z"></path></svg></button>
           <div style="flex:1"></div>
           <span>9:16 · 1080×1920</span>
         </div>
