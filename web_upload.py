@@ -3279,12 +3279,13 @@ function nxMStyleRefresh(){ try{nxMUpdatePreview();}catch(e){} nxMHistTouch(); }
 function nxMSoon(){ if(typeof showToast==='function') showToast('Cette option arrive bientôt 🙂','info'); }
 function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)return; if(v.paused){try{v.play();}catch(e){}} else {v.pause();} var b=document.querySelector('.ce-play'); if(b) setTimeout(function(){ b.textContent=v.paused?'▶':'⏸'; },30); }
 // ── Annuler / Refaire (historique captions + style) ──
-function nxMSnap(){
+// NB: PAS nxMSnap() -> ce nom est déjà pris par l'aimantation timeline (ligne ~2949).
+function nxMHistSnap(){
   return JSON.stringify({caps:nxMState.caps||[], style:nxMState.style||{}, font:(document.getElementById('nx-m-font')||{}).value||'Strong'});
 }
-function nxMHistInit(){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=nxMSnap(); nxMHistPaint(); }
+function nxMHistInit(){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=nxMHistSnap(); nxMHistPaint(); }
 function nxMCommit(){
-  var s=nxMSnap();
+  var s=nxMHistSnap();
   if(!nxMState.undoStack){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=s; nxMHistPaint(); return; }
   if(s===nxMState.histLast) return;                 // rien de nouveau
   nxMState.undoStack.push(nxMState.histLast);
