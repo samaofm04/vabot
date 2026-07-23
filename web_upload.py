@@ -3042,6 +3042,20 @@ function nxMImgHtml(i,c,rec,ow,oh){
     +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-select:none;user-select:none">'
     +cnr+'</div>';
 }
+// Met à jour l'image d'une caption EN PLACE (sans reconstruire l'overlay) : garde les
+// poignées visibles, pas de flicker. Utilisé pour le re-wrap LIVE de la poignée ↕.
+function nxMLiveWrapImg(i){
+  var ov=document.getElementById('nx-m-overlay'); if(!ov) return;
+  var c=nxMState.caps[i]; if(!c) return;
+  var key=nxMCapKey(c), rec=nxMState.rimg[key]; if(!(rec&&rec.url&&rec.bbox)) return;
+  var wrap=ov.querySelector('.nxm-drag[data-i="'+i+'"]'); if(!wrap) return;
+  var img=wrap.querySelector('img'); if(img && img.src!==rec.url) img.src=rec.url;
+  var p=nxMCapXY(c), W=rec.bbox.W||1080, H=rec.bbox.H||1920;
+  var wpc=Math.max(1,(rec.bbox.w||1)/W*100), hpc=Math.max(1,(rec.bbox.h||1)/H*100);
+  wrap.style.width=wpc.toFixed(3)+'%'; wrap.style.height=hpc.toFixed(3)+'%';
+  wrap.style.left=(p.x*100-wpc/2).toFixed(3)+'%'; wrap.style.top=(p.y*100-hpc/2).toFixed(3)+'%';
+  nxMState.lastImg[i]={url:rec.url,bbox:rec.bbox,text:String(c.text||'')};
+}
 // Indices des captions actives à l'instant courant
 function nxMActiveIdx(t){ var out=[]; (nxMState.caps||[]).forEach(function(c,i){ if(c.start==null||(t>=c.start-0.001&&t<=c.end+0.001)) out.push(i); }); return out; }
 function nxMUpdatePreview(force){
@@ -3147,7 +3161,7 @@ function nxMBeginResizeH(e,i,side){
   var baseW=wrap.offsetWidth||1, baseH=wrap.offsetHeight||1;
   var wr=wrap.getBoundingClientRect(), ovr=ov.getBoundingClientRect();
   var cxOv=wr.left+baseW/2-ovr.left, cyOv=wr.top+baseH/2-ovr.top;
-  nxMState.dragging=true; wrap.classList.add('on');
+  nxMState.dragging=true; nxMState._liveWrap=i; wrap.classList.add('on');   // mode re-wrap live (maj image en place)
   try{ ov.setPointerCapture(pid); }catch(_){}
   var lastW=startWrap;
   function move(ev){
@@ -3155,20 +3169,22 @@ function nxMBeginResizeH(e,i,side){
     if(ev.buttons===0){ up(ev); return; }
     var outward=((side==='b')?(ev.clientY-startY):(startY-ev.clientY))/ovH;  // + = étendre = plus de lignes
     var w=Math.max(0.25, Math.min(0.97, startWrap - outward*1.5));           // étendre -> wrapW plus petit -> + de lignes
-    w=Math.round(w*200)/200;                                                 // pas de 0.005 -> évite de spammer le rendu
+    w=Math.round(w*50)/50;                                                   // pas de 0.02 -> moins de rendus distincts
     if(w===lastW) return; lastW=w; c.wrapW=w;
-    // PAS de déformation de la boîte (ça écrasait le texte) : on re-rend le texte
-    // re-wrappé en direct (throttle) -> vraies lignes, taille inchangée.
-    clearTimeout(nxMState._hrT);
-    nxMState._hrT=setTimeout(function(){ nxMRealCap(c); }, 120);
+    // Re-wrap EN DIRECT (throttle ~130ms même en glissant en continu) : on voit les
+    // lignes changer. Maj de l'image en place (nxMLiveWrapImg via nxMRealCap.then).
+    if(!nxMState._hrPending){
+      nxMState._hrPending=true;
+      nxMState._hrT=setTimeout(function(){ nxMState._hrPending=false; if(nxMState._liveWrap===i) nxMRealCap(c); }, 130);
+    }
   }
   function up(ev){
     if(ev && ev.pointerId!=null && ev.pointerId!==pid) return;
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
-    clearTimeout(nxMState._hrT);
+    clearTimeout(nxMState._hrT); nxMState._hrPending=false; nxMState._liveWrap=null;
     nxMState.dragging=false; wrap.classList.remove('on');
-    nxMRealCap(c);   // re-rend le texte re-wrappé (nouveau nombre de lignes), taille INCHANGÉE
+    nxMRealCap(c);   // rendu net final ; taille INCHANGÉE
     nxMHistTouch();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
@@ -3270,8 +3286,9 @@ function nxMRealCap(c){
     delete nxMState.rpend[key];
     if(b && b.size>200 && bbox){
       nxMState.rimg[key]={url:URL.createObjectURL(b), bbox:bbox};
-      // repaint normal hors drag ; pendant un drag ↕ (re-wrap live) on FORCE l'affichage
-      try{ nxMUpdatePreview(nxMState.dragging===true); }catch(e){}
+      // pendant un drag ↕ (re-wrap live) : maj de l'image EN PLACE (pas de rebuild ->
+      // poignées gardées, pas de flicker). Sinon repaint normal.
+      try{ if(nxMState._liveWrap!=null) nxMLiveWrapImg(nxMState._liveWrap); else nxMUpdatePreview(); }catch(e){}
     } else {
       // pas de boîte -> on N'INSISTE PAS (sinon boucle infinie de requêtes) ; fallback CSS
       nxMState.rfail[key]=1;
