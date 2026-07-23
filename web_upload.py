@@ -995,7 +995,7 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 .skeleton{background:linear-gradient(90deg,#1a1a1a 0%,#2a2a2a 50%,#1a1a1a 100%);background-size:200% 100%;animation:shimmer 1.5s infinite}
 
 /* ============ TOAST NOTIFICATIONS ============ */
-.toast-container{position:fixed;top:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:9999;pointer-events:none;max-width:420px}
+.toast-container{position:fixed;top:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:200000;pointer-events:none;max-width:420px}
 .toast{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #3b82f6;border-radius:10px;padding:14px 18px;color:#fff;font-size:14px;box-shadow:0 12px 32px rgba(0,0,0,.6);display:flex;align-items:flex-start;gap:12px;pointer-events:auto;animation:toastIn .4s cubic-bezier(.16,1,.3,1);min-width:280px;backdrop-filter:blur(10px)}
 .toast.success{border-left-color:#00d68f;background:#0f1f17}
 .toast.error{border-left-color:#ff4757;background:#1f0f0f}
@@ -3210,13 +3210,17 @@ function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)retu
 // 💾 Enregistre le brouillon (captions + police + style) pour ce reel
 function nxMontageSave(){
   if(!nxMState.fid) return;
+  var btn=document.getElementById('nx-m-save'), orig='💾 Enregistrer';
+  if(btn){ btn.textContent='⏳ Enregistrement…'; btn.disabled=true; }
+  function reset(txt){ if(btn){ btn.textContent=txt; setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },1800); } }
   var fd=new FormData(); fd.set('file_id',nxMState.fid);
   fd.set('segments',JSON.stringify(nxMState.caps||[]));
   fd.set('font',(document.getElementById('nx-m-font')||{}).value||'Strong');
   fd.set('style',JSON.stringify(nxMState.style||{}));
   fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
-    if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ce que tu as mis est gardé':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
-  }).catch(function(){ if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+    reset(j.ok?'✅ Enregistré !':'❌ Erreur');
+    if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ta caption + le style sont gardés':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
+  }).catch(function(){ reset('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
 // Recharge le brouillon enregistré (captions + style) à l'ouverture
 function nxMLoadDraft(fid){
@@ -3446,22 +3450,24 @@ async function nxMontageGen(){
   fd.set('folders', 'V1');   // une seule vidéo en sortie (plus de choix V1-V10)
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
   fd.set('style', JSON.stringify(nxMState.style||{}));   // réglages texte CapCut
-  document.getElementById('nx-m-gen').disabled=true;
-  document.getElementById('nx-m-prog').textContent='⏳ génération…';
+  var gen=document.getElementById('nx-m-gen');
+  gen.disabled=true; gen.textContent='⏳ Génération…';
+  document.getElementById('nx-m-prog').textContent='⏳ génération de la vidéo…';
+  if(typeof showToast==='function') showToast('⏳ Génération de la vidéo en cours…','info');
   try{
     var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
-    if(!j.ok){ document.getElementById('nx-m-gen').disabled=false; document.getElementById('nx-m-prog').textContent=''; alert('❌ '+(j.error||'?')); return; }
+    if(!j.ok){ gen.disabled=false; gen.textContent='⬇ Télécharger'; document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
     nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMontagePoll();
-  }catch(e){ document.getElementById('nx-m-gen').disabled=false; alert('Erreur: '+e); }
+  }catch(e){ gen.disabled=false; gen.textContent='⬇ Télécharger'; if(typeof showToast==='function') showToast('Erreur : '+e,'error'); else alert('Erreur: '+e); }
 }
 async function nxMontagePoll(){
   if(!nxMState.model) return;
   try{
     var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
-    var p=document.getElementById('nx-m-prog');
-    if(s.state==='running'){ p.textContent='⏳ '+(s.pct||0)+'%'; setTimeout(nxMontagePoll,1500); }
-    else if(s.state==='done'){ p.textContent='✅ Terminé'; document.getElementById('nx-m-gen').disabled=false; nxMontageResults(); }
-    else if(s.state==='error'){ p.textContent='❌ '+(s.error||'erreur'); document.getElementById('nx-m-gen').disabled=false; }
+    var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
+    if(s.state==='running'){ p.textContent='⏳ '+(s.pct||0)+'%'; if(gen) gen.textContent='⏳ '+(s.pct||0)+'%'; setTimeout(nxMontagePoll,1500); }
+    else if(s.state==='done'){ p.textContent='✅ Terminé'; nxMontageResults(); }
+    else if(s.state==='error'){ p.textContent='❌ '+(s.error||'erreur'); if(gen){ gen.disabled=false; gen.textContent='⬇ Télécharger'; } if(typeof showToast==='function') showToast('❌ '+(s.error||'erreur'),'error'); }
     else { setTimeout(nxMontagePoll,1500); }
   }catch(e){ setTimeout(nxMontagePoll,2500); }
 }
@@ -3489,11 +3495,14 @@ async function nxMontageResults(){
       b.addEventListener('click', function(){ nxMontageSend(b.getAttribute('data-vf'), b.getAttribute('data-file'), b); });
     });
     var dlBtn=document.getElementById('nx-m-dlall');
-    if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); });
+    if(dlBtn) dlBtn.addEventListener('click', function(){ nxMDownloadAll(dls); if(typeof showToast==='function') showToast('⬇ Téléchargement lancé','success'); });
     // remonte les résultats devant les yeux + lance le téléchargement auto
     try{ wrap.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
     nxMDownloadAll(dls);   // télécharge direct sur le PC dès que le rendu est prêt
-  }catch(e){ wrap.textContent='Erreur chargement résultats'; }
+    if(typeof showToast==='function') showToast('✅ Vidéo prête — téléchargement en cours sur ton PC','success',6000);
+    var gen=document.getElementById('nx-m-gen');
+    if(gen){ gen.disabled=false; gen.textContent='✅ Téléchargé !'; setTimeout(function(){ gen.textContent='⬇ Télécharger'; },3000); }
+  }catch(e){ wrap.textContent='Erreur chargement résultats'; var g=document.getElementById('nx-m-gen'); if(g){ g.disabled=false; g.textContent='⬇ Télécharger'; } }
 }
 // Télécharge chaque vidéo générée. La réponse ?dl=1 est en Content-Disposition:attachment,
 // donc une navigation iframe déclenche le téléchargement SANS geste utilisateur (a.click()
@@ -5305,9 +5314,8 @@ body.light .action-icon{color:#666}
     <div class="ce-title">
       <span class="ce-app-name">🎬 Montage</span>
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
-      <span class="ce-saved">● Enregistré auto</span>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
-      <button class="ce-btn" onclick="nxMontageSave()">💾 Enregistrer</button>
+      <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen()">⬇ Télécharger</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
