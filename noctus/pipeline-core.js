@@ -329,6 +329,59 @@ function randomDevice() {
   return _DEVICES[Math.floor(Math.random() * _DEVICES.length)];
 }
 
+// ── Métadonnées iPhone crédibles (MÊME recette que /reel / video_transform.py) ──
+// iPhone + iOS cohérent + ville française + GPS RÉEL (ISO6709 Apple) + dates.
+// Écrites via -movflags use_metadata_tags ; -bitexact efface le mouchard Lavf/x264.
+const _FR_CITIES = [
+  ['Paris',48.8566,2.3522,35],['Lyon',45.7640,4.8357,170],['Marseille',43.2965,5.3698,12],
+  ['Nice',43.7102,7.2620,10],['Bordeaux',44.8378,-0.5792,9],['Toulouse',43.6047,1.4442,146],
+  ['Nantes',47.2184,-1.5536,8],['Lille',50.6292,3.0573,23],['Cannes',43.5528,7.0174,10],
+  ['Montpellier',43.6108,3.8767,27],['Strasbourg',48.5734,7.7521,142],['Rennes',48.1173,-1.6778,30],
+  ['Biarritz',43.4832,-1.5586,19],['Annecy',45.8992,6.1294,447],['Saint-Tropez',43.2727,6.6386,10],
+  ['Deauville',49.3600,0.0756,3],['Aix-en-Provence',43.5297,5.4474,173],['Grenoble',45.1885,5.7245,212],
+  ['Toulon',43.1242,5.9280,10],['Avignon',43.9493,4.8055,23],['Colmar',48.0794,7.3585,194],
+  ['Versailles',48.8014,2.1301,132],['La Baule',47.2860,-2.3908,6],['Honfleur',49.4189,0.2337,8],
+];
+const _IOS_BY = {
+  'iPhone 15':['17.0','17.4','17.5','18.0','18.1'],'iPhone 15 Plus':['17.1','17.5','18.0','18.2'],
+  'iPhone 15 Pro':['17.0','17.4','18.0','18.3','18.4'],'iPhone 15 Pro Max':['17.2','17.6','18.1','18.4'],
+  'iPhone 16':['18.0','18.2','18.5','19.0'],'iPhone 16 Plus':['18.0','18.3','18.6','19.0'],
+  'iPhone 16 Pro':['18.0','18.4','18.6','19.1'],'iPhone 16 Pro Max':['18.1','18.5','19.0','19.2'],
+  'iPhone 17':['19.0','19.2','19.3'],'iPhone 17 Plus':['19.0','19.3'],
+  'iPhone 17 Pro':['19.0','19.3','19.4'],'iPhone 17 Pro Max':['19.1','19.4','19.5'],
+};
+const _IPHONES = Object.keys(_IOS_BY);
+function _isoPad(n, width, dec) {           // "007.4321" (signe géré à part)
+  const parts = Math.abs(n).toFixed(dec).split('.');
+  return parts[0].padStart(width, '0') + (parts[1] ? '.' + parts[1] : '');
+}
+function appleMetaArgs() {
+  const model = _IPHONES[Math.floor(Math.random() * _IPHONES.length)];
+  const iosArr = _IOS_BY[model];
+  const ios   = iosArr[Math.floor(Math.random() * iosArr.length)];
+  const c     = _FR_CITIES[Math.floor(Math.random() * _FR_CITIES.length)];
+  const lat   = c[1] + randFloat(-0.003, 0.003);
+  const lon   = c[2] + randFloat(-0.004, 0.004);
+  const alt   = Math.max(0, c[3] + randFloat(-5, 15));
+  const latS = lat >= 0 ? '+' : '-', lonS = lon >= 0 ? '+' : '-', altS = alt >= 0 ? '+' : '-';
+  // Apple ISO6709 : lat 2 chiffres, lon 3, alt 3, chacun son signe (ex +44.8363-000.5792+009.990/)
+  const iso = `${latS}${_isoPad(lat,2,4)}${lonS}${_isoPad(lon,3,4)}${altS}${_isoPad(alt,3,3)}/`;
+  const ms  = Date.now() - Math.floor(randFloat(1,60))*86400000 - Math.floor(randFloat(0,23))*3600000;
+  const iso8601 = new Date(ms).toISOString().split('.')[0];   // 2026-01-02T15:04:05
+  return [
+    '-metadata', `com.apple.quicktime.location.ISO6709=${iso}`,
+    '-metadata', `com.apple.quicktime.make=Apple`,
+    '-metadata', `com.apple.quicktime.model=${model}`,
+    '-metadata', `com.apple.quicktime.software=${ios}`,
+    '-metadata', `com.apple.quicktime.creationdate=${iso8601}+0200`,   // heure locale + offset
+    '-metadata', `make=Apple`,
+    '-metadata', `model=${model}`,
+    '-metadata', `creation_time=${iso8601}.000000Z`,
+    '-metadata:s:v:0', `handler_name=Core Media Video`,
+    '-metadata:s:v:0', `encoder=`,   // efface "Lavc libx264" du flux vidéo (mouchard)
+  ];
+}
+
 // Pitch shift ±2% + délai aléatoire 0-250ms → piste audio unique à chaque export
 function randomAudioFilter() {
   const pitchFactor  = 1 + randFloat(-0.02, 0.02);
@@ -412,11 +465,12 @@ async function renderCaptionsPng(captions, pngPath, yOffset = 0, fontFamily = nu
   const capY = hasCustomY ? Math.min(0.96, Math.max(0.03, parseFloat(st.y))) : CONFIG.verticalY;
   const hasCustomX = (st.x != null && isFinite(parseFloat(st.x)));
   const capX = hasCustomX ? Math.min(0.97, Math.max(0.03, parseFloat(st.x))) : 0.5;
-  const CX = Math.round(W * capX);
-  // Position custom (drag éditeur) -> AUCUN jitter : le rendu final tombe exactement
-  // à la position de l'aperçu (WYSIWYG). Le jitter anti-détection reste pour les
-  // captions non positionnées (comportement historique).
-  const effYOffset = hasCustomY ? 0 : yOffset;
+  // Position custom (drag) -> PETIT décalage aléatoire (~±16px sur X et Y) : le texte
+  // reste À CÔTÉ de là où tu l'as posé, mais JAMAIS au même pixel d'un export à l'autre
+  // (anti-empreinte). Sans position custom -> jitter historique (yOffset).
+  const jitterX = hasCustomX ? Math.round((Math.random() - 0.5) * 32) : 0;
+  const CX = Math.round(W * capX) + jitterX;
+  const effYOffset = hasCustomY ? Math.round((Math.random() - 0.5) * 32) : yOffset;
   // ── Styles CapCut par caption : alignement / casse / souligné / bulle / effet ──
   const alignSt = (st.align === 'left' || st.align === 'right') ? st.align : 'center';
   const caseSt  = (st.case === 'upper' || st.case === 'lower' || st.case === 'title') ? st.case : 'none';
@@ -947,16 +1001,15 @@ async function runPipeline(modelId, log, selectedFolders = null, notify = null, 
             '-af',             audioFilter,
             '-t',              finalDuration.toFixed(3),
             '-map_metadata',   '-1',
-            '-metadata',       `comment=${uid}`,
-            '-metadata',       `creation_time=${randomCreationDate()}`,
-            '-metadata',       `make=${randomDevice().split(' ')[0]}`,
-            '-metadata',       `model=${randomDevice()}`,
-            '-metadata',       `encoder=QuickTime`,
+            ...appleMetaArgs(),          // identité iPhone crédible + GPS ville (comme /reel)
             '-c:v',            'libx264',
             '-preset',         'fast',
             '-crf',            '23',
             '-c:a',            'aac',
             '-b:a',            '192k',
+            // use_metadata_tags : écrit les atomes com.apple.quicktime.* ; -bitexact : efface Lavf/SEI x264
+            '-movflags',       'use_metadata_tags+faststart',
+            '-bitexact',
             '-y',              outputPath,
           ];
 
