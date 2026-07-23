@@ -2934,6 +2934,20 @@ function nxMAddCap(){
   nxMHistTouch();
   return true;
 }
+// « ➕ Ajouter un texte » (panneau gauche) : démarre une NOUVELLE caption. Sort du mode
+// édition (pour ne pas écraser un texte existant), vide la zone de texte et met le focus
+// dessus -> tu écris ton 2e (3e…) texte, puis « Ajouter cette caption ». Les textes
+// précédents restent (chacun = un bloc sur la timeline).
+function nxMNewText(){
+  nxMState.editIdx=-1;
+  var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
+  var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+  var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
+  var ti=document.getElementById('nx-m-timeinfo'); if(ti) ti.textContent='';
+  var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; try{ nxMTimeToggle(); }catch(e){} }
+  try{ nxMRenderCaps(); }catch(e){}    // dé-sélectionne le bloc en cours dans la liste/timeline
+  try{ if(ca) ca.focus(); }catch(e){}
+}
 // Écriture EN DIRECT : quand on modifie le texte d'une caption existante (mode édition),
 // l'aperçu sur la vidéo + la liste se mettent à jour immédiatement (pas besoin de « Mettre à jour »).
 function nxMCaptionLive(){
@@ -5658,9 +5672,9 @@ body.light .action-icon{color:#666}
       <div class="ce-lib">
         <div class="ce-libcontent">
           <div class="nxm-plabel">Ajouter du texte</div>
-          <div class="ce-card" onclick="try{document.getElementById('nx-m-caption').focus()}catch(e){}">Texte par défaut</div>
+          <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Écris ta caption à droite → règle le style → « Ajouter » → place-la sur la timeline → <b style="color:#00d9c0">Télécharger</b>.</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#00d9c0">Télécharger</b>.</div>
         </div>
       </div>
       <!-- CENTRE : lecteur -->
