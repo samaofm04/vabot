@@ -7290,7 +7290,8 @@ def _get_links_clicks_period(link_ids: list, days: int = 7) -> dict:
         # fiablement sur cette API, on filtre côté client).
         today = _dt3.date.today()
         start_date = today - _dt3.timedelta(days=days - 1)
-        res = gms._call_tool("list_recent_visitors", {
+        with gms.api_tag("widget-vas"):
+            res = gms._call_tool("list_recent_visitors", {
             "link_ids": link_ids,
             "limit": 100,
         })
@@ -16296,7 +16297,8 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
     if c and (is_past or now - float(c[2] if len(c) > 2 else 0) < 120):
         return int(c[0]), int(c[1])
     try:
-        total, countries = gms_mod.analytics_for_link(lid, iso_day, iso_day)
+        with gms_mod.api_tag("paie"):
+            total, countries = gms_mod.analytics_for_link(lid, iso_day, iso_day)
     except Exception:
         return 0, 0
     total = int(total or 0)
@@ -22972,7 +22974,8 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 pr["done"] = pr.get("done", 0) + inc
     try:
         import gms
-        _lr = gms.list_links_team(team) or {}
+        with gms.api_tag("dashboard"):
+            _lr = gms.list_links_team(team) or {}
         if not _lr.get("ok"):
             # ÉCHEC de la liste (429/réseau) : on renvoie ok=False -> PAS mis en
             # cache, la page garde les dernières bonnes données au lieu de « 0 ».
@@ -22992,7 +22995,8 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         q_tot, q_countries, q_ok = 0, {}, True
         for _i in range(0, len(_ids_all), 20):
             try:
-                _res = gms.get_analytics_overview(s_iso, e_iso, link_ids=_ids_all[_i:_i + 20])
+                with gms.api_tag("dashboard"):
+                    _res = gms.get_analytics_overview(s_iso, e_iso, link_ids=_ids_all[_i:_i + 20])
             except Exception:
                 _res = {"ok": False}
             if _res.get("ok"):
@@ -23018,7 +23022,8 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         if not lid:
             return None
         try:
-            tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
+            with gms.api_tag("dashboard"):
+                tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
         row = {"id": lid, "shortcode": l.get("shortcode") or "",
@@ -23048,7 +23053,8 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
       for r in [x for x in rows if x["clicks"] is None]:
         _t_c.sleep(0.5)
         try:
-            tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
+            with gms.api_tag("dashboard"):
+                tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
         except Exception:
             tot2, ctry2 = None, None
         if tot2 is not None:
@@ -23101,7 +23107,8 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
     def _cell(job):
         lid, day = job
         try:
-            tot, ctry = gms.analytics_for_link(lid, day, day)
+            with gms.api_tag("dashboard"):
+                tot, ctry = gms.analytics_for_link(lid, day, day)
         except Exception:
             tot, ctry = None, None
         if prog:
@@ -23218,9 +23225,17 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
         inflight = key in _GMSDASH_INFLIGHT
         lf = _GMSDASH_LASTFAIL.get(key)
     if not inflight and lf and retry_in > 0:
+        _err = lf.get("error") or ""
+        try:
+            import gms as _g_u
+            _u = _g_u.api_usage(10)
+            _by = ", ".join(f"{k} {v}" for k, v in sorted(_u["by"].items(), key=lambda kv: -kv[1]))
+            _err += f" · appels GMS 10 min : {_u['total']} ({_by}) · 429×{_u['e429']}"
+        except Exception:
+            pass
         prog = {"done": 0, "total": 0,
                 "stage": f"échec — nouvelle tentative dans {max(1, retry_in)} s",
-                "error": lf.get("error") or ""}
+                "error": _err}
     return {"ok": True, "loading": True, "progress": prog,
             "team": team, "links": rows_partial, "countries": {}}
 

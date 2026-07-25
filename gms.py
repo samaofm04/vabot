@@ -125,6 +125,7 @@ def list_tools() -> Dict[str, Any]:
 
 
 import threading as _threading
+from collections import deque as _deque
 _MCP_LOCK = _threading.Lock()
 _MCP_CACHE: Dict[str, Any] = {"session": None}
 _READ_TOOLS = {"list_links", "get_analytics_overview", "_ping"}
@@ -191,6 +192,50 @@ def _gms_note_429():
         _GMS_THROTTLE_UNTIL[0] = time.time() + 120.0
 
 
+# ---- Instrumentation : QUI consomme l'API GMS ----
+# Chaque appel est journalisé (horodatage, étiquette du consommateur, statut HTTP).
+# api_usage() agrège sur les N dernières minutes -> affiché dans le dashboard quand
+# ça 429, pour identifier le consommateur qui sature l'IP du VPS.
+_API_LOCAL = _threading.local()
+_API_LOG = _deque(maxlen=4000)
+
+
+class api_tag:
+    """Contexte : étiquette les appels GMS faits dans ce thread (ex: 'report')."""
+
+    def __init__(self, tag):
+        self.tag = tag
+
+    def __enter__(self):
+        self.prev = getattr(_API_LOCAL, "tag", None)
+        _API_LOCAL.tag = self.tag
+        return self
+
+    def __exit__(self, *exc):
+        _API_LOCAL.tag = self.prev
+        return False
+
+
+def _api_note(status):
+    try:
+        _API_LOG.append((time.time(), getattr(_API_LOCAL, "tag", None) or "autres", int(status or 0)))
+    except Exception:
+        pass
+
+
+def api_usage(minutes: int = 10) -> dict:
+    cut = time.time() - minutes * 60
+    by, by429 = {}, {}
+    for ts, tag, st in list(_API_LOG):
+        if ts < cut:
+            continue
+        by[tag] = by.get(tag, 0) + 1
+        if st == 429:
+            by429[tag] = by429.get(tag, 0) + 1
+    return {"minutes": minutes, "total": sum(by.values()), "by": by,
+            "e429": sum(by429.values()), "e429_by": by429}
+
+
 def _gms_is_bulk() -> bool:
     with _GMS_GATE_LOCK:
         return _GMS_BULK[0] > 0
@@ -236,7 +281,9 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
     _gms_gate()
     try:
         r = s.post(MCP_URL, json=body, timeout=_to)
+        _api_note(r.status_code)
     except Exception as e:
+        _api_note(0)
         if _retry:  # session peut-être morte -> on la recrée et on réessaie
             _reset_session()
             return _call_tool(tool_name, args, _retry=False, _429=_429)
@@ -1206,7 +1253,9 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
             _gms_gate()
             try:
                 r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
+                _api_note(r.status_code)
             except Exception as e:
+                _api_note(0)
                 return {"ok": False, "error": f"reseau: {e}"}
             if r.status_code == 429:            # rate-limit -> on souffle puis on retente
                 _gms_note_429()

@@ -16,6 +16,16 @@ import re
 import time
 
 import discord
+
+
+def _tagged_analytics(gms, lid, a, b):
+    """analytics_for_link étiqueté 'report' (instrumentation gms.api_usage)."""
+    try:
+        with gms.api_tag("report"):
+            return gms.analytics_for_link(lid, a, b)
+    except AttributeError:                       # vieux gms sans api_tag
+        return gms.analytics_for_link(lid, a, b)
+
 from discord import app_commands
 from discord.ext import commands, tasks
 
@@ -637,7 +647,7 @@ class ClickRecap(commands.Cog):
             async def _one(dd):
                 async with sem:
                     t, ctry = await asyncio.to_thread(
-                        gms.analytics_for_link, lid, dd.isoformat(), dd.isoformat())
+                        _tagged_analytics, gms, lid, dd.isoformat(), dd.isoformat())
                     return dd, t, ctry
 
             for dd, total, countries in await asyncio.gather(*[_one(x) for x in missing]):
