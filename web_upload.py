@@ -18763,15 +18763,56 @@ def _render_jailbreak_html() -> str:
     all_accounts = jb.list_all()
     stats = jb.stats()
 
-    # Accountability par VA (jb_activity) : comptes actifs / bannis / silencieux >48h
-    # + oublis du mois (1 par jour où au moins 1 compte est resté muet >48h).
-    _act_by_va = {}
+    # Accountability : on charge UNE fois les données d'activité, puis on compte
+    # par (identité, VA) — surtout PAS par VA global : un même VA peut gérer des
+    # comptes sous plusieurs identités (ex. 11 sous lola + 11 sous amelia), et la
+    # section affichée ne concerne que l'identité en cours.
+    _jba = None
+    _jb_act = {}
+    _jb_banned = set()
+    _jb_pen = {}
     try:
-        import jb_activity as _jba
-        for _d in _jba.va_summary():
-            _act_by_va[(_d.get("va") or "").strip().lower()] = _d
+        import jb_activity as _jba_mod
+        _jba = _jba_mod
+        _jb_act = _jba._load(_jba.ACT_FILE) or {}
+        _jb_banned = _jba._banned()
+        _jb_pen = _jba._load(_jba.PEN_FILE) or {}
     except Exception:
-        _act_by_va = {}
+        _jba = None
+
+    def _jb_accountability(va_accts_arg, va_name_arg):
+        """Compteurs pour CE couple (identité, VA) uniquement : actifs / bannis /
+        oublis 48h / oublis du mois. Un oubli = 1 par JOUR où au moins un compte
+        de cette liste est resté muet >48 h (10 comptes le même jour = 1 oubli)."""
+        if not _jba:
+            return None
+        import time as _t_ac
+        now = _t_ac.time()
+        n_actif = n_ban = n_silent = 0
+        unames = set()
+        for a in va_accts_arg:
+            u = (a.get("username") or "").strip()
+            if u:
+                unames.add(u.lower())
+            st = _jba._acct_state(u, _jb_act.get(u), now, _jb_banned)
+            if st == "banned":
+                n_ban += 1
+            elif st == "silent":
+                n_silent += 1
+                n_actif += 1          # un compte muet reste un compte actif
+            elif st in ("ok", "never"):
+                n_actif += 1
+        import datetime as _dt_ac
+        month = _dt_ac.datetime.now().strftime("%Y-%m")
+        rec = _jb_pen.get((va_name_arg or "").strip().lower()) or {}
+        n_mois = 0
+        for day, accs in (rec.get("by_day") or {}).items():
+            if not str(day).startswith(month):
+                continue
+            # le jour ne compte que si un compte DE CETTE IDENTITÉ était fautif
+            if any((x or "").lower() in unames for x in (accs or [])):
+                n_mois += 1
+        return {"actif": n_actif, "ban": n_ban, "silent": n_silent, "mois": n_mois}
 
     # Header
     header = (
@@ -19408,12 +19449,12 @@ def _render_jailbreak_html() -> str:
 
                 # Pastilles accountability : actifs / bannis / oublis 48h / oublis du mois.
                 # Un compte banni est quand même scrapé, il est juste compté à part.
-                _sm = _act_by_va.get(va_name.strip().lower()) or {}
+                _sm = _jb_accountability(va_accts, va_name)
                 if _sm:
-                    _n_actif = int(_sm.get("accounts", 0)) - int(_sm.get("banned", 0)) - int(_sm.get("no_data", 0))
-                    _n_ban = int(_sm.get("banned", 0))
-                    _n_oubli = int(_sm.get("silent_now", 0))
-                    _n_mois = int(_sm.get("penalties_month", 0))
+                    _n_actif = _sm["actif"]
+                    _n_ban = _sm["ban"]
+                    _n_oubli = _sm["silent"]
+                    _n_mois = _sm["mois"]
                     scrape_pill += (
                         f"<span class='jb-acc-pill ok' title='Comptes actifs (non bannis, avec données)'>"
                         f"✅ {max(0, _n_actif)} actifs</span>"
