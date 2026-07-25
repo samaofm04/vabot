@@ -6530,7 +6530,7 @@ def _classify_scrape_error(msg: str) -> str:
     if "401" in m or "403" in m or "login" in m or "session" in m or "checkpoint" in m:
         return "Session/cookies Instagram expirés — à reconnecter dans Settings"
     if "not found" in m or "introuvable" in m or "404" in m or "does not exist" in m:
-        return "Compte introuvable (renommé ou supprimé)"
+        return "Compte introuvable — renommé/supprimé (compté comme banni)"
     if "private" in m or "privé" in m:
         return "Compte privé — stats inaccessibles"
     if "timeout" in m or "timed out" in m or "connection" in m or "réseau" in m or "network" in m:
@@ -6865,9 +6865,13 @@ def _verify_ig_profile_exists(handle: str) -> bool:
             allow_redirects=True,
         )
     except Exception:
-        return False
+        return True     # réseau KO -> on ne SAIT pas : surtout ne pas déclarer le compte mort
+    if r.status_code == 404:
+        return False    # seul cas certain d'un compte disparu
     if r.status_code != 200:
-        return False
+        # 429 (rate-limit), 5xx, mur de login… : indéterminé. Renvoyer False ici
+        # ferait passer des comptes VIVANTS en « banni » pendant un gros scrape.
+        return True
     txt = r.text or ""
     # Marqueurs explicites de page introuvable
     not_found_markers = [
@@ -6999,14 +7003,18 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     if "error" in res:
         err_msg = res["error"]
         is_banned = bool(res.get("banned"))
-        # Si RapidAPI dit "invalid username", on tente une verif HTTP directe
-        # pour distinguer "handle inexistant" vs "compte trop neuf/petit non-indexe"
-        if not is_banned and ("invalid" in err_msg.lower() or "missing username" in err_msg.lower()):
+        # Handle qui n'existe plus (RENOMMÉ, supprimé ou banni) -> on vérifie en HTTP
+        # direct puis on le compte comme BANNI (pas comme une simple erreur) : un compte
+        # renommé est perdu pour nous, il doit sortir des comptes actifs.
+        _gone = ("invalid", "missing username", "introuvable", "not found", "404",
+                 "does not exist", "profilenotexists", "supprimé", "user not found")
+        _lm = err_msg.lower()
+        if not is_banned and any(m in _lm for m in _gone):
             exists = _verify_ig_profile_exists(h)
             if exists:
                 err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit)."
             else:
-                err_msg = f"🚫 Compte banni ou supprimé (@{h})"
+                err_msg = f"🚫 Compte introuvable (@{h}) — renommé, supprimé ou banni"
                 is_banned = True
         out = {"error": err_msg, "banned": is_banned, "scraped_at": now_ts}
         _cache_put_stats(h, out)
@@ -19163,7 +19171,9 @@ def _render_jailbreak_html() -> str:
 
         # Pastille de statut a cote du handle : banni / non scrape / actif
         if is_banned:
-            status_badge = "<span class='va-ig3-ban-badge'>Banni</span>"
+            _why_ban = html_escape(str(s.get("error") or "")[:120]) or "Compte inaccessible"
+            _lbl_ban = "Renommé" if "renommé" in str(s.get("error") or "").lower() else "Banni"
+            status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>{_lbl_ban}</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
         elif s.get("stale"):
