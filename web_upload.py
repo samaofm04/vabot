@@ -22948,7 +22948,7 @@ def _gmsdash_period_range(period: str):
     return today - _dt_p.timedelta(days=6), today, "7 derniers jours"
 
 
-def _gmsdash_compute(team: str, period: str, progress_key: str = None) -> dict:
+def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=None) -> dict:
     """Calcule le détail par lien d'une catégorie (appel analytics par lien).
     Lent (~0.4 s/lien) — appelé par le démon, ou à la volée si le cache est vide."""
     from concurrent.futures import ThreadPoolExecutor
@@ -22982,6 +22982,37 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None) -> dict:
         _prog(total=len(links), stage="clics par lien")
     except Exception as e:
         return {"ok": False, "error": f"liste des liens : {e}"[:160]}
+
+    # PHASE RAPIDE : le TOTAL de la catégorie coûte 1 appel par 20 liens (au lieu
+    # d'1 par lien). Publié dans la progression -> la page affiche les cartes en
+    # quelques secondes, pendant que le détail par lien se calcule derrière.
+    if progress_key and links:
+        _ids_all = [l.get("id") for l in links if l.get("id")]
+        _nb = (len(_ids_all) + 19) // 20
+        _prog(total_add=_nb, stage="total de la catégorie")
+        q_tot, q_countries, q_ok = 0, {}, True
+        for _i in range(0, len(_ids_all), 20):
+            try:
+                _res = gms.get_analytics_overview(s_iso, e_iso, link_ids=_ids_all[_i:_i + 20])
+            except Exception:
+                _res = {"ok": False}
+            if _res.get("ok"):
+                _d0 = _res.get("data") or {}
+                q_tot += int(_d0.get("total_clicks") or 0)
+                for _it in (_d0.get("top_countries") or []):
+                    _cc = _it.get("country_code")
+                    if _cc:
+                        q_countries[_cc] = q_countries.get(_cc, 0) + int(_it.get("count") or 0)
+            else:
+                q_ok = False
+            _prog(1)
+        with _GMSDASH_LOCK:
+            _pr = _GMSDASH_PROGRESS.get(progress_key)
+            if _pr is not None:
+                _pr["quick"] = {"total": q_tot, "us": q_countries.get("US", 0),
+                                "countries": q_countries, "n_links": len(_ids_all),
+                                "complete": q_ok}
+        _prog(stage="clics par lien")
 
     def _one(l):
         lid = l.get("id")
@@ -23037,10 +23068,18 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None) -> dict:
     # L'analytics ne renvoie qu'un total par appel : une série coûte 1 appel par
     # lien ET par jour. On se limite donc aux N meilleurs liens sur 7 jours
     # (8 x 7 = 56 appels), ce qui suffit à voir qui génère quoi.
-    series = _gmsdash_series(rows, days=7, top_n=8, prog=_prog)
-    return {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
-            "links": rows, "countries": countries, "series": series,
+    base = {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
+            "links": rows, "countries": countries,
             "failed": failed, "partial": failed > 0}
+    if store_cb and rows:
+        # Publie le tableau COMPLET tout de suite (la courbe suit) : la page passe
+        # des liens partiels au tableau définitif sans attendre les 56 appels de série.
+        try:
+            store_cb(dict(base, series={"days": [], "links": []}))
+        except Exception:
+            pass
+    base["series"] = _gmsdash_series(rows, days=7, top_n=8, prog=_prog)
+    return base
 
 
 def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dict:
@@ -23113,7 +23152,8 @@ def _gmsdash_kick(team: str, period: str) -> bool:
 
     def _bg():
         try:
-            payload = _gmsdash_compute(team, period, progress_key=key)
+            payload = _gmsdash_compute(team, period, progress_key=key,
+                                         store_cb=lambda pl: _gmsdash_store(team, period, pl))
             import time as _t_bg
             if payload.get("ok"):
                 _gmsdash_store(team, period, payload)
@@ -23359,6 +23399,15 @@ function gdSchedulePoll(ms){
   window.__gdPollTimer = setTimeout(function(){ gdLoad(); }, ms);
 }
 // Barre de progression du calcul (X / Y appels) — affichée tant qu'il n'y a rien à montrer
+function gdQuickCards(q, label){
+  var us = window.__gdUs;
+  document.getElementById('gd-cards').innerHTML =
+      '<div class="gd-card"><div class="lab">'+(us?'Clics US':'Clics totaux')+'</div>'
+    + '<div class="val">'+gdNum(us?(q.us||0):(q.total||0))+'</div>'
+    + '<div class="sub">'+gdEsc(label||'')+(q.complete===false?' · incomplet':'')+' — détail par lien en cours…</div></div>'
+    + '<div class="gd-card"><div class="lab">Liens</div><div class="val">'+(q.n_links||0)+'</div>'
+    + '<div class="sub">dans la catégorie</div></div>';
+}
 function gdProgressHtml(p){
   p = p || {};
   var tot = p.total || 0, don = p.done || 0;
@@ -23399,12 +23448,24 @@ function gdLoad(force){
     if(d.loading){
       var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
       document.getElementById('gd-ctry').innerHTML = '';
+      var q = (d.progress || {}).quick;
       if((d.links||[]).length){
         // Les liens DÉJÀ lus s'affichent en direct, la barre au-dessus
         d.label = 'calcul en cours…';
         window.__gdData = d;
         gdRender(d);
+        // Le TOTAL rapide (par lots) est plus juste que la somme partielle
+        if(q){ gdQuickCards(q, d.label); }
         document.getElementById('gd-tbl').insertAdjacentHTML('afterbegin', gdProgressHtml(d.progress));
+      } else if(q){
+        // Premier rendu LÉGER : les totaux de la catégorie avant le détail par lien
+        gdQuickCards(q, 'total rapide');
+        var ks = Object.keys(q.countries||{}).sort(function(a,b){ return q.countries[b]-q.countries[a]; }).slice(0,12);
+        document.getElementById('gd-ctry').innerHTML = ks.length
+          ? ('<span style="background:none;border:0;color:#6b7280">Pays :</span>' + ks.map(function(k){
+              return '<span>'+gdEsc(k)+' · '+gdNum(q.countries[k])+'</span>'; }).join(''))
+          : '';
+        gdShowProgress(d.progress);
       } else {
         document.getElementById('gd-cards').innerHTML = '';
         gdShowProgress(d.progress);

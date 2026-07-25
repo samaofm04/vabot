@@ -164,7 +164,7 @@ def _reset_session():
 # On n'espace les appels que dans 2 cas : (1) un 429 vient d'être reçu -> on
 # temporise le temps que ça retombe ; (2) un traitement en LOT s'est déclaré via
 # bulk_mode() (dashboard clics), qui doit rester poli avec l'API.
-_GMS_RPS = 2.5                      # requêtes/seconde quand on freine
+_GMS_RPS = 1.5                      # requêtes/seconde quand on freine
 _GMS_GATE_LOCK = _threading.Lock()
 _GMS_LAST = [0.0]
 _GMS_THROTTLE_UNTIL = [0.0]         # timestamp jusqu'auquel on freine (après un 429)
@@ -188,7 +188,7 @@ class bulk_mode:
 def _gms_note_429():
     """Un 429 est tombé -> on freine tout le monde pendant 45 s."""
     with _GMS_GATE_LOCK:
-        _GMS_THROTTLE_UNTIL[0] = time.time() + 45.0
+        _GMS_THROTTLE_UNTIL[0] = time.time() + 120.0
 
 
 def _gms_gate():
