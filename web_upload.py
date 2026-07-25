@@ -23092,6 +23092,19 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
         _GMSDASH_INFLIGHT.add(key)
     try:
         payload = _gmsdash_compute(team, period)
+        if not payload.get("ok"):
+            # API saturée (429/réseau) : on ressert les DERNIÈRES bonnes données,
+            # même périmées, plutôt qu'une page d'erreur vide.
+            with _GMSDASH_LOCK:
+                stale = _GMSDASH_MEM.get(key)
+            if stale and (stale.get("payload") or {}).get("links"):
+                out = dict(stale["payload"])
+                out["cached_at"] = stale.get("ts")
+                out["age_min"] = int((_t_g.time() - int(stale.get("ts", 0))) // 60)
+                out["stale_api"] = True
+                out["stale_error"] = str(payload.get("error") or "")[:120]
+                return out
+            return payload
         _gmsdash_store(team, period, payload)
         payload["cached_at"] = int(_t_g.time())
         payload["age_min"] = 0
@@ -23119,10 +23132,17 @@ def _gmsdash_warm_loop():
             t0 = _t_w.time()
             for tid in ids:
                 for per in _GMSDASH_WARM_PERIODS:
+                    key = f"{tid}|{per}"
+                    with _GMSDASH_LOCK:
+                        hit = _GMSDASH_MEM.get(key)
+                    if (hit and (hit.get("payload") or {}).get("links")
+                            and (_t_w.time() - int(hit.get("ts", 0))) < 25 * 60):
+                        continue          # encore frais (redémarrage récent) -> pas de recalcul
                     try:
                         _gmsdash_store(tid, per, _gmsdash_compute(tid, per))
                     except Exception as e:
                         print(f"[gmsdash-warm] {tid}/{per} : {e}", flush=True)
+                    _t_w.sleep(30)        # souffle entre les lots (partage le quota API)
             print(f"[gmsdash-warm] {len(ids)} catégorie(s) × {len(_GMSDASH_WARM_PERIODS)} "
                   f"période(s) en {int(_t_w.time() - t0)}s", flush=True)
         except Exception as e:
@@ -23372,7 +23392,10 @@ function gdRender(d){
       + '</div><div class="sub">recalcul auto toutes les 30 min · ↻ pour forcer</div></div>'
     + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
-       + '<div class="sub">non lus — clique ↻</div></div>' : '');
+       + '<div class="sub">non lus — clique ↻</div></div>' : '')
+    + (d.stale_api ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">API saturée</div>'
+       + '<div class="val" style="font-size:16px;color:#fb923c">données gardées</div>'
+       + '<div class="sub">dernier relevé il y a '+(d.age_min||0)+' min — réessaie ↻ dans quelques minutes</div></div>' : '');
   var rows = '<div class="gd-row gd-head"><span>#</span><span>Lien</span><span style="text-align:right">'
            + (us?'Clics US':'Clics')+'</span><span>Part</span></div>';
   if(!links.length){ rows += '<div class="gd-msg">Aucun lien dans cette catégorie.</div>'; }
@@ -31036,15 +31059,19 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        # AUCUN appel API ici : quand GMS rate-limite (429), le sélecteur restait
+        # bloqué sur « Chargement… ». Les noms sont en dur, le nombre de liens
+        # vient du cache pré-calculé (0 = pas encore calculé, purement cosmétique).
         out = []
         for tid, name in GMSDASH_TEAMS:
-            n = None
-            try:
-                import gms
-                n = len((gms.list_links_team(tid) or {}).get("links") or []) or None
-            except Exception:
-                n = None
-            out.append({"id": tid, "name": name, "link_count": n or 0})
+            n = 0
+            with _GMSDASH_LOCK:
+                for per in ("today", "7", "30", "quinz"):
+                    hit = _GMSDASH_MEM.get(f"{tid}|{per}")
+                    if hit and (hit.get("payload") or {}).get("links"):
+                        n = len(hit["payload"]["links"])
+                        break
+            out.append({"id": tid, "name": name, "link_count": n})
         return jsonify({"ok": True, "teams": out})
 
     @app.route("/gmsdash/data")
