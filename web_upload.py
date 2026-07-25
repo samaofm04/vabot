@@ -22891,6 +22891,194 @@ def _render_videocrea_html() -> str:
         return f"<div style='padding:24px;color:#f99'>Module « Création de vidéos » indisponible : {type(e).__name__}: {e}</div>"
 
 
+# ============ Dashboard clics GMS : cache persistant + pré-calcul ============
+# L'analytics GMS ne donne qu'un total par appel : le détail par lien coûte 1 appel
+# PAR LIEN (261 pour « marche francais » ≈ 2 min au rythme autorisé). Un démon
+# recalcule donc en arrière-plan pour que la page soit instantanée à l'ouverture.
+GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
+_GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
+_GMSDASH_WARM_PERIODS = ("today", "7")   # périodes pré-calculées (les plus consultées)
+_GMSDASH_LOCK = _threading_mod.Lock()
+_GMSDASH_MEM: dict = {}         # "team|period" -> {ts, payload}
+_GMSDASH_INFLIGHT: set = set()  # évite 2 calculs simultanés de la même clé
+
+
+def _gmsdash_load_disk():
+    """Recharge le cache depuis le disque (survit à un redémarrage)."""
+    global _GMSDASH_MEM
+    try:
+        if GMSDASH_CACHE_FILE.exists():
+            d = json.loads(GMSDASH_CACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                _GMSDASH_MEM = d
+    except Exception:
+        _GMSDASH_MEM = {}
+
+
+def _gmsdash_save_disk():
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = GMSDASH_CACHE_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(_GMSDASH_MEM, ensure_ascii=False), encoding="utf-8")
+        os.replace(str(tmp), str(GMSDASH_CACHE_FILE))
+    except Exception:
+        pass
+
+
+def _gmsdash_period_range(period: str):
+    """(date_debut, date_fin, libellé) pour une période du sélecteur."""
+    import datetime as _dt_p
+    today = _dt_p.date.today()
+    if period == "today":
+        return today, today, "aujourd'hui"
+    if period == "30":
+        return today - _dt_p.timedelta(days=29), today, "30 derniers jours"
+    if period == "quinz":
+        start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
+        return start, today, ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin")
+    return today - _dt_p.timedelta(days=6), today, "7 derniers jours"
+
+
+def _gmsdash_compute(team: str, period: str) -> dict:
+    """Calcule le détail par lien d'une catégorie (appel analytics par lien).
+    Lent (~0.4 s/lien) — appelé par le démon, ou à la volée si le cache est vide."""
+    from concurrent.futures import ThreadPoolExecutor
+    import time as _t_c
+    start, end, label = _gmsdash_period_range(period)
+    s_iso, e_iso = start.isoformat(), end.isoformat()
+    try:
+        import gms
+        links = (gms.list_links_team(team) or {}).get("links") or []
+    except Exception as e:
+        return {"ok": False, "error": f"liste des liens : {e}"[:160]}
+
+    def _one(l):
+        lid = l.get("id")
+        if not lid:
+            return None
+        try:
+            tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
+        except Exception:
+            tot, ctry = None, None
+        return {"id": lid, "shortcode": l.get("shortcode") or "",
+                "name": l.get("display_name") or l.get("shortcode") or "",
+                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
+                "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
+
+    try:
+        # 4 workers : le rythme réel est imposé par gms._gms_gate() (2,5 req/s).
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            rows = [r for r in ex.map(_one, links) if r]
+    except Exception as e:
+        return {"ok": False, "error": f"analytics : {e}"[:160]}
+    # Rattrapage séquentiel des liens que le rate-limit a fait échouer.
+    for r in [x for x in rows if x["clicks"] is None]:
+        _t_c.sleep(0.5)
+        try:
+            tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
+        except Exception:
+            tot2, ctry2 = None, None
+        if tot2 is not None:
+            r["clicks"] = tot2
+            r["us"] = (ctry2 or {}).get("US", 0)
+            r["countries"] = ctry2 or {}
+    failed = sum(1 for r in rows if r["clicks"] is None)
+    countries: dict = {}
+    for r in rows:
+        for c, n in (r.get("countries") or {}).items():
+            countries[c] = countries.get(c, 0) + int(n or 0)
+        r.pop("countries", None)
+        if r["clicks"] is None:
+            r["clicks"] = 0                    # affichage seulement (cf. `failed`)
+    return {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
+            "links": rows, "countries": countries,
+            "failed": failed, "partial": failed > 0}
+
+
+def _gmsdash_store(team: str, period: str, payload: dict):
+    import time as _t_s
+    if not payload.get("ok"):
+        return
+    with _GMSDASH_LOCK:
+        _GMSDASH_MEM[f"{team}|{period}"] = {"ts": int(_t_s.time()), "payload": payload}
+        _gmsdash_save_disk()
+
+
+def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
+    """Sert le cache (pré-calculé par le démon) ; calcule à la volée si absent."""
+    import time as _t_g
+    key = f"{team}|{period}"
+    if not force:
+        with _GMSDASH_LOCK:
+            hit = _GMSDASH_MEM.get(key)
+        if hit and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL:
+            out = dict(hit["payload"])
+            out["cached_at"] = hit["ts"]
+            out["age_min"] = int((_t_g.time() - hit["ts"]) // 60)
+            return out
+    # Pas de doublon de calcul si 2 onglets demandent la même chose en même temps
+    with _GMSDASH_LOCK:
+        if key in _GMSDASH_INFLIGHT and not force:
+            stale = _GMSDASH_MEM.get(key)
+            if stale:
+                out = dict(stale["payload"])
+                out["age_min"] = int((_t_g.time() - stale["ts"]) // 60)
+                out["refreshing"] = True
+                return out
+        _GMSDASH_INFLIGHT.add(key)
+    try:
+        payload = _gmsdash_compute(team, period)
+        _gmsdash_store(team, period, payload)
+        payload["cached_at"] = int(_t_g.time())
+        payload["age_min"] = 0
+        return payload
+    finally:
+        with _GMSDASH_LOCK:
+            _GMSDASH_INFLIGHT.discard(key)
+
+
+_GMSDASH_WARM_STARTED = False
+
+
+def _gmsdash_warm_loop():
+    """Recalcule toutes les catégories × périodes en boucle, en tâche de fond.
+    Objectif : la page est déjà prête quand l'utilisateur ouvre le site."""
+    import time as _t_w
+    _t_w.sleep(90)                     # laisse le boot se terminer
+    while True:
+        try:
+            import gms
+            if not gms.is_configured():
+                _t_w.sleep(600)
+                continue
+            r = gms._call_tool("list_teams", {}) or {}
+            teams = ((r.get("data") or {}).get("data")) or []
+            ids = [t.get("id") for t in teams if t.get("id")]
+            t0 = _t_w.time()
+            for tid in ids:
+                for per in _GMSDASH_WARM_PERIODS:
+                    try:
+                        _gmsdash_store(tid, per, _gmsdash_compute(tid, per))
+                    except Exception as e:
+                        print(f"[gmsdash-warm] {tid}/{per} : {e}", flush=True)
+            print(f"[gmsdash-warm] {len(ids)} catégorie(s) × {len(_GMSDASH_WARM_PERIODS)} "
+                  f"période(s) en {int(_t_w.time() - t0)}s", flush=True)
+        except Exception as e:
+            print(f"[gmsdash-warm] crash: {e}", flush=True)
+        _t_w.sleep(30 * 60)            # cycle toutes les 30 min
+
+
+def _start_gmsdash_warm():
+    global _GMSDASH_WARM_STARTED
+    if _GMSDASH_WARM_STARTED:
+        return
+    _GMSDASH_WARM_STARTED = True
+    _gmsdash_load_disk()
+    import threading as _th_w
+    _th_w.Thread(target=_gmsdash_warm_loop, daemon=True, name="gmsdash-warm").start()
+    print("[gmsdash-warm] démon démarré (pré-calcul toutes les 30 min)", flush=True)
+
+
 def _render_gmsdash_html() -> str:
     """Dashboard clics GetMySocial : clics par lien, filtrés par CATÉGORIE (= team
     GMS : BOYA, KHLOE, marche francais…) + bascule « US uniquement ».
@@ -23022,6 +23210,9 @@ function gdRender(d){
     + '<div class="sub">'+actifs+' avec au moins 1 clic</div></div>'
     + '<div class="gd-card"><div class="lab">Meilleur lien</div><div class="val">'+gdNum(max)+'</div>'
     + '<div class="sub">'+gdEsc(links.length?(links[0].name||links[0].shortcode):'—')+'</div></div>'
+    + '<div class="gd-card"><div class="lab">Mis à jour</div><div class="val" style="font-size:19px">'
+      + ((d.age_min==null || d.age_min<1) ? 'maintenant' : ('il y a '+d.age_min+' min'))
+      + '</div><div class="sub">recalcul auto toutes les 30 min · ↻ pour forcer</div></div>'
     + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
        + '<div class="sub">non lus — clique ↻</div></div>' : '');
@@ -30699,103 +30890,20 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"[:160]})
 
-    _GMSDASH_CACHE = {}          # (team, period) -> (ts, payload)
-    _GMSDASH_TTL = 300           # 5 min : l'analytics est lent (1 appel par lien)
-
     @app.route("/gmsdash/data")
     def gmsdash_data():
         """Clics par lien pour UNE catégorie (team) et une période.
-
-        L'analytics GMS ne renvoie qu'un TOTAL par appel : pour un détail par lien
-        il faut un appel par lien -> on parallélise (8 workers) et on cache 5 min.
-        Chaque lien renvoie aussi ses pays (top ~10) d'où on tire le compteur US."""
+        Sert le cache pré-calculé par le démon ; ne calcule à la volée que si le
+        cache est vide/périmé (ou si ?force=1)."""
         from flask import jsonify
-        import time as _t_gd, datetime as _dt_gd
-        from concurrent.futures import ThreadPoolExecutor
-        if not is_auth():
-            return jsonify({"ok": False, "error": "unauth"}), 401
         team = (request.args.get("team") or "").strip()
         period = (request.args.get("period") or "7").strip()
         force = (request.args.get("force") or "") == "1"
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
         if not team:
             return jsonify({"ok": False, "error": "catégorie manquante"})
-        key = (team, period)
-        now = _t_gd.time()
-        if not force:
-            hit = _GMSDASH_CACHE.get(key)
-            if hit and (now - hit[0]) < _GMSDASH_TTL:
-                return jsonify(hit[1])
-        today = _dt_gd.date.today()
-        if period == "today":
-            start, end, label = today, today, "aujourd'hui"
-        elif period == "30":
-            start, end, label = today - _dt_gd.timedelta(days=29), today, "30 derniers jours"
-        elif period == "quinz":
-            start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
-            end, label = today, ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin")
-        else:
-            start, end, label = today - _dt_gd.timedelta(days=6), today, "7 derniers jours"
-        s_iso, e_iso = start.isoformat(), end.isoformat()
-        try:
-            import gms
-            links = (gms.list_links_team(team, force_refresh=force) or {}).get("links") or []
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"liste des liens : {e}"[:160]})
-
-        def _one(l):
-            lid = l.get("id")
-            if not lid:
-                return None
-            try:
-                tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
-            except Exception:
-                tot, ctry = None, None
-            return {
-                "id": lid,
-                "shortcode": l.get("shortcode") or "",
-                "name": l.get("display_name") or l.get("shortcode") or "",
-                "clicks": tot,                       # None = lecture ratée (pas un 0)
-                "us": (ctry or {}).get("US", 0),
-                "countries": ctry or {},
-            }
-
-        rows = []
-        try:
-            # 4 workers : le rythme réel est imposé par _gms_gate() (3 req/s),
-            # au-delà on ne gagne rien et on empile juste des threads en attente.
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                rows = [r for r in ex.map(_one, links) if r]
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"analytics : {e}"[:160]})
-        # Passe de RATTRAPAGE : les liens que le rate-limit a fait échouer sont
-        # relus un par un, sans concurrence. Bien plus efficace que de ralentir
-        # tout le lot (30 relectures au lieu de 261 appels lents).
-        retry_rows = [r for r in rows if r["clicks"] is None]
-        if retry_rows:
-            import time as _t_rt
-            for r in retry_rows:
-                _t_rt.sleep(0.5)
-                try:
-                    tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
-                except Exception:
-                    tot2, ctry2 = None, None
-                if tot2 is not None:
-                    r["clicks"] = tot2
-                    r["us"] = (ctry2 or {}).get("US", 0)
-                    r["countries"] = ctry2 or {}
-        failed = sum(1 for r in rows if r["clicks"] is None)
-        countries = {}
-        for r in rows:
-            for c, n in (r.get("countries") or {}).items():
-                countries[c] = countries.get(c, 0) + int(n or 0)
-            r.pop("countries", None)
-            if r["clicks"] is None:
-                r["clicks"] = 0                      # affichage seulement (cf. `failed`)
-        payload = {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
-                   "links": rows, "countries": countries,
-                   "failed": failed, "partial": failed > 0}
-        _GMSDASH_CACHE[key] = (now, payload)
-        return jsonify(payload)
+        return jsonify(_gmsdash_get(team, period, force=force))
 
     @app.route("/insta/pp/<handle>")
     def insta_pp(handle):
@@ -37503,6 +37611,11 @@ def start_in_thread():
         _start_insta_trends_scheduler()
     except Exception as e:
         print(f"[start_in_thread] insta trends scheduler failed to start: {e}", flush=True)
+    # Pré-calcul des clics GMS -> le Dashboard clics est déjà prêt à l'ouverture
+    try:
+        _start_gmsdash_warm()
+    except Exception as e:
+        print(f"[start_in_thread] gmsdash warm failed to start: {e}", flush=True)
     # Seed des media pools MyPuls (idempotent : skip si pool deja peuple).
     # Au boot, restaure les listes hardcoded dans seed_media_pools.py pour
     # chaque createur (EMMA, AMELIA, JULIA, etc.) si le pool est vide.
