@@ -191,14 +191,25 @@ def _gms_note_429():
         _GMS_THROTTLE_UNTIL[0] = time.time() + 120.0
 
 
+def _gms_is_bulk() -> bool:
+    with _GMS_GATE_LOCK:
+        return _GMS_BULK[0] > 0
+
+
 def _gms_gate():
-    """Ne freine que si nécessaire (429 récent ou traitement en lot)."""
+    """Freine UNIQUEMENT les traitements en lot (bulk_mode).
+
+    Les appels des pages web ne sont JAMAIS retenus ici : freiner tout le monde
+    après un 429 occupait les threads du serveur web en attentes de plusieurs
+    minutes -> plus AUCUNE page ne répondait (Cloudflare 524, site down)."""
+    if not _gms_is_bulk():
+        return
     while True:
         with _GMS_GATE_LOCK:
             now = time.time()
-            if _GMS_BULK[0] <= 0 and now >= _GMS_THROTTLE_UNTIL[0]:
-                return                      # cas normal : aucun délai
-            wait = _GMS_LAST[0] + (1.0 / max(0.5, _GMS_RPS)) - now
+            throttled = now < _GMS_THROTTLE_UNTIL[0]
+            gap = (1.0 / max(0.5, _GMS_RPS)) if throttled else 0.25   # 1,5/s freiné, 4/s sinon
+            wait = _GMS_LAST[0] + gap - now
             if wait <= 0:
                 _GMS_LAST[0] = now
                 return
@@ -231,11 +242,13 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
             return _call_tool(tool_name, args, _retry=False, _429=_429)
         return {"ok": False, "error": f"Erreur réseau : {e}"}
     if r.status_code == 429:
-        # Rate-limit GMS : on souffle et on retente (backoff croissant). Sans ça
-        # le lien remonte à 0 clic alors qu'il en a -> chiffres faux.
+        # Rate-limit GMS. En LOT : backoff patient (le chiffre doit finir juste).
+        # Depuis une PAGE : 1 seul retry court — une page qui attend 30 s par appel
+        # gèle un thread du serveur web (cause du 524 « site down »).
         _gms_note_429()
-        if _429 < 3:
-            time.sleep((2.0, 5.0, 9.0)[_429])
+        _max, _sleeps = (3, (2.0, 5.0, 9.0)) if _gms_is_bulk() else (1, (1.0,))
+        if _429 < _max:
+            time.sleep(_sleeps[_429])
             return _call_tool(tool_name, args, _retry=_retry, _429=_429 + 1)
         return {"ok": False, "error": "HTTP 429 (rate-limit GetMySocial)"}
     if r.status_code in (400, 401, 404) and _retry:
@@ -1188,7 +1201,8 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
         if cursor:
             url += f"&cursor={cursor}"
         r = None
-        for _try in range(3):
+        _sleeps = (2.0, 6.0, 12.0) if _gms_is_bulk() else (1.0,)   # pages : 1 retry court
+        for _try in range(len(_sleeps) + 1):
             _gms_gate()
             try:
                 r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
@@ -1196,7 +1210,8 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
                 return {"ok": False, "error": f"reseau: {e}"}
             if r.status_code == 429:            # rate-limit -> on souffle puis on retente
                 _gms_note_429()
-                time.sleep((2.0, 6.0, 12.0)[_try])
+                if _try < len(_sleeps):
+                    time.sleep(_sleeps[_try])
                 continue
             break
         if r is None or r.status_code != 200:
