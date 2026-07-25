@@ -22990,9 +22990,58 @@ def _gmsdash_compute(team: str, period: str) -> dict:
         r.pop("countries", None)
         if r["clicks"] is None:
             r["clicks"] = 0                    # affichage seulement (cf. `failed`)
+    # --- Courbe : clics JOUR PAR JOUR pour les meilleurs liens ---------------
+    # L'analytics ne renvoie qu'un total par appel : une série coûte 1 appel par
+    # lien ET par jour. On se limite donc aux N meilleurs liens sur 7 jours
+    # (8 x 7 = 56 appels), ce qui suffit à voir qui génère quoi.
+    series = _gmsdash_series(rows, days=7, top_n=8)
     return {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
-            "links": rows, "countries": countries,
+            "links": rows, "countries": countries, "series": series,
             "failed": failed, "partial": failed > 0}
+
+
+def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8) -> dict:
+    """Série quotidienne (clics + clics US) des `top_n` meilleurs liens sur `days`
+    jours. Retourne {days:[iso…], links:[{name, shortcode, points, us_points, total,
+    us_total}]}. Best-effort : un jour illisible vaut 0 pour ce lien."""
+    import datetime as _dt_se
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        import gms
+    except Exception:
+        return {"days": [], "links": []}
+    top = sorted([r for r in rows if r.get("id")],
+                 key=lambda r: -(r.get("clicks") or 0))[:top_n]
+    if not top:
+        return {"days": [], "links": []}
+    today = _dt_se.date.today()
+    day_list = [(today - _dt_se.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+
+    def _cell(job):
+        lid, day = job
+        try:
+            tot, ctry = gms.analytics_for_link(lid, day, day)
+        except Exception:
+            tot, ctry = None, None
+        return (lid, day, tot or 0, (ctry or {}).get("US", 0))
+
+    jobs = [(r["id"], d) for r in top for d in day_list]
+    got: dict = {}
+    try:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for lid, day, tot, us in ex.map(_cell, jobs):
+                got[(lid, day)] = (tot, us)
+    except Exception:
+        pass
+    out = []
+    for r in top:
+        pts = [got.get((r["id"], d), (0, 0))[0] for d in day_list]
+        ups = [got.get((r["id"], d), (0, 0))[1] for d in day_list]
+        out.append({"name": r.get("name") or r.get("shortcode"),
+                    "shortcode": r.get("shortcode"),
+                    "points": pts, "us_points": ups,
+                    "total": sum(pts), "us_total": sum(ups)})
+    return {"days": day_list, "links": out}
 
 
 def _gmsdash_store(team: str, period: str, payload: dict):
@@ -23127,6 +23176,15 @@ def _render_gmsdash_html() -> str:
 .gd-share{height:6px;background:#1b1e27;border-radius:20px;overflow:hidden}
 .gd-share i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px}
 .gd-msg{padding:40px;text-align:center;color:#6b7280;font-size:13px}
+.gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px}
+.gd-chart h4{margin:0 0 2px;font-size:14px;font-weight:700;color:#e6e6ea}
+.gd-chart .hint{font-size:11px;color:#6b7280;margin-bottom:12px}
+.gd-leg{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.gd-leg button{display:inline-flex;align-items:center;gap:7px;background:#14161c;border:1px solid #2b2f3a;border-radius:8px;padding:5px 10px;font-size:11.5px;color:#c4c4cc;font-family:inherit;cursor:pointer;font-weight:600}
+.gd-leg button.off{opacity:.35}
+.gd-leg i{width:10px;height:10px;border-radius:3px;display:inline-block;flex-shrink:0}
+.gd-leg b{color:#fff;font-variant-numeric:tabular-nums}
+
 .gd-ctry{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
 .gd-ctry span{background:#14161c;border:1px solid #2b2f3a;border-radius:8px;padding:5px 10px;font-size:11.5px;color:#c4c4cc;font-weight:600}
 </style>
@@ -23147,6 +23205,7 @@ def _render_gmsdash_html() -> str:
     <button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache">↻</button>
   </div>
   <div class="gd-cards" id="gd-cards"></div>
+  <div class="gd-chart" id="gd-chart"></div>
   <div class="gd-tbl" id="gd-tbl"><div class="gd-msg">Choisis une catégorie…</div></div>
   <div class="gd-ctry" id="gd-ctry"></div>
 </div>
@@ -23184,15 +23243,89 @@ function gdLoad(force){
   document.getElementById('gd-cards').innerHTML = '';
   document.getElementById('gd-ctry').innerHTML = '';
   var u = '/gmsdash/data?team='+encodeURIComponent(tid)+'&period='+encodeURIComponent(window.__gdPeriod)+(force?'&force=1':'');
-  fetch(u, {credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
-    if(!d || !d.ok){
-      document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc((d&&d.error)||'Erreur')+'</div>';
-      return;
+  fetch(u, {credentials:'same-origin'}).then(function(r){
+    var ct = r.headers.get('content-type') || '';
+    if(ct.indexOf('json') === -1){
+      // Réponse HTML (session expirée / erreur serveur) -> message clair
+      return r.text().then(function(t){
+        throw new Error(/login|connexion/i.test(t) ? 'Session expirée — recharge la page'
+                                                   : 'Le serveur a répondu autre chose que des données');
+      });
     }
+    return r.json();
+  }).then(function(d){
+    if(!d || !d.ok) throw new Error((d && d.error) || 'Erreur');
     window.__gdData = d; gdRender(d);
   }).catch(function(e){
-    document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e)+'</div>';
+    // On garde le tableau précédent s'il y en a un (ne pas perdre l'affichage)
+    var tbl = document.getElementById('gd-tbl');
+    var had = window.__gdData && (window.__gdData.links||[]).length;
+    if(had){ gdRender(window.__gdData); }
+    var msg = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e && e.message ? e.message : e)
+            + ' — clique ↻ pour réessayer</div>';
+    if(had){ tbl.insertAdjacentHTML('afterbegin', msg); } else { tbl.innerHTML = msg; }
   });
+}
+var GD_COLORS = ['#22c55e','#3b82f6','#f59e0b','#ec4899','#a855f7','#14b8a6','#ef4444','#84cc16'];
+window.__gdHidden = window.__gdHidden || {};
+function gdToggleSerie(i){
+  window.__gdHidden[i] = !window.__gdHidden[i];
+  gdChart(window.__gdData);
+}
+// Graphe SVG construit à la main (pas de librairie : les CDN sont bloqués côté client)
+function gdChart(d){
+  var box = document.getElementById('gd-chart');
+  if(!box) return;
+  var se = (d && d.series) || {days:[], links:[]};
+  var days = se.days || [], links = se.links || [];
+  if(!days.length || !links.length){ box.innerHTML = ''; return; }
+  var us = window.__gdUs;
+  var W = 900, H = 260, PL = 46, PR = 14, PT = 12, PB = 26;
+  var iw = W - PL - PR, ih = H - PT - PB;
+  var vals = links.map(function(l, i){ return window.__gdHidden[i] ? [] : (us ? l.us_points : l.points); });
+  var max = 0;
+  vals.forEach(function(p){ (p||[]).forEach(function(v){ if(v > max) max = v; }); });
+  if(max <= 0) max = 1;
+  var stepX = days.length > 1 ? iw / (days.length - 1) : 0;
+  function X(i){ return PL + i * stepX; }
+  function Y(v){ return PT + ih - (v / max) * ih; }
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+  // grille + axe Y
+  for(var g = 0; g <= 4; g++){
+    var yv = Math.round(max * (4 - g) / 4), yy = Y(yv);
+    svg += '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy + '" stroke="#1e2129" stroke-width="1"/>';
+    svg += '<text x="' + (PL - 8) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#6b7280" font-size="10">' + yv + '</text>';
+  }
+  // axe X (dates courtes)
+  days.forEach(function(dd, i){
+    if(days.length > 10 && (i % 2)) return;
+    var p = dd.split('-');
+    svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#6b7280" font-size="10">' + p[2] + '/' + p[1] + '</text>';
+  });
+  // courbes
+  links.forEach(function(l, i){
+    if(window.__gdHidden[i]) return;
+    var pts = (us ? l.us_points : l.points) || [];
+    var col = GD_COLORS[i % GD_COLORS.length];
+    var dpath = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
+    svg += '<path d="' + dpath + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    pts.forEach(function(v, k){
+      svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
+           + '<title>' + gdEsc(l.name) + ' — ' + days[k] + ' : ' + v + (us ? ' clics US' : ' clics') + '</title></circle>';
+    });
+  });
+  svg += '</svg>';
+  var leg = links.map(function(l, i){
+    var tot = us ? l.us_total : l.total;
+    return '<button class="' + (window.__gdHidden[i] ? 'off' : '') + '" onclick="gdToggleSerie(' + i + ')" '
+         + 'title="Clique pour masquer/afficher cette courbe">'
+         + '<i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
+         + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(tot) + '</b></button>';
+  }).join('');
+  box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
+    + '<div class="hint">' + (us ? 'Clics US uniquement' : 'Tous les clics') + ' · les ' + links.length
+    + ' meilleurs liens · survole un point pour le détail · clique une légende pour masquer</div>'
+    + svg + '<div class="gd-leg">' + leg + '</div>';
 }
 function gdRender(d){
   if(!d) return;
@@ -23230,6 +23363,7 @@ function gdRender(d){
       + '</div>';
   });
   document.getElementById('gd-tbl').innerHTML = rows;
+  gdChart(d);
   var c = d.countries||{};
   var keys = Object.keys(c).sort(function(a,b){ return c[b]-c[a]; }).slice(0,12);
   document.getElementById('gd-ctry').innerHTML = keys.length
@@ -30903,7 +31037,14 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         if not team:
             return jsonify({"ok": False, "error": "catégorie manquante"})
-        return jsonify(_gmsdash_get(team, period, force=force))
+        try:
+            return jsonify(_gmsdash_get(team, period, force=force))
+        except Exception as e:
+            # Toujours du JSON : sinon le front reçoit la page d'erreur HTML de
+            # Flask et affiche « <!DOCTYPE ... is not valid JSON ».
+            import traceback as _tb
+            print("[gmsdash] " + _tb.format_exc(), flush=True)
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"[:200]})
 
     @app.route("/insta/pp/<handle>")
     def insta_pp(handle):
