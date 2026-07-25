@@ -28,6 +28,41 @@ def _ensure_dirs():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+PP_DIR = INSTA_DIR / "pp"          # photos de profil téléchargées (URL Insta = signée, expire)
+
+
+def cache_profile_pic(username: str, url: str) -> bool:
+    """Télécharge la photo de profil en local (data/insta/pp/<user>.jpg).
+
+    Les URLs de PP Instagram sont SIGNÉES et expirent (quelques heures/jours) :
+    en s'y fiant, les comptes finissent par s'afficher sans photo même s'ils sont
+    bien scrapés. On garde donc une copie servie par le dashboard. Best-effort."""
+    if not url or not username:
+        return False
+    try:
+        import requests
+        PP_DIR.mkdir(parents=True, exist_ok=True)
+        r = requests.get(url, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0", "Referer": "https://www.instagram.com/"})
+        if r.status_code != 200 or not r.content:
+            return False
+        ct = (r.headers.get("Content-Type") or "").lower()
+        if "image" not in ct and not r.content[:3] in (b"\xff\xd8\xff", b"\x89PN"):
+            return False
+        tmp = PP_DIR / f"{username}.jpg.tmp"
+        tmp.write_bytes(r.content)
+        os.replace(str(tmp), str(PP_DIR / f"{username}.jpg"))   # écriture atomique
+        return True
+    except Exception:
+        return False
+
+
+def local_pp_path(username: str):
+    """Chemin de la PP locale si elle existe, sinon None."""
+    p = PP_DIR / f"{_clean_username(username)}.jpg"
+    return p if p.exists() else None
+
+
 def _write_cache(username: str, result: dict) -> dict:
     """Écrit le cache d'un compte en FUSIONNANT avec le dernier relevé connu.
 
@@ -74,6 +109,13 @@ def _write_cache(username: str, result: dict) -> dict:
             result["previous_scraped_at"] = old.get("scraped_at")
 
     f.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Copie locale de la PP tant que l'URL signée est encore valide (elle expire).
+    try:
+        _pic = ((result.get("profile") or {}).get("profile_pic_url") or "")
+        if _pic.startswith("http"):
+            cache_profile_pic(username, _pic)
+    except Exception:
+        pass
     return result
 
 

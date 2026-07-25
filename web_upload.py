@@ -6968,6 +6968,17 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     if not profile and "followers" in res:
         profile = res
     profile_pic = profile.get("profile_pic_url") or ""
+    # PP : on sert la COPIE LOCALE (/insta/pp/<handle>) — les URLs Instagram sont
+    # signées et expirent, ce qui faisait apparaître des comptes « sans photo »
+    # même bien scrapés. On télécharge la copie tant que l'URL est fraîche.
+    try:
+        import insta_scraper as _ig_pp
+        if profile_pic.startswith("http") and not _ig_pp.local_pp_path(h):
+            _ig_pp.cache_profile_pic(h, profile_pic)
+        if _ig_pp.local_pp_path(h):
+            profile_pic = f"/insta/pp/{h}"
+    except Exception:
+        pass
     followers = int(profile.get("followers") or 0)
     posts_count = int(profile.get("posts_count") or 0)
     reels = res.get("reels") or res.get("posts") or []
@@ -30114,6 +30125,25 @@ def create_app():
         if ok:
             return jsonify({"ok": True, "channel": msg})
         return jsonify({"ok": False, "error": msg})
+
+    @app.route("/insta/pp/<handle>")
+    def insta_pp(handle):
+        """Sert la photo de profil téléchargée en local (data/insta/pp/<handle>.jpg).
+        Évite de dépendre des URLs Instagram signées, qui expirent -> plus de comptes
+        affichés sans photo. 404 si on n'a pas encore de copie."""
+        from flask import send_file
+        if not is_auth():
+            return "", 401
+        try:
+            import insta_scraper as _ig_pp
+            p = _ig_pp.local_pp_path(handle)
+            if not p:
+                return "", 404
+            resp = send_file(str(p), mimetype="image/jpeg", conditional=True)
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        except Exception:
+            return "", 404
 
     @app.route("/noctus/montage_approve", methods=["POST"])
     def noctus_montage_approve():
