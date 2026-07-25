@@ -22908,6 +22908,7 @@ _GMSDASH_WARM_PERIODS = ("today", "7")   # périodes pré-calculées (les plus c
 _GMSDASH_LOCK = _threading_mod.Lock()
 _GMSDASH_MEM: dict = {}         # "team|period" -> {ts, payload}
 _GMSDASH_INFLIGHT: set = set()  # évite 2 calculs simultanés de la même clé
+_GMSDASH_PROGRESS: dict = {}   # "team|period" -> {done,total,stage,error} (barre de progression)
 
 
 def _gmsdash_load_disk():
@@ -22946,13 +22947,29 @@ def _gmsdash_period_range(period: str):
     return today - _dt_p.timedelta(days=6), today, "7 derniers jours"
 
 
-def _gmsdash_compute(team: str, period: str) -> dict:
+def _gmsdash_compute(team: str, period: str, progress_key: str = None) -> dict:
     """Calcule le détail par lien d'une catégorie (appel analytics par lien).
     Lent (~0.4 s/lien) — appelé par le démon, ou à la volée si le cache est vide."""
     from concurrent.futures import ThreadPoolExecutor
     import time as _t_c
     start, end, label = _gmsdash_period_range(period)
     s_iso, e_iso = start.isoformat(), end.isoformat()
+
+    def _prog(inc=0, total=None, total_add=None, stage=None):
+        """Alimente la barre de progression de la page (si progress_key)."""
+        if not progress_key:
+            return
+        with _GMSDASH_LOCK:
+            pr = _GMSDASH_PROGRESS.setdefault(progress_key,
+                                              {"done": 0, "total": 0, "stage": "", "error": ""})
+            if total is not None:
+                pr["total"] = total
+            if total_add:
+                pr["total"] = pr.get("total", 0) + total_add
+            if stage:
+                pr["stage"] = stage
+            if inc:
+                pr["done"] = pr.get("done", 0) + inc
     try:
         import gms
         _lr = gms.list_links_team(team) or {}
@@ -22961,6 +22978,7 @@ def _gmsdash_compute(team: str, period: str) -> dict:
             # cache, la page garde les dernières bonnes données au lieu de « 0 ».
             return {"ok": False, "error": f"liste des liens : {_lr.get('error') or '?'}"[:160]}
         links = _lr.get("links") or []
+        _prog(total=len(links), stage="clics par lien")
     except Exception as e:
         return {"ok": False, "error": f"liste des liens : {e}"[:160]}
 
@@ -22972,10 +22990,12 @@ def _gmsdash_compute(team: str, period: str) -> dict:
             tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
+        _prog(1)
         return {"id": lid, "shortcode": l.get("shortcode") or "",
                 "name": l.get("display_name") or l.get("shortcode") or "",
                 "clicks": tot,                 # None = lecture ratée (surtout pas 0)
                 "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
+        # (la progression est notée par l'appelant via _prog)
 
     try:
         # bulk_mode : ce lot (des centaines d'appels) s'auto-freine, sans ralentir
@@ -23008,13 +23028,13 @@ def _gmsdash_compute(team: str, period: str) -> dict:
     # L'analytics ne renvoie qu'un total par appel : une série coûte 1 appel par
     # lien ET par jour. On se limite donc aux N meilleurs liens sur 7 jours
     # (8 x 7 = 56 appels), ce qui suffit à voir qui génère quoi.
-    series = _gmsdash_series(rows, days=7, top_n=8)
+    series = _gmsdash_series(rows, days=7, top_n=8, prog=_prog)
     return {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
             "links": rows, "countries": countries, "series": series,
             "failed": failed, "partial": failed > 0}
 
 
-def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8) -> dict:
+def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dict:
     """Série quotidienne (clics + clics US) des `top_n` meilleurs liens sur `days`
     jours. Retourne {days:[iso…], links:[{name, shortcode, points, us_points, total,
     us_total}]}. Best-effort : un jour illisible vaut 0 pour ce lien."""
@@ -23037,9 +23057,13 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8) -> dict:
             tot, ctry = gms.analytics_for_link(lid, day, day)
         except Exception:
             tot, ctry = None, None
+        if prog:
+            prog(1)
         return (lid, day, tot or 0, (ctry or {}).get("US", 0))
 
     jobs = [(r["id"], d) for r in top for d in day_list]
+    if prog:
+        prog(total_add=len(jobs), stage="courbe des 7 jours")
     got: dict = {}
     try:
         with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
@@ -23067,51 +23091,66 @@ def _gmsdash_store(team: str, period: str, payload: dict):
         _gmsdash_save_disk()
 
 
+def _gmsdash_kick(team: str, period: str) -> bool:
+    """Lance le calcul en ARRIÈRE-PLAN (1 seul à la fois par clé)."""
+    key = f"{team}|{period}"
+    with _GMSDASH_LOCK:
+        if key in _GMSDASH_INFLIGHT:
+            return False
+        _GMSDASH_INFLIGHT.add(key)
+        _GMSDASH_PROGRESS[key] = {"done": 0, "total": 0,
+                                  "stage": "liste des liens", "error": ""}
+    import threading as _th_k
+
+    def _bg():
+        try:
+            payload = _gmsdash_compute(team, period, progress_key=key)
+            if payload.get("ok"):
+                _gmsdash_store(team, period, payload)
+                with _GMSDASH_LOCK:
+                    _GMSDASH_PROGRESS.pop(key, None)
+            else:
+                with _GMSDASH_LOCK:
+                    pr = _GMSDASH_PROGRESS.setdefault(
+                        key, {"done": 0, "total": 0, "stage": "", "error": ""})
+                    pr["error"] = str(payload.get("error") or "?")[:140]
+        except Exception as e:
+            with _GMSDASH_LOCK:
+                pr = _GMSDASH_PROGRESS.setdefault(
+                    key, {"done": 0, "total": 0, "stage": "", "error": ""})
+                pr["error"] = f"{type(e).__name__}: {e}"[:140]
+        finally:
+            with _GMSDASH_LOCK:
+                _GMSDASH_INFLIGHT.discard(key)
+
+    _th_k.Thread(target=_bg, daemon=True, name=f"gmsdash-{key}").start()
+    return True
+
+
 def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
-    """Sert le cache (pré-calculé par le démon) ; calcule à la volée si absent."""
+    """INSTANTANÉ, toujours : sert ce qu'on a (même vieux) et lance le recalcul en
+    arrière-plan si besoin. S'il n'y a encore RIEN, renvoie {loading, progress}
+    que la page affiche en barre de progression (elle re-demande toutes les 2 s).
+    La route ne bloque donc JAMAIS plusieurs secondes."""
     import time as _t_g
     key = f"{team}|{period}"
-    if not force:
-        with _GMSDASH_LOCK:
-            hit = _GMSDASH_MEM.get(key)
-        if (hit and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
-                and (hit.get("payload") or {}).get("links")):   # cache vide = à recalculer
-            out = dict(hit["payload"])
-            out["cached_at"] = hit["ts"]
-            out["age_min"] = int((_t_g.time() - hit["ts"]) // 60)
-            return out
-    # Pas de doublon de calcul si 2 onglets demandent la même chose en même temps
     with _GMSDASH_LOCK:
-        if key in _GMSDASH_INFLIGHT and not force:
-            stale = _GMSDASH_MEM.get(key)
-            if stale:
-                out = dict(stale["payload"])
-                out["age_min"] = int((_t_g.time() - stale["ts"]) // 60)
-                out["refreshing"] = True
-                return out
-        _GMSDASH_INFLIGHT.add(key)
-    try:
-        payload = _gmsdash_compute(team, period)
-        if not payload.get("ok"):
-            # API saturée (429/réseau) : on ressert les DERNIÈRES bonnes données,
-            # même périmées, plutôt qu'une page d'erreur vide.
-            with _GMSDASH_LOCK:
-                stale = _GMSDASH_MEM.get(key)
-            if stale and (stale.get("payload") or {}).get("links"):
-                out = dict(stale["payload"])
-                out["cached_at"] = stale.get("ts")
-                out["age_min"] = int((_t_g.time() - int(stale.get("ts", 0))) // 60)
-                out["stale_api"] = True
-                out["stale_error"] = str(payload.get("error") or "")[:120]
-                return out
-            return payload
-        _gmsdash_store(team, period, payload)
-        payload["cached_at"] = int(_t_g.time())
-        payload["age_min"] = 0
-        return payload
-    finally:
+        hit = _GMSDASH_MEM.get(key)
+    has = bool(hit and (hit.get("payload") or {}).get("links"))
+    fresh = has and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
+    if force or not fresh:
+        _gmsdash_kick(team, period)          # no-op si déjà en cours
+    if has:
+        out = dict(hit["payload"])
+        out["cached_at"] = hit.get("ts")
+        out["age_min"] = int((_t_g.time() - int(hit.get("ts", 0))) // 60)
         with _GMSDASH_LOCK:
-            _GMSDASH_INFLIGHT.discard(key)
+            out["refreshing"] = key in _GMSDASH_INFLIGHT
+        return out
+    with _GMSDASH_LOCK:
+        prog = dict(_GMSDASH_PROGRESS.get(key) or {})
+    return {"ok": True, "loading": True, "progress": prog,
+            "team": team, "links": [], "countries": {}}
 
 
 _GMSDASH_WARM_STARTED = False
@@ -23225,7 +23264,7 @@ def _render_gmsdash_html() -> str:
     body = """
 <div class="gd-wrap">
   <div class="gd-bar">
-    <select id="gd-team" class="gd-sel" onchange="gdLoad()"><option>Chargement…</option></select>
+    <select id="gd-team" class="gd-sel" onchange="window.__gdData=null; gdLoad()"><option>Chargement…</option></select>
     <div class="gd-seg" id="gd-period">
       <button data-p="today" onclick="gdPeriod(this)">Aujourd'hui</button>
       <button data-p="7" class="on" onclick="gdPeriod(this)">7 jours</button>
@@ -23247,7 +23286,8 @@ window.__gdPeriod = '7';
 window.__gdUs = false;
 function gdPeriod(b){
   document.querySelectorAll('#gd-period button').forEach(function(x){ x.classList.remove('on'); });
-  b.classList.add('on'); window.__gdPeriod = b.getAttribute('data-p'); gdLoad();
+  b.classList.add('on'); window.__gdPeriod = b.getAttribute('data-p');
+  window.__gdData = null; gdLoad();
 }
 function gdToggleUs(){
   window.__gdUs = !window.__gdUs;
@@ -23280,12 +23320,34 @@ function gdTeams(){
         '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e && e.message ? e.message : e)+'</div>';
     });
 }
+window.__gdPollTimer = null;
+function gdSchedulePoll(ms){
+  clearTimeout(window.__gdPollTimer);
+  window.__gdPollTimer = setTimeout(function(){ gdLoad(); }, ms);
+}
+// Barre de progression du calcul (X / Y appels) — affichée tant qu'il n'y a rien à montrer
+function gdShowProgress(p){
+  p = p || {};
+  var tot = p.total || 0, don = p.done || 0;
+  var pct = tot ? Math.min(100, Math.round(don * 100 / tot)) : 0;
+  var err = p.error ? ('<div style="color:#f87171;font-size:11px;margin-top:8px">⚠ ' + gdEsc(p.error)
+    + ' — nouvelle tentative automatique…</div>') : '';
+  document.getElementById('gd-tbl').innerHTML =
+    '<div class="gd-msg" style="text-align:left">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">'
+    + '<span>⏳ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '</span>'
+    + '<b style="color:#4ade80;font-variant-numeric:tabular-nums">' + don + ' / ' + (tot || '…')
+    + (tot ? ('&nbsp;(' + pct + '%)') : '') + '</b></div>'
+    + '<div style="height:8px;background:#1b1e27;border-radius:20px;overflow:hidden">'
+    + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px;transition:width .4s"></div></div>'
+    + err + '</div>';
+}
 function gdLoad(force){
   var tid = (document.getElementById('gd-team')||{}).value;
   if(!tid) return;
-  document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Lecture des clics… (ça peut prendre quelques secondes)</div>';
-  document.getElementById('gd-cards').innerHTML = '';
-  document.getElementById('gd-ctry').innerHTML = '';
+  if(!(window.__gdData && (window.__gdData.links||[]).length)){
+    document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Connexion…</div>';
+  }
   var u = '/gmsdash/data?team='+encodeURIComponent(tid)+'&period='+encodeURIComponent(window.__gdPeriod)+(force?'&force=1':'');
   fetch(u, {credentials:'same-origin'}).then(function(r){
     var ct = r.headers.get('content-type') || '';
@@ -23299,7 +23361,17 @@ function gdLoad(force){
     return r.json();
   }).then(function(d){
     if(!d || !d.ok) throw new Error((d && d.error) || 'Erreur');
+    if(d.loading){
+      // Rien à montrer encore : barre de progression + on redemande dans 2 s
+      document.getElementById('gd-cards').innerHTML = '';
+      document.getElementById('gd-ctry').innerHTML = '';
+      var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
+      gdShowProgress(d.progress);
+      gdSchedulePoll(2000);
+      return;
+    }
     window.__gdData = d; gdRender(d);
+    if(d.refreshing){ gdSchedulePoll(5000); }   // le fond recalcule -> on rafraîchira
   }).catch(function(e){
     // On garde le tableau précédent s'il y en a un (ne pas perdre l'affichage)
     var tbl = document.getElementById('gd-tbl');
@@ -23389,7 +23461,7 @@ function gdRender(d){
     + '<div class="sub">'+gdEsc(links.length?(links[0].name||links[0].shortcode):'—')+'</div></div>'
     + '<div class="gd-card"><div class="lab">Mis à jour</div><div class="val" style="font-size:19px">'
       + ((d.age_min==null || d.age_min<1) ? 'maintenant' : ('il y a '+d.age_min+' min'))
-      + '</div><div class="sub">recalcul auto toutes les 30 min · ↻ pour forcer</div></div>'
+      + '</div><div class="sub">'+(d.refreshing?'🔄 mise à jour en cours…':'recalcul auto toutes les 30 min · ↻ pour forcer')+'</div></div>'
     + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
        + '<div class="sub">non lus — clique ↻</div></div>' : '')
