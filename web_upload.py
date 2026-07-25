@@ -6535,9 +6535,12 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             in_progress_since=int(t0),
             in_progress_label=label,
             in_progress_total=total,
+            in_progress_done=0,
         )
         print(f"[insta-refresh:{label}] starting parallel for {total} handles", flush=True)
         ok = banned = err = 0
+        done = 0
+        _last_write = [0.0]   # throttle : 1 écriture/s max (sinon 695 écritures disque)
         def _scrape_one(h):
             try:
                 return h, _compute_insta_3_stats(h, force=True), None
@@ -6555,6 +6558,16 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                     err += 1
                 else:
                     ok += 1
+                # Progression live pour la barre du dashboard (throttlée)
+                done += 1
+                _now = _t_dr.time()
+                if done == total or (_now - _last_write[0]) >= 1.0:
+                    _last_write[0] = _now
+                    try:
+                        _set_refresh_status(in_progress_done=done, in_progress_ok=ok,
+                                            in_progress_err=err, in_progress_banned=banned)
+                    except Exception:
+                        pass
         dt_s = _t_dr.time() - t0
         summary = {
             "ok": ok, "banned": banned, "err": err,
@@ -6566,6 +6579,10 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             in_progress_since=None,
             in_progress_label=None,
             in_progress_total=None,
+            in_progress_done=None,
+            in_progress_ok=None,
+            in_progress_err=None,
+            in_progress_banned=None,
             last_run_at=int(_t_dr.time()),
             last_summary=summary,
             error=None,
@@ -18708,6 +18725,20 @@ def _render_jailbreak_html() -> str:
         "Stats Insta rafraîchies automatiquement <b style='color:#aaa'>3×/jour</b> (00h / 08h / 16h). "
         "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
+        # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
+        "<div id='jb-scrape-prog' style='display:none;margin:0 0 16px;background:#0f1116;"
+        "border:1px solid #23262f;border-radius:12px;padding:12px 16px'>"
+        "<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px'>"
+        "<span style='font-size:12px;font-weight:700;color:#e6e6ea;display:flex;align-items:center;gap:8px'>"
+        "<span class='jb-prog-spin'></span>Scrape en cours…</span>"
+        "<span id='jb-scrape-prog-txt' style='font-size:12px;font-weight:800;color:#22c55e;"
+        "font-variant-numeric:tabular-nums'>0 / 0</span></div>"
+        "<div style='height:8px;background:#1b1e27;border-radius:20px;overflow:hidden'>"
+        "<div id='jb-scrape-prog-bar' style='height:100%;width:0%;border-radius:20px;"
+        "background:linear-gradient(90deg,#22c55e,#4ade80);transition:width .4s ease'></div></div>"
+        "<div id='jb-scrape-prog-sub' style='margin-top:7px;font-size:11px;color:#6b7280'>"
+        "Les photos et les vues apparaissent au fur et à mesure.</div>"
+        "</div>"
     )
 
     # CSS local (reutilise les classes .va-vlist-* qui sont deja dans le DOM
@@ -18803,6 +18834,7 @@ def _render_jailbreak_html() -> str:
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
         ".va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}"
         ".jb-va-detail-accounts{overflow-x:auto}"
+        ".jb-prog-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(34,197,94,.25);border-top-color:#22c55e;display:inline-block;animation:jbSpin .8s linear infinite;flex-shrink:0}"
         ".jb-row:hover{background:rgba(255,255,255,.02)}"
         ".jb-row-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;margin-left:4px;transition:all .15s}"
         ".jb-row-btn:hover{border-color:#3b82f6;color:#fff;background:rgba(59,130,246,.08)}"
@@ -20229,8 +20261,51 @@ def _render_jailbreak_html() -> str:
         "    jbResetScrapeBtn(btn, ico, lbl);"
         "  });"
         "}"
+        # Affiche/alimente la barre de progression du scrape (done/total du state serveur)
+        "function jbProgShow(st){"
+        "  var box=document.getElementById('jb-scrape-prog');"
+        "  var bar=document.getElementById('jb-scrape-prog-bar');"
+        "  var txt=document.getElementById('jb-scrape-prog-txt');"
+        "  var sub=document.getElementById('jb-scrape-prog-sub');"
+        "  if(!box) return;"
+        "  var tot=(st && st.in_progress_total) ? st.in_progress_total : 0;"
+        "  var don=(st && st.in_progress_done) ? st.in_progress_done : 0;"
+        "  box.style.display='block';"
+        "  var pct = tot ? Math.min(100, Math.round(don*100/tot)) : 0;"
+        "  if(bar) bar.style.width = pct + '%';"
+        "  if(txt) txt.textContent = don + ' / ' + tot + '  (' + pct + '%)';"
+        "  if(sub){"
+        "    var ok=(st&&st.in_progress_ok)||0, er=(st&&st.in_progress_err)||0, bn=(st&&st.in_progress_banned)||0;"
+        "    sub.textContent = '✅ ' + ok + ' ok · ⚠ ' + er + ' échecs · ⛔ ' + bn + ' bannis — '"
+        "      + 'les photos et les vues apparaissent au fur et à mesure.';"
+        "  }"
+        "}"
+        "function jbProgDone(){"
+        "  var box=document.getElementById('jb-scrape-prog');"
+        "  var bar=document.getElementById('jb-scrape-prog-bar');"
+        "  var txt=document.getElementById('jb-scrape-prog-txt');"
+        "  if(bar) bar.style.width='100%';"
+        "  if(txt) txt.textContent='Terminé ✓';"
+        "  if(box){ var s=box.querySelector('.jb-prog-spin'); if(s) s.style.display='none'; }"
+        "}"
+        # Au chargement : si un scrape tourne déjà (lancé ailleurs / auto), on affiche la barre
+        "document.addEventListener('DOMContentLoaded', function(){"
+        "  if(!document.getElementById('jb-scrape-prog')) return;"
+        "  fetch('/insta/refresh_status').then(function(r){return r.json();}).then(function(s){"
+        "    var st=(s&&s.state)?s.state:null;"
+        "    if(st && st.status==='in_progress'){"
+        "      jbProgShow(st);"
+        "      var b=document.getElementById('jb-scrape-now-btn');"
+        "      var i=document.getElementById('jb-scrape-now-ico');"
+        "      var l=document.getElementById('jb-scrape-now-lbl');"
+        "      if(b){ b.dataset.busy='1'; b.style.opacity='.7'; b.style.cursor='wait'; }"
+        "      if(l) l.textContent='Scrape en cours…';"
+        "      jbPollScrape(b,i,l);"
+        "    }"
+        "  }).catch(function(){});"
+        "});"
         "function jbPollScrape(btn, ico, lbl){"
-        # Poll l etat du refresh toutes les 4s ; quand idle -> reload pour voir les stats
+        # Poll l etat du refresh toutes les 2s (alimente la barre) ; idle -> reload
         "  var tries = 0;"
         "  var errs = 0;"
         "  var iv = setInterval(function(){"
@@ -20238,12 +20313,14 @@ def _render_jailbreak_html() -> str:
         "    fetch('/insta/refresh_status').then(function(r){ return r.json(); }).then(function(s){"
         "      errs = 0;"  # reset compteur d erreurs sur succes
         "      var stt = (s && s.state) ? s.state.status : null;"
+        "      if(stt === 'in_progress'){ jbProgShow(s.state); }"
         "      if(stt === 'idle' && tries > 1){"
         "        clearInterval(iv);"
+        "        jbProgDone();"
         "        if(lbl) lbl.textContent='Terminé ✓';"
         "        if(typeof showToast === 'function') showToast('✓ Scrape terminé — rechargement…', 'success', 2000);"
         "        setTimeout(function(){ location.reload(); }, 1200);"
-        "      } else if(tries > 75){"  # ~5 min max
+        "      } else if(tries > 900){"  # ~30 min max (695 comptes = long)
         "        clearInterval(iv);"
         "        jbResetScrapeBtn(btn, ico, lbl);"
         "        if(typeof showToast === 'function') showToast('Scrape long — recharge la page manuellement', 'info', 3000);"
@@ -20256,7 +20333,7 @@ def _render_jailbreak_html() -> str:
         "        if(typeof showToast === 'function') showToast('⚠ Connexion perdue durant le scrape — recharge manuellement', 'error', 3500);"
         "      }"
         "    });"
-        "  }, 4000);"
+        "  }, 2000);"
         "}"
         "function jbResetScrapeBtn(btn, ico, lbl){"
         "  if(btn){ btn.dataset.busy=''; btn.style.opacity='1'; btn.style.cursor='pointer'; }"
