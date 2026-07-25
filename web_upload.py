@@ -4557,8 +4557,8 @@ document.addEventListener('click',function(e){
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
-        <button class="item" id="tab-igaccounts" onclick="showTab('trends','igaccounts','Instagram Accounts','Watchlist des comptes Instagram à scrape')"><span class="left">👤 Accounts</span></button>
-        <button class="item" id="tab-igtrends" onclick="showTab('trends','igtrends','Instagram Trends','Tendances Instagram')"><span class="left">📈 Trends</span></button>
+        <button class="item" id="tab-igaccounts" onclick="showTab('trends','igaccounts','Instagram Accounts','Watchlist des comptes Instagram à scrape')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Accounts</span></button>
+        <button class="item" id="tab-igtrends" onclick="showTab('trends','igtrends','Instagram Trends','Tendances Instagram')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span></button>
       </div>
     </div>
 
@@ -4573,8 +4573,8 @@ document.addEventListener('click',function(e){
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
-        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
-        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+        <button class="item" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span><span class="badge">SOON</span></button>
       </div>
     </div>
 
@@ -4589,8 +4589,8 @@ document.addEventListener('click',function(e){
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
-        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
-        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+        <button class="item" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span><span class="badge">SOON</span></button>
       </div>
     </div>
 
@@ -4605,8 +4605,8 @@ document.addEventListener('click',function(e){
         <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="sub-items">
-        <button class="item" onclick="comingSoon()"><span class="left">👤 Accounts</span><span class="badge">SOON</span></button>
-        <button class="item soon" onclick="comingSoon()"><span class="left">📈 Trends</span><span class="badge">SOON</span></button>
+        <button class="item" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Accounts</span><span class="badge">SOON</span></button>
+        <button class="item soon" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span><span class="badge">SOON</span></button>
       </div>
     </div>
 
@@ -18092,9 +18092,14 @@ async function glDeleteWatcher(id, btn){
                 if s.get("error") else ""
             )
             banned_class = " va-ig3-row-banned" if s.get("banned") else ""
+            # Pastille de statut : Banni (rouge) / Non scrapé (gris) / Actif (vert)
             ban_badge = (
-                "<span class='va-ig3-ban-badge' title='Compte banni ou supprimé sur Instagram'>BANNI</span>"
-                if s.get("banned") else ""
+                "<span class='va-ig3-ban-badge' title='Compte banni ou supprimé sur Instagram'>Banni</span>"
+                if s.get("banned") else (
+                    "<span class='jb-not-scraped-badge' title='Pas encore scrapé'>Non scrapé</span>"
+                    if not s or s.get("error") else
+                    "<span class='jb-ok-badge' title='Compte scrapé — stats à jour'>Actif</span>"
+                )
             )
             # Mini-footer pour assigner modele + VA name (auto-save on change)
             cur_model = (it.get("model") or "").strip()
@@ -18231,6 +18236,13 @@ async function glDeleteWatcher(id, btn){
 .va-ig3-row-banned .va-ig3-row-pp{filter:grayscale(.9) opacity(.7)}
 .va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
 .va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}
+/* Pastilles Actif / Non scrapé (mêmes classes que la page Jailbreak, redéclarées
+   ici car ce bloc CSS est celui de la page Trends) */
+.jb-ok-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.jb-ok-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;flex-shrink:0}
+.jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(154,160,166,.12);color:#9aa0a6;border:1px solid rgba(154,160,166,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.jb-not-scraped-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#9aa0a6;flex-shrink:0}
+.va-ig3-row-banned .jb-ok-badge{display:none}
 .va-ig3-detail{display:flex;flex-direction:column;gap:8px}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
