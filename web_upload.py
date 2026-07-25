@@ -22896,6 +22896,13 @@ def _render_videocrea_html() -> str:
 # PAR LIEN (261 pour « marche francais » ≈ 2 min au rythme autorisé). Un démon
 # recalcule donc en arrière-plan pour que la page soit instantanée à l'ouverture.
 GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
+# Catégories suivies par le dashboard. Codées en dur volontairement : l'appel
+# list_teams échoue par moments sur le VPS et la page se retrouvait vide
+# (« Aucune catégorie »). Les ids sont stables côté GetMySocial.
+GMSDASH_TEAMS = [
+    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),
+    ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
+]
 _GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
 _GMSDASH_WARM_PERIODS = ("today", "7")   # périodes pré-calculées (les plus consultées)
 _GMSDASH_LOCK = _threading_mod.Lock()
@@ -23100,9 +23107,7 @@ def _gmsdash_warm_loop():
             if not gms.is_configured():
                 _t_w.sleep(600)
                 continue
-            r = gms._call_tool("list_teams", {}) or {}
-            teams = ((r.get("data") or {}).get("data")) or []
-            ids = [t.get("id") for t in teams if t.get("id")]
+            ids = [tid for tid, _n in GMSDASH_TEAMS]
             t0 = _t_w.time()
             for tid in ids:
                 for per in _GMSDASH_WARM_PERIODS:
@@ -23229,12 +23234,23 @@ function gdTeams(){
     .then(function(r){ return r.json(); })
     .then(function(d){
       var sel = document.getElementById('gd-team');
-      if(!d || !d.ok || !(d.teams||[]).length){ sel.innerHTML = '<option>Aucune catégorie</option>'; return; }
+      if(!d || !d.ok || !(d.teams||[]).length){
+        sel.innerHTML = '<option>Aucune catégorie</option>';
+        document.getElementById('gd-tbl').innerHTML =
+          '<div class="gd-msg" style="color:#f87171">❌ Catégories illisibles : '
+          + gdEsc((d && d.error) || 'réponse vide de GetMySocial') + '<br>'
+          + '<span style="color:#6b7280">Vérifie la clé API GMS, puis clique ↻.</span></div>';
+        return;
+      }
       sel.innerHTML = d.teams.map(function(t){
         return '<option value="'+gdEsc(t.id)+'">'+gdEsc(t.name)+' ('+(t.link_count||0)+' liens)</option>';
       }).join('');
       gdLoad();
-    }).catch(function(){ document.getElementById('gd-team').innerHTML = '<option>Erreur</option>'; });
+    }).catch(function(e){
+      document.getElementById('gd-team').innerHTML = '<option>Erreur</option>';
+      document.getElementById('gd-tbl').innerHTML =
+        '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e && e.message ? e.message : e)+'</div>';
+    });
 }
 function gdLoad(force){
   var tid = (document.getElementById('gd-team')||{}).value;
@@ -31012,17 +31028,16 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
-        try:
-            import gms
-            r = gms._call_tool("list_teams", {}) or {}
-            teams = ((r.get("data") or {}).get("data")) or []
-            out = [{"id": t.get("id"), "name": t.get("name") or t.get("id"),
-                    "link_count": t.get("link_count") or 0}
-                   for t in teams if t.get("id")]
-            out.sort(key=lambda x: -(x["link_count"] or 0))
-            return jsonify({"ok": True, "teams": out})
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"[:160]})
+        out = []
+        for tid, name in GMSDASH_TEAMS:
+            n = None
+            try:
+                import gms
+                n = len((gms.list_links_team(tid) or {}).get("links") or []) or None
+            except Exception:
+                n = None
+            out.append({"id": tid, "name": name, "link_count": n or 0})
+        return jsonify({"ok": True, "teams": out})
 
     @app.route("/gmsdash/data")
     def gmsdash_data():
