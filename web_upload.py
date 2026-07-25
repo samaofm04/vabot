@@ -22900,7 +22900,6 @@ GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
 # list_teams échoue par moments sur le VPS et la page se retrouvait vide
 # (« Aucune catégorie »). Les ids sont stables côté GetMySocial.
 GMSDASH_TEAMS = [
-    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),
     ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
 ]
 _GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
