@@ -22955,7 +22955,12 @@ def _gmsdash_compute(team: str, period: str) -> dict:
     s_iso, e_iso = start.isoformat(), end.isoformat()
     try:
         import gms
-        links = (gms.list_links_team(team) or {}).get("links") or []
+        _lr = gms.list_links_team(team) or {}
+        if not _lr.get("ok"):
+            # ÉCHEC de la liste (429/réseau) : on renvoie ok=False -> PAS mis en
+            # cache, la page garde les dernières bonnes données au lieu de « 0 ».
+            return {"ok": False, "error": f"liste des liens : {_lr.get('error') or '?'}"[:160]}
+        links = _lr.get("links") or []
     except Exception as e:
         return {"ok": False, "error": f"liste des liens : {e}"[:160]}
 
@@ -22973,13 +22978,15 @@ def _gmsdash_compute(team: str, period: str) -> dict:
                 "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
 
     try:
-        # 4 workers : le rythme réel est imposé par gms._gms_gate() (2,5 req/s).
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        # bulk_mode : ce lot (des centaines d'appels) s'auto-freine, sans ralentir
+        # les pages du site qui font aussi des appels GMS.
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
             rows = [r for r in ex.map(_one, links) if r]
     except Exception as e:
         return {"ok": False, "error": f"analytics : {e}"[:160]}
     # Rattrapage séquentiel des liens que le rate-limit a fait échouer.
-    for r in [x for x in rows if x["clicks"] is None]:
+    with gms.bulk_mode():
+      for r in [x for x in rows if x["clicks"] is None]:
         _t_c.sleep(0.5)
         try:
             tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
@@ -23035,7 +23042,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8) -> dict:
     jobs = [(r["id"], d) for r in top for d in day_list]
     got: dict = {}
     try:
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
             for lid, day, tot, us in ex.map(_cell, jobs):
                 got[(lid, day)] = (tot, us)
     except Exception:
@@ -23067,7 +23074,8 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     if not force:
         with _GMSDASH_LOCK:
             hit = _GMSDASH_MEM.get(key)
-        if hit and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL:
+        if (hit and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
+                and (hit.get("payload") or {}).get("links")):   # cache vide = à recalculer
             out = dict(hit["payload"])
             out["cached_at"] = hit["ts"]
             out["age_min"] = int((_t_g.time() - hit["ts"]) // 60)
@@ -23243,7 +23251,7 @@ function gdTeams(){
         return;
       }
       sel.innerHTML = d.teams.map(function(t){
-        return '<option value="'+gdEsc(t.id)+'">'+gdEsc(t.name)+' ('+(t.link_count||0)+' liens)</option>';
+        return '<option value="'+gdEsc(t.id)+'">'+gdEsc(t.name)+(t.link_count?(' ('+t.link_count+' liens)'):'')+'</option>';
       }).join('');
       gdLoad();
     }).catch(function(e){

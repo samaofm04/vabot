@@ -159,18 +159,46 @@ def _reset_session():
 # 8 threads en rafale = 429 en masse). Fenêtre glissante partagée par tous les
 # threads + backoff sur 429, pour que le dashboard clics (1 appel par lien) et
 # les reports ne se fassent plus jeter.
-_GMS_RPS = 2.5                      # requêtes/seconde autorisées
+# Le freinage est ADAPTATIF : par défaut on ne ralentit RIEN (sinon les pages du
+# dashboard, qui font des dizaines d'appels GMS, mettent des minutes à s'afficher).
+# On n'espace les appels que dans 2 cas : (1) un 429 vient d'être reçu -> on
+# temporise le temps que ça retombe ; (2) un traitement en LOT s'est déclaré via
+# bulk_mode() (dashboard clics), qui doit rester poli avec l'API.
+_GMS_RPS = 2.5                      # requêtes/seconde quand on freine
 _GMS_GATE_LOCK = _threading.Lock()
 _GMS_LAST = [0.0]
+_GMS_THROTTLE_UNTIL = [0.0]         # timestamp jusqu'auquel on freine (après un 429)
+_GMS_BULK = [0]                     # nb de traitements en lot en cours
+
+
+class bulk_mode:
+    """Contexte : « je vais faire des centaines d'appels, freine-moi »."""
+
+    def __enter__(self):
+        with _GMS_GATE_LOCK:
+            _GMS_BULK[0] += 1
+        return self
+
+    def __exit__(self, *exc):
+        with _GMS_GATE_LOCK:
+            _GMS_BULK[0] = max(0, _GMS_BULK[0] - 1)
+        return False
+
+
+def _gms_note_429():
+    """Un 429 est tombé -> on freine tout le monde pendant 45 s."""
+    with _GMS_GATE_LOCK:
+        _GMS_THROTTLE_UNTIL[0] = time.time() + 45.0
 
 
 def _gms_gate():
-    """Espace les appels pour ne pas dépasser _GMS_RPS."""
-    min_gap = 1.0 / max(0.5, _GMS_RPS)
+    """Ne freine que si nécessaire (429 récent ou traitement en lot)."""
     while True:
         with _GMS_GATE_LOCK:
             now = time.time()
-            wait = _GMS_LAST[0] + min_gap - now
+            if _GMS_BULK[0] <= 0 and now >= _GMS_THROTTLE_UNTIL[0]:
+                return                      # cas normal : aucun délai
+            wait = _GMS_LAST[0] + (1.0 / max(0.5, _GMS_RPS)) - now
             if wait <= 0:
                 _GMS_LAST[0] = now
                 return
@@ -205,6 +233,7 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
     if r.status_code == 429:
         # Rate-limit GMS : on souffle et on retente (backoff croissant). Sans ça
         # le lien remonte à 0 clic alors qu'il en a -> chiffres faux.
+        _gms_note_429()
         if _429 < 3:
             time.sleep((2.0, 5.0, 9.0)[_429])
             return _call_tool(tool_name, args, _retry=_retry, _429=_429 + 1)
@@ -1158,12 +1187,20 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
         url = f"{PUBLIC_REST_BASE}/links?team_id={tid}&limit=100"
         if cursor:
             url += f"&cursor={cursor}"
-        try:
-            r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
-        except Exception as e:
-            return {"ok": False, "error": f"reseau: {e}"}
-        if r.status_code != 200:
-            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        r = None
+        for _try in range(3):
+            _gms_gate()
+            try:
+                r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
+            except Exception as e:
+                return {"ok": False, "error": f"reseau: {e}"}
+            if r.status_code == 429:            # rate-limit -> on souffle puis on retente
+                _gms_note_429()
+                time.sleep((2.0, 6.0, 12.0)[_try])
+                continue
+            break
+        if r is None or r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code if r is not None else '?'}"}
         d = r.json()
         all_links.extend(d.get("data") or [])
         if not d.get("has_more"):
