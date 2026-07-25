@@ -20503,7 +20503,7 @@ def _render_jailbreak_html() -> str:
         "        if(lbl) lbl.textContent='Terminé ✓';"
         "        if(typeof showToast === 'function') showToast('✓ Scrape terminé — rechargement…', 'success', 2000);"
         "        setTimeout(function(){ location.reload(); }, (s && s.state && s.state.last_summary && s.state.last_summary.err) ? 9000 : 1500);"
-        "      } else if(tries > 900){"  # ~30 min max (695 comptes = long)
+        "      } else if(tries > 3600){"  # ~2h max (695 comptes a 45 req/min = ~46 min)
         "        clearInterval(iv);"
         "        jbResetScrapeBtn(btn, ico, lbl);"
         "        if(typeof showToast === 'function') showToast('Scrape long — recharge la page manuellement', 'info', 3000);"

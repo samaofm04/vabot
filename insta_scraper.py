@@ -5,6 +5,8 @@ import os
 import json
 import time
 import logging
+import threading as _threading
+from collections import deque as _deque
 from pathlib import Path
 from typing import List, Optional
 
@@ -29,6 +31,37 @@ def _ensure_dirs():
 
 
 PP_DIR = INSTA_DIR / "pp"          # photos de profil téléchargées (URL Insta = signée, expire)
+
+# ---- Limiteur RapidAPI (le plan est plafonné à 50 requêtes/minute) ----
+# Un scrape de ~700 comptes = ~3 appels/compte sur plusieurs threads : sans ce
+# garde-fou on dépasse la limite en quelques secondes et tout retombe en 429.
+# Fenêtre glissante partagée par TOUS les threads.
+_RPM_LOCK = _threading.Lock()
+_RPM_CALLS = _deque()
+DEFAULT_RPM = 45                   # marge sous les 50/min du plan
+
+
+def _rapid_rpm() -> int:
+    try:
+        v = int(load_auth().get("rapidapi_rpm") or DEFAULT_RPM)
+        return max(1, min(300, v))
+    except Exception:
+        return DEFAULT_RPM
+
+
+def _rapid_gate():
+    """Bloque jusqu'à ce qu'un créneau soit libre dans la fenêtre d'1 minute."""
+    rpm = _rapid_rpm()
+    while True:
+        with _RPM_LOCK:
+            now = time.time()
+            while _RPM_CALLS and (now - _RPM_CALLS[0]) >= 60.0:
+                _RPM_CALLS.popleft()
+            if len(_RPM_CALLS) < rpm:
+                _RPM_CALLS.append(now)
+                return
+            wait = 60.0 - (now - _RPM_CALLS[0]) + 0.05
+        time.sleep(max(0.05, min(wait, 5.0)))
 
 
 def cache_profile_pic(username: str, url: str) -> bool:
@@ -328,6 +361,7 @@ def _scrape_via_rapidapi_single_post(shortcode: str) -> dict:
     candidates = []
     for ep in endpoints:
         try:
+            _rapid_gate()
             r = requests.post(
                 f"{base}{ep}",
                 headers=headers,
@@ -546,6 +580,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
 
     def _fetch_profile_resp():
         try:
+            _rapid_gate()
             _prof_box["resp"] = requests.post(
                 f"{base}/ig_get_fb_profile_v3.php",
                 headers=headers,
@@ -568,6 +603,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     pages_fetched = 0
     try:
         while pages_fetched < max_pages:
+            _rapid_gate()
             r = requests.post(
                 f"{base}/get_ig_user_reels.php",
                 headers=headers,
