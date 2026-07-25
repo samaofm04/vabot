@@ -4675,6 +4675,20 @@ document.addEventListener('click',function(e){
      /gms/*) et les form-sections (form-biolinks, form-gms) restent intactes
      pour usage interne / appels API depuis l interface VA. -->
 
+<div class="group" id="grp-liens">
+  <button class="group-head" onclick="toggleGroup('liens')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    <span class="label">Liens</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-gmsdash" onclick="showTab('liens','gmsdash','Dashboard clics','Clics par lien et par catégorie (GetMySocial)')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      Dashboard clics
+    </button>
+  </div>
+</div>
+
 <div class="group" id="grp-finances">
   <button class="group-head" onclick="toggleGroup('finances')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -5237,6 +5251,11 @@ document.addEventListener('keydown', function(e){
 <!-- BUSINESS - REVENUS -->
 <div class="form-section" id="form-revenus" style="display:none">
 {revenus_html}
+</div>
+
+<!-- LIENS - Dashboard clics GMS -->
+<div class="form-section" id="form-gmsdash" style="display:none">
+{gmsdash_html}
 </div>
 
 <!-- BUSINESS - DÉPENSES -->
@@ -22872,6 +22891,167 @@ def _render_videocrea_html() -> str:
         return f"<div style='padding:24px;color:#f99'>Module « Création de vidéos » indisponible : {type(e).__name__}: {e}</div>"
 
 
+def _render_gmsdash_html() -> str:
+    """Dashboard clics GetMySocial : clics par lien, filtrés par CATÉGORIE (= team
+    GMS : BOYA, KHLOE, marche francais…) + bascule « US uniquement ».
+
+    Les données sont chargées en AJAX (/gmsdash/data) : lister les liens puis
+    interroger l'analytics lien par lien prend plusieurs secondes, on ne bloque
+    donc pas le rendu de la page."""
+    try:
+        import gms
+    except Exception as e:
+        return f"<p style='color:#f99'>Module GMS indisponible : {e}</p>"
+    if not gms.is_configured():
+        return ("<div style='padding:40px;text-align:center;color:#888'>"
+                "<p>Clé API GetMySocial non configurée.</p>"
+                "<p style='font-size:12px'>Renseigne-la dans l'onglet GMS.</p></div>")
+
+    css = """
+<style>
+.gd-wrap{max-width:1250px}
+.gd-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.gd-sel{background:#14161c;border:1px solid #2b2f3a;color:#e6e6ea;border-radius:9px;padding:9px 12px;font-size:13px;font-family:inherit;outline:none;cursor:pointer;min-width:190px}
+.gd-sel:focus{border-color:#3b82f6}
+.gd-seg{display:inline-flex;background:#14161c;border:1px solid #2b2f3a;border-radius:9px;overflow:hidden}
+.gd-seg button{background:transparent;border:0;color:#9aa0a6;padding:9px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.gd-seg button.on{background:#2563eb;color:#fff}
+.gd-tg{display:inline-flex;align-items:center;gap:8px;background:#14161c;border:1px solid #2b2f3a;border-radius:9px;padding:8px 13px;cursor:pointer;font-size:12.5px;font-weight:700;color:#9aa0a6;user-select:none}
+.gd-tg.on{border-color:#22c55e;color:#4ade80;background:rgba(34,197,94,.1)}
+.gd-tg .dot{width:9px;height:9px;border-radius:50%;background:#3a3f4d}
+.gd-tg.on .dot{background:#22c55e;box-shadow:0 0 6px #22c55e}
+.gd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+.gd-card{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:15px 17px}
+.gd-card .lab{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.gd-card .val{font-size:27px;font-weight:800;color:#fff;margin-top:6px;font-variant-numeric:tabular-nums}
+.gd-card .sub{font-size:11px;color:#6b7280;margin-top:3px}
+.gd-tbl{background:#0f1116;border:1px solid #23262f;border-radius:14px;overflow:hidden}
+.gd-row{display:grid;grid-template-columns:34px minmax(180px,1fr) 120px 110px;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid #181b22}
+.gd-row:last-child{border-bottom:0}
+.gd-head{background:#0c0e13;border-bottom:1px solid #23262f}
+.gd-head span{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6b7280}
+.gd-row:not(.gd-head):hover{background:#14171f}
+.gd-rank{font-size:12px;font-weight:800;color:#6b7280;text-align:center}
+.gd-rank.top{color:#fbbf24}
+.gd-name{font-weight:700;font-size:13.5px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gd-sc{font-size:11px;color:#6b7280;margin-top:2px}
+.gd-clicks{font-size:15px;font-weight:800;color:#4ade80;text-align:right;font-variant-numeric:tabular-nums}
+.gd-share{height:6px;background:#1b1e27;border-radius:20px;overflow:hidden}
+.gd-share i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px}
+.gd-msg{padding:40px;text-align:center;color:#6b7280;font-size:13px}
+.gd-ctry{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+.gd-ctry span{background:#14161c;border:1px solid #2b2f3a;border-radius:8px;padding:5px 10px;font-size:11.5px;color:#c4c4cc;font-weight:600}
+</style>
+"""
+    body = """
+<div class="gd-wrap">
+  <div class="gd-bar">
+    <select id="gd-team" class="gd-sel" onchange="gdLoad()"><option>Chargement…</option></select>
+    <div class="gd-seg" id="gd-period">
+      <button data-p="today" onclick="gdPeriod(this)">Aujourd'hui</button>
+      <button data-p="7" class="on" onclick="gdPeriod(this)">7 jours</button>
+      <button data-p="30" onclick="gdPeriod(this)">30 jours</button>
+      <button data-p="quinz" onclick="gdPeriod(this)">Quinzaine</button>
+    </div>
+    <div class="gd-tg" id="gd-us" onclick="gdToggleUs()" title="N'afficher que les clics venant des États-Unis">
+      <span class="dot"></span><span>🇺🇸 US uniquement</span>
+    </div>
+    <button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache">↻</button>
+  </div>
+  <div class="gd-cards" id="gd-cards"></div>
+  <div class="gd-tbl" id="gd-tbl"><div class="gd-msg">Choisis une catégorie…</div></div>
+  <div class="gd-ctry" id="gd-ctry"></div>
+</div>
+<script>
+window.__gdPeriod = '7';
+window.__gdUs = false;
+function gdPeriod(b){
+  document.querySelectorAll('#gd-period button').forEach(function(x){ x.classList.remove('on'); });
+  b.classList.add('on'); window.__gdPeriod = b.getAttribute('data-p'); gdLoad();
+}
+function gdToggleUs(){
+  window.__gdUs = !window.__gdUs;
+  document.getElementById('gd-us').classList.toggle('on', window.__gdUs);
+  gdRender(window.__gdData);
+}
+function gdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
+function gdTeams(){
+  fetch('/gmsdash/teams', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var sel = document.getElementById('gd-team');
+      if(!d || !d.ok || !(d.teams||[]).length){ sel.innerHTML = '<option>Aucune catégorie</option>'; return; }
+      sel.innerHTML = d.teams.map(function(t){
+        return '<option value="'+gdEsc(t.id)+'">'+gdEsc(t.name)+' ('+(t.link_count||0)+' liens)</option>';
+      }).join('');
+      gdLoad();
+    }).catch(function(){ document.getElementById('gd-team').innerHTML = '<option>Erreur</option>'; });
+}
+function gdLoad(force){
+  var tid = (document.getElementById('gd-team')||{}).value;
+  if(!tid) return;
+  document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Lecture des clics… (ça peut prendre quelques secondes)</div>';
+  document.getElementById('gd-cards').innerHTML = '';
+  document.getElementById('gd-ctry').innerHTML = '';
+  var u = '/gmsdash/data?team='+encodeURIComponent(tid)+'&period='+encodeURIComponent(window.__gdPeriod)+(force?'&force=1':'');
+  fetch(u, {credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !d.ok){
+      document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc((d&&d.error)||'Erreur')+'</div>';
+      return;
+    }
+    window.__gdData = d; gdRender(d);
+  }).catch(function(e){
+    document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e)+'</div>';
+  });
+}
+function gdRender(d){
+  if(!d) return;
+  var us = window.__gdUs;
+  var links = (d.links||[]).slice();
+  links.forEach(function(l){ l._v = us ? (l.us||0) : (l.clicks||0); });
+  links.sort(function(a,b){ return b._v - a._v; });
+  var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
+  var actifs = links.filter(function(l){ return l._v > 0; }).length;
+  var max = links.length ? links[0]._v : 0;
+  document.getElementById('gd-cards').innerHTML =
+      '<div class="gd-card"><div class="lab">'+(us?'Clics US':'Clics totaux')+'</div><div class="val">'+gdNum(tot)+'</div>'
+    + '<div class="sub">'+gdEsc(d.label||'')+'</div></div>'
+    + '<div class="gd-card"><div class="lab">Liens</div><div class="val">'+links.length+'</div>'
+    + '<div class="sub">'+actifs+' avec au moins 1 clic</div></div>'
+    + '<div class="gd-card"><div class="lab">Meilleur lien</div><div class="val">'+gdNum(max)+'</div>'
+    + '<div class="sub">'+gdEsc(links.length?(links[0].name||links[0].shortcode):'—')+'</div></div>'
+    + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
+       + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
+       + '<div class="sub">non lus — clique ↻</div></div>' : '');
+  var rows = '<div class="gd-row gd-head"><span>#</span><span>Lien</span><span style="text-align:right">'
+           + (us?'Clics US':'Clics')+'</span><span>Part</span></div>';
+  if(!links.length){ rows += '<div class="gd-msg">Aucun lien dans cette catégorie.</div>'; }
+  links.forEach(function(l, i){
+    var pct = max ? Math.round(l._v*100/max) : 0;
+    rows += '<div class="gd-row">'
+      + '<div class="gd-rank'+(i<3?' top':'')+'">'+(i+1)+'</div>'
+      + '<div style="min-width:0"><div class="gd-name">'+gdEsc(l.name||l.shortcode)+'</div>'
+      + '<div class="gd-sc">/'+gdEsc(l.shortcode)+(us?'':(' · 🇺🇸 '+gdNum(l.us||0)+' US'))+'</div></div>'
+      + '<div class="gd-clicks">'+gdNum(l._v)+'</div>'
+      + '<div class="gd-share"><i style="width:'+pct+'%"></i></div>'
+      + '</div>';
+  });
+  document.getElementById('gd-tbl').innerHTML = rows;
+  var c = d.countries||{};
+  var keys = Object.keys(c).sort(function(a,b){ return c[b]-c[a]; }).slice(0,12);
+  document.getElementById('gd-ctry').innerHTML = keys.length
+    ? ('<span style="background:none;border:0;color:#6b7280">Pays :</span>' + keys.map(function(k){
+        return '<span>'+gdEsc(k)+' · '+gdNum(c[k])+'</span>'; }).join(''))
+    : '';
+}
+if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', gdTeams); } else { gdTeams(); }
+</script>
+"""
+    return css + body
+
+
 def _render_facture_html() -> str:
     """Page Facture (compta mensuelle OFM). Isolé dans facture_web.py."""
     try:
@@ -28899,6 +29079,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
+        .replace("{gmsdash_html}", _g("gmsdash", _render_gmsdash_html))
         .replace("{facture_html}", _g("facture", _render_facture_html))
         .replace("{depenses_html}", _g("depenses", _render_depenses_html))
         .replace("{paievas_html}", _g("paievas", _render_paievas_html))
@@ -30498,6 +30679,123 @@ def create_app():
         if ok:
             return jsonify({"ok": True, "channel": msg})
         return jsonify({"ok": False, "error": msg})
+
+    @app.route("/gmsdash/teams")
+    def gmsdash_teams():
+        """Catégories = les TEAMS GetMySocial (BOYA, KHLOE, marche francais…).
+        Via la clé API (pas le cookie de session) -> fiable sur le VPS."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import gms
+            r = gms._call_tool("list_teams", {}) or {}
+            teams = ((r.get("data") or {}).get("data")) or []
+            out = [{"id": t.get("id"), "name": t.get("name") or t.get("id"),
+                    "link_count": t.get("link_count") or 0}
+                   for t in teams if t.get("id")]
+            out.sort(key=lambda x: -(x["link_count"] or 0))
+            return jsonify({"ok": True, "teams": out})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"[:160]})
+
+    _GMSDASH_CACHE = {}          # (team, period) -> (ts, payload)
+    _GMSDASH_TTL = 300           # 5 min : l'analytics est lent (1 appel par lien)
+
+    @app.route("/gmsdash/data")
+    def gmsdash_data():
+        """Clics par lien pour UNE catégorie (team) et une période.
+
+        L'analytics GMS ne renvoie qu'un TOTAL par appel : pour un détail par lien
+        il faut un appel par lien -> on parallélise (8 workers) et on cache 5 min.
+        Chaque lien renvoie aussi ses pays (top ~10) d'où on tire le compteur US."""
+        from flask import jsonify
+        import time as _t_gd, datetime as _dt_gd
+        from concurrent.futures import ThreadPoolExecutor
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        team = (request.args.get("team") or "").strip()
+        period = (request.args.get("period") or "7").strip()
+        force = (request.args.get("force") or "") == "1"
+        if not team:
+            return jsonify({"ok": False, "error": "catégorie manquante"})
+        key = (team, period)
+        now = _t_gd.time()
+        if not force:
+            hit = _GMSDASH_CACHE.get(key)
+            if hit and (now - hit[0]) < _GMSDASH_TTL:
+                return jsonify(hit[1])
+        today = _dt_gd.date.today()
+        if period == "today":
+            start, end, label = today, today, "aujourd'hui"
+        elif period == "30":
+            start, end, label = today - _dt_gd.timedelta(days=29), today, "30 derniers jours"
+        elif period == "quinz":
+            start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
+            end, label = today, ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin")
+        else:
+            start, end, label = today - _dt_gd.timedelta(days=6), today, "7 derniers jours"
+        s_iso, e_iso = start.isoformat(), end.isoformat()
+        try:
+            import gms
+            links = (gms.list_links_team(team, force_refresh=force) or {}).get("links") or []
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"liste des liens : {e}"[:160]})
+
+        def _one(l):
+            lid = l.get("id")
+            if not lid:
+                return None
+            try:
+                tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
+            except Exception:
+                tot, ctry = None, None
+            return {
+                "id": lid,
+                "shortcode": l.get("shortcode") or "",
+                "name": l.get("display_name") or l.get("shortcode") or "",
+                "clicks": tot,                       # None = lecture ratée (pas un 0)
+                "us": (ctry or {}).get("US", 0),
+                "countries": ctry or {},
+            }
+
+        rows = []
+        try:
+            # 4 workers : le rythme réel est imposé par _gms_gate() (3 req/s),
+            # au-delà on ne gagne rien et on empile juste des threads en attente.
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                rows = [r for r in ex.map(_one, links) if r]
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"analytics : {e}"[:160]})
+        # Passe de RATTRAPAGE : les liens que le rate-limit a fait échouer sont
+        # relus un par un, sans concurrence. Bien plus efficace que de ralentir
+        # tout le lot (30 relectures au lieu de 261 appels lents).
+        retry_rows = [r for r in rows if r["clicks"] is None]
+        if retry_rows:
+            import time as _t_rt
+            for r in retry_rows:
+                _t_rt.sleep(0.5)
+                try:
+                    tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
+                except Exception:
+                    tot2, ctry2 = None, None
+                if tot2 is not None:
+                    r["clicks"] = tot2
+                    r["us"] = (ctry2 or {}).get("US", 0)
+                    r["countries"] = ctry2 or {}
+        failed = sum(1 for r in rows if r["clicks"] is None)
+        countries = {}
+        for r in rows:
+            for c, n in (r.get("countries") or {}).items():
+                countries[c] = countries.get(c, 0) + int(n or 0)
+            r.pop("countries", None)
+            if r["clicks"] is None:
+                r["clicks"] = 0                      # affichage seulement (cf. `failed`)
+        payload = {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
+                   "links": rows, "countries": countries,
+                   "failed": failed, "partial": failed > 0}
+        _GMSDASH_CACHE[key] = (now, payload)
+        return jsonify(payload)
 
     @app.route("/insta/pp/<handle>")
     def insta_pp(handle):

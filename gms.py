@@ -154,7 +154,31 @@ def _reset_session():
         _MCP_CACHE["session"] = None
 
 
-def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True) -> Dict[str, Any]:
+# ---- Limiteur d'appels GetMySocial ----
+# GMS renvoie des HTTP 429 quand on tape trop vite (mesuré : ~2,5 req/s passe,
+# 8 threads en rafale = 429 en masse). Fenêtre glissante partagée par tous les
+# threads + backoff sur 429, pour que le dashboard clics (1 appel par lien) et
+# les reports ne se fassent plus jeter.
+_GMS_RPS = 2.5                      # requêtes/seconde autorisées
+_GMS_GATE_LOCK = _threading.Lock()
+_GMS_LAST = [0.0]
+
+
+def _gms_gate():
+    """Espace les appels pour ne pas dépasser _GMS_RPS."""
+    min_gap = 1.0 / max(0.5, _GMS_RPS)
+    while True:
+        with _GMS_GATE_LOCK:
+            now = time.time()
+            wait = _GMS_LAST[0] + min_gap - now
+            if wait <= 0:
+                _GMS_LAST[0] = now
+                return
+        time.sleep(min(wait, 2.0))
+
+
+def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
+               _429: int = 0) -> Dict[str, Any]:
     """Appelle un outil MCP. Retourne {'ok': bool, 'data': ..., 'error': ...}.
     Réutilise une session MCP cachée ; si elle a expiré (réseau / 4xx), on la
     recrée et on réessaie UNE fois."""
@@ -170,17 +194,25 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True)
         "params": {"name": tool_name, "arguments": args or {}},
     }
     _to = READ_TIMEOUT if tool_name in _READ_TOOLS else TIMEOUT
+    _gms_gate()
     try:
         r = s.post(MCP_URL, json=body, timeout=_to)
     except Exception as e:
         if _retry:  # session peut-être morte -> on la recrée et on réessaie
             _reset_session()
-            return _call_tool(tool_name, args, _retry=False)
+            return _call_tool(tool_name, args, _retry=False, _429=_429)
         return {"ok": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code == 429:
+        # Rate-limit GMS : on souffle et on retente (backoff croissant). Sans ça
+        # le lien remonte à 0 clic alors qu'il en a -> chiffres faux.
+        if _429 < 3:
+            time.sleep((2.0, 5.0, 9.0)[_429])
+            return _call_tool(tool_name, args, _retry=_retry, _429=_429 + 1)
+        return {"ok": False, "error": "HTTP 429 (rate-limit GetMySocial)"}
     if r.status_code in (400, 401, 404) and _retry:
         # session MCP probablement expirée -> on la recrée et on réessaie 1×
         _reset_session()
-        return _call_tool(tool_name, args, _retry=False)
+        return _call_tool(tool_name, args, _retry=False, _429=_429)
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:300]}"}
     data = _parse_sse(r.text)
