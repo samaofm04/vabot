@@ -18701,6 +18701,16 @@ def _render_jailbreak_html() -> str:
     all_accounts = jb.list_all()
     stats = jb.stats()
 
+    # Accountability par VA (jb_activity) : comptes actifs / bannis / silencieux >48h
+    # + oublis du mois (1 par jour où au moins 1 compte est resté muet >48h).
+    _act_by_va = {}
+    try:
+        import jb_activity as _jba
+        for _d in _jba.va_summary():
+            _act_by_va[(_d.get("va") or "").strip().lower()] = _d
+    except Exception:
+        _act_by_va = {}
+
     # Header
     header = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
@@ -18908,6 +18918,12 @@ def _render_jailbreak_html() -> str:
         ".jb-detail-scrape-pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:2px}"
         ".jb-detail-scrape-pill.on{background:rgba(34,197,94,.12);color:#22c55e}"
         ".jb-detail-scrape-pill.pending{background:rgba(107,114,128,.15);color:#9ca3af}"
+        # Pastilles accountability (actifs / bannis / oublis 48h / oublis du mois)
+        ".jb-acc-pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:6px;white-space:nowrap}"
+        ".jb-acc-pill.ok{background:rgba(34,197,94,.12);color:#4ade80}"
+        ".jb-acc-pill.ban{background:rgba(248,113,113,.12);color:#f87171}"
+        ".jb-acc-pill.warn{background:rgba(251,146,60,.14);color:#fb923c}"
+        ".jb-acc-pill.quiet{background:rgba(107,114,128,.15);color:#9ca3af}"
         ".jb-detail-head-info{flex:1;min-width:0}"
         ".jb-detail-head-name{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#fff;margin-bottom:3px}"
         ".jb-detail-head-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#888}"
@@ -19319,6 +19335,35 @@ def _render_jailbreak_html() -> str:
                     scrape_pill = "<span class='jb-detail-scrape-pill pending'>● en attente de scrape</span>"
                 else:
                     scrape_pill = ""
+
+                # Pastilles accountability : actifs / bannis / oublis 48h / oublis du mois.
+                # Un compte banni est quand même scrapé, il est juste compté à part.
+                _sm = _act_by_va.get(va_name.strip().lower()) or {}
+                if _sm:
+                    _n_actif = int(_sm.get("accounts", 0)) - int(_sm.get("banned", 0)) - int(_sm.get("no_data", 0))
+                    _n_ban = int(_sm.get("banned", 0))
+                    _n_oubli = int(_sm.get("silent_now", 0))
+                    _n_mois = int(_sm.get("penalties_month", 0))
+                    scrape_pill += (
+                        f"<span class='jb-acc-pill ok' title='Comptes actifs (non bannis, avec données)'>"
+                        f"✅ {max(0, _n_actif)} actifs</span>"
+                    )
+                    if _n_ban:
+                        scrape_pill += (
+                            f"<span class='jb-acc-pill ban' title='Comptes bannis (scrapés mais inutilisables)'>"
+                            f"⛔ {_n_ban} bannis</span>"
+                        )
+                    _ocls = "warn" if _n_oubli else "quiet"
+                    scrape_pill += (
+                        f"<span class='jb-acc-pill {_ocls}' title=\"Comptes sans post depuis plus de 48 h\">"
+                        f"🕒 {_n_oubli} oubli{'s' if _n_oubli > 1 else ''} 48h</span>"
+                    )
+                    _mcls = "warn" if _n_mois else "quiet"
+                    scrape_pill += (
+                        f"<span class='jb-acc-pill {_mcls}' title=\"Oublis du mois : 1 par JOUR où au moins un "
+                        f"compte est resté muet plus de 48 h (10 comptes le même jour = 1 seul oubli)\">"
+                        f"📅 {_n_mois} oubli{'s' if _n_mois > 1 else ''} ce mois</span>"
+                    )
 
                 detail_cards_html.append(
                     f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
