@@ -22909,6 +22909,7 @@ _GMSDASH_LOCK = _threading_mod.Lock()
 _GMSDASH_MEM: dict = {}         # "team|period" -> {ts, payload}
 _GMSDASH_INFLIGHT: set = set()  # évite 2 calculs simultanés de la même clé
 _GMSDASH_PROGRESS: dict = {}   # "team|period" -> {done,total,stage,error} (barre de progression)
+_GMSDASH_LASTFAIL: dict = {}   # "team|period" -> {ts, error} : cooldown avant nouvelle tentative
 
 
 def _gmsdash_load_disk():
@@ -23113,20 +23114,27 @@ def _gmsdash_kick(team: str, period: str) -> bool:
     def _bg():
         try:
             payload = _gmsdash_compute(team, period, progress_key=key)
+            import time as _t_bg
             if payload.get("ok"):
                 _gmsdash_store(team, period, payload)
                 with _GMSDASH_LOCK:
                     _GMSDASH_PROGRESS.pop(key, None)
+                    _GMSDASH_LASTFAIL.pop(key, None)
             else:
+                err = str(payload.get("error") or "?")[:140]
                 with _GMSDASH_LOCK:
+                    _GMSDASH_LASTFAIL[key] = {"ts": int(_t_bg.time()), "error": err}
                     pr = _GMSDASH_PROGRESS.setdefault(
                         key, {"done": 0, "total": 0, "stage": "", "error": ""})
-                    pr["error"] = str(payload.get("error") or "?")[:140]
+                    pr["error"] = err
         except Exception as e:
+            import time as _t_bg2
+            err = f"{type(e).__name__}: {e}"[:140]
             with _GMSDASH_LOCK:
+                _GMSDASH_LASTFAIL[key] = {"ts": int(_t_bg2.time()), "error": err}
                 pr = _GMSDASH_PROGRESS.setdefault(
                     key, {"done": 0, "total": 0, "stage": "", "error": ""})
-                pr["error"] = f"{type(e).__name__}: {e}"[:140]
+                pr["error"] = err
         finally:
             with _GMSDASH_LOCK:
                 _GMSDASH_INFLIGHT.discard(key)
@@ -23146,8 +23154,18 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
         hit = _GMSDASH_MEM.get(key)
     has = bool(hit and (hit.get("payload") or {}).get("links"))
     fresh = has and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
+    retry_in = 0
     if force or not fresh:
-        _gmsdash_kick(team, period)          # no-op si déjà en cours
+        # Cooldown après un échec : sans ça, chaque poll (2 s) relançait un calcul
+        # qui re-échouait en boucle sur le 429 -> barre figée à « 0 / … » ET
+        # martèlement de l'API qui entretenait la saturation.
+        with _GMSDASH_LOCK:
+            lf = _GMSDASH_LASTFAIL.get(key)
+        if lf and not force:
+            retry_in = 60 - (int(_t_g.time()) - int(lf.get("ts", 0)))
+        if force or retry_in <= 0:
+            retry_in = 0
+            _gmsdash_kick(team, period)      # no-op si déjà en cours
     if has:
         out = dict(hit["payload"])
         out["cached_at"] = hit.get("ts")
@@ -23158,6 +23176,12 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     with _GMSDASH_LOCK:
         prog = dict(_GMSDASH_PROGRESS.get(key) or {})
         rows_partial = list(prog.pop("rows", []) or [])
+        inflight = key in _GMSDASH_INFLIGHT
+        lf = _GMSDASH_LASTFAIL.get(key)
+    if not inflight and lf and retry_in > 0:
+        prog = {"done": 0, "total": 0,
+                "stage": f"échec — nouvelle tentative dans {max(1, retry_in)} s",
+                "error": lf.get("error") or ""}
     return {"ok": True, "loading": True, "progress": prog,
             "team": team, "links": rows_partial, "countries": {}}
 
