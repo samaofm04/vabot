@@ -6633,15 +6633,67 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
         _REFRESH_LOCK.release()
 
 
+def _jb_handles_for(identity: str, va: str = "") -> set:
+    """Handles Insta d'une identité Jailbreak, éventuellement restreints à UN VA.
+    Sert au scrape ciblé (« ne scraper que Andry / lola »)."""
+    out = set()
+    try:
+        import jailbreak as _jb_h
+        entry = (_jb_h._load() or {}).get((identity or "").strip().lower())
+        accts = entry.get("accounts") if isinstance(entry, dict) else entry
+        va_lc = (va or "").strip().lower()
+        for a in (accts or []):
+            if not isinstance(a, dict):
+                continue
+            if va_lc and (a.get("va") or "").strip().lower() != va_lc:
+                continue
+            u = (a.get("username") or "").strip()
+            if u:
+                try:
+                    out.add(_normalize_insta_handle(u))
+                except Exception:
+                    out.add(u.lower().lstrip("@"))
+    except Exception:
+        pass
+    return out
+
+
+def _banned_handles() -> set:
+    """Handles marqués bannis/renommés dans le cache des stats."""
+    out = set()
+    try:
+        for h, st in (_load_insta_3_stats_cache() or {}).items():
+            if isinstance(st, dict) and st.get("banned"):
+                out.add((h or "").strip().lower())
+    except Exception:
+        pass
+    return out
+
+
 def _run_daily_insta_refresh():
-    """Re-scrape TOUS les comptes Insta tracked (force, ignore le cache)."""
+    """Re-scrape les comptes Insta tracked (force, ignore le cache).
+
+    Les comptes BANNIS/renommés ne sont re-vérifiés que le 1er et le 15 du mois :
+    inutile de brûler du quota RapidAPI 2x/jour sur des comptes morts (695 comptes
+    x 3 appels x 2/jour = ~125k req/mois, il faut garder de la marge). Le scrape
+    MANUEL, lui, prend toujours tout le monde."""
+    import datetime as _dt_dr
     handles = sorted(_all_tracked_handles())
-    return _do_refresh(handles, label="daily")
+    day = _dt_dr.datetime.now().day
+    if day in (1, 15):
+        return _do_refresh(handles, label="daily+bannis")
+    banned = _banned_handles()
+    todo = [h for h in handles if (h or "").strip().lower() not in banned]
+    skipped = len(handles) - len(todo)
+    if skipped:
+        print(f"[insta-refresh:daily] {skipped} compte(s) banni(s) ignoré(s) "
+              f"(re-vérifiés le 1er et le 15)", flush=True)
+    return _do_refresh(todo, label="daily")
 
 
 # Heures de refresh Insta automatique (heure locale serveur).
-# 3x/jour = stats bien fraiches (vues 24h/sem qui evoluent en continu).
-_INSTA_REFRESH_HOURS = [0, 8, 16]
+# 2x/jour (00h/12h) : compromis fraicheur des vues / quota RapidAPI.
+_INSTA_REFRESH_HOURS = [0, 12]      # 2 scrapes/jour (quota RapidAPI)
 
 
 def _next_insta_refresh_dt(now):
@@ -6663,7 +6715,7 @@ def _next_insta_refresh_dt(now):
 def _daily_insta_loop():
     """Thread daemon : refresh initial au boot + refresh recurrent 2-3x/jour.
 
-    Tourne a chaque heure de _INSTA_REFRESH_HOURS (00h / 08h / 16h) pour que
+    Tourne a chaque heure de _INSTA_REFRESH_HOURS (00h / 12h) pour que
     les vues 24h / semaine restent fraiches. Au boot, smart-refresh (skip les
     handles dont le cache est encore frais) pour ne pas hammerer IG."""
     import time as _t_dl
@@ -6675,7 +6727,7 @@ def _daily_insta_loop():
         _run_daily_insta_refresh_smart()
     except Exception as e:
         print(f"[daily-insta] initial refresh crash: {e}", flush=True)
-    # Boucle recurrente : 00h / 08h / 16h chaque jour
+    # Boucle recurrente : 00h / 12h chaque jour
     while True:
         try:
             now = _dt_dl.datetime.now()
@@ -6721,7 +6773,7 @@ def _start_daily_insta_thread():
     t = _th.Thread(target=_daily_insta_loop, daemon=True, name="daily-insta-refresh")
     t.start()
     _hrs = "h / ".join(str(h).zfill(2) for h in _INSTA_REFRESH_HOURS) + "h"
-    print(f"[daily-insta] thread started — refresh {_hrs} (3x/jour)", flush=True)
+    print(f"[daily-insta] thread started — refresh {_hrs} (2x/jour)", flush=True)
 
 
 def _render_refresh_status_text(st: dict) -> str:
@@ -6811,7 +6863,7 @@ def _remove_external_insta(handle: str) -> bool:
 # ============ Stats Insta 3 (RapidAPI + cache 1h) ============
 
 VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
-_INSTA_3_STATS_TTL = 8 * 3600  # 8h (refresh auto 3x/jour : 00h / 08h / 16h)
+_INSTA_3_STATS_TTL = 11 * 3600  # 11h (refresh auto 2x/jour : 00h / 12h)
 
 
 def _load_insta_3_stats_cache() -> dict:
@@ -7128,7 +7180,7 @@ def _kick_scrape_handles(handles, label: str = "kick-scrape") -> int:
     """Lance un scrape IMMEDIAT en arriere-plan pour une liste de handles.
 
     Sert a ce que les comptes fraichement ajoutes (Jailbreak, externals, ...)
-    ne restent pas 'NON SCRAPÉ' jusqu au prochain cycle auto (00h/08h/16h).
+    ne restent pas 'NON SCRAPÉ' jusqu au prochain cycle auto (00h/12h).
     Non-bloquant : spawn un thread daemon et rend la main tout de suite.
     Retourne le nombre de handles uniques mis en file."""
     norm = []
@@ -18825,7 +18877,7 @@ def _render_jailbreak_html() -> str:
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center'>"
         f"<button type='button' id='jb-scrape-now-btn' onclick='jbScrapeNow(this)' "
-        f"title='Lance un scrape immédiat de tous les comptes (sinon auto 3x/jour : 00h/08h/16h)' "
+        f"title='Lance un scrape immédiat de TOUS les comptes, bannis compris (auto : 2x/jour, 00h/12h)' "
         f"style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(34,197,94,.3);display:inline-flex;align-items:center;gap:7px'>"
         f"<span id='jb-scrape-now-ico'>🔄</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
@@ -18835,7 +18887,7 @@ def _render_jailbreak_html() -> str:
         "</div>"
         "<div style='margin:-6px 0 16px;color:#666;font-size:11px;display:flex;align-items:center;gap:6px'>"
         "<span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,.5)'></span>"
-        "Stats Insta rafraîchies automatiquement <b style='color:#aaa'>3×/jour</b> (00h / 08h / 16h). "
+        "Stats Insta rafraîchies automatiquement <b style='color:#aaa'>2×/jour</b> (00h / 12h) — les comptes bannis seulement le 1er et le 15. "
         "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
         # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
@@ -19027,6 +19079,9 @@ def _render_jailbreak_html() -> str:
         ".jb-acc-pill.ban{background:rgba(248,113,113,.12);color:#f87171}"
         ".jb-acc-pill.warn{background:rgba(251,146,60,.14);color:#fb923c}"
         ".jb-acc-pill.quiet{background:rgba(107,114,128,.15);color:#9ca3af}"
+        ".jb-scrape-one{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:#4ade80;padding:5px 11px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700;flex-shrink:0;margin-right:6px;white-space:nowrap;font-family:inherit}"
+        ".jb-scrape-one:hover{background:rgba(34,197,94,.2)}"
+        ".jb-scrape-one[disabled]{opacity:.6;cursor:wait}"
         ".jb-detail-head-info{flex:1;min-width:0}"
         ".jb-detail-head-name{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#fff;margin-bottom:3px}"
         ".jb-detail-head-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#888}"
@@ -19492,6 +19547,10 @@ def _render_jailbreak_html() -> str:
                     f"</div>"
                     f"</div>"
                     f"<span class='jb-detail-count-badge'>{len(va_accts)} compte{'s' if len(va_accts)!=1 else ''}</span>"
+                    f"<button type='button' class='jb-scrape-one' "
+                    f"onclick=\"jbScrapeScope(this,'{ident_safe}','{va_attr}')\" "
+                    f"title='Scraper UNIQUEMENT les comptes de ce VA (bannis compris)'>"
+                    f"🔄 Scraper ce bloc</button>"
                     f"<button type='button' class='jb-detail-head-edit' "
                     f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
                     f"data-va-discord='{html_escape(discord_username)}' "
@@ -20418,6 +20477,24 @@ def _render_jailbreak_html() -> str:
         "  });"
         "}"
         # Affiche/alimente la barre de progression du scrape (done/total du state serveur)
+        "function jbScrapeScope(btn, identity, va){"
+        "  if(btn && btn.disabled) return;"
+        "  if(btn){ btn.disabled=true; btn.textContent='⏳ Scrape…'; }"
+        "  var fd=new FormData(); fd.append('identity', identity); fd.append('va', va);"
+        "  fetch('/insta/refresh_now', {method:'POST', body:fd})"
+        "   .then(function(r){ return r.json(); }).then(function(d){"
+        "    if(d && d.ok){"
+        "      if(typeof showToast==='function') showToast('🔄 Scrape de ' + (d.scope||va) + ' — ' + (d.handles||0) + ' compte(s)', 'success', 4000);"
+        "      jbPollScrape(null, null, null);"
+        "    } else {"
+        "      if(btn){ btn.disabled=false; btn.textContent='🔄 Scraper ce bloc'; }"
+        "      if(typeof showToast==='function') showToast('⚠ ' + ((d&&d.error)||'Erreur'), 'error', 3500);"
+        "    }"
+        "   }).catch(function(e){"
+        "    if(btn){ btn.disabled=false; btn.textContent='🔄 Scraper ce bloc'; }"
+        "    if(typeof showToast==='function') showToast('⚠ Réseau : ' + e, 'error', 3500);"
+        "   });"
+        "}"
         "function jbEsc(t){ return String(t==null?'':t).replace(/[&<>\"]/g, function(c){"        "  return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]; }); }"
         "function jbProgShow(st){"
         "  var box=document.getElementById('jb-scrape-prog');"
@@ -36908,16 +36985,29 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             st = _load_refresh_state()
             return jsonify({"ok": False, "error": "Un refresh est deja en cours", "state": st})
         _REFRESH_LOCK.release()
+        # Portee optionnelle : ?identity=lola&va=Toky -> ne scrape QUE ce bloc.
+        # Sans parametre : TOUS les comptes, bannis compris (le filtre 1er/15 ne
+        # s'applique qu'au scrape AUTOMATIQUE).
+        ident_q = (request.form.get("identity") or request.args.get("identity") or "").strip().lower()
+        va_q = (request.form.get("va") or request.args.get("va") or "").strip().lower()
+        scope = "tous les comptes"
+        if ident_q:
+            handles = sorted(_jb_handles_for(ident_q, va_q))
+            scope = f"@{ident_q}" + (f" · VA {va_q}" if va_q else "")
+            if not handles:
+                return jsonify({"ok": False, "error": f"Aucun compte pour {scope}"})
+        else:
+            handles = sorted(_all_tracked_handles())
         # Lance en thread background
         import threading as _th2
         def _bg():
             try:
-                _run_daily_insta_refresh()
+                _do_refresh(handles, label=f"manual:{scope}")
             except Exception as e:
                 print(f"[insta-refresh:manual] crash: {e}", flush=True)
         t = _th2.Thread(target=_bg, daemon=True, name="insta-refresh-manual")
         t.start()
-        return jsonify({"ok": True, "started": True, "handles": len(_all_tracked_handles())})
+        return jsonify({"ok": True, "started": True, "handles": len(handles), "scope": scope})
 
     @app.route("/external/stats_batch", methods=["POST"])
     def external_stats_batch():
