@@ -23232,8 +23232,9 @@ def _gmsdash_warm_loop():
     """Recalcule toutes les catégories × périodes en boucle, en tâche de fond.
     Objectif : la page est déjà prête quand l'utilisateur ouvre le site."""
     import time as _t_w
-    _t_w.sleep(90)                     # laisse le boot se terminer
+    _t_w.sleep(240)                    # laisse passer la vague d'appels du boot (autres démons)
     while True:
+        had_fail = False
         try:
             import gms
             if not gms.is_configured():
@@ -23250,15 +23251,23 @@ def _gmsdash_warm_loop():
                             and (_t_w.time() - int(hit.get("ts", 0))) < 25 * 60):
                         continue          # encore frais (redémarrage récent) -> pas de recalcul
                     try:
-                        _gmsdash_store(tid, per, _gmsdash_compute(tid, per))
+                        _res_w = _gmsdash_compute(tid, per)
+                        if _res_w.get("ok"):
+                            _gmsdash_store(tid, per, _res_w)
+                        else:
+                            had_fail = True
+                            print(f"[gmsdash-warm] {tid}/{per} : {_res_w.get('error')}", flush=True)
                     except Exception as e:
+                        had_fail = True
                         print(f"[gmsdash-warm] {tid}/{per} : {e}", flush=True)
                     _t_w.sleep(30)        # souffle entre les lots (partage le quota API)
             print(f"[gmsdash-warm] {len(ids)} catégorie(s) × {len(_GMSDASH_WARM_PERIODS)} "
                   f"période(s) en {int(_t_w.time() - t0)}s", flush=True)
         except Exception as e:
+            had_fail = True
             print(f"[gmsdash-warm] crash: {e}", flush=True)
-        _t_w.sleep(30 * 60)            # cycle toutes les 30 min
+        # Échec (IP rate-limitée) -> nouvel essai dans 3 min, sinon cycle 30 min.
+        _t_w.sleep(180 if had_fail else 30 * 60)
 
 
 def _start_gmsdash_warm():

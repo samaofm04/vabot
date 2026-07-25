@@ -208,7 +208,7 @@ def _gms_gate():
         with _GMS_GATE_LOCK:
             now = time.time()
             throttled = now < _GMS_THROTTLE_UNTIL[0]
-            gap = (1.0 / max(0.5, _GMS_RPS)) if throttled else 0.25   # 1,5/s freiné, 4/s sinon
+            gap = (1.0 / max(0.5, _GMS_RPS)) if throttled else 0.5    # 1,5/s freiné, 2/s sinon
             wait = _GMS_LAST[0] + gap - now
             if wait <= 0:
                 _GMS_LAST[0] = now
@@ -319,7 +319,7 @@ def list_links(limit: int = 100) -> Dict[str, Any]:
 
 _LINKS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
 _LINKS_TEAM_CACHE: Dict[str, Any] = {}  # team_id -> {"ts","data"}
-_LINKS_TTL = 120  # secondes
+_LINKS_TTL = 900  # 15 min (invalidé par invalidate_grouping_cache sur create/delete)
 
 
 def list_all_links(max_pages: int = 50, force_refresh: bool = False) -> Dict[str, Any]:
