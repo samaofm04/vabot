@@ -6518,6 +6518,30 @@ def _all_tracked_handles() -> set:
     return handles
 
 
+def _classify_scrape_error(msg: str) -> str:
+    """Traduit un message d'erreur de scrape en motif LISIBLE (et actionnable).
+    Sert au récap « pourquoi ça a échoué » du dashboard."""
+    m = (msg or "").lower()
+    if "429" in m or "quota" in m or "rate" in m or "too many" in m:
+        return "Quota/rate-limit atteint — attendre ou upgrader le plan RapidAPI"
+    # RapidAPI d'abord : ses erreurs de clé sortent aussi en 401/403
+    if "rapidapi" in m or "non-abonné" in m or "subscribe" in m:
+        return "Clé RapidAPI invalide ou abonnement inactif"
+    if "401" in m or "403" in m or "login" in m or "session" in m or "checkpoint" in m:
+        return "Session/cookies Instagram expirés — à reconnecter dans Settings"
+    if "not found" in m or "introuvable" in m or "404" in m or "does not exist" in m:
+        return "Compte introuvable (renommé ou supprimé)"
+    if "private" in m or "privé" in m:
+        return "Compte privé — stats inaccessibles"
+    if "timeout" in m or "timed out" in m or "connection" in m or "réseau" in m or "network" in m:
+        return "Réseau/timeout — le serveur n'a pas eu de réponse"
+    if "clé" in m or "key" in m or "non-abonné" in m or "subscribe" in m:
+        return "Clé RapidAPI invalide ou abonnement inactif"
+    if "vide" in m or "empty" in m or "invalide" in m:
+        return "Instagram a renvoyé une réponse vide/invalide"
+    return (msg or "Erreur inconnue")[:70]
+
+
 def _do_refresh(handles: list, label: str = "manual") -> dict:
     """Core refresh : lock + parallel scrape + state persistence.
 
@@ -6540,6 +6564,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
         print(f"[insta-refresh:{label}] starting parallel for {total} handles", flush=True)
         ok = banned = err = 0
         done = 0
+        fails = []            # [{handle, why}] -> pourquoi chaque compte a échoué
         _last_write = [0.0]   # throttle : 1 écriture/s max (sinon 695 écritures disque)
         def _scrape_one(h):
             try:
@@ -6552,10 +6577,12 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                 h, res, exc = fut.result()
                 if exc is not None:
                     err += 1
+                    fails.append({"handle": h, "why": f"{type(exc).__name__}: {exc}"[:160]})
                 elif res.get("banned"):
                     banned += 1
                 elif res.get("error"):
                     err += 1
+                    fails.append({"handle": h, "why": str(res.get("error"))[:160]})
                 else:
                     ok += 1
                 # Progression live pour la barre du dashboard (throttlée)
@@ -6565,14 +6592,23 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                     _last_write[0] = _now
                     try:
                         _set_refresh_status(in_progress_done=done, in_progress_ok=ok,
-                                            in_progress_err=err, in_progress_banned=banned)
+                                            in_progress_err=err, in_progress_banned=banned,
+                                            in_progress_fails=fails[-25:])
                     except Exception:
                         pass
         dt_s = _t_dr.time() - t0
+        # Regroupe les motifs d'échec (quota, session, profil introuvable…) pour
+        # afficher « pourquoi » au lieu d'un simple compteur.
+        by_reason = {}
+        for f in fails:
+            key = _classify_scrape_error(f.get("why", ""))
+            by_reason[key] = by_reason.get(key, 0) + 1
         summary = {
             "ok": ok, "banned": banned, "err": err,
             "duration_s": round(dt_s, 1), "total": total, "label": label,
             "finished_at": int(_t_dr.time()),
+            "fails": fails[:100],
+            "fail_reasons": sorted(by_reason.items(), key=lambda kv: -kv[1]),
         }
         _set_refresh_status(
             status="idle",
@@ -6583,6 +6619,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             in_progress_ok=None,
             in_progress_err=None,
             in_progress_banned=None,
+            in_progress_fails=None,
             last_run_at=int(_t_dr.time()),
             last_summary=summary,
             error=None,
@@ -20330,6 +20367,7 @@ def _render_jailbreak_html() -> str:
         "  });"
         "}"
         # Affiche/alimente la barre de progression du scrape (done/total du state serveur)
+        "function jbEsc(t){ return String(t==null?'':t).replace(/[&<>\"]/g, function(c){"        "  return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]; }); }"
         "function jbProgShow(st){"
         "  var box=document.getElementById('jb-scrape-prog');"
         "  var bar=document.getElementById('jb-scrape-prog-bar');"
@@ -20344,17 +20382,43 @@ def _render_jailbreak_html() -> str:
         "  if(txt) txt.textContent = don + ' / ' + tot + '  (' + pct + '%)';"
         "  if(sub){"
         "    var ok=(st&&st.in_progress_ok)||0, er=(st&&st.in_progress_err)||0, bn=(st&&st.in_progress_banned)||0;"
-        "    sub.textContent = '✅ ' + ok + ' ok · ⚠ ' + er + ' échecs · ⛔ ' + bn + ' bannis — '"
-        "      + 'les photos et les vues apparaissent au fur et à mesure.';"
+        "    var html = '✅ ' + ok + ' ok · ⚠ ' + er + ' échecs · ⛔ ' + bn + ' bannis'"
+        "      + ' — les photos et les vues apparaissent au fur et à mesure.';"
+        "    var fl = (st && st.in_progress_fails) || [];"
+        "    if(fl.length){"
+        "      html += '<div style=\"margin-top:7px;max-height:96px;overflow:auto\">';"
+        "      for(var i=fl.length-1;i>=0 && i>fl.length-9;i--){"
+        "        html += '<div style=\"color:#f87171;font-size:10.5px\">⚠ @' + jbEsc(fl[i].handle)"
+        "             + ' — ' + jbEsc(fl[i].why) + '</div>';"
+        "      }"
+        "      html += '</div>';"
+        "    }"
+        "    sub.innerHTML = html;"
         "  }"
         "}"
-        "function jbProgDone(){"
+        "function jbProgDone(st){"
         "  var box=document.getElementById('jb-scrape-prog');"
         "  var bar=document.getElementById('jb-scrape-prog-bar');"
         "  var txt=document.getElementById('jb-scrape-prog-txt');"
+        "  var sub=document.getElementById('jb-scrape-prog-sub');"
         "  if(bar) bar.style.width='100%';"
         "  if(txt) txt.textContent='Terminé ✓';"
-        "  if(box){ var s=box.querySelector('.jb-prog-spin'); if(s) s.style.display='none'; }"
+        "  if(box){ var sp=box.querySelector('.jb-prog-spin'); if(sp) sp.style.display='none'; }"
+        # Récap final : POURQUOI ça a échoué, regroupé par motif
+        "  var sm = (st && st.last_summary) ? st.last_summary : null;"
+        "  if(sub && sm){"
+        "    var h = '✅ ' + (sm.ok||0) + ' ok · ⚠ ' + (sm.err||0) + ' échecs · ⛔ ' + (sm.banned||0)"
+        "          + ' bannis · ' + (sm.duration_s||0) + 's';"
+        "    var rs = sm.fail_reasons || [];"
+        "    if(rs.length){"
+        "      h += '<div style=\"margin-top:8px\"><b style=\"color:#fb923c\">Pourquoi ça a échoué :</b></div>';"
+        "      for(var i=0;i<rs.length;i++){"
+        "        h += '<div style=\"color:#fbbf24;font-size:11px;margin-top:3px\">• ' + rs[i][1]"
+        "          + ' × ' + jbEsc(rs[i][0]) + '</div>';"
+        "      }"
+        "    }"
+        "    sub.innerHTML = h;"
+        "  }"
         "}"
         # Au chargement : si un scrape tourne déjà (lancé ailleurs / auto), on affiche la barre
         "document.addEventListener('DOMContentLoaded', function(){"
@@ -20384,10 +20448,10 @@ def _render_jailbreak_html() -> str:
         "      if(stt === 'in_progress'){ jbProgShow(s.state); }"
         "      if(stt === 'idle' && tries > 1){"
         "        clearInterval(iv);"
-        "        jbProgDone();"
+        "        jbProgDone(s && s.state);"
         "        if(lbl) lbl.textContent='Terminé ✓';"
         "        if(typeof showToast === 'function') showToast('✓ Scrape terminé — rechargement…', 'success', 2000);"
-        "        setTimeout(function(){ location.reload(); }, 1200);"
+        "        setTimeout(function(){ location.reload(); }, (s && s.state && s.state.last_summary && s.state.last_summary.err) ? 9000 : 1500);"
         "      } else if(tries > 900){"  # ~30 min max (695 comptes = long)
         "        clearInterval(iv);"
         "        jbResetScrapeBtn(btn, ico, lbl);"
