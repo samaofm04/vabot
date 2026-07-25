@@ -8859,9 +8859,9 @@ function extRenderStats(row, s){
     if(hd){var bb=document.createElement('span');bb.className='va-ig3-ban-badge';bb.textContent='BANNI';bb.title='Compte banni';hd.appendChild(bb);}
   } else {row.classList.remove('va-ig3-row-banned');}
   if(s.error){
-    if(nums[0]) nums[0].textContent='—'; if(nums[1]) nums[1].textContent='—'; if(nums[2]) nums[2].textContent='—'; if(nums[3]) nums[3].textContent='—';
-    if(last) last.textContent='—';
-    var e=document.createElement('div'); e.className='va-ig3-row-err'; e.textContent=(s.error||'').slice(0,90); row.appendChild(e);
+    // Scrape raté -> on GARDE les chiffres du dernier scrape connu (jamais effacés),
+    // on signale juste l'erreur sous la ligne.
+    var e=document.createElement('div'); e.className='va-ig3-row-err'; e.textContent=(s.error||'').slice(0,90)+' — stats précédentes conservées'; row.appendChild(e);
     return;
   }
   if(s.profile_pic_url){var pp=row.querySelector('.va-ig3-row-pp');if(pp&&pp.tagName==='IMG'){pp.src=s.profile_pic_url;}else if(pp){var np=document.createElement('img');np.src=s.profile_pic_url;np.className='va-ig3-row-pp';np.referrerPolicy='no-referrer';pp.replaceWith(np);}}
@@ -8892,7 +8892,9 @@ function vaIg3MiniLoad(uid, detail, force){
   rows.forEach(function(r){
     if(r.classList.contains('va-ig3-row-empty')) return;
     var last = r.querySelector('.va-ig3-row-last-val');
-    if(last) last.textContent = '…';
+    // Mémorise la valeur affichée AVANT le refresh -> on la restaure si le scrape rate
+    // (les chiffres des colonnes ne sont jamais effacés, ils restent visibles).
+    if(last){ last.setAttribute('data-prev', last.textContent); last.textContent = '…'; }
   });
   var url = '/va/insta_3_stats?user_id=' + encodeURIComponent(uid) + (force ? '&force=1' : '');
   fetch(url).then(function(r){ return r.json(); }).then(function(d){
@@ -8900,7 +8902,7 @@ function vaIg3MiniLoad(uid, detail, force){
       rows.forEach(function(r){
         if(r.classList.contains('va-ig3-row-empty')) return;
         var last = r.querySelector('.va-ig3-row-last-val');
-        if(last) last.textContent = 'Erreur';
+        if(last) last.textContent = last.getAttribute('data-prev') || '—';   // stats gardées
       });
       return;
     }
@@ -8923,14 +8925,12 @@ function vaIg3MiniLoad(uid, detail, force){
         if(hd){var bb=document.createElement('span');bb.className='va-ig3-ban-badge';bb.textContent='BANNI';bb.title='Compte banni';hd.appendChild(bb);}
       } else {row.classList.remove('va-ig3-row-banned');}
       if(s.error){
-        if(nums[0]) nums[0].textContent = '—';
-        if(nums[1]) nums[1].textContent = '—';
-        if(nums[2]) nums[2].textContent = '—';
-        if(nums[3]) nums[3].textContent = '—';
-        if(last) last.textContent = '—';
+        // On GARDE les stats déjà affichées (dernier scrape connu) : un refresh raté
+        // ne doit pas effacer les chiffres, sinon on ne peut plus checker les comptes.
+        if(last && last.textContent === '…') last.textContent = last.getAttribute('data-prev') || '—';
         var errEl = document.createElement('div');
         errEl.className = 'va-ig3-row-err';
-        errEl.textContent = (s.error || '').slice(0,90);
+        errEl.textContent = (s.error || '').slice(0,90) + ' — stats précédentes conservées';
         row.appendChild(errEl);
         return;
       }
@@ -9032,10 +9032,16 @@ function vaIg3TrkLoad(force){
 .ig3-trk-refresh:hover{color:#22c55e}
 /* Rangee detail 3 comptes IG sous chaque carte VA — lignes horizontales */
 .va-ig3-detail{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a}
-.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
-.va-ig3-row:hover{border-color:#ec489940}
+/* Lignes façon TABLEAU (colonnes fixes -> alignées avec l'en-tête .va-ig3-thead) */
+.va-ig3-row{background:#0f1116;border:1px solid #23262f;border-top-width:0;border-radius:0;padding:12px 16px;display:grid;grid-template-columns:36px minmax(0,1fr) 78px 78px 78px 78px 104px 30px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:background .12s}
+.va-ig3-row:first-child{border-top-width:1px;border-radius:12px 12px 0 0}
+.va-ig3-row:last-child{border-radius:0 0 12px 12px}
+.va-ig3-row:hover{background:#14171f}
+/* En-tête de colonnes (même grille que les lignes) */
+.va-ig3-thead{background:#0c0e13;border:1px solid #23262f;border-radius:12px 12px 0 0;padding:10px 16px;display:grid;grid-template-columns:36px minmax(0,1fr) 78px 78px 78px 78px 104px 30px;gap:14px;align-items:center}
+.va-ig3-thead span{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6b7280}
+.va-ig3-thead .r{text-align:center}
 .va-ig3-row-empty{opacity:.4;cursor:default;grid-template-columns:36px 1fr}
-.va-ig3-row-empty:hover{border-color:#2a2a2a}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
 .va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
@@ -18223,7 +18229,8 @@ async function glDeleteWatcher(id, btn){
 .va-ig3-row-banned{background:rgba(239,68,68,.06) !important;border-color:rgba(239,68,68,.3) !important}
 .va-ig3-row-banned .va-ig3-row-handle{color:#ef4444;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.4)}
 .va-ig3-row-banned .va-ig3-row-pp{filter:grayscale(.9) opacity(.7)}
-.va-ig3-ban-badge{display:inline-block;margin-left:8px;background:#ef4444;color:#fff;font-size:9px;font-weight:800;letter-spacing:.08em;padding:2px 7px;border-radius:5px;vertical-align:middle}
+.va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}
 .va-ig3-detail{display:flex;flex-direction:column;gap:8px}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
@@ -18852,10 +18859,17 @@ def _render_jailbreak_html() -> str:
         ".jb-detail-accounts{display:flex;flex-direction:column;gap:8px}"
         # Override grille .va-ig3-row pour .jb-row : 9 cols = PP + name + 4 metrics + last + arrow + actions(group)
         # On supprime le 2e slot d action (28px) et on remplace par 1 cellule actions auto pour edit+delete groupes
-        ".jb-row{grid-template-columns:36px 1fr auto auto auto auto auto 22px auto !important}"
+        ".jb-row{grid-template-columns:36px minmax(0,1fr) 78px 78px 78px 78px 104px 30px auto !important}"
+        ".jb-thead{grid-template-columns:36px minmax(0,1fr) 78px 78px 78px 78px 104px 30px auto !important}"
         ".jb-row-actions{display:flex;gap:5px;align-items:center}"
         # Badge "NON SCRAPE" (orange : pas encore scrappe vs ban : rouge)
-        ".jb-not-scraped-badge{display:inline-block;background:rgba(251,146,60,.15);color:#fb923c;font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid rgba(251,146,60,.3);white-space:nowrap;flex-shrink:0}"
+        ".jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(154,160,166,.12);color:#9aa0a6;font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;border:1px solid rgba(154,160,166,.28);white-space:nowrap;flex-shrink:0}"
+        ".jb-not-scraped-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#9aa0a6;flex-shrink:0}"
+        ".jb-ok-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(34,197,94,.12);color:#4ade80;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(34,197,94,.28);white-space:nowrap;flex-shrink:0}"
+        ".jb-ok-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;flex-shrink:0}"
+        # Un refresh qui passe le compte en BANNI ajoute la pastille rouge : on masque
+        # alors l'ancienne pastille verte (sinon « Actif » + « Banni » sur la même ligne).
+        ".va-ig3-row-banned .jb-ok-badge{display:none}"
         # Rows pas scrapees : opacite legere pour visuel "en attente"
         ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
         ".jb-row-not-scraped .va-ig3-row-handle{color:#a78bfa}"
@@ -18914,6 +18928,16 @@ def _render_jailbreak_html() -> str:
         if n >= 1000:
             return f"{n/1000:.1f}k"
         return str(n)
+
+    # En-tête de colonnes du tableau des comptes (même grille que .jb-row)
+    _ACCT_THEAD = (
+        "<div class='va-ig3-thead jb-thead'>"
+        "<span></span><span>Compte</span>"
+        "<span class='r'>Abonnés</span><span class='r'>Vues 24h</span>"
+        "<span class='r'>Vues sem</span><span class='r'>Vues 2 sem</span>"
+        "<span>Dernier reel</span><span></span><span></span>"
+        "</div>"
+    )
 
     # === Helper rendu compte (utilise globalement) ===
     def _render_account_row(a: dict, ident_lc_arg: str) -> str:
@@ -19004,13 +19028,13 @@ def _render_jailbreak_html() -> str:
             cred_parts.append("<span style='color:#fb923c'>🔐 2FA</span>")
         cred_html = " · ".join(cred_parts) if cred_parts else ""
 
-        # Status badge a cote du handle : banni / non scrape / OK (rien)
+        # Pastille de statut a cote du handle : banni / non scrape / actif
         if is_banned:
-            status_badge = "<span class='va-ig3-ban-badge'>BAN</span>"
+            status_badge = "<span class='va-ig3-ban-badge'>Banni</span>"
         elif is_not_scraped:
-            status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>NON SCRAPÉ</span>"
+            status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
         else:
-            status_badge = ""
+            status_badge = "<span class='jb-ok-badge' title='Compte scrapé — stats à jour'>Actif</span>"
 
         # Row-level class additions
         row_extra_cls = " va-ig3-row-banned" if is_banned else ""
@@ -19221,7 +19245,7 @@ def _render_jailbreak_html() -> str:
                     )
 
                 if va_accts:
-                    accounts_html = "".join(_render_account_row(a, ident_lc) for a in va_accts)
+                    accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in va_accts)
                 else:
                     accounts_html = (
                         "<div class='jb-empty-section'>Aucun compte sous ce VA — clique "
@@ -19304,7 +19328,7 @@ def _render_jailbreak_html() -> str:
                     f"</button>"
                 )
 
-                accounts_html = "".join(_render_account_row(a, ident_lc) for a in no_va_accts)
+                accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in no_va_accts)
                 detail_cards_html.append(
                     f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
                     f"data-identity='{ident_safe}' data-va-name=''>"
