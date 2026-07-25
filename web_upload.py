@@ -6925,14 +6925,21 @@ def _verify_ig_profile_exists(handle: str) -> bool:
         # ferait passer des comptes VIVANTS en « banni » pendant un gros scrape.
         return True
     txt = r.text or ""
-    # Marqueurs explicites de page introuvable
+    low = txt.lower()
+    # Marqueurs explicites de page introuvable (comparaison en minuscules : la vraie
+    # page FR d'Instagram dit « Cette page n'est malheureusement pas disponible »,
+    # que l'ancien marqueur « Désolé, cette page n » ne matchait PAS -> les comptes
+    # supprimés/renommés passaient pour vivants).
     not_found_markers = [
-        "Page Not Found",
-        "Sorry, this page isn",  # "Sorry, this page isn't available"
-        "Désolé, cette page n",
-        '"is_private":true,"username":"' + handle.lower() + '"',  # private mais existe
+        "page not found",
+        "sorry, this page isn",                         # "Sorry, this page isn't available"
+        "cette page n'est malheureusement pas disponible",
+        "cette page n’est malheureusement pas disponible",   # apostrophe typographique
+        "désolé, cette page n",
+        "esta página no está disponible",
+        "diese seite ist leider nicht verfügbar",
     ]
-    if any(m in txt for m in not_found_markers[:3]):
+    if any(m in low for m in not_found_markers):
         return False
     # Marqueur positif : og:title contient le username
     if f'@{handle.lower()}' in txt.lower() or f'"username":"{handle.lower()}"' in txt.lower():
@@ -18819,41 +18826,56 @@ def _render_jailbreak_html() -> str:
     # par (identité, VA) — surtout PAS par VA global : un même VA peut gérer des
     # comptes sous plusieurs identités (ex. 11 sous lola + 11 sous amelia), et la
     # section affichée ne concerne que l'identité en cours.
-    _jba = None
-    _jb_act = {}
-    _jb_banned = set()
+    # Seules les PÉNALITÉS mensuelles viennent de jb_activity (historique des jours
+    # en faute). Les compteurs actifs/bannis/oublis-48h, eux, se calculent sur
+    # ig_stats_cache pour rester cohérents avec les lignes du tableau.
     _jb_pen = {}
     try:
         import jb_activity as _jba_mod
-        _jba = _jba_mod
-        _jb_act = _jba._load(_jba.ACT_FILE) or {}
-        _jb_banned = _jba._banned()
-        _jb_pen = _jba._load(_jba.PEN_FILE) or {}
+        _jb_pen = _jba_mod._load(_jba_mod.PEN_FILE) or {}
     except Exception:
-        _jba = None
+        _jb_pen = {}
 
     def _jb_accountability(va_accts_arg, va_name_arg):
         """Compteurs pour CE couple (identité, VA) uniquement : actifs / bannis /
         oublis 48h / oublis du mois. Un oubli = 1 par JOUR où au moins un compte
-        de cette liste est resté muet >48 h (10 comptes le même jour = 1 oubli)."""
-        if not _jba:
-            return None
+        de cette liste est resté muet >48 h (10 comptes le même jour = 1 oubli).
+
+        IMPORTANT : on lit ig_stats_cache — LA MÊME source que les lignes du
+        tableau. Avant on lisait jb_activity.json (scan séparé, souvent pas à jour),
+        d'où l'incohérence « 8/10 scrapés » mais « 2 actifs »."""
         import time as _t_ac
+        import datetime as _dt_ac2
         now = _t_ac.time()
-        n_actif = n_ban = n_silent = 0
+        n_actif = n_ban = n_silent = n_fail = 0
         unames = set()
         for a in va_accts_arg:
             u = (a.get("username") or "").strip()
             if u:
                 unames.add(u.lower())
-            st = _jba._acct_state(u, _jb_act.get(u), now, _jb_banned)
-            if st == "banned":
+            try:
+                hn = _normalize_insta_handle(u) if callable(_normalize_insta_handle) else u.lower().lstrip("@")
+            except Exception:
+                hn = u.lower().lstrip("@")
+            st = ig_stats_cache.get(hn) or {}
+            if st.get("banned"):
                 n_ban += 1
-            elif st == "silent":
-                n_silent += 1
-                n_actif += 1          # un compte muet reste un compte actif
-            elif st in ("ok", "never"):
-                n_actif += 1
+                continue
+            if not st or st.get("error"):
+                n_fail += 1           # jamais scrapé / scrape en échec : ni actif ni banni
+                continue
+            n_actif += 1              # scrapé et pas banni = compte actif
+            # Oubli 48 h : dernier reel connu il y a plus de 48 h
+            lr = st.get("last_reel_at") or st.get("last_post_at")
+            if lr:
+                try:
+                    d_lr = _dt_ac2.datetime.fromisoformat(str(lr).replace("Z", "+00:00"))
+                    if d_lr.tzinfo is None:
+                        d_lr = d_lr.replace(tzinfo=_dt_ac2.timezone.utc)
+                    if (now - d_lr.timestamp()) > 48 * 3600:
+                        n_silent += 1
+                except Exception:
+                    pass
         import datetime as _dt_ac
         month = _dt_ac.datetime.now().strftime("%Y-%m")
         rec = _jb_pen.get((va_name_arg or "").strip().lower()) or {}
@@ -18864,7 +18886,8 @@ def _render_jailbreak_html() -> str:
             # le jour ne compte que si un compte DE CETTE IDENTITÉ était fautif
             if any((x or "").lower() in unames for x in (accs or [])):
                 n_mois += 1
-        return {"actif": n_actif, "ban": n_ban, "silent": n_silent, "mois": n_mois}
+        return {"actif": n_actif, "ban": n_ban, "silent": n_silent,
+                "mois": n_mois, "fail": n_fail}
 
     # Header
     header = (
@@ -19108,6 +19131,8 @@ def _render_jailbreak_html() -> str:
         ".jb-row .va-ig3-row-lab,.jb-row .va-ig3-row-last-lab{display:none}"
         ".jb-stale-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(251,146,60,.13);color:#fb923c;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(251,146,60,.3);white-space:nowrap;flex-shrink:0}"
         ".jb-stale-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#fb923c;flex-shrink:0}"
+        ".jb-fail-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.13);color:#f87171;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(239,68,68,.3);white-space:nowrap;flex-shrink:0}"
+        ".jb-fail-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#ef4444;flex-shrink:0}"
         ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
         ".jb-row-not-scraped .va-ig3-row-handle{color:#a78bfa}"
         ".jb-row-not-scraped:hover{opacity:1}"
@@ -19272,6 +19297,10 @@ def _render_jailbreak_html() -> str:
             status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>{_lbl_ban}</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
+        elif s.get("error"):
+            # Scrape en échec : surtout PAS « Actif » (on n'a aucune donnée fraîche)
+            _why_err = html_escape(str(s.get("error"))[:130])
+            status_badge = f"<span class='jb-fail-badge' title='{_why_err}'>Échec</span>"
         elif s.get("stale"):
             status_badge = ("<span class='jb-stale-badge' title='Le dernier scrape n a rien ramené "
                             "(Instagram) — on affiche les stats du dernier relevé valable'>Stats gardées</span>")
@@ -19516,8 +19545,15 @@ def _render_jailbreak_html() -> str:
                     )
                     if _n_ban:
                         scrape_pill += (
-                            f"<span class='jb-acc-pill ban' title='Comptes bannis (scrapés mais inutilisables)'>"
-                            f"⛔ {_n_ban} bannis</span>"
+                            f"<span class='jb-acc-pill ban' title='Comptes bannis / renommés (introuvables sur Instagram)'>"
+                            f"⛔ {_n_ban} banni{'s' if _n_ban > 1 else ''}</span>"
+                        )
+                    _n_fail = _sm.get("fail", 0)
+                    if _n_fail:
+                        scrape_pill += (
+                            f"<span class='jb-acc-pill warn' title='Scrape en échec ou jamais scrapé — "
+                            f"relance « Scraper ce bloc » pour connaître la raison'>"
+                            f"⚠ {_n_fail} non scrapé{'s' if _n_fail > 1 else ''}</span>"
                         )
                     _ocls = "warn" if _n_oubli else "quiet"
                     scrape_pill += (
