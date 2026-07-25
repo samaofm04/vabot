@@ -22990,12 +22990,20 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None) -> dict:
             tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
+        row = {"id": lid, "shortcode": l.get("shortcode") or "",
+               "name": l.get("display_name") or l.get("shortcode") or "",
+               "clicks": tot,                 # None = lecture ratée (surtout pas 0)
+               "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
         _prog(1)
-        return {"id": lid, "shortcode": l.get("shortcode") or "",
-                "name": l.get("display_name") or l.get("shortcode") or "",
-                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
-                "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
-        # (la progression est notée par l'appelant via _prog)
+        if progress_key:
+            # rend ce lien visible dans la page PENDANT le calcul (tableau partiel)
+            with _GMSDASH_LOCK:
+                pr = _GMSDASH_PROGRESS.get(progress_key)
+                if pr is not None:
+                    pr.setdefault("rows", []).append(
+                        {"id": lid, "shortcode": row["shortcode"], "name": row["name"],
+                         "clicks": tot or 0, "us": row["us"]})
+        return row
 
     try:
         # bulk_mode : ce lot (des centaines d'appels) s'auto-freine, sans ralentir
@@ -23098,7 +23106,7 @@ def _gmsdash_kick(team: str, period: str) -> bool:
         if key in _GMSDASH_INFLIGHT:
             return False
         _GMSDASH_INFLIGHT.add(key)
-        _GMSDASH_PROGRESS[key] = {"done": 0, "total": 0,
+        _GMSDASH_PROGRESS[key] = {"done": 0, "total": 0, "rows": [],
                                   "stage": "liste des liens", "error": ""}
     import threading as _th_k
 
@@ -23149,8 +23157,9 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
         return out
     with _GMSDASH_LOCK:
         prog = dict(_GMSDASH_PROGRESS.get(key) or {})
+        rows_partial = list(prog.pop("rows", []) or [])
     return {"ok": True, "loading": True, "progress": prog,
-            "team": team, "links": [], "countries": {}}
+            "team": team, "links": rows_partial, "countries": {}}
 
 
 _GMSDASH_WARM_STARTED = False
@@ -23326,14 +23335,13 @@ function gdSchedulePoll(ms){
   window.__gdPollTimer = setTimeout(function(){ gdLoad(); }, ms);
 }
 // Barre de progression du calcul (X / Y appels) — affichée tant qu'il n'y a rien à montrer
-function gdShowProgress(p){
+function gdProgressHtml(p){
   p = p || {};
   var tot = p.total || 0, don = p.done || 0;
   var pct = tot ? Math.min(100, Math.round(don * 100 / tot)) : 0;
   var err = p.error ? ('<div style="color:#f87171;font-size:11px;margin-top:8px">⚠ ' + gdEsc(p.error)
     + ' — nouvelle tentative automatique…</div>') : '';
-  document.getElementById('gd-tbl').innerHTML =
-    '<div class="gd-msg" style="text-align:left">'
+  return '<div class="gd-msg" style="text-align:left;padding:16px 18px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">'
     + '<span>⏳ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '</span>'
     + '<b style="color:#4ade80;font-variant-numeric:tabular-nums">' + don + ' / ' + (tot || '…')
@@ -23341,6 +23349,9 @@ function gdShowProgress(p){
     + '<div style="height:8px;background:#1b1e27;border-radius:20px;overflow:hidden">'
     + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px;transition:width .4s"></div></div>'
     + err + '</div>';
+}
+function gdShowProgress(p){
+  document.getElementById('gd-tbl').innerHTML = gdProgressHtml(p);
 }
 function gdLoad(force){
   var tid = (document.getElementById('gd-team')||{}).value;
@@ -23362,11 +23373,18 @@ function gdLoad(force){
   }).then(function(d){
     if(!d || !d.ok) throw new Error((d && d.error) || 'Erreur');
     if(d.loading){
-      // Rien à montrer encore : barre de progression + on redemande dans 2 s
-      document.getElementById('gd-cards').innerHTML = '';
-      document.getElementById('gd-ctry').innerHTML = '';
       var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
-      gdShowProgress(d.progress);
+      document.getElementById('gd-ctry').innerHTML = '';
+      if((d.links||[]).length){
+        // Les liens DÉJÀ lus s'affichent en direct, la barre au-dessus
+        d.label = 'calcul en cours…';
+        window.__gdData = d;
+        gdRender(d);
+        document.getElementById('gd-tbl').insertAdjacentHTML('afterbegin', gdProgressHtml(d.progress));
+      } else {
+        document.getElementById('gd-cards').innerHTML = '';
+        gdShowProgress(d.progress);
+      }
       gdSchedulePoll(2000);
       return;
     }
