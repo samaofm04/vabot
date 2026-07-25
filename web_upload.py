@@ -7058,6 +7058,23 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "posts_count": posts_count,
         "preview": preview,
     }
+    # GARDE-FOU anti-écrasement : un scrape qui « réussit » mais ne ramène RIEN
+    # (0 abonné, 0 post, aucun aperçu) est en fait un scrape raté côté Instagram.
+    # Sans ça il écrasait de bonnes stats -> comptes affichés à 0 vues alors qu'ils
+    # ont du contenu. On garde alors le dernier relevé valable.
+    # NB : on ne fige PAS les vues quand le profil répond correctement — elles
+    # doivent pouvoir retomber à 0 si le compte ne poste plus.
+    looks_empty = (not followers) and (not posts_count) and not preview
+    if looks_empty and isinstance(cached, dict) and cached and not cached.get("error"):
+        if cached.get("followers") or cached.get("posts_count") or cached.get("preview"):
+            kept = dict(cached)
+            kept["scraped_at"] = now_ts          # on a bien retenté à cet instant
+            kept["stale"] = True                 # affichage : données du dernier bon scrape
+            kept["stale_since"] = cached.get("scraped_at")
+            _cache_put_stats(h, kept)
+            return kept
+    if not profile_pic and isinstance(cached, dict) and cached.get("profile_pic_url"):
+        out["profile_pic_url"] = cached["profile_pic_url"]   # jamais de compte sans PP
     _cache_put_stats(h, out)
     return out
 
@@ -9061,12 +9078,12 @@ function vaIg3TrkLoad(force){
 /* Rangee detail 3 comptes IG sous chaque carte VA — lignes horizontales */
 .va-ig3-detail{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a}
 /* Lignes façon TABLEAU (colonnes fixes -> alignées avec l'en-tête .va-ig3-thead) */
-.va-ig3-row{background:#0f1116;border:1px solid #23262f;border-top-width:0;border-radius:0;padding:12px 16px;display:grid;grid-template-columns:36px minmax(0,1fr) 64px 64px 64px 64px 88px 26px;gap:10px;align-items:center;position:relative;cursor:pointer;transition:background .12s}
+.va-ig3-row{background:#0f1116;border:1px solid #23262f;border-top-width:0;border-radius:0;padding:12px 16px;display:grid;grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px;gap:10px;align-items:center;position:relative;cursor:pointer;transition:background .12s}
 .va-ig3-row:first-child{border-top-width:1px;border-radius:12px 12px 0 0}
 .va-ig3-row:last-child{border-radius:0 0 12px 12px}
 .va-ig3-row:hover{background:#14171f}
 /* En-tête de colonnes (même grille que les lignes) */
-.va-ig3-thead{background:#0c0e13;border:1px solid #23262f;border-radius:12px 12px 0 0;padding:10px 16px;display:grid;grid-template-columns:36px minmax(0,1fr) 64px 64px 64px 64px 88px 26px;gap:10px;align-items:center}
+.va-ig3-thead{background:#0c0e13;border:1px solid #23262f;border-radius:12px 12px 0 0;padding:10px 16px;display:grid;grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px;gap:10px;align-items:center}
 .va-ig3-thead span{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6b7280}
 .va-ig3-thead .r{text-align:center}
 .va-ig3-row-empty{opacity:.4;cursor:default;grid-template-columns:36px 1fr}
@@ -18843,7 +18860,7 @@ def _render_jailbreak_html() -> str:
         # Trends -> sans ça, « Banni » s'affichait en texte brut sur la page Jailbreak.
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
         ".va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}"
-        ".jb-va-detail-accounts{overflow-x:auto}"
+        ".jb-detail-accounts{overflow-x:auto}"
         ".jb-prog-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(34,197,94,.25);border-top-color:#22c55e;display:inline-block;animation:jbSpin .8s linear infinite;flex-shrink:0}"
         ".jb-row:hover{background:rgba(255,255,255,.02)}"
         ".jb-row-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;margin-left:4px;transition:all .15s}"
@@ -18935,8 +18952,8 @@ def _render_jailbreak_html() -> str:
         ".jb-detail-accounts{display:flex;flex-direction:column;gap:8px}"
         # Override grille .va-ig3-row pour .jb-row : 9 cols = PP + name + 4 metrics + last + arrow + actions(group)
         # On supprime le 2e slot d action (28px) et on remplace par 1 cellule actions auto pour edit+delete groupes
-        ".jb-row{grid-template-columns:36px minmax(0,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
-        ".jb-thead{grid-template-columns:36px minmax(0,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
+        ".jb-row{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
+        ".jb-thead{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
         ".jb-row-actions{display:flex;gap:5px;align-items:center}"
         # Badge "NON SCRAPE" (orange : pas encore scrappe vs ban : rouge)
         ".jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(154,160,166,.12);color:#9aa0a6;font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;border:1px solid rgba(154,160,166,.28);white-space:nowrap;flex-shrink:0}"
@@ -18947,6 +18964,9 @@ def _render_jailbreak_html() -> str:
         # alors l'ancienne pastille verte (sinon « Actif » + « Banni » sur la même ligne).
         ".va-ig3-row-banned .jb-ok-badge{display:none}"
         # Rows pas scrapees : opacite legere pour visuel "en attente"
+        ".jb-row .va-ig3-row-lab,.jb-row .va-ig3-row-last-lab{display:none}"
+        ".jb-stale-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(251,146,60,.13);color:#fb923c;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(251,146,60,.3);white-space:nowrap;flex-shrink:0}"
+        ".jb-stale-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#fb923c;flex-shrink:0}"
         ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
         ".jb-row-not-scraped .va-ig3-row-handle{color:#a78bfa}"
         ".jb-row-not-scraped:hover{opacity:1}"
@@ -19109,6 +19129,9 @@ def _render_jailbreak_html() -> str:
             status_badge = "<span class='va-ig3-ban-badge'>Banni</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
+        elif s.get("stale"):
+            status_badge = ("<span class='jb-stale-badge' title='Le dernier scrape n a rien ramené "
+                            "(Instagram) — on affiche les stats du dernier relevé valable'>Stats gardées</span>")
         else:
             status_badge = "<span class='jb-ok-badge' title='Compte scrapé — stats à jour'>Actif</span>"
 
