@@ -28,6 +28,55 @@ def _ensure_dirs():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _write_cache(username: str, result: dict) -> dict:
+    """Écrit le cache d'un compte en FUSIONNANT avec le dernier relevé connu.
+
+    Un scrape partiel (Instagram renvoie parfois un profil sans photo, 0 abonné
+    ou aucun reel) ne doit PAS effacer les bonnes données : sinon le dashboard
+    affiche des comptes sans PP et des « vues sem 0 » alors qu'on avait mieux.
+    On garde donc l'ancienne valeur quand la nouvelle est vide/nulle, et on
+    marque `partial` pour tracer les champs repris.
+    """
+    _ensure_dirs()
+    f = CACHE_DIR / f"{username}.json"
+    old = {}
+    try:
+        if f.exists():
+            old = json.loads(f.read_text(encoding="utf-8")) or {}
+    except Exception:
+        old = {}
+
+    if isinstance(old, dict) and old and not old.get("error"):
+        kept = []
+        op, np_ = old.get("profile") or {}, result.get("profile") or {}
+        if isinstance(op, dict) and isinstance(np_, dict):
+            # PP : jamais de compte sans photo si on en avait une
+            if not np_.get("profile_pic_url") and op.get("profile_pic_url"):
+                np_["profile_pic_url"] = op["profile_pic_url"]
+                kept.append("profile_pic_url")
+            # Compteurs : un 0/absent ne remplace pas une vraie valeur
+            for k in ("followers", "following", "posts_count"):
+                if not np_.get(k) and op.get(k):
+                    np_[k] = op[k]
+                    kept.append(k)
+            for k in ("full_name", "biography", "pk"):
+                if not np_.get(k) and op.get(k):
+                    np_[k] = op[k]
+            result["profile"] = np_
+        # Reels : liste vide -> on garde les précédents (sinon toutes les vues
+        # retombent à 0 alors que le compte a bien des posts)
+        if not (result.get("reels") or []) and (old.get("reels") or []):
+            result["reels"] = old["reels"]
+            kept.append("reels")
+        if kept:
+            result["partial"] = True
+            result["kept_from_previous"] = kept
+            result["previous_scraped_at"] = old.get("scraped_at")
+
+    f.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return result
+
+
 # ============ AUTH ============
 
 def load_auth() -> dict:
@@ -665,11 +714,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
         "scraped_at": time.time(),
         "source": "rapidapi",
     }
-    _ensure_dirs()
-    (CACHE_DIR / f"{username}.json").write_text(
-        json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    return result
+    return _write_cache(username, result)
 
 
 def _scrape_via_web_api(username: str, limit: int) -> dict:
@@ -762,11 +807,7 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
         "reels": reels,
         "scraped_at": time.time(),
     }
-    _ensure_dirs()
-    (CACHE_DIR / f"{username}.json").write_text(
-        json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    return result
+    return _write_cache(username, result)
 
 
 HEALTH_FILE = INSTA_DIR / "watchlist_health.json"
@@ -930,11 +971,7 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
             "reels": reels,
             "scraped_at": time.time(),
         }
-        _ensure_dirs()
-        (CACHE_DIR / f"{username}.json").write_text(
-            json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        return result
+        return _write_cache(username, result)
     except instaloader.exceptions.ProfileNotExistsException:
         errors.append(f"instaloader: profil introuvable")
         return {"error": " | ".join(errors)}
