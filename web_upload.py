@@ -22904,6 +22904,108 @@ GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
 GMSDASH_TEAMS = [
     ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
 ]
+# Liste de SECOURS des liens par team (relevée le 26/07/2026) : la liste (REST)
+# est ce qui 429 sur le VPS, alors que les clics (MCP) passent. Avec ce secours,
+# le dashboard affiche des résultats même quand le listage est bloqué. Toute
+# liste fraîchement réussie est persistée dans data/gmsdash_links.json et prime.
+GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
+GMSDASH_SEED_LINKS = {
+    "tm_6a0e4739bfa0c238f20a8bf5": [
+        {
+            "id": "lnk_6a6224c47e0f5e0625458acd",
+            "shortcode": "bertjessye",
+            "display_name": "VA 13 Gerome"
+        },
+        {
+            "id": "lnk_6a5167c3661861fd7a0eaa59",
+            "shortcode": "knstjessye",
+            "display_name": "VA 12 (Roucham)"
+        },
+        {
+            "id": "lnk_6a5167a9124b8220a218f2de",
+            "shortcode": "hstvjessy",
+            "display_name": "VA 11"
+        },
+        {
+            "id": "lnk_6a0e5415a5835045d4a1a4d2",
+            "shortcode": "rmxvjessy",
+            "display_name": "VA 10 (Abdoul)"
+        },
+        {
+            "id": "lnk_6a0e54087917759f8b67d6b5",
+            "shortcode": "ldkpjessy",
+            "display_name": "VA 9"
+        },
+        {
+            "id": "lnk_6a0e540151a8673d099b79e3",
+            "shortcode": "wzyfjessy",
+            "display_name": "VA 8"
+        },
+        {
+            "id": "lnk_6a0e53f9bfa0c238f20b46b8",
+            "shortcode": "tbhcjessy",
+            "display_name": "VA 8"
+        },
+        {
+            "id": "lnk_6a0e53e19a5ce8394b308002",
+            "shortcode": "nqrjjessy",
+            "display_name": "VA 6"
+        },
+        {
+            "id": "lnk_6a0e5362fea0a6e3ed3390d9",
+            "shortcode": "pvxajessy",
+            "display_name": "VA 5"
+        },
+        {
+            "id": "lnk_6a0e5346fba948185cdbdfaf",
+            "shortcode": "kfwojessy",
+            "display_name": "VA 4"
+        },
+        {
+            "id": "lnk_6a0e53417917759f8b67c8d1",
+            "shortcode": "mlydjessy",
+            "display_name": "VA 3"
+        },
+        {
+            "id": "lnk_6a0e533ba5835045d4a19815",
+            "shortcode": "ztrkjessy",
+            "display_name": "VA 2"
+        },
+        {
+            "id": "lnk_6a0e5332c08c737549671aa5",
+            "shortcode": "xqvnjessy",
+            "display_name": "VA 1"
+        }
+    ]
+}
+
+
+def _gmsdash_links_persist(team: str, links: list):
+    """Sauve la dernière liste RÉUSSIE (champs minimaux) pour les pannes futures."""
+    try:
+        d = {}
+        if GMSDASH_LINKS_FILE.exists():
+            d = json.loads(GMSDASH_LINKS_FILE.read_text(encoding="utf-8")) or {}
+        d[team] = [{"id": l.get("id"), "shortcode": l.get("shortcode") or "",
+                    "display_name": l.get("display_name") or l.get("shortcode") or ""}
+                   for l in links if l.get("id")]
+        tmp = GMSDASH_LINKS_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(str(tmp), str(GMSDASH_LINKS_FILE))
+    except Exception:
+        pass
+
+
+def _gmsdash_links_fallback(team: str):
+    """Liste de repli : dernière liste réussie (disque) sinon le seed embarqué."""
+    try:
+        if GMSDASH_LINKS_FILE.exists():
+            d = json.loads(GMSDASH_LINKS_FILE.read_text(encoding="utf-8")) or {}
+            if d.get(team):
+                return d[team]
+    except Exception:
+        pass
+    return GMSDASH_SEED_LINKS.get(team)
 _GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
 _GMSDASH_WARM_PERIODS = ("today", "7")   # périodes pré-calculées (les plus consultées)
 _GMSDASH_LOCK = _threading_mod.Lock()
@@ -22974,13 +23076,20 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 pr["done"] = pr.get("done", 0) + inc
     try:
         import gms
-        with gms.api_tag("dashboard"):
+        with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
             _lr = gms.list_links_team(team) or {}
-        if not _lr.get("ok"):
-            # ÉCHEC de la liste (429/réseau) : on renvoie ok=False -> PAS mis en
-            # cache, la page garde les dernières bonnes données au lieu de « 0 ».
-            return {"ok": False, "error": f"liste des liens : {_lr.get('error') or '?'}"[:160]}
-        links = _lr.get("links") or []
+        if _lr.get("ok"):
+            links = _lr.get("links") or []
+            _gmsdash_links_persist(team, links)
+        else:
+            # Liste (REST) en échec -> on continue avec la DERNIÈRE liste connue
+            # (disque, sinon seed embarqué) : les clics passent par MCP, un autre
+            # serveur — on peut donc quand même afficher des résultats.
+            links = _gmsdash_links_fallback(team)
+            if not links:
+                return {"ok": False, "error": f"liste des liens : {_lr.get('error') or '?'}"[:160]}
+            print(f"[gmsdash] liste {team} en échec ({_lr.get('error')}) -> "
+                  f"liste de secours ({len(links)} liens)", flush=True)
         _prog(total=len(links), stage="clics par lien")
     except Exception as e:
         return {"ok": False, "error": f"liste des liens : {e}"[:160]}
@@ -22995,7 +23104,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         q_tot, q_countries, q_ok = 0, {}, True
         for _i in range(0, len(_ids_all), 20):
             try:
-                with gms.api_tag("dashboard"):
+                with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
                     _res = gms.get_analytics_overview(s_iso, e_iso, link_ids=_ids_all[_i:_i + 20])
             except Exception:
                 _res = {"ok": False}
@@ -23022,7 +23131,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         if not lid:
             return None
         try:
-            with gms.api_tag("dashboard"):
+            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
                 tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
@@ -23053,7 +23162,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
       for r in [x for x in rows if x["clicks"] is None]:
         _t_c.sleep(0.5)
         try:
-            with gms.api_tag("dashboard"):
+            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
                 tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
         except Exception:
             tot2, ctry2 = None, None
@@ -23107,7 +23216,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
     def _cell(job):
         lid, day = job
         try:
-            with gms.api_tag("dashboard"):
+            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
                 tot, ctry = gms.analytics_for_link(lid, day, day)
         except Exception:
             tot, ctry = None, None
@@ -23312,6 +23421,17 @@ def _render_gmsdash_html() -> str:
                 "<p>Clé API GetMySocial non configurée.</p>"
                 "<p style='font-size:12px'>Renseigne-la dans l'onglet GMS.</p></div>")
 
+    try:
+        _has_k2 = bool(gms.get_dash_key())
+    except Exception:
+        _has_k2 = False
+    key2_html = ("<span style='font-size:11px;color:#4ade80;font-weight:700;"
+                 "display:inline-flex;align-items:center;gap:5px'>🔑 clé dédiée active</span>"
+                 if _has_k2 else
+                 "<input id='gd-key2' class='gd-sel' type='password' style='min-width:230px' "
+                 "placeholder='Clé API dédiée (gms_live_…) — quota séparé'>"
+                 "<button class='gd-sel' style='min-width:auto;cursor:pointer' "
+                 "onclick='gdSaveKey2()' title='Enregistrer la clé dédiée au dashboard'>🔑</button>")
     css = """
 <style>
 .gd-wrap{max-width:1250px}
@@ -23371,6 +23491,8 @@ def _render_gmsdash_html() -> str:
       <span class="dot"></span><span>🇺🇸 US uniquement</span>
     </div>
     <button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache">↻</button>
+    __GDKEY2__
+
   </div>
   <div class="gd-cards" id="gd-cards"></div>
   <div class="gd-chart" id="gd-chart"></div>
@@ -23393,6 +23515,22 @@ function gdToggleUs(){
 function gdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
+function gdSaveKey2(){
+  var el = document.getElementById('gd-key2');
+  var k = (el && el.value || '').trim();
+  if(!k){ if(typeof showToast==='function') showToast('Colle la clé gms_live_… d’abord','error'); return; }
+  var fd = new FormData(); fd.append('key', k);
+  fetch('/gmsdash/set_key', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if(d && d.ok){
+        if(typeof showToast==='function') showToast('🔑 Clé dédiée enregistrée — recalcul…','success');
+        window.__gdData = null; gdLoad(true);
+        if(el){ el.value=''; el.placeholder='clé dédiée active ✓'; }
+      } else {
+        if(typeof showToast==='function') showToast('❌ '+((d&&d.error)||'?'),'error');
+      }
+    }).catch(function(e){ if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
+}
 function gdTeams(){
   fetch('/gmsdash/teams', {credentials:'same-origin'})
     .then(function(r){ return r.json(); })
@@ -23619,7 +23757,7 @@ function gdRender(d){
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', gdTeams); } else { gdTeams(); }
 </script>
 """
-    return css + body
+    return css + body.replace("__GDKEY2__", key2_html)
 
 
 def _render_facture_html() -> str:
@@ -31271,6 +31409,20 @@ def create_app():
                         break
             out.append({"id": tid, "name": name, "link_count": n})
         return jsonify({"ok": True, "teams": out})
+
+    @app.route("/gmsdash/set_key", methods=["POST"])
+    def gmsdash_set_key():
+        """Enregistre la clé API DÉDIÉE au dashboard (quota séparé du report/paie).
+        À coller depuis GetMySocial > API keys (ex: la clé « claude »)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import gms
+        k = (request.form.get("key") or "").strip()
+        if not k.startswith("gms_"):
+            return jsonify({"ok": False, "error": "clé invalide (doit commencer par gms_)"})
+        gms.save_dash_key(k)
+        return jsonify({"ok": True})
 
     @app.route("/gmsdash/data")
     def gmsdash_data():

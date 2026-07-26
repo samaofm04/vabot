@@ -50,6 +50,17 @@ def get_api_key() -> str:
     return load_config().get("api_key", "")
 
 
+def save_dash_key(key: str):
+    """Clé API DÉDIÉE au dashboard clics (quota séparé du report/paie)."""
+    cfg = load_config()
+    cfg["api_key_dash"] = (key or "").strip()
+    save_config(cfg)
+
+
+def get_dash_key() -> str:
+    return load_config().get("api_key_dash", "")
+
+
 def is_configured() -> bool:
     k = get_api_key()
     return bool(k) and k.startswith("gms_")
@@ -127,32 +138,54 @@ def list_tools() -> Dict[str, Any]:
 import threading as _threading
 from collections import deque as _deque
 _MCP_LOCK = _threading.Lock()
-_MCP_CACHE: Dict[str, Any] = {"session": None}
+_MCP_CACHE: Dict[str, Any] = {}          # api_key -> session MCP (multi-clés)
 _READ_TOOLS = {"list_links", "get_analytics_overview", "_ping"}
+_KEY_LOCAL = _threading.local()
+
+
+class use_key:
+    """Contexte : les appels GMS de ce thread utilisent CETTE clé API.
+    use_key(None) = no-op (clé principale). Sert à donner au dashboard sa clé
+    dédiée -> quota séparé du report horaire / de la paie."""
+
+    def __init__(self, key):
+        self.key = (key or "").strip() or None
+
+    def __enter__(self):
+        self.prev = getattr(_KEY_LOCAL, "key", None)
+        if self.key:
+            _KEY_LOCAL.key = self.key
+        return self
+
+    def __exit__(self, *exc):
+        _KEY_LOCAL.key = self.prev
+        return False
+
+
+def _effective_key() -> str:
+    return getattr(_KEY_LOCAL, "key", None) or get_api_key()
 
 
 def _get_session() -> Optional[requests.Session]:
-    """Session MCP initialisée et RÉUTILISÉE entre les appels (évite de refaire le
-    handshake initialize+initialized — donc 2 round-trips HTTPS — à CHAQUE call).
-    None si l'init échoue."""
-    api_key = get_api_key()
+    """Session MCP initialisée et RÉUTILISÉE entre les appels, PAR CLÉ API."""
+    api_key = _effective_key()
     if not api_key:
         return None
     with _MCP_LOCK:
-        s = _MCP_CACHE.get("session")
+        s = _MCP_CACHE.get(api_key)
         if s is not None:
             return s
         s = _make_session(api_key)
         if not _initialize(s):
-            _MCP_CACHE["session"] = None
+            _MCP_CACHE.pop(api_key, None)
             return None
-        _MCP_CACHE["session"] = s
+        _MCP_CACHE[api_key] = s
         return s
 
 
 def _reset_session():
     with _MCP_LOCK:
-        _MCP_CACHE["session"] = None
+        _MCP_CACHE.pop(_effective_key(), None)
 
 
 # ---- Limiteur d'appels GetMySocial ----
@@ -1233,7 +1266,7 @@ def reset_va_counter(team_id: Optional[str], folder: str):
 def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]:
     """List_all_links scopé à un team via API publique v3. Cache 2 min par team
     (mêmes liens re-demandés plusieurs fois par render de page sinon)."""
-    api_key = get_api_key()
+    api_key = _effective_key()
     if not api_key:
         return {"ok": False, "error": "API key absente"}
     tid = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
