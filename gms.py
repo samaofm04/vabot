@@ -650,27 +650,31 @@ def time_series_for_links(link_ids, start_date: str, end_date: str,
     ids = [i for i in (link_ids or []) if i][:200]
     if not ids:
         return {}
-    res = _call_tool("get_time_series", {
-        "link_ids": ids, "start_date": start_date, "end_date": end_date,
-        "interval": "day", "timezone": tz,
-    })
-    if not res.get("ok"):
-        return None
-    data = res.get("data") or {}
-    rows = data.get("data") if isinstance(data, dict) else None
-    if rows is None:
-        rows = data if isinstance(data, list) else []
+    # L'API REFUSE >20 link_ids (Error 400, malgré la doc qui dit 200) -> on
+    # découpe par 20 et on SOMME les séries. Un lot en échec = None (jamais une
+    # courbe partielle présentée comme complète).
     out: Dict[str, int] = {}
-    for b in rows or []:
-        if not isinstance(b, dict):
-            continue
-        day = str(b.get("bucket") or "")[:10]
-        if not day:
-            continue
-        v = b.get("pageviews")
-        if v is None:
-            v = b.get("clicks") or 0
-        out[day] = int(v or 0)
+    for i in range(0, len(ids), 20):
+        res = _call_tool("get_time_series", {
+            "link_ids": ids[i:i + 20], "start_date": start_date, "end_date": end_date,
+            "interval": "day", "timezone": tz,
+        })
+        if not res.get("ok"):
+            return None
+        data = res.get("data") or {}
+        rows = data.get("data") if isinstance(data, dict) else None
+        if rows is None:
+            rows = data if isinstance(data, list) else []
+        for b in rows or []:
+            if not isinstance(b, dict):
+                continue
+            day = str(b.get("bucket") or "")[:10]
+            if not day:
+                continue
+            v = b.get("pageviews")
+            if v is None:
+                v = b.get("clicks") or 0
+            out[day] = out.get(day, 0) + int(v or 0)
     return out
 
 

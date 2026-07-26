@@ -22959,7 +22959,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 7
+GMSDASH_PAYLOAD_VER = 8
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
