@@ -706,7 +706,13 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
     try:
         if _dedup_accounts(data):
             import jailbreak as jb
-            jb._save(data)
+            # Dédup persistée sur la base FRAÎCHE (le `data` reçu ici est une
+            # photo qui peut dater : le réécrire tel quel effacerait ce qui a
+            # changé entre-temps).
+            with jb.transaction():
+                _fresh = jb._load()
+                if _dedup_accounts(_fresh):
+                    jb._save(_fresh)
     except Exception:
         pass
     cfg = load_config()
@@ -774,7 +780,13 @@ def _push_all_single(data: dict, force: bool = False) -> bool:
     try:
         if _dedup_accounts(data):
             import jailbreak as jb
-            jb._save(data)
+            # Dédup persistée sur la base FRAÎCHE (le `data` reçu ici est une
+            # photo qui peut dater : le réécrire tel quel effacerait ce qui a
+            # changé entre-temps).
+            with jb.transaction():
+                _fresh = jb._load()
+                if _dedup_accounts(_fresh):
+                    jb._save(_fresh)
     except Exception:
         pass
     try:
@@ -963,9 +975,16 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     import jailbreak as jb
     if is_paused():
         return False, "Sync en PAUSE (aucune modification appliquée)."
-    sheet = pull_all()
+    sheet = pull_all()          # lecture réseau HORS verrou (peut durer)
     if sheet is None:
         return False, "Sheet indisponible"
+    # Toute la séquence load -> merge -> save sous le verrou de la base : sans
+    # ça, une action du site pendant le merge du poller était écrasée.
+    with jb.transaction():
+        return _merge_sheet_into_data(sheet, jb, force_delete)
+
+
+def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple:
     data = jb._load()
     known = {str(k).strip().lower() for k in data.keys()}
     # Tombstones : un VA/compte supprime sur le site (7 j) ne doit JAMAIS etre

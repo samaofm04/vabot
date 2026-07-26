@@ -24,12 +24,40 @@ Ancien schema (v1, retrocompat lue automatiquement) :
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Any
 
 DATA_DIR = Path("data")
 JAILBREAK_FILE = DATA_DIR / "jailbreak.json"
+BACKUP_DIR = DATA_DIR / "jailbreak_backups"
+_BACKUPS_KEEP = 15
+
+# Verrou REENTRANT global : toute sequence lire-modifier-ecrire doit se faire
+# sous ce verrou, sinon deux ecritures concurrentes (poller Sheet toutes les
+# 2 min + action web) s ecrasent l une l autre = comptes perdus en silence.
+_LOCK = threading.RLock()
+# Dernier etat SAIN vu par ce process : permet une restauration EXACTE si le
+# fichier est trouve corrompu/vide (sans perdre la derniere operation).
+_LAST_GOOD: Dict[str, Any] = {"data": None}
+
+
+@contextmanager
+def transaction():
+    """Verrouille la base le temps d une sequence load -> modif -> save.
+
+    Usage (y compris depuis sheets_sync) :
+        with jailbreak.transaction():
+            data = jailbreak._load()
+            ...
+            jailbreak._save(data)
+    """
+    with _LOCK:
+        yield
 
 
 def _migrate_identity_entry(entry: Any) -> Dict[str, Any]:
@@ -84,27 +112,142 @@ def _va_name(va: Any) -> str:
     return ""
 
 
-def _load() -> Dict[str, Dict[str, Any]]:
-    """Charge et NORMALISE tout vers le format v2."""
-    if not JAILBREAK_FILE.exists():
-        return {}
+def _parse(txt: str) -> Dict[str, Dict[str, Any]]:
+    raw = json.loads(txt)
+    if not isinstance(raw, dict):
+        raise ValueError("racine JSON invalide")
+    return {k: _migrate_identity_entry(v) for k, v in raw.items()}
+
+
+PREV_FILE = DATA_DIR / "jailbreak.prev.json"
+
+
+def _backups_newest_first() -> List[Path]:
+    """Candidats de restauration, du plus récent au plus ancien.
+    jailbreak.prev.json (état juste avant la DERNIÈRE écriture) passe devant :
+    une restauration ne perd alors qu'une seule opération."""
+    out: List[Path] = []
     try:
-        raw = json.loads(JAILBREAK_FILE.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return {}
-        out: Dict[str, Dict[str, Any]] = {}
-        for k, v in raw.items():
-            out[k] = _migrate_identity_entry(v)
-        return out
+        if PREV_FILE.exists():
+            out.append(PREV_FILE)
     except Exception:
-        return {}
+        pass
+    try:
+        out += sorted(BACKUP_DIR.glob("jailbreak_*.json"), reverse=True)
+    except Exception:
+        pass
+    return out
+
+
+def _load() -> Dict[str, Dict[str, Any]]:
+    """Charge et NORMALISE tout vers le format v2.
+
+    JAMAIS de {} silencieux sur fichier corrompu : un fichier tronque (crash /
+    redemarrage pendant l ecriture) renverrait une base VIDE, que le premier
+    _save suivant graverait pour de bon (et que le push repliquerait dans les
+    Sheets). On repli donc sur le dernier backup valide.
+    """
+    with _LOCK:
+        if not JAILBREAK_FILE.exists():
+            return {}
+        try:
+            txt = JAILBREAK_FILE.read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[jailbreak] lecture impossible : {e}", flush=True)
+            txt = ""
+        if txt.strip():
+            try:
+                data = _parse(txt)
+                _LAST_GOOD["data"] = json.loads(json.dumps(data))   # copie profonde
+                return data
+            except Exception as e:
+                print(f"[jailbreak] ⚠ FICHIER CORROMPU ({e}) — repli", flush=True)
+        else:
+            print("[jailbreak] ⚠ fichier VIDE — repli", flush=True)
+        # 1) dernier état SAIN vu par ce process (restauration exacte)
+        if _LAST_GOOD.get("data") is not None:
+            data = json.loads(json.dumps(_LAST_GOOD["data"]))
+            print(f"[jailbreak] ✔ restauré depuis la mémoire "
+                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)", flush=True)
+            try:
+                _write_atomic(data)
+            except Exception:
+                pass
+            return data
+        # 2) sinon : jailbreak.prev.json puis l historique horodaté
+        for b in _backups_newest_first():
+            try:
+                data = _parse(b.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            print(f"[jailbreak] ✔ restauré depuis {b.name} "
+                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)", flush=True)
+            try:                       # remet le fichier principal d aplomb
+                _write_atomic(data)
+            except Exception:
+                pass
+            return data
+        # Aucun backup exploitable : on refuse de faire croire a une base vide
+        # (sinon la moindre ecriture suivante detruit tout pour de bon).
+        raise RuntimeError("jailbreak.json illisible et aucun backup valide")
+
+
+def _write_atomic(data: Dict[str, Dict[str, Any]]):
+    """Ecriture ATOMIQUE (tmp + os.replace) : un crash en pleine ecriture ne
+    peut plus laisser un jailbreak.json tronque."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = JAILBREAK_FILE.with_suffix(".json.tmp")
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(str(tmp), str(JAILBREAK_FILE))
+
+
+_BACKUP_EVERY_S = 600          # historique horodaté : au plus 1 / 10 min
+
+
+def _rotate_backup():
+    """Sauvegarde l état AVANT écrasement, à deux niveaux :
+    - jailbreak.prev.json : SYSTÉMATIQUE (état N-1 exact) ;
+    - jailbreak_backups/  : historique horodaté, au plus un toutes les 10 min,
+      rotation sur _BACKUPS_KEEP (une rafale d écritures dans la même seconde
+      ne doit pas remplir l historique et chasser les états utiles)."""
+    try:
+        if not JAILBREAK_FILE.exists() or JAILBREAK_FILE.stat().st_size < 2:
+            return
+        try:
+            shutil.copy2(JAILBREAK_FILE, PREV_FILE)
+        except Exception:
+            pass
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        hist = sorted(BACKUP_DIR.glob("jailbreak_*.json"), reverse=True)
+        if hist:
+            try:
+                if time.time() - hist[0].stat().st_mtime < _BACKUP_EVERY_S:
+                    return
+            except Exception:
+                pass
+        shutil.copy2(JAILBREAK_FILE,
+                     BACKUP_DIR / f"jailbreak_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        for old in sorted(BACKUP_DIR.glob("jailbreak_*.json"), reverse=True)[_BACKUPS_KEEP:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[jailbreak] backup impossible : {e}", flush=True)
 
 
 def _save(data: Dict[str, Dict[str, Any]]):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    JAILBREAK_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    with _LOCK:
+        _rotate_backup()
+        _write_atomic(data)
+        try:
+            _LAST_GOOD["data"] = json.loads(json.dumps(data))
+        except Exception:
+            pass
     # Sync -> Google Sheet (best-effort, non bloquant, no-op si non configure).
     try:
         import sheets_sync
@@ -638,3 +781,29 @@ def rename_identity_in_storage(old_name: str, new_name: str) -> bool:
     data[new_name] = data.pop(old_name)
     _save(data)
     return True
+
+
+# ============ Atomicite des ecritures ============
+# Chaque fonction publique ci-dessous fait « _load -> modifier -> _save ».
+# Sans verrou tenu sur TOUTE la sequence, deux appels concurrents (poller Sheet
+# toutes les 2 min, actions AJAX du site, scrape) repartent chacun d une copie
+# et le dernier _save efface les modifications de l autre. On enveloppe donc
+# ces fonctions dans le verrou reentrant global.
+def _with_lock(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(*a, **kw):
+        with _LOCK:
+            return fn(*a, **kw)
+    return _wrapped
+
+
+for _fname in ("add_account", "update_account", "remove_account", "bulk_add_accounts",
+               "add_va", "update_va", "remove_va", "remove_va_and_accounts",
+               "reorder_vas", "rename_va", "rename_identity_in_storage",
+               "tomb_add", "tomb_clear", "stats", "list_all", "list_accounts",
+               "list_vas_for_identity", "accounts_for_discord_username"):
+    if _fname in globals():
+        globals()[_fname] = _with_lock(globals()[_fname])
+del _fname
