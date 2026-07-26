@@ -35,6 +35,13 @@ DATA_DIR = Path("data")
 VEILLE_FILE = DATA_DIR / "veille_reels.json"
 
 
+import threading as _th_v
+# Verrou : add_reel/mark_*/remove_* font lire-modifier-ecrire. Flask sert en
+# multi-threads : deux requetes simultanees (ajout + marquage) se marchaient
+# dessus et un reel enregistre disparaissait.
+_VEILLE_LOCK = _th_v.RLock()
+
+
 def _load() -> Dict[str, Any]:
     if not VEILLE_FILE.exists():
         return {"reels": []}
@@ -218,3 +225,20 @@ def stats() -> Dict[str, Any]:
         "days_count": len(by_day),
         "today_count": len(by_day.get(date.today().isoformat(), [])),
     }
+
+
+# ---- Atomicite : toute mutation lit/modifie/ecrit sous le meme verrou ----
+def _veille_locked(fn):
+    import functools as _ft_v
+
+    @_ft_v.wraps(fn)
+    def _w(*a, **k):
+        with _VEILLE_LOCK:
+            return fn(*a, **k)
+    return _w
+
+
+for _fn_v in ("add_reel", "remove_reel", "remove_by_url", "mark_sent", "mark_ready",
+              "set_desc", "set_video_url", "toggle_banger", "update_reel"):
+    if _fn_v in globals() and callable(globals()[_fn_v]):
+        globals()[_fn_v] = _veille_locked(globals()[_fn_v])
