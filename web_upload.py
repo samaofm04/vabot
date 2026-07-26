@@ -19118,6 +19118,7 @@ def _render_jailbreak_html() -> str:
         ".jb-side-id.collapsed .jb-side-id-arrow{transform:rotate(-90deg)}"
         ".jb-side-id-body{padding:2px 0 6px;display:flex;flex-direction:column;gap:2px}"
         ".jb-side-va{display:flex;align-items:center;gap:8px;padding:7px 8px;background:transparent;border:0;border-radius:8px;cursor:pointer;width:calc(100% - 4px);margin:0 2px;text-align:left;color:#fff;font-size:11px;font-weight:600;position:relative}"
+        ".jb-side-va.jb-va-dragging{opacity:.35;outline:1px dashed rgba(168,85,247,.6)}"
         ".jb-side-va:hover{background:rgba(255,255,255,.04)}"
         ".jb-side-va.active{background:linear-gradient(90deg,rgba(168,85,247,.18),rgba(168,85,247,.04));box-shadow:inset 2px 0 0 #a855f7}"
         ".jb-side-va-pp-wrap{position:relative;width:30px;height:30px;flex-shrink:0}"
@@ -20512,6 +20513,71 @@ def _render_jailbreak_html() -> str:
         "window.addEventListener('mouseup', function(){"
         "  if(window.__jbDraggedSection) _jbCleanupDrag();"
         "});"
+        # === Drag & drop pour reordonner les VAs D UNE identite (persiste serveur) ===
+        "window.__jbDraggedVa = null;"
+        "function _jbVaCleanup(){"
+        "  document.querySelectorAll('.jb-side-va.jb-va-dragging').forEach(function(b){ b.classList.remove('jb-va-dragging'); });"
+        "  window.__jbDraggedVa = null;"
+        "}"
+        "function jbInitVaDrag(){"
+        "  document.querySelectorAll('.jb-side-va').forEach(function(btn){"
+        "    if(!(btn.getAttribute('data-va-name') || '')) return;"   # bucket « sans VA » : fixe
+        "    if(btn.getAttribute('data-va-drag')) return;"
+        "    btn.setAttribute('data-va-drag', '1');"
+        "    btn.setAttribute('draggable', 'true');"
+        "    btn.title = 'Glisser pour changer sa place dans la liste';"
+        "    btn.addEventListener('dragstart', function(ev){"
+        "      _jbVaCleanup();"
+        "      window.__jbDraggedVa = btn;"
+        "      btn.classList.add('jb-va-dragging');"
+        "      ev.dataTransfer.effectAllowed = 'move';"
+        "      try { ev.dataTransfer.setData('text/plain', btn.getAttribute('data-va-name') || ''); } catch(e){}"
+        "      ev.stopPropagation();"
+        "    });"
+        "    btn.addEventListener('dragend', function(){ _jbVaCleanup(); });"
+        "  });"
+        "  document.querySelectorAll('.jb-side-id-body').forEach(function(body){"
+        "    if(body.getAttribute('data-va-drop')) return;"
+        "    body.setAttribute('data-va-drop', '1');"
+        "    body.addEventListener('dragover', function(ev){"
+        "      var drag = window.__jbDraggedVa;"
+        "      if(!drag || drag.parentNode !== body) return;"   # meme identite uniquement
+        "      ev.preventDefault();"
+        "      ev.stopPropagation();"
+        "      ev.dataTransfer.dropEffect = 'move';"
+        "      var target = ev.target.closest ? ev.target.closest('.jb-side-va') : null;"
+        "      if(!target || target === drag || target.parentNode !== body) return;"
+        "      var rect = target.getBoundingClientRect();"
+        "      var after = ev.clientY > rect.top + rect.height / 2;"
+        "      if(after){"
+        "        if(target.nextSibling !== drag) body.insertBefore(drag, target.nextSibling);"
+        "      } else {"
+        "        if(target !== drag.nextSibling) body.insertBefore(drag, target);"
+        "      }"
+        "    });"
+        "    body.addEventListener('drop', function(ev){"
+        "      var drag = window.__jbDraggedVa;"
+        "      if(!drag) return;"
+        "      ev.preventDefault();"
+        "      ev.stopPropagation();"
+        "      var ident = drag.getAttribute('data-identity') || '';"
+        "      var names = Array.prototype.map.call(body.querySelectorAll('.jb-side-va'), function(b){"
+        "        return b.getAttribute('data-va-name') || '';"
+        "      }).filter(Boolean);"
+        "      _jbVaCleanup();"
+        "      if(!ident || !names.length) return;"
+        "      fetch('/jailbreak/reorder_vas', {method:'POST', headers:{'Content-Type':'application/json'},"
+        "        body: JSON.stringify({identity: ident, names: names})})"
+        "        .then(function(r){ return r.json(); })"
+        "        .then(function(d){"
+        "          if(d && d.ok){ if(typeof showToast === 'function') showToast('Ordre des VA sauvegardé', 'success', 1500); }"
+        "          else if(typeof showToast === 'function'){ showToast('Échec de la sauvegarde de la position', 'error', 2200); }"
+        "        })"
+        "        .catch(function(){ if(typeof showToast === 'function') showToast('Échec de la sauvegarde de la position', 'error', 2200); });"
+        "    });"
+        "  });"
+        "}"
+        "if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', jbInitVaDrag); } else { jbInitVaDrag(); }"
         # === Filter / search (opere sur la sidebar) ===
         "function jbApplyFilter(){"
         "  var qInput = document.getElementById('jb-search-input');"
@@ -34776,6 +34842,24 @@ def create_app():
             extra = f" (lié à <code>@{discord_username}</code>)" if discord_username else ""
             return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
         return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
+
+    @app.route("/jailbreak/reorder_vas", methods=["POST"])
+    def jailbreak_reorder_vas():
+        """Drag & drop de la liste des VAs (sidebar) : persiste le nouvel ordre."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import jailbreak as jb
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:120]}), 500
+        payload = request.get_json(silent=True) or {}
+        identity = (payload.get("identity") or "").strip().lower()
+        names = payload.get("names") or []
+        if not identity or not isinstance(names, list) or not names:
+            return jsonify({"ok": False, "error": "identity/names manquants"}), 400
+        ok = bool(jb.reorder_vas(identity, [str(n) for n in names]))
+        return jsonify({"ok": ok})
 
     @app.route("/jailbreak/discord_debug")
     def jailbreak_discord_debug():

@@ -410,6 +410,33 @@ def add_va(identity: str, va_name: str, discord_username: str = "") -> bool:
     return True
 
 
+def reorder_vas(identity: str, ordered_names: List[str]) -> bool:
+    """Reordonne les VAs d une identite selon ordered_names (drag & drop du site).
+    Un nom inconnu de la liste devient un VA explicite (cas des VAs implicites,
+    presents seulement via leurs comptes) ; les VAs non cites restent a la fin."""
+    identity = (identity or "").strip().lower()
+    names = [str(n or "").strip()[:60] for n in (ordered_names or [])]
+    names = [n for n in names if n]
+    if not identity or not names:
+        return False
+    data = _load()
+    entry = _ensure_identity(data, identity)
+    by_lc = {_va_name(v).lower(): v for v in entry["vas"] if _va_name(v)}
+    new_list, seen = [], set()
+    for n in names:
+        lc = n.lower()
+        if lc in seen:
+            continue
+        seen.add(lc)
+        new_list.append(by_lc.get(lc) or {"name": n, "discord_username": ""})
+    for v in entry["vas"]:
+        if _va_name(v).lower() not in seen:
+            new_list.append(v)
+    entry["vas"] = new_list
+    _save(data)
+    return True
+
+
 def update_va(identity: str, old_name: str, new_name: str = None,
               discord_username: str = None) -> bool:
     """Met a jour un VA (nom et/ou discord_username).
