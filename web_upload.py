@@ -7093,7 +7093,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             else:
                 # False = confirmé. None = indéterminé, MAIS l'API dit déjà
                 # « introuvable » : dans la vraie vie c'est un ban -> on classe banni.
-                err_msg = f"🚫 Compte introuvable (@{h}) — renommé, supprimé ou banni"
+                err_msg = f"🚫 Compte introuvable (@{h}) — banni (ou supprimé/renommé)"
                 is_banned = True
         # « Échec » générique sur un compte qui n'a JAMAIS donné de stats : c'est
         # très souvent un compte banni que l'erreur empêche de classifier. On
@@ -19357,9 +19357,10 @@ def _render_jailbreak_html() -> str:
 
         # Pastille de statut a cote du handle : banni / non scrape / actif
         if is_banned:
+            # Un compte introuvable = BANNI (retour terrain : le « renommage » est
+            # l'exception, pas la règle). La raison exacte reste dans l'infobulle.
             _why_ban = html_escape(str(s.get("error") or "")[:120]) or "Compte inaccessible"
-            _lbl_ban = "Renommé" if "renommé" in str(s.get("error") or "").lower() else "Banni"
-            status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>{_lbl_ban}</span>"
+            status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>Banni</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
         elif s.get("error"):
