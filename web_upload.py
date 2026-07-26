@@ -32598,18 +32598,22 @@ def _start_auto_scrape_daemon():
                     log.warning(f"[insta-bg-scrape] purge: {_e}")
                 wl = load_watchlist() or []
                 if wl:
-                    log.info(f"[insta-bg-scrape] scraping {len(wl)} comptes...")
+                    # 1) SCRAPE : on passe par la fonction PARTAGEE (verrou +
+                    #    « ne re-scrape pas un profil frais »). Avant, cette
+                    #    boucle re-scrapait TOUTE la watchlist chaque heure, en
+                    #    plus du planificateur 00h/12h : la quota RapidAPI
+                    #    (payante) partait x24 pour des donnees identiques.
                     ok = fail = 0
-                    # 1) SCRAPE des comptes (RapidAPI, garde le delai anti-429)
-                    for u in wl:
-                        try:
-                            r = scrape_profile(u, limit=200)
-                            ok += 1 if "error" not in r else 0
-                            fail += 0 if "error" not in r else 1
-                        except Exception as e:
-                            log.warning(f"[insta-bg-scrape] {u}: {e}")
-                            fail += 1
-                        _t.sleep(DELAY_BETWEEN_PROFILES)
+                    try:
+                        _res_bg = run_insta_watchlist_scrape(
+                            limit=200, label="bg-hourly", skip_fresh_hours=11.0,
+                            delay=DELAY_BETWEEN_PROFILES)
+                        ok = int(_res_bg.get("scraped") or 0)
+                        _sk = int(_res_bg.get("skipped") or 0)
+                        log.info(f"[insta-bg-scrape] scrape={ok} frais_ignores={_sk} "
+                                 f"({_res_bg.get('reason') or 'ok'})")
+                    except Exception as _e_bg:
+                        log.warning(f"[insta-bg-scrape] scrape partage: {_e_bg}")
                     # 2) TELECHARGEMENT PARALLELE (4 en meme temps, sans cookie)
                     #    des mp4 manquants des 7 derniers jours -> bien plus rapide
                     #    que l'ancienne boucle sequentielle avec sleep.
