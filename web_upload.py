@@ -24140,9 +24140,9 @@ function gdModelSel(i){
   gdRender(window.__gdData);
 }
 function gdView(v){
-  // v numérique (0=liens, 1=modèles, 2=VA jailbreak) : PAS de quotes dans
-  // l'attribut onclick — un ' dans ce fichier casse tout le script (piège connu).
-  window.__gdView = (v === 2) ? 'vajb' : (v === 1 ? 'models' : 'links');
+  // v numérique (0=liens, 1=modèles, 2=VA jailbreak, 3=global) : PAS de quotes
+  // dans l'attribut onclick — un ' dans ce fichier casse tout le script (piège connu).
+  window.__gdView = (v === 3) ? 'global' : ((v === 2) ? 'vajb' : (v === 1 ? 'models' : 'links'));
   window.__gdHidden = {};          // les index des légendes changent entre les vues
   gdChart(window.__gdData);
 }
@@ -24155,13 +24155,31 @@ function gdChart(d){
   var seJ = (d && d.series_vajb) || {days:[], links:[]};
   var hasM = ((seM.links) || []).length > 1;    // 1 seul modèle = la vue n'apporte rien
   var hasJ = ((seJ.links) || []).length > 0;    // des liens jailbreak « <va> N » existent
+  var hasG = ((seM.links) || []).some(function(e){ return e.jb; });   // Global = utile seulement si du JB existe
   if(window.__gdKind === 'normal' && window.__gdView === 'vajb'){ window.__gdView = 'links'; }
   var view = (window.__gdView === 'models' && hasM) ? 'models'
-           : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
-  var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
+           : ((window.__gdView === 'vajb' && hasJ) ? 'vajb'
+           : ((window.__gdView === 'global' && hasG) ? 'global' : 'links'));
+  var se = (view === 'models' || view === 'global') ? seM : (view === 'vajb' ? seJ : seL);
   var days = se.days || [];
   var links = (se.links || []).map(function(l, _i){ l._ci = _i; return l; });   // couleur STABLE par série
-  if(view === 'models'){
+  if(view === 'global'){
+    // 3 traits : Tous / VA normaux / 🔓 Jailbreak — la série modèle×type sommée par type
+    var gdGZ = function(nm){ return {name: nm, points: days.map(function(){ return 0; }),
+                             us_points: [], fr_points: [], total: 0, us_total: 0, fr_total: 0, n: 0}; };
+    var gT = gdGZ('Tous'), gN = gdGZ('VA normaux'), gJ = gdGZ('🔓 Jailbreak');
+    links.forEach(function(e){
+      if(gdIsOff(e.model)) return;
+      var t = e.jb ? gJ : gN;
+      (e.points || []).forEach(function(v, k){ t.points[k] += v; gT.points[k] += v; });
+      t.total += e.total || 0;       gT.total += e.total || 0;
+      t.us_total += e.us_total || 0; gT.us_total += e.us_total || 0;
+      t.fr_total += e.fr_total || 0; gT.fr_total += e.fr_total || 0;
+      t.n += e.n_links || 0;         gT.n += e.n_links || 0;
+    });
+    links = [gT, gN, gJ];
+    links.forEach(function(l, i){ l._ci = i; l.name = l.name + ' (' + l.n + ' liens)'; });
+  } else if(view === 'models'){
     // « intelligent » : la série est éclatée (modèle × type) -> on somme côté
     // client selon le filtre. 1 trait = LE TOTAL de l'identité (pas chaque lien).
     var agg = {};
@@ -24186,8 +24204,9 @@ function gdChart(d){
     links = links.filter(function(l){ return !gdIsOff(l.model) && gdKindOk(l); });
   }
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
-  var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : 'lien');
-  var segHtml = (hasM || hasJ) ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
+  var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : (view === 'global' ? 'type' : 'lien'));
+  var segHtml = (hasM || hasJ || hasG) ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
+    + (hasG ? ('<button class="' + (view === 'global' ? 'on' : '') + '" onclick=gdView(3)>Global</button>') : '')
     + '<button class="' + (view === 'links' ? 'on' : '') + '" onclick=gdView(0)>Par lien</button>'
     + (hasM ? ('<button class="' + (view === 'models' ? 'on' : '') + '" onclick=gdView(1)>Par modèle</button>') : '')
     + (hasJ ? ('<button class="' + (view === 'vajb' ? 'on' : '') + '" onclick=gdView(2)>Par VA JB</button>') : '')
@@ -24199,19 +24218,25 @@ function gdChart(d){
   var geoMissing = mode && (se.us_available === false
       || (links[0] && !((mode === 'us' ? links[0].us_points : links[0].fr_points) || []).length));
   if(geoMissing){
-    // Ancien cache sans détail pays par jour : le démon recalcule en fond -> on
-    // re-tente tout seul jusqu'à ce que la courbe soit disponible.
+    // Vues agrégées (modèle / VA JB / global) : PAS de détail pays jour par jour
+    // (us_available=false, structurel) -> message honnête, pas de re-tentative.
+    // Vue par lien avec vieux cache : le démon recalcule en fond -> on re-tente.
     var flag0 = (mode === 'us') ? '🇺🇸' : '🇫🇷';
+    var permanent0 = (se.us_available === false);
     var leg0 = links.map(function(l){
       return '<button style="cursor:default"><i style="background:' + GD_COLORS[l._ci % GD_COLORS.length] + '"></i>'
            + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(gdTot(l)) + '</b></button>';
     }).join('');
     box.innerHTML = headHtml
-      + '<div class="hint">' + flag0 + ' Courbe en cours de calcul en arrière-plan — elle s’affichera toute seule '
-      + '(ou clique ↻). En attendant : totaux de la période par ' + viewLbl + '.</div>'
+      + '<div class="hint">' + flag0 + ' ' + (permanent0
+        ? ('Pas de courbe pays jour par jour pour cette vue — totaux ' + flag0 + ' de la période par ' + viewLbl + ' (la vue « Par lien » a la courbe exacte) :')
+        : ('Courbe en cours de calcul en arrière-plan — elle s’affichera toute seule (ou clique ↻). En attendant : totaux de la période par ' + viewLbl + '.'))
+      + '</div>'
       + '<div class="gd-leg">' + leg0 + '</div>';
-    window.__gdUsRetry = (window.__gdUsRetry || 0) + 1;
-    if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(gdMode()) gdLoad(); }, 10000); }
+    if(!permanent0){
+      window.__gdUsRetry = (window.__gdUsRetry || 0) + 1;
+      if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(gdMode()) gdLoad(); }, 10000); }
+    }
     return;
   }
   window.__gdUsRetry = 0;
@@ -24261,7 +24286,9 @@ function gdChart(d){
   box.innerHTML = headHtml
     + '<div class="hint">' + (mode === 'us' ? 'Clics US uniquement' : (mode === 'fr' ? 'Clics FR/BE/CH/LU/MC uniquement' : 'Tous les clics'))
     + (view === 'models' ? ' · un trait = TOUS les liens du modèle sommés'
-       : (view === 'vajb' ? ' · un trait = TOUS les liens du VA jailbreak sommés' : (' · les ' + links.length + ' meilleurs liens')))
+       : (view === 'vajb' ? ' · un trait = TOUS les liens du VA jailbreak sommés'
+       : (view === 'global' ? ' · 3 traits : Tous / VA normaux / 🔓 Jailbreak (liens du type sommés)'
+       : (' · les ' + links.length + ' meilleurs liens'))))
     + ' · survole la courbe pour le détail · clique une légende pour masquer</div>'
     + svg + '<div class="gd-tip" id="gd-tip"></div>' + '<div class="gd-leg">' + leg + '</div>';
   // Survol : ligne-guide + tooltip listant TOUS les liens pour le jour pointé
@@ -24312,9 +24339,18 @@ function gdRender(d){
   var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
   var actifs = links.filter(function(l){ return l._v > 0; }).length;
   var max = links.length ? links[0]._v : 0;
+  // Répartition 🔓 JB / VA normaux : respecte les pilules modèles et le mode
+  // US/FR, mais PAS le filtre de type (le but est justement la comparaison).
+  var allK = (d.links||[]).filter(function(l){ return !gdIsOff(l.model); });
+  var totJb = 0, totNo = 0, nJb = 0, nNo = 0;
+  allK.forEach(function(l){ var v = gdV(l); if(l.jb){ totJb += v; nJb++; } else { totNo += v; nNo++; } });
   document.getElementById('gd-cards').innerHTML =
       '<div class="gd-card"><div class="lab">'+gdModeLabel()+'</div><div class="val">'+gdNum(tot)+'</div>'
     + '<div class="sub">'+gdEsc(d.label||'')+'</div></div>'
+    + (nJb ? ('<div class="gd-card"><div class="lab">🔓 Jailbreak</div><div class="val">'+gdNum(totJb)+'</div>'
+    +   '<div class="sub">'+nJb+' liens JB</div></div>'
+    + '<div class="gd-card"><div class="lab">VA normaux</div><div class="val">'+gdNum(totNo)+'</div>'
+    +   '<div class="sub">'+nNo+' liens</div></div>') : '')
     + '<div class="gd-card"><div class="lab">Liens</div><div class="val">'+links.length+'</div>'
     + '<div class="sub">'+actifs+' avec au moins 1 clic</div></div>'
     + '<div class="gd-card"><div class="lab">Meilleur lien</div><div class="val">'+gdNum(max)+'</div>'
@@ -24335,7 +24371,7 @@ function gdRender(d){
     var pct = max ? Math.round(l._v*100/max) : 0;
     rows += '<div class="gd-row">'
       + '<div class="gd-rank'+(i<3?' top':'')+'">'+(i+1)+'</div>'
-      + '<div style="min-width:0"><div class="gd-name">'+gdEsc(l.name||l.shortcode)+'</div>'
+      + '<div style="min-width:0"><div class="gd-name">'+gdEsc(l.name||l.shortcode)+(l.jb?' 🔓':'')+'</div>'
       + '<div class="gd-sc">/'+gdEsc(l.shortcode)
       + (m==='us' ? (' · 🇫🇷 '+gdNum(l.fr||0)) : (m==='fr' ? (' · 🇺🇸 '+gdNum(l.us||0)) : (' · 🇺🇸 '+gdNum(l.us||0)+' · 🇫🇷 '+gdNum(l.fr||0))))+'</div></div>'
       + '<div class="gd-clicks">'+gdNum(l._v)+'</div>'
