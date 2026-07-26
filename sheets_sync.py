@@ -490,8 +490,18 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool, save_cfg: bool =
             _ws_write(ws, full)
             _last_hash[title] = h
         wanted[key] = ws
-    # Vues obsolètes (suivies en config, ou anciens onglets 👤) -> supprimées
-    for key in (_view_tab_names() | {k for k in list(existing) if str(k).startswith("👤")}):
+    # Vues obsolètes -> supprimées. 3 sources : la liste de suivi en config,
+    # les anciens onglets 👤, et — indépendamment de la config — TOUT onglet
+    # « <identité> <va> » dont le VA n'existe plus (orphelins d'un VA supprimé :
+    # la config ne les connaissait pas toujours -> ils restaient à vie).
+    ident_lc = {str(k).strip().lower() for k in (data or {}).keys()}
+    orphans = set()
+    for k in list(existing):
+        ks = str(k)
+        first, _, rest = ks.partition(" ")
+        if rest and first in ident_lc and ks not in wanted:
+            orphans.add(ks)
+    for key in (_view_tab_names() | {k for k in list(existing) if str(k).startswith("👤")} | orphans):
         if key in wanted:
             continue
         ws = existing.get(key)
