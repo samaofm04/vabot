@@ -23067,7 +23067,8 @@ def _gmsdash_period_range(period: str):
     return today - _dt_p.timedelta(days=6), today, "7 derniers jours"
 
 
-def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=None) -> dict:
+def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=None,
+                     force: bool = False) -> dict:
     """Calcule le détail par lien d'une catégorie (appel analytics par lien).
     Lent (~0.4 s/lien) — appelé par le démon, ou à la volée si le cache est vide."""
     from concurrent.futures import ThreadPoolExecutor
@@ -23093,7 +23094,9 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
     try:
         import gms
         with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
-            _lr = gms.list_links_team(team) or {}
+            # force (bouton ↻) : re-liste vraiment -> les RENOMMAGES de liens
+            # apparaissent tout de suite (sinon cache de liste 15 min)
+            _lr = gms.list_links_team(team, force_refresh=force) or {}
         if _lr.get("ok"):
             links = _lr.get("links") or []
             _gmsdash_links_persist(team, links)
@@ -23266,7 +23269,7 @@ def _gmsdash_store(team: str, period: str, payload: dict):
         _gmsdash_save_disk()
 
 
-def _gmsdash_kick(team: str, period: str) -> bool:
+def _gmsdash_kick(team: str, period: str, force: bool = False) -> bool:
     """Lance le calcul en ARRIÈRE-PLAN (1 seul à la fois par clé)."""
     key = f"{team}|{period}"
     with _GMSDASH_LOCK:
@@ -23279,7 +23282,7 @@ def _gmsdash_kick(team: str, period: str) -> bool:
 
     def _bg():
         try:
-            payload = _gmsdash_compute(team, period, progress_key=key,
+            payload = _gmsdash_compute(team, period, progress_key=key, force=force,
                                          store_cb=lambda pl: _gmsdash_store(team, period, pl))
             import time as _t_bg
             if payload.get("ok"):
@@ -23332,7 +23335,7 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
             retry_in = 60 - (int(_t_g.time()) - int(lf.get("ts", 0)))
         if force or retry_in <= 0:
             retry_in = 0
-            _gmsdash_kick(team, period)      # no-op si déjà en cours
+            _gmsdash_kick(team, period, force=force)   # no-op si déjà en cours
     if has:
         out = dict(hit["payload"])
         out["cached_at"] = hit.get("ts")
@@ -23478,7 +23481,12 @@ def _render_gmsdash_html() -> str:
 .gd-share{height:6px;background:#1b1e27;border-radius:20px;overflow:hidden}
 .gd-share i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px}
 .gd-msg{padding:40px;text-align:center;color:#6b7280;font-size:13px}
-.gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px}
+.gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px;position:relative}
+.gd-tip{position:absolute;display:none;background:#16181f;border:1px solid #2b2f3a;border-radius:10px;padding:10px 12px;font-size:11.5px;pointer-events:none;z-index:10;box-shadow:0 8px 22px rgba(0,0,0,.5);min-width:170px}
+.gd-tip .d{font-weight:800;color:#fff;margin-bottom:6px}
+.gd-tip .r{display:flex;align-items:center;gap:7px;margin-top:3px;color:#c4c4cc;white-space:nowrap}
+.gd-tip .r i{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.gd-tip .r b{margin-left:auto;color:#fff;font-variant-numeric:tabular-nums;padding-left:12px}
 .gd-chart h4{margin:0 0 2px;font-size:14px;font-weight:700;color:#e6e6ea}
 .gd-chart .hint{font-size:11px;color:#6b7280;margin-bottom:12px}
 .gd-leg{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -23725,6 +23733,7 @@ function gdChart(d){
            + '<title>' + gdEsc(l.name) + ' — ' + days[k] + ' : ' + v + (us ? ' clics US' : ' clics') + '</title></circle>';
     });
   });
+  svg += '<line id="gd-guide" x1="0" y1="' + PT + '" x2="0" y2="' + (PT + ih) + '" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
   svg += '</svg>';
   var leg = links.map(function(l, i){
     var tot = us ? l.us_total : l.total;
@@ -23735,8 +23744,45 @@ function gdChart(d){
   }).join('');
   box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
     + '<div class="hint">' + (us ? 'Clics US uniquement' : 'Tous les clics') + ' · les ' + links.length
-    + ' meilleurs liens · survole un point pour le détail · clique une légende pour masquer</div>'
-    + svg + '<div class="gd-leg">' + leg + '</div>';
+    + ' meilleurs liens · survole la courbe : détail de TOUS les liens · clique une légende pour masquer</div>'
+    + svg + '<div class="gd-tip" id="gd-tip"></div>' + '<div class="gd-leg">' + leg + '</div>';
+  // Survol : ligne-guide + tooltip listant TOUS les liens pour le jour pointé
+  var svgEl = box.querySelector('svg');
+  var tip = document.getElementById('gd-tip');
+  var guide = svgEl ? svgEl.querySelector('#gd-guide') : null;
+  if(svgEl && tip){
+    svgEl.addEventListener('mousemove', function(e){
+      var r = svgEl.getBoundingClientRect();
+      var xs = (e.clientX - r.left) * (W / r.width);          // px écran -> coords SVG
+      var i = Math.round((xs - PL) / (stepX || 1));
+      if(i < 0) i = 0; if(i > days.length - 1) i = days.length - 1;
+      var gx = X(i);
+      if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', gx); guide.setAttribute('x2', gx); }
+      var p = days[i].split('-');
+      var rows = links.map(function(l, k){
+        return {k: k, n: l.name || l.shortcode, v: ((us ? l.us_points : l.points) || [])[i] || 0,
+                off: !!window.__gdHidden[k]};
+      }).filter(function(x){ return !x.off; })
+        .sort(function(a, b){ return b.v - a.v; });
+      var htmlT = '<div class="d">' + p[2] + '/' + p[1] + '</div>' + rows.map(function(x){
+        return '<div class="r"><i style="background:' + GD_COLORS[x.k % GD_COLORS.length] + '"></i>'
+             + gdEsc(x.n) + '<b>' + gdNum(x.v) + '</b></div>';
+      }).join('');
+      tip.innerHTML = htmlT;
+      tip.style.display = 'block';
+      var br = box.getBoundingClientRect();
+      var tx = e.clientX - br.left + 16;
+      if(tx + tip.offsetWidth > br.width - 8) tx = e.clientX - br.left - tip.offsetWidth - 16;
+      var ty = e.clientY - br.top - 10;
+      if(ty + tip.offsetHeight > br.height - 4) ty = br.height - tip.offsetHeight - 4;
+      tip.style.left = Math.max(4, tx) + 'px';
+      tip.style.top = Math.max(4, ty) + 'px';
+    });
+    svgEl.addEventListener('mouseleave', function(){
+      tip.style.display = 'none';
+      if(guide) guide.style.display = 'none';
+    });
+  }
 }
 function gdRender(d){
   if(!d) return;
