@@ -465,6 +465,52 @@ try:
 except Exception as _e:
     check("rapport de paie : testable", False, repr(_e)[:80])
 
+
+print()
+print("=" * 70)
+print("11) Sécurité : cookies, force brute, cloisonnement du HTML")
+print("=" * 70)
+try:
+    import web_upload as _w3
+    _a3 = _w3.create_app()
+    _a3.config["TESTING"] = True
+    check("cookie HttpOnly", _a3.config.get("SESSION_COOKIE_HTTPONLY") is True)
+    check("cookie SameSite", _a3.config.get("SESSION_COOKIE_SAMESITE") == "Lax")
+    check("cookie Secure", _a3.config.get("SESSION_COOKIE_SECURE") is True)
+    _sav3 = _w3._check_web_login
+    _w3._check_web_login = lambda u, p: False
+    _c6 = _a3.test_client()
+    _blocked = False
+    for _i in range(12):
+        _txt = _c6.post("/", data={"username": "x", "password": "no"}).get_data(as_text=True)
+        if "Trop de tentatives" in _txt:
+            _blocked = True
+            break
+    check("force brute bloquée après ~8 essais", _blocked)
+    _w3._check_web_login = _sav3
+    # cloisonnement : un rôle restreint ne reçoit pas les données des autres onglets
+    _sav4 = _w3._load_web_users
+    _w3._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _c7 = _a3.test_client()
+    with _c7.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "chat"
+        _s["role"] = "chatter"
+        _s["sid"] = "Z1"
+    _h = _c7.get("/").get_data(as_text=True)
+    check("onglets interdits neutralisés", _h.count("Accès non autorisé") > 5, str(_h.count("Accès non autorisé")))
+    _w3._load_web_users = lambda: {"boss": {"role": "owner"}}
+    _c8 = _a3.test_client()
+    with _c8.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "boss"
+        _s["role"] = "owner"
+        _s["sid"] = "Z2"
+    check("owner : rien n'est retiré", _c8.get("/").get_data(as_text=True).count("Accès non autorisé") == 0)
+    _w3._load_web_users = _sav4
+except Exception as _e:
+    check("sécurité 3 : testable", False, repr(_e)[:80])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
