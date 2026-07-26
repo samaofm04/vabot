@@ -22969,7 +22969,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 8
+GMSDASH_PAYLOAD_VER = 9
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23213,6 +23213,34 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         sc = (sc or "").lower()
         return next((_mmap_c[suf] for suf in _mmap_c if sc.endswith(suf)), "autres")
 
+    # Rattachement lien -> groupe GMS (« AMELIA JB TOKY ») : source de VÉRITÉ
+    # quand le cookie marche — les noms de liens ne suffisent pas (ceux de toky
+    # s'appellent juste « VA 1 »). Repli sur le nommage sinon.
+    _grp_map = None
+    try:
+        _grp_map = gms.link_groups_map(team)
+    except Exception:
+        _grp_map = None
+    import re as _re_bv
+    _bare_va = _re_bv.compile(r"^va\s+\d+$")
+
+    def _classify_jb(l):
+        """(jb: bool, va: str) pour un lien."""
+        dn = str(l.get("display_name") or "")
+        g = str((_grp_map or {}).get(l.get("id")) or "").strip()
+        if g and g.lower() != "ungrouped links":
+            parts = g.split()
+            if len(parts) >= 2:
+                return True, parts[-1].lower()      # « AMELIA JB TOKY » -> toky
+            return False, ""                        # groupe identité simple -> classique
+        if _gmsdash_kind_is_jb(dn):
+            return True, dn.lower().split()[0]
+        if team == "tm_6a1ea410d882dd2173b8a315" and _bare_va.match(dn.lower().strip()):
+            # marché FR : les liens « VA N » nus sont ceux des groupes JB TOKY
+            # (vérifié sur le board — 34 liens = ses 3 groupes)
+            return True, "toky"
+        return False, ""
+
     def _one(l):
         lid = l.get("id")
         if not lid:
@@ -23222,9 +23250,10 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
+        _jb, _va = _classify_jb(l)
         row = {"id": lid, "shortcode": l.get("shortcode") or "",
                "model": _model_of_sc(l.get("shortcode")),
-               "jb": _gmsdash_kind_is_jb(l.get("display_name")),
+               "jb": _jb, "va": _va,
                "name": l.get("display_name") or l.get("shortcode") or "",
                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
                "us": (ctry or {}).get("US", 0),
@@ -23237,7 +23266,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 if pr is not None:
                     pr.setdefault("rows", []).append(
                         {"id": lid, "shortcode": row["shortcode"], "name": row["name"],
-                         "model": row["model"], "jb": row["jb"],
+                         "model": row["model"], "jb": row["jb"], "va": row["va"],
                          "clicks": tot or 0, "us": row["us"], "fr": row["fr"]})
         return row
 
@@ -23480,14 +23509,7 @@ def _gmsdash_series_vajb(rows: list, days: int = 7, prog=None) -> dict:
     jaurel 10…) -> groupés par le nom du VA. Les liens classiques (va_@handle,
     VA N majuscule) sont exclus de cette vue."""
     def _of(r):
-        dn = str(r.get("name") or "")
-        if dn.lower().startswith("va_"):
-            return None
-        m = _VAJB_NAME.match(dn.lower())
-        if not m:
-            return None
-        va = m.group(1)
-        return None if va in ("va",) else va
+        return (r.get("va") or None) if r.get("jb") else None
 
     return _gmsdash_series_groups(rows, _of, days=days, prog=prog,
                                   stage="courbe par VA jailbreak", cap=12)

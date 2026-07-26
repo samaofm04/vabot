@@ -561,6 +561,9 @@ def get_analytics_overview(start_date: str = "", end_date: str = "",
         args["start_date"] = start_date
     if end_date:
         args["end_date"] = end_date
+    if start_date or end_date:
+        # même fuseau que le dashboard GMS -> les totaux par jour correspondent
+        args["timezone"] = "Europe/Paris"
     if link_ids:
         args["link_ids"] = link_ids[:200]
     res = _call_tool("get_analytics_overview", args)
@@ -1182,6 +1185,53 @@ def group_id_by_name(team_id: str, name: str) -> Optional[str]:
             gid = g.get("id") or g.get("_id") or g.get("groupId") or ""
             return str(gid).strip() or None
     return None
+
+
+_BOARD_MAP_CACHE: Dict[str, Any] = {}
+_BOARD_MAP_TTL = 900
+
+
+def link_groups_map(team_id: str, force_refresh: bool = False) -> Optional[Dict[str, str]]:
+    """{link_id: nom_du_groupe} pour toute la team, en UN appel au board privé
+    (cookie). C'est LA source de vérité pour rattacher un lien à son groupe
+    (« AMELIA JB TOKY »…) — les noms de liens ne suffisent pas (ceux de toky
+    s'appellent juste « VA 1 »). None = échec (cookie mort/HTTP) ; l'appelant
+    retombe alors sur ses heuristiques de nommage. Cache 15 min par team."""
+    cookie = get_session_cookie()
+    if not cookie:
+        return None
+    tid = team_id[3:] if team_id.startswith("tm_") else team_id
+    c = _BOARD_MAP_CACHE.get(tid)
+    if (not force_refresh and c and c.get("data") is not None
+            and (time.time() - c.get("ts", 0)) < _BOARD_MAP_TTL):
+        return c["data"]
+    try:
+        r = requests.get(
+            f"{PRIVATE_API_BASE}/links/board?as=team&teamId={tid}",
+            headers={"Cookie": cookie}, timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    except Exception:
+        return None
+    if not isinstance(d, dict) or "placements" not in d:
+        return None
+    gnames: Dict[str, str] = {}
+    for g in d.get("groups") or []:
+        gid = str(g.get("id") or g.get("_id") or g.get("groupId") or "")
+        name = str(g.get("name") or g.get("title") or "").strip()
+        if gid and name:
+            gnames[gid] = name
+    out: Dict[str, str] = {}
+    for pl in d.get("placements") or []:
+        gid = str(pl.get("groupId") or "")
+        lid = pl.get("linkId")
+        if gid in gnames and lid:
+            lid = lid if str(lid).startswith("lnk_") else "lnk_" + str(lid)
+            out[lid] = gnames[gid]
+    _BOARD_MAP_CACHE[tid] = {"ts": time.time(), "data": out}
+    return out
 
 
 def link_ids_in_group(team_id: str, group_id: str) -> Optional[List[str]]:
