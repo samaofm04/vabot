@@ -23678,12 +23678,11 @@ def _render_gmsdash_html() -> str:
 .gd-mpills button.on{background:rgba(37,99,235,.18);border-color:#2563eb;color:#fff}
 .gd-mpills img,.gd-mpills .fb{width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .gd-mpills .fb{background:linear-gradient(135deg,#3b82f6,#a855f7);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800}
-.gd-mcard{display:inline-flex;align-items:center;gap:8px;background:#14161c;border:1px solid #2b2f3a;border-radius:12px;padding:7px 13px 7px 9px;font-size:12px;color:#e6e6ea;cursor:pointer;font-weight:700;transition:all .12s;user-select:none}
-.gd-mcard:hover{border-color:#3a3f4d}
-.gd-mcard input{accent-color:#2563eb;width:14px;height:14px;cursor:pointer;margin:0}
-.gd-mcard b{color:#4ade80;font-variant-numeric:tabular-nums}
-.gd-mcard.offm{opacity:.45}
-.gd-mcard.offm b{color:#6b7280}
+.gd-mcard{display:inline-flex;align-items:center;gap:8px;background:#14161c;border:1.5px solid #2b2f3a;border-radius:22px;padding:5px 13px 5px 6px;font-size:12.5px;color:#e6e6ea;cursor:pointer;font-weight:700;transition:all .12s;user-select:none;font-family:inherit}
+.gd-mcard:hover{filter:brightness(1.15)}
+.gd-mcard b{font-variant-numeric:tabular-nums}
+.gd-mcard.offm{opacity:.4}
+.gd-mcard.allon{border-color:#2563eb}
 .gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px;position:relative}
 .gd-tip{position:absolute;display:none;background:#16181f;border:1px solid #2b2f3a;border-radius:10px;padding:10px 12px;font-size:11.5px;pointer-events:none;z-index:10;box-shadow:0 8px 22px rgba(0,0,0,.5);min-width:170px}
 .gd-tip .d{font-weight:800;color:#fff;margin-bottom:6px}
@@ -23835,19 +23834,26 @@ function gdModelPills(d){
   var models = Object.keys(seen).sort();
   window.__gdModelList = models;
   if(models.length < 2){ box.innerHTML = ''; return; }
+  // couleur de chaque model = celle de SA courbe (ordre de la série par modèle)
+  var colorOf = {};
+  (((d && d.series_models) || {}).links || []).forEach(function(l, i){
+    if(l.model){ colorOf[l.model] = GD_COLORS[i % GD_COLORS.length]; }
+  });
   var avs = (d && d.model_avatars) || {};
   var anyOff = models.some(function(mn){ return gdIsOff(mn); });
-  var htmlP = '<button class="' + (anyOff ? '' : 'on') + '" onclick=gdModelSel(-1) title="Tout recocher">'
-    + '<span class="fb">∀</span>Toutes</button>';
+  var htmlP = '<button class="gd-mcard' + (anyOff ? '' : ' allon') + '" onclick=gdModelSel(-1) title="Tout recocher">'
+    + '<span class="fb">∀</span><span>Toutes</span></button>';
   models.forEach(function(mn, i){
     var off = gdIsOff(mn);
+    var col = colorOf[mn] || '#6b7280';
     var av = avs[mn];
     var head = av ? ('<img src="' + gdEsc(av) + '" onerror="this.style.display=String.fromCharCode(110,111,110,101)">')
                   : ('<span class="fb">' + gdEsc(mn.charAt(0).toUpperCase()) + '</span>');
-    htmlP += '<label class="gd-mcard' + (off ? ' offm' : '') + '" title="Décocher = retirer cette model des courbes et du tableau">'
-      + '<input type="checkbox"' + (off ? '' : ' checked') + ' onchange=gdModelSel(' + i + ')>'
+    htmlP += '<button class="gd-mcard' + (off ? ' offm' : '') + '" onclick=gdModelSel(' + i + ') '
+      + 'style="border-color:' + (off ? '#2b2f3a' : col) + '" '
+      + 'title="Clique pour ' + (off ? 'réafficher' : 'retirer') + ' cette model">'
       + head + '<span>' + gdEsc(mn.charAt(0).toUpperCase() + mn.slice(1)) + '</span>'
-      + '<b>' + gdNum(totals[mn] || 0) + '</b></label>';
+      + '<b style="color:' + (off ? '#6b7280' : col) + '">' + gdNum(totals[mn] || 0) + '</b></button>';
   });
   box.innerHTML = htmlP;
 }
@@ -23973,7 +23979,8 @@ function gdChart(d){
   var view = (window.__gdView === 'models' && hasM) ? 'models'
            : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
   var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
-  var days = se.days || [], links = se.links || [];
+  var days = se.days || [];
+  var links = (se.links || []).map(function(l, _i){ l._ci = _i; return l; });   // couleur STABLE par série
   if(view !== 'vajb'){
     links = links.filter(function(l){ return !gdIsOff(l.model); });
   }
@@ -23994,8 +24001,8 @@ function gdChart(d){
     // Ancien cache sans détail pays par jour : le démon recalcule en fond -> on
     // re-tente tout seul jusqu'à ce que la courbe soit disponible.
     var flag0 = (mode === 'us') ? '🇺🇸' : '🇫🇷';
-    var leg0 = links.map(function(l, i){
-      return '<button style="cursor:default"><i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
+    var leg0 = links.map(function(l){
+      return '<button style="cursor:default"><i style="background:' + GD_COLORS[l._ci % GD_COLORS.length] + '"></i>'
            + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(gdTot(l)) + '</b></button>';
     }).join('');
     box.innerHTML = headHtml
@@ -24009,7 +24016,7 @@ function gdChart(d){
   window.__gdUsRetry = 0;
   var W = 900, H = 260, PL = 46, PR = 14, PT = 12, PB = 26;
   var iw = W - PL - PR, ih = H - PT - PB;
-  var vals = links.map(function(l, i){ return window.__gdHidden[i] ? [] : gdPts(l); });
+  var vals = links.map(function(l){ return window.__gdHidden[l._ci] ? [] : gdPts(l); });
   var max = 0;
   vals.forEach(function(p){ (p||[]).forEach(function(v){ if(v > max) max = v; }); });
   if(max <= 0) max = 1;
@@ -24030,10 +24037,10 @@ function gdChart(d){
     svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#6b7280" font-size="10">' + p[2] + '/' + p[1] + '</text>';
   });
   // courbes
-  links.forEach(function(l, i){
-    if(window.__gdHidden[i]) return;
+  links.forEach(function(l){
+    if(window.__gdHidden[l._ci]) return;
     var pts = gdPts(l);
-    var col = GD_COLORS[i % GD_COLORS.length];
+    var col = GD_COLORS[l._ci % GD_COLORS.length];
     var dpath = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
     svg += '<path d="' + dpath + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
@@ -24043,11 +24050,11 @@ function gdChart(d){
   });
   svg += '<line id="gd-guide" x1="0" y1="' + PT + '" x2="0" y2="' + (PT + ih) + '" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
   svg += '</svg>';
-  var leg = links.map(function(l, i){
+  var leg = links.map(function(l){
     var tot = gdTot(l);
-    return '<button class="' + (window.__gdHidden[i] ? 'off' : '') + '" onclick="gdToggleSerie(' + i + ')" '
+    return '<button class="' + (window.__gdHidden[l._ci] ? 'off' : '') + '" onclick="gdToggleSerie(' + l._ci + ')" '
          + 'title="Clique pour masquer/afficher cette courbe">'
-         + '<i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
+         + '<i style="background:' + GD_COLORS[l._ci % GD_COLORS.length] + '"></i>'
          + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(tot) + '</b></button>';
   }).join('');
   box.innerHTML = headHtml
@@ -24069,13 +24076,13 @@ function gdChart(d){
       var gx = X(i);
       if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', gx); guide.setAttribute('x2', gx); }
       var p = days[i].split('-');
-      var rows = links.map(function(l, k){
-        return {k: k, n: l.name || l.shortcode, v: (gdPts(l))[i] || 0,
-                off: !!window.__gdHidden[k]};
+      var rows = links.map(function(l){
+        return {ci: l._ci, n: l.name || l.shortcode, v: (gdPts(l))[i] || 0,
+                off: !!window.__gdHidden[l._ci]};
       }).filter(function(x){ return !x.off; })
         .sort(function(a, b){ return b.v - a.v; });
       var htmlT = '<div class="d">' + p[2] + '/' + p[1] + '</div>' + rows.map(function(x){
-        return '<div class="r"><i style="background:' + GD_COLORS[x.k % GD_COLORS.length] + '"></i>'
+        return '<div class="r"><i style="background:' + GD_COLORS[x.ci % GD_COLORS.length] + '"></i>'
              + gdEsc(x.n) + '<b>' + gdNum(x.v) + '</b></div>';
       }).join('');
       tip.innerHTML = htmlT;
