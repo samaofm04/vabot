@@ -14954,13 +14954,23 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                 _api_src = True
                 # l'API a répondu : le bandeau « cookies expirés » n'a plus de sens
                 warning = ""
-                if _ov.get("errors"):
+                _n_err = len(_ov.get("errors") or [])
+                _n_stale = len(_ov.get("stale") or [])
+                if _n_err:
                     warning = (
                         "<div style='padding:10px 14px;background:rgba(251,191,36,.08);"
                         "border:1px solid rgba(251,191,36,.3);border-radius:10px;"
                         "margin-bottom:18px;font-size:12.5px;color:#fbbf24'>"
-                        f"⚠ Total PARTIEL : {len(_ov['errors'])} créatrice(s) en erreur "
+                        f"⚠ Total PARTIEL : {_n_err} créatrice(s) sans AUCUNE donnée "
                         "— recharge dans une minute pour le chiffre complet.</div>")
+                elif _n_stale:
+                    # rien de perdu : ces créatrices affichent leur DERNIER relevé
+                    warning = (
+                        "<div style='padding:10px 14px;background:rgba(96,165,250,.08);"
+                        "border:1px solid rgba(96,165,250,.3);border-radius:10px;"
+                        "margin-bottom:18px;font-size:12.5px;color:#93c5fd'>"
+                        f"♻ {_n_stale} créatrice(s) affichée(s) avec leur dernier relevé "
+                        "(API MyPuls momentanément en erreur) — le total reste complet.</div>")
                 # brut par TYPE : chaque part remontée au taux de sa plateforme
                 _t_of = _ov.get("types_of") or {}
                 _t_mym = _ov.get("types_mym") or {}

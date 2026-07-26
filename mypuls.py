@@ -16,7 +16,9 @@ Stockage : data/mypuls_cookies.json (gitignored).
 """
 from __future__ import annotations
 import json
+import os
 import re
+import threading as _th
 from html import unescape
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -168,9 +170,47 @@ _API_STATS_CACHE: Dict[str, Any] = {}
 _API_STATS_TTL = 300
 
 
+# ---- Dernier BON relevé par (créatrice, période), persisté sur disque ----
+# L'API MyPuls a des ratés réguliers -> sans ça, chaque créatrice en erreur
+# tombait à 0 $ et le dashboard affichait « Total PARTIEL » en boucle.
+_LASTGOOD_FILE = DATA_DIR / "mypuls_stats_lastgood.json"
+_LASTGOOD_LOCK = _th.Lock()
+_LASTGOOD_MEM: Dict[str, Any] = {}
+_LASTGOOD_LOADED = [False]
+
+
+def _lastgood_load():
+    if _LASTGOOD_LOADED[0]:
+        return
+    _LASTGOOD_LOADED[0] = True
+    try:
+        if _LASTGOOD_FILE.exists():
+            d = json.loads(_LASTGOOD_FILE.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                _LASTGOOD_MEM.update(d)
+    except Exception:
+        pass
+
+
+def _lastgood_save():
+    import time as _t
+    try:
+        # purge : les périodes de plus de 45 jours ne seront plus re-demandées
+        cut = _t.time() - 45 * 86400
+        for k in [k for k, v in _LASTGOOD_MEM.items() if (v or {}).get("ts", 0) < cut]:
+            _LASTGOOD_MEM.pop(k, None)
+        tmp = _LASTGOOD_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(_LASTGOOD_MEM, ensure_ascii=False), encoding="utf-8")
+        os.replace(str(tmp), str(_LASTGOOD_FILE))
+    except Exception:
+        pass
+
+
 def api_creator_stats_cached(creator_id, date_from: str, date_to: str) -> dict:
     """api_creator_stats() avec cache 5 min par (créatrice, période).
-    Les ÉCHECS ne sont pas mis en cache : un 429 passager se rattrape seul."""
+    Les ÉCHECS ne sont pas mis en cache (un 429 passager se rattrape seul) MAIS
+    on ressert alors le DERNIER BON relevé (persisté) marqué stale=True :
+    mieux vaut un chiffre d'il y a 10 min qu'un faux 0."""
     import time as _t
     key = f"{creator_id}|{date_from}|{date_to}"
     hit = _API_STATS_CACHE.get(key)
@@ -181,6 +221,22 @@ def api_creator_stats_cached(creator_id, date_from: str, date_to: str) -> dict:
         _API_STATS_CACHE[key] = (_t.time(), r)
         if len(_API_STATS_CACHE) > 200:
             _API_STATS_CACHE.clear()
+        try:
+            rev = ((r.get("data") or {}).get("revenue") or {})
+            with _LASTGOOD_LOCK:
+                _lastgood_load()
+                _LASTGOOD_MEM[key] = {"ts": _t.time(), "revenue": rev}
+                _lastgood_save()
+        except Exception:
+            pass
+        return r
+    # Échec -> dernier bon relevé si on en a un
+    with _LASTGOOD_LOCK:
+        _lastgood_load()
+        lg = _LASTGOOD_MEM.get(key)
+    if lg and isinstance(lg.get("revenue"), dict):
+        return {"ok": True, "stale": True, "stale_ts": lg.get("ts"),
+                "data": {"revenue": lg["revenue"]}}
     return r
 
 
@@ -239,7 +295,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     # par type (les commissions different : OnlyFans 20 %, MyM 26 %)
     types_of = dict(types)
     types_mym = dict(types)
-    per_creator, errors = [], []
+    per_creator, errors, stale = [], [], []
     _MAP = {  # libellés API -> cartes du dashboard
         "message": "Messages", "post": "Posts", "tip": "Tips",
         "subscription": "Subscriptions", "sub": "Subscriptions",
@@ -255,6 +311,8 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         if not r.get("ok"):
             errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")
             continue
+        if r.get("stale"):
+            stale.append(str(c.get("pseudo") or c.get("id")))
         rev = ((r.get("data") or {}).get("revenue") or {})
         cur = (rev.get("currency") or c.get("currency") or "USD").upper()
         rate = eur_usd if cur == "EUR" else 1.0
@@ -278,10 +336,12 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
            "types": {k: round(v, 2) for k, v in types.items()},
            "types_of": {k: round(v, 2) for k, v in types_of.items()},
            "types_mym": {k: round(v, 2) for k, v in types_mym.items()},
-           "creators": per_creator, "errors": errors}
+           "creators": per_creator, "errors": errors, "stale": stale}
     # un agrégat AMPUTÉ (créatrice en 429/timeout) n'est jamais mis en cache :
-    # sinon un total partiel s'affichait comme complet pendant 5 minutes
-    if not errors:
+    # sinon un total partiel s'affichait comme complet pendant 5 minutes.
+    # Pareil pour un agrégat contenant du STALE : on veut retenter vite les
+    # créatrices en erreur (leurs derniers relevés comblent en attendant).
+    if not errors and not stale:
         _API_OVERVIEW_CACHE[key] = (_t.time(), out)
         if len(_API_OVERVIEW_CACHE) > 40:
             _API_OVERVIEW_CACHE.clear()
