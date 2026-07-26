@@ -68,10 +68,11 @@ class SheetsSync(commands.Cog):
         sheet_id="(setup) l'ID du Google Sheet — la longue chaîne dans son URL",
         cle="(setup) le fichier JSON du compte de service Google",
         folder="(folder) le lien du dossier Drive partagé au compte de service (1 classeur/identité)",
+        force="(pull) appliquer AUSSI les suppressions massives (> 25 %) — grand ménage volontaire",
     )
     async def sheetsync(self, interaction: discord.Interaction, action: str,
                         sheet_id: str = None, cle: discord.Attachment = None,
-                        folder: str = None):
+                        folder: str = None, force: bool = False):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -221,10 +222,14 @@ class SheetsSync(commands.Cog):
 
         if action == "pull":
             await interaction.response.defer(ephemeral=True, thinking=True)
-            changed, summary = await asyncio.to_thread(sheets_sync.pull_and_merge)
-            await interaction.followup.send(
-                f"✅ Importé du Sheet : {summary}" if changed else
-                "Rien de nouveau côté Sheet (ou Sheet indispo).", ephemeral=True)
+            changed, summary = await asyncio.to_thread(sheets_sync.pull_and_merge, force)
+            if changed:
+                msg = f"✅ Importé du Sheet : {summary}"
+            elif "RETENUES" in (summary or ""):
+                msg = f"ℹ️ Aucun ajout/modif, MAIS :{summary.split('suppr.', 1)[-1]}"
+            else:
+                msg = "Rien de nouveau côté Sheet (ou Sheet indispo)."
+            await interaction.followup.send(msg[:1990], ephemeral=True)
             return
 
         if action == "check":

@@ -949,7 +949,7 @@ def _row_new_account(u, r, va, gen_id):
     }
 
 
-def pull_and_merge() -> tuple:
+def pull_and_merge(force_delete: bool = False) -> tuple:
     """Applique le Sheet dans jailbreak.json. 2 types d'onglets ÉDITABLES :
       - IDENTITÉ (nom = 'amelia') : gouverne TOUS les comptes de l'identité.
       - PAR VA (nom = 'amelia andry') : gouverne les comptes de cette identité gérés
@@ -957,6 +957,8 @@ def pull_and_merge() -> tuple:
     Règle : un compte est SUPPRIMÉ s'il est absent d'un onglet NON VIDE où il devrait
     figurer (identité OU son onglet VA) -> supprimer d'un côté supprime partout. Un
     username nouveau -> ajouté. ANTI-WIPE : un onglet VIDE n'entraîne aucune suppression.
+    force_delete=True (action VOLONTAIRE /sheetsync pull force) : applique aussi
+    les suppressions massives normalement retenues par le garde anti-effacement.
     Retourne (changed, summary)."""
     import jailbreak as jb
     if is_paused():
@@ -1007,6 +1009,7 @@ def pull_and_merge() -> tuple:
 
     added = updated = removed = 0
     skipped_tomb = set()
+    blocked_del = 0
     for identity in list(data.keys()):
         entry = data[identity]
         if not isinstance(entry, dict):
@@ -1043,8 +1046,14 @@ def pull_and_merge() -> tuple:
         # suppressions volontaires en masse passent par /jailbreakreset ou le site.
         n_before = len(accts)
         deleted = set()
-        if to_delete and len(to_delete) > max(5, int(n_before * 0.25)):
-            print(f"[sheets_sync] anti-mass-delete {identity}: -{len(to_delete)}/{n_before} IGNORÉ",
+        # Politique : supprimer dans le Sheet SUPPRIME sur le site (c'est la
+        # base). Seul le quasi-effacement TOTAL d'une identité (> 90 % et
+        # >= 20 comptes) est retenu par sécurité — /sheetsync pull force:True
+        # pour l'appliquer quand même.
+        if ((not force_delete) and to_delete and n_before >= 20
+                and len(to_delete) > int(n_before * 0.9)):
+            blocked_del += len(to_delete)
+            print(f"[sheets_sync] anti-wipe {identity}: -{len(to_delete)}/{n_before} RETENU",
                   flush=True)
         else:
             entry["accounts"] = kept
@@ -1135,4 +1144,8 @@ def pull_and_merge() -> tuple:
     if changed:
         jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
     _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site < 7 j — re-ajoute-les via le SITE pour les débloquer)" if skipped_tomb else ""
+    if blocked_del:
+        _extra += (f"" + chr(10) + f"⚠️ **{blocked_del} suppression(s) RETENUES** (garde anti-effacement : "
+                   f"quasi-effacement total d'une identité). Si c'est VOULU, relance "
+                   f"`/sheetsync pull force:True` pour les appliquer.")
     return changed, f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}"
