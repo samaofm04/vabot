@@ -24737,9 +24737,31 @@ def _jbanalyse_payload() -> dict:
         out.sort(key=lambda r: (-r["weekly"], -r["biweekly"], r["name"]))
         return out
 
+    # Analyse croisée : clics GMS 7 j par identité, depuis le CACHE du dashboard
+    # clics (aucun appel API). Les rows portent "model" = identité (suffixe de
+    # shortcode) ; jessye vient de la team JESSY. Vide si le cache n'est pas prêt.
+    clicks7: dict = {}
+    try:
+        mem = {}
+        try:
+            with _GMSDASH_LOCK:
+                mem = dict(_GMSDASH_MEM)
+        except Exception:
+            pass
+        if not mem and GMSDASH_CACHE_FILE.exists():
+            mem = json.loads(GMSDASH_CACHE_FILE.read_text(encoding="utf-8")) or {}
+        for key, hit in mem.items():
+            if not str(key).endswith("|7"):
+                continue
+            for r in ((hit or {}).get("payload") or {}).get("links") or []:
+                m = str(r.get("model") or "").lower()
+                if m and m in idents:
+                    clicks7[m] = clicks7.get(m, 0) + int(r.get("clicks") or 0)
+    except Exception:
+        clicks7 = {}
     tot.pop("points", None)
     return {"ok": True, "days": days, "idents": _ser(idents), "vas": _ser(vas),
-            "tot": tot, "has_days": has_days, "cov": cov,
+            "tot": tot, "has_days": has_days, "cov": cov, "clicks7": clicks7,
             "scraped_at": newest_scrape, "generated_at": int(_t_a.time())}
 
 
@@ -24784,7 +24806,12 @@ def _render_jbanalyse_html() -> str:
 .ja-share{background:#191c23;border-radius:6px;height:8px;overflow:hidden}
 .ja-share i{display:block;height:100%;background:linear-gradient(90deg,#8b5cf6,#3b82f6)}
 .ja-msg{padding:28px;text-align:center;color:#6b7280;font-size:13px}
-@media(max-width:900px){.ja-row{grid-template-columns:22px minmax(110px,1.2fr) 60px 70px 70px 1fr}.ja-row .hidesm{display:none}}
+.ja-irow{display:grid;grid-template-columns:minmax(110px,1.2fr) 100px 100px 130px 1fr 110px 110px;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #16181e;color:#d1d5db;font-size:12px}
+.ja-irow.head{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid #23262f}
+.ja-irow .num{text-align:right;font-variant-numeric:tabular-nums}
+.ja-irow .nm{font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:900px){.ja-row{grid-template-columns:22px minmax(110px,1.2fr) 60px 70px 70px 1fr}.ja-row .hidesm{display:none}
+.ja-irow{grid-template-columns:minmax(100px,1fr) 74px 74px 96px 1fr}.ja-irow .hidesm{display:none}}
 </style>
 """
     body = """
@@ -24801,6 +24828,7 @@ def _render_jbanalyse_html() -> str:
   <div class="ja-cards" id="ja-cards"></div>
   <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg">Chargement&hellip;</div></div></div>
   <div style="background:#0f0f13;border:1px solid #1d2027;border-radius:14px;overflow:hidden" id="ja-tbl"></div>
+  <div id="ja-insights"></div>
 </div>
 <script>
 window.__jaData = null;
@@ -24994,12 +25022,65 @@ function jaTable(){
   });
   el.innerHTML = rows;
 }
+function jaConv(x){ return (Math.round(x * 10) / 10).toLocaleString('fr-FR') + ' /1000'; }
+function jaInsights(){
+  var d = window.__jaData || {};
+  var el = document.getElementById('ja-insights');
+  if(!el) return;
+  var cl = d.clicks7 || {};
+  var gs = (d.idents || []).filter(function(g){ return cl[g.name] != null; });
+  if(window.__jaView !== 'id' || !gs.length){ el.innerHTML = ''; return; }
+  var rows = gs.map(function(g){
+    var c = cl[g.name] || 0;
+    return {name: g.name, views: g.weekly, clicks: c,
+            conv: g.weekly > 0 ? (c * 1000 / g.weekly) : 0,
+            vpa: g.active ? Math.round(g.weekly / g.active) : 0,
+            cpa: g.active ? (Math.round(c * 10 / g.active) / 10) : 0};
+  });
+  var totV = 0, totC = 0;
+  rows.forEach(function(r){ totV += r.views; totC += r.clicks; });
+  var globalConv = totV > 0 ? (totC * 1000 / totV) : 0;
+  var ranked = rows.filter(function(r){ return r.views >= 500; }).sort(function(a, b){ return b.conv - a.conv; });
+  var best = ranked[0] || null;
+  var worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
+  var maxConv = 0;
+  rows.forEach(function(r){ if(r.conv > maxConv) maxConv = r.conv; });
+  rows.sort(function(a, b){ return b.conv - a.conv; });
+  var h = '<div class="ja-chartbox" style="margin-top:14px">'
+    + '<h4>&#128269; Analyse &mdash; conversion vues &rarr; clics (7 jours)</h4>'
+    + '<div class="ja-hint" style="margin-top:4px">clics = Dashboard clics (GMS) &middot; vues = scrape Insta &middot; conversion = clics pour 1 000 vues</div>'
+    + '<div class="ja-cards" style="margin:12px 0 6px">'
+    + '<div class="ja-card"><div class="lab">Conversion globale</div><div class="val">' + jaConv(globalConv) + '</div>'
+    +   '<div class="sub">' + jaNum(totC) + ' clics pour ' + jaNum(totV) + ' vues</div></div>'
+    + (best ? ('<div class="ja-card"><div class="lab">Meilleure conversion</div><div class="val" style="color:#22c55e">' + jaEsc(best.name) + '</div>'
+    +   '<div class="sub">' + jaConv(best.conv) + ' &middot; ' + jaNum(best.clicks) + ' clics / ' + jaNum(best.views) + ' vues</div></div>') : '')
+    + (worst ? ('<div class="ja-card"><div class="lab">&Agrave; la tra&icirc;ne</div><div class="val" style="color:#f59e0b">' + jaEsc(worst.name) + '</div>'
+    +   '<div class="sub">' + jaConv(worst.conv) + ' &middot; ' + jaNum(worst.clicks) + ' clics / ' + jaNum(worst.views) + ' vues</div></div>') : '')
+    + '</div>'
+    + '<div class="ja-irow head"><span>Identit&eacute;</span><span class="num">Vues 7 j</span><span class="num">Clics 7 j</span>'
+    + '<span class="num">Clics / 1000 vues</span><span></span><span class="num hidesm">Vues / compte</span><span class="num hidesm">Clics / compte</span></div>';
+  rows.forEach(function(r){
+    var pct = maxConv ? Math.round(r.conv * 100 / maxConv) : 0;
+    h += '<div class="ja-irow">'
+      + '<span class="nm">' + jaEsc(r.name) + '</span>'
+      + '<span class="num">' + jaNum(r.views) + '</span>'
+      + '<span class="num">' + jaNum(r.clicks) + '</span>'
+      + '<span class="num" style="color:#fff;font-weight:800">' + jaConv(r.conv) + '</span>'
+      + '<span class="ja-share"><i style="width:' + pct + '%"></i></span>'
+      + '<span class="num hidesm">' + jaNum(r.vpa) + '</span>'
+      + '<span class="num hidesm">' + r.cpa + '</span>'
+      + '</div>';
+  });
+  h += '</div>';
+  el.innerHTML = h;
+}
 function jaRender(){
   if(!window.__jaData) return;
   jaPills();
   jaCards();
   jaChart();
   jaTable();
+  jaInsights();
 }
 function jaLoad(force){
   fetch('/jbanalyse/data')
