@@ -4671,6 +4671,10 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
       Analyse vues
     </button>
+    <button class="item" id="tab-jbactivite" onclick="showTab('jailbreak','jbactivite','Activité VA','Assiduité : 1 reel / 48 h par compte, warm-up 5 j, jours de repos, retenues sur paie')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
+      Activité VA
+    </button>
   </div>
 </div>
 
@@ -5238,6 +5242,11 @@ document.addEventListener('keydown', function(e){
 <!-- JAILBREAK - Analyse vues Instagram -->
 <div class="form-section" id="form-jbanalyse" style="display:none">
 {jbanalyse_html}
+</div>
+
+<!-- JAILBREAK - Activité VA (assiduité) -->
+<div class="form-section" id="form-jbactivite" style="display:none">
+{jbactivite_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -6798,7 +6807,8 @@ def _run_daily_insta_refresh_smart():
         # Migration courbes « Analyse vues » : une entrée SAINE sans post_days
         # date d'avant la maj -> on la re-scrape même si son cache est frais
         # (sinon la couverture reste bloquée jusqu'au prochain 00h/12h).
-        or ("post_days" not in cache.get(h, {}) and not cache.get(h, {}).get("error"))
+        or (("post_days" not in cache.get(h, {}) or "reel_days" not in cache.get(h, {}))
+            and not cache.get(h, {}).get("error"))
     )]
     skipped = len(all_h) - len(todo)
     print(f"[insta-refresh:boot] {len(todo)} stale, {skipped} frais", flush=True)
@@ -7159,6 +7169,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     # Vues par JOUR DE PUBLICATION (fuseau Paris) sur 30 j : la matière première
     # de l'onglet « Analyse vues » (courbes par identité / VA).
     post_days: dict = {}
+    reel_days: dict = {}
     try:
         from zoneinfo import ZoneInfo as _Zi
         _tz_paris = _Zi("Europe/Paris")
@@ -7212,6 +7223,11 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             if age_h <= 24 * 30:
                 _dk = (p_dt.astimezone(_tz_paris) if _tz_paris else p_dt).date().isoformat()
                 post_days[_dk] = post_days.get(_dk, 0) + views
+        # Assiduité (« Activité VA ») : dates de TOUS les reels publiés, même à
+        # 0 vue — un reel tout frais compte comme une publication.
+        if is_video and age_h <= 24 * 30:
+            _dk_r = (p_dt.astimezone(_tz_paris) if _tz_paris else p_dt).date().isoformat()
+            reel_days[_dk_r] = reel_days.get(_dk_r, 0) + 1
     # Top 4 reels (par date desc) pour la preview strip
     def _ts(p):
         try:
@@ -7245,6 +7261,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "posts_count": posts_count,
         "preview": preview,
         "post_days": post_days,
+        "reel_days": reel_days,
     }
     # GARDE-FOU anti-écrasement : un scrape qui « réussit » mais ne ramène RIEN
     # (0 abonné, 0 post, aucun aperçu) est en fait un scrape raté côté Instagram.
@@ -24709,7 +24726,8 @@ def _jbanalyse_payload() -> dict:
 
     def _blank():
         return {"daily": 0, "weekly": 0, "biweekly": 0, "followers": 0,
-                "n": 0, "active": 0, "banned": 0, "pending": 0, "points": {}}
+                "n": 0, "active": 0, "banned": 0, "pending": 0,
+                "points": {}, "rc": {}}
 
     idents: dict = {}
     vas: dict = {}
@@ -24752,6 +24770,12 @@ def _jbanalyse_payload() -> dict:
                     has_days = True
                     for g in groups[:2]:
                         g["points"][dk] = g["points"].get(dk, 0) + int(vv or 0)
+            # Nb de reels PUBLIÉS par jour (même à 0 vue) : distingue « 0 vue
+            # car rien posté » de « posté mais pas encore de vues »
+            for dk, vv in (st.get("reel_days") or {}).items():
+                if dk in dayset:
+                    for g in groups[:2]:
+                        g["rc"][dk] = g["rc"].get(dk, 0) + int(vv or 0)
 
     def _ser(dmap):
         out = []
@@ -24760,6 +24784,7 @@ def _jbanalyse_payload() -> dict:
                                      "n", "active", "banned", "pending")}
             row["name"] = name
             row["points"] = [int(g["points"].get(d) or 0) for d in days]
+            row["reels"] = [int(g["rc"].get(d) or 0) for d in days]
             out.append(row)
         out.sort(key=lambda r: (-r["weekly"], -r["biweekly"], r["name"]))
         return out
@@ -24803,6 +24828,7 @@ def _jbanalyse_payload() -> dict:
         # le delta jour-à-jour de tv = « nouvelles vues » réellement gagnées.
         _snap = {i: {"f": g["followers"], "v": g["weekly"],
                      "tv": sum(g["points"].values())} for i, g in idents.items()}
+        # (rc exclu du snapshot : seul tv/f servent aux deltas)
         _dirty = False
         if fhist.get(_tkey) != _snap:
             fhist[_tkey] = _snap               # DERNIER relevé du jour (courbe abonnés)
@@ -25226,7 +25252,8 @@ function jaChart(){
   if(!metricF){
     var rr = jaRangeIdx();
     days = days.slice(rr[0], rr[1] + 1);
-    gs = gs.map(function(g){ return {name: g.name, points: (g.points || []).slice(rr[0], rr[1] + 1)}; });
+    gs = gs.map(function(g){ return {name: g.name, points: (g.points || []).slice(rr[0], rr[1] + 1),
+                             reels: (g.reels || []).slice(rr[0], rr[1] + 1)}; });
   }
   var act = (d.tot || {}).active || 0;
   if(!metricF && act && (d.cov || 0) < act){
@@ -25288,11 +25315,14 @@ function jaChart(){
       if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', X(i)); guide.setAttribute('x2', X(i)); }
       var p = days[i].split('-');
       var rows = gs.map(function(g){
-        return {name: g.name, v: (g.points || [])[i] || 0, ci: nameIdx[g.name] || 0};
+        return {name: g.name, v: (g.points || [])[i] || 0, rl: (g.reels || [])[i],
+                ci: nameIdx[g.name] || 0};
       }).sort(function(a, b){ return b.v - a.v; });
       tip.innerHTML = '<div class="d">' + p[2] + '/' + p[1] + '</div>' + rows.map(function(x){
+        var rl = (!metricF && x.rl != null)
+          ? ' <span style="color:#6b7280">(' + x.rl + ' reel' + (x.rl > 1 ? 's' : '') + ')</span>' : '';
         return '<div class="r"><i style="background:' + JA_COLORS[x.ci % JA_COLORS.length] + '"></i>'
-             + jaEsc(x.name) + '<b>' + jaNum(x.v) + '</b></div>';
+             + jaEsc(x.name) + rl + '<b>' + jaNum(x.v) + '</b></div>';
       }).join('');
       tip.style.display = 'block';
       var br = box.getBoundingClientRect();
@@ -25416,6 +25446,454 @@ function jaLoad(force){
     });
 }
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ jaLoad(0); }); } else { jaLoad(0); }
+</script>
+"""
+    return css + body
+
+
+VA_ACT_CFG = DATA_DIR / "va_activity_cfg.json"
+
+
+def _vaact_cfg_load() -> dict:
+    """Config « Activité VA » : par VA (clé lowercase) base de paie ($/quinzaine),
+    malus $/jour d'oubli, jours de repos (0=lundi … 6=dimanche) ; warm-up global."""
+    try:
+        d = json.loads(VA_ACT_CFG.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:
+        d = {}
+    d.setdefault("vas", {})
+    d.setdefault("warmup_days", 5)
+    return d
+
+
+def _vaact_cfg_save(d: dict):
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = VA_ACT_CFG.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(str(tmp), str(VA_ACT_CFG))
+    except Exception:
+        pass
+
+
+def _vaact_days(period: str):
+    """Liste de dates (Paris) de la période + libellé + payable (True si quinzaine)."""
+    import datetime as _dt_v
+    try:
+        from zoneinfo import ZoneInfo as _Zi_v
+        today = _dt_v.datetime.now(_Zi_v("Europe/Paris")).date()
+    except Exception:
+        today = _dt_v.date.today()
+    if period == "q":
+        start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
+        end = today
+        lab = ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin") + " (en cours)"
+        payable = True
+    elif period == "qprev":
+        if today.day <= 15:
+            _last = today.replace(day=1) - _dt_v.timedelta(days=1)
+            start, end, lab = _last.replace(day=16), _last, "quinzaine 16-fin (précédente)"
+        else:
+            start, end, lab = today.replace(day=1), today.replace(day=15), "quinzaine 1-15 (précédente)"
+        payable = True
+    elif period == "30":
+        start, end, lab, payable = today - _dt_v.timedelta(days=29), today, "30 derniers jours", False
+    else:
+        start, end, lab, payable = today - _dt_v.timedelta(days=13), today, "14 derniers jours", False
+    days = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += _dt_v.timedelta(days=1)
+    return days, lab, payable, today
+
+
+def _vaact_payload(period: str = "14") -> dict:
+    """Assiduité des VA jailbreak. Règles :
+    - 1 reel / 48 h PAR COMPTE (en règle le jour J si reel le J ou J-1) ;
+    - 1 oubli max par VA et par JOUR (même si plusieurs comptes ratés) ;
+    - warm-up : compte créé il y a < warmup_days jours -> pas comptabilisé ;
+    - jours de repos du VA -> pas comptabilisés ;
+    - comptes bannis / sans données -> pas comptabilisés ; les jours plus vieux
+      que la fenêtre de reels connue d'un compte ne comptent pas (anti faux-oubli,
+      l'API publique ne rend que ~12 posts) ;
+    - paie (quinzaines) : base - oublis x malus, plancher 0."""
+    import datetime as _dt_v
+    try:
+        import jailbreak as jb
+        data = jb._load()
+    except Exception as e:
+        return {"ok": False, "error": f"jailbreak: {e}"[:160]}
+    try:
+        cache = _load_insta_3_stats_cache()
+    except Exception:
+        cache = {}
+    cfg = _vaact_cfg_load()
+    warmup = int(cfg.get("warmup_days") or 5)
+    days, lab, payable, today = _vaact_days(period)
+    day_iso = [d.isoformat() for d in days]
+
+    vas: dict = {}
+    for ident, entry in (data or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for a in (entry.get("accounts") or []):
+            va = str(a.get("va") or "").strip()
+            if not va:
+                continue
+            vl = va.lower()
+            g = vas.setdefault(vl, {"display": va, "idents": set(), "accounts": []})
+            g["idents"].add(ident)
+            g["accounts"].append((ident, a))
+
+    out_vas = []
+    tot_oublis = 0
+    tot_ded = 0.0
+    n_warm_tot = 0
+    for vl, g in vas.items():
+        vcfg = (cfg.get("vas") or {}).get(vl) or {}
+        repos = set(int(x) for x in (vcfg.get("repos") or []) if str(x).strip() != "")
+        base = float(vcfg.get("base") or 0)
+        malus = float(vcfg.get("malus") or 0)
+        # Pré-calcul par compte : set des jours avec reel + plancher de fenêtre
+        accts = []
+        n_ban = n_warm = n_nodata = 0
+        for ident, a in g["accounts"]:
+            try:
+                h = _normalize_insta_handle(str(a.get("username") or ""))
+            except Exception:
+                h = str(a.get("username") or "").strip().lstrip("@").lower()
+            st = cache.get(h) or {}
+            if st.get("banned"):
+                n_ban += 1
+                continue
+            if not st or st.get("error"):
+                n_nodata += 1
+                continue
+            rd = set((st.get("reel_days") or st.get("post_days") or {}).keys())
+            try:
+                cd = _dt_v.date.fromtimestamp(int(a.get("created_at") or 0))
+            except Exception:
+                cd = None
+            first_ok = (cd + _dt_v.timedelta(days=warmup)) if cd else None
+            if first_ok and first_ok > today:
+                n_warm += 1
+            floor = min(rd) if rd else None
+            posts_count = int(st.get("posts_count") or 0)
+            # ANTI-AMNISTIE : dernier reel CONNU (même hors fenêtre 30 j). Un VA
+            # qui a tout arrêté depuis > 30 j reste en faute (au lieu de devenir
+            # invisible quand ses vieux reels sortent de la fenêtre).
+            last_reel = None
+            try:
+                _lr = st.get("last_reel_at") or ""
+                if _lr:
+                    last_reel = _dt_v.datetime.fromisoformat(str(_lr).replace("Z", "+00:00")).date()
+            except Exception:
+                last_reel = None
+            # Entrée STALE (garde-fou scrape vide) : les jours APRÈS le gel sont
+            # inconnus, pas des oublis.
+            ceil = None
+            if st.get("stale"):
+                try:
+                    ceil = _dt_v.date.fromtimestamp(int(st.get("stale_since") or st.get("scraped_at") or 0))
+                except Exception:
+                    ceil = None
+            # Migration : une entrée SANS reel_days (cache d'avant la maj) ne peut
+            # pas prouver un oubli (post_days ignore les reels à 0 vue).
+            trust = ("reel_days" in st)
+            accts.append({"h": h, "rd": rd, "floor": floor, "ceil": ceil,
+                          "first_ok": first_ok, "posts": posts_count,
+                          "last_reel": last_reel, "trust": trust})
+        n_warm_tot += n_warm
+        statuses = []
+        miss_detail = {}
+        oublis = 0
+        for d in days:
+            di = d.isoformat()
+            if d.weekday() in repos:
+                statuses.append("r")
+                continue
+            misses, n_elig = [], 0
+            prev = (d - _dt_v.timedelta(days=1)).isoformat()
+            for ac in accts:
+                if ac["first_ok"] and d < ac["first_ok"]:
+                    continue                     # warm-up
+                if ac["ceil"] and d > ac["ceil"]:
+                    continue                     # données gelées (stale) après cette date
+                if not ac["rd"]:
+                    if ac["posts"] == 0:
+                        n_elig += 1              # compte VIDE : jamais rien posté
+                        misses.append(ac["h"])
+                    elif ac["last_reel"] is not None and d > ac["last_reel"] + _dt_v.timedelta(days=1):
+                        n_elig += 1              # dernier reel connu il y a > 48 h (voire > 30 j)
+                        misses.append(ac["h"])
+                    elif ac["last_reel"] is None and ac["trust"]:
+                        n_elig += 1              # que des photos, jamais de reel -> en faute
+                        misses.append(ac["h"])
+                    continue                     # sinon : données insuffisantes
+                if ac["floor"] and di < ac["floor"]:
+                    continue                     # la fenêtre de reels ne couvre pas ce jour
+                n_elig += 1
+                if di in ac["rd"] or prev in ac["rd"]:
+                    continue                     # en règle (reel < 48 h)
+                if not ac["trust"]:
+                    n_elig -= 1                  # entrée pré-migration : « raté » non prouvable
+                    continue
+                misses.append(ac["h"])
+            if n_elig == 0:
+                statuses.append("n")
+            elif misses:
+                if d == today:
+                    # journée NON FINIE + cache rafraîchi 2x/jour : en retard
+                    # « pour l'instant », affiché orange mais PAS compté ni retenu
+                    statuses.append("p")
+                    miss_detail[di] = misses[:6]
+                else:
+                    statuses.append("x")
+                    oublis += 1
+                    miss_detail[di] = misses[:6]
+            else:
+                statuses.append("g")
+        ded = round(oublis * malus, 2)
+        pay = round(max(0.0, base - ded), 2) if payable else None
+        tot_oublis += oublis
+        tot_ded += ded
+        out_vas.append({
+            "va": vl, "display": g["display"],
+            "idents": sorted(g["idents"]),
+            "n": len(g["accounts"]), "n_suivis": len(accts),
+            "n_ban": n_ban, "n_warm": n_warm, "n_nodata": n_nodata,
+            "statuses": "".join(statuses), "oublis": oublis,
+            "miss": miss_detail,
+            "base": base, "malus": malus, "repos": sorted(repos),
+            "deduction": ded, "pay": pay,
+        })
+    out_vas.sort(key=lambda v: (-v["oublis"], -v["n_suivis"], v["va"]))
+    if day_iso and day_iso[-1] == today.isoformat():
+        late_today = sum(1 for v in out_vas if v["statuses"][-1:] in ("x", "p"))
+    else:
+        late_today = None      # période passée : « là maintenant » n'a pas de sens
+    return {"ok": True, "period": period, "label": lab, "payable": payable,
+            "days": day_iso, "vas": out_vas, "warmup_days": warmup,
+            "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
+                    "vas": len(out_vas), "late_today": late_today,
+                    "warm": n_warm_tot}}
+
+
+def _render_jbactivite_html() -> str:
+    """Page « Activité VA » (jailbreak) : heatmap d'assiduité 1 reel/48 h,
+    warm-up, jours de repos, retenues sur paie. Données locales (cache scrape)."""
+    css = """
+<style>
+#av-root{max-width:1180px}
+.av-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.av-seg{display:inline-flex;background:#0f0f13;border:1px solid #23262f;border-radius:10px;overflow:hidden}
+.av-seg button{background:transparent;border:0;color:#9ca3af;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.av-seg button.on{background:#2563eb;color:#fff}
+.av-hint{color:#6b7280;font-size:11px}
+.av-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.av-card{flex:1;min-width:150px;background:#0f0f13;border:1px solid #1d2027;border-radius:14px;padding:14px 16px}
+.av-card .lab{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase}
+.av-card .val{font-size:26px;font-weight:800;color:#fff;margin-top:2px}
+.av-card .sub{color:#6b7280;font-size:11px;margin-top:2px}
+.av-tbl{background:#0f0f13;border:1px solid #1d2027;border-radius:14px;overflow:hidden}
+.av-row{display:grid;grid-template-columns:minmax(150px,1fr) 90px minmax(240px,1.6fr) 70px 92px 92px 100px 40px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #16181e;color:#d1d5db;font-size:12px}
+.av-row.head{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid #23262f}
+.av-row .num{text-align:right;font-variant-numeric:tabular-nums}
+.av-nm{display:flex;align-items:center;gap:9px;min-width:0}
+.av-pfb{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex:0 0 auto}
+.av-nm .t{min-width:0}
+.av-nm .n{font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.av-nm .s{color:#6b7280;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.av-hm{display:flex;gap:2px;flex-wrap:wrap}
+.av-hm i{width:13px;height:13px;border-radius:3px;display:block}
+.av-hm i.g{background:#16a34a}
+.av-hm i.x{background:#ef4444}
+.av-hm i.r{background:#1d4ed8;opacity:.55}
+.av-hm i.n{background:#23262f}
+.av-hm i.p{background:#f59e0b}
+.av-badge{display:inline-block;background:#1a1d24;border-radius:6px;padding:1px 7px;font-size:10px;color:#9ca3af;margin-right:4px}
+.av-pay{font-weight:800}
+.av-cfg{background:#0f0f13;border:1px solid #23262f;color:#9ca3af;border-radius:8px;padding:5px 9px;cursor:pointer;font-size:12px}
+.av-cfg:hover{color:#fff;border-color:#3b82f6}
+.av-msg{padding:28px;text-align:center;color:#6b7280;font-size:13px}
+.av-legend{display:flex;gap:14px;align-items:center;margin:10px 2px 0;color:#6b7280;font-size:11px;flex-wrap:wrap}
+.av-legend i{width:11px;height:11px;border-radius:3px;display:inline-block;vertical-align:-1px;margin-right:4px}
+#av-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:60;align-items:center;justify-content:center}
+#av-modal.show{display:flex}
+#av-modal .box{background:#111318;border:1px solid #2a2d36;border-radius:16px;padding:22px;min-width:320px;max-width:420px}
+#av-modal h3{margin:0 0 14px;color:#fff;font-size:15px}
+#av-modal label{display:block;color:#9ca3af;font-size:11px;font-weight:700;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.6px}
+#av-modal input[type=number]{width:100%;background:#0c0e12;border:1px solid #23262f;border-radius:9px;color:#fff;padding:9px 11px;font-size:13px}
+.av-days{display:flex;gap:6px;flex-wrap:wrap}
+.av-days label{display:inline-flex;align-items:center;gap:4px;background:#0c0e12;border:1px solid #23262f;border-radius:8px;padding:6px 9px;margin:0;cursor:pointer;font-size:11px;text-transform:none;letter-spacing:0}
+@media(max-width:960px){.av-row{grid-template-columns:minmax(120px,1fr) minmax(150px,1.3fr) 46px 84px 34px}.av-row .hidesm{display:none}}
+</style>
+"""
+    body = """
+<div id="av-root">
+  <div class="av-top">
+    <div class="av-seg" id="av-period">
+      <button data-p="14" class="on" onclick=avPeriod(this)>14 jours</button>
+      <button data-p="q" onclick=avPeriod(this)>Quinzaine en cours</button>
+      <button data-p="qprev" onclick=avPeriod(this)>Quinzaine pr&eacute;c.</button>
+      <button data-p="30" onclick=avPeriod(this)>30 jours</button>
+    </div>
+    <button class="av-cfg" onclick=avLoad() title="Recharger">&#8635;</button>
+    <span class="av-hint" id="av-upd"></span>
+  </div>
+  <div class="av-cards" id="av-cards"></div>
+  <div class="av-tbl" id="av-tbl"><div class="av-msg">Chargement&hellip;</div></div>
+  <div class="av-legend">
+    <span><i style="background:#16a34a"></i>tous les comptes en r&egrave;gle (reel &lt; 48 h)</span>
+    <span><i style="background:#ef4444"></i>oubli (&ge; 1 compte sans reel depuis 48 h)</span>
+    <span><i style="background:#f59e0b"></i>en retard aujourd&#39;hui (journ&eacute;e en cours &mdash; pas encore compt&eacute;)</span>
+    <span><i style="background:#1d4ed8;opacity:.55"></i>jour de repos</span>
+    <span><i style="background:#23262f"></i>pas de donn&eacute;es (warm-up / hors fen&ecirc;tre)</span>
+  </div>
+</div>
+<div id="av-modal" onclick="if(event.target===this)avCfgClose()">
+  <div class="box">
+    <h3 id="av-m-title">Configurer</h3>
+    <input type="hidden" id="av-m-va">
+    <label>Base de paie ($ / quinzaine)</label>
+    <input type="number" id="av-m-base" min="0" step="1">
+    <label>Retenue par jour d&#39;oubli ($)</label>
+    <input type="number" id="av-m-malus" min="0" step="0.5">
+    <label>Jours de repos (jamais comptabilis&eacute;s)</label>
+    <div class="av-days" id="av-m-repos"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button class="av-cfg" onclick=avCfgClose()>Annuler</button>
+      <button class="av-cfg" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick=avCfgSave()>Enregistrer</button>
+    </div>
+  </div>
+</div>
+<script>
+window.__avData = null;
+window.__avPeriod = '14';
+var AV_DAYS_FR = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+function avEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function avNum(n){ return Math.round(n || 0).toLocaleString('fr-FR'); }
+function avMoney(n){ n = Math.round((n || 0) * 100) / 100; return n.toLocaleString('fr-FR') + ' $'; }
+function avHue(s){ var h = 0; for(var i = 0; i < s.length; i++){ h = (h * 31 + s.charCodeAt(i)) % 360; } return h; }
+function avFrD(s){ var p = String(s || '').split('-'); return p.length === 3 ? (p[2] + '/' + p[1]) : s; }
+function avPeriod(btn){
+  window.__avPeriod = btn.getAttribute('data-p') || '14';
+  var seg = document.getElementById('av-period');
+  if(seg){ Array.prototype.forEach.call(seg.querySelectorAll('button'), function(b){ b.classList.toggle('on', b === btn); }); }
+  avLoad();
+}
+function avCards(){
+  var d = window.__avData || {};
+  var t = d.tot || {};
+  var el = document.getElementById('av-cards');
+  if(!el) return;
+  el.innerHTML =
+      '<div class="av-card"><div class="lab">VAs suivis</div><div class="val">' + avNum(t.vas) + '</div><div class="sub">' + avNum(t.warm) + ' compte(s) en warm-up (' + avNum(d.warmup_days) + ' j)</div></div>'
+    + '<div class="av-card"><div class="lab">Oublis &mdash; ' + avEsc(d.label || '') + '</div><div class="val" style="color:' + (t.oublis ? '#ef4444' : '#22c55e') + '">' + avNum(t.oublis) + '</div><div class="sub">1 oubli max / VA / jour</div></div>'
+    + (t.late_today == null ? '' : ('<div class="av-card"><div class="lab">En retard l&agrave; maintenant</div><div class="val" style="color:' + (t.late_today ? '#f59e0b' : '#22c55e') + '">' + avNum(t.late_today) + '</div><div class="sub">&ge; 1 compte sans reel depuis 48 h</div></div>'))
+    + '<div class="av-card"><div class="lab">Retenues totales</div><div class="val" style="color:' + (t.deduction ? '#ef4444' : '#fff') + '">' + avMoney(t.deduction) + '</div><div class="sub">oublis &times; retenue par VA</div></div>';
+}
+function avTable(){
+  var d = window.__avData || {};
+  var vas = d.vas || [];
+  var el = document.getElementById('av-tbl');
+  if(!el) return;
+  var days = d.days || [];
+  var h = '<div class="av-row head"><span>VA</span><span class="hidesm">Comptes</span><span>Assiduit&eacute; (' + days.length + ' j)</span>'
+    + '<span class="num">Oublis</span><span class="num hidesm">Base</span><span class="num hidesm">Retenue</span>'
+    + '<span class="num">&Agrave; payer</span><span></span></div>';
+  if(!vas.length){ h += '<div class="av-msg">Aucun VA jailbreak.</div>'; }
+  vas.forEach(function(v, idx){
+    var hm = '';
+    for(var i = 0; i < v.statuses.length; i++){
+      var c = v.statuses.charAt(i);
+      var ttl = avFrD(days[i]);
+      if(c === 'x' || c === 'p'){
+        var ms = (v.miss || {})[days[i]] || [];
+        ttl += (c === 'p' ? ' : en retard (journée en cours, pas compté)' : ' : oubli')
+             + (ms.length ? (' — @' + ms.join(', @')) : '');
+      } else if(c === 'g'){ ttl += ' : tous les comptes en règle'; }
+      else if(c === 'r'){ ttl += ' : repos'; }
+      else { ttl += ' : pas de données'; }
+      hm += '<i class="' + c + '" title="' + avEsc(ttl) + '"></i>';
+    }
+    var repos = (v.repos || []).map(function(k){ return AV_DAYS_FR[k] || k; }).join(' · ');
+    var sub = v.idents.join(', ') + (repos ? (' · repos : ' + repos) : '');
+    var payTxt = (v.pay == null) ? '<span class="av-hint">&mdash;</span>'
+      : '<span class="av-pay" style="color:' + (v.deduction ? '#f59e0b' : '#22c55e') + '">' + avMoney(v.pay) + '</span>';
+    h += '<div class="av-row">'
+      + '<div class="av-nm"><span class="av-pfb" style="background:hsl(' + avHue(v.va) + ',55%,42%)">' + avEsc(v.display.charAt(0).toUpperCase()) + '</span>'
+      + '<div class="t"><div class="n">' + avEsc(v.display) + '</div><div class="s">' + avEsc(sub) + '</div></div></div>'
+      + '<span class="hidesm">' + avNum(v.n_suivis) + '<span class="av-hint"> / ' + avNum(v.n) + '</span>'
+      + (v.n_ban ? (' <span class="av-badge" style="color:#ef4444">' + avNum(v.n_ban) + ' ban</span>') : '')
+      + (v.n_warm ? (' <span class="av-badge" style="color:#a855f7">' + avNum(v.n_warm) + ' warm</span>') : '') + '</span>'
+      + '<div class="av-hm">' + hm + '</div>'
+      + '<span class="num" style="color:' + (v.oublis ? '#ef4444' : '#22c55e') + ';font-weight:800">' + avNum(v.oublis) + '</span>'
+      + '<span class="num hidesm">' + (v.base ? avMoney(v.base) : '<span class="av-hint">&mdash;</span>') + '</span>'
+      + '<span class="num hidesm" style="color:' + (v.deduction ? '#ef4444' : '#6b7280') + '">' + (v.deduction ? ('&minus;' + avMoney(v.deduction)) : '0 $') + '</span>'
+      + '<span class="num">' + payTxt + '</span>'
+      + '<button class="av-cfg" onclick=avCfgOpen(' + idx + ') title="Base de paie, retenue, jours de repos">&#9998;</button>'
+      + '</div>';
+  });
+  el.innerHTML = h;
+}
+function avCfgOpen(idx){
+  var v = ((window.__avData || {}).vas || [])[idx];
+  if(!v) return;
+  document.getElementById('av-m-title').textContent = 'Configurer ' + v.display;
+  document.getElementById('av-m-va').value = v.va;
+  document.getElementById('av-m-base').value = v.base || 0;
+  document.getElementById('av-m-malus').value = v.malus || 0;
+  var box = document.getElementById('av-m-repos');
+  box.innerHTML = AV_DAYS_FR.map(function(nm, k){
+    return '<label><input type="checkbox" value="' + k + '"' + ((v.repos || []).indexOf(k) !== -1 ? ' checked' : '') + '> ' + nm + '</label>';
+  }).join('');
+  document.getElementById('av-modal').classList.add('show');
+}
+function avCfgClose(){ document.getElementById('av-modal').classList.remove('show'); }
+function avCfgSave(){
+  var fd = new FormData();
+  fd.append('va', document.getElementById('av-m-va').value);
+  fd.append('base', document.getElementById('av-m-base').value || '0');
+  fd.append('malus', document.getElementById('av-m-malus').value || '0');
+  var ks = [];
+  Array.prototype.forEach.call(document.querySelectorAll('#av-m-repos input:checked'), function(c){ ks.push(c.value); });
+  fd.append('repos', ks.join(','));
+  fetch('/jbactivite/cfg', {method: 'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(x){
+      if(x && x.ok){
+        avCfgClose();
+        if(typeof showToast === 'function') showToast('Config enregistrée', 'success', 1800);
+        avLoad();
+      } else if(typeof showToast === 'function'){ showToast((x && x.error) || 'Échec', 'error', 2500); }
+    })
+    .catch(function(){ if(typeof showToast === 'function') showToast('Erreur réseau', 'error', 2500); });
+}
+function avLoad(){
+  fetch('/jbactivite/data?period=' + encodeURIComponent(window.__avPeriod))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        var el = document.getElementById('av-tbl');
+        if(el) el.innerHTML = '<div class="av-msg">Erreur : ' + avEsc((d && d.error) || 'indisponible') + '</div>';
+        return;
+      }
+      window.__avData = d;
+      avCards();
+      avTable();
+      var upd = document.getElementById('av-upd');
+      if(upd) upd.textContent = d.label || '';
+    })
+    .catch(function(){
+      var el = document.getElementById('av-tbl');
+      if(el) el.innerHTML = '<div class="av-msg">Erreur r&eacute;seau &mdash; clique &#8635;</div>';
+    });
+}
+if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ avLoad(); }); } else { avLoad(); }
 </script>
 """
     return css + body
@@ -30477,7 +30955,7 @@ _PERM_KEY_TO_TABS = {
     # panneaux d'upload. Sans cloudoverview, accorder "upload" ne montrait aucun menu.
     "upload": {"cloudoverview", "reel", "post", "story", "storycta", "pp"},
     # La permission « Jailbreak » couvre aussi le sous-onglet Analyse vues.
-    "jailbreak": {"jailbreak", "jbanalyse"},
+    "jailbreak": {"jailbreak", "jbanalyse", "jbactivite"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -31460,6 +31938,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{geelark_html}", _lazy("geelark"))
         .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
         .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
+        .replace("{jbactivite_html}", _g("jbactivite", _render_jbactivite_html))
         .replace("{gms_html}", _lazy("gms"))
         .replace("{linkscale_html}", _lazy("linkscale"))
         .replace("{schedule_html}", _lazy("schedule"))
@@ -35891,6 +36370,38 @@ def create_app():
             return jsonify(_jbanalyse_payload())
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
+
+    @app.route("/jbactivite/data")
+    def jbactivite_data():
+        """Assiduité VA jailbreak (1 reel/48 h, warm-up, repos, retenues)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            return jsonify(_vaact_payload((request.args.get("period") or "14").strip()))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+
+    @app.route("/jbactivite/cfg", methods=["POST"])
+    def jbactivite_cfg():
+        """Config par VA : base de paie, retenue par oubli, jours de repos."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        va = (request.form.get("va") or "").strip().lower()
+        if not va:
+            return jsonify({"ok": False, "error": "va manquant"})
+        try:
+            base = float(request.form.get("base") or 0)
+            malus = float(request.form.get("malus") or 0)
+        except Exception:
+            return jsonify({"ok": False, "error": "montants invalides"})
+        repos = sorted({int(x) for x in (request.form.get("repos") or "").split(",")
+                        if x.strip().isdigit() and 0 <= int(x) <= 6})
+        cfg = _vaact_cfg_load()
+        cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus, "repos": repos}
+        _vaact_cfg_save(cfg)
+        return jsonify({"ok": True})
 
     @app.route("/jailbreak/discord_debug")
     def jailbreak_discord_debug():
