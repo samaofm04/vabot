@@ -6918,12 +6918,11 @@ def _cache_put_stats(handle: str, entry: dict):
         _save_insta_3_stats_cache(cur)
 
 
-def _verify_ig_profile_exists(handle: str) -> bool:
-    """Probe sur instagram.com pour verifier qu'un compte existe.
-
-    Instagram redirige tout vers le SPA donc on doit parser le HTML pour
-    distinguer une vraie page de profil d'un 404.
-    """
+def _verify_ig_profile_exists(handle: str):
+    """Probe sur instagram.com. Retourne True (PREUVE POSITIVE que le profil
+    existe), False (page « introuvable » confirmée) ou None (indéterminé : mur
+    de login, rate-limit, page SPA sans données). Les appelants décident quoi
+    faire du None — en pratique, sur un compte en erreur, c'est un ban."""
     try:
         import requests
         r = requests.get(
@@ -6936,13 +6935,11 @@ def _verify_ig_profile_exists(handle: str) -> bool:
             allow_redirects=True,
         )
     except Exception:
-        return True     # réseau KO -> on ne SAIT pas : surtout ne pas déclarer le compte mort
+        return None     # réseau KO -> indéterminé
     if r.status_code == 404:
-        return False    # seul cas certain d'un compte disparu
+        return False    # cas certain d'un compte disparu
     if r.status_code != 200:
-        # 429 (rate-limit), 5xx, mur de login… : indéterminé. Renvoyer False ici
-        # ferait passer des comptes VIVANTS en « banni » pendant un gros scrape.
-        return True
+        return None     # 429/5xx/mur de login : indéterminé
     txt = r.text or ""
     low = txt.lower()
     # Marqueurs explicites de page introuvable (comparaison en minuscules : la vraie
@@ -6960,11 +6957,13 @@ def _verify_ig_profile_exists(handle: str) -> bool:
     ]
     if any(m in low for m in not_found_markers):
         return False
-    # Marqueur positif : og:title contient le username
-    if f'@{handle.lower()}' in txt.lower() or f'"username":"{handle.lower()}"' in txt.lower():
+    # PREUVE POSITIVE stricte : données de profil dans la page (le simple
+    # « @handle » traînait dans des URLs de redirection -> faux « existe »
+    # sur des comptes bannis).
+    hl = handle.lower()
+    if (f'"username":"{hl}"' in low or f'content="@{hl}' in low or f'(@{hl})' in low):
         return True
-    # Par defaut on suppose qu'il existe si pas de marqueur de 404
-    return True
+    return None         # SPA sans données : indéterminé
 
 
 def _scrape_via_ig_public(handle: str) -> dict:
@@ -7089,9 +7088,11 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         _lm = err_msg.lower()
         if not is_banned and any(m in _lm for m in _gone):
             exists = _verify_ig_profile_exists(h)
-            if exists:
+            if exists is True:
                 err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit)."
             else:
+                # False = confirmé. None = indéterminé, MAIS l'API dit déjà
+                # « introuvable » : dans la vraie vie c'est un ban -> on classe banni.
                 err_msg = f"🚫 Compte introuvable (@{h}) — renommé, supprimé ou banni"
                 is_banned = True
         # « Échec » générique sur un compte qui n'a JAMAIS donné de stats : c'est
@@ -7105,7 +7106,13 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             _last_chk = int(_prev.get("exist_check_ts") or 0)
             if _never_ok and (now_ts - _last_chk) > 20 * 3600:
                 _chk_ts = now_ts
-                if not _verify_ig_profile_exists(h):
+                _lm2 = str(err_msg).lower()
+                _transient = any(k in _lm2 for k in
+                                 ("429", "quota", "rate", "timeout", "réseau", "reseau", "network"))
+                _ex = _verify_ig_profile_exists(h)
+                # Compte JAMAIS vu vivant + erreur non transitoire + pas de preuve
+                # d'existence -> banni (l'expérience : ces « Échec » sont des bans).
+                if _ex is False or (_ex is None and not _transient):
                     is_banned = True
                     err_msg = f"🚫 Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
             else:
