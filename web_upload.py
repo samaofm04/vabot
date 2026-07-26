@@ -3991,6 +3991,9 @@ function showGameLoader(totalCount){
   // Cleanup ancien si present
   var old = document.getElementById('game-loader');
   if(old) old.remove();
+  // Ne pas empiler les intervals : sans ce clear, chaque appel laissait un
+  // polling réseau résiduel (jusqu'à 3+ req/s après quelques clics).
+  try{ clearInterval(window.__gameLoaderTimer); }catch(e){}
   var loader = document.createElement('div');
   loader.id = 'game-loader';
   loader.style.cssText = 'position:fixed;top:18px;right:18px;background:#0a0c10;border:2px solid #3b82f6;border-radius:10px;padding:12px 18px;z-index:99998;box-shadow:0 8px 28px rgba(59,130,246,.35);font-family:monospace;min-width:240px;animation:gameLoaderIn .2s ease';
@@ -22163,8 +22166,29 @@ async function veilleInitModelChips(){
 // existe mais que la barre manque, on la recrée (models en cache, chips en
 // localStorage -> la sélection est conservée).
 document.addEventListener('DOMContentLoaded', function(){
+  // Gardien qui S'ARRÊTE : dès que la barre à chips est là (ou après ~30 s
+  // sans modèle configuré), on coupe le polling. Avant, c'était un setInterval
+  // permanent qui rappelait /veille/models 1 800 fois/heure/onglet.
+  var _tries = 0;
+  var _iv = setInterval(function(){
+    _tries++;
+    if(document.getElementById('veille-model-chips') || _tries > 15){
+      clearInterval(_iv);
+    }
+    veilleInitModelChips();
+  }, 2000);
   setTimeout(veilleInitModelChips, 800);
-  setInterval(veilleInitModelChips, 2000);
+  // Recrée la barre à la demande quand la section Veille est ré-affichée.
+  document.addEventListener('click', function(e){
+    if(e.target && e.target.closest && e.target.closest('[data-nav-va],.item')){
+      setTimeout(function(){
+        if(document.getElementById('veille-send-selected-btn')
+           && !document.getElementById('veille-model-chips')){
+          veilleInitModelChips();
+        }
+      }, 400);
+    }
+  });
 });
 
 // ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
