@@ -16464,12 +16464,28 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
     now = time.time()
     with _PAY_DAYCACHE_LOCK:
         c = _PAY_DAYCACHE.get(key)
-    if c and (is_past or now - float(c[2] if len(c) > 2 else 0) < 120):
-        return int(c[0]), int(c[1])
+    # Un jour n'est DÉFINITIF que s'il a été relevé APRÈS sa fin. Avant ce
+    # correctif, consulter la page à 14 h figeait à vie les clics partiels du
+    # jour (donc sous-paiement de tous les VAs, proportionnel à l'heure).
+    try:
+        import datetime as _dt_pd
+        _d = _dt_pd.date.fromisoformat(iso_day)
+        day_end_ts = time.mktime((_d + _dt_pd.timedelta(days=1)).timetuple())
+    except Exception:
+        day_end_ts = 0
+    if c:
+        _ts = float(c[2] if len(c) > 2 else 0)
+        if (is_past and _ts >= day_end_ts) or (not is_past and now - _ts < 120):
+            return int(c[0]), int(c[1])
     try:
         with gms_mod.api_tag("paie"):
             total, countries = gms_mod.analytics_for_link(lid, iso_day, iso_day)
     except Exception:
+        return 0, 0
+    # PANNE GMS (429, timeout) : analytics_for_link renvoie None EXPRÈS pour ne
+    # pas produire un faux 0. On ne met alors RIEN en cache — sinon un jour
+    # travaillé restait payé $0 pour toujours.
+    if total is None:
         return 0, 0
     total = int(total or 0)
     eligible = 0

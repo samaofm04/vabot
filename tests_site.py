@@ -285,6 +285,90 @@ try:
 except Exception as e:
     check("update_account : testable", False, repr(e)[:80])
 
+
+print()
+print("=" * 70)
+print("7) Sécurité : le gating par rôle est appliqué CÔTÉ SERVEUR")
+print("=" * 70)
+try:
+    import web_upload as _w
+    _app = _w.create_app()
+    _app.config["TESTING"] = True
+    _orig_users = _w._load_web_users
+    _w._load_web_users = lambda: {"chatteur1": {"role": "chatter", "password": "x"}}
+    _c = _app.test_client()
+    with _c.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "chatteur1"
+        _s["role"] = "chatter"
+    for _label, _path, _data in (
+            ("créer un compte owner", "/settings/role/add", {"username": "p", "role": "owner"}),
+            ("se promouvoir", "/settings/role/edit_user", {"username": "chatteur1", "role": "owner"}),
+            ("changer sa commission", "/mypuls/chatter/set_pct", {"name": "chatteur1", "pct": "60"}),
+            ("détourner une adresse crypto", "/mypuls/chatter/set_crypto", {"name": "a", "address": "moi"}),
+            ("ajouter une dépense", "/business/expense/add", {"label": "x", "amount": "10"}),
+            ("supprimer un VA", "/jailbreak/remove_va", {"identity": "e", "va_name": "T"})):
+        _r = _c.post(_path, data=_data)
+        check(f"rôle restreint bloqué : {_label}", _r.status_code == 403, f"HTTP {_r.status_code}")
+    _r = _c.post("/chatting/update_cell", data={"edt": "x", "row": "0", "col": "0", "value": "v"})
+    check("rôle restreint garde son planning", _r.status_code != 403, f"HTTP {_r.status_code}")
+    _w._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _c2 = _app.test_client()
+    with _c2.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "boss"
+        _s["role"] = "owner"
+    _r = _c2.post("/jailbreak/remove_va", data={"identity": "zzz", "va_name": "nope"})
+    check("owner : accès complet conservé", _r.status_code != 403, f"HTTP {_r.status_code}")
+    _w._load_web_users = _orig_users
+except Exception as _e:
+    check("sécurité : testable", False, repr(_e)[:90])
+
+print()
+print("=" * 70)
+print("8) Paie VA : pas de sous-paiement figé, pas de faux zéro")
+print("=" * 70)
+try:
+    import time as _t, datetime as _dtp
+    import web_upload as _w
+    _today = _dtp.date.today()
+    _hier = (_today - _dtp.timedelta(days=1)).isoformat()
+    _midi = _t.mktime((_today - _dtp.timedelta(days=1)).timetuple()) + 12 * 3600
+    _fin = _t.mktime(_today.timetuple())
+
+    class _G:
+        calls = 0
+        def api_tag(self, *a):
+            import contextlib
+            return contextlib.nullcontext()
+        def analytics_for_link(self, lid, a, b):
+            _G.calls += 1
+            return 120, {"FR": 100, "US": 20}
+
+    class _GKo(_G):
+        def analytics_for_link(self, lid, a, b):
+            _G.calls += 1
+            return None, None
+
+    _w._PAY_DAYCACHE.clear()
+    _w._PAY_DAYCACHE[f"L1|{_hier}"] = [45, 30, _midi]
+    _G.calls = 0
+    _tt, _ee = _w._pay_day_stats(_G(), "L1", _hier, True)
+    check("jour relevé en cours de journée : re-téléchargé", _G.calls == 1 and _tt == 120, f"{_tt} calls={_G.calls}")
+    _w._PAY_DAYCACHE[f"L2|{_hier}"] = [77, 70, _fin + 60]
+    _G.calls = 0
+    _tt, _ee = _w._pay_day_stats(_G(), "L2", _hier, True)
+    check("jour complet : servi du cache", _G.calls == 0 and _tt == 77, f"{_tt} calls={_G.calls}")
+    _w._PAY_DAYCACHE.clear()
+    _tt, _ee = _w._pay_day_stats(_GKo(), "L3", _hier, True)
+    check("panne GMS : aucun faux zéro mis en cache",
+          (_tt, _ee) == (0, 0) and f"L3|{_hier}" not in _w._PAY_DAYCACHE, str(list(_w._PAY_DAYCACHE)))
+    _tt, _ee = _w._pay_day_stats(_G(), "L3", _hier, True)
+    check("après la panne : vraie valeur récupérée", _tt == 120 and _ee == 100, f"{_tt}/{_ee}")
+    _w._PAY_DAYCACHE.clear()
+except Exception as _e:
+    check("paie : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
