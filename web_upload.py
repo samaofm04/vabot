@@ -22959,7 +22959,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 6
+GMSDASH_PAYLOAD_VER = 7
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23214,6 +23214,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
             tot, ctry = None, None
         row = {"id": lid, "shortcode": l.get("shortcode") or "",
                "model": _model_of_sc(l.get("shortcode")),
+               "jb": _gmsdash_kind_is_jb(l.get("display_name")),
                "name": l.get("display_name") or l.get("shortcode") or "",
                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
                "us": (ctry or {}).get("US", 0),
@@ -23226,7 +23227,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 if pr is not None:
                     pr.setdefault("rows", []).append(
                         {"id": lid, "shortcode": row["shortcode"], "name": row["name"],
-                         "model": row["model"],
+                         "model": row["model"], "jb": row["jb"],
                          "clicks": tot or 0, "us": row["us"], "fr": row["fr"]})
         return row
 
@@ -23333,6 +23334,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
         fps = [got.get((r["id"], d), (0, 0, 0))[2] for d in day_list]
         out.append({"id": r.get("id"), "name": r.get("name") or r.get("shortcode"),
                     "shortcode": r.get("shortcode"), "model": r.get("model") or "",
+                    "jb": bool(r.get("jb")),
                     "points": pts, "us_points": ups, "fr_points": fps,
                     "total": sum(pts), "us_total": sum(ups), "fr_total": sum(fps)})
     return {"days": day_list, "links": out, "us_available": True}
@@ -23426,19 +23428,41 @@ def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
 
 
 def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
-    """Courbes PAR MODÈLE (lola, amelia…) : mapping par suffixe de shortcode."""
+    """Courbes PAR MODÈLE, éclatées par TYPE (VA normaux / jailbreak) : une entrée
+    par (modèle, type) — le front les somme ou les filtre selon le sélecteur
+    « Tous / VA normaux / Jailbreak ». cap élargi (6 modèles × 2 types)."""
     mmap = _gmsdash_model_map()
 
     def _of(r):
         sc = (r.get("shortcode") or "").lower()
-        return next((mmap[suf] for suf in mmap if sc.endswith(suf)), "autres")
+        model = next((mmap[suf] for suf in mmap if sc.endswith(suf)), "autres")
+        return f"{model}⋄{'jb' if r.get('jb') else 'normal'}"
 
-    return _gmsdash_series_groups(rows, _of, days=days, prog=prog,
-                                  stage="courbe par modèle", cap=10)
+    se = _gmsdash_series_groups(rows, _of, days=days, prog=prog,
+                                stage="courbe par modèle", cap=20)
+    import re as _re_mk
+    for e in (se.get("links") or []):
+        raw = str(e.get("model") or "")
+        model, _, kind = raw.partition("⋄")
+        e["model"] = model
+        e["jb"] = (kind == "jb")
+        _mn = _re_mk.search(r"\((\d+) liens\)", str(e.get("name") or ""))
+        e["n_links"] = int(_mn.group(1)) if _mn else 0
+    return se
 
 
 import re as _re_vajb
 _VAJB_NAME = _re_vajb.compile(r"^\s*([a-z][a-z0-9_.]{1,20})\s+\d+\s*$")
+
+
+def _gmsdash_kind_is_jb(display_name: str) -> bool:
+    """True si le lien est un lien JAILBREAK (nommé « <va> N » : bo7 3, toky 5…).
+    Les liens classiques sont « va_@handle » (ou tout autre nom)."""
+    dn = str(display_name or "").lower()
+    if dn.startswith("va_"):
+        return False
+    m = _VAJB_NAME.match(dn)
+    return bool(m and m.group(1) not in ("va",))
 
 
 def _gmsdash_series_vajb(rows: list, days: int = 7, prog=None) -> dict:
@@ -23741,6 +23765,11 @@ def _render_gmsdash_html() -> str:
     <div class="gd-tg" id="gd-fr" onclick="gdToggleFr()" title="Clics du marché FR : France + Belgique + Suisse + Luxembourg + Monaco (les pays éligibles à la paie)">
       <span class="dot"></span><span>🇫🇷 FR uniquement</span>
     </div>
+    <div class="gd-seg" id="gd-kind" title="Type de liens : VA normaux (va_@pseudo) ou jailbreak (bo7 3, toky 5…)">
+      <button data-k="" class="on" onclick="gdKind(this)">Tous</button>
+      <button data-k="normal" onclick="gdKind(this)">VA normaux</button>
+      <button data-k="jb" onclick="gdKind(this)">🔓 Jailbreak</button>
+    </div>
     <button class="gd-sel" id="gd-refresh" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache (mise à jour des clics)">↻</button>
     __GDKEY2__
 
@@ -23757,6 +23786,15 @@ def _render_gmsdash_html() -> str:
 window.__gdPeriod = '7';
 window.__gdView = 'models';        // par défaut : les courbes PAR MODÈLE (retombe sur « par lien » si 1 seul modèle)
 window.__gdModelOff = {};          // models DÉCOCHÉES (exclues des courbes/tableau) — mémorisé par catégorie
+window.__gdKind = '';              // '' = tous les liens · 'normal' = va_@… · 'jb' = jailbreak (<va> N)
+function gdKindOk(l){ return !window.__gdKind || (l.jb ? 'jb' : 'normal') === window.__gdKind; }
+function gdKind(b){
+  document.querySelectorAll('#gd-kind button').forEach(function(x){ x.classList.remove('on'); });
+  b.classList.add('on');
+  window.__gdKind = b.getAttribute('data-k') || '';
+  window.__gdHidden = {};
+  gdRender(window.__gdData);
+}
 window.__gdModelList = [];
 window.__gdPillsTeam = null;
 function gdOffKey(){ return 'vabot_gd_moff_' + (window.__gdPillsTeam || ''); }
@@ -23893,7 +23931,7 @@ function gdModelPills(d){
   }
   var seen = {}, totals = {};
   ((d && d.links) || []).forEach(function(l){
-    if(l.model && l.model !== 'autres'){
+    if(l.model && l.model !== 'autres' && gdKindOk(l)){
       seen[l.model] = 1;
       totals[l.model] = (totals[l.model] || 0) + gdV(l);
     }
@@ -24081,13 +24119,35 @@ function gdChart(d){
   var seJ = (d && d.series_vajb) || {days:[], links:[]};
   var hasM = ((seM.links) || []).length > 1;    // 1 seul modèle = la vue n'apporte rien
   var hasJ = ((seJ.links) || []).length > 0;    // des liens jailbreak « <va> N » existent
+  if(window.__gdKind === 'normal' && window.__gdView === 'vajb'){ window.__gdView = 'links'; }
   var view = (window.__gdView === 'models' && hasM) ? 'models'
            : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
   var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
   var days = se.days || [];
   var links = (se.links || []).map(function(l, _i){ l._ci = _i; return l; });   // couleur STABLE par série
-  if(view !== 'vajb'){
-    links = links.filter(function(l){ return !gdIsOff(l.model); });
+  if(view === 'models'){
+    // « intelligent » : la série est éclatée (modèle × type) -> on somme côté
+    // client selon le filtre. 1 trait = LE TOTAL de l'identité (pas chaque lien).
+    var agg = {};
+    links.forEach(function(e){
+      if(gdIsOff(e.model) || !gdKindOk(e)) return;
+      var g = agg[e.model];
+      if(!g){
+        g = agg[e.model] = {model: e.model, points: days.map(function(){ return 0; }),
+                            us_points: [], fr_points: [], total: 0, us_total: 0, fr_total: 0, n: 0};
+      }
+      (e.points || []).forEach(function(v, k){ g.points[k] += v; });
+      g.total += e.total || 0; g.us_total += e.us_total || 0; g.fr_total += e.fr_total || 0;
+      g.n += e.n_links || 0;
+    });
+    links = Object.keys(agg).map(function(mn){ return agg[mn]; })
+      .sort(function(a, b){ return b.total - a.total; });
+    links.forEach(function(l, i){
+      l._ci = i;
+      l.name = l.model + (window.__gdKind === 'jb' ? ' 🔓' : '') + ' (' + l.n + ' liens)';
+    });
+  } else if(view !== 'vajb'){
+    links = links.filter(function(l){ return !gdIsOff(l.model) && gdKindOk(l); });
   }
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
   var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : 'lien');
@@ -24210,7 +24270,7 @@ function gdRender(d){
   if(!d) return;
   var m = gdMode();
   gdModelPills(d);
-  var links = (d.links||[]).filter(function(l){ return !gdIsOff(l.model); });
+  var links = (d.links||[]).filter(function(l){ return !gdIsOff(l.model) && gdKindOk(l); });
   links.forEach(function(l){ l._v = gdV(l); });
   links.sort(function(a,b){ return b._v - a._v; });
   var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
