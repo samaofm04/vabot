@@ -1056,10 +1056,34 @@ def register(app, is_auth):
         lid = (request.form.get("id") or "").strip()
         d = _load()
         m = d["months"].get(month) or {}
-        before = len(m.get("lines") or [])
-        m["lines"] = [l for l in (m.get("lines") or []) if l.get("id") != lid]
+        lines = m.get("lines") or []
+        # Une ligne de revenu peut servir de BASE à des payes en % (« 35 % de
+        # OF Lola »). La supprimer sans rien dire mettait ces payes à $0 et
+        # gonflait la part lead d'autant. On prévient, et on répare les liens.
+        deps = []
+        for l in lines:
+            po = str(l.get("pct_of") or "")
+            if (l.get("form") == "pct" and lid and
+                    (po == f"line:{lid}" or (po.startswith("lines:") and lid in po[6:].split(",")))):
+                deps.append(l.get("label") or l.get("id"))
+        if deps and (request.form.get("confirm") or "") != "1":
+            return jsonify({"ok": False, "needs_confirm": True, "dependents": deps,
+                            "error": "Des payes en % utilisent cette ligne comme base : "
+                                     + ", ".join(str(x) for x in deps[:6])})
+        for l in lines:
+            po = str(l.get("pct_of") or "")
+            if l.get("form") != "pct" or not lid:
+                continue
+            if po == f"line:{lid}":
+                l["pct_of"] = "rev_total"          # base disparue -> total des revenus
+            elif po.startswith("lines:"):
+                rest = [i for i in po[6:].split(",") if i and i != lid]
+                l["pct_of"] = ("lines:" + ",".join(rest)) if rest else "rev_total"
+        before = len(lines)
+        m["lines"] = [l for l in lines if l.get("id") != lid]
         _save(d)
-        return jsonify({"ok": True, "deleted": before - len(m["lines"])})
+        return jsonify({"ok": True, "deleted": before - len(m["lines"]),
+                        "relinked": deps})
 
     @app.route("/facture/line/pay", methods=["POST"])
     def facture_line_pay():

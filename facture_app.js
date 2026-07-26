@@ -323,8 +323,27 @@
         e.stopPropagation();
         if (!confirm('Supprimer cette ligne ?')) return;
         var fd = new FormData(); fd.set('month', S.month); fd.set('id', b.dataset.id);
-        fetch('/facture/line/delete', {method: 'POST', body: fd}).then(function (r) { return r.json(); })
-          .then(function (j) { if (j.ok) { toast('Ligne supprimée'); load(S.month); } });
+        var send = function (confirmDeps) {
+          if (confirmDeps) fd.set('confirm', '1');
+          fetch('/facture/line/delete', {method: 'POST', body: fd}).then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (j.ok) {
+                toast(j.relinked && j.relinked.length
+                  ? ('Ligne supprimée · ' + j.relinked.length + ' paye(s) rebasculée(s) sur le total des revenus')
+                  : 'Ligne supprimée');
+                load(S.month);
+              } else if (j.needs_confirm) {
+                // Des payes en % s'appuient sur cette ligne : on demande AVANT
+                // de casser leur base (sinon elles tombaient à $0 en silence).
+                var _q = j.error + String.fromCharCode(10) + String.fromCharCode(10)
+                        + 'Supprimer quand meme ? Ces payes seront recalculees sur le TOTAL des revenus.';
+                if (confirm(_q)) send(true);
+              } else {
+                toast(j.error || 'Échec de la suppression');
+              }
+            });
+        };
+        send(false);
       });
     });
   }
