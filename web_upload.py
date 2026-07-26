@@ -32719,6 +32719,59 @@ def create_app():
             role = ""
         return _role_allowed_tabs(role) is None
 
+    # ==================================================================
+    # GARDE-FOU SERVEUR (faille critique corrigée) : le gating par rôle
+    # n'existait QUE côté client. Un compte restreint (ex. « chatter »)
+    # pouvait appeler n'importe quelle route d'écriture depuis la console —
+    # y compris /settings/role/add pour se créer un compte owner, ou
+    # /mypuls/chatter/set_pct pour changer sa propre commission.
+    # Politique : owner/admin = tout ; rôle restreint = DENY par défaut sur
+    # toute écriture, sauf les routes dont il a réellement besoin.
+    # ==================================================================
+    _RESTRICTED_WRITE_ALLOW = (
+        "/chatting/",          # planning chatteurs (onglet chatplanning)
+        "/logout",
+        "/prefs/", "/settings/prefs", "/theme", "/sfw",
+    )
+    # Écritures réservées aux accès complets, même si un rôle a l'onglet.
+    _ADMIN_ONLY_WRITE = (
+        "/settings/", "/admin/", "/business/", "/facture/", "/mypuls/",
+        "/gms/", "/gmsdash/", "/linkscale/", "/jailbreak/", "/jbactivite/",
+        "/jbanalyse/", "/insta/", "/sheets", "/va/", "/identity/",
+        "/textpool/", "/onboarding/", "/biolinks/", "/geelark/", "/noctus/",
+        "/veille/", "/tg/", "/sfs", "/guild", "/vtg/", "/schedule/",
+    )
+
+    def _live_role() -> str:
+        """Rôle relu depuis le stockage (jamais depuis la seule session : un
+        rôle rétrogradé doit s'appliquer immédiatement)."""
+        try:
+            u = _load_web_users().get((session.get("username") or "").lower())
+            if isinstance(u, dict) and u.get("role"):
+                return str(u.get("role")).lower()
+        except Exception:
+            pass
+        return (session.get("role") or "").lower()
+
+    @app.before_request
+    def _guard_write_routes():
+        from flask import jsonify
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if not is_auth():
+            return None                    # les handlers gèrent déjà l'anonyme
+        path = request.path or ""
+        if _role_allowed_tabs(_live_role()) is None:
+            return None                    # owner / admin : accès complet
+        allowed = any(path.startswith(p) for p in _RESTRICTED_WRITE_ALLOW)
+        if allowed and not any(path.startswith(p) for p in _ADMIN_ONLY_WRITE):
+            return None
+        print(f"[secu] écriture refusée : {session.get('username')} "
+              f"({_live_role()}) -> {path}", flush=True)
+        if request.form.get("ajax") == "1" or "application/json" in (request.headers.get("Accept") or ""):
+            return jsonify({"ok": False, "error": "Action réservée aux administrateurs"}), 403
+        return ("Action réservée aux administrateurs", 403)
+
     def _redirect_back(tab=None):
         """Retourne l URL ou rediriger.
         Priorite : tab explicite > form.back_tab > Referer > /
