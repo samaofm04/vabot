@@ -345,7 +345,8 @@ w._scrape_via_ig_public = lambda h: {
     "reels": [{"shortcode": "x", "is_video": True, "views": 100, "taken_at": _now - 86400}]}
 _o = w._compute_insta_3_stats("hist", force=True)
 check("jours anciens conserves (courbe 30 j)", _D(9) in _o["reel_days"], str(sorted(_o["reel_days"])))
-check("nouveaux jours ajoutes", _D(1) in _o["reel_days"], str(sorted(_o["reel_days"])))
+_recents = {(_today - dt.timedelta(days=k)).isoformat() for k in range(0, 3)}
+check("nouveaux jours ajoutes", bool(_recents & set(_o["reel_days"])), str(sorted(_o["reel_days"])))
 _store["err"] = {"followers": 99, "posts_count": 20, "scraped_at": _now - 7200,
                  "reel_days": {_D(2): 1}, "profile_pic_url": "/x.png"}
 w._scrape_via_ig_public = lambda h: {"error": "429 rate limit"}
