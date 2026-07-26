@@ -24866,8 +24866,14 @@ def _render_jbanalyse_html() -> str:
       <button class="on" onclick=jaMetric(0)>Vues</button>
       <button onclick=jaMetric(1)>Abonn&eacute;s</button>
     </div>
-    <button class="ja-refresh" onclick=jaLoad(1) title="Recharger les donn&eacute;es (sans re-scraper)">&#8635;</button>
-    <button class="ja-refresh" id="ja-scrape" onclick=jaScrape() title="Scrape TOUS les comptes maintenant (~10-15 min) &mdash; les courbes de vues arrivent &agrave; la fin">&#128260; Scraper maintenant</button>
+    <button class="ja-refresh" onclick=jaLoad(1) title="Recharger les donn&eacute;es (sans re-scraper, ne consomme RIEN)">&#8635;</button>
+    <select id="ja-scope" class="ja-refresh" style="padding:7px 10px" title="Limiter le scrape &agrave; une identit&eacute;">
+      <option value="">Toutes les identit&eacute;s</option>
+    </select>
+    <label class="ja-hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Saute les comptes bannis connus (&eacute;conomie de quota &mdash; ils restent v&eacute;rifi&eacute;s les 1er et 15)">
+      <input type="checkbox" id="ja-actifs" checked> actifs seulement
+    </label>
+    <button class="ja-refresh" id="ja-scrape" onclick=jaScrape() title="Lance le scrape (m&ecirc;me quota que la page Jailbreak &mdash; les 2 pages partagent le M&Ecirc;ME cache)">&#128260; Scraper</button>
     <span class="ja-hint" id="ja-upd"></span>
   </div>
   <div class="ja-pills" id="ja-pills"></div>
@@ -24907,16 +24913,32 @@ function jaMetric(m){
   jaRender();
 }
 window.__jaScrapeBusy = 0;
+function jaScopeFill(){
+  var sel = document.getElementById('ja-scope');
+  var d = window.__jaData || {};
+  if(!sel || sel.dataset && sel.dataset.filled === '1') return;
+  var ids = (d.idents || []).map(function(g){ return g.name; });
+  if(!ids.length) return;
+  sel.innerHTML = '<option value="">Toutes les identités</option>' + ids.map(function(n){
+    return '<option value="' + jaEsc(n) + '">' + jaEsc(n) + '</option>';
+  }).join('');
+  if(sel.dataset) sel.dataset.filled = '1';
+}
 function jaScrape(){
   var btn = document.getElementById('ja-scrape');
   if(window.__jaScrapeBusy) return;
   window.__jaScrapeBusy = 1;
   if(btn) btn.style.opacity = '.55';
-  fetch('/insta/refresh_now', {method:'POST'})
+  var fd = new FormData();
+  var sel = document.getElementById('ja-scope');
+  var act = document.getElementById('ja-actifs');
+  if(sel && sel.value) fd.append('identity', sel.value);
+  if(act && act.checked) fd.append('actifs', '1');
+  fetch('/insta/refresh_now', {method:'POST', body: fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.ok){
-        if(typeof showToast === 'function') showToast('Scrape lancé — les courbes arrivent à la fin (~10-15 min)', 'success', 3000);
+        if(typeof showToast === 'function') showToast('Scrape lancé : ' + (d.scope || 'tous') + ' — ' + (d.handles || '?') + ' comptes', 'success', 3200);
         jaPoll(btn);
       } else if(d && String(d.error || '').toLowerCase().indexOf('deja en cours') !== -1){
         jaPoll(btn);
@@ -25203,6 +25225,7 @@ function jaInsights(){
 }
 function jaRender(){
   if(!window.__jaData) return;
+  jaScopeFill();
   jaPills();
   jaCards();
   jaChart();
@@ -39642,6 +39665,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # s'applique qu'au scrape AUTOMATIQUE).
         ident_q = (request.form.get("identity") or request.args.get("identity") or "").strip().lower()
         va_q = (request.form.get("va") or request.args.get("va") or "").strip().lower()
+        actifs_q = (request.form.get("actifs") or request.args.get("actifs") or "").strip() == "1"
         scope = "tous les comptes"
         if ident_q:
             handles = sorted(_jb_handles_for(ident_q, va_q))
@@ -39650,6 +39674,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 return jsonify({"ok": False, "error": f"Aucun compte pour {scope}"})
         else:
             handles = sorted(_all_tracked_handles())
+        if actifs_q:
+            # Actifs seulement : saute les bannis connus (économie RapidAPI — les
+            # bannis restent re-vérifiés par le scrape auto du 1er et du 15).
+            _c_act = _load_insta_3_stats_cache()
+            _n_avant = len(handles)
+            handles = [h for h in handles if not (_c_act.get(h) or {}).get("banned")]
+            scope += f" · actifs seulement ({_n_avant - len(handles)} bannis sautés)"
+            if not handles:
+                return jsonify({"ok": False, "error": f"Aucun compte actif ({scope})"})
         # Lance en thread background
         import threading as _th2
         def _bg():
