@@ -23678,6 +23678,12 @@ def _render_gmsdash_html() -> str:
 .gd-mpills button.on{background:rgba(37,99,235,.18);border-color:#2563eb;color:#fff}
 .gd-mpills img,.gd-mpills .fb{width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .gd-mpills .fb{background:linear-gradient(135deg,#3b82f6,#a855f7);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800}
+.gd-mcard{display:inline-flex;align-items:center;gap:8px;background:#14161c;border:1px solid #2b2f3a;border-radius:12px;padding:7px 13px 7px 9px;font-size:12px;color:#e6e6ea;cursor:pointer;font-weight:700;transition:all .12s;user-select:none}
+.gd-mcard:hover{border-color:#3a3f4d}
+.gd-mcard input{accent-color:#2563eb;width:14px;height:14px;cursor:pointer;margin:0}
+.gd-mcard b{color:#4ade80;font-variant-numeric:tabular-nums}
+.gd-mcard.offm{opacity:.45}
+.gd-mcard.offm b{color:#6b7280}
 .gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px;position:relative}
 .gd-tip{position:absolute;display:none;background:#16181f;border:1px solid #2b2f3a;border-radius:10px;padding:10px 12px;font-size:11.5px;pointer-events:none;z-index:10;box-shadow:0 8px 22px rgba(0,0,0,.5);min-width:170px}
 .gd-tip .d{font-weight:800;color:#fff;margin-bottom:6px}
@@ -23726,8 +23732,11 @@ def _render_gmsdash_html() -> str:
 <script>
 window.__gdPeriod = '7';
 window.__gdView = 'models';        // par défaut : les courbes PAR MODÈLE (retombe sur « par lien » si 1 seul modèle)
-window.__gdModel = '';             // filtre : '' = toutes les models
+window.__gdModelOff = {};          // models DÉCOCHÉES (exclues des courbes/tableau) — mémorisé par catégorie
 window.__gdModelList = [];
+window.__gdPillsTeam = null;
+function gdOffKey(){ return 'vabot_gd_moff_' + (window.__gdPillsTeam || ''); }
+function gdIsOff(m){ return !!window.__gdModelOff[m || '']; }
 window.__gdUs = false;
 window.__gdFr = false;
 function gdMode(){ return window.__gdUs ? 'us' : (window.__gdFr ? 'fr' : ''); }
@@ -23809,20 +23818,36 @@ function gdSchedulePoll(ms){
 function gdModelPills(d){
   var box = document.getElementById('gd-mpills');
   if(!box) return;
-  var seen = {};
-  ((d && d.links) || []).forEach(function(l){ if(l.model && l.model !== 'autres') seen[l.model] = 1; });
+  // Mémorisation par catégorie : au changement de team, on recharge les décochées
+  var team = (d && d.team) || '';
+  if(window.__gdPillsTeam !== team){
+    window.__gdPillsTeam = team;
+    try{ window.__gdModelOff = JSON.parse(localStorage.getItem(gdOffKey()) || '{}') || {}; }
+    catch(e){ window.__gdModelOff = {}; }
+  }
+  var seen = {}, totals = {};
+  ((d && d.links) || []).forEach(function(l){
+    if(l.model && l.model !== 'autres'){
+      seen[l.model] = 1;
+      totals[l.model] = (totals[l.model] || 0) + gdV(l);
+    }
+  });
   var models = Object.keys(seen).sort();
   window.__gdModelList = models;
   if(models.length < 2){ box.innerHTML = ''; return; }
   var avs = (d && d.model_avatars) || {};
-  var htmlP = '<button class="' + (window.__gdModel ? '' : 'on') + '" onclick=gdModelSel(-1)>'
+  var anyOff = models.some(function(mn){ return gdIsOff(mn); });
+  var htmlP = '<button class="' + (anyOff ? '' : 'on') + '" onclick=gdModelSel(-1) title="Tout recocher">'
     + '<span class="fb">∀</span>Toutes</button>';
   models.forEach(function(mn, i){
+    var off = gdIsOff(mn);
     var av = avs[mn];
     var head = av ? ('<img src="' + gdEsc(av) + '" onerror="this.style.display=String.fromCharCode(110,111,110,101)">')
                   : ('<span class="fb">' + gdEsc(mn.charAt(0).toUpperCase()) + '</span>');
-    htmlP += '<button class="' + (window.__gdModel === mn ? 'on' : '') + '" onclick=gdModelSel(' + i + ')>'
-      + head + gdEsc(mn.charAt(0).toUpperCase() + mn.slice(1)) + '</button>';
+    htmlP += '<label class="gd-mcard' + (off ? ' offm' : '') + '" title="Décocher = retirer cette model des courbes et du tableau">'
+      + '<input type="checkbox"' + (off ? '' : ' checked') + ' onchange=gdModelSel(' + i + ')>'
+      + head + '<span>' + gdEsc(mn.charAt(0).toUpperCase() + mn.slice(1)) + '</span>'
+      + '<b>' + gdNum(totals[mn] || 0) + '</b></label>';
   });
   box.innerHTML = htmlP;
 }
@@ -23920,8 +23945,12 @@ function gdToggleSerie(i){
 }
 function gdModelSel(i){
   var list = window.__gdModelList || [];
-  var pick = (i < 0) ? '' : (list[i] || '');
-  window.__gdModel = (window.__gdModel === pick) ? '' : pick;   // re-cliquer = tout afficher
+  if(i < 0){ window.__gdModelOff = {}; }                        // « Toutes » = tout recocher
+  else {
+    var mn = list[i];
+    if(mn){ if(window.__gdModelOff[mn]){ delete window.__gdModelOff[mn]; } else { window.__gdModelOff[mn] = true; } }
+  }
+  try{ localStorage.setItem(gdOffKey(), JSON.stringify(window.__gdModelOff)); }catch(e){}
   window.__gdHidden = {};
   gdRender(window.__gdData);
 }
@@ -23945,8 +23974,8 @@ function gdChart(d){
            : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
   var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
   var days = se.days || [], links = se.links || [];
-  if(window.__gdModel && view !== 'vajb'){
-    links = links.filter(function(l){ return (l.model || '') === window.__gdModel; });
+  if(view !== 'vajb'){
+    links = links.filter(function(l){ return !gdIsOff(l.model); });
   }
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
   var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : 'lien');
@@ -24069,9 +24098,7 @@ function gdRender(d){
   if(!d) return;
   var m = gdMode();
   gdModelPills(d);
-  var links = (d.links||[]).filter(function(l){
-    return !window.__gdModel || (l.model || '') === window.__gdModel;
-  });
+  var links = (d.links||[]).filter(function(l){ return !gdIsOff(l.model); });
   links.forEach(function(l){ l._v = gdV(l); });
   links.sort(function(a,b){ return b._v - a._v; });
   var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
