@@ -23462,11 +23462,13 @@ def _gmsdash_store(team: str, period: str, payload: dict):
 def _gmsdash_kick(team: str, period: str, force: bool = False) -> bool:
     """Lance le calcul en ARRIÈRE-PLAN (1 seul à la fois par clé)."""
     key = f"{team}|{period}"
+    import time as _t_k
     with _GMSDASH_LOCK:
         if key in _GMSDASH_INFLIGHT:
             return False
         _GMSDASH_INFLIGHT.add(key)
         _GMSDASH_PROGRESS[key] = {"done": 0, "total": 0, "rows": [],
+                                  "started_at": int(_t_k.time()),
                                   "stage": "liste des liens", "error": ""}
     import threading as _th_k
 
@@ -23718,7 +23720,7 @@ def _render_gmsdash_html() -> str:
     <div class="gd-tg" id="gd-fr" onclick="gdToggleFr()" title="Clics du marché FR : France + Belgique + Suisse + Luxembourg + Monaco (les pays éligibles à la paie)">
       <span class="dot"></span><span>🇫🇷 FR uniquement</span>
     </div>
-    <button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache">↻</button>
+    <button class="gd-sel" id="gd-refresh" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache (mise à jour des clics)">↻</button>
     __GDKEY2__
 
   </div>
@@ -23870,11 +23872,22 @@ function gdProgressHtml(p){
   p = p || {};
   var tot = p.total || 0, don = p.done || 0;
   var pct = tot ? Math.min(100, Math.round(don * 100 / tot)) : 0;
+  // ETA « prêt dans ~X » : vitesse réelle mesurée depuis le début du calcul
+  var eta = '';
+  if(tot && don > 2 && p.started_at){
+    var el = (Date.now() / 1000) - p.started_at;
+    if(el > 3){
+      var rem = Math.max(0, Math.round(el * (tot - don) / don));
+      eta = ' · prêt dans ~' + (rem >= 60
+        ? (Math.floor(rem / 60) + ' min' + (rem % 60 ? ' ' + (rem % 60) + ' s' : ''))
+        : (rem + ' s'));
+    }
+  }
   var err = p.error ? ('<div style="color:#f87171;font-size:11px;margin-top:8px">⚠ ' + gdEsc(p.error)
     + ' — nouvelle tentative automatique…</div>') : '';
   return '<div class="gd-msg" style="text-align:left;padding:16px 18px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">'
-    + '<span>⏳ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '</span>'
+    + '<span>⏳ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '<b style="color:#4ade80">' + eta + '</b></span>'
     + '<b style="color:#4ade80;font-variant-numeric:tabular-nums">' + don + ' / ' + (tot || '…')
     + (tot ? ('&nbsp;(' + pct + '%)') : '') + '</b></div>'
     + '<div style="height:8px;background:#1b1e27;border-radius:20px;overflow:hidden">'
@@ -23904,6 +23917,8 @@ function gdLoad(force){
   }).then(function(d){
     if(!d || !d.ok) throw new Error((d && d.error) || 'Erreur');
     if(d.loading){
+      var rb = document.getElementById('gd-refresh');
+      if(rb){ rb.disabled = true; rb.style.opacity = '.5'; rb.style.cursor = 'wait'; rb.textContent = '⏳'; }
       var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
       document.getElementById('gd-ctry').innerHTML = '';
       var q = (d.progress || {}).quick;
@@ -23931,9 +23946,13 @@ function gdLoad(force){
       gdSchedulePoll(2000);
       return;
     }
+    var rb2 = document.getElementById('gd-refresh');
+    if(rb2){ rb2.disabled = false; rb2.style.opacity = '1'; rb2.style.cursor = 'pointer'; rb2.textContent = '↻'; }
     window.__gdData = d; gdRender(d);
     if(d.refreshing){ gdSchedulePoll(5000); }   // le fond recalcule -> on rafraîchira
   }).catch(function(e){
+    var rb3 = document.getElementById('gd-refresh');
+    if(rb3){ rb3.disabled = false; rb3.style.opacity = '1'; rb3.style.cursor = 'pointer'; rb3.textContent = '↻'; }
     // On garde le tableau précédent s'il y en a un (ne pas perdre l'affichage)
     var tbl = document.getElementById('gd-tbl');
     var had = window.__gdData && (window.__gdData.links||[]).length;
