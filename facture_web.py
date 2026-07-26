@@ -453,6 +453,10 @@ def compute_state(month: str) -> dict:
     d = _load()
     settings = {
         "eur_usd": _month_rate(d, month),
+        # BRUT : 0 = mode auto (taux BCE live). Le champ du modal doit afficher
+        # CE zéro (vide), pas le taux résolu — sinon enregistrer les réglages
+        # figeait le taux auto sur la valeur du jour pour tout le site.
+        "eur_usd_raw": float(d["settings"].get("eur_usd") or 0),
         "cutoff": int(d["settings"].get("cutoff") or 15),
         "associates": d["settings"].get("associates") or [],
     }

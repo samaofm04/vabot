@@ -618,7 +618,7 @@
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">' +
       '<div style="font-size:17px;font-weight:800">⚙️ Paramètres de calcul</div>' +
       '<button class="fx-close" style="background:#1d1d28;border:0;color:#999;width:30px;height:30px;border-radius:8px;cursor:pointer;margin:0">✕</button></div>' +
-      fld('💱 Taux EUR → USD', '<input id="fxs-rate" type="number" step="0.01" min="0.5" max="2" style="' + INP + '" value="' + st.eur_usd + '">') +
+      fld('💱 Taux EUR → USD', '<input id="fxs-rate" type="number" step="0.01" min="0.5" max="2" style="' + INP + '" value="' + ((st.eur_usd_raw ? st.eur_usd_raw : '')) + '" placeholder="auto (' + (st.eur_usd || '') + ')">') +
       fld('💸 Jour de coupure paie chatters', '<input id="fxs-cutoff" type="number" min="1" max="28" style="' + INP + '" value="' + st.cutoff + '">') +
       '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin-bottom:16px">Découpe le mois en 2 périodes de paie : <b style="color:#c0c0d5">1 → ce jour</b> et <b style="color:#c0c0d5">jour+1 → fin du mois</b>. Défaut : 15 (1-15 / 16-fin).</div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
