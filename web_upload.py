@@ -23791,9 +23791,30 @@ function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
 function gdChangeKey(){
   var host = document.getElementById('gd-key2wrap');
   if(!host) return;
-  host.outerHTML = '<input id="gd-key2" class="gd-sel" type="password" style="min-width:230px" placeholder="Nouvelle clé gms_live_…">'
-    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKey2()" title="Enregistrer">🔑</button>';
+  host.outerHTML = '<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center">'
+    + '<input id="gd-key2" class="gd-sel" type="password" style="min-width:290px" '
+    + 'placeholder="POOL dashboard : tes 5 clés séparées par des virgules">'
+    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKey2()" title="Enregistrer le pool dashboard">🔑</button>'
+    + '<input id="gd-keymain" class="gd-sel" type="password" style="min-width:250px" '
+    + 'placeholder="Clé PRINCIPALE (report horaire + paie)">'
+    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKeyMain()" title="Enregistrer la clé principale">💾</button>'
+    + '</span>';
   var el = document.getElementById('gd-key2'); if(el) el.focus();
+}
+function gdSaveKeyMain(){
+  var el = document.getElementById('gd-keymain');
+  var k = (el && el.value || '').trim();
+  if(!k){ if(typeof showToast==='function') showToast('Colle la clé principale gms_live_…','error'); return; }
+  var fd = new FormData(); fd.append('key', k);
+  fetch('/gmsdash/set_main_key', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if(d && d.ok){
+        if(typeof showToast==='function') showToast('💾 Clé principale remplacée et testée (ping OK) — report horaire + paie basculés','success',7000);
+        if(el){ el.value=''; el.placeholder='clé principale OK ✓'; }
+      } else {
+        if(typeof showToast==='function') showToast('❌ '+((d&&d.error)||'?'),'error',8000);
+      }
+    }).catch(function(e){ if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
 }
 function gdSaveKey2(){
   var el = document.getElementById('gd-key2');
@@ -31856,6 +31877,25 @@ def create_app():
                         break
             out.append({"id": tid, "name": name, "link_count": n})
         return jsonify({"ok": True, "teams": out})
+
+    @app.route("/gmsdash/set_main_key", methods=["POST"])
+    def gmsdash_set_main_key():
+        """Remplace la clé PRINCIPALE GetMySocial (report horaire + paie + pages),
+        puis la teste immédiatement (ping)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import gms
+        k = (request.form.get("key") or "").strip()
+        if not k.startswith("gms_") or len(k) < 20:
+            return jsonify({"ok": False, "error": "clé invalide (gms_…, 20+ caractères)"})
+        gms.save_api_key(k)
+        try:
+            pr = gms.ping() or {}
+            return jsonify({"ok": bool(pr.get("ok")),
+                            "error": None if pr.get("ok") else f"clé enregistrée mais ping KO : {str(pr.get('error'))[:100]}"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"clé enregistrée, test impossible : {e}"[:140]})
 
     @app.route("/gmsdash/set_key", methods=["POST"])
     def gmsdash_set_key():
