@@ -68,7 +68,7 @@ def _trace(txt: str):
 
 def _load() -> dict:
     try:
-        d = json.loads(CFG_FILE.read_text(encoding="utf-8"))
+        d = safe_json.load_or_prev(CFG_FILE)
         if isinstance(d, dict):
             d.setdefault("topics", {})
             d.setdefault("sources", {})

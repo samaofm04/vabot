@@ -17,7 +17,7 @@ def _load_all() -> dict:
     if not BIO_FILE.exists():
         return {}
     try:
-        return json.loads(BIO_FILE.read_text(encoding="utf-8"))
+        return safe_json.load_or_prev(BIO_FILE)
     except Exception:
         return {}
 

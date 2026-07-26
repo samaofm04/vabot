@@ -68,7 +68,7 @@ def _load() -> Dict[str, Any]:
     if not POOL_FILE.exists():
         return {c: [] for c in CATEGORIES}
     try:
-        data = json.loads(POOL_FILE.read_text(encoding="utf-8"))
+        data = safe_json.load_or_prev(POOL_FILE)
         for c in CATEGORIES:
             if c not in data:
                 data[c] = []

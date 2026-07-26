@@ -112,3 +112,27 @@ def load(path, default: Any = None) -> Any:
             except Exception:
                 pass
         return default
+
+
+def load_or_prev(path):
+    """Comme json.loads(path.read_text()) mais avec le filet .prev.
+
+    LEVE si rien n'est lisible (les appelants ont deja un try/except qui
+    retombe sur leur valeur par defaut) : on ne fait donc jamais croire a un
+    fichier vide alors qu'une sauvegarde existe.
+    """
+    import json as _j
+    from pathlib import Path as _P
+    p = _P(path)
+    txt = p.read_text(encoding="utf-8")     # laisse remonter FileNotFoundError
+    try:
+        return _j.loads(txt)
+    except Exception:
+        prev = p.with_suffix(p.suffix + ".prev")
+        data = _j.loads(prev.read_text(encoding="utf-8"))
+        print(f"[safe_json] ✔ {p.name} illisible -> restauré depuis {prev.name}", flush=True)
+        try:
+            write_text(p, _j.dumps(data, indent=2, ensure_ascii=False), backup=False)
+        except Exception:
+            pass
+        return data

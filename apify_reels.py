@@ -30,7 +30,7 @@ BASE = "https://api.apify.com/v2"
 
 def _load() -> dict:
     try:
-        d = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        d = safe_json.load_or_prev(CONFIG_FILE)
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}

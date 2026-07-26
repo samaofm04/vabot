@@ -39,7 +39,7 @@ def _load() -> Dict[str, Any]:
     if not VEILLE_FILE.exists():
         return {"reels": []}
     try:
-        data = json.loads(VEILLE_FILE.read_text(encoding="utf-8"))
+        data = safe_json.load_or_prev(VEILLE_FILE)
         if "reels" not in data:
             data["reels"] = []
         return data

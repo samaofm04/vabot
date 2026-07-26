@@ -25,7 +25,7 @@ ALL_FEATURES = ("contenu", "onboarding", "clics", "liens", "tickets", "statut", 
 
 def _load() -> dict:
     try:
-        d = json.loads(_FILE.read_text(encoding="utf-8"))
+        d = safe_json.load_or_prev(_FILE)
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}

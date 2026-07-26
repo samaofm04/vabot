@@ -85,7 +85,7 @@ def _load() -> Dict[str, Any]:
     if not SETUP_FILE.exists():
         return {"platforms": {p: {"identities": {}} for p in PLATFORMS}}
     try:
-        data = json.loads(SETUP_FILE.read_text(encoding="utf-8"))
+        data = safe_json.load_or_prev(SETUP_FILE)
         # Migration depuis l'ancien format (sans plateformes)
         if "identities" in data and "platforms" not in data:
             data = {"platforms": {
