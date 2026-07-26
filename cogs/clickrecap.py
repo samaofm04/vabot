@@ -982,10 +982,13 @@ class ClickRecap(commands.Cog):
             dstats = await self._fetch_daily_stats(link.get("id"), gms, p_start, p_end)
             elig = sum(v[1] for v in dstats.values() if v is not None)
             money = sum(self._money_for_clicks(v[1]) for v in dstats.values() if v is not None)
-            if money <= 0:
+            # Jours dont la lecture GetMySocial a ECHOUE (429/timeout) : ils
+            # etaient purement ignores -> montant sous-evalue SANS aucun signal.
+            missing = sum(1 for v in dstats.values() if v is None)
+            if money <= 0 and not missing:
                 continue
             cat = ch.category.name if getattr(ch, "category", None) else "Sans catégorie"
-            rows.append((cat, h, elig, money))
+            rows.append((cat, h, elig, money, missing))
         return rows
 
     @staticmethod
@@ -994,18 +997,25 @@ class ClickRecap(commands.Cog):
         Retourne une liste de lignes."""
         from collections import defaultdict
         by_cat = defaultdict(list)
-        for cat, h, elig, money in rows:
-            by_cat[cat].append((h, elig, money))
-        cat_total = {c: sum(m for _, _, m in v) for c, v in by_cat.items()}
+        for _r in rows:
+            cat, h, elig, money = _r[0], _r[1], _r[2], _r[3]
+            miss = _r[4] if len(_r) > 4 else 0
+            by_cat[cat].append((h, elig, money, miss))
+        cat_total = {c: sum(m for _, _, m, _m in v) for c, v in by_cat.items()}
         grand = sum(cat_total.values())
         lines = [f"💸 **{title}**",
                  "_clics éligibles uniquement · triés du + payé au - payé_", ""]
         for c in sorted(by_cat.keys(), key=lambda x: -cat_total[x]):
             lines.append(f"📁 **{c}** — sous-total **${cat_total[c]:.2f}**")
-            for h, elig, money in sorted(by_cat[c], key=lambda x: -x[2]):
-                lines.append(f"  • `va-{h}` — {elig} élig. → **${money:.2f}**")
+            for h, elig, money, miss in sorted(by_cat[c], key=lambda x: -x[2]):
+                warn = f"  ⚠️ {miss} j illisible(s) — montant INCOMPLET" if miss else ""
+                lines.append(f"  • `va-{h}` — {elig} élig. → **${money:.2f}**{warn}")
             lines.append("")
+        n_miss = sum((r[4] if len(r) > 4 else 0) for r in rows)
         lines.append(f"💰 **TOTAL À PAYER : ${grand:.2f}**  ·  {len(rows)} VA")
+        if n_miss:
+            lines.append(f"⚠️ **{n_miss} jour(s) non lus** (quota GMS) : le total est un MINIMUM. "
+                         f"Relance la commande dans quelques minutes avant de payer.")
         return lines
 
     async def _run_pay_report(self, interaction, which):
