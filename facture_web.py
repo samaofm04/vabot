@@ -916,14 +916,34 @@ def _seed_of_fee_amelia_mypuls():
 def register(app, is_auth):
     from flask import request, jsonify, send_file
 
-    _seed_pay35_20260709()  # one-shot : payes 35% Lola/Emma/Alicia (voir docstring)
-    _seed_rev_compte2_20260709()  # one-shot : revenus compte séparé Amelia/Julia/Lola + payes %
-    _seed_of_chatters_20260709()  # one-shot : compte 2 -> Revenue OF + chatteurs % liés aux 3
-    _seed_chatters_mym_20260709()  # CORRECTIF : chatteurs % -> CA MyPuls (toutes sauf Amelia)
-    _seed_va_classique_20260709()  # one-shot : ligne auto VA classique (clics x 0.07$)
-    _seed_frais_crm_20260709()  # one-shot : ligne auto Frais CRM MyPuls (factures du mois)
-    _seed_of_amelia_mrn()  # one-shot : OF amelia.mrn (CA auto MyPuls) + paye 30%
-    _seed_of_fee_amelia_mypuls()  # one-shot : OF Amelia (MyPuls) = brut -> net (-20%)
+    # ---- Graines « one-shot » du 09/07/2026 ----------------------------------
+    # Elles se ré-exécutaient à CHAQUE démarrage tant que leur drapeau n'était
+    # pas posé : une ligne supprimée volontairement (paye 35 %, ligne de CA…)
+    # revenait d'entre les morts au redémarrage suivant, et les liens % des
+    # chatteurs pouvaient être réécrits par-dessus un choix manuel.
+    # Elles ne servent plus qu'à une base VIERGE : on ne les lance donc que si
+    # le mois courant n'a aucune ligne, et on les retire définitivement ensuite.
+    try:
+        _d_seed = _load()
+        if not _d_seed["settings"].get("seeds_20260709_retired"):
+            _m_seed = (_d_seed["months"].get(_cur_month()) or {}).get("lines") or []
+            if not _m_seed:
+                _seed_pay35_20260709()
+                _seed_rev_compte2_20260709()
+                _seed_of_chatters_20260709()
+                _seed_chatters_mym_20260709()
+                _seed_va_classique_20260709()
+                _seed_frais_crm_20260709()
+                _seed_of_amelia_mrn()
+                _seed_of_fee_amelia_mypuls()
+                print("[facture] graines initiales appliquées (facture vierge)", flush=True)
+            else:
+                print("[facture] graines one-shot retirées (facture déjà remplie)", flush=True)
+            _d2_seed = _load()
+            _d2_seed["settings"]["seeds_20260709_retired"] = True
+            _save(_d2_seed)
+    except Exception as _e_seed:
+        print(f"[facture] graines : {_e_seed}", flush=True)
 
     @app.route("/facture/app.js")
     def facture_app_js():
