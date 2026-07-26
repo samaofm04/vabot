@@ -32178,14 +32178,28 @@ def _render_upload_inner(msg=None, error=None):
     allowed = _role_allowed_tabs(role)  # None = acces complet (owner/admin uniquement)
 
     def _g(tab, producer):
-        """Contenu d'un onglet. On rend TOUJOURS le contenu : vider cote serveur
-        cassait le CSS/JS partage entre onglets (ex: la page Jailbreak perdait
-        son style quand l'onglet VA-list etait masque). La restriction est geree
-        cote client (nav + panneaux caches par _role_gate_script)."""
+        """Contenu d'un onglet.
+
+        Rôle RESTREINT + onglet interdit : on ne renvoie plus les DONNÉES au
+        navigateur (elles étaient dans le HTML, donc lisibles en « voir la
+        source » malgré le masquage visuel). On conserve uniquement les blocs
+        <style>/<script> de la page — c'est eux qui sont partagés entre onglets
+        et dont la suppression cassait le rendu des onglets autorisés.
+        """
         try:
-            return producer()
+            html = producer()
         except Exception:
             return ""
+        try:
+            if allowed is not None and tab not in allowed:
+                import re as _re_g
+                keep = "".join(_re_g.findall(r"<style[^>]*>.*?</style>", html, _re_g.S))
+                keep += "".join(_re_g.findall(r"<script[^>]*>.*?</script>", html, _re_g.S))
+                return keep + ("<div style='padding:40px;text-align:center;color:#6b7280'>"
+                               "Accès non autorisé.</div>")
+        except Exception:
+            pass
+        return html
 
     # Onglets LOURDS (I/O réseau) : on ne les rend PAS au 1er chargement. On pose
     # un placeholder ; showTab() va chercher le fragment via /?lazy=<name> au 1er
