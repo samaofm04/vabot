@@ -1593,8 +1593,19 @@ def fr_market_eligible_clicks(start_date: str, end_date: str,
             eligible += elig
             if okb:
                 ok_batches += 1
+    failed_batches = len(chunks) - ok_batches
     if ok_batches == 0:  # tout a échoué -> indispo (l'appelant garde l'ancien)
         return {"ok": False, "error": "analytics indisponible",
+                "eligible": 0, "total": 0, "links": len(all_ids), "per_model": per_model}
+    if failed_batches:
+        # PARTIEL : des lots ont échoué (429/timeout). Renvoyer « ok » avec un
+        # total amputé le faisait FIGER en cache dans la Facture (clics FR
+        # sous-comptés à vie pour ce mois). On signale l'échec : l'appelant
+        # conserve sa dernière valeur complète.
+        print(f"[gms] fr_market_eligible_clicks PARTIEL : {failed_batches}/{len(chunks)} lots KO "
+              f"-> valeur ignorée (eligible={eligible})", flush=True)
+        return {"ok": False, "error": f"lecture partielle ({failed_batches} lot(s) sur {len(chunks)})",
+                "partial": True, "partial_eligible": eligible, "partial_total": total,
                 "eligible": 0, "total": 0, "links": len(all_ids), "per_model": per_model}
     return {"ok": True, "eligible": eligible, "total": total,
             "links": len(all_ids), "per_model": per_model, "source": source,
