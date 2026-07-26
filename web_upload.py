@@ -19294,9 +19294,15 @@ def _render_jailbreak_html() -> str:
                 return (2, 0)                      # jamais scrapé
             if st.get("error"):
                 return (3, 0)                      # échec (souvent des bannis pas encore confirmés)
-            # actif : les plus grosses vues de la semaine en premier
-            return ((1, 0) if st.get("stale") else (0, -(st.get("weekly") or 0)))
-        return sorted(accts, key=_rank)
+            # actif : le plus d'ABONNÉS en premier (meilleur compte en tête),
+            # égalité départagée par les vues de la semaine
+            if st.get("stale"):
+                return (1, 0, 0)
+            return (0, -(st.get("followers") or 0), -(st.get("weekly") or 0))
+        def _rank3(a):
+            r = _rank(a)
+            return r if len(r) == 3 else (r[0], r[1], 0)
+        return sorted(accts, key=_rank3)
 
     # === Helper rendu compte (utilise globalement) ===
     def _render_account_row(a: dict, ident_lc_arg: str) -> str:
