@@ -1405,7 +1405,35 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeSpeed}
 
 /* 6) Squelettes de chargement : une pulsation douce vaut mieux qu'un texte figé. */
 @keyframes siteSkel{0%,100%{opacity:.45}50%{opacity:.9}}
-.ja-msg,.av-msg,.gd-msg{animation:siteSkel 1.4s ease-in-out infinite}
+/* Seuls les messages explicitement marqués « chargement » pulsent — les
+   erreurs et états vides restent stables (avant, ils clignotaient comme un
+   skeleton et donnaient l'impression que ça chargeait sans fin). */
+.is-loading,.ja-msg.loading,.av-msg.loading,.gd-msg.loading{animation:siteSkel 1.4s ease-in-out infinite}
+
+/* FIX #4 : color-scheme déclaré -> les widgets natifs (sélecteurs de date,
+   ascenseurs, menus déroulants) suivent le thème au lieu d'être rendus en
+   clair UA sur un fond sombre. */
+:root{color-scheme:dark}
+:root[data-theme="light"],body.light{color-scheme:light}
+
+/* FIX #3 : les pages Analyse vues / Activité VA / Dashboard clics utilisent des
+   fonds sombres codés en dur (#0f0f13, #16181e…) qui restaient noirs en thème
+   clair sur fond #f9fafb. Overrides additifs (aucune modif des règles sombres). */
+body.light .ja-card,body.light .av-card,body.light .gd-card,
+body.light .ja-chartbox,body.light .av-tbl,body.light .ja-irow,
+body.light #ja-tbl,body.light #av-tbl,body.light #gd-tbl,
+body.light .ja-pill,body.light .av-pfb{background:#fff!important;border-color:#e5e7eb!important;color:#111827}
+body.light .ja-card .val,body.light .av-card .val,body.light .gd-card .val,
+body.light .ja-row .nm,body.light .av-nm .n{color:#111827!important}
+body.light .ja-card .lab,body.light .av-card .lab,body.light .gd-card .lab,
+body.light .ja-card .sub,body.light .av-card .sub,body.light .gd-card .sub,
+body.light .av-nm .s,body.light .ja-hint,body.light .av-hint{color:#6b7280!important}
+body.light .ja-row,body.light .av-row,body.light .gd-row,
+body.light .ja-irow{border-bottom-color:#eef0f3!important}
+body.light .ja-seg,body.light .av-seg,body.light .gd-seg{background:#f3f4f6!important;border-color:#e5e7eb!important}
+body.light .ja-refresh,body.light .av-cfg{background:#fff!important;border-color:#e5e7eb!important;color:#374151}
+body.light .ja-share,body.light .av-share{background:#eef0f3!important}
+body.light .ja-note,body.light .av-note{background:#eff6ff!important;border-color:#bfdbfe!important;color:#1e40af!important}
 
 /* Filet de sécurité + accessibilité : si l'utilisateur préfère moins
    d'animations (réglage OS), on neutralise TOUT le mouvement du site. */
@@ -25141,7 +25169,7 @@ def _render_jbanalyse_html() -> str:
   </div>
   <div class="ja-pills" id="ja-pills"></div>
   <div class="ja-cards" id="ja-cards"></div>
-  <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg">Chargement&hellip;</div></div></div>
+  <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg loading">Chargement&hellip;</div></div></div>
   <div style="background:#0f0f13;border:1px solid #1d2027;border-radius:14px;overflow:hidden" id="ja-tbl"></div>
   <div id="ja-insights"></div>
 </div>
@@ -26055,7 +26083,7 @@ def _render_jbactivite_html() -> str:
     <span class="av-hint" id="av-upd"></span>
   </div>
   <div class="av-cards" id="av-cards"></div>
-  <div class="av-tbl" id="av-tbl"><div class="av-msg">Chargement&hellip;</div></div>
+  <div class="av-tbl" id="av-tbl"><div class="av-msg loading">Chargement&hellip;</div></div>
   <div class="av-legend">
     <span><i style="background:#16a34a"></i>tous les comptes en r&egrave;gle (reel &lt; 48 h)</span>
     <span><i style="background:#ef4444"></i>oubli (&ge; 1 compte sans reel depuis 48 h)</span>
