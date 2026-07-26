@@ -23007,7 +23007,7 @@ def _gmsdash_links_fallback(team: str):
         pass
     return GMSDASH_SEED_LINKS.get(team)
 _GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
-_GMSDASH_WARM_PERIODS = ("today", "7")   # périodes pré-calculées (les plus consultées)
+_GMSDASH_WARM_PERIODS = ("today", "yesterday", "7", "q1", "q2")   # pré-calculées (dont quinzaines de paie)
 _GMSDASH_LOCK = _threading_mod.Lock()
 _GMSDASH_MEM: dict = {}         # "team|period" -> {ts, payload}
 _GMSDASH_INFLIGHT: set = set()  # évite 2 calculs simultanés de la même clé
@@ -23043,9 +23043,25 @@ def _gmsdash_period_range(period: str):
     today = _dt_p.date.today()
     if period == "today":
         return today, today, "aujourd'hui"
+    if period == "yesterday":
+        y = today - _dt_p.timedelta(days=1)
+        return y, y, "hier"
     if period == "30":
         return today - _dt_p.timedelta(days=29), today, "30 derniers jours"
-    if period == "quinz":
+    # Quinzaines de PAIE : q1 = 1-15, q2 = 16-fin. Si la quinzaine demandée n'a
+    # pas commencé ce mois-ci, on montre celle du MOIS PRÉCÉDENT (la dernière payée).
+    if period == "q1":
+        start = today.replace(day=1)
+        end = today if today.day <= 15 else today.replace(day=15)
+        return start, end, f"quinzaine 1-15 ({start.strftime('%d/%m')} → {end.strftime('%d/%m')})"
+    if period == "q2":
+        if today.day >= 16:
+            start, end = today.replace(day=16), today
+        else:
+            prev_end = today.replace(day=1) - _dt_p.timedelta(days=1)   # fin du mois précédent
+            start, end = prev_end.replace(day=16), prev_end
+        return start, end, f"quinzaine 16-fin ({start.strftime('%d/%m')} → {end.strftime('%d/%m')})"
+    if period == "quinz":    # rétro-compat (ancien bouton)
         start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
         return start, today, ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin")
     return today - _dt_p.timedelta(days=6), today, "7 derniers jours"
@@ -23479,9 +23495,10 @@ def _render_gmsdash_html() -> str:
     <select id="gd-team" class="gd-sel" onchange="window.__gdData=null; gdLoad()"><option>Chargement…</option></select>
     <div class="gd-seg" id="gd-period">
       <button data-p="today" onclick="gdPeriod(this)">Aujourd'hui</button>
+      <button data-p="yesterday" onclick="gdPeriod(this)">Hier</button>
       <button data-p="7" class="on" onclick="gdPeriod(this)">7 jours</button>
-      <button data-p="30" onclick="gdPeriod(this)">30 jours</button>
-      <button data-p="quinz" onclick="gdPeriod(this)">Quinzaine</button>
+      <button data-p="q1" onclick="gdPeriod(this)" title="Quinzaine de paie du 1 au 15">1-15</button>
+      <button data-p="q2" onclick="gdPeriod(this)" title="Quinzaine de paie du 16 à la fin du mois">16-fin</button>
     </div>
     <div class="gd-tg" id="gd-us" onclick="gdToggleUs()" title="N'afficher que les clics venant des États-Unis">
       <span class="dot"></span><span>🇺🇸 US uniquement</span>
