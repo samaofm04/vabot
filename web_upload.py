@@ -23437,8 +23437,10 @@ def _render_gmsdash_html() -> str:
         _has_k2 = bool(gms.get_dash_key())
     except Exception:
         _has_k2 = False
-    key2_html = ("<span style='font-size:11px;color:#4ade80;font-weight:700;"
-                 "display:inline-flex;align-items:center;gap:5px'>🔑 clé dédiée active</span>"
+    key2_html = ("<span id='gd-key2wrap' style='font-size:11px;color:#4ade80;font-weight:700;"
+                 "display:inline-flex;align-items:center;gap:8px'>🔑 clé dédiée active "
+                 "<button class='gd-sel' style='min-width:auto;cursor:pointer;font-size:11px;padding:5px 9px' "
+                 "onclick='gdChangeKey()' title='Remplacer la clé dédiée'>changer</button></span>"
                  if _has_k2 else
                  "<input id='gd-key2' class='gd-sel' type='password' style='min-width:230px' "
                  "placeholder='Clé API dédiée (gms_live_…) — quota séparé'>"
@@ -23492,7 +23494,7 @@ def _render_gmsdash_html() -> str:
     body = """
 <div class="gd-wrap">
   <div class="gd-bar">
-    <select id="gd-team" class="gd-sel" onchange="window.__gdData=null; gdLoad()"><option>Chargement…</option></select>
+    <select id="gd-team" class="gd-sel" onchange="window.__gdData=null; gdLoad()">__GDOPTS__</select>
     <div class="gd-seg" id="gd-period">
       <button data-p="today" onclick="gdPeriod(this)">Aujourd'hui</button>
       <button data-p="yesterday" onclick="gdPeriod(this)">Hier</button>
@@ -23528,6 +23530,13 @@ function gdToggleUs(){
 function gdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
+function gdChangeKey(){
+  var host = document.getElementById('gd-key2wrap');
+  if(!host) return;
+  host.outerHTML = '<input id="gd-key2" class="gd-sel" type="password" style="min-width:230px" placeholder="Nouvelle clé gms_live_…">'
+    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKey2()" title="Enregistrer">🔑</button>';
+  var el = document.getElementById('gd-key2'); if(el) el.focus();
+}
 function gdSaveKey2(){
   var el = document.getElementById('gd-key2');
   var k = (el && el.value || '').trim();
@@ -23545,27 +23554,24 @@ function gdSaveKey2(){
     }).catch(function(e){ if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
 }
 function gdTeams(){
+  // Les <option> sont rendues côté serveur (teams en dur) : on charge direct.
+  // Ce fetch ne sert qu'à décorer le nombre de liens ; un échec est SANS effet
+  // (avant, il remplaçait le sélecteur par « Erreur » -> team=Erreur envoyé à
+  // l'API -> HTTP 400 en boucle).
+  gdLoad();
   fetch('/gmsdash/teams', {credentials:'same-origin'})
     .then(function(r){ return r.json(); })
     .then(function(d){
+      if(!d || !d.ok) return;
       var sel = document.getElementById('gd-team');
-      if(!d || !d.ok || !(d.teams||[]).length){
-        sel.innerHTML = '<option>Aucune catégorie</option>';
-        document.getElementById('gd-tbl').innerHTML =
-          '<div class="gd-msg" style="color:#f87171">❌ Catégories illisibles : '
-          + gdEsc((d && d.error) || 'réponse vide de GetMySocial') + '<br>'
-          + '<span style="color:#6b7280">Vérifie la clé API GMS, puis clique ↻.</span></div>';
-        return;
-      }
-      sel.innerHTML = d.teams.map(function(t){
-        return '<option value="'+gdEsc(t.id)+'">'+gdEsc(t.name)+(t.link_count?(' ('+t.link_count+' liens)'):'')+'</option>';
-      }).join('');
-      gdLoad();
-    }).catch(function(e){
-      document.getElementById('gd-team').innerHTML = '<option>Erreur</option>';
-      document.getElementById('gd-tbl').innerHTML =
-        '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e && e.message ? e.message : e)+'</div>';
-    });
+      (d.teams||[]).forEach(function(t){
+        for(var i=0;i<sel.options.length;i++){
+          if(sel.options[i].value === t.id && t.link_count){
+            sel.options[i].text = t.name + ' (' + t.link_count + ' liens)';
+          }
+        }
+      });
+    }).catch(function(){});
 }
 window.__gdPollTimer = null;
 function gdSchedulePoll(ms){
@@ -23602,7 +23608,7 @@ function gdShowProgress(p){
 }
 function gdLoad(force){
   var tid = (document.getElementById('gd-team')||{}).value;
-  if(!tid) return;
+  if(!tid || tid.indexOf('tm_') !== 0) return;
   if(!(window.__gdData && (window.__gdData.links||[]).length)){
     document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Connexion…</div>';
   }
@@ -23782,7 +23788,8 @@ function gdRender(d){
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', gdTeams); } else { gdTeams(); }
 </script>
 """
-    return css + body.replace("__GDKEY2__", key2_html)
+    _opts = "".join(f"<option value='{tid}'>{name}</option>" for tid, name in GMSDASH_TEAMS)
+    return css + body.replace("__GDKEY2__", key2_html).replace("__GDOPTS__", _opts)
 
 
 def _render_facture_html() -> str:
@@ -31462,6 +31469,8 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         if not team:
             return jsonify({"ok": False, "error": "catégorie manquante"})
+        if team not in {t[0] for t in GMSDASH_TEAMS}:
+            return jsonify({"ok": False, "error": "catégorie inconnue"})
         try:
             return jsonify(_gmsdash_get(team, period, force=force))
         except Exception as e:

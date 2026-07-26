@@ -18,6 +18,17 @@ import time
 import discord
 
 
+def _tag_call(_fn, *a, **kw):
+    """Exécute un appel gms.* sous l'étiquette 'report' (instrumentation api_usage) :
+    le tag doit être posé DANS le thread exécutant, pas dans la boucle asyncio."""
+    try:
+        import gms as _g
+        with _g.api_tag("report"):
+            return _fn(*a, **kw)
+    except AttributeError:          # vieux gms sans api_tag
+        return _fn(*a, **kw)
+
+
 def _tagged_analytics(gms, lid, a, b):
     """analytics_for_link étiqueté 'report' (instrumentation gms.api_usage)."""
     try:
@@ -278,7 +289,7 @@ class ClickRecap(commands.Cog):
         group_id = c.get("group_id")
         identity = c.get("identity")  # si défini -> énumération par suffixe (clé API)
         name = c.get("group_name") or "Groupe"
-        metas = await asyncio.to_thread(gms.report_links_meta, team_id, identity, group_id)
+        metas = await asyncio.to_thread(_tag_call, gms.report_links_meta, team_id, identity, group_id)
         # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
         # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
         # message valide (l'appelant voit None -> ne touche pas au message).
@@ -299,7 +310,7 @@ class ClickRecap(commands.Cog):
             (p2s, p2e),            # période 16–fin
         ]
         vals = await asyncio.gather(*[
-            asyncio.to_thread(gms.clicks_for_ids, ids, s.isoformat(), e.isoformat())
+            asyncio.to_thread(_tag_call, gms.clicks_for_ids, ids, s.isoformat(), e.isoformat())
             for (s, e) in ranges
         ])
         c_today, c_yest, c_week, c_p1, c_p2 = vals
@@ -346,9 +357,9 @@ class ClickRecap(commands.Cog):
             cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours (les 2 semaines)
             per = await asyncio.gather(*[
                 asyncio.gather(
-                    asyncio.to_thread(gms.clicks_for_link, m["id"], today.isoformat(), today.isoformat()),
-                    asyncio.to_thread(gms.clicks_for_link, m["id"], week_start.isoformat(), today.isoformat()),
-                    asyncio.to_thread(gms.clicks_for_link, m["id"], cyc_s.isoformat(), cyc_e.isoformat()),
+                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], today.isoformat(), today.isoformat()),
+                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], week_start.isoformat(), today.isoformat()),
+                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], cyc_s.isoformat(), cyc_e.isoformat()),
                 )
                 for m in metas if m.get("id")
             ])
@@ -443,7 +454,7 @@ class ClickRecap(commands.Cog):
     # ---------- Coeur ----------
     async def _links(self):
         import gms
-        res = await asyncio.to_thread(gms.list_all_links)
+        res = await asyncio.to_thread(_tag_call, gms.list_all_links)
         return (res.get("links") or []) if res.get("ok") else []
 
     async def _resolve_link(self, ch, links):
@@ -533,7 +544,7 @@ class ClickRecap(commands.Cog):
             (p_start, today),          # quinzaine en cours
         ]
         vals = await asyncio.gather(*[
-            asyncio.to_thread(gms.clicks_for_link, lid, s.isoformat(), e.isoformat())
+            asyncio.to_thread(_tag_call, gms.clicks_for_link, lid, s.isoformat(), e.isoformat())
             for (s, e) in ranges
         ])
         vals = tuple(vals)
@@ -828,7 +839,7 @@ class ClickRecap(commands.Cog):
         link = await self._resolve_link(ch, links)  # nom va_@ OU scan historique du salon
         if link is None and skip_if_no_link:
             return "skip"  # pas de lien -> pas de message (anti-spam)
-        content, emb = await asyncio.to_thread(self._build_message, link, gms, yest, today)
+        content, emb = await asyncio.to_thread(_tag_call, self._build_message, link, gms, yest, today)
         try:
             if emb is not None:
                 await ch.send(content=content, embed=emb)
@@ -875,7 +886,7 @@ class ClickRecap(commands.Cog):
         Best-effort. Retourne un dict de compteurs, ou None si GMS indispo."""
         import gms
         try:
-            lr = await asyncio.to_thread(gms.list_all_links)
+            lr = await asyncio.to_thread(_tag_call, gms.list_all_links)
         except Exception:
             return None
         if not isinstance(lr, dict) or not lr.get("ok"):
@@ -896,7 +907,7 @@ class ClickRecap(commands.Cog):
             has_gear = False
             if link:
                 c3 = await asyncio.to_thread(
-                    gms.clicks_for_link, link.get("id"),
+                    _tag_call, gms.clicks_for_link, link.get("id"),
                     start3.isoformat(), today.isoformat())
                 # 0 EXACT -> ⚙️. None = API indispo -> on ne marque PAS (évite un faux ⚙️).
                 if c3 == 0:
