@@ -23728,6 +23728,7 @@ def _render_gmsdash_html() -> str:
     __GDKEY2__
 
   </div>
+  <div id="gd-topprog"></div>
   <div class="gd-mpills" id="gd-mpills"></div>
   <div class="gd-cards" id="gd-cards"></div>
   <div class="gd-chart" id="gd-chart"></div>
@@ -23926,14 +23927,15 @@ function gdLoad(force){
       var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
       document.getElementById('gd-ctry').innerHTML = '';
       var q = (d.progress || {}).quick;
+      var tpl = document.getElementById('gd-topprog');
+      if(tpl){ tpl.innerHTML = gdProgressHtml(d.progress); }
       if((d.links||[]).length){
-        // Les liens DÉJÀ lus s'affichent en direct, la barre au-dessus
+        // Les liens DÉJÀ lus s'affichent en direct, la barre tout en haut
         d.label = 'calcul en cours…';
         window.__gdData = d;
         gdRender(d);
         // Le TOTAL rapide (par lots) est plus juste que la somme partielle
         if(q){ gdQuickCards(q, d.label); }
-        document.getElementById('gd-tbl').insertAdjacentHTML('afterbegin', gdProgressHtml(d.progress));
       } else if(q){
         // Premier rendu LÉGER : les totaux de la catégorie avant le détail par lien
         gdQuickCards(q, 'total rapide');
@@ -23956,11 +23958,13 @@ function gdLoad(force){
       // Recalcul en fond : la BARRE + « prêt dans ~X » s'affichent AU-DESSUS des
       // données servies (avant, on ne voyait qu'un petit « mise à jour en cours »)
       if(rb2){ rb2.disabled = true; rb2.style.opacity = '.5'; rb2.style.cursor = 'wait'; rb2.textContent = '⏳'; }
-      if(d.progress){
-        document.getElementById('gd-tbl').insertAdjacentHTML('afterbegin', gdProgressHtml(d.progress));
-      }
+      var tp = document.getElementById('gd-topprog');
+      if(tp){ tp.innerHTML = d.progress ? gdProgressHtml(d.progress) : ''; }
       gdSchedulePoll(3000);
-    } else if(rb2){ rb2.disabled = false; rb2.style.opacity = '1'; rb2.style.cursor = 'pointer'; rb2.textContent = '↻'; }
+    } else {
+      var tp2 = document.getElementById('gd-topprog'); if(tp2) tp2.innerHTML = '';
+      if(rb2){ rb2.disabled = false; rb2.style.opacity = '1'; rb2.style.cursor = 'pointer'; rb2.textContent = '↻'; }
+    }
   }).catch(function(e){
     var rb3 = document.getElementById('gd-refresh');
     if(rb3){ rb3.disabled = false; rb3.style.opacity = '1'; rb3.style.cursor = 'pointer'; rb3.textContent = '↻'; }
