@@ -23534,6 +23534,10 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
         out["age_min"] = int((_t_g.time() - int(hit.get("ts", 0))) // 60)
         with _GMSDASH_LOCK:
             out["refreshing"] = key in _GMSDASH_INFLIGHT
+            if out["refreshing"]:
+                _pr = dict(_GMSDASH_PROGRESS.get(key) or {})
+                _pr.pop("rows", None)
+                out["progress"] = _pr          # barre + ETA par-dessus les vieilles données
         return out
     with _GMSDASH_LOCK:
         prog = dict(_GMSDASH_PROGRESS.get(key) or {})
@@ -23947,9 +23951,16 @@ function gdLoad(force){
       return;
     }
     var rb2 = document.getElementById('gd-refresh');
-    if(rb2){ rb2.disabled = false; rb2.style.opacity = '1'; rb2.style.cursor = 'pointer'; rb2.textContent = '↻'; }
     window.__gdData = d; gdRender(d);
-    if(d.refreshing){ gdSchedulePoll(5000); }   // le fond recalcule -> on rafraîchira
+    if(d.refreshing){
+      // Recalcul en fond : la BARRE + « prêt dans ~X » s'affichent AU-DESSUS des
+      // données servies (avant, on ne voyait qu'un petit « mise à jour en cours »)
+      if(rb2){ rb2.disabled = true; rb2.style.opacity = '.5'; rb2.style.cursor = 'wait'; rb2.textContent = '⏳'; }
+      if(d.progress){
+        document.getElementById('gd-tbl').insertAdjacentHTML('afterbegin', gdProgressHtml(d.progress));
+      }
+      gdSchedulePoll(3000);
+    } else if(rb2){ rb2.disabled = false; rb2.style.opacity = '1'; rb2.style.cursor = 'pointer'; rb2.textContent = '↻'; }
   }).catch(function(e){
     var rb3 = document.getElementById('gd-refresh');
     if(rb3){ rb3.disabled = false; rb3.style.opacity = '1'; rb3.style.cursor = 'pointer'; rb3.textContent = '↻'; }
