@@ -1946,11 +1946,16 @@ class Admin(commands.Cog):
             from cogs.welcome import pick_next_identity, list_active_identities
             _pool = list_active_identities() or identities  # exclut jessye (jailbreak-only)
             identity = pick_next_identity() or random.choice(_pool)
-        users[str(user.id)] = {
+        # FUSION (et non remplacement) : recréer la fiche à partir de 3 champs
+        # effaçait tout le reste — moyen de paiement (crypto/TapTap), comptes
+        # Instagram liés, historique… — pour un VA qui existait déjà.
+        _entry = dict(existing_data) if existing_data else {}
+        _entry.update({
             "identity": identity,
-            "channel_id": existing_data.get("channel_id") if existing_data else None,
-            "auto_post": existing_data.get("auto_post", True) if existing_data else True,
-        }
+            "channel_id": _entry.get("channel_id"),
+            "auto_post": _entry.get("auto_post", True),
+        })
+        users[str(user.id)] = _entry
         save_json(USERS_FILE, users)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -1968,10 +1973,25 @@ class Admin(commands.Cog):
             (c for c in guild.categories if c.name.lower().strip() == target_cat_name),
             None,
         )
+        # Salon DÉJÀ existant : on le réutilise (avant, /adduser sur un VA connu
+        # créait un second salon va-<pseudo> en double).
+        channel = None
+        _old_ch_id = _entry.get("channel_id")
+        if _old_ch_id:
+            channel = guild.get_channel(int(_old_ch_id)) if str(_old_ch_id).isdigit() else None
+        if channel is None:
+            channel = next((c for c in guild.text_channels
+                            if (c.name or "").lower() == base_name), None)
+        if channel is not None:
+            try:
+                await channel.edit(category=category, overwrites=overwrites)
+            except Exception:
+                pass
         try:
-            channel = await guild.create_text_channel(
-                name=base_name, overwrites=overwrites, category=category
-            )
+            if channel is None:
+                channel = await guild.create_text_channel(
+                    name=base_name, overwrites=overwrites, category=category
+                )
         except discord.Forbidden:
             await interaction.followup.send(
                 "Le bot n'a pas la permission de créer des salons. Active 'Manage Channels' pour le bot.",
