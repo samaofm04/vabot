@@ -32699,6 +32699,51 @@ def create_app():
             pass
         return s
     app.secret_key = os.environ.get("WEB_SECRET") or _web_secret_persistent()
+    # Durcissement du cookie de session : inaccessible au JavaScript (vol par
+    # XSS), non envoyé sur les requêtes venues d'un autre site (CSRF), et
+    # chiffré uniquement (le site est en HTTPS derrière Cloudflare).
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=True,
+    )
+
+    # Anti-force brute sur le login : 8 essais ratés par IP -> pause de 10 min.
+    _LOGIN_FAILS: dict = {}
+    _LOGIN_MAX, _LOGIN_BLOCK_S = 8, 600
+
+    def _login_ip() -> str:
+        try:
+            fwd = (request.headers.get("CF-Connecting-IP")
+                   or request.headers.get("X-Forwarded-For") or "")
+            return (fwd.split(",")[0].strip() or request.remote_addr or "?")[:45]
+        except Exception:
+            return "?"
+
+    def _login_blocked() -> int:
+        import time as _t_lb
+        rec = _LOGIN_FAILS.get(_login_ip())
+        if not rec:
+            return 0
+        n, last = rec
+        if n < _LOGIN_MAX:
+            return 0
+        left = int(_LOGIN_BLOCK_S - (_t_lb.time() - last))
+        if left <= 0:
+            _LOGIN_FAILS.pop(_login_ip(), None)
+            return 0
+        return left
+
+    def _login_note(ok: bool):
+        import time as _t_ln
+        ip = _login_ip()
+        if ok:
+            _LOGIN_FAILS.pop(ip, None)
+            return
+        n, _ = _LOGIN_FAILS.get(ip, (0, 0))
+        _LOGIN_FAILS[ip] = (n + 1, _t_ln.time())
+        if n + 1 >= _LOGIN_MAX:
+            print(f"[secu] login bloqué {_LOGIN_BLOCK_S}s pour {ip} ({n+1} échecs)", flush=True)
     # Demarre l'auto-scrape Instagram en background
     _start_auto_scrape_daemon()
     # Job quotidien "Activité VA" (scan comptes JB + pénalités)
@@ -33011,7 +33056,13 @@ def create_app():
             username = (request.form.get("username") or "").strip().lower()
             password = request.form.get("password") or ""
             remember = (request.form.get("remember") or "") == "1"
-            if _check_web_login(username, password):
+            _blk = _login_blocked()
+            if _blk:
+                return _render_login(
+                    f"Trop de tentatives — réessaie dans {max(1, _blk // 60)} min.")
+            _ok_login = _check_web_login(username, password)
+            _login_note(_ok_login)
+            if _ok_login:
                 session["auth"] = True
                 session["username"] = username or "admin"
                 session["role"] = _web_user_role(username, password)
