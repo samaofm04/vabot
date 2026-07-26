@@ -1087,8 +1087,8 @@ body.light [style*="border:1px solid #1a1a1a"]{border-color:#e5e7eb!important}
 body.light [style*="border:1px solid #333"]{border-color:#d1d5db!important}
 body.light [style*="color:#fff"]:not(.toast):not(button){color:#111827!important}
 body.light [style*="color:#aaa"]{color:#6b7280!important}
-body.light [style*="color:#888"]{color:#9ca3af!important}
-body.light [style*="color:#666"]{color:#9ca3af!important}
+body.light [style*="color:#888"]{color:#6b7280!important}
+body.light [style*="color:#666"]{color:#5b6472!important}
 body.light [style*="color:#ccc"]{color:#374151!important}
 body.light [style*="background:rgba(0,0,0,.6)"]{background:rgba(255,255,255,.85)!important}
 body.light [style*="background:rgba(0,0,0,.5)"]{background:rgba(255,255,255,.85)!important}
@@ -10796,7 +10796,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         vault_items.append(
             f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
-            f"onmouseenter='vaultPrefetch(this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
@@ -11789,23 +11789,37 @@ window.__vaultPrefetchCache = window.__vaultPrefetchCache || {};
 window.__vaultPrefetchInflight = window.__vaultPrefetchInflight || {};
 
 window.__vaultPrefetchOrder = window.__vaultPrefetchOrder || [];
+window.__vaultPrefetchTimer = null;
+window.__vaultPrefetchAbort = {};
 window.vaultPrefetch = function(url){
-  if(!url || window.__vaultPrefetchCache[url] || window.__vaultPrefetchInflight[url]) return;
-  window.__vaultPrefetchInflight[url] = true;
-  fetch(url, {credentials:'same-origin'})
-    .then(r=>r.text())
-    .then(html=>{
-      window.__vaultPrefetchCache[url] = html;
-      window.__vaultPrefetchOrder.push(url);
-      // PERF : cap LRU (24 pages max) -> la memoire du navigateur ne gonfle pas
-      // sur les longues sessions qui naviguent beaucoup.
-      while(window.__vaultPrefetchOrder.length > 24){
-        delete window.__vaultPrefetchCache[window.__vaultPrefetchOrder.shift()];
-      }
-      delete window.__vaultPrefetchInflight[url];
-    })
-    .catch(()=>{ delete window.__vaultPrefetchInflight[url]; });
+  // Délai d'INTENTION : glisser la souris sur 30 identités ne doit pas
+  // déclencher 30 rendus serveur complets. On n'amorce qu'après 160 ms de
+  // survol réel, et on annule dès que la souris quitte l'item.
+  clearTimeout(window.__vaultPrefetchTimer);
+  window.__vaultPrefetchTimer = setTimeout(function(){
+    if(!url || window.__vaultPrefetchCache[url] || window.__vaultPrefetchInflight[url]) return;
+    window.__vaultPrefetchInflight[url] = true;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    window.__vaultPrefetchAbort[url] = ctrl;
+    // Fragment léger : le header X-Tab-Ajax fait renvoyer au serveur UNIQUEMENT
+    // la galerie de cette identité (~50 Ko) au lieu de toute la page (~1,4 Mo).
+    fetch(url + '&frag=1', {credentials:'same-origin',
+                            headers:{'X-Tab-Ajax':'1'},
+                            signal: ctrl ? ctrl.signal : undefined})
+      .then(r=>r.text())
+      .then(html=>{
+        window.__vaultPrefetchCache[url] = html;
+        window.__vaultPrefetchOrder.push(url);
+        while(window.__vaultPrefetchOrder.length > 4){   // cap LRU réduit
+          delete window.__vaultPrefetchCache[window.__vaultPrefetchOrder.shift()];
+        }
+        delete window.__vaultPrefetchInflight[url];
+        delete window.__vaultPrefetchAbort[url];
+      })
+      .catch(()=>{ delete window.__vaultPrefetchInflight[url]; delete window.__vaultPrefetchAbort[url]; });
+  }, 160);
 };
+window.vaultPrefetchCancel = function(){ clearTimeout(window.__vaultPrefetchTimer); };
 
 window.vaultGoTo = function(ev, url){
   if(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey)) return true;
@@ -11897,7 +11911,9 @@ window.vaultGoTo = function(ev, url){
   if(window.__vaultPrefetchCache[url]){
     apply(window.__vaultPrefetchCache[url]);
   } else {
-    fetch(url, {credentials:'same-origin'}).then(r=>r.text()).then(apply).catch(()=>{ window.location.href = url; });
+    fetch(url + '&frag=1', {credentials:'same-origin', headers:{'X-Tab-Ajax':'1'}})
+      .then(r=>r.text()).then(apply)
+      .catch(()=>{ window.location.href = url; });
   }
   return false;
 };
@@ -33104,6 +33120,35 @@ def create_app():
                 return f"<div id='form-chatplanning'>{_render_chatplanning_html()}</div>"
             except Exception:
                 pass  # fallback : page complete
+        # Fragment GALERIE (survol / navigation Bibliothèque) : au lieu de
+        # renvoyer toute la page (~1,4 Mo) juste pour en extraire la section
+        # cloud, on ne rend QUE cette section pour l'identité demandée.
+        if request.headers.get("X-Tab-Ajax") and request.args.get("frag") == "1":
+            _tab = (request.args.get("tab") or "").strip()
+            _cloud = {
+                "cloudreels": ("videos", VIDEO_EXTS, False),
+                "cloudposts": ("posts", IMAGE_EXTS, False),
+                "cloudstories": ("stories", IMAGE_EXTS, False),
+                "cloudstoryctas": ("storyctas", IMAGE_EXTS, False),
+                "cloudpps": None,   # PP a son propre producer
+            }
+            if _tab == "cloudpps":
+                try:
+                    return (f"<div class='form-section' id='form-cloudpps' style='display:block'>"
+                            f"{_render_cloud_pps_page()}</div>", 200)
+                except Exception:
+                    return ("", 200)
+            _cfg = _cloud.get(_tab)
+            if _cfg:
+                _sub, _exts, _jb = _cfg
+                _secid = "form-" + _tab
+                try:
+                    return (f"<div class='form-section' id='{_secid}' style='display:block'>"
+                            f"{_render_cloud_content_html(_sub, _exts, include_jb=_jb)}</div>", 200)
+                except Exception:
+                    return ("", 200)
+            # tab inconnu -> on laisse retomber sur le rendu complet ci-dessous
+
         # Lazy-load des onglets lourds : showTab() envoie X-Tab-Ajax + ?lazy=<name>.
         # On renvoie UNIQUEMENT le fragment du producer (pas toute la page ~1.4MB).
         if request.headers.get("X-Tab-Ajax") and request.args.get("lazy"):
