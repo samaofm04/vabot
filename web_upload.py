@@ -4667,6 +4667,10 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       Comptes par identité
     </button>
+    <button class="item" id="tab-jbanalyse" onclick="showTab('jailbreak','jbanalyse','Analyse vues Instagram','Vues des comptes JB par identité et par VA (scrape 2×/jour)')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+      Analyse vues
+    </button>
   </div>
 </div>
 
@@ -5229,6 +5233,11 @@ document.addEventListener('keydown', function(e){
 <!-- JAILBREAK -->
 <div class="form-section" id="form-jailbreak" style="display:none">
 {jailbreak_html}
+</div>
+
+<!-- JAILBREAK - Analyse vues Instagram -->
+<div class="form-section" id="form-jbanalyse" style="display:none">
+{jbanalyse_html}
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -7128,6 +7137,14 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     daily = weekly = biweekly = 0
     last_post_at = None
     last_reel_at = None
+    # Vues par JOUR DE PUBLICATION (fuseau Paris) sur 30 j : la matière première
+    # de l'onglet « Analyse vues » (courbes par identité / VA).
+    post_days: dict = {}
+    try:
+        from zoneinfo import ZoneInfo as _Zi
+        _tz_paris = _Zi("Europe/Paris")
+    except Exception:
+        _tz_paris = None
     # Meta profile
     profile = res.get("profile") or {}
     if not profile and "followers" in res:
@@ -7173,6 +7190,9 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                 weekly += views
             if age_h <= 24 * 14:
                 biweekly += views
+            if age_h <= 24 * 30:
+                _dk = (p_dt.astimezone(_tz_paris) if _tz_paris else p_dt).date().isoformat()
+                post_days[_dk] = post_days.get(_dk, 0) + views
     # Top 4 reels (par date desc) pour la preview strip
     def _ts(p):
         try:
@@ -7205,6 +7225,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "followers": followers,
         "posts_count": posts_count,
         "preview": preview,
+        "post_days": post_days,
     }
     # GARDE-FOU anti-écrasement : un scrape qui « réussit » mais ne ramène RIEN
     # (0 abonné, 0 post, aucun aperçu) est en fait un scrape raté côté Instagram.
@@ -24633,6 +24654,376 @@ setTimeout(function(){
     return css + body.replace("__GDKEY2__", key2_html).replace("__GDOPTS__", _opts)
 
 
+def _jbanalyse_payload() -> dict:
+    """Onglet « Analyse vues » : agrège les vues Insta des comptes JB par
+    identité et par VA. 100 % local (jailbreak.json + cache de scrape) — aucun
+    appel réseau, la fraîcheur = celle du scrape auto (00h/12h) ou manuel."""
+    import datetime as _dt_a
+    import time as _t_a
+    try:
+        import jailbreak as jb
+        data = jb._load()
+    except Exception as e:
+        return {"ok": False, "error": f"jailbreak: {e}"[:160]}
+    try:
+        cache = _load_insta_3_stats_cache()
+    except Exception:
+        cache = {}
+    # Axe des jours en date PARIS : les clés post_days sont en date Paris — un
+    # axe en date serveur (UTC probable) filtrerait le jour courant entre 00h
+    # et 02h Paris.
+    try:
+        from zoneinfo import ZoneInfo as _Zi_a
+        today = _dt_a.datetime.now(_Zi_a("Europe/Paris")).date()
+    except Exception:
+        today = _dt_a.date.today()
+    days = [(today - _dt_a.timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
+    dayset = set(days)
+
+    def _blank():
+        return {"daily": 0, "weekly": 0, "biweekly": 0, "followers": 0,
+                "n": 0, "active": 0, "banned": 0, "pending": 0, "points": {}}
+
+    idents: dict = {}
+    vas: dict = {}
+    tot = _blank()
+    has_days = False
+    cov = 0            # comptes actifs déjà re-scrapés AVEC post_days (couverture courbe)
+    newest_scrape = 0
+    for ident, entry in (data or {}).items():
+        for a in ((entry or {}).get("accounts") or []):
+            # Même normalisation que le scrape (_all_tracked_handles) : un
+            # username collé avec un caractère parasite doit matcher le cache.
+            try:
+                h = _normalize_insta_handle(str(a.get("username") or ""))
+            except Exception:
+                h = str(a.get("username") or "").strip().lstrip("@").lower()
+            if not h:
+                continue
+            va = str(a.get("va") or "").strip() or "Sans VA"
+            st = cache.get(h) or {}
+            newest_scrape = max(newest_scrape, int(st.get("scraped_at") or 0))
+            groups = (idents.setdefault(ident, _blank()),
+                      vas.setdefault(va, _blank()), tot)
+            for g in groups:
+                g["n"] += 1
+            if not st or st.get("error"):
+                k = "banned" if st.get("banned") else "pending"
+                for g in groups:
+                    g[k] += 1
+                continue
+            for g in groups:
+                g["active"] += 1
+                g["daily"] += int(st.get("daily") or 0)
+                g["weekly"] += int(st.get("weekly") or 0)
+                g["biweekly"] += int(st.get("biweekly") or 0)
+                g["followers"] += int(st.get("followers") or 0)
+            if "post_days" in st:
+                cov += 1       # clé présente (même vide) = re-scrapé depuis la maj
+            for dk, vv in (st.get("post_days") or {}).items():
+                if dk in dayset:
+                    has_days = True
+                    for g in groups[:2]:
+                        g["points"][dk] = g["points"].get(dk, 0) + int(vv or 0)
+
+    def _ser(dmap):
+        out = []
+        for name, g in dmap.items():
+            row = {k: g[k] for k in ("daily", "weekly", "biweekly", "followers",
+                                     "n", "active", "banned", "pending")}
+            row["name"] = name
+            row["points"] = [int(g["points"].get(d) or 0) for d in days]
+            out.append(row)
+        out.sort(key=lambda r: (-r["weekly"], -r["biweekly"], r["name"]))
+        return out
+
+    tot.pop("points", None)
+    return {"ok": True, "days": days, "idents": _ser(idents), "vas": _ser(vas),
+            "tot": tot, "has_days": has_days, "cov": cov,
+            "scraped_at": newest_scrape, "generated_at": int(_t_a.time())}
+
+
+def _render_jbanalyse_html() -> str:
+    """Page « Analyse vues Instagram » : cartes de totaux, pilules par identité
+    (avatar) / par VA, courbe 14 jours (vues par jour de publication) et tableau.
+    Les données viennent de /jbanalyse/data (local, instantané)."""
+    css = """
+<style>
+#ja-root{max-width:1180px}
+.ja-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.ja-seg{display:inline-flex;background:#0f0f13;border:1px solid #23262f;border-radius:10px;overflow:hidden}
+.ja-seg button{background:transparent;border:0;color:#9ca3af;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.ja-seg button.on{background:#2563eb;color:#fff}
+.ja-refresh{background:#0f0f13;border:1px solid #23262f;color:#9ca3af;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+.ja-refresh:hover{color:#fff;border-color:#3b82f6}
+.ja-hint{color:#6b7280;font-size:11px}
+.ja-pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.ja-pill{display:inline-flex;align-items:center;gap:7px;background:#0f0f13;border:1.5px solid #2a2d36;border-radius:999px;padding:5px 12px 5px 6px;cursor:pointer;color:#e5e7eb;font-size:12px;font-weight:700}
+.ja-pill img,.ja-pill .ja-pfb{width:24px;height:24px;border-radius:50%;object-fit:cover;display:block}
+.ja-pill .ja-pfb{display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff}
+.ja-pill b{font-weight:800}
+.ja-pill.off{opacity:.38;border-style:dashed}
+.ja-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.ja-card{flex:1;min-width:150px;background:#0f0f13;border:1px solid #1d2027;border-radius:14px;padding:14px 16px}
+.ja-card .lab{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase}
+.ja-card .val{font-size:26px;font-weight:800;color:#fff;margin-top:2px}
+.ja-card .sub{color:#6b7280;font-size:11px;margin-top:2px}
+.ja-chartbox{background:#0f0f13;border:1px solid #1d2027;border-radius:14px;padding:14px 16px;margin-bottom:14px;position:relative}
+.ja-chartbox h4{margin:0;color:#fff;font-size:14px}
+.ja-note{color:#9ca3af;font-size:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px;padding:10px 12px;margin-top:10px}
+.ja-tip{display:none;position:absolute;pointer-events:none;background:#15171d;border:1px solid #2a2d36;border-radius:10px;padding:8px 11px;font-size:11.5px;color:#e5e7eb;z-index:5;min-width:150px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.ja-tip .d{color:#9ca3af;font-weight:800;margin-bottom:5px}
+.ja-tip .r{display:flex;align-items:center;gap:6px;margin:2px 0}
+.ja-tip .r i{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+.ja-tip .r b{margin-left:auto;padding-left:12px}
+.ja-row{display:grid;grid-template-columns:26px minmax(140px,1.4fr) 70px 70px 70px 90px 90px 90px 90px 1fr;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #16181e;color:#d1d5db;font-size:12px}
+.ja-row.head{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid #23262f}
+.ja-row .num{text-align:right;font-variant-numeric:tabular-nums}
+.ja-row .nm{display:flex;align-items:center;gap:8px;font-weight:700;color:#fff;min-width:0}
+.ja-row .nm img,.ja-row .nm .ja-pfb{width:22px;height:22px;border-radius:50%;object-fit:cover;flex:0 0 auto}
+.ja-share{background:#191c23;border-radius:6px;height:8px;overflow:hidden}
+.ja-share i{display:block;height:100%;background:linear-gradient(90deg,#8b5cf6,#3b82f6)}
+.ja-msg{padding:28px;text-align:center;color:#6b7280;font-size:13px}
+@media(max-width:900px){.ja-row{grid-template-columns:22px minmax(110px,1.2fr) 60px 70px 70px 1fr}.ja-row .hidesm{display:none}}
+</style>
+"""
+    body = """
+<div id="ja-root">
+  <div class="ja-top">
+    <div class="ja-seg" id="ja-view">
+      <button class="on" onclick=jaView(0)>Par identit&eacute;</button>
+      <button onclick=jaView(1)>Par VA</button>
+    </div>
+    <button class="ja-refresh" onclick=jaLoad(1) title="Recharger (les vues bougent au scrape 00h/12h ou via Scraper maintenant)">&#8635;</button>
+    <span class="ja-hint" id="ja-upd"></span>
+  </div>
+  <div class="ja-pills" id="ja-pills"></div>
+  <div class="ja-cards" id="ja-cards"></div>
+  <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg">Chargement&hellip;</div></div></div>
+  <div style="background:#0f0f13;border:1px solid #1d2027;border-radius:14px;overflow:hidden" id="ja-tbl"></div>
+</div>
+<script>
+window.__jaData = null;
+window.__jaView = 'id';
+window.__jaOff = {};
+var JA_COLORS = ['#22c55e','#3b82f6','#f59e0b','#ec4899','#a855f7','#14b8a6','#ef4444','#eab308','#6366f1','#f97316','#84cc16','#06b6d4'];
+function jaEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jaNum(n){ n = Math.round(n || 0); return n.toLocaleString('fr-FR'); }
+function jaGroups(){
+  var d = window.__jaData || {};
+  return (window.__jaView === 'va' ? d.vas : d.idents) || [];
+}
+function jaView(v){
+  window.__jaView = v === 1 ? 'va' : 'id';
+  window.__jaOff = {};
+  var seg = document.getElementById('ja-view');
+  if(seg){ var bs = seg.querySelectorAll('button');
+    bs.forEach ? bs.forEach(function(b,i){ b.classList.toggle('on', (v===1)===(i===1)); })
+               : Array.prototype.forEach.call(bs, function(b,i){ b.classList.toggle('on', (v===1)===(i===1)); }); }
+  jaRender();
+}
+function jaHue(name){ var h = 0; for(var i = 0; i < name.length; i++){ h = (h * 31 + name.charCodeAt(i)) % 360; } return h; }
+function jaAvatar(g, size){
+  if(window.__jaView === 'id'){
+    return '<img src="/identity/avatar/' + encodeURIComponent(g.name) + '" loading="lazy" '
+         + 'onerror="this.outerHTML=jaFb(this.alt)" alt="' + jaEsc(g.name) + '">';
+  }
+  return jaFb(g.name);
+}
+function jaFb(name){
+  return '<span class="ja-pfb" style="background:hsl(' + jaHue(String(name||'')) + ',55%,42%)">'
+       + jaEsc(String(name||'?').charAt(0).toUpperCase()) + '</span>';
+}
+function jaPills(){
+  var gs = jaGroups();
+  var el = document.getElementById('ja-pills');
+  if(!el) return;
+  el.innerHTML = gs.map(function(g, i){
+    var col = JA_COLORS[i % JA_COLORS.length];
+    return '<button class="ja-pill' + (window.__jaOff[g.name] ? ' off' : '') + '" '
+         + 'style="border-color:' + (window.__jaOff[g.name] ? '#2a2d36' : col) + '" '
+         + 'onclick=jaTogglePill(' + i + ') title="Clique pour masquer/afficher">'
+         + jaAvatar(g) + '<span>' + jaEsc(g.name) + '</span> <b style="color:' + col + '">' + jaNum(g.weekly) + '</b>'
+         + '</button>';
+  }).join('');
+}
+function jaTogglePill(i){
+  var g = jaGroups()[i];
+  if(!g) return;
+  if(window.__jaOff[g.name]){ delete window.__jaOff[g.name]; } else { window.__jaOff[g.name] = true; }
+  jaRender();
+}
+function jaCards(){
+  var d = window.__jaData || {};
+  var t = d.tot || {};
+  var el = document.getElementById('ja-cards');
+  if(!el) return;
+  var age = '';
+  if(d.scraped_at){
+    var m = Math.max(0, Math.round((Date.now()/1000 - d.scraped_at) / 60));
+    age = m < 60 ? ('il y a ' + m + ' min') : ('il y a ' + Math.round(m/60) + ' h');
+  }
+  el.innerHTML =
+      '<div class="ja-card"><div class="lab">Vues 24 h</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">reels post&eacute;s ces 24 h</div></div>'
+    + '<div class="ja-card"><div class="lab">Vues 7 jours</div><div class="val">' + jaNum(t.weekly) + '</div><div class="sub">reels des 7 derniers jours</div></div>'
+    + '<div class="ja-card"><div class="lab">Vues 14 jours</div><div class="val">' + jaNum(t.biweekly) + '</div><div class="sub">reels des 14 derniers jours</div></div>'
+    + '<div class="ja-card"><div class="lab">Abonn&eacute;s</div><div class="val">' + jaNum(t.followers) + '</div><div class="sub">cumul des comptes actifs</div></div>'
+    + '<div class="ja-card"><div class="lab">Comptes</div><div class="val">' + jaNum(t.n) + '</div>'
+    + '<div class="sub">' + jaNum(t.active) + ' actifs &middot; ' + jaNum(t.banned) + ' bannis'
+    + (t.pending ? (' &middot; ' + jaNum(t.pending) + ' en attente') : '') + '</div></div>'
+    + '<div class="ja-card"><div class="lab">Dernier scrape</div><div class="val" style="font-size:19px">' + (age || '&mdash;') + '</div>'
+    + '<div class="sub">auto 00h / 12h &middot; &#8635; recharge</div></div>';
+  var upd = document.getElementById('ja-upd');
+  if(upd) upd.textContent = age ? ('donn\\u00e9es du dernier scrape \\u00b7 ' + age) : '';
+}
+function jaChart(){
+  var d = window.__jaData || {};
+  var box = document.getElementById('ja-chart');
+  if(!box) return;
+  var days = d.days || [];
+  var gs = jaGroups().filter(function(g){ return !window.__jaOff[g.name]; });
+  var head = '<h4>Vues par ' + (window.__jaView === 'va' ? 'VA' : 'identit&eacute;') + ' &mdash; 14 jours (par jour de publication)</h4>';
+  if(!d.has_days){
+    box.innerHTML = head + '<div class="ja-note">&#128200; Les courbes appara&icirc;tront apr&egrave;s le prochain scrape '
+      + '(auto &agrave; 00h / 12h, ou bouton &laquo; Scraper maintenant &raquo; de la page Jailbreak). '
+      + 'Les totaux et le tableau ci-dessous sont d&eacute;j&agrave; &agrave; jour.</div>';
+    return;
+  }
+  var partial = '';
+  var act = (d.tot || {}).active || 0;
+  if(act && (d.cov || 0) < act){
+    // Couverture incomplete : seuls les comptes re-scrapes depuis la maj ont
+    // leur courbe -> on previent au lieu de laisser croire a des vues a zero.
+    partial = '<div class="ja-note">&#9203; Courbes partielles : <b>' + jaNum(d.cov) + '/' + jaNum(act)
+      + '</b> comptes actifs couverts pour le moment &mdash; complet au prochain scrape (00h / 12h). '
+      + 'Les cartes et le tableau sont, eux, d&eacute;j&agrave; complets.</div>';
+  }
+  if(!days.length || !gs.length){ box.innerHTML = head + partial + '<div class="ja-msg">Rien &agrave; tracer.</div>'; return; }
+  var W = 940, H = 260, PL = 52, PR = 14, PT = 14, PB = 26;
+  var iw = W - PL - PR, ih = H - PT - PB;
+  var max = 0;
+  gs.forEach(function(g){ (g.points || []).forEach(function(v){ if(v > max) max = v; }); });
+  if(max <= 0) max = 1;
+  var stepX = days.length > 1 ? iw / (days.length - 1) : 0;
+  function X(i){ return PL + i * stepX; }
+  function Y(v){ return PT + ih - (v / max) * ih; }
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+  for(var gi = 0; gi <= 4; gi++){
+    var yv = Math.round(max * (4 - gi) / 4), yy = Y(yv);
+    svg += '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy + '" stroke="#1e2129" stroke-width="1"/>';
+    svg += '<text x="' + (PL - 8) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#6b7280" font-size="10">' + jaNum(yv) + '</text>';
+  }
+  days.forEach(function(dd, i){
+    if(days.length > 8 && (i % 2)) return;
+    var p = dd.split('-');
+    svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#6b7280" font-size="10">' + p[2] + '/' + p[1] + '</text>';
+  });
+  var all = jaGroups();
+  gs.forEach(function(g){
+    var ci = all.indexOf(g);
+    var col = JA_COLORS[ci % JA_COLORS.length];
+    var pts = g.points || [];
+    var path = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
+    svg += '<path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    pts.forEach(function(v, k){
+      svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
+           + '<title>' + jaEsc(g.name) + ' &mdash; ' + days[k] + ' : ' + jaNum(v) + ' vues</title></circle>';
+    });
+  });
+  svg += '<line id="ja-guide" x1="0" y1="' + PT + '" x2="0" y2="' + (PT + ih) + '" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
+  svg += '</svg>';
+  box.innerHTML = head + partial + svg + '<div class="ja-tip" id="ja-tip"></div>';
+  var svgEl = box.querySelector('svg');
+  var tip = document.getElementById('ja-tip');
+  var guide = svgEl ? svgEl.querySelector('#ja-guide') : null;
+  if(svgEl && tip){
+    svgEl.addEventListener('mousemove', function(e){
+      var r = svgEl.getBoundingClientRect();
+      var xs = (e.clientX - r.left) * (W / r.width);
+      var i = Math.round((xs - PL) / (stepX || 1));
+      if(i < 0) i = 0; if(i > days.length - 1) i = days.length - 1;
+      if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', X(i)); guide.setAttribute('x2', X(i)); }
+      var p = days[i].split('-');
+      var rows = gs.map(function(g){
+        return {name: g.name, v: (g.points || [])[i] || 0, ci: all.indexOf(g)};
+      }).sort(function(a, b){ return b.v - a.v; });
+      tip.innerHTML = '<div class="d">' + p[2] + '/' + p[1] + '</div>' + rows.map(function(x){
+        return '<div class="r"><i style="background:' + JA_COLORS[x.ci % JA_COLORS.length] + '"></i>'
+             + jaEsc(x.name) + '<b>' + jaNum(x.v) + '</b></div>';
+      }).join('');
+      tip.style.display = 'block';
+      var br = box.getBoundingClientRect();
+      var tx = e.clientX - br.left + 16;
+      if(tx + tip.offsetWidth > br.width - 8) tx = e.clientX - br.left - tip.offsetWidth - 16;
+      var ty = e.clientY - br.top - 10;
+      if(ty + tip.offsetHeight > br.height - 4) ty = br.height - tip.offsetHeight - 4;
+      tip.style.left = Math.max(4, tx) + 'px';
+      tip.style.top = Math.max(4, ty) + 'px';
+    });
+    svgEl.addEventListener('mouseleave', function(){
+      tip.style.display = 'none';
+      if(guide) guide.style.display = 'none';
+    });
+  }
+}
+function jaTable(){
+  var gs = jaGroups();
+  var el = document.getElementById('ja-tbl');
+  if(!el) return;
+  var max = 0;
+  gs.forEach(function(g){ if(g.weekly > max) max = g.weekly; });
+  var rows = '<div class="ja-row head"><span>#</span><span>' + (window.__jaView === 'va' ? 'VA' : 'Identit&eacute;') + '</span>'
+    + '<span class="num">Comptes</span><span class="num">Actifs</span><span class="num">Bannis</span>'
+    + '<span class="num hidesm">Vues 24 h</span><span class="num">Vues 7 j</span><span class="num hidesm">Vues 14 j</span>'
+    + '<span class="num hidesm">Abonn&eacute;s</span><span class="hidesm">Part 7 j</span></div>';
+  if(!gs.length){ rows += '<div class="ja-msg">Aucun compte.</div>'; }
+  gs.forEach(function(g, i){
+    var pct = max ? Math.round(g.weekly * 100 / max) : 0;
+    rows += '<div class="ja-row">'
+      + '<span style="color:#6b7280">' + (i + 1) + '</span>'
+      + '<span class="nm">' + jaAvatar(g) + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + jaEsc(g.name) + '</span></span>'
+      + '<span class="num">' + jaNum(g.n) + '</span>'
+      + '<span class="num" style="color:#22c55e">' + jaNum(g.active) + '</span>'
+      + '<span class="num" style="color:' + (g.banned ? '#ef4444' : '#6b7280') + '">' + jaNum(g.banned) + '</span>'
+      + '<span class="num hidesm">' + jaNum(g.daily) + '</span>'
+      + '<span class="num" style="color:#fff;font-weight:800">' + jaNum(g.weekly) + '</span>'
+      + '<span class="num hidesm">' + jaNum(g.biweekly) + '</span>'
+      + '<span class="num hidesm">' + jaNum(g.followers) + '</span>'
+      + '<span class="ja-share hidesm"><i style="width:' + pct + '%"></i></span>'
+      + '</div>';
+  });
+  el.innerHTML = rows;
+}
+function jaRender(){
+  if(!window.__jaData) return;
+  jaPills();
+  jaCards();
+  jaChart();
+  jaTable();
+}
+function jaLoad(force){
+  fetch('/jbanalyse/data')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        var box = document.getElementById('ja-chart');
+        if(box) box.innerHTML = '<div class="ja-msg">Erreur : ' + jaEsc((d && d.error) || 'donn&eacute;es indisponibles') + '</div>';
+        return;
+      }
+      window.__jaData = d;
+      jaRender();
+    })
+    .catch(function(){
+      var box = document.getElementById('ja-chart');
+      if(box) box.innerHTML = '<div class="ja-msg">Erreur r&eacute;seau &mdash; clique &#8635;</div>';
+    });
+}
+if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ jaLoad(0); }); } else { jaLoad(0); }
+</script>
+"""
+    return css + body
+
+
 def _render_facture_html() -> str:
     """Page Facture (compta mensuelle OFM). Isolé dans facture_web.py."""
     try:
@@ -29688,6 +30079,8 @@ _PERM_KEY_TO_TABS = {
     # On révèle donc la Bibliothèque (cloudoverview = navigable) + on dé-masque les
     # panneaux d'upload. Sans cloudoverview, accorder "upload" ne montrait aucun menu.
     "upload": {"cloudoverview", "reel", "post", "story", "storycta", "pp"},
+    # La permission « Jailbreak » couvre aussi le sous-onglet Analyse vues.
+    "jailbreak": {"jailbreak", "jbanalyse"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -30669,6 +31062,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{textpool_html}", _lazy("textpool"))
         .replace("{geelark_html}", _lazy("geelark"))
         .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
+        .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
         .replace("{gms_html}", _lazy("gms"))
         .replace("{linkscale_html}", _lazy("linkscale"))
         .replace("{schedule_html}", _lazy("schedule"))
@@ -35089,6 +35483,17 @@ def create_app():
             return jsonify({"ok": False, "error": "identity/names manquants"}), 400
         ok = bool(jb.reorder_vas(identity, [str(n) for n in names]))
         return jsonify({"ok": ok})
+
+    @app.route("/jbanalyse/data")
+    def jbanalyse_data():
+        """Données de l'onglet « Analyse vues » (local, instantané)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            return jsonify(_jbanalyse_payload())
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
 
     @app.route("/jailbreak/discord_debug")
     def jailbreak_discord_debug():
