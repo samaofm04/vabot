@@ -40228,6 +40228,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             """Tente de stream depuis video_url. Retourne Response ou None si echec.
             fast=True : timeout 4s pour la HEAD initiale (detection URL morte rapide).
             """
+            # Défense en profondeur : point de contrôle UNIQUE. On ne streame QUE des
+            # hôtes Instagram / CDN Meta, y compris pour une URL résolue via RapidAPI
+            # ou le scrape de page (pas seulement les paramètres url/vurl de l'appelant).
+            if not _host_ok(video_url or ""):
+                return None
             try:
                 upstream = _rq.get(
                     video_url, headers=ig_headers, stream=True,
