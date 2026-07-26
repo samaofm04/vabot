@@ -139,7 +139,7 @@ import threading as _threading
 from collections import deque as _deque
 _MCP_LOCK = _threading.Lock()
 _MCP_CACHE: Dict[str, Any] = {}          # api_key -> session MCP (multi-clés)
-_READ_TOOLS = {"list_links", "get_analytics_overview", "_ping"}
+_READ_TOOLS = {"list_links", "get_analytics_overview", "get_time_series", "_ping"}
 _KEY_LOCAL = _threading.local()
 
 
@@ -580,6 +580,35 @@ def analytics_for_link(link_id: str, start_date: str, end_date: str):
         except Exception:
             pass
     return total, countries
+
+
+def time_series_for_link(link_id: str, start_date: str, end_date: str,
+                         tz: str = "Europe/Paris") -> Optional[Dict[str, int]]:
+    """Clics JOUR PAR JOUR d'un lien en UN SEUL appel (outil MCP get_time_series),
+    au lieu d'un get_analytics_overview par jour. Retourne {"YYYY-MM-DD": clics}
+    ou None si échec (jamais un faux 0)."""
+    res = _call_tool("get_time_series", {
+        "link_id": link_id, "start_date": start_date, "end_date": end_date,
+        "interval": "day", "timezone": tz,
+    })
+    if not res.get("ok"):
+        return None
+    data = res.get("data") or {}
+    rows = data.get("data") if isinstance(data, dict) else None
+    if rows is None:
+        rows = data if isinstance(data, list) else []
+    out: Dict[str, int] = {}
+    for b in rows or []:
+        if not isinstance(b, dict):
+            continue
+        day = str(b.get("bucket") or "")[:10]
+        if not day:
+            continue
+        v = b.get("pageviews")
+        if v is None:
+            v = b.get("clicks") or 0
+        out[day] = int(v or 0)
+    return out
 
 
 def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:

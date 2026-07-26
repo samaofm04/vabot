@@ -23197,52 +23197,48 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
 
 
 def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dict:
-    """Série quotidienne (clics + clics US) des `top_n` meilleurs liens sur `days`
-    jours. Retourne {days:[iso…], links:[{name, shortcode, points, us_points, total,
-    us_total}]}. Best-effort : un jour illisible vaut 0 pour ce lien."""
+    """Série quotidienne des `top_n` meilleurs liens — UN appel API PAR LIEN
+    (gms.time_series_for_link) au lieu d'un par lien ET par jour (8 vs 56).
+    L'API ne détaille pas les pays par jour -> us_available=False : la courbe en
+    mode US est remplacée par une note, les totaux US (période) restent exacts."""
     import datetime as _dt_se
     from concurrent.futures import ThreadPoolExecutor
     try:
         import gms
     except Exception:
-        return {"days": [], "links": []}
+        return {"days": [], "links": [], "us_available": False}
     top = sorted([r for r in rows if r.get("id")],
                  key=lambda r: -(r.get("clicks") or 0))[:top_n]
     if not top:
-        return {"days": [], "links": []}
+        return {"days": [], "links": [], "us_available": False}
     today = _dt_se.date.today()
     day_list = [(today - _dt_se.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    if prog:
+        prog(total_add=len(top), stage="courbe des 7 jours")
 
-    def _cell(job):
-        lid, day = job
+    def _one_series(r):
         try:
             with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
-                tot, ctry = gms.analytics_for_link(lid, day, day)
+                m = gms.time_series_for_link(r["id"], day_list[0], day_list[-1])
         except Exception:
-            tot, ctry = None, None
+            m = None
         if prog:
             prog(1)
-        return (lid, day, tot or 0, (ctry or {}).get("US", 0))
+        return r, (m or {})
 
-    jobs = [(r["id"], d) for r in top for d in day_list]
-    if prog:
-        prog(total_add=len(jobs), stage="courbe des 7 jours")
-    got: dict = {}
+    out = []
     try:
         with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
-            for lid, day, tot, us in ex.map(_cell, jobs):
-                got[(lid, day)] = (tot, us)
+            for r, m in ex.map(_one_series, top):
+                pts = [int(m.get(d) or 0) for d in day_list]
+                out.append({"name": r.get("name") or r.get("shortcode"),
+                            "shortcode": r.get("shortcode"),
+                            "points": pts, "us_points": [0] * len(day_list),
+                            "total": sum(pts),
+                            "us_total": int(r.get("us") or 0)})   # US de la PÉRIODE (exact)
     except Exception:
         pass
-    out = []
-    for r in top:
-        pts = [got.get((r["id"], d), (0, 0))[0] for d in day_list]
-        ups = [got.get((r["id"], d), (0, 0))[1] for d in day_list]
-        out.append({"name": r.get("name") or r.get("shortcode"),
-                    "shortcode": r.get("shortcode"),
-                    "points": pts, "us_points": ups,
-                    "total": sum(pts), "us_total": sum(ups)})
-    return {"days": day_list, "links": out}
+    return {"days": day_list, "links": out, "us_available": False}
 
 
 def _gmsdash_store(team: str, period: str, payload: dict):
@@ -23660,6 +23656,18 @@ function gdChart(d){
   var days = se.days || [], links = se.links || [];
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
   var us = window.__gdUs;
+  if(us && se.us_available === false){
+    var leg0 = links.map(function(l, i){
+      return '<button style="cursor:default"><i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
+           + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(l.us_total || 0) + '</b></button>';
+    }).join('');
+    box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
+      + '<div class="hint">Mode 🇺🇸 : l’API ne détaille pas les pays jour par jour — '
+      + 'voici les totaux US de la période par lien (le tableau reste en US aussi). '
+      + 'Décoche « US uniquement » pour revoir la courbe.</div>'
+      + '<div class="gd-leg">' + leg0 + '</div>';
+    return;
+  }
   var W = 900, H = 260, PL = 46, PR = 14, PT = 12, PB = 26;
   var iw = W - PL - PR, ih = H - PT - PB;
   var vals = links.map(function(l, i){ return window.__gdHidden[i] ? [] : (us ? l.us_points : l.points); });
