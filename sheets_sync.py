@@ -975,7 +975,13 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     except Exception:
         _tomb = {"vas": {}, "accounts": {}}
     _tv = _tomb.get("vas") or {}
-    _ta = _tomb.get("accounts") or {}
+    _ta_raw = _tomb.get("accounts") or {}
+    # Le blocage anti-résurrection ne dure que la FENÊTRE DE COURSE (15 min) :
+    # le temps qu'une suppression faite sur le site soit repoussée vers le
+    # Sheet. Au-delà, une ligne présente dans le Sheet = re-ajout VOULU
+    # (le push a déjà réécrit les onglets sans les comptes supprimés).
+    _now_t = time.time()
+    _ta = {k: ts for k, ts in _ta_raw.items() if _now_t - float(ts or 0) < 900}
 
     # Classer les onglets du Sheet
     id_tabs = {}                 # identity_lower -> rows
@@ -1143,7 +1149,7 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     changed = bool(added or updated or removed)
     if changed:
         jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
-    _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site < 7 j — re-ajoute-les via le SITE pour les débloquer)" if skipped_tomb else ""
+    _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site il y a < 15 min — réessaie dans quelques minutes)" if skipped_tomb else ""
     if blocked_del:
         _extra += (f"" + chr(10) + f"⚠️ **{blocked_del} suppression(s) RETENUES** (garde anti-effacement : "
                    f"quasi-effacement total d'une identité). Si c'est VOULU, relance "
