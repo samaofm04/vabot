@@ -20553,7 +20553,7 @@ def _render_jailbreak_html() -> str:
         "  var sb = document.querySelector('.jb-sidebar');"
         "  var sbScroll = sb ? sb.scrollTop : 0;"
         "  var winScroll = window.scrollY || 0;"
-        "  fetch(window.location.href, {credentials:'same-origin'})"
+        "  fetch('/?tab=jailbreak&frag=1', {credentials:'same-origin', headers:{'X-Tab-Ajax':'1'}})"
         "    .then(function(r){ return r.text(); })"
         "    .then(function(html){"
         "      var doc = new DOMParser().parseFromString(html, 'text/html');"
@@ -33125,6 +33125,14 @@ def create_app():
         # cloud, on ne rend QUE cette section pour l'identité demandée.
         if request.headers.get("X-Tab-Ajax") and request.args.get("frag") == "1":
             _tab = (request.args.get("tab") or "").strip()
+            # Même gating que les onglets : un rôle restreint ne peut pas
+            # récupérer un fragment d'onglet interdit via cette route.
+            try:
+                _al = _role_allowed_tabs(_live_role())
+            except Exception:
+                _al = None
+            if _al is not None and _tab and _tab not in _al:
+                return ("", 403)
             _cloud = {
                 "cloudreels": ("videos", VIDEO_EXTS, False),
                 "cloudposts": ("posts", IMAGE_EXTS, False),
@@ -33145,6 +33153,11 @@ def create_app():
                 try:
                     return (f"<div class='form-section' id='{_secid}' style='display:block'>"
                             f"{_render_cloud_content_html(_sub, _exts, include_jb=_jb)}</div>", 200)
+                except Exception:
+                    return ("", 200)
+            if _tab == "jailbreak":
+                try:
+                    return (_render_jailbreak_html(), 200)
                 except Exception:
                     return ("", 200)
             # tab inconnu -> on laisse retomber sur le rendu complet ci-dessous
