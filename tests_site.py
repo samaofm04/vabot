@@ -511,6 +511,90 @@ try:
 except Exception as _e:
     check("sécurité 3 : testable", False, repr(_e)[:80])
 
+print()
+print("=" * 70)
+print("10) Régressions du 27/07 (sweep wi90wufzn) — verrouillage")
+print("=" * 70)
+try:
+    import web_upload as _wr
+    _ar = _wr.create_app(); _ar.config["TESTING"] = True
+    _svr = _wr._load_web_users
+    # -- FIX 1 : un rôle restreint change SON propre mot de passe (pas 403) --
+    _wr._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _cc = _ar.test_client()
+    with _cc.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "chat"; _s["role"] = "chatter"; _s["sid"] = "R1"
+    check("FIX1 chatter peut changer son mdp (≠403)",
+          _cc.post("/settings/my_password", data={"old": "x", "new": "y"}).status_code != 403)
+    # -- FIX 4 : revenus globaux + paie VA fermés à un rôle restreint --
+    check("FIX4 /paievas/report fermé au chatter",
+          _cc.get("/paievas/report?period=current").status_code == 403)
+    check("FIX4 /home/overview fermé au chatter",
+          _cc.get("/home/overview?home_period=today").status_code == 403)
+    # -- FIX 2 : SSRF ancré sur une frontière de point --
+    _wr._load_web_users = lambda: {"boss": {"role": "owner"}}
+    _co = _ar.test_client()
+    with _co.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "R2"
+    _ssrf_ok = all(_co.get("/insta/proxy_video?vurl=http://" + _h + "/x").status_code == 403
+                   for _h in ("evil-instagram.com", "xinstagram.com", "attacker-facebook.com"))
+    check("FIX2 SSRF bloque les domaines sosies", _ssrf_ok)
+    check("FIX2 SSRF laisse passer le vrai CDN",
+          _co.get("/insta/proxy_video?vurl=https://scontent.cdninstagram.com/v/x.mp4").status_code != 403)
+    _wr._load_web_users = _svr
+    # -- FIX 5 : fin de journée de paie calée sur Paris, SANS zoneinfo --
+    import datetime as _dtp, calendar as _calp
+    def _dayend(_iso):
+        _nd = _dtp.date.fromisoformat(_iso) + _dtp.timedelta(days=1)
+        _d0 = _dtp.date(_nd.year, 3, _wr._last_sunday_web(_nd.year, 3))
+        _d1 = _dtp.date(_nd.year, 10, _wr._last_sunday_web(_nd.year, 10))
+        _off = 2 if (_d0 <= _nd < _d1) else 1
+        return _calp.timegm((_dtp.datetime(_nd.year, _nd.month, _nd.day)
+                             - _dtp.timedelta(hours=_off)).timetuple())
+    check("FIX5 fin de jour Paris été (CEST)",
+          _dayend("2026-07-26") == _calp.timegm(_dtp.datetime(2026, 7, 26, 22, 0).timetuple()))
+    check("FIX5 fin de jour Paris hiver (CET)",
+          _dayend("2026-01-15") == _calp.timegm(_dtp.datetime(2026, 1, 15, 23, 0).timetuple()))
+except Exception as _e:
+    check("régressions 27/07 : testable", False, repr(_e)[:90])
+
+try:
+    import copy as _cp, sheets_sync as _ss
+    class _FJB:
+        def __init__(_s, d): _s._data = d
+        def _load(_s): return _cp.deepcopy(_s._data)
+        def _save(_s, d): _s._data = d
+        def tombstones(_s): return {"accounts": {}, "vas": {}}
+        def tomb_clear(_s, *a, **k): pass
+    _COLS = ["username", "password", "email", "two_fa", "va"]
+    _jb = _FJB({"test": {"vas": ["jhon", "andry"],
+                         "accounts": [{"id": 1, "username": "acc1", "va": "jhon",
+                                       "password": "SECRET", "two_fa": "2FA", "email": "e@x"}]}})
+    # onglet identité PÉRIMÉ (jhon) + ligne DÉPLACÉE dans l'onglet VA 'andry'
+    _ss._merge_sheet_into_data({
+        "test": [{"username": "acc1", "va": "jhon", "password": "SECRET", "email": "e@x",
+                  "two_fa": "2FA", "__cols__": _COLS}],
+        "test andry": [{"username": "acc1", "__cols__": ["username"]}],
+        "test jhon": [],
+    }, _jb, force_delete=False)
+    _a = {a["username"]: a for a in _jb._data["test"]["accounts"]}.get("acc1")
+    check("FIX6 déplacement d'onglet VA tient (reassignation)", bool(_a) and _a["va"] == "andry")
+    check("FIX6 credentials préservés au déplacement",
+          bool(_a) and _a["password"] == "SECRET" and _a["two_fa"] == "2FA")
+    # chemin normal : colonne 'va' de l'onglet identité fait toujours foi
+    _jb2 = _FJB({"test": {"vas": ["jhon", "andry"],
+                          "accounts": [{"id": 2, "username": "acc2", "va": "jhon",
+                                        "password": "S", "two_fa": "T", "email": "e"}]}})
+    _ss._merge_sheet_into_data({
+        "test": [{"username": "acc2", "va": "andry", "password": "S", "email": "e",
+                  "two_fa": "T", "__cols__": _COLS}],
+        "test jhon": [{"username": "acc2", "__cols__": ["username"]}],
+    }, _jb2, force_delete=False)
+    _b = {a["username"]: a for a in _jb2._data["test"]["accounts"]}.get("acc2")
+    check("FIX6 chemin normal (colonne va) intact", bool(_b) and _b["va"] == "andry")
+except Exception as _e:
+    check("FIX6 : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

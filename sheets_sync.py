@@ -1091,6 +1091,7 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
 
         # --- SUPPRESSIONS : absent d'un onglet non vide où il devrait figurer ---
         touched = set()      # (username, champ) deja applique depuis l onglet IDENTITE
+        moved_users = set()  # usernames reassignes par DEPLACEMENT d onglet VA
         to_delete, kept = [], []
         for a in accts:
             u = (a.get("username") or "").strip().lower()
@@ -1100,6 +1101,7 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                 # Ligne DEPLACEE dans l onglet d un autre VA -> reassignation.
                 # Avant, le compte etait supprime (mot de passe et 2FA perdus).
                 a["va"] = va_meta.get(moved_to, (moved_to, None))[0]
+                moved_users.add(u)   # le 'va' de l onglet identite (perime) ne doit PAS l ecraser
                 updated += 1
                 kept.append(a)
                 continue
@@ -1151,6 +1153,11 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                     for f in _FIELDS:
                         if f not in _cols:
                             continue      # colonne absente du Sheet : on n ecrase RIEN
+                        if f == "va" and u.lower() in moved_users:
+                            # Ligne deplacee dans un onglet VA : le DEPLACEMENT fait
+                            # foi, pas la colonne 'va' (perimee) de l onglet identite,
+                            # sinon la reassignation etait annulee a chaque cycle.
+                            continue
                         v = (r.get(f) or "").strip()
                         if (acct.get(f) or "") != v:
                             acct[f] = v

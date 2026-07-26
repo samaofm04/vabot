@@ -16552,9 +16552,20 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
     # correctif, consulter la page à 14 h figeait à vie les clics partiels du
     # jour (donc sous-paiement de tous les VAs, proportionnel à l'heure).
     try:
-        import datetime as _dt_pd
-        _d = _dt_pd.date.fromisoformat(iso_day)
-        day_end_ts = time.mktime((_d + _dt_pd.timedelta(days=1)).timetuple())
+        # La fin de journee doit etre calculee en HEURE DE PARIS (les clics GMS
+        # sont comptes en heure Paris), pas dans le fuseau du serveur : sinon un
+        # VPS en avance sur Paris figeait un jour encore en cours -> sous-paiement.
+        # SANS zoneinfo/tzdata (absent sous Windows, non garanti sur le VPS) : on
+        # derive l offset DST a la main, exactement comme _paris_now_web. Un
+        # fallback zoneinfo=0 aurait re-fige les jours partiels -> on l evite.
+        import datetime as _dt_pd, calendar as _cal_pd
+        _nd = _dt_pd.date.fromisoformat(iso_day) + _dt_pd.timedelta(days=1)
+        _y = _nd.year
+        _dst0 = _dt_pd.date(_y, 3, _last_sunday_web(_y, 3))
+        _dst1 = _dt_pd.date(_y, 10, _last_sunday_web(_y, 10))
+        _off = 2 if (_dst0 <= _nd < _dst1) else 1     # CEST(+2) l ete, CET(+1) l hiver
+        _naive_utc = _dt_pd.datetime(_nd.year, _nd.month, _nd.day) - _dt_pd.timedelta(hours=_off)
+        day_end_ts = _cal_pd.timegm(_naive_utc.timetuple())
     except Exception:
         day_end_ts = 0
     if c:
@@ -16623,7 +16634,7 @@ def compute_va_eligible_clicks(start_iso: str, end_iso: str) -> int:
             matched.append(str(l["id"]))
     if not matched:
         return 0
-    today = _dt.date.today()
+    today = _paris_now_web().date()   # jour "aujourd'hui" en heure de Paris
     try:
         d0 = _dt.date.fromisoformat(start_iso)
         d1 = min(_dt.date.fromisoformat(end_iso), today)
@@ -16659,7 +16670,7 @@ def _compute_va_pay_report(period: str) -> dict:
     if cached and time.time() - cached[0] < 300:
         return cached[1]
 
-    today = _dt.date.today()
+    today = _paris_now_web().date()   # jour "aujourd'hui" en heure de Paris
     if period == "previous":
         cur_start, _ = _pay_quinzaine(today)
         p_start, p_end = _pay_quinzaine(cur_start - _dt.timedelta(days=1))
@@ -32998,6 +33009,10 @@ def create_app():
         "/facture/", "/business/", "/jailbreak/", "/jbactivite/", "/jbanalyse/",
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
         "/sheets", "/external/list", "/va/get_insta",
+        # revenus GLOBAUX et rapport de PAIE des VAs : jamais un onglet d'un
+        # role restreint (le chatter n'a que sa propre page revenus, servie
+        # cote page ; ces GET-la exposaient le CA agence et les salaires VA).
+        "/home/overview", "/paievas/",
     )
 
     @app.before_request
@@ -33008,6 +33023,11 @@ def create_app():
         path = request.path or ""
         if _role_allowed_tabs(_live_role()) is None:
             return None                    # owner / admin : accès complet
+        # Exception : chaque rôle peut changer SON propre mot de passe (seule
+        # écriture de l'onglet « Mon compte » d'un rôle restreint) — sinon un
+        # chatter était bloqué en 403 sur /settings/my_password.
+        if path == "/settings/my_password":
+            return None
         is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if not is_write:
             # LECTURE : bloquer uniquement les API de DONNÉES sensibles. Les
@@ -33269,7 +33289,7 @@ def create_app():
             if _prod is None:
                 return ("", 404)
             try:
-                _allowed = _role_allowed_tabs((session.get("role") or "").lower())
+                _allowed = _role_allowed_tabs(_live_role())
             except Exception:
                 _allowed = None
             if _allowed is not None and _name not in _allowed:
@@ -40160,10 +40180,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 pr = _up(u)
                 if pr.scheme not in ("http", "https"):
                     return False
-                h = (pr.hostname or "").lower()
-                return (h.endswith("instagram.com") or h.endswith("cdninstagram.com")
-                        or h.endswith("fbcdn.net") or h.endswith("facebook.com")
-                        or h == "instagram.com")
+                h = (pr.hostname or "").lower().rstrip(".")
+                # Ancré sur une frontière de point : « evil-instagram.com » ou
+                # « attacker-facebook.com » ne doivent PLUS passer.
+                _ok_dom = ("instagram.com", "cdninstagram.com", "fbcdn.net", "facebook.com")
+                return any(h == d or h.endswith("." + d) for d in _ok_dom)
             except Exception:
                 return False
         for _u in (post_url, direct_vurl):
