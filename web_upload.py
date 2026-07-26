@@ -20300,6 +20300,41 @@ def _render_jailbreak_html() -> str:
         # Réponse fetch -> JSON, sauf si la session a expiré (redirect vers le
         # login ou 401) : dans ce cas on recharge la page (montre le login) au
         # lieu d afficher un « Erreur réseau » mensonger en boucle.
+        # Verrou PAR CIBLE : supprimer un VA ne doit pas bloquer les autres.
+        # Chien de garde 20 s : un verrou ne peut jamais rester collé.
+        "window.__jbLocks = {};"
+        "function _jbLock(key){"
+        "  if(window.__jbLocks[key]) return false;"
+        "  window.__jbLocks[key] = setTimeout(function(){ delete window.__jbLocks[key]; }, 20000);"
+        "  return true;"
+        "}"
+        "function _jbUnlock(key){"
+        "  var t = window.__jbLocks[key];"
+        "  if(t) clearTimeout(t);"
+        "  delete window.__jbLocks[key];"
+        "}"
+        # Retrait optimiste : l élément part tout de suite (la réponse serveur
+        # + le soft refresh prennent 1-3 s sur 500+ comptes).
+        "function _jbHideVa(identity, vaName){"
+        "  var out = [], vid = identity + '|' + vaName.toLowerCase();"
+        "  document.querySelectorAll('.jb-side-va').forEach(function(b){"
+        "    if((b.getAttribute('data-identity') || '') === identity"
+        "       && (b.getAttribute('data-va-name') || '') === vaName){ b.style.display = 'none'; out.push(b); }"
+        "  });"
+        "  document.querySelectorAll('.jb-va-detail').forEach(function(c){"
+        "    if((c.getAttribute('data-va-id') || '') === vid){ c.style.display = 'none'; out.push(c); }"
+        "  });"
+        "  return out;"
+        "}"
+        "function _jbHideRow(username){"
+        "  var out = [], u = String(username || '').toLowerCase();"
+        "  if(!u) return out;"
+        "  document.querySelectorAll('.jb-row').forEach(function(r){"
+        "    if((r.getAttribute('data-username') || '').toLowerCase() === u){ r.style.display = 'none'; out.push(r); }"
+        "  });"
+        "  return out;"
+        "}"
+        "function _jbShowAgain(list){ (list || []).forEach(function(el){ el.style.display = ''; }); }"
         "function _jbJsonOrAuth(r){"
         "  if(r.redirected || r.status === 401){"
         "    if(typeof showToast === 'function') showToast('Session expirée — reconnexion…', 'error', 2200);"
@@ -20386,22 +20421,24 @@ def _render_jailbreak_html() -> str:
         "function jbRemoveVa(identity, vaName){"
         # AJAX : plus de rechargement de page (le reload coupait le scrape en cours)
         "  function _do(){"
-        "    if(window.__jbRmBusy) return;"
-        "    window.__jbRmBusy = 1;"
+        "    var key = 'va:' + identity + '|' + vaName.toLowerCase();"
+        "    if(!_jbLock(key)) return;"
+        "    var hidden = _jbHideVa(identity, vaName);"
         "    var fd = new FormData();"
         "    fd.append('identity', identity); fd.append('va_name', vaName); fd.append('ajax', '1');"
         "    fetch('/jailbreak/remove_va', {method:'POST', body: fd})"
         "      .then(_jbJsonOrAuth)"
         "      .then(function(d){"
-        "        window.__jbRmBusy = 0;"
+        "        _jbUnlock(key);"
         "        if(d && d.ok){"
         "          try { var sel = localStorage.getItem('vabot_jb_selected_va') || '';"
         "                if(sel === identity + '|' + vaName.toLowerCase()) localStorage.removeItem('vabot_jb_selected_va'); } catch(e){}"
         "          if(typeof showToast === 'function') showToast('VA ' + vaName + ' supprimé (' + (d.removed_accounts || 0) + ' compte(s))', 'success', 2200);"
         "          jbSoftRefresh('');"
-        "        } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
+        "        } else { _jbShowAgain(hidden); if(typeof showToast === 'function') showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
         "      })"
-        "      .catch(function(e){ window.__jbRmBusy = 0; if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
+        "      .catch(function(e){ _jbUnlock(key); if(e && e.message === 'auth') return; _jbShowAgain(hidden);"
+        "        if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
         "  }"
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le VA et TOUS ses comptes ?', 'Le VA \"' + vaName + '\" et tous ses comptes seront supprimés définitivement (et retirés du Google Sheet).').then(function(ok){"
@@ -20742,29 +20779,31 @@ def _render_jailbreak_html() -> str:
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le compte ?', 'Compte @' + username + ' (' + identity + ') sera supprimé. Cette action est irréversible.').then(function(ok){"
         "      if(!ok) return;"
-        "      _jbPostRemove(identity, accountId);"
+        "      _jbPostRemove(identity, accountId, username);"
         "    });"
         "  } else {"
         "    if(!confirm('Supprimer le compte @' + username + ' ?')) return;"
-        "    _jbPostRemove(identity, accountId);"
+        "    _jbPostRemove(identity, accountId, username);"
         "  }"
         "}"
-        "function _jbPostRemove(identity, accountId){"
-        "  if(window.__jbRmBusy) return;"
-        "  window.__jbRmBusy = 1;"
+        "function _jbPostRemove(identity, accountId, username){"
+        "  var key = 'ac:' + identity + '|' + accountId;"
+        "  if(!_jbLock(key)) return;"
+        "  var hidden = _jbHideRow(username);"
         # AJAX : la liste se met a jour en place, le VA selectionne reste affiche
         "  var fd = new FormData();"
         "  fd.append('identity', identity); fd.append('account_id', accountId); fd.append('ajax', '1');"
         "  fetch('/jailbreak/remove_account', {method:'POST', body: fd})"
         "    .then(_jbJsonOrAuth)"
         "    .then(function(d){"
-        "      window.__jbRmBusy = 0;"
+        "      _jbUnlock(key);"
         "      if(d && d.ok){"
         "        if(typeof showToast === 'function') showToast('Compte supprimé', 'success', 1800);"
         "        jbSoftRefresh('');"
-        "      } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
+        "      } else { _jbShowAgain(hidden); if(typeof showToast === 'function') showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
         "    })"
-        "    .catch(function(e){ window.__jbRmBusy = 0; if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
+        "    .catch(function(e){ _jbUnlock(key); if(e && e.message === 'auth') return; _jbShowAgain(hidden);"
+        "      if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
         "}"
         # === Scraper maintenant : declenche /insta/refresh_now puis poll l etat ===
         "function jbScrapeNow(btn){"
@@ -35168,9 +35207,13 @@ def create_app():
             return _error("❌ Identité ou nom du VA manquant", tab="jailbreak")
         n = jb.remove_va_and_accounts(identity, va_name)
         if n >= 0:
+            # Push Sheet en ARRIÈRE-PLAN : en synchrone il réécrit un classeur
+            # par identité (plusieurs secondes) et figeait le bouton Supprimer.
             try:
-                import sheets_sync
-                sheets_sync.push_all(jb._load(), force=True)  # maj le Sheet tout de suite (anti ré-import)
+                import sheets_sync, threading as _th_rv
+                _snap = jb._load()
+                _th_rv.Thread(target=lambda: sheets_sync.push_all(_snap, force=True),
+                              daemon=True, name="jb-rmva-sheet").start()
             except Exception:
                 pass
             if request.form.get("ajax") == "1":
