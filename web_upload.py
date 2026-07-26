@@ -19067,7 +19067,7 @@ def _render_jailbreak_html() -> str:
         # Trends -> sans ça, « Banni » s'affichait en texte brut sur la page Jailbreak.
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
         ".va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}"
-        ".jb-detail-accounts{overflow-x:auto}"
+        ".jb-detail-accounts{overflow-x:auto;max-width:1400px}"
         ".jb-prog-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(34,197,94,.25);border-top-color:#22c55e;display:inline-block;animation:jbSpin .8s linear infinite;flex-shrink:0}"
         ".jb-row:hover{background:rgba(255,255,255,.02)}"
         ".jb-row-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;margin-left:4px;transition:all .15s}"
@@ -19162,8 +19162,8 @@ def _render_jailbreak_html() -> str:
         ".jb-detail-accounts{display:flex;flex-direction:column;gap:8px}"
         # Override grille .va-ig3-row pour .jb-row : 9 cols = PP + name + 4 metrics + last + arrow + actions(group)
         # On supprime le 2e slot d action (28px) et on remplace par 1 cellule actions auto pour edit+delete groupes
-        ".jb-row{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
-        ".jb-thead{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px auto !important;gap:10px !important}"
+        ".jb-row{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px 76px !important;gap:10px !important}"
+        ".jb-thead{grid-template-columns:36px minmax(190px,1fr) 64px 64px 64px 64px 88px 26px 76px !important;gap:10px !important}"
         ".jb-row-actions{display:flex;gap:5px;align-items:center}"
         # Badge "NON SCRAPE" (orange : pas encore scrappe vs ban : rouge)
         ".jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(154,160,166,.12);color:#9aa0a6;font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;border:1px solid rgba(154,160,166,.28);white-space:nowrap;flex-shrink:0}"
@@ -22959,7 +22959,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 3
+GMSDASH_PAYLOAD_VER = 4
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23266,6 +23266,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         except Exception:
             pass
     base["series"] = _gmsdash_series(rows, days=7, top_n=8, prog=_prog)
+    base["series_models"] = _gmsdash_series_models(rows, days=7, prog=_prog)
     return base
 
 
@@ -23319,6 +23320,80 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
                     "points": pts, "us_points": ups, "fr_points": fps,
                     "total": sum(pts), "us_total": sum(ups), "fr_total": sum(fps)})
     return {"days": day_list, "links": out, "us_available": True}
+
+
+def _gmsdash_model_map() -> dict:
+    """{suffixe_shortcode: modèle} trié du suffixe le plus long au plus court.
+    Les shortcodes GMS finissent par le nom du modèle (xxxxlola, xxxxamelia…) ;
+    exceptions connues : 'secret' -> hybride, 'jessy' -> jessye."""
+    base = []
+    try:
+        import gms
+        base += list(getattr(gms, "FR_MARKET_MODELS", []) or [])
+    except Exception:
+        pass
+    try:
+        base += list(_list_identities() or [])
+    except Exception:
+        pass
+    m = {str(n).lower(): str(n).lower() for n in base if n}
+    m.setdefault("jessye", "jessye")
+    m["jessy"] = "jessye"
+    m["secret"] = "hybride"
+    return dict(sorted(m.items(), key=lambda kv: -len(kv[0])))
+
+
+def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
+    """Courbes PAR MODÈLE : tous les liens d'une identité sommés, 1 appel API par
+    modèle (get_time_series accepte un lot de link_ids). us/fr = totaux de la
+    période (pas de détail pays par jour sur un agrégat -> us_available=False)."""
+    import datetime as _dt_sm
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        import gms
+    except Exception:
+        return {"days": [], "links": [], "us_available": False}
+    mmap = _gmsdash_model_map()
+    groups: dict = {}
+    for r in rows:
+        sc = (r.get("shortcode") or "").lower()
+        model = next((mmap[suf] for suf in mmap if sc.endswith(suf)), "autres")
+        g = groups.setdefault(model, {"ids": [], "clicks": 0, "us": 0, "fr": 0})
+        if r.get("id"):
+            g["ids"].append(r["id"])
+        g["clicks"] += r.get("clicks") or 0
+        g["us"] += r.get("us") or 0
+        g["fr"] += r.get("fr") or 0
+    today = _dt_sm.date.today()
+    day_list = [(today - _dt_sm.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    items = sorted([kv for kv in groups.items() if kv[1]["ids"]],
+                   key=lambda kv: -kv[1]["clicks"])[:10]
+    if prog:
+        prog(total_add=len(items), stage="courbe par modèle")
+
+    def _one_model(kv):
+        name, g = kv
+        try:
+            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+                m = gms.time_series_for_links(g["ids"], day_list[0], day_list[-1])
+        except Exception:
+            m = None
+        if prog:
+            prog(1)
+        return name, g, (m or {})
+
+    out = []
+    try:
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=3) as ex:
+            for name, g, m in ex.map(_one_model, items):
+                pts = [int(m.get(d) or 0) for d in day_list]
+                out.append({"name": f"{name} ({len(g['ids'])} liens)", "shortcode": "",
+                            "points": pts, "us_points": [], "fr_points": [],
+                            "total": sum(pts), "us_total": g["us"], "fr_total": g["fr"]})
+    except Exception:
+        pass
+    out.sort(key=lambda x: -x["total"])
+    return {"days": day_list, "links": out, "us_available": False}
 
 
 def _gmsdash_store(team: str, period: str, payload: dict):
@@ -23760,13 +23835,30 @@ function gdToggleSerie(i){
   window.__gdHidden[i] = !window.__gdHidden[i];
   gdChart(window.__gdData);
 }
+function gdView(v){
+  // v numérique (0=liens, 1=modèles) : PAS de quotes dans l'attribut onclick —
+  // un ' dans ce fichier casse tout le script de la page (piège connu).
+  window.__gdView = v ? 'models' : 'links';
+  window.__gdHidden = {};          // les index des légendes changent entre les vues
+  gdChart(window.__gdData);
+}
 // Graphe SVG construit à la main (pas de librairie : les CDN sont bloqués côté client)
 function gdChart(d){
   var box = document.getElementById('gd-chart');
   if(!box) return;
-  var se = (d && d.series) || {days:[], links:[]};
+  var seL = (d && d.series) || {days:[], links:[]};
+  var seM = (d && d.series_models) || {days:[], links:[]};
+  var hasM = ((seM.links) || []).length > 1;    // 1 seul modèle = la vue n'apporte rien
+  var view = (window.__gdView === 'models' && hasM) ? 'models' : 'links';
+  var se = (view === 'models') ? seM : seL;
   var days = se.days || [], links = se.links || [];
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
+  var segHtml = hasM ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
+    + '<button class="' + (view === 'links' ? 'on' : '') + '" onclick=gdView(0)>Par lien</button>'
+    + '<button class="' + (view === 'models' ? 'on' : '') + '" onclick=gdView(1)>Par modèle</button></div>') : '';
+  var headHtml = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">'
+    + '<h4 style="margin:0">Clics par ' + (view === 'models' ? 'modèle' : 'lien') + ' — 7 derniers jours</h4>'
+    + segHtml + '</div>';
   var mode = gdMode();
   var geoMissing = mode && (se.us_available === false
       || (links[0] && !((mode === 'us' ? links[0].us_points : links[0].fr_points) || []).length));
@@ -23778,9 +23870,9 @@ function gdChart(d){
       return '<button style="cursor:default"><i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
            + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(gdTot(l)) + '</b></button>';
     }).join('');
-    box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
+    box.innerHTML = headHtml
       + '<div class="hint">' + flag0 + ' Courbe en cours de calcul en arrière-plan — elle s’affichera toute seule '
-      + '(ou clique ↻). En attendant : totaux de la période par lien.</div>'
+      + '(ou clique ↻). En attendant : totaux de la période' + (view === 'models' ? ' par modèle' : ' par lien') + '.</div>'
       + '<div class="gd-leg">' + leg0 + '</div>';
     window.__gdUsRetry = (window.__gdUsRetry || 0) + 1;
     if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(gdMode()) gdLoad(); }, 10000); }
@@ -23830,9 +23922,10 @@ function gdChart(d){
          + '<i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
          + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(tot) + '</b></button>';
   }).join('');
-  box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
-    + '<div class="hint">' + (mode === 'us' ? 'Clics US uniquement' : (mode === 'fr' ? 'Clics FR/BE/CH/LU/MC uniquement' : 'Tous les clics')) + ' · les ' + links.length
-    + ' meilleurs liens · survole la courbe : détail de TOUS les liens · clique une légende pour masquer</div>'
+  box.innerHTML = headHtml
+    + '<div class="hint">' + (mode === 'us' ? 'Clics US uniquement' : (mode === 'fr' ? 'Clics FR/BE/CH/LU/MC uniquement' : 'Tous les clics'))
+    + (view === 'models' ? ' · un trait = TOUS les liens du modèle sommés' : (' · les ' + links.length + ' meilleurs liens'))
+    + ' · survole la courbe pour le détail · clique une légende pour masquer</div>'
     + svg + '<div class="gd-tip" id="gd-tip"></div>' + '<div class="gd-leg">' + leg + '</div>';
   // Survol : ligne-guide + tooltip listant TOUS les liens pour le jour pointé
   var svgEl = box.querySelector('svg');

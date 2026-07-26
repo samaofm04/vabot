@@ -611,6 +611,38 @@ def time_series_for_link(link_id: str, start_date: str, end_date: str,
     return out
 
 
+def time_series_for_links(link_ids, start_date: str, end_date: str,
+                          tz: str = "Europe/Paris") -> Optional[Dict[str, int]]:
+    """Comme time_series_for_link mais AGRÈGE un LOT de liens (≤200) en UN appel
+    — sert aux courbes « par modèle » (tous les liens d'une identité sommés).
+    Retourne {"YYYY-MM-DD": clics} ou None si échec."""
+    ids = [i for i in (link_ids or []) if i][:200]
+    if not ids:
+        return {}
+    res = _call_tool("get_time_series", {
+        "link_ids": ids, "start_date": start_date, "end_date": end_date,
+        "interval": "day", "timezone": tz,
+    })
+    if not res.get("ok"):
+        return None
+    data = res.get("data") or {}
+    rows = data.get("data") if isinstance(data, dict) else None
+    if rows is None:
+        rows = data if isinstance(data, list) else []
+    out: Dict[str, int] = {}
+    for b in rows or []:
+        if not isinstance(b, dict):
+            continue
+        day = str(b.get("bucket") or "")[:10]
+        if not day:
+            continue
+        v = b.get("pageviews")
+        if v is None:
+            v = b.get("clicks") or 0
+        out[day] = int(v or 0)
+    return out
+
+
 def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optional[int]:
     """Total de clics pour une LISTE de liens sur une periode (YYYY-MM-DD).
     Batch par 20 (l'API analytics rejette >~20 link_ids : Error 400
