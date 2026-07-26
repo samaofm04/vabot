@@ -33010,6 +33010,11 @@ def create_app():
             return None                    # owner / admin : accès complet
         is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if not is_write:
+            # LECTURE : bloquer uniquement les API de DONNÉES sensibles. Les
+            # assets de code (.js/.css) ne portent aucune donnée -> jamais gatés
+            # (sinon on casserait une page si elle référençait cet asset).
+            if path.endswith((".js", ".css", ".map", ".ico", ".png", ".svg", ".woff", ".woff2")):
+                return None
             # LECTURE : bloquer uniquement les API sensibles (le reste des GET
             # sert les pages/fragments/assets dont le rôle a besoin).
             if any(path.startswith(p) for p in _ADMIN_ONLY_READ):
