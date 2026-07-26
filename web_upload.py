@@ -22959,7 +22959,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 4
+GMSDASH_PAYLOAD_VER = 5
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23267,6 +23267,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
             pass
     base["series"] = _gmsdash_series(rows, days=7, top_n=8, prog=_prog)
     base["series_models"] = _gmsdash_series_models(rows, days=7, prog=_prog)
+    base["series_vajb"] = _gmsdash_series_vajb(rows, days=7, prog=_prog)
     return base
 
 
@@ -23343,22 +23344,22 @@ def _gmsdash_model_map() -> dict:
     return dict(sorted(m.items(), key=lambda kv: -len(kv[0])))
 
 
-def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
-    """Courbes PAR MODÈLE : tous les liens d'une identité sommés, 1 appel API par
-    modèle (get_time_series accepte un lot de link_ids). us/fr = totaux de la
-    période (pas de détail pays par jour sur un agrégat -> us_available=False)."""
+def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
+                           stage: str = "courbe groupée", cap: int = 12) -> dict:
+    """Courbes AGRÉGÉES : les liens sont groupés par group_of(row) (None = exclu),
+    1 appel API par groupe (get_time_series en lot). us/fr = totaux de la période."""
     import datetime as _dt_sm
     from concurrent.futures import ThreadPoolExecutor
     try:
         import gms
     except Exception:
         return {"days": [], "links": [], "us_available": False}
-    mmap = _gmsdash_model_map()
     groups: dict = {}
     for r in rows:
-        sc = (r.get("shortcode") or "").lower()
-        model = next((mmap[suf] for suf in mmap if sc.endswith(suf)), "autres")
-        g = groups.setdefault(model, {"ids": [], "clicks": 0, "us": 0, "fr": 0})
+        name = group_of(r)
+        if not name:
+            continue
+        g = groups.setdefault(name, {"ids": [], "clicks": 0, "us": 0, "fr": 0})
         if r.get("id"):
             g["ids"].append(r["id"])
         g["clicks"] += r.get("clicks") or 0
@@ -23367,11 +23368,13 @@ def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
     today = _dt_sm.date.today()
     day_list = [(today - _dt_sm.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
     items = sorted([kv for kv in groups.items() if kv[1]["ids"]],
-                   key=lambda kv: -kv[1]["clicks"])[:10]
+                   key=lambda kv: -kv[1]["clicks"])[:cap]
+    if not items:
+        return {"days": [], "links": [], "us_available": False}
     if prog:
-        prog(total_add=len(items), stage="courbe par modèle")
+        prog(total_add=len(items), stage=stage)
 
-    def _one_model(kv):
+    def _one_grp(kv):
         name, g = kv
         try:
             with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
@@ -23385,7 +23388,7 @@ def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
     out = []
     try:
         with gms.bulk_mode(), ThreadPoolExecutor(max_workers=3) as ex:
-            for name, g, m in ex.map(_one_model, items):
+            for name, g, m in ex.map(_one_grp, items):
                 pts = [int(m.get(d) or 0) for d in day_list]
                 out.append({"name": f"{name} ({len(g['ids'])} liens)", "shortcode": "",
                             "points": pts, "us_points": [], "fr_points": [],
@@ -23394,6 +23397,40 @@ def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
         pass
     out.sort(key=lambda x: -x["total"])
     return {"days": day_list, "links": out, "us_available": False}
+
+
+def _gmsdash_series_models(rows: list, days: int = 7, prog=None) -> dict:
+    """Courbes PAR MODÈLE (lola, amelia…) : mapping par suffixe de shortcode."""
+    mmap = _gmsdash_model_map()
+
+    def _of(r):
+        sc = (r.get("shortcode") or "").lower()
+        return next((mmap[suf] for suf in mmap if sc.endswith(suf)), "autres")
+
+    return _gmsdash_series_groups(rows, _of, days=days, prog=prog,
+                                  stage="courbe par modèle", cap=10)
+
+
+import re as _re_vajb
+_VAJB_NAME = _re_vajb.compile(r"^\s*([a-z][a-z0-9_.]{1,20})\s+\d+\s*$")
+
+
+def _gmsdash_series_vajb(rows: list, days: int = 7, prog=None) -> dict:
+    """Courbes PAR VA JAILBREAK : les liens JB s'appellent « <va> N » (bo7 3,
+    jaurel 10…) -> groupés par le nom du VA. Les liens classiques (va_@handle,
+    VA N majuscule) sont exclus de cette vue."""
+    def _of(r):
+        dn = str(r.get("name") or "")
+        if dn.lower().startswith("va_"):
+            return None
+        m = _VAJB_NAME.match(dn.lower())
+        if not m:
+            return None
+        va = m.group(1)
+        return None if va in ("va",) else va
+
+    return _gmsdash_series_groups(rows, _of, days=days, prog=prog,
+                                  stage="courbe par VA jailbreak", cap=12)
 
 
 def _gmsdash_store(team: str, period: str, payload: dict):
@@ -23836,9 +23873,9 @@ function gdToggleSerie(i){
   gdChart(window.__gdData);
 }
 function gdView(v){
-  // v numérique (0=liens, 1=modèles) : PAS de quotes dans l'attribut onclick —
-  // un ' dans ce fichier casse tout le script de la page (piège connu).
-  window.__gdView = v ? 'models' : 'links';
+  // v numérique (0=liens, 1=modèles, 2=VA jailbreak) : PAS de quotes dans
+  // l'attribut onclick — un ' dans ce fichier casse tout le script (piège connu).
+  window.__gdView = (v === 2) ? 'vajb' : (v === 1 ? 'models' : 'links');
   window.__gdHidden = {};          // les index des légendes changent entre les vues
   gdChart(window.__gdData);
 }
@@ -23848,16 +23885,22 @@ function gdChart(d){
   if(!box) return;
   var seL = (d && d.series) || {days:[], links:[]};
   var seM = (d && d.series_models) || {days:[], links:[]};
+  var seJ = (d && d.series_vajb) || {days:[], links:[]};
   var hasM = ((seM.links) || []).length > 1;    // 1 seul modèle = la vue n'apporte rien
-  var view = (window.__gdView === 'models' && hasM) ? 'models' : 'links';
-  var se = (view === 'models') ? seM : seL;
+  var hasJ = ((seJ.links) || []).length > 0;    // des liens jailbreak « <va> N » existent
+  var view = (window.__gdView === 'models' && hasM) ? 'models'
+           : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
+  var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
   var days = se.days || [], links = se.links || [];
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
-  var segHtml = hasM ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
+  var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : 'lien');
+  var segHtml = (hasM || hasJ) ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
     + '<button class="' + (view === 'links' ? 'on' : '') + '" onclick=gdView(0)>Par lien</button>'
-    + '<button class="' + (view === 'models' ? 'on' : '') + '" onclick=gdView(1)>Par modèle</button></div>') : '';
+    + (hasM ? ('<button class="' + (view === 'models' ? 'on' : '') + '" onclick=gdView(1)>Par modèle</button>') : '')
+    + (hasJ ? ('<button class="' + (view === 'vajb' ? 'on' : '') + '" onclick=gdView(2)>Par VA JB</button>') : '')
+    + '</div>') : '';
   var headHtml = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">'
-    + '<h4 style="margin:0">Clics par ' + (view === 'models' ? 'modèle' : 'lien') + ' — 7 derniers jours</h4>'
+    + '<h4 style="margin:0">Clics par ' + viewLbl + ' — 7 derniers jours</h4>'
     + segHtml + '</div>';
   var mode = gdMode();
   var geoMissing = mode && (se.us_available === false
@@ -23872,7 +23915,7 @@ function gdChart(d){
     }).join('');
     box.innerHTML = headHtml
       + '<div class="hint">' + flag0 + ' Courbe en cours de calcul en arrière-plan — elle s’affichera toute seule '
-      + '(ou clique ↻). En attendant : totaux de la période' + (view === 'models' ? ' par modèle' : ' par lien') + '.</div>'
+      + '(ou clique ↻). En attendant : totaux de la période par ' + viewLbl + '.</div>'
       + '<div class="gd-leg">' + leg0 + '</div>';
     window.__gdUsRetry = (window.__gdUsRetry || 0) + 1;
     if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(gdMode()) gdLoad(); }, 10000); }
@@ -23924,7 +23967,8 @@ function gdChart(d){
   }).join('');
   box.innerHTML = headHtml
     + '<div class="hint">' + (mode === 'us' ? 'Clics US uniquement' : (mode === 'fr' ? 'Clics FR/BE/CH/LU/MC uniquement' : 'Tous les clics'))
-    + (view === 'models' ? ' · un trait = TOUS les liens du modèle sommés' : (' · les ' + links.length + ' meilleurs liens'))
+    + (view === 'models' ? ' · un trait = TOUS les liens du modèle sommés'
+       : (view === 'vajb' ? ' · un trait = TOUS les liens du VA jailbreak sommés' : (' · les ' + links.length + ' meilleurs liens')))
     + ' · survole la courbe pour le détail · clique une légende pour masquer</div>'
     + svg + '<div class="gd-tip" id="gd-tip"></div>' + '<div class="gd-leg">' + leg + '</div>';
   // Survol : ligne-guide + tooltip listant TOUS les liens pour le jour pointé
