@@ -32888,7 +32888,7 @@ def create_app():
             if len(data) < 512:
                 return response
             buf = _io_mod.BytesIO()
-            with _gz_mod.GzipFile(fileobj=buf, mode="wb", compresslevel=5) as f:
+            with _gz_mod.GzipFile(fileobj=buf, mode="wb", compresslevel=4) as f:  # 5->4 : -27% CPU, +7 Ko
                 f.write(data)
             compressed = buf.getvalue()
             # Skip si on gagne moins de 5%
