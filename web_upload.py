@@ -20249,6 +20249,35 @@ def _render_jailbreak_html() -> str:
         "  var o = document.getElementById('jb-edit-va-overlay');"
         "  if(o) o.classList.remove('show');"
         "}"
+        # Recharge SEULEMENT la sidebar + les cartes détail depuis un rendu frais,
+        # sans navigation : garde le scroll, la barre de scrape et l état de la page.
+        "function jbSoftRefresh(selectVaId){"
+        "  var wrap = document.getElementById('jb-sections-wrap');"
+        "  var main = document.getElementById('jb-main-pane');"
+        "  if(!wrap || !main){ window.location.reload(); return; }"
+        "  var sb = document.querySelector('.jb-sidebar');"
+        "  var sbScroll = sb ? sb.scrollTop : 0;"
+        "  var winScroll = window.scrollY || 0;"
+        "  fetch(window.location.href, {credentials:'same-origin'})"
+        "    .then(function(r){ return r.text(); })"
+        "    .then(function(html){"
+        "      var doc = new DOMParser().parseFromString(html, 'text/html');"
+        "      var nw = doc.getElementById('jb-sections-wrap');"
+        "      var nm = doc.getElementById('jb-main-pane');"
+        "      if(!nw || !nm){ window.location.reload(); return; }"
+        "      wrap.innerHTML = nw.innerHTML;"
+        "      main.innerHTML = nm.innerHTML;"
+        "      main.setAttribute('data-default-va', nm.getAttribute('data-default-va') || '');"
+        "      if(selectVaId){ try { localStorage.setItem('vabot_jb_selected_va', selectVaId); } catch(e){} }"
+        "      jbApplySavedOrder();"
+        "      jbInitVaDrag();"
+        "      jbAutoSelectDefault();"
+        "      if(typeof jbApplyFilter === 'function') jbApplyFilter();"
+        "      if(sb) sb.scrollTop = sbScroll;"
+        "      window.scrollTo(0, winScroll);"
+        "    })"
+        "    .catch(function(){ window.location.reload(); });"
+        "}"
         "function jbValidateAddVa(){"
         "  var nameEl = document.getElementById('jb-add-va-name');"
         "  var idEl = document.getElementById('jb-add-va-identity');"
@@ -20262,7 +20291,24 @@ def _render_jailbreak_html() -> str:
         "    if(typeof showToast === 'function') showToast('Identité manquante - rouvre le modal', 'error');"
         "    return false;"
         "  }"
-        "  return true;"
+        # Envoi AJAX : la page ne recharge plus (le reload coupait la barre de
+        # scrape en cours et faisait perdre la position dans la liste).
+        "  var form = document.getElementById('jb-add-va-form');"
+        "  var fd = new FormData(form);"
+        "  fd.append('ajax', '1');"
+        "  fetch('/jailbreak/add_va', {method:'POST', body: fd})"
+        "    .then(function(r){ return r.json(); })"
+        "    .then(function(d){"
+        "      if(d && d.ok){"
+        "        jbCloseAddVaModal();"
+        "        if(typeof showToast === 'function') showToast('VA ' + name + ' ajouté ✓', 'success', 2000);"
+        "        jbSoftRefresh(d.va_id || '');"
+        "      } else {"
+        "        if(typeof showToast === 'function') showToast((d && d.error) ? d.error : 'Échec de l ajout', 'error', 2600);"
+        "      }"
+        "    })"
+        "    .catch(function(){ if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2600); });"
+        "  return false;"
         "}"
         # === Remove VA (avec confirm stylise) ===
         "function jbRemoveVa(identity, vaName){"
@@ -34838,7 +34884,15 @@ def create_app():
             return _error("❌ Identité manquante", tab="jailbreak")
         if not va_name:
             return _error("❌ Nom du VA manquant", tab="jailbreak")
-        if jb.add_va(identity, va_name, discord_username=discord_username):
+        added = jb.add_va(identity, va_name, discord_username=discord_username)
+        if request.form.get("ajax") == "1":
+            # Mode AJAX (modal du site) : pas de redirect — la page se met à jour
+            # sans rechargement (un reload coupait la barre de scrape en cours).
+            from flask import jsonify
+            if added:
+                return jsonify({"ok": True, "va_id": f"{identity}|{va_name.lower()}"})
+            return jsonify({"ok": False, "error": f"Le VA {va_name} existe déjà pour cette identité"})
+        if added:
             extra = f" (lié à <code>@{discord_username}</code>)" if discord_username else ""
             return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
         return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
