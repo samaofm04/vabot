@@ -18,6 +18,7 @@ _ss_guard.push_all_async = lambda *a, **k: None
 _ss_guard._push_all_folder = lambda *a, **k: False
 _ss_guard._push_all_single = lambda *a, **k: False
 
+import datetime as dt
 import importlib, json, os, random, string, sys, threading, time
 import pathlib
 
@@ -25,6 +26,7 @@ sys.path.insert(0, str(pathlib.Path.cwd()))
 import jailbreak as jb
 
 IDENT = "test"
+SEP1 = "=" * 70
 FAILS = []
 OKS = []
 
@@ -296,6 +298,63 @@ for fn in ("_render_jbanalyse_html", "_render_jbactivite_html"):
         check(f"{fn} OK", True)
     except Exception as e:
         check(f"{fn} OK", False, repr(e))
+
+print(SEP1, "13) Paie : ne jamais accuser a tort (prive, illisible, erreur de scrape)", SEP1)
+reset()
+_now = int(time.time())
+_today = dt.date.today()
+_D = lambda k: (_today - dt.timedelta(days=k)).isoformat()
+jb.add_va(IDENT, "Paie")
+for _u in ("prive", "aveugle", "fautif"):
+    jb.add_account(IDENT, _u, va="Paie")
+with jb.transaction():
+    _d = jb._load()
+    for _a in _d[IDENT]["accounts"]:
+        _a["created_at"] = _now - 90 * 86400
+    jb._save(_d)
+_cache13 = {
+    "prive":   {"followers": 5, "posts_count": 30, "scraped_at": _now, "reel_days": {},
+                "is_private": True, "reels_seen": 0},
+    "aveugle": {"followers": 5, "posts_count": 30, "scraped_at": _now, "reel_days": {},
+                "is_private": False, "reels_seen": 0},
+    "fautif":  {"followers": 5, "posts_count": 30, "scraped_at": _now, "reels_seen": 12,
+                "reel_days": {_D(k): 1 for k in range(6, 14)},
+                "last_reel_at": (dt.datetime.now() - dt.timedelta(days=6)).isoformat()},
+}
+w._load_insta_3_stats_cache = lambda: _cache13
+w._vaact_cfg_load = lambda: {"vas": {"paie": {"base": 300, "malus": 10, "cadence": "q"}},
+                             "warmup_days": 5, "rebuild_days": 5}
+w._vaact_state_load = lambda: {"alerts": {}}
+w._vaact_state_save = lambda d: None
+_p13 = w._vaact_payload("14")
+_v13 = _p13["vas"][0]
+_det = [u for day in _p13["days"] for u in (_v13["miss"].get(day) or [])]
+check("compte prive jamais accuse", "prive" not in _det, str(set(_det)))
+check("compte illisible (0 media) jamais accuse", "aveugle" not in _det, str(set(_det)))
+check("vrai fautif detecte", "fautif" in _det, str(set(_det)))
+check("retenue = oublis x malus", _v13["deduction"] == _v13["oublis"] * 10)
+
+print(SEP1, "14) Cache Insta : historique fusionne, erreur non destructrice", SEP1)
+_store = {}
+w._load_insta_3_stats_cache = lambda: dict(_store)
+w._cache_put_stats = lambda h, o: _store.__setitem__(h, o)
+_store["hist"] = {"followers": 10, "posts_count": 30, "scraped_at": _now - 3600,
+                  "post_days": {_D(9): 500}, "reel_days": {_D(9): 1}}
+w._scrape_via_ig_public = lambda h: {
+    "profile": {"username": h, "followers": 12, "posts_count": 31, "profile_pic_url": "", "is_private": False},
+    "reels": [{"shortcode": "x", "is_video": True, "views": 100, "taken_at": _now - 86400}]}
+_o = w._compute_insta_3_stats("hist", force=True)
+check("jours anciens conserves (courbe 30 j)", _D(9) in _o["reel_days"], str(sorted(_o["reel_days"])))
+check("nouveaux jours ajoutes", _D(1) in _o["reel_days"], str(sorted(_o["reel_days"])))
+_store["err"] = {"followers": 99, "posts_count": 20, "scraped_at": _now - 7200,
+                 "reel_days": {_D(2): 1}, "profile_pic_url": "/x.png"}
+w._scrape_via_ig_public = lambda h: {"error": "429 rate limit"}
+import insta_scraper as _isc
+_isc.scrape_profile = lambda h, limit=50: {"error": "429 rate limit"}
+_o2 = w._compute_insta_3_stats("err", force=True)
+check("erreur de scrape : donnees conservees",
+      _o2.get("followers") == 99 and _o2.get("reel_days") == {_D(2): 1}, str(_o2.get("followers")))
+check("erreur de scrape : marque stale", _o2.get("stale") is True)
 
 print("\n", "=" * 70, "\nNETTOYAGE\n", "=" * 70)
 reset()

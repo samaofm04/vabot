@@ -874,6 +874,9 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
                 "caption": caption[:280],
                 "thumbnail_url": node.get("display_url", ""),
                 "video_url": node.get("video_url") if is_video else None,
+                # DATE : sans elle, les vues du post tombaient dans le vide et
+                # l'assiduité accusait le VA à tort (aucun reel « daté »).
+                "taken_at": node.get("taken_at_timestamp") or 0,
                 "date": "",
                 "url": f"https://www.instagram.com/p/{shortcode}/",
             }

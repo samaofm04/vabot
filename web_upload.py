@@ -7156,7 +7156,16 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                     err_msg = f"🚫 Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
             else:
                 _chk_ts = _last_chk
-        out = {"error": err_msg, "banned": is_banned, "scraped_at": now_ts}
+        # On CONSERVE les données du dernier bon scrape (abonnés, vues, PP,
+        # post_days/reel_days) : une erreur passagère effaçait tout l'historique,
+        # ce qui faisait ensuite considérer le compte comme « jamais vu vivant »
+        # (donc banni à tort) et inventait des oublis dans la paie.
+        _prev_ok = cached if (isinstance(cached, dict) and cached and not cached.get("error")) else {}
+        out = dict(_prev_ok)
+        out.update({"error": err_msg, "banned": is_banned, "scraped_at": now_ts})
+        if _prev_ok:
+            out["stale"] = True
+            out["stale_since"] = _prev_ok.get("scraped_at")
         if _chk_ts:
             out["exist_check_ts"] = _chk_ts
         _cache_put_stats(h, out)
@@ -7263,6 +7272,8 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         "preview": preview,
         "post_days": post_days,
         "reel_days": reel_days,
+        "is_private": bool(profile.get("is_private")),
+        "reels_seen": len(reels),
     }
     # GARDE-FOU anti-écrasement : un scrape qui « réussit » mais ne ramène RIEN
     # (0 abonné, 0 post, aucun aperçu) est en fait un scrape raté côté Instagram.
@@ -7270,9 +7281,16 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     # ont du contenu. On garde alors le dernier relevé valable.
     # NB : on ne fige PAS les vues quand le profil répond correctement — elles
     # doivent pouvoir retomber à 0 si le compte ne poste plus.
+    # « Profil qui répond mais AUCUN média rendu » est tout aussi suspect qu'un
+    # profil vide : l'API publique renvoie parfois 0 post pour un compte qui en
+    # a. Sans ça, post_days/reel_days étaient écrasés par du vide -> vues à 0 et
+    # oublis (donc retenues de paie) inventés.
     looks_empty = (not followers) and (not posts_count) and not preview
-    if looks_empty and isinstance(cached, dict) and cached and not cached.get("error"):
-        if cached.get("followers") or cached.get("posts_count") or cached.get("preview"):
+    media_empty = (not preview) and (not post_days) and (not reel_days)
+    suspect = looks_empty or (media_empty and posts_count > 0)
+    if suspect and isinstance(cached, dict) and cached and not cached.get("error"):
+        if (cached.get("followers") or cached.get("posts_count") or cached.get("preview")
+                or cached.get("reel_days") or cached.get("post_days")):
             kept = dict(cached)
             kept["scraped_at"] = now_ts          # on a bien retenté à cet instant
             kept["stale"] = True                 # affichage : données du dernier bon scrape
@@ -7281,6 +7299,20 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             return kept
     if not profile_pic and isinstance(cached, dict) and cached.get("profile_pic_url"):
         out["profile_pic_url"] = cached["profile_pic_url"]   # jamais de compte sans PP
+    # HISTORIQUE : l'API publique ne rend que ~12 posts. Remplacer post_days /
+    # reel_days à chaque scrape effaçait les jours plus anciens -> la courbe 30 j
+    # s'érodait et l'assiduité des périodes de paie PASSÉES devenait fausse.
+    # On FUSIONNE (en gardant la plus grande valeur connue par jour).
+    if isinstance(cached, dict) and not cached.get("error"):
+        import datetime as _dt_h
+        _floor = (_dt_h.date.today() - _dt_h.timedelta(days=30)).isoformat()
+        for _key in ("post_days", "reel_days"):
+            _merged = dict(out.get(_key) or {})
+            for _d, _v in (cached.get(_key) or {}).items():
+                if str(_d) < _floor:
+                    continue                     # au-delà de 30 j : on purge
+                _merged[_d] = max(int(_v or 0), int(_merged.get(_d) or 0))
+            out[_key] = _merged
     _cache_put_stats(h, out)
     return out
 
@@ -25676,9 +25708,13 @@ def _vaact_payload(period: str = "14") -> dict:
             # Migration : une entrée SANS reel_days (cache d'avant la maj) ne peut
             # pas prouver un oubli (post_days ignore les reels à 0 vue).
             trust = ("reel_days" in st)
+            # Compte PRIVÉ ou dont l'API ne rend AUCUN média : on ne peut pas
+            # prouver un oubli -> ne jamais accuser (ça retenait de l'argent sur
+            # la paie d'un VA dont le compte était juste passé en privé).
+            blind = bool(st.get("is_private")) or (st.get("reels_seen") == 0) or bool(st.get("stale"))
             accts.append({"h": h, "rd": rd, "floor": floor, "ceil": ceil,
                           "first_ok": first_ok, "posts": posts_count,
-                          "last_reel": last_reel, "trust": trust})
+                          "last_reel": last_reel, "trust": trust, "blind": blind})
         n_warm_tot += n_warm
         statuses = []
         miss_detail = {}
@@ -25696,13 +25732,15 @@ def _vaact_payload(period: str = "14") -> dict:
                 if ac["ceil"] and d > ac["ceil"]:
                     continue                     # données gelées (stale) après cette date
                 if not ac["rd"]:
+                    if ac["blind"]:
+                        continue                 # privé / aucun média rendu : indécidable
                     if ac["posts"] == 0:
                         n_elig += 1              # compte VIDE : jamais rien posté
                         misses.append(ac["h"])
                     elif ac["last_reel"] is not None and d > ac["last_reel"] + _dt_v.timedelta(days=1):
                         n_elig += 1              # dernier reel connu il y a > 48 h (voire > 30 j)
                         misses.append(ac["h"])
-                    elif ac["last_reel"] is None and ac["trust"]:
+                    elif ac["last_reel"] is None and ac["trust"] and not ac["blind"]:
                         n_elig += 1              # que des photos, jamais de reel -> en faute
                         misses.append(ac["h"])
                     continue                     # sinon : données insuffisantes
