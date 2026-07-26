@@ -1006,6 +1006,7 @@ def pull_and_merge() -> tuple:
         return nid
 
     added = updated = removed = 0
+    skipped_tomb = set()
     for identity in list(data.keys()):
         entry = data[identity]
         if not isinstance(entry, dict):
@@ -1078,13 +1079,14 @@ def pull_and_merge() -> tuple:
                         ch = True
                     if ch:
                         updated += 1
-                elif (u.lower() not in deleted
-                      and f"{il}|{u.lower()}" not in _ta
-                      and f"{il}|{(r.get('va') or '').strip().lower()}" not in _tv):
-                    acct = _row_new_account(u, r, (r.get("va") or "").strip(), _gen_id)
-                    accts.append(acct)
-                    by_uname[u.lower()] = acct
-                    added += 1
+                elif u.lower() not in deleted:
+                    if f"{il}|{u.lower()}" in _ta:
+                        skipped_tomb.add(f"{il}|{u.lower()}")   # supprime sur le site < 7 j
+                    else:
+                        acct = _row_new_account(u, r, (r.get("va") or "").strip(), _gen_id)
+                        accts.append(acct)
+                        by_uname[u.lower()] = acct
+                        added += 1
 
         # --- MAJ + AJOUTS depuis les onglets PAR VA (va = nom de l'onglet) ---
         for vl, (vdisp, rows) in va_meta.items():
@@ -1104,13 +1106,14 @@ def pull_and_merge() -> tuple:
                             ch = True
                     if ch:
                         updated += 1
-                elif (u.lower() not in deleted
-                      and f"{il}|{u.lower()}" not in _ta
-                      and f"{il}|{vl}" not in _tv):
-                    acct = _row_new_account(u, r, vdisp, _gen_id)
-                    accts.append(acct)
-                    by_uname[u.lower()] = acct
-                    added += 1
+                elif u.lower() not in deleted:
+                    if f"{il}|{u.lower()}" in _ta:
+                        skipped_tomb.add(f"{il}|{u.lower()}")
+                    else:
+                        acct = _row_new_account(u, r, vdisp, _gen_id)
+                        accts.append(acct)
+                        by_uname[u.lower()] = acct
+                        added += 1
 
         # Cohérence : les 'va' des comptes existent dans entry["vas"]
         vas = entry.setdefault("vas", [])
@@ -1118,11 +1121,18 @@ def pull_and_merge() -> tuple:
                 for _v in vas}
         for a in accts:
             va = (a.get("va") or "").strip()
-            if va and va.lower() not in have and f"{il}|{va.lower()}" not in _tv:
+            if va and va.lower() not in have:
                 vas.append({"name": va, "discord_username": ""})
+                have.add(va.lower())
+                if f"{il}|{va.lower()}" in _tv:
+                    try:
+                        jb.tomb_clear("vas", il, va)
+                    except Exception:
+                        pass
                 have.add(va.lower())
 
     changed = bool(added or updated or removed)
     if changed:
         jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
-    return changed, f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr."
+    _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site < 7 j — re-ajoute-les via le SITE pour les débloquer)" if skipped_tomb else ""
+    return changed, f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}"
