@@ -23744,6 +23744,7 @@ def _render_gmsdash_html() -> str:
     __GDKEY2__
 
   </div>
+  <div id="gd-keypanel"></div>
   <div id="gd-topprog"></div>
   <div class="gd-mpills" id="gd-mpills"></div>
   <div class="gd-cards" id="gd-cards"></div>
@@ -23789,33 +23790,53 @@ function gdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
 function gdChangeKey(){
-  var host = document.getElementById('gd-key2wrap');
-  if(!host) return;
-  host.outerHTML = '<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center">'
-    + '<input id="gd-key2" class="gd-sel" type="password" style="min-width:290px" '
-    + 'placeholder="POOL dashboard : tes 5 clés séparées par des virgules">'
-    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKey2()" title="Enregistrer le pool dashboard">🔑</button>'
-    + '<input id="gd-keymain" class="gd-sel" type="password" style="min-width:250px" '
-    + 'placeholder="Clé PRINCIPALE (report horaire + paie)">'
-    + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdSaveKeyMain()" title="Enregistrer la clé principale">💾</button>'
-    + '</span>';
-  var el = document.getElementById('gd-key2'); if(el) el.focus();
+  var panel = document.getElementById('gd-keypanel');
+  if(!panel) return;
+  panel.innerHTML = '<div class="gd-msg" style="text-align:left;padding:14px 16px">⏳ chargement des clés…</div>';
+  fetch('/gmsdash/keys', {credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !d.ok){ panel.innerHTML = ''; return; }
+    var rows = gdKeyRow('main', '🏛 Clé PRINCIPALE — report horaire + paie', d.main);
+    for(var i = 1; i <= 4; i++){
+      rows += gdKeyRow('k' + i, '⚡ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
+    }
+    panel.innerHTML = '<div style="background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:14px">'
+      + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🔑 Clés API GetMySocial</div>'
+      + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Champ vide = conserver la clé actuelle · tape « - » dans une clé dédiée pour vider ce slot.</div>'
+      + rows
+      + '<div style="display:flex;gap:8px;margin-top:14px;align-items:center">'
+      + '<button class="gd-sel" style="min-width:auto;cursor:pointer;color:#4ade80;font-weight:700" onclick="gdSaveKeys()">💾 Enregistrer</button>'
+      + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdCloseKeys()">Fermer</button>'
+      + '</div></div>';
+    var f = document.getElementById('gd-kf-main'); if(f) f.focus();
+  }).catch(function(){ panel.innerHTML = ''; });
 }
-function gdSaveKeyMain(){
-  var el = document.getElementById('gd-keymain');
-  var k = (el && el.value || '').trim();
-  if(!k){ if(typeof showToast==='function') showToast('Colle la clé principale gms_live_…','error'); return; }
-  var fd = new FormData(); fd.append('key', k);
-  fetch('/gmsdash/set_main_key', {method:'POST', body:fd, credentials:'same-origin'})
+function gdKeyRow(id, label, cur){
+  return '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'
+    + '<span style="font-size:12px;color:#9aa0a6;min-width:250px;font-weight:700">' + label + '</span>'
+    + '<input id="gd-kf-' + id + '" class="gd-sel" type="password" style="min-width:300px;flex:1" '
+    + 'placeholder="' + (cur ? ('actuelle : ' + gdEsc(cur) + ' — colle ici pour remplacer') : 'slot vide — colle une clé gms_live_…') + '">'
+    + '</div>';
+}
+function gdSaveKeys(){
+  var fd = new FormData();
+  ['main', 'k1', 'k2', 'k3', 'k4'].forEach(function(f){
+    var el = document.getElementById('gd-kf-' + f);
+    fd.append(f, (el && el.value || '').trim());
+  });
+  fetch('/gmsdash/set_keys', {method:'POST', body:fd, credentials:'same-origin'})
     .then(function(r){ return r.json(); }).then(function(d){
       if(d && d.ok){
-        if(typeof showToast==='function') showToast('💾 Clé principale remplacée et testée (ping OK) — report horaire + paie basculés','success',7000);
-        if(el){ el.value=''; el.placeholder='clé principale OK ✓'; }
+        var msg = '💾 Enregistré — ' + (d.pool_count || 0) + ' clé(s) dédiée(s)';
+        if(d.main_ping === true) msg += ' · principale : ping OK ✓';
+        if(d.main_ping === false) msg += ' · ⚠ principale : ping KO (vérifie la clé)';
+        if(typeof showToast === 'function') showToast(msg, d.main_ping === false ? 'error' : 'success', 6000);
+        setTimeout(function(){ location.reload(); }, 1300);
       } else {
-        if(typeof showToast==='function') showToast('❌ '+((d&&d.error)||'?'),'error',8000);
+        if(typeof showToast === 'function') showToast('❌ ' + ((d && d.error) || '?'), 'error', 7000);
       }
-    }).catch(function(e){ if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
+    }).catch(function(e){ if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); });
 }
+function gdCloseKeys(){ var p = document.getElementById('gd-keypanel'); if(p) p.innerHTML = ''; }
 function gdSaveKey2(){
   var el = document.getElementById('gd-key2');
   var k = (el && el.value || '').trim();
@@ -31877,6 +31898,57 @@ def create_app():
                         break
             out.append({"id": tid, "name": name, "link_count": n})
         return jsonify({"ok": True, "teams": out})
+
+    def _gd_mask(k):
+        k = k or ""
+        return (k[:12] + "…" + k[-4:]) if len(k) > 18 else (k[:6] + "…") if k else ""
+
+    @app.route("/gmsdash/keys")
+    def gmsdash_keys():
+        """État MASQUÉ des slots de clés (principale + 4 dédiées) pour le panneau."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import gms
+        return jsonify({"ok": True,
+                        "main": _gd_mask(gms.get_api_key()),
+                        "pool": [_gd_mask(k) for k in gms.get_dash_keys()]})
+
+    @app.route("/gmsdash/set_keys", methods=["POST"])
+    def gmsdash_set_keys():
+        """Slots nommés : main + k1..k4. Champ vide = conserver la clé actuelle du
+        slot ; « - » dans une clé dédiée = vider ce slot. La principale est testée
+        (ping) après remplacement."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import gms
+        cur_pool = gms.get_dash_keys()
+        new_pool = []
+        for i in range(4):
+            v = (request.form.get(f"k{i + 1}") or "").strip()
+            if v == "-":
+                continue
+            if not v:
+                if i < len(cur_pool):
+                    new_pool.append(cur_pool[i])
+                continue
+            if not v.startswith("gms_"):
+                return jsonify({"ok": False, "error": f"clé dédiée {i + 1} invalide (gms_…)"})
+            new_pool.append(v)
+        main_v = (request.form.get("main") or "").strip()
+        if main_v and main_v != "-":
+            if not main_v.startswith("gms_") or len(main_v) < 20:
+                return jsonify({"ok": False, "error": "clé principale invalide (gms_…, 20+ caractères)"})
+            gms.save_api_key(main_v)
+        gms.save_dash_key(chr(10).join(new_pool))
+        ping_ok = None
+        if main_v and main_v != "-":
+            try:
+                ping_ok = bool((gms.ping() or {}).get("ok"))
+            except Exception:
+                ping_ok = False
+        return jsonify({"ok": True, "pool_count": len(new_pool), "main_ping": ping_ok})
 
     @app.route("/gmsdash/set_main_key", methods=["POST"])
     def gmsdash_set_main_key():
