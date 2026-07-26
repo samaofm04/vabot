@@ -9,6 +9,7 @@ Structure attendue dans chaque classeur :
 duplique pas. Reconstruit la liste des VA de chaque identité.
 """
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -62,6 +63,15 @@ def _parse_ws(ws, identity: str) -> list:
     return out
 
 
+_TITLE_PREFIX = re.compile(r"^\s*va\s*jb\s*[—–-]\s*", re.I)
+
+
+def _ident_from_filename(stem: str) -> str:
+    """« VA JB — lola » -> « lola » (les classeurs sont crees sous ce titre par
+    sheets_sync ; sans ce nettoyage l import creait une identite FANTOME)."""
+    return _TITLE_PREFIX.sub("", str(stem or "")).strip()
+
+
 def parse_upload(filename: str, blob: bytes) -> dict:
     """-> {identity: [comptes]}. Accepte .zip (dossier exporté) ou .xlsx seul."""
     import openpyxl
@@ -71,9 +81,9 @@ def parse_upload(filename: str, blob: bytes) -> dict:
         with zipfile.ZipFile(io.BytesIO(blob)) as z:
             for n in z.namelist():
                 if n.lower().endswith(".xlsx") and not n.split("/")[-1].startswith("~"):
-                    books.append((Path(n).stem, z.read(n)))
+                    books.append((_ident_from_filename(Path(n).stem), z.read(n)))
     elif name.endswith(".xlsx"):
-        books.append((Path(filename).stem, blob))
+        books.append((_ident_from_filename(Path(filename).stem), blob))
     else:
         raise ValueError("Format non supporté (attendu : .zip du dossier ou .xlsx).")
 
@@ -125,7 +135,14 @@ def restore(parsed: dict, overwrite: bool = False) -> dict:
 
     report, total_add, total_fill = {}, 0, 0
     for identity, accts in (parsed or {}).items():
-        real = known.get(identity.strip().lower(), identity)
+        real = known.get(identity.strip().lower())
+        if not real:
+            # Identite INCONNUE : on n en cree PAS une nouvelle (sinon toute la
+            # base se retrouve dupliquee sous une cle fantome, invisible sur le
+            # site mais comptee en double dans les stats et la paie).
+            report[identity] = {"added": 0, "filled": 0,
+                                "error": "identité inconnue — aucun compte importé"}
+            continue
         entry = data.setdefault(real, {"vas": [], "accounts": []})
         entry.setdefault("accounts", [])
         entry.setdefault("vas", [])

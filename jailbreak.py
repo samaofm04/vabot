@@ -393,6 +393,12 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
                         v = str(v or "").strip()[:80]
                         if not v:
                             continue  # ne pas vider le username
+                        # Anti-doublon : deux comptes au meme username finissaient
+                        # fusionnes par _dedup_accounts (un des deux, avec son mot
+                        # de passe et son 2FA, disparaissait).
+                        if any(o is not acct and (o.get("username") or "").strip().lower() == v.lower()
+                               for o in entry["accounts"]):
+                            return False
                     elif k == "va":
                         v = str(v or "").strip()[:60]
                     elif k == "two_fa_validated":

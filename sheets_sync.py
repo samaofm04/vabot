@@ -667,6 +667,7 @@ def _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views):
     tab_ncols = {ws.id: len(HEADER)}   # onglet principal = 7 colonnes
     # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
     # pour la config (pas d'écrasement entre classeurs).
+    views_ok = True
     try:
         existing = {w.title.strip().lower(): w for w in all_ws}
         va_wanted = _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
@@ -674,6 +675,7 @@ def _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views):
         for vw in va_wanted.values():
             tab_ncols[vw.id] = len(_VIEW_HEADER)   # onglets VA = 6 colonnes
     except Exception as e:
+        views_ok = False
         print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
     # Onglets par défaut parasites (« Feuille N » / « Sheet N ») : supprimés
     # s'ils sont VIDES ou si c'est un vieux tableau de comptes (en-tête
@@ -699,6 +701,10 @@ def _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views):
         pass
     # Mise en forme "pro" de tout le classeur (1 batch)
     _beautify_sheet(sh, tab_ncols)
+    if not views_ok:
+        # Onglets VA PERIMES : ne pas marquer l identite comme poussee, sinon le
+        # pull suivant supprimait des comptes valides absents d un onglet obsolete.
+        raise RuntimeError(f"vues VA de '{identity}' non poussees")
 
 
 def _push_all_folder(data: dict, force: bool = False) -> bool:
@@ -819,12 +825,26 @@ def _push_all_single(data: dict, force: bool = False) -> bool:
 
 
 def push_all_async(data: dict) -> None:
-    """Push en arriere-plan (non bloquant, ne casse jamais l'appelant)."""
+    """Push en arriere-plan (non bloquant, ne casse jamais l'appelant).
+
+    On ne pousse PAS le snapshot recu : deux sauvegardes rapprochees lancaient
+    deux threads, et le plus lent pouvait ecrire un etat PERIME dans le Sheet
+    (puis figer _last_hash dessus). On relit l etat courant au moment du push.
+    """
     if not (is_configured() and gspread_available()):
         return
+
+    def _run():
+        try:
+            import jailbreak as jb
+            with jb.transaction():
+                fresh = jb._load()
+            push_all(fresh)
+        except Exception as e:
+            print(f"[sheets_sync] push async : {e}", flush=True)
+
     try:
-        snapshot = json.loads(json.dumps(data or {}))  # copie profonde
-        threading.Thread(target=push_all, args=(snapshot,), daemon=True).start()
+        threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
 
@@ -851,6 +871,10 @@ def _parse_ws(ws) -> list:
              for i in range(len(header))}
         if not (d.get("username") or "").strip():
             continue
+        # Colonnes REELLEMENT presentes : le merge ne doit ecraser QUE ces
+        # champs. Sans ca, renommer/supprimer une colonne dans le Sheet vidait
+        # les mots de passe / 2FA / emails de tous les comptes de l identite.
+        d["__cols__"] = header
         accts.append(d)
     return accts
 
@@ -1057,14 +1081,33 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
             if rows:
                 va_present[vl] = {(r.get("username") or "").strip().lower()
                                   for r in rows if (r.get("username") or "").strip()}
+        # Ou le compte apparait-il ? (sert a distinguer « supprime » de
+        # « deplace vers un autre VA » : deplacer une ligne d un onglet VA a un
+        # autre reassigne le VA, ca ne detruit pas le compte.)
+        seen_in_va = {}
+        for vl, us in va_present.items():
+            for u in us:
+                seen_in_va.setdefault(u, vl)
 
         # --- SUPPRESSIONS : absent d'un onglet non vide où il devrait figurer ---
+        touched = set()      # (username, champ) deja applique depuis l onglet IDENTITE
         to_delete, kept = [], []
         for a in accts:
             u = (a.get("username") or "").strip().lower()
             vx = (a.get("va") or "").strip().lower()
-            gone = (id_present is not None and u and u not in id_present) or \
-                   (vx and vx in va_present and u and u not in va_present[vx])
+            moved_to = seen_in_va.get(u)
+            if moved_to and moved_to != vx:
+                # Ligne DEPLACEE dans l onglet d un autre VA -> reassignation.
+                # Avant, le compte etait supprime (mot de passe et 2FA perdus).
+                a["va"] = va_meta.get(moved_to, (moved_to, None))[0]
+                updated += 1
+                kept.append(a)
+                continue
+            missing_id = id_present is not None and u and u not in id_present
+            missing_va = bool(vx) and vx in va_present and u and u not in va_present[vx]
+            gone = missing_id or missing_va
+            if gone and u and (u in (id_present or set()) or u in seen_in_va):
+                gone = False     # present ailleurs dans le classeur : on ne supprime pas
             (to_delete if gone else kept).append(a)
         # GARDE-FOU anti-suppression massive : si un seul sync voudrait supprimer
         # BEAUCOUP de comptes d'une identité (>10 ET >40%), c'est louche (lecture
@@ -1104,11 +1147,15 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                 acct = by_uname.get(u.lower())
                 if acct is not None:
                     ch = False
+                    _cols = set(r.get("__cols__") or _FIELDS)
                     for f in _FIELDS:
+                        if f not in _cols:
+                            continue      # colonne absente du Sheet : on n ecrase RIEN
                         v = (r.get(f) or "").strip()
                         if (acct.get(f) or "") != v:
                             acct[f] = v
                             ch = True
+                            touched.add((u.lower(), f))
                     if acct.get("username") != u:
                         acct["username"] = u[:80]
                         ch = True
@@ -1134,7 +1181,12 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                 acct = by_uname.get(u.lower())
                 if acct is not None:
                     ch = False
+                    _cols = set(r.get("__cols__") or ("password", "email", "two_fa", "notes"))
                     for f in ("password", "email", "two_fa", "notes"):
+                        if f not in _cols:
+                            continue      # colonne absente : aucun ecrasement
+                        if (u.lower(), f) in touched:
+                            continue      # deja applique depuis l onglet IDENTITE ce cycle
                         v = (r.get(f) or "").strip()
                         if (acct.get(f) or "") != v:
                             acct[f] = v

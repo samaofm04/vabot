@@ -182,6 +182,109 @@ for m in ("web_upload", "jailbreak", "sheets_sync", "gms", "mypuls", "business",
     except Exception as e:
         check(f"import {m}", False, repr(e)[:80])
 
+
+print()
+print("=" * 70)
+print("6) Sync Sheet : scénarios destructeurs (bugs trouvés par l'audit)")
+print("=" * 70)
+import json as _json
+import sheets_sync as _ss
+import jailbreak as _jb
+
+
+def _mk():
+    return {"lola": {"vas": [{"name": "Andry", "discord_username": ""},
+                             {"name": "Bo7", "discord_username": ""}],
+            "accounts": [
+                {"id": 1, "username": "u1", "va": "Andry", "password": "SECRET1",
+                 "email": "a@x.io", "two_fa": "KEY1", "notes": "n1"},
+                {"id": 2, "username": "u2", "va": "Andry", "password": "SECRET2",
+                 "email": "b@x.io", "two_fa": "KEY2", "notes": "n2"}]}}
+
+
+def _merge(sheet, state):
+    _jb._load = lambda: _json.loads(_json.dumps(state))
+    _jb._save = lambda d: (state.clear(), state.update(_json.loads(_json.dumps(d))))
+    _jb.tombstones = lambda: {"vas": {}, "accounts": {}}
+    _jb.tomb_clear = lambda *a: None
+    _ss.pull_all = lambda: sheet
+    _ss.is_paused = lambda: False
+    return _ss.pull_and_merge()
+
+
+C_FULL = ["username", "password", "email", "two_fa", "va", "notes"]
+st = _mk()
+_merge({"lola": [{"username": "u1", "password": "SECRET1", "2fa": "KEY1", "va": "Andry",
+                  "notes": "n1", "__cols__": ["username", "password", "2fa", "va", "notes"]},
+                 {"username": "u2", "password": "SECRET2", "2fa": "KEY2", "va": "Andry",
+                  "notes": "n2", "__cols__": ["username", "password", "2fa", "va", "notes"]}]}, st)
+_a = {x["username"]: x for x in st["lola"]["accounts"]}
+check("colonne 2FA renommée : secret conservé", _a["u1"]["two_fa"] == "KEY1", _a["u1"]["two_fa"])
+check("colonne email supprimée : email conservé", _a["u1"]["email"] == "a@x.io", _a["u1"]["email"])
+
+st = _mk()
+_merge({"lola Andry": [{"username": "u2", "__cols__": ["username"]}],
+        "lola Bo7": [{"username": "u1", "__cols__": ["username"]}]}, st)
+_a = {x["username"]: x for x in st["lola"]["accounts"]}
+check("ligne déplacée entre onglets VA : compte gardé", "u1" in _a, list(_a))
+check("ligne déplacée : VA réassigné", _a.get("u1", {}).get("va") == "Bo7", _a.get("u1", {}).get("va"))
+check("ligne déplacée : mot de passe intact", _a.get("u1", {}).get("password") == "SECRET1")
+
+st = _mk()
+_merge({"lola": [{"username": "u1", "password": "NOUVEAU", "email": "a@x.io", "two_fa": "KEY1",
+                  "va": "Andry", "notes": "n1", "__cols__": C_FULL},
+                 {"username": "u2", "password": "SECRET2", "email": "b@x.io", "two_fa": "KEY2",
+                  "va": "Andry", "notes": "n2", "__cols__": C_FULL}],
+        "lola Andry": [{"username": "u1", "password": "SECRET1", "email": "a@x.io",
+                        "two_fa": "KEY1", "notes": "n1",
+                        "__cols__": ["username", "password", "email", "two_fa", "notes"]},
+                       {"username": "u2", "password": "SECRET2", "email": "b@x.io",
+                        "two_fa": "KEY2", "notes": "n2",
+                        "__cols__": ["username", "password", "email", "two_fa", "notes"]}]}, st)
+_a = {x["username"]: x for x in st["lola"]["accounts"]}
+check("modif de l'onglet identité non annulée", _a["u1"]["password"] == "NOUVEAU", _a["u1"]["password"])
+
+st = _mk()
+_merge({"lola": [{"username": "u1", "password": "SECRET1", "email": "a@x.io", "two_fa": "KEY1",
+                  "va": "Andry", "notes": "n1", "__cols__": C_FULL}]}, st)
+check("suppression volontaire toujours appliquée",
+      [x["username"] for x in st["lola"]["accounts"]] == ["u1"],
+      [x["username"] for x in st["lola"]["accounts"]])
+
+# import : identité fantôme refusée
+try:
+    import jb_import as _ji
+    check("import : « VA JB — lola » normalisé", _ji._ident_from_filename("VA JB — lola") == "lola")
+    _st2 = {"lola": {"vas": [], "accounts": []}}
+    _jb._load = lambda: _json.loads(_json.dumps(_st2))
+    _jb._save = lambda d: (_st2.clear(), _st2.update(_json.loads(_json.dumps(d))))
+    _ji._list_identities = lambda: ["lola"]
+    _ji.restore({"lola": [{"username": "a1", "va": "A"}], "inconnue": [{"username": "x9"}]})
+    check("import : identité inconnue refusée", sorted(_st2) == ["lola"], sorted(_st2))
+except Exception as e:
+    check("import : testable", False, repr(e)[:80])
+
+# update_account : doublon de username refusé
+try:
+    import tempfile as _tf
+    _tmpd = pathlib.Path(_tf.mkdtemp())
+    _orig_file, _orig_dir = _jb.JAILBREAK_FILE, _jb.DATA_DIR
+    _jb.JAILBREAK_FILE = _tmpd / "jb.json"
+    _jb.DATA_DIR = _tmpd
+    import importlib as _il
+    _il.reload(_jb)
+    _jb.JAILBREAK_FILE = _tmpd / "jb.json"
+    _jb.DATA_DIR = _tmpd
+    _jb.BACKUP_DIR = _tmpd / "bk"
+    _jb.PREV_FILE = _tmpd / "jb.prev.json"
+    a1 = _jb.add_account("zz", "aaa")
+    a2 = _jb.add_account("zz", "bbb")
+    check("update_account : doublon refusé", _jb.update_account("zz", a2["id"], username="aaa") is False)
+    _jb.JAILBREAK_FILE, _jb.DATA_DIR = _orig_file, _orig_dir
+    shutil.rmtree(_tmpd, ignore_errors=True)
+except Exception as e:
+    check("update_account : testable", False, repr(e)[:80])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

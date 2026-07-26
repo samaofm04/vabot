@@ -297,6 +297,10 @@ class SheetsSync(commands.Cog):
 
         def _do():
             import json as _j, time as _t
+            with jb.transaction():
+                return _do_locked(_j, _t)
+
+        def _do_locked(_j, _t):
             data = jb._load()
             total_before, _ = _counts(data)
             backup = jb.DATA_DIR / f"jailbreak.backup.{int(_t.time())}.json"
@@ -305,9 +309,23 @@ class SheetsSync(commands.Cog):
                 backup.write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
+            # Tombstones AVANT filtrage : sans elles le poller (2 min) ré-importait
+            # depuis le Sheet tout ce que le reset venait de supprimer.
             for identity, entry in data.items():
                 if not isinstance(entry, dict):
                     continue
+                gone_u = [(a.get("username") or "") for a in (entry.get("accounts") or [])
+                          if (a.get("va") or "").strip().lower() != kl]
+                gone_v = [(v.get("name") if isinstance(v, dict) else v or "")
+                          for v in (entry.get("vas") or [])
+                          if (v.get("name") if isinstance(v, dict) else v or "").strip().lower() != kl]
+                try:
+                    if gone_u:
+                        jb.tomb_add("accounts", identity, *gone_u)
+                    if gone_v:
+                        jb.tomb_add("vas", identity, *gone_v)
+                except Exception:
+                    pass
                 entry["accounts"] = [a for a in (entry.get("accounts") or [])
                                      if (a.get("va") or "").strip().lower() == kl]
                 entry["vas"] = [v for v in (entry.get("vas") or [])
