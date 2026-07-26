@@ -23658,7 +23658,8 @@ def _render_gmsdash_html() -> str:
                  "<button class='gd-sel' style='min-width:auto;cursor:pointer;font-size:11px;padding:5px 9px' "
                  "onclick='gdChangeKey()' title='Remplacer la clé dédiée'>changer</button></span>"
                  if _has_k2 else
-                 "<input id='gd-key2' class='gd-sel' type='password' style='min-width:230px' "
+                 "<input id='gd-key2' class='gd-sel' type='text' autocomplete='off' spellcheck='false' "
+                 "style='min-width:230px;-webkit-text-security:disc' "
                  "placeholder='Clé(s) dédiée(s) — PLUSIEURS possibles (virgules) = plus rapide'>"
                  "<button class='gd-sel' style='min-width:auto;cursor:pointer' "
                  "onclick='gdSaveKey2()' title='Enregistrer la clé dédiée au dashboard'>🔑</button>")
@@ -23813,7 +23814,8 @@ function gdChangeKey(){
 function gdKeyRow(id, label, cur){
   return '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'
     + '<span style="font-size:12px;color:#9aa0a6;min-width:250px;font-weight:700">' + label + '</span>'
-    + '<input id="gd-kf-' + id + '" class="gd-sel" type="password" style="min-width:300px;flex:1" '
+    + '<input id="gd-kf-' + id + '" class="gd-sel" type="text" autocomplete="off" spellcheck="false" '
+    + 'style="min-width:300px;flex:1;-webkit-text-security:disc" '
     + 'placeholder="' + (cur ? ('actuelle : ' + gdEsc(cur) + ' — colle ici pour remplacer') : 'slot vide — colle une clé gms_live_…') + '">'
     + '</div>';
 }
@@ -23961,8 +23963,19 @@ function gdShowProgress(p){
   document.getElementById('gd-tbl').innerHTML = gdProgressHtml(p);
 }
 function gdLoad(force){
-  var tid = (document.getElementById('gd-team')||{}).value;
-  if(!tid || tid.indexOf('tm_') !== 0) return;
+  var sel0 = document.getElementById('gd-team');
+  var tid = (sel0 || {}).value;
+  if(!tid || tid.indexOf('tm_') !== 0){
+    // valeur invalide (autofill/reload bizarre) -> on se rabat sur la 1re vraie catégorie
+    if(sel0){
+      for(var si = 0; si < sel0.options.length; si++){
+        if(((sel0.options[si].value) || '').indexOf('tm_') === 0){
+          sel0.selectedIndex = si; tid = sel0.options[si].value; break;
+        }
+      }
+    }
+    if(!tid || tid.indexOf('tm_') !== 0) return;
+  }
   if(!(window.__gdData && (window.__gdData.links||[]).length)){
     document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Connexion…</div>';
   }
@@ -24243,6 +24256,12 @@ function gdRender(d){
     : '';
 }
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', gdTeams); } else { gdTeams(); }
+setTimeout(function(){
+  // filet : si le tableau est resté sur l'écran d'accueil (course au chargement,
+  // reload pendant un redémarrage serveur…), on relance le chargement
+  var t = document.getElementById('gd-tbl');
+  if(t && t.innerHTML.indexOf('Choisis une catégorie') !== -1){ gdTeams(); }
+}, 3000);
 </script>
 """
     _opts = "".join(f"<option value='{tid}'>{name}</option>" for tid, name in GMSDASH_TEAMS)
