@@ -244,6 +244,20 @@ def extend_due_campaigns(now: Optional[datetime] = None) -> Dict[str, Any]:
         d_start = sched_until + timedelta(days=1)
         d_end = d_start + timedelta(days=CHUNK_DAYS - 1)
         res = _execute_chunk(c, d_start, d_end)
+        # Si RIEN n'a ete planifie (panne MyPuls, plus de medias, quota...), on
+        # n'avance PAS le curseur : sinon ces jours etaient consideres comme
+        # traites et ne seraient JAMAIS rattrapes -> trous definitifs dans le
+        # planning de la campagne.
+        if not res.get("planned"):
+            c["last_extend_error_at"] = now.isoformat(timespec="seconds")
+            c["last_extend_error"] = (str((res.get("errors") or ["aucun post planifie"])[0]))[:200]
+            total_failed += res.get("failed", 0)
+            if res.get("errors"):
+                errors.extend(res["errors"][:3])
+            changed = True
+            continue
+        c.pop("last_extend_error", None)
+        c.pop("last_extend_error_at", None)
         c["scheduled_until"] = d_end.isoformat()
         c["last_extended_at"] = now.isoformat(timespec="seconds")
         c["total_planned"] = int(c.get("total_planned", 0)) + res.get("planned", 0)
