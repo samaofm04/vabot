@@ -6752,6 +6752,14 @@ def _daily_insta_loop():
     # ou jamais scrape). Evite de re-scrape inutilement au moindre redemarrage.
     try:
         _t_dl.sleep(30)  # attend que le bot soit stabilise (Discord ready, etc.)
+        # Un redemarrage (deploy) en plein scrape laissait le state a
+        # « in_progress » pour toujours -> l'UI croyait un scrape actif.
+        try:
+            if (_load_refresh_state() or {}).get("status") == "in_progress":
+                _set_refresh_status(status="idle", in_progress_since=None,
+                                    error="scrape interrompu par un redémarrage — les comptes manquants repartent au boot")
+        except Exception:
+            pass
         _run_daily_insta_refresh_smart()
     except Exception as e:
         print(f"[daily-insta] initial refresh crash: {e}", flush=True)
@@ -6779,7 +6787,12 @@ def _run_daily_insta_refresh_smart():
     now_ts = int(_t_dr.time())
     all_h = sorted(_all_tracked_handles())
     todo = [h for h in all_h if (
-        h not in cache or (now_ts - int(cache.get(h, {}).get("scraped_at", 0))) >= _INSTA_3_STATS_TTL
+        h not in cache
+        or (now_ts - int(cache.get(h, {}).get("scraped_at", 0))) >= _INSTA_3_STATS_TTL
+        # Migration courbes « Analyse vues » : une entrée SAINE sans post_days
+        # date d'avant la maj -> on la re-scrape même si son cache est frais
+        # (sinon la couverture reste bloquée jusqu'au prochain 00h/12h).
+        or ("post_days" not in cache.get(h, {}) and not cache.get(h, {}).get("error"))
     )]
     skipped = len(all_h) - len(todo)
     print(f"[insta-refresh:boot] {len(todo)} stale, {skipped} frais", flush=True)
