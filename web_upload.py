@@ -6134,6 +6134,7 @@ import threading as _th_perf
 
 _TTL_CACHE: dict = {}
 _TTL_CACHE_LOCK = _th_perf.Lock()
+_TTL_REFRESHING: set = set()   # clés en cours de rafraîchissement en fond
 
 
 def ttl_cache(seconds: int = 30, max_entries: int = 256):
@@ -6156,6 +6157,30 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                 hit = _TTL_CACHE.get(k)
                 if hit and (now - hit[0]) < seconds:
                     return hit[1]
+                stale = hit[1] if hit else None
+                refreshing = k in _TTL_REFRESHING
+                if stale is not None and not refreshing:
+                    _TTL_REFRESHING.add(k)
+            # PÉRIMÉ MAIS DISPONIBLE : on rend l'ancien TOUT DE SUITE et on
+            # rafraîchit en arrière-plan. Avant, le premier visiteur après
+            # expiration attendait l'appel réseau (jusqu'à 2,5 s sur l'accueil,
+            # qui interroge GetMySocial) — et chaque expiration re-consommait
+            # du quota API pendant le rendu.
+            if stale is not None:
+                if not refreshing:
+                    def _refresh():
+                        try:
+                            val = fn(*args, **kwargs)
+                            with _TTL_CACHE_LOCK:
+                                _TTL_CACHE[k] = (_time_perf.time(), val)
+                        except Exception:
+                            pass
+                        finally:
+                            with _TTL_CACHE_LOCK:
+                                _TTL_REFRESHING.discard(k)
+                    _th_perf.Thread(target=_refresh, daemon=True,
+                                    name="ttl-refresh").start()
+                return stale
             # Compute hors lock pour ne pas bloquer d autres threads
             result = fn(*args, **kwargs)
             with _TTL_CACHE_LOCK:
@@ -40920,6 +40945,31 @@ def start_in_thread():
         _start_gmsdash_warm()
     except Exception as e:
         print(f"[start_in_thread] gmsdash warm failed to start: {e}", flush=True)
+    # PRÉCHAUFFAGE de l'accueil : le rendu de la page appelle GetMySocial
+    # (widget clics des VAs). Sans ça, le PREMIER visiteur après un
+    # redémarrage attendait ~2,5 s. On remplit le cache en fond au boot,
+    # puis on l'entretient : plus personne ne paie l'appel réseau.
+    def _warm_home():
+        import time as _t_wh
+        _t_wh.sleep(20)                      # laisse le serveur démarrer
+        while True:
+            try:
+                from flask import Flask as _F_wh
+                _app_wh = _F_wh(__name__)
+                with _app_wh.test_request_context("/"):
+                    _render_va_list_html()
+                    try:
+                        _render_home_dashboard_html()
+                    except Exception:
+                        pass
+            except Exception as _e_wh:
+                print(f"[warm-home] {_e_wh}", flush=True)
+            _t_wh.sleep(240)                 # entretient le cache (4 min)
+    try:
+        threading.Thread(target=_warm_home, daemon=True, name="warm-home").start()
+        print("[warm-home] préchauffage de l'accueil armé", flush=True)
+    except Exception as e:
+        print(f"[start_in_thread] warm-home failed: {e}", flush=True)
     # Seed des media pools MyPuls (idempotent : skip si pool deja peuple).
     # Au boot, restaure les listes hardcoded dans seed_media_pools.py pour
     # chaque createur (EMMA, AMELIA, JULIA, etc.) si le pool est vide.
