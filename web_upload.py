@@ -23864,17 +23864,21 @@ def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
             m = None
         if prog:
             prog(1)
-        return name, g, (m or {})
+        return name, g, m          # None = LECTURE ECHOUEE (≠ 0 clic)
 
     out = []
     try:
         with gms.bulk_mode(), ThreadPoolExecutor(max_workers=_gmsdash_workers()) as ex:
             for name, g, m in ex.map(_one_grp, items):
-                pts = [int(m.get(d) or 0) for d in day_list]
+                failed = m is None
+                pts = [int((m or {}).get(d) or 0) for d in day_list]
                 out.append({"name": f"{name} ({len(g['ids'])} liens)", "shortcode": "",
-                            "model": name,
+                            "model": name, "failed": failed,
                             "points": pts, "us_points": [], "fr_points": [],
-                            "total": sum(pts), "us_total": g["us"], "fr_total": g["fr"]})
+                            # total connu par ailleurs (somme des liens) : on
+                            # l'affiche même si la COURBE n'a pas pu être lue.
+                            "total": (g["clicks"] if failed else sum(pts)),
+                            "us_total": g["us"], "fr_total": g["fr"]})
     except Exception:
         pass
     out.sort(key=lambda x: -x["total"])
@@ -24625,12 +24629,14 @@ function gdChart(d){
       (e.points || []).forEach(function(v, k){ g.points[k] += v; });
       g.total += e.total || 0; g.us_total += e.us_total || 0; g.fr_total += e.fr_total || 0;
       g.n += e.n_links || 0;
+      if(e.failed) g.failed = true;
     });
     links = Object.keys(agg).map(function(mn){ return agg[mn]; })
       .sort(function(a, b){ return b.total - a.total; });
     links.forEach(function(l, i){
       l._ci = i;
       l.name = l.model + (window.__gdKind === 'jb' ? ' 🔓' : '') + ' (' + l.n + ' liens)';
+      if(l.failed) l.name += ' ⚠ courbe non lue';
     });
   } else if(view !== 'vajb'){
     links = links.filter(function(l){ return !gdIsOff(l.model) && gdKindOk(l); });
