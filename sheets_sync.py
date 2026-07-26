@@ -636,6 +636,68 @@ def push_all(data: dict, force: bool = False) -> bool:
     return _push_all_single(data, force)
 
 
+def _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views):
+    """Réécrit LE classeur d'une identité (onglet principal + vues VA + ménage).
+    Lève l'exception au caller (qui gère quota/retry). La liste worksheets()
+    n'est lue qu'UNE fois (économie de quota Google)."""
+    sh = _ensure_identity_sheet(gc, identity, cfg)
+    all_ws = sh.worksheets()
+    # Onglet principal par NOM (= identité), PAS par position : si un onglet
+    # parasite (« Feuille 2 ») passe premier, sheet1 pointait dessus -> les
+    # comptes s'écrivaient dedans et l'onglet identité restait périmé.
+    ws = None
+    ident_lc = str(identity).strip().lower()
+    for _w0 in all_ws:
+        if _w0.title.strip().lower() == ident_lc:
+            ws = _w0
+            break
+    if ws is None:
+        ws = sh.sheet1  # classeur neuf : on renomme la 1re feuille
+        try:
+            ws.update_title(str(identity))
+            all_ws = sh.worksheets()
+        except Exception:
+            pass
+    rows = [HEADER] + [_acct_row(a) for a in accts]
+    ws.clear()
+    _ws_write(ws, rows)
+    tab_ncols = {ws.id: len(HEADER)}   # onglet principal = 7 colonnes
+    # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
+    # pour la config (pas d'écrasement entre classeurs).
+    try:
+        existing = {w.title.strip().lower(): w for w in all_ws}
+        va_wanted = _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
+        all_views += list(va_wanted.keys())
+        for vw in va_wanted.values():
+            tab_ncols[vw.id] = len(_VIEW_HEADER)   # onglets VA = 6 colonnes
+    except Exception as e:
+        print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
+    # Onglets par défaut parasites (« Feuille N » / « Sheet N ») : supprimés
+    # s'ils sont VIDES ou si c'est un vieux tableau de comptes (en-tête
+    # username…) — jamais si ça ressemble à des notes perso.
+    try:
+        import re as _re_fn
+        n_tabs = len(all_ws)
+        for _w in all_ws:
+            _t = (_w.title or "").strip().lower()
+            if not _re_fn.match(r"^(feuille|sheet)\s*\d*$", _t):
+                continue
+            if n_tabs <= 1:
+                break
+            try:
+                _r1 = [str(c).strip().lower() for c in (_w.row_values(1) or [])]
+            except Exception:
+                continue
+            if not _r1 or _r1[0] == "username":
+                sh.del_worksheet(_w)
+                n_tabs -= 1
+                print(f"[sheets_sync] onglet parasite supprimé: {_w.title} ({identity})", flush=True)
+    except Exception:
+        pass
+    # Mise en forme "pro" de tout le classeur (1 batch)
+    _beautify_sheet(sh, tab_ncols)
+
+
 def _push_all_folder(data: dict, force: bool = False) -> bool:
     """1 CLASSEUR par identité (rangé dans le dossier partagé). L'onglet principal
     est nommé comme l'identité (compat avec pull_and_merge). Best-effort."""
@@ -659,70 +721,27 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 h = _entry_hash(entry)
                 if not force and _last_hash.get(identity) == h:
                     continue
-                try:
-                    sh = _ensure_identity_sheet(gc, identity, cfg)
-                except Exception as e:
-                    if not _LAST_FOLDER["err"]:
-                        _LAST_FOLDER["err"] = str(e)[:250]
-                    print(f"[sheets_sync] création classeur '{identity}': {e}", flush=True)
-                    continue
-                # Onglet principal par NOM (= identité), PAS par position : si un
-                # onglet parasite (« Feuille 2 ») passe premier, sheet1 pointait
-                # dessus -> les comptes s'écrivaient dedans et l'onglet identité
-                # restait périmé.
-                ws = None
-                try:
-                    for _w0 in sh.worksheets():
-                        if _w0.title.strip().lower() == str(identity).strip().lower():
-                            ws = _w0
-                            break
-                except Exception:
-                    pass
-                if ws is None:
-                    ws = sh.sheet1  # classeur neuf : on renomme la 1re feuille
+                # Chaque classeur est INDÉPENDANT : une erreur (quota 429…) sur
+                # l'un ne doit pas faire échouer tout le push. Sur 429 : pause
+                # 35 s puis UN retry (quota Google = fenêtre par minute).
+                for _attempt in (1, 2):
                     try:
-                        ws.update_title(str(identity))
-                    except Exception:
-                        pass
-                rows = [HEADER] + [_acct_row(a) for a in accts]
-                ws.clear()
-                _ws_write(ws, rows)
-                tab_ncols = {ws.id: len(HEADER)}   # onglet principal = 7 colonnes
-                # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
-                # pour la config (pas d'écrasement entre classeurs).
-                try:
-                    existing = {w.title.strip().lower(): w for w in sh.worksheets()}
-                    va_wanted = _push_va_views(sh, existing, {identity: entry}, force, save_cfg=False)
-                    all_views += list(va_wanted.keys())
-                    for vw in va_wanted.values():
-                        tab_ncols[vw.id] = len(_VIEW_HEADER)   # onglets VA = 6 colonnes
-                except Exception as e:
-                    print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
-                # Onglets par défaut parasites (« Feuille N » / « Sheet N ») :
-                # supprimés s'ils sont VIDES ou si c'est un vieux tableau de
-                # comptes (en-tête username…) — jamais si ça ressemble à des
-                # notes perso de l'utilisateur.
-                try:
-                    import re as _re_fn
-                    for _w in list(sh.worksheets()):
-                        _t = (_w.title or "").strip().lower()
-                        if not _re_fn.match(r"^(feuille|sheet)\s*\d*$", _t):
+                        _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views)
+                        _last_hash[identity] = h
+                        _LAST_FOLDER["ok"] += 1
+                        break
+                    except Exception as e:
+                        _es = str(e)
+                        _is_quota = ("429" in _es or "RESOURCE_EXHAUSTED" in _es
+                                     or "Quota exceeded" in _es or "RATE_LIMIT" in _es.upper())
+                        if _is_quota and _attempt == 1:
+                            print(f"[sheets_sync] quota sur '{identity}' — pause 35s puis retry", flush=True)
+                            time.sleep(35)
                             continue
-                        if len(sh.worksheets()) <= 1:
-                            break
-                        try:
-                            _r1 = [str(c).strip().lower() for c in (_w.row_values(1) or [])]
-                        except Exception:
-                            continue
-                        if not _r1 or _r1[0] == "username":
-                            sh.del_worksheet(_w)
-                            print(f"[sheets_sync] onglet parasite supprimé: {_w.title} ({identity})", flush=True)
-                except Exception:
-                    pass
-                # Mise en forme "pro" de tout le classeur (1 batch)
-                _beautify_sheet(sh, tab_ncols)
-                _last_hash[identity] = h
-                _LAST_FOLDER["ok"] += 1
+                        if not _LAST_FOLDER["err"]:
+                            _LAST_FOLDER["err"] = f"{identity}: {_es}"[:250]
+                        print(f"[sheets_sync] classeur '{identity}': {_es}", flush=True)
+                        break
             # sauvegarde unique de la liste des vues (tous classeurs confondus)
             try:
                 c2 = load_config()
@@ -730,7 +749,8 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 save_config(c2)
             except Exception:
                 pass
-            return True
+            # Succès si au moins un classeur est passé (ou rien à pousser sans erreur)
+            return _LAST_FOLDER["ok"] > 0 or not _LAST_FOLDER["err"]
     except Exception as e:
         if not _LAST_FOLDER["err"]:
             _LAST_FOLDER["err"] = str(e)[:250]

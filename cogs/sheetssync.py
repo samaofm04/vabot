@@ -203,9 +203,20 @@ class SheetsSync(commands.Cog):
             await interaction.response.defer(ephemeral=True, thinking=True)
             import jailbreak as jb
             ok = await asyncio.to_thread(sheets_sync.push_all, jb._load(), True)
-            await interaction.followup.send(
-                "✅ Comptes poussés vers le Sheet." if ok else
-                "❌ Push échoué (config/gspread ?). Fais `/sheetsync status`.", ephemeral=True)
+            err = ""
+            try:
+                err = (getattr(sheets_sync, "_LAST_FOLDER", None) or {}).get("err") or ""
+            except Exception:
+                pass
+            if ok and err:
+                msg = f"✅ Poussé, mais un classeur a échoué : `{err[:170]}` — relance `/sheetsync push`."
+            elif ok:
+                msg = "✅ Comptes poussés vers le Sheet."
+            elif err:
+                msg = f"❌ Push échoué : `{err[:180]}`"
+            else:
+                msg = "❌ Push échoué (config/gspread ?). Fais `/sheetsync status`."
+            await interaction.followup.send(msg, ephemeral=True)
             return
 
         if action == "pull":
