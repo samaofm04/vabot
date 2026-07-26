@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "veille_telegram.json"
@@ -36,7 +37,7 @@ def load_config() -> Dict[str, Any]:
 
 def save_config(cfg: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def is_configured() -> bool:
@@ -423,8 +424,7 @@ def _fileid_all() -> Dict[str, Any]:
 def _fileid_save():
     try:
         FILEID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        FILEID_FILE.write_text(json.dumps(_FILEID_MEM, ensure_ascii=False),
-                               encoding="utf-8")
+        safe_json.write_text(FILEID_FILE, json.dumps(_FILEID_MEM, ensure_ascii=False))
     except Exception:
         pass
 

@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional
+import safe_json
 
 DATA_DIR = Path("data")
 CAMPAIGNS_FILE = DATA_DIR / "mypuls_campaigns.json"
@@ -41,9 +42,7 @@ def _load_all() -> List[Dict[str, Any]]:
 
 def _save_all(campaigns: List[Dict[str, Any]]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CAMPAIGNS_FILE.write_text(
-        json.dumps(campaigns, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(CAMPAIGNS_FILE, json.dumps(campaigns, indent=2, ensure_ascii=False))
 
 
 def list_campaigns(active_only: bool = False) -> List[Dict[str, Any]]:

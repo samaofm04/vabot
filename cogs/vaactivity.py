@@ -20,6 +20,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+import safe_json
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 ACT_FILE = DATA_DIR / "va_activity.json"        # {user_id: {"YYYY-MM-DD": count}}
@@ -71,7 +72,7 @@ def _load(path, default):
 def _save(path, data):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(path, json.dumps(data, ensure_ascii=False))
     except Exception:
         pass
 

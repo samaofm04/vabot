@@ -23,6 +23,7 @@ import calendar
 import datetime
 import threading
 from pathlib import Path
+import safe_json
 
 DATA_DIR = Path("data")
 FACTURE_FILE = DATA_DIR / "facture.json"
@@ -67,7 +68,7 @@ def _load() -> dict:
 def _save(d: dict):
     with _LOCK:
         FACTURE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        FACTURE_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        safe_json.write_text(FACTURE_FILE, json.dumps(d, ensure_ascii=False, indent=1))
 
 
 def _cur_month() -> str:
@@ -291,7 +292,7 @@ def _mypuls_ca(model: str, month: str) -> float:
             _MYPULS_MONTH_CACHE[key] = tot
             try:
                 _MYPULS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                _MYPULS_CACHE_FILE.write_text(json.dumps(_MYPULS_MONTH_CACHE), encoding="utf-8")
+                safe_json.write_text(_MYPULS_CACHE_FILE, json.dumps(_MYPULS_MONTH_CACHE))
             except Exception:
                 pass
         return tot
@@ -314,7 +315,7 @@ def _pcache_set(key: str, val: float):
     _MYPULS_MONTH_CACHE[key] = val
     try:
         _MYPULS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _MYPULS_CACHE_FILE.write_text(json.dumps(_MYPULS_MONTH_CACHE), encoding="utf-8")
+        safe_json.write_text(_MYPULS_CACHE_FILE, json.dumps(_MYPULS_MONTH_CACHE))
     except Exception:
         pass
 

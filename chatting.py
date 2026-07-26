@@ -34,6 +34,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import safe_json
 
 DATA_DIR = Path("data")
 PLANNING_FILE = DATA_DIR / "chatting_planning.json"
@@ -171,9 +172,7 @@ def _load() -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    PLANNING_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(PLANNING_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 # ==================== EDT CRUD ====================

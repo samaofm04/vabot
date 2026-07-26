@@ -8,6 +8,7 @@ import random
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "image_transform_config.json"
@@ -199,7 +200,7 @@ def load_config():
 
 def save_config(config):
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(CONFIG_FILE, json.dumps(config, indent=2, ensure_ascii=False))
 
 
 def reset_config():

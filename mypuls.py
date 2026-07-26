@@ -25,6 +25,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from datetime import date, timedelta
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "mypuls_cookies.json"
@@ -55,7 +56,7 @@ def save_config(cfg: dict):
     import os as _os
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(tmp, json.dumps(cfg, indent=2, ensure_ascii=False))
     _os.replace(str(tmp), str(CONFIG_FILE))
 
 
@@ -200,7 +201,7 @@ def _lastgood_save():
         for k in [k for k, v in _LASTGOOD_MEM.items() if (v or {}).get("ts", 0) < cut]:
             _LASTGOOD_MEM.pop(k, None)
         tmp = _LASTGOOD_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(_LASTGOOD_MEM, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(tmp, json.dumps(_LASTGOOD_MEM, ensure_ascii=False))
         os.replace(str(tmp), str(_LASTGOOD_FILE))
     except Exception:
         pass
@@ -486,8 +487,7 @@ def api_sfs_inbox(force: bool = False) -> dict:
                               reverse=True)[:3000]
                 items = {x["key"]: x for x in keep}
             SFS_INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SFS_INBOX_FILE.write_text(json.dumps({"items": items}, ensure_ascii=False),
-                                      encoding="utf-8")
+            safe_json.write_text(SFS_INBOX_FILE, json.dumps({"items": items}, ensure_ascii=False))
         except Exception as e:
             errors.append(f"sauvegarde: {e}")
     lst = sorted(items.values(), key=lambda x: str(x.get("at") or ""), reverse=True)
@@ -1126,7 +1126,7 @@ def _load_chatters() -> dict:
 
 def _save_chatters(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CHATTERS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(CHATTERS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def get_chatter_meta(name: str) -> dict:
@@ -1336,9 +1336,7 @@ def load_creator_order() -> List[int]:
 
 def save_creator_order(creator_ids: List[int]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CREATOR_ORDER_FILE.write_text(
-        json.dumps([int(x) for x in creator_ids], indent=2), encoding="utf-8"
-    )
+    safe_json.write_text(CREATOR_ORDER_FILE, json.dumps([int(x) for x in creator_ids], indent=2))
 
 
 def list_creators(force_refresh: bool = False) -> Dict[str, Any]:

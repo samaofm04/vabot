@@ -6,6 +6,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands
+import safe_json
 
 log = logging.getLogger("vabot.onboarding")
 
@@ -224,7 +225,7 @@ def load_step_links(index: int) -> list:
 
 def save_step_links(index: int, links: list):
     f = step_links_file(index)
-    f.write_text(json.dumps(links, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(f, json.dumps(links, indent=2, ensure_ascii=False))
 
 
 def list_step_media(index: int) -> list:

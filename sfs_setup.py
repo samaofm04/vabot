@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Dict, Any, List
+import safe_json
 
 DATA_DIR = Path("data")
 SETUP_FILE = DATA_DIR / "sfs_setup.json"
@@ -105,7 +106,7 @@ def _load() -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SETUP_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(SETUP_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def get_identity(platform: str, identity: str) -> Dict[str, Any]:

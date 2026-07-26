@@ -9,6 +9,7 @@ import threading as _threading
 from collections import deque as _deque
 from pathlib import Path
 from typing import List, Optional
+import safe_json
 
 try:
     import instaloader
@@ -141,7 +142,7 @@ def _write_cache(username: str, result: dict) -> dict:
             result["kept_from_previous"] = kept
             result["previous_scraped_at"] = old.get("scraped_at")
 
-    f.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(f, json.dumps(result, indent=2, ensure_ascii=False))
     # Copie locale de la PP tant que l'URL signée est encore valide (elle expire).
     try:
         _pic = ((result.get("profile") or {}).get("profile_pic_url") or "")
@@ -165,7 +166,7 @@ def load_auth() -> dict:
 
 def save_auth(data: dict):
     _ensure_dirs()
-    AUTH_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    safe_json.write_text(AUTH_FILE, json.dumps(data, indent=2))
     try:
         os.chmod(AUTH_FILE, 0o600)
     except Exception:
@@ -208,7 +209,7 @@ def save_watchlist(usernames: List[str]):
     # le fichier (sinon load_watchlist renvoyait [] et un add écrasait toute la liste).
     _ensure_dirs()
     tmp = WATCHLIST_FILE.with_suffix(WATCHLIST_FILE.suffix + ".tmp")
-    tmp.write_text(json.dumps(usernames, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(tmp, json.dumps(usernames, indent=2, ensure_ascii=False))
     os.replace(str(tmp), str(WATCHLIST_FILE))
 
 
@@ -901,7 +902,7 @@ def _load_health() -> dict:
 
 def _save_health(h: dict):
     try:
-        HEALTH_FILE.write_text(json.dumps(h, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(HEALTH_FILE, json.dumps(h, ensure_ascii=False))
     except Exception as e:
         log.warning(f"watchlist_health: {e}")
 

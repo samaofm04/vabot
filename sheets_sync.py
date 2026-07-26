@@ -20,6 +20,7 @@ import time
 import hashlib
 import threading
 from pathlib import Path
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "sheets_config.json"
@@ -71,7 +72,7 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    safe_json.write_text(CONFIG_FILE, json.dumps(cfg, ensure_ascii=False, indent=2))
 
 
 def gspread_available() -> bool:

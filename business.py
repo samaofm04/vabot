@@ -7,6 +7,7 @@ import time
 import os
 from pathlib import Path
 from typing import List, Dict
+import safe_json
 
 DATA_DIR = Path("data")
 BUSINESS_DIR = DATA_DIR / "business"
@@ -41,9 +42,7 @@ def load_identity_platforms() -> dict:
 
 def save_identity_platforms(data: dict):
     _ensure()
-    IDENTITY_PLATFORMS_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(IDENTITY_PLATFORMS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def set_identity_platform(identity: str, platform: str, active: bool):
@@ -80,7 +79,7 @@ def _load(path: Path) -> list:
 
 def _save(path: Path, data: list):
     _ensure()
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 # ============ SFS ============
@@ -241,7 +240,7 @@ def list_categories() -> List[str]:
         # Seed initial
         try:
             BUSINESS_DIR.mkdir(parents=True, exist_ok=True)
-            CATEGORIES_FILE.write_text(json.dumps(DEFAULT_CATEGORIES, ensure_ascii=False, indent=2), encoding="utf-8")
+            safe_json.write_text(CATEGORIES_FILE, json.dumps(DEFAULT_CATEGORIES, ensure_ascii=False, indent=2))
         except Exception:
             pass
         return list(DEFAULT_CATEGORIES)
@@ -257,7 +256,7 @@ def list_categories() -> List[str]:
 
 def _save_categories(cats: List[str]) -> None:
     BUSINESS_DIR.mkdir(parents=True, exist_ok=True)
-    CATEGORIES_FILE.write_text(json.dumps(cats, ensure_ascii=False, indent=2), encoding="utf-8")
+    safe_json.write_text(CATEGORIES_FILE, json.dumps(cats, ensure_ascii=False, indent=2))
 
 
 def add_category(name: str) -> bool:

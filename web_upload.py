@@ -12,6 +12,7 @@ import time
 import subprocess
 from pathlib import Path
 from html import escape as html_escape
+import safe_json
 
 log = logging.getLogger("vabot.web")
 
@@ -463,7 +464,7 @@ def _load_banger_marks() -> dict:
 def _save_banger_marks(marks: dict) -> None:
     try:
         BANGER_MARKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        BANGER_MARKS_FILE.write_text(json.dumps(marks, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(BANGER_MARKS_FILE, json.dumps(marks, ensure_ascii=False))
     except Exception:
         pass
 
@@ -510,7 +511,7 @@ def _toggle_disabled_reel(file_id: str) -> bool:
         s.discard(file_id)
     try:
         DISABLED_REELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        DISABLED_REELS_FILE.write_text(json.dumps(sorted(s), ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(DISABLED_REELS_FILE, json.dumps(sorted(s), ensure_ascii=False))
     except Exception:
         pass
     return now_off
@@ -6023,7 +6024,7 @@ def _load_web_users() -> dict:
 
 def _save_web_users(users: dict):
     WEB_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WEB_USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(WEB_USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
 
 
 def _bootstrap_web_users():
@@ -6210,7 +6211,7 @@ def _load_users():
 
 def _save_users(users):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
     _invalidate_json_cache(USERS_FILE)
 
 
@@ -6294,7 +6295,7 @@ def _load_va_payments() -> dict:
 
 def _save_va_payments(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VA_PAYMENTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(VA_PAYMENTS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _get_va_payment(user_id) -> dict:
@@ -6344,7 +6345,7 @@ def _load_va_insta() -> dict:
 
 def _save_va_insta(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VA_INSTA_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(VA_INSTA_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _get_va_insta(user_id) -> dict:
@@ -6419,7 +6420,7 @@ def _load_va_insta_3() -> dict:
 
 def _save_va_insta_3(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VA_INSTA_3_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(VA_INSTA_3_FILE, json.dumps(data, indent=2, ensure_ascii=False))
     _invalidate_json_cache(VA_INSTA_3_FILE)
 
 
@@ -6508,7 +6509,7 @@ def _load_refresh_state() -> dict:
 
 def _save_refresh_state(state: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    INSTA_REFRESH_STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(INSTA_REFRESH_STATE_FILE, json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def _set_refresh_status(**kw):
@@ -6878,7 +6879,7 @@ def _load_external_insta() -> list:
 
 def _save_external_insta(items: list):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    EXT_INSTA_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(EXT_INSTA_FILE, json.dumps(items, indent=2, ensure_ascii=False))
     _invalidate_json_cache(EXT_INSTA_FILE)
 
 
@@ -6938,7 +6939,7 @@ def _save_insta_3_stats_cache(d: dict):
     write."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = VA_INSTA_3_STATS_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(tmp, json.dumps(d, indent=2, ensure_ascii=False))
     import os as _os_sv
     _os_sv.replace(tmp, VA_INSTA_3_STATS_FILE)
 
@@ -7326,7 +7327,7 @@ def _load_va_links() -> dict:
 
 def _save_va_links(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VA_LINKS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(VA_LINKS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
     _invalidate_json_cache(VA_LINKS_FILE)
 
 
@@ -16374,7 +16375,7 @@ def _pay_daycache_save():
     try:
         with _PAY_DAYCACHE_LOCK:
             _PAY_DAYCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _PAY_DAYCACHE_FILE.write_text(json.dumps(_PAY_DAYCACHE), encoding="utf-8")
+            safe_json.write_text(_PAY_DAYCACHE_FILE, json.dumps(_PAY_DAYCACHE))
     except Exception:
         pass
 
@@ -23344,7 +23345,7 @@ def _gmsdash_links_persist(team: str, links: list):
                     "display_name": l.get("display_name") or l.get("shortcode") or ""}
                    for l in links if l.get("id")]
         tmp = GMSDASH_LINKS_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(tmp, json.dumps(d, ensure_ascii=False))
         os.replace(str(tmp), str(GMSDASH_LINKS_FILE))
     except Exception:
         pass
@@ -23385,7 +23386,7 @@ def _gmsdash_save_disk():
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = GMSDASH_CACHE_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(_GMSDASH_MEM, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(tmp, json.dumps(_GMSDASH_MEM, ensure_ascii=False))
         os.replace(str(tmp), str(GMSDASH_CACHE_FILE))
     except Exception:
         pass
@@ -24864,7 +24865,7 @@ def _jbanalyse_payload() -> dict:
             _tmp = _hfile.with_suffix(".json.tmp")
             _out = dict(fhist)
             _out["_first"] = fh_first
-            _tmp.write_text(json.dumps(_out, ensure_ascii=False), encoding="utf-8")
+            safe_json.write_text(_tmp, json.dumps(_out, ensure_ascii=False))
             os.replace(str(_tmp), str(_hfile))
     except Exception:
         fhist = fhist or {}
@@ -25512,7 +25513,7 @@ def _vaact_state_save(d: dict):
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = VA_ACT_STATE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(tmp, json.dumps(d, ensure_ascii=False))
         os.replace(str(tmp), str(VA_ACT_STATE))
     except Exception:
         pass
@@ -25536,7 +25537,7 @@ def _vaact_cfg_save(d: dict):
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = VA_ACT_CFG.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        safe_json.write_text(tmp, json.dumps(d, ensure_ascii=False, indent=1))
         os.replace(str(tmp), str(VA_ACT_CFG))
     except Exception:
         pass
@@ -30528,7 +30529,7 @@ def _load_account_settings() -> dict:
 def _save_account_settings(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     f = DATA_DIR / "account_settings.json"
-    f.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(f, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _render_profile_pic_html() -> str:
@@ -31023,7 +31024,7 @@ def _load_role_users() -> list:
 def _save_role_users(users: list):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     f = DATA_DIR / "role_users.json"
-    f.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(f, json.dumps(users, indent=2, ensure_ascii=False))
 
 
 def _load_role_definitions() -> dict:
@@ -31039,9 +31040,7 @@ def _load_role_definitions() -> dict:
 
 def _save_role_definitions(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (DATA_DIR / "role_definitions.json").write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(DATA_DIR / "role_definitions.json", json.dumps(data, indent=2, ensure_ascii=False))
 
 
 # Structure des menus avec permissions disponibles
@@ -32755,9 +32754,7 @@ def create_app():
             sessions = list(seen.values())
             # Garder seulement les 50 plus recentes
             sessions = sorted(sessions, key=lambda s: s.get("last_seen", 0), reverse=True)[:50]
-            (DATA_DIR / "active_sessions.json").write_text(
-                json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            safe_json.write_text(DATA_DIR / "active_sessions.json", json.dumps(sessions, indent=2, ensure_ascii=False))
         except Exception:
             pass
 
@@ -35766,7 +35763,7 @@ def create_app():
             parsed = _parse_of_har(data)
             parsed["imported_at"] = int(time.time())
             OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            OF_PUSHS_FILE.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+            safe_json.write_text(OF_PUSHS_FILE, json.dumps(parsed, ensure_ascii=False, indent=2))
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
         return jsonify({"ok": True, "items": len(parsed.get("items", [])),
@@ -35879,9 +35876,9 @@ def create_app():
                     pass
             else:
                 try:
-                    _cache_f.write_text(json.dumps(
+                    safe_json.write_text(_cache_f, json.dumps(
                         {"ts": time.time(), "pushs": all_pushs[:2000]},
-                        ensure_ascii=False), encoding="utf-8")
+                        ensure_ascii=False))
                 except Exception:
                     pass
             return jsonify({"ok": True, "pushs": all_pushs[:2000],
@@ -39103,9 +39100,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         sessions = _load_active_sessions()
         sessions = [s for s in sessions if s.get("id") != sid]
         try:
-            (DATA_DIR / "active_sessions.json").write_text(
-                json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            safe_json.write_text(DATA_DIR / "active_sessions.json", json.dumps(sessions, indent=2, ensure_ascii=False))
         except Exception as e:
             return _error(f"❌ Erreur : {e}")
         return _success("✅ Session révoquée")

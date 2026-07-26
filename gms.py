@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "gms_config.json"
@@ -37,7 +38,7 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def save_api_key(key: str):
@@ -783,7 +784,7 @@ def load_templates() -> Dict[str, str]:
 
 def save_templates(data: Dict[str, str]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _TEMPLATES_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(_TEMPLATES_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def set_template_for_model(model: str, link_id: str):
@@ -942,7 +943,7 @@ def load_groups_mapping() -> Dict[str, str]:
 
 def save_groups_mapping(mapping: Dict[str, str]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _GROUPS_FILE.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(_GROUPS_FILE, json.dumps(mapping, indent=2, ensure_ascii=False))
 
 
 def set_group_for_folder(folder: str, group_id: str, team_id: Optional[str] = None):
@@ -1375,7 +1376,7 @@ def _load_counters() -> Dict[str, int]:
 
 def _save_counters(d: Dict[str, int]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _VA_COUNTERS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(_VA_COUNTERS_FILE, json.dumps(d, indent=2, ensure_ascii=False))
 
 
 def claim_next_va_number(team_id: Optional[str], folder: str) -> int:

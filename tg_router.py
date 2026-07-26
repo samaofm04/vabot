@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CFG_FILE = DATA_DIR / "tg_router.json"
@@ -80,7 +81,7 @@ def _load() -> dict:
 def _save(d: dict):
     with _LOCK:
         CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CFG_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        safe_json.write_text(CFG_FILE, json.dumps(d, ensure_ascii=False, indent=1))
 
 
 def _cache_load():
@@ -108,11 +109,11 @@ def _cache_save():
                 while len(d) > 100:
                     d.pop(next(iter(d)))
             CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            CACHE_FILE.write_text(json.dumps({
+            safe_json.write_text(CACHE_FILE, json.dumps({
                 "veilles": {f"{k[0]}|{k[1]}": v for k, v in _VEILLES.items()},
                 "last_veille": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_VEILLE.items()},
                 "last_text": {f"{k[0]}|{k[1]}": list(v) for k, v in _LAST_TEXT.items()},
-            }, ensure_ascii=False), encoding="utf-8")
+            }, ensure_ascii=False))
         except Exception:
             pass
 

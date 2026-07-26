@@ -16,6 +16,7 @@ import re
 import time
 
 import discord
+import safe_json
 
 
 def _tag_call(_fn, *a, **kw):
@@ -56,7 +57,7 @@ def _auto_enabled() -> bool:
 def _set_auto(v: bool):
     try:
         _CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CFG_FILE.write_text(json.dumps({"auto": bool(v)}), encoding="utf-8")
+        safe_json.write_text(_CFG_FILE, json.dumps({"auto": bool(v)}))
     except Exception:
         pass
 
@@ -105,7 +106,7 @@ def _load_linkcache() -> dict:
 def _save_linkcache(d: dict):
     try:
         _LINKCACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _LINKCACHE_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(_LINKCACHE_FILE, json.dumps(d, ensure_ascii=False))
     except Exception:
         pass
 
@@ -127,7 +128,7 @@ def _load_report_cfg() -> dict:
 def _save_report_cfg(d: dict):
     try:
         _REPORT_CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _REPORT_CFG_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+        safe_json.write_text(_REPORT_CFG_FILE, json.dumps(d, ensure_ascii=False, indent=2))
     except Exception:
         pass
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "apify_config.json"
@@ -38,7 +39,7 @@ def _load() -> dict:
 def _save(d: dict):
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(CONFIG_FILE, json.dumps(d, ensure_ascii=False))
     except Exception:
         pass
 

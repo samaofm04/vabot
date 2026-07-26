@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import safe_json
 
 DATA_DIR = Path("data")
 POOL_FILE = DATA_DIR / "text_pool.json"
@@ -78,9 +79,7 @@ def _load() -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    POOL_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(POOL_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def list_entries(category: str, only_available: bool = False) -> List[Dict[str, Any]]:

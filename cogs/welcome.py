@@ -15,6 +15,7 @@ from typing import Union
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+import safe_json
 
 log = logging.getLogger("vabot.welcome")
 
@@ -166,7 +167,7 @@ def load_welcome_config():
 
 def save_welcome_config(cfg):
     WELCOME_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WELCOME_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(WELCOME_CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def load_users():
@@ -180,7 +181,7 @@ def load_users():
 
 def save_users(users):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
 
 
 def load_pending():
@@ -194,7 +195,7 @@ def load_pending():
 
 def save_pending(pending):
     PENDING_DELETIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PENDING_DELETIONS_FILE.write_text(json.dumps(pending, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(PENDING_DELETIONS_FILE, json.dumps(pending, indent=2, ensure_ascii=False))
 
 
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
@@ -211,7 +212,7 @@ def load_identities_config():
 
 def save_identities_config(cfg):
     IDENTITIES_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    IDENTITIES_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(IDENTITIES_CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def is_identity_active(name):

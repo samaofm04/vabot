@@ -34,6 +34,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
+import safe_json
 
 DATA_DIR = Path("data")
 SETTINGS_FILE = DATA_DIR / "mypuls_creator_settings.json"
@@ -131,9 +132,7 @@ def _migrate_from_v1(old_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(SETTINGS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _normalize_id(creator_id) -> str:

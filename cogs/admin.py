@@ -9,6 +9,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands
+import safe_json
 
 from video_transform import (
     load_config as load_transform_config,
@@ -46,7 +47,7 @@ def load_json(path, default):
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def list_identities():

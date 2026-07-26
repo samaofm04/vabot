@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 ONBOARDING_FILE = DATA_DIR / "onboarding.json"
@@ -217,9 +218,7 @@ def _seed() -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ONBOARDING_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(ONBOARDING_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def reset_to_default() -> Dict[str, Any]:

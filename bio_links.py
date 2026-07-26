@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 from typing import List, Dict
+import safe_json
 
 DATA_DIR = Path("data")
 BIO_FILE = DATA_DIR / "bio_links.json"
@@ -23,7 +24,7 @@ def _load_all() -> dict:
 
 def _save_all(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    BIO_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(BIO_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def get_bio(identity: str) -> dict:

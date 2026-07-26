@@ -38,6 +38,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+import safe_json
 
 log = logging.getLogger("vabot.cta_reminder")
 
@@ -132,9 +133,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(
-        json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(STATE_FILE, json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def _paris_now() -> datetime:
@@ -290,9 +289,7 @@ def _load_tracking_state() -> dict:
 
 def _save_tracking_state(state: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    TRACKING_STATE_FILE.write_text(
-        json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(TRACKING_STATE_FILE, json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def tracking_was_sent_today(uid: str) -> bool:

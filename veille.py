@@ -29,6 +29,7 @@ import uuid
 from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, Any, List
+import safe_json
 
 DATA_DIR = Path("data")
 VEILLE_FILE = DATA_DIR / "veille_reels.json"
@@ -48,7 +49,7 @@ def _load() -> Dict[str, Any]:
 
 def _save(data: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    VEILLE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(VEILLE_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def list_reels() -> List[Dict[str, Any]]:

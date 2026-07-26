@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+import safe_json
 
 DATA_DIR = Path("data")
 ACT_FILE = DATA_DIR / "jb_activity.json"
@@ -51,7 +52,7 @@ def _load(p: Path) -> dict:
 def _save(p: Path, d: dict) -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+        safe_json.write_text(p, json.dumps(d, ensure_ascii=False, indent=2))
     except Exception:
         pass
 

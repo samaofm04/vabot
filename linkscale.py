@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+import safe_json
 
 DATA_DIR = Path("data")
 CONFIG_FILE = DATA_DIR / "linkscale_config.json"
@@ -40,9 +41,7 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(
-        json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def save_api_key(key: str):
@@ -492,9 +491,7 @@ def _load_template_map() -> Dict[str, Any]:
 
 def _save_template_map(cache: Dict[str, Any]):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    TEMPLATE_MAP_FILE.write_text(
-        json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    safe_json.write_text(TEMPLATE_MAP_FILE, json.dumps(cache, indent=2, ensure_ascii=False))
 
 
 def get_template_to_folder_map(force_refresh: bool = False) -> Dict[str, str]:

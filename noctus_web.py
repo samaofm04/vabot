@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+import safe_json
 
 # Sérialise lecture+écriture de captions.json (partagé) + spawn du runner, pour ne pas
 # perdre le label d'une génération concurrente (2 VA cliquent « Reel monté » en même temps).
@@ -85,7 +86,7 @@ def _setup_status() -> dict:
 
 def _set_setup(state, msg=""):
     try:
-        _SETUP_STATUS_FILE.write_text(json.dumps({"state": state, "msg": msg}), encoding="utf-8")
+        safe_json.write_text(_SETUP_STATUS_FILE, json.dumps({"state": state, "msg": msg}))
     except Exception:
         pass
 
@@ -276,9 +277,7 @@ def write_captions(data) -> bool:
         return False
     try:
         NOCTUS_DATA.mkdir(parents=True, exist_ok=True)
-        (NOCTUS_DATA / "captions.json").write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        safe_json.write_text(NOCTUS_DATA / "captions.json", json.dumps(data, ensure_ascii=False, indent=2))
         return True
     except Exception:
         return False

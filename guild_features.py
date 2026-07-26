@@ -16,6 +16,7 @@ Fonctions (clés) :
 """
 import json
 import pathlib
+import safe_json
 
 _FILE = pathlib.Path(__file__).resolve().parent / "data" / "guild_features.json"
 
@@ -33,7 +34,7 @@ def _load() -> dict:
 def _save(d: dict) -> bool:
     try:
         _FILE.parent.mkdir(parents=True, exist_ok=True)
-        _FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(_FILE, json.dumps(d, indent=2, ensure_ascii=False))
         return True
     except Exception:
         return False
@@ -137,7 +138,7 @@ def set_threads(guild_or_id, on: bool) -> bool:
         d.pop(gid, None)
     try:
         _THREADS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _THREADS_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(_THREADS_FILE, json.dumps(d, indent=2, ensure_ascii=False))
     except Exception:
         return False
     return bool(on)
@@ -179,7 +180,7 @@ def set_va_category(guild_or_id, category_id) -> bool:
         d.pop(gid, None)
     try:
         _VACAT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _VACAT_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(_VACAT_FILE, json.dumps(d, indent=2, ensure_ascii=False))
     except Exception:
         return False
     return True
@@ -220,7 +221,7 @@ def set_server_identity(guild_or_id, ident) -> bool:
         d.pop(gid, None)
     try:
         _SVID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SVID_FILE.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+        safe_json.write_text(_SVID_FILE, json.dumps(d, indent=2, ensure_ascii=False))
     except Exception:
         return False
     return True

@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 
 from video_transform import load_config as load_video_config
 from image_transform import transform_image, load_config as load_image_config
+import safe_json
 
 log = logging.getLogger("vabot.autopost")
 
@@ -54,7 +55,7 @@ def load_autopost_config():
 
 def save_autopost_config(cfg):
     AUTOPOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    AUTOPOST_CONFIG.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(AUTOPOST_CONFIG, json.dumps(cfg, indent=2, ensure_ascii=False))
 
 
 def load_users():
@@ -68,7 +69,7 @@ def load_users():
 
 def save_users(users):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
 
 
 def get_user_data(user_id):
