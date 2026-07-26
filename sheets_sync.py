@@ -728,6 +728,11 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                 # 35 s puis UN retry (quota Google = fenêtre par minute).
                 for _attempt in (1, 2):
                     try:
+                        # Rythme anti-quota : Google limite ~60 ÉCRITURES/min/user
+                        # et un classeur en consomme ~12-15. En force (7 classeurs
+                        # d'affilée), on espace pour tenir en UN SEUL passage.
+                        if force and _LAST_FOLDER["ok"] > 0:
+                            time.sleep(10)
                         _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views)
                         _last_hash[identity] = h
                         _LAST_FOLDER["ok"] += 1
