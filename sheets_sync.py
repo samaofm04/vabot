@@ -896,6 +896,14 @@ def pull_and_merge() -> tuple:
         return False, "Sheet indisponible"
     data = jb._load()
     known = {str(k).strip().lower() for k in data.keys()}
+    # Tombstones : un VA/compte supprime sur le site (7 j) ne doit JAMAIS etre
+    # re-importe depuis le Sheet (course pull/push, vieil onglet, etc.)
+    try:
+        _tomb = jb.tombstones()
+    except Exception:
+        _tomb = {"vas": {}, "accounts": {}}
+    _tv = _tomb.get("vas") or {}
+    _ta = _tomb.get("accounts") or {}
 
     # Classer les onglets du Sheet
     id_tabs = {}                 # identity_lower -> rows
@@ -1000,7 +1008,9 @@ def pull_and_merge() -> tuple:
                         ch = True
                     if ch:
                         updated += 1
-                elif u.lower() not in deleted:
+                elif (u.lower() not in deleted
+                      and f"{il}|{u.lower()}" not in _ta
+                      and f"{il}|{(r.get('va') or '').strip().lower()}" not in _tv):
                     acct = _row_new_account(u, r, (r.get("va") or "").strip(), _gen_id)
                     accts.append(acct)
                     by_uname[u.lower()] = acct
@@ -1024,7 +1034,9 @@ def pull_and_merge() -> tuple:
                             ch = True
                     if ch:
                         updated += 1
-                elif u.lower() not in deleted:
+                elif (u.lower() not in deleted
+                      and f"{il}|{u.lower()}" not in _ta
+                      and f"{il}|{vl}" not in _tv):
                     acct = _row_new_account(u, r, vdisp, _gen_id)
                     accts.append(acct)
                     by_uname[u.lower()] = acct
@@ -1036,7 +1048,7 @@ def pull_and_merge() -> tuple:
                 for _v in vas}
         for a in accts:
             va = (a.get("va") or "").strip()
-            if va and va.lower() not in have:
+            if va and va.lower() not in have and f"{il}|{va.lower()}" not in _tv:
                 vas.append({"name": va, "discord_username": ""})
                 have.add(va.lower())
 

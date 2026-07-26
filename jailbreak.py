@@ -223,6 +223,9 @@ def add_account(identity: str, username: str, password: str = "",
     if va_clean:
         if not any(_va_name(v).lower() == va_clean.lower() for v in entry["vas"]):
             entry["vas"].append({"name": va_clean, "discord_username": ""})
+    tomb_clear("accounts", identity, username)
+    if va_clean:
+        tomb_clear("vas", identity, va_clean)
     _save(data)
     return acct
 
@@ -337,6 +340,11 @@ def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict
     if va_clean and added_usernames:
         if not any(_va_name(v).lower() == va_clean.lower() for v in entry["vas"]):
             entry["vas"].append({"name": va_clean, "discord_username": ""})
+    if added_usernames:
+        # re-ajout volontaire -> ces comptes (et le VA) ne sont plus "supprimes"
+        tomb_clear("accounts", identity, *added_usernames)
+        if (va or "").strip():
+            tomb_clear("vas", identity, va)
     _save(data)
     return {
         "added": len(added_usernames),
@@ -345,6 +353,68 @@ def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict
         "added_usernames": added_usernames,
         "skipped_dups": skipped_dups,
     }
+
+
+
+# ============ Tombstones (anti-resurrection via le Google Sheet) ============
+# Un VA/compte supprime sur le site etait RE-IMPORTE par le poller Sheet (2 min)
+# si le pull passait avant le push (ou si un vieil onglet trainait). On marque
+# donc chaque suppression 7 jours : pull_and_merge refuse de re-importer.
+TOMB_FILE = DATA_DIR / "jb_tombstones.json"
+_TOMB_TTL = 7 * 86400
+
+
+def _tomb_key(identity: str, name: str) -> str:
+    return f"{(identity or '').strip().lower()}|{(name or '').strip().lower()}"
+
+
+def _tomb_load() -> Dict[str, Dict[str, int]]:
+    try:
+        d = json.loads(TOMB_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    now = int(time.time())
+    out: Dict[str, Dict[str, int]] = {}
+    for kind in ("vas", "accounts"):
+        m = d.get(kind) if isinstance(d.get(kind), dict) else {}
+        out[kind] = {k: int(v) for k, v in m.items() if now - int(v or 0) < _TOMB_TTL}
+    return out
+
+
+def _tomb_save(d: Dict[str, Dict[str, int]]):
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        TOMB_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def tomb_add(kind: str, identity: str, *names: str):
+    names = [n for n in names if (n or "").strip()]
+    if not (identity or "").strip() or not names:
+        return
+    d = _tomb_load()
+    now = int(time.time())
+    for n in names:
+        d[kind][_tomb_key(identity, n)] = now
+    _tomb_save(d)
+
+
+def tomb_clear(kind: str, identity: str, *names: str):
+    d = _tomb_load()
+    hit = False
+    for n in names:
+        if d[kind].pop(_tomb_key(identity, n), None) is not None:
+            hit = True
+    if hit:
+        _tomb_save(d)
+
+
+def tombstones() -> Dict[str, Dict[str, int]]:
+    """{'vas': {'ident|va': ts}, 'accounts': {'ident|username': ts}} (TTL purge)."""
+    return _tomb_load()
 
 
 def remove_account(identity: str, account_id: int) -> bool:
@@ -358,11 +428,13 @@ def remove_account(identity: str, account_id: int) -> bool:
     if not entry:
         return False
     n_before = len(entry["accounts"])
+    gone = [a for a in entry["accounts"] if int(a.get("id", 0)) == int(account_id)]
     entry["accounts"] = [
         a for a in entry["accounts"] if int(a.get("id", 0)) != int(account_id)
     ]
     if len(entry["accounts"]) == n_before:
         return False
+    tomb_add("accounts", identity, *[(a.get("username") or "") for a in gone])
     _save(data)
     return True
 
@@ -410,6 +482,7 @@ def add_va(identity: str, va_name: str, discord_username: str = "") -> bool:
         "name": va_name,
         "discord_username": discord_username,
     })
+    tomb_clear("vas", identity, va_name)
     _save(data)
     return True
 
@@ -515,8 +588,11 @@ def remove_va_and_accounts(identity: str, va_name: str) -> int:
     vl = va_name.lower()
     accts = entry.get("accounts") or []
     before = len(accts)
+    gone = [a for a in accts if (a.get("va") or "").strip().lower() == vl]
     entry["accounts"] = [a for a in accts if (a.get("va") or "").strip().lower() != vl]
     entry["vas"] = [v for v in (entry.get("vas") or []) if _va_name(v).lower() != vl]
+    tomb_add("vas", identity, va_name)
+    tomb_add("accounts", identity, *[(a.get("username") or "") for a in gone])
     _save(data)
     return before - len(entry["accounts"])
 
