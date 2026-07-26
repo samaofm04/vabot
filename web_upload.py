@@ -7094,7 +7094,25 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             else:
                 err_msg = f"🚫 Compte introuvable (@{h}) — renommé, supprimé ou banni"
                 is_banned = True
+        # « Échec » générique sur un compte qui n'a JAMAIS donné de stats : c'est
+        # très souvent un compte banni que l'erreur empêche de classifier. On
+        # vérifie son existence (max 1x/20h par compte) : page « introuvable »
+        # confirmée = banni ; rate-limit/réseau = on ne conclut PAS.
+        _chk_ts = 0
+        if not is_banned:
+            _prev = cached if isinstance(cached, dict) else {}
+            _never_ok = not (_prev.get("followers") or _prev.get("posts_count") or _prev.get("preview"))
+            _last_chk = int(_prev.get("exist_check_ts") or 0)
+            if _never_ok and (now_ts - _last_chk) > 20 * 3600:
+                _chk_ts = now_ts
+                if not _verify_ig_profile_exists(h):
+                    is_banned = True
+                    err_msg = f"🚫 Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
+            else:
+                _chk_ts = _last_chk
         out = {"error": err_msg, "banned": is_banned, "scraped_at": now_ts}
+        if _chk_ts:
+            out["exist_check_ts"] = _chk_ts
         _cache_put_stats(h, out)
         return out
 
@@ -19222,6 +19240,25 @@ def _render_jailbreak_html() -> str:
         "</div>"
     )
 
+    # === Tri des comptes : actifs -> stats gardées -> jamais scrapé -> échec -> bannis ===
+    def _jb_sort_accounts(accts: list) -> list:
+        def _rank(a):
+            raw = str(a.get("username", ""))
+            try:
+                hn = _normalize_insta_handle(raw) if callable(_normalize_insta_handle) else raw.lower().lstrip("@")
+            except Exception:
+                hn = raw.lower().lstrip("@")
+            st = ig_stats_cache.get(hn) or {}
+            if st.get("banned"):
+                return (4, 0)
+            if not st:
+                return (2, 0)                      # jamais scrapé
+            if st.get("error"):
+                return (3, 0)                      # échec (souvent des bannis pas encore confirmés)
+            # actif : les plus grosses vues de la semaine en premier
+            return ((1, 0) if st.get("stale") else (0, -(st.get("weekly") or 0)))
+        return sorted(accts, key=_rank)
+
     # === Helper rendu compte (utilise globalement) ===
     def _render_account_row(a: dict, ident_lc_arg: str) -> str:
         """Style va-ig3-row : meme markup que la page VAs (CSS deja
@@ -19537,7 +19574,7 @@ def _render_jailbreak_html() -> str:
                     )
 
                 if va_accts:
-                    accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in va_accts)
+                    accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in _jb_sort_accounts(va_accts))
                 else:
                     accounts_html = (
                         "<div class='jb-empty-section'>Aucun compte sous ce VA — clique "
@@ -19660,7 +19697,7 @@ def _render_jailbreak_html() -> str:
                     f"</button>"
                 )
 
-                accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in no_va_accts)
+                accounts_html = _ACCT_THEAD + "".join(_render_account_row(a, ident_lc) for a in _jb_sort_accounts(no_va_accts))
                 detail_cards_html.append(
                     f"<div class='jb-va-detail' data-va-id='{va_id_safe}' "
                     f"data-identity='{ident_safe}' data-va-name=''>"
