@@ -721,15 +721,27 @@ def find_link_for_handle(handle: str, links: List[dict]) -> Optional[dict]:
     if not h or not links:
         return None
     target = "va" + h
+    # 1) correspondance EXACTE : va_@<handle>
     for l in links:
         if _norm_handle(l.get("display_name")) == target:
             return l
+    # 2) le handle est un MOT ENTIER du display_name (« va @toky », « VA toky 3 »).
+    #    Avant : simple sous-chaîne -> « lia » matchait « amelia », « mia »
+    #    matchait « mialee »… et les clics (donc l'argent) d'un AUTRE VA
+    #    étaient attribués au mauvais.
+    import re as _re_fl
     for l in links:
-        dn = _norm_handle(l.get("display_name"))
-        if dn and h in dn and dn.startswith("va"):
+        raw = (l.get("display_name") or "").lower()
+        if not _norm_handle(raw).startswith("va"):
+            continue
+        toks = [t for t in _re_fl.split(r"[^a-z0-9]+", raw) if t]
+        if h in toks:
             return l
+    # 3) shortcode : mot entier également
     for l in links:
-        if h in _norm_handle(l.get("shortcode")):
+        raw = (l.get("shortcode") or "").lower()
+        toks = [t for t in _re_fl.split(r"[^a-z0-9]+", raw) if t]
+        if h in toks:
             return l
     return None
 

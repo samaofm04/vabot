@@ -427,6 +427,44 @@ try:
 except Exception as _e:
     check("sécurité 2 : testable", False, repr(_e)[:90])
 
+
+print()
+print("=" * 70)
+print("10) Argent : attribution des liens et rapport de paie")
+print("=" * 70)
+try:
+    import gms as _gms
+    _links = [{"display_name": "va_@amelia", "shortcode": "abcamelia"},
+              {"display_name": "va_@mialee", "shortcode": "xxmialee"},
+              {"display_name": "va @toky", "shortcode": "zztoky"},
+              {"display_name": "va_@lia", "shortcode": "lialink"}]
+    _r = _gms.find_link_for_handle("lia", _links)
+    check("lien : « lia » ne prend pas celui d'amelia",
+          _r and _r["display_name"] == "va_@lia", str(_r))
+    _r = _gms.find_link_for_handle("mia", _links)
+    check("lien : « mia » ne prend pas celui de mialee",
+          (not _r) or _r["display_name"] != "va_@mialee", str(_r))
+    _r = _gms.find_link_for_handle("amelia", _links)
+    check("lien : « amelia » trouve le sien", _r and _r["display_name"] == "va_@amelia", str(_r))
+except Exception as _e:
+    check("attribution des liens : testable", False, repr(_e)[:80])
+
+try:
+    _src = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    _s = _src.index("    def _format_pay_report(rows, title):")
+    _e2 = _src.index("    async def _run_pay_report")
+    _NL = chr(10)
+    _body = _NL.join(l[4:] if l.startswith('    ') else l
+                     for l in _src[_s:_e2].split(_NL))
+    _ns = {}
+    exec(_body, _ns)
+    _txt = _NL.join(_ns['_format_pay_report'](
+        [('A', 'toky', 120, 7.2, 0), ('A', 'bo7', 50, 2.5, 3)], 'Quinzaine'))
+    check("rapport de paie : jours illisibles signalés", "illisible" in _txt, _txt[-90:])
+    check("rapport de paie : total marqué comme minimum", "MINIMUM" in _txt)
+except Exception as _e:
+    check("rapport de paie : testable", False, repr(_e)[:80])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
