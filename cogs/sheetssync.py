@@ -227,8 +227,12 @@ class SheetsSync(commands.Cog):
                 msg = f"✅ Importé du Sheet : {summary}"
             elif "RETENUES" in (summary or ""):
                 msg = f"ℹ️ Aucun ajout/modif, MAIS :{summary.split('suppr.', 1)[-1]}"
+            elif "indisponible" in (summary or "").lower():
+                msg = "❌ **Sheet ILLISIBLE** (API/quota Google ?) — le pull n'a rien pu lire. Réessaie dans 1-2 min, puis `/sheetsync status`."
+            elif "pause" in (summary or "").lower():
+                msg = "⏸️ **Sync en PAUSE** — aucun pull appliqué. Fais `/sheetsync resume` pour réactiver."
             else:
-                msg = "Rien de nouveau côté Sheet (ou Sheet indispo)."
+                msg = "Rien de nouveau côté Sheet (le contenu du Sheet = déjà l'état du site)."
             await interaction.followup.send(msg[:1990], ephemeral=True)
             return
 
