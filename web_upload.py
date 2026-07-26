@@ -1370,6 +1370,43 @@ button[type=submit]:active,.btn:active{transform:translateY(0) scale(.985)}
 @keyframes siteCardIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
 .card{animation:siteCardIn .5s cubic-bezier(.16,1,.3,1)}
 
+/* =========================================================================
+   FLUIDITÉ — couche additive (aucune modif de layout).
+   Objectif : scroll et survols sans à-coups sur les grosses pages
+   (Jailbreak : 500+ lignes de comptes dans le DOM).
+   ========================================================================= */
+
+/* 1) Les listes longues ne sont peintes QUE si elles entrent dans l'écran.
+   contain-intrinsic-size réserve la hauteur -> aucun saut d'ascenseur. */
+.jb-row,.va-ig3-row{content-visibility:auto;contain-intrinsic-size:auto 56px}
+.gd-row,.ja-row,.av-row{content-visibility:auto;contain-intrinsic-size:auto 42px}
+.jb-side-va{content-visibility:auto;contain-intrinsic-size:auto 44px}
+/* Les cartes de détail masquées ne coûtent plus rien au rendu. */
+.jb-va-detail:not(.active){content-visibility:hidden}
+
+/* 2) Isolation des zones qui se rafraîchissent seules (sidebar, tableaux,
+   graphes) : un changement dedans ne relayoute plus toute la page. */
+.jb-sidebar,.jb-main-pane,#gd-tbl,#ja-tbl,#av-tbl,#gd-chart,#ja-chart{contain:layout style}
+
+/* 3) Scroll : inertie douce et pas de « scroll chaining » qui fait bouger la
+   page quand on arrive au bout d'un panneau. */
+html{scroll-behavior:smooth}
+.jb-sidebar,.form-section,.gd-wrap,.modal-body{overscroll-behavior:contain}
+
+/* 4) Survols : on n'anime que des propriétés composées (transform/opacity),
+   jamais la géométrie -> 60 fps garantis même sur de longues listes. */
+.jb-row,.gd-row,.ja-row,.av-row,.jb-side-va{
+  transition:background-color .13s ease,transform .13s cubic-bezier(.16,1,.3,1)}
+.jb-row:hover,.gd-row:hover,.ja-row:hover,.av-row:hover{background:rgba(59,130,246,.05)}
+.jb-side-va:hover{transform:translateX(2px)}
+
+/* 5) Textes plus nets pendant les animations (évite le « flou » de rendu). */
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeSpeed}
+
+/* 6) Squelettes de chargement : une pulsation douce vaut mieux qu'un texte figé. */
+@keyframes siteSkel{0%,100%{opacity:.45}50%{opacity:.9}}
+.ja-msg,.av-msg,.gd-msg{animation:siteSkel 1.4s ease-in-out infinite}
+
 /* Filet de sécurité + accessibilité : si l'utilisateur préfère moins
    d'animations (réglage OS), on neutralise TOUT le mouvement du site. */
 @media (prefers-reduced-motion: reduce){
@@ -3877,6 +3914,14 @@ function deleteSelected(){
       form.submit();
     }
   );
+}
+/* Filtres de recherche : on attend une micro-pause dans la frappe avant de
+   recalculer. Sur les listes longues (500+ comptes), filtrer a CHAQUE touche
+   faisait saccader la saisie. */
+window.__siteDeb = {};
+function siteDebounce(key, fn, ms){
+  try{ clearTimeout(window.__siteDeb[key]); }catch(e){}
+  window.__siteDeb[key] = setTimeout(fn, ms || 120);
 }
 function showTab(group,name,title,subtitle){
   if(typeof igStopAllReels==="function") igStopAllReels();
@@ -8319,7 +8364,7 @@ body.light .va-id{color:#9ca3af}
         "<div class='va-vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
         "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' id='va-search' placeholder='Rechercher…' oninput='vaSearch(this.value)'>"
+        "<input type='text' id='va-search' placeholder='Rechercher…' oninput='var e=this;siteDebounce(3, function(){ vaSearch(e.value); }, 130)'>"
         "</div>"
         "<select id='va-filter-identity' onchange='vaSearch(null)' class='va-vault-filter'>"
         "<option value=''>Toutes les identités</option>"
@@ -9722,7 +9767,7 @@ function vaPaySave(){
         "<div id='vlm-subtitle'></div>"
         "<button onclick='vaLinksClose()' class='vlm-close'>×</button>"
         "</div>"
-        "<input type='text' id='vlm-search' placeholder='Rechercher un lien…' oninput='vaLinksFilter(this.value)'>"
+        "<input type='text' id='vlm-search' placeholder='Rechercher un lien…' oninput='var e=this;siteDebounce(4, function(){ vaLinksFilter(e.value); }, 130)'>"
         "<div id='vlm-pills'></div>"
         "<div id='vlm-list'></div>"
         "<div class='vlm-foot'>"
@@ -18652,7 +18697,7 @@ async function glDeleteWatcher(id, btn){
         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2' "
         f"style='position:absolute;left:10px;top:50%;transform:translateY(-50%)'>"
         f"<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' id='ext-sb-search' placeholder='Rechercher…' oninput='extSbFilter()' "
+        f"<input type='text' id='ext-sb-search' placeholder='Rechercher…' oninput='siteDebounce(2, extSbFilter, 130)' "
         f"style='background:#0a0c10;border:1px solid #2a2a2a;color:#fff;padding:8px 12px 8px 32px;"
         f"border-radius:8px;font-size:12px;width:100%;font-family:inherit'>"
         f"</div>"
@@ -19303,7 +19348,7 @@ def _render_jailbreak_html() -> str:
         "<div class='jb-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
         "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' id='jb-search-input' placeholder='Rechercher (identité ou username)…' oninput='jbApplyFilter()'>"
+        "<input type='text' id='jb-search-input' placeholder='Rechercher (identité ou username)…' oninput='siteDebounce(1, jbApplyFilter, 130)'>"
         "</div>"
         f"<select id='jb-filter-identity' class='jb-filter' onchange='jbApplyFilter()'>{filter_opts}</select>"
         "</div>"
