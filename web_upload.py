@@ -25598,6 +25598,7 @@ def _vaact_payload(period: str = "14") -> dict:
         base = float(vcfg.get("base") or 0)
         malus = float(vcfg.get("malus") or 0)
         quota = int(vcfg.get("quota") or 0)      # nb de comptes ACTIFS à maintenir (0 = pas d'objectif)
+        quota_pct = int(vcfg.get("quota_pct") or 100)   # % toléré avant ALERTE (ex. 80)
         # Pré-calcul par compte : set des jours avec reel + plancher de fenêtre
         accts = []
         n_ban = n_warm = n_nodata = 0
@@ -25710,6 +25711,9 @@ def _vaact_payload(period: str = "14") -> dict:
             "miss": miss_detail,
             "base": base, "malus": malus, "repos": sorted(repos),
             "quota": quota, "deficit": (max(0, quota - len(accts)) if quota else 0),
+            "quota_pct": quota_pct,
+            "seuil": (int(-(-quota * quota_pct // 100)) if quota else 0),
+            "alert": bool(quota and len(accts) < -(-quota * quota_pct // 100)),
             "deduction": ded, "pay": pay,
         })
     out_vas.sort(key=lambda v: (-v["oublis"], -v["n_suivis"], v["va"]))
@@ -25717,7 +25721,7 @@ def _vaact_payload(period: str = "14") -> dict:
         late_today = sum(1 for v in out_vas if v["statuses"][-1:] in ("x", "p"))
     else:
         late_today = None      # période passée : « là maintenant » n'a pas de sens
-    under_quota = sum(1 for v in out_vas if v["deficit"] > 0)
+    under_quota = sum(1 for v in out_vas if v["alert"])
     return {"ok": True, "period": period, "label": lab, "payable": payable,
             "days": day_iso, "vas": out_vas, "warmup_days": warmup,
             "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
@@ -25806,7 +25810,11 @@ def _render_jbactivite_html() -> str:
     <label>Retenue par jour d&#39;oubli ($)</label>
     <input type="number" id="av-m-malus" min="0" step="0.5">
     <label>Comptes actifs &agrave; maintenir (objectif &mdash; 0 = aucun)</label>
-    <input type="number" id="av-m-quota" min="0" step="1">
+    <div style="display:flex;gap:8px">
+      <input type="number" id="av-m-quota" min="0" step="1" style="flex:2" placeholder="ex : 60">
+      <input type="number" id="av-m-quotapct" min="1" max="100" step="1" style="flex:1" placeholder="% tol&eacute;r&eacute;" title="En dessous de objectif &times; % : ALERTE rouge">
+    </div>
+    <div class="av-hint" style="margin-top:3px">alerte rouge sous objectif &times; % (ex : 60 &times; 80 % = alerte sous 48 comptes)</div>
     <label>Jours de repos (jamais comptabilis&eacute;s)</label>
     <div class="av-days" id="av-m-repos"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
@@ -25838,7 +25846,7 @@ function avCards(){
   el.innerHTML =
       '<div class="av-card"><div class="lab">VAs suivis</div><div class="val">' + avNum(t.vas) + '</div><div class="sub">' + avNum(t.warm) + ' compte(s) en warm-up (' + avNum(d.warmup_days) + ' j)</div></div>'
     + '<div class="av-card"><div class="lab">Oublis &mdash; ' + avEsc(d.label || '') + '</div><div class="val" style="color:' + (t.oublis ? '#ef4444' : '#22c55e') + '">' + avNum(t.oublis) + '</div><div class="sub">1 oubli max / VA / jour</div></div>'
-    + (t.under_quota ? ('<div class="av-card"><div class="lab">Sous l&#39;objectif de comptes</div><div class="val" style="color:#ef4444">' + avNum(t.under_quota) + '</div><div class="sub">VA(s) en dessous de leur quota de comptes actifs</div></div>') : '')
+    + (t.under_quota ? ('<div class="av-card"><div class="lab">&#9888; Alerte comptes</div><div class="val" style="color:#ef4444">' + avNum(t.under_quota) + '</div><div class="sub">VA(s) sous le seuil tol&eacute;r&eacute; (objectif &times; %)</div></div>') : '')
     + (t.late_today == null ? '' : ('<div class="av-card"><div class="lab">En retard l&agrave; maintenant</div><div class="val" style="color:' + (t.late_today ? '#f59e0b' : '#22c55e') + '">' + avNum(t.late_today) + '</div><div class="sub">&ge; 1 compte sans reel depuis 48 h</div></div>'))
     + '<div class="av-card"><div class="lab">Retenues totales</div><div class="val" style="color:' + (t.deduction ? '#ef4444' : '#fff') + '">' + avMoney(t.deduction) + '</div><div class="sub">oublis &times; retenue par VA</div></div>';
 }
@@ -25874,8 +25882,9 @@ function avTable(){
       + '<div class="av-nm"><span class="av-pfb" style="background:hsl(' + avHue(v.va) + ',55%,42%)">' + avEsc(v.display.charAt(0).toUpperCase()) + '</span>'
       + '<div class="t"><div class="n">' + avEsc(v.display) + '</div><div class="s">' + avEsc(sub) + '</div></div></div>'
       + '<span class="hidesm">' + (v.quota
-          ? ('<b style="color:' + (v.deficit ? '#ef4444' : '#22c55e') + '">' + avNum(v.n_suivis) + '</b><span class="av-hint"> / ' + avNum(v.quota) + ' requis</span>'
-             + (v.deficit ? (' <span class="av-badge" style="color:#ef4444">manque ' + avNum(v.deficit) + '</span>') : ''))
+          ? ('<b style="color:' + (v.alert ? '#ef4444' : (v.deficit ? '#f59e0b' : '#22c55e')) + '">' + avNum(v.n_suivis) + '</b><span class="av-hint"> / ' + avNum(v.quota) + ' requis</span>'
+             + (v.alert ? (' <span class="av-badge" style="color:#ef4444;font-weight:800">&#9888; ALERTE &lt; ' + avNum(v.seuil) + '</span>')
+                        : (v.deficit ? (' <span class="av-badge" style="color:#f59e0b">manque ' + avNum(v.deficit) + '</span>') : '')))
           : (avNum(v.n_suivis) + '<span class="av-hint"> / ' + avNum(v.n) + '</span>'))
       + (v.n_ban ? (' <span class="av-badge" style="color:#ef4444">' + avNum(v.n_ban) + ' ban</span>') : '')
       + (v.n_warm ? (' <span class="av-badge" style="color:#a855f7">' + avNum(v.n_warm) + ' warm</span>') : '') + '</span>'
@@ -25897,6 +25906,7 @@ function avCfgOpen(idx){
   document.getElementById('av-m-base').value = v.base || 0;
   document.getElementById('av-m-malus').value = v.malus || 0;
   document.getElementById('av-m-quota').value = v.quota || 0;
+  document.getElementById('av-m-quotapct').value = v.quota_pct || 100;
   var box = document.getElementById('av-m-repos');
   box.innerHTML = AV_DAYS_FR.map(function(nm, k){
     return '<label><input type="checkbox" value="' + k + '"' + ((v.repos || []).indexOf(k) !== -1 ? ' checked' : '') + '> ' + nm + '</label>';
@@ -25910,6 +25920,7 @@ function avCfgSave(){
   fd.append('base', document.getElementById('av-m-base').value || '0');
   fd.append('malus', document.getElementById('av-m-malus').value || '0');
   fd.append('quota', document.getElementById('av-m-quota').value || '0');
+  fd.append('quota_pct', document.getElementById('av-m-quotapct').value || '100');
   var ks = [];
   Array.prototype.forEach.call(document.querySelectorAll('#av-m-repos input:checked'), function(c){ ks.push(c.value); });
   fd.append('repos', ks.join(','));
@@ -36453,9 +36464,14 @@ def create_app():
             quota = max(0, int(float(request.form.get("quota") or 0)))
         except Exception:
             quota = 0
+        try:
+            quota_pct = min(100, max(1, int(float(request.form.get("quota_pct") or 100))))
+        except Exception:
+            quota_pct = 100
         cfg = _vaact_cfg_load()
         cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus,
-                                         "repos": repos, "quota": quota}
+                                         "repos": repos, "quota": quota,
+                                         "quota_pct": quota_pct}
         _vaact_cfg_save(cfg)
         return jsonify({"ok": True})
 
