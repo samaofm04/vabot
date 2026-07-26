@@ -24443,6 +24443,23 @@ function gdView(v){
   gdChart(window.__gdData);
 }
 // Graphe SVG construit à la main (pas de librairie : les CDN sont bloqués côté client)
+function gdSmooth(pts, X, Y, yMin, yMax){
+  // Spline Catmull-Rom -> beziers (rendu doux façon courbe des chatteurs),
+  // points de contrôle bornés pour ne pas plonger sous l'axe.
+  var n = pts.length;
+  if(!n) return '';
+  function cl(v){ return Math.max(yMin, Math.min(yMax, v)); }
+  var P = [];
+  for(var i = 0; i < n; i++){ P.push([X(i), Y(pts[i])]); }
+  var d = 'M' + P[0][0].toFixed(1) + ' ' + P[0][1].toFixed(1);
+  for(var j = 0; j < n - 1; j++){
+    var p0 = P[j - 1] || P[j], p1 = P[j], p2 = P[j + 1], p3 = P[j + 2] || p2;
+    d += ' C' + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + ' ' + cl(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)
+       + ' ' + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + ' ' + cl(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)
+       + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+  }
+  return d;
+}
 function gdChart(d){
   var box = document.getElementById('gd-chart');
   if(!box) return;
@@ -24563,8 +24580,11 @@ function gdChart(d){
     if(window.__gdHidden[l._ci]) return;
     var pts = gdPts(l);
     var col = GD_COLORS[l._ci % GD_COLORS.length];
-    var dpath = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
-    svg += '<path d="' + dpath + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    var dpath = gdSmooth(pts, X, Y, PT, PT + ih);
+    if(pts.length > 1){
+      svg += '<path d="' + dpath + ' L' + X(pts.length - 1).toFixed(1) + ' ' + (PT + ih) + ' L' + X(0).toFixed(1) + ' ' + (PT + ih) + ' Z" fill="' + col + '" opacity="0.09" stroke="none"/>';
+    }
+    svg += '<path d="' + dpath + '" fill="none" stroke="' + col + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
       svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
            + '<title>' + gdEsc(l.name) + ' — ' + days[k] + ' : ' + v + ' clics' + (mode ? (' ' + mode.toUpperCase()) : '') + '</title></circle>';
@@ -25221,6 +25241,23 @@ function jaCards(){
   var upd = document.getElementById('ja-upd');
   if(upd) upd.textContent = age ? ('données du dernier scrape · ' + age) : '';
 }
+function jaSmooth(pts, X, Y, yMin, yMax){
+  // Spline Catmull-Rom -> beziers (rendu doux façon courbe des chatteurs),
+  // points de contrôle bornés pour ne pas plonger sous l'axe.
+  var n = pts.length;
+  if(!n) return '';
+  function cl(v){ return Math.max(yMin, Math.min(yMax, v)); }
+  var P = [];
+  for(var i = 0; i < n; i++){ P.push([X(i), Y(pts[i])]); }
+  var d = 'M' + P[0][0].toFixed(1) + ' ' + P[0][1].toFixed(1);
+  for(var j = 0; j < n - 1; j++){
+    var p0 = P[j - 1] || P[j], p1 = P[j], p2 = P[j + 1], p3 = P[j + 2] || p2;
+    d += ' C' + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + ' ' + cl(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)
+       + ' ' + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + ' ' + cl(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)
+       + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+  }
+  return d;
+}
 function jaChart(){
   var d = window.__jaData || {};
   var box = document.getElementById('ja-chart');
@@ -25293,8 +25330,11 @@ function jaChart(){
     var ci = nameIdx[g.name] || 0;
     var col = JA_COLORS[ci % JA_COLORS.length];
     var pts = g.points || [];
-    var path = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
-    svg += '<path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    var path = jaSmooth(pts, X, Y, PT, PT + ih);
+    if(pts.length > 1){
+      svg += '<path d="' + path + ' L' + X(pts.length - 1).toFixed(1) + ' ' + (PT + ih) + ' L' + X(0).toFixed(1) + ' ' + (PT + ih) + ' Z" fill="' + col + '" opacity="0.09" stroke="none"/>';
+    }
+    svg += '<path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
       svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="' + (days.length > 1 ? 2.6 : 5) + '" fill="' + col + '">'
            + '<title>' + jaEsc(g.name) + ' &mdash; ' + days[k] + ' : ' + jaNum(v) + (metricF ? ' abonnés' : ' vues') + '</title></circle>';
