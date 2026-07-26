@@ -58,7 +58,37 @@ def save_dash_key(key: str):
 
 
 def get_dash_key() -> str:
-    return load_config().get("api_key_dash", "")
+    """1re clé dédiée (rétro-compat use_key(get_dash_key()))."""
+    ks = get_dash_keys()
+    return ks[0] if ks else ""
+
+
+def get_dash_keys() -> list:
+    """TOUTES les clés dédiées au dashboard (séparées par virgule/espace/retour
+    à la ligne). Le quota GMS est PAR CLÉ -> N clés = N voies en parallèle."""
+    raw = load_config().get("api_key_dash", "") or ""
+    out = []
+    for part in re.split(r"[\s,;]+", raw):
+        part = part.strip()
+        if part.startswith("gms_") and part not in out:
+            out.append(part)
+    return out
+
+
+_DASH_RR = [0]
+
+
+def next_dash_key() -> str:
+    """Clé dédiée suivante (round-robin sur le POOL) : chaque appel du dashboard
+    part sur une voie différente -> N clés = ~N fois plus vite. '' si aucun pool
+    (use_key('') est un no-op -> clé principale)."""
+    ks = get_dash_keys()
+    if not ks:
+        return ""
+    with _GMS_GATE_LOCK:
+        i = _DASH_RR[0]
+        _DASH_RR[0] = (i + 1) % len(ks)
+    return ks[i % len(ks)]
 
 
 def is_configured() -> bool:
@@ -200,8 +230,8 @@ def _reset_session():
 # bulk_mode() (dashboard clics), qui doit rester poli avec l'API.
 _GMS_RPS = 1.5                      # requêtes/seconde quand on freine
 _GMS_GATE_LOCK = _threading.Lock()
-_GMS_LAST = [0.0]
-_GMS_THROTTLE_UNTIL = [0.0]         # timestamp jusqu'auquel on freine (après un 429)
+_GMS_LAST: Dict[str, float] = {}            # PAR CLÉ : dernier appel (le quota GMS est par clé)
+_GMS_THROTTLE_UNTIL: Dict[str, float] = {}  # PAR CLÉ : fin de pénalité après un 429
 _GMS_BULK = [0]                     # nb de traitements en lot en cours
 
 
@@ -220,9 +250,9 @@ class bulk_mode:
 
 
 def _gms_note_429():
-    """Un 429 est tombé -> on freine tout le monde pendant 45 s."""
+    """Un 429 est tombé -> on freine CETTE clé pendant 120 s (les autres voies continuent)."""
     with _GMS_GATE_LOCK:
-        _GMS_THROTTLE_UNTIL[0] = time.time() + 120.0
+        _GMS_THROTTLE_UNTIL[_effective_key()] = time.time() + 120.0
 
 
 # ---- Instrumentation : QUI consomme l'API GMS ----
@@ -282,14 +312,15 @@ def _gms_gate():
     minutes -> plus AUCUNE page ne répondait (Cloudflare 524, site down)."""
     if not _gms_is_bulk():
         return
+    k = _effective_key()
     while True:
         with _GMS_GATE_LOCK:
             now = time.time()
-            throttled = now < _GMS_THROTTLE_UNTIL[0]
+            throttled = now < _GMS_THROTTLE_UNTIL.get(k, 0.0)
             gap = (1.0 / max(0.5, _GMS_RPS)) if throttled else 0.5    # 1,5/s freiné, 2/s sinon
-            wait = _GMS_LAST[0] + gap - now
+            wait = _GMS_LAST.get(k, 0.0) + gap - now
             if wait <= 0:
-                _GMS_LAST[0] = now
+                _GMS_LAST[k] = now
                 return
         time.sleep(min(wait, 2.0))
 

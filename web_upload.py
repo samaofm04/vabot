@@ -23144,7 +23144,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 pr["done"] = pr.get("done", 0) + inc
     try:
         import gms
-        with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+        with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
             # force (bouton ↻) : re-liste vraiment -> les RENOMMAGES de liens
             # apparaissent tout de suite (sinon cache de liste 15 min)
             _lr = gms.list_links_team(team, force_refresh=force) or {}
@@ -23174,7 +23174,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         q_tot, q_countries, q_ok = 0, {}, True
         for _i in range(0, len(_ids_all), 20):
             try:
-                with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+                with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
                     _res = gms.get_analytics_overview(s_iso, e_iso, link_ids=_ids_all[_i:_i + 20])
             except Exception:
                 _res = {"ok": False}
@@ -23208,7 +23208,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         if not lid:
             return None
         try:
-            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+            with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
                 tot, ctry = gms.analytics_for_link(lid, s_iso, e_iso)
         except Exception:
             tot, ctry = None, None
@@ -23233,7 +23233,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
     try:
         # bulk_mode : ce lot (des centaines d'appels) s'auto-freine, sans ralentir
         # les pages du site qui font aussi des appels GMS.
-        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=_gmsdash_workers()) as ex:
             rows = [r for r in ex.map(_one, links) if r]
     except Exception as e:
         return {"ok": False, "error": f"analytics : {e}"[:160]}
@@ -23242,7 +23242,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
       for r in [x for x in rows if x["clicks"] is None]:
         _t_c.sleep(0.5)
         try:
-            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+            with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
                 tot2, ctry2 = gms.analytics_for_link(r["id"], s_iso, e_iso)
         except Exception:
             tot2, ctry2 = None, None
@@ -23307,7 +23307,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
     def _cell(job):
         lid, day = job
         try:
-            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+            with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
                 tot, ctry = gms.analytics_for_link(lid, day, day)
         except Exception:
             tot, ctry = None, None
@@ -23321,7 +23321,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
         prog(total_add=len(jobs), stage="courbe des 7 jours (clics + US)")
     got: dict = {}
     try:
-        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=_gmsdash_workers()) as ex:
             for lid, day, tot, us, fr in ex.map(_cell, jobs):
                 got[(lid, day)] = (tot, us, fr)
     except Exception:
@@ -23336,6 +23336,16 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
                     "points": pts, "us_points": ups, "fr_points": fps,
                     "total": sum(pts), "us_total": sum(ups), "fr_total": sum(fps)})
     return {"days": day_list, "links": out, "us_available": True}
+
+
+def _gmsdash_workers() -> int:
+    """Parallélisme des calculs : ~3 workers par clé dédiée (quota par clé)."""
+    try:
+        import gms
+        n = max(1, len(gms.get_dash_keys()))
+    except Exception:
+        n = 1
+    return min(12, 1 + 3 * n)
 
 
 def _gmsdash_model_map() -> dict:
@@ -23392,7 +23402,7 @@ def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
     def _one_grp(kv):
         name, g = kv
         try:
-            with gms.api_tag("dashboard"), gms.use_key(gms.get_dash_key()):
+            with gms.api_tag("dashboard"), gms.use_key(gms.next_dash_key()):
                 m = gms.time_series_for_links(g["ids"], day_list[0], day_list[-1])
         except Exception:
             m = None
@@ -23402,7 +23412,7 @@ def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
 
     out = []
     try:
-        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=3) as ex:
+        with gms.bulk_mode(), ThreadPoolExecutor(max_workers=_gmsdash_workers()) as ex:
             for name, g, m in ex.map(_one_grp, items):
                 pts = [int(m.get(d) or 0) for d in day_list]
                 out.append({"name": f"{name} ({len(g['ids'])} liens)", "shortcode": "",
@@ -23637,13 +23647,19 @@ def _render_gmsdash_html() -> str:
         _has_k2 = bool(gms.get_dash_key())
     except Exception:
         _has_k2 = False
-    key2_html = ("<span id='gd-key2wrap' style='font-size:11px;color:#4ade80;font-weight:700;"
-                 "display:inline-flex;align-items:center;gap:8px'>🔑 clé dédiée active "
+    try:
+        _n_k2 = len(gms.get_dash_keys())
+    except Exception:
+        _n_k2 = 1 if _has_k2 else 0
+    _pl_k2 = "s" if _n_k2 > 1 else ""
+    key2_html = (f"<span id='gd-key2wrap' style='font-size:11px;color:#4ade80;font-weight:700;"
+                 "display:inline-flex;align-items:center;gap:8px'>🔑 "
+                 f"{_n_k2} clé{_pl_k2} dédiée{_pl_k2} active{_pl_k2} "
                  "<button class='gd-sel' style='min-width:auto;cursor:pointer;font-size:11px;padding:5px 9px' "
                  "onclick='gdChangeKey()' title='Remplacer la clé dédiée'>changer</button></span>"
                  if _has_k2 else
                  "<input id='gd-key2' class='gd-sel' type='password' style='min-width:230px' "
-                 "placeholder='Clé API dédiée (gms_live_…) — quota séparé'>"
+                 "placeholder='Clé(s) dédiée(s) — PLUSIEURS possibles (virgules) = plus rapide'>"
                  "<button class='gd-sel' style='min-width:auto;cursor:pointer' "
                  "onclick='gdSaveKey2()' title='Enregistrer la clé dédiée au dashboard'>🔑</button>")
     css = """
@@ -31849,11 +31865,13 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         import gms
-        k = (request.form.get("key") or "").strip()
-        if not k.startswith("gms_"):
-            return jsonify({"ok": False, "error": "clé invalide (doit commencer par gms_)"})
-        gms.save_dash_key(k)
-        return jsonify({"ok": True})
+        import re as _re_k
+        raw = (request.form.get("key") or "").strip()
+        parts = [x for x in _re_k.split(r"[\s,;]+", raw) if x]
+        if not parts or any(not x.startswith("gms_") for x in parts):
+            return jsonify({"ok": False, "error": "clé(s) invalide(s) — chaque clé commence par gms_"})
+        gms.save_dash_key(chr(10).join(parts))   # une clé par ligne dans la config
+        return jsonify({"ok": True, "count": len(parts)})
 
     @app.route("/gmsdash/data")
     def gmsdash_data():
