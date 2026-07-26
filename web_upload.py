@@ -18960,8 +18960,8 @@ def _render_jailbreak_html() -> str:
         f"style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(34,197,94,.3);display:inline-flex;align-items:center;gap:7px'>"
         f"<span id='jb-scrape-now-ico'>🔄</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
-        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
-        f"<div style='text-align:center'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
+        f"<div style='text-align:center' id='jb-kpi-comptes'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
+        f"<div style='text-align:center' id='jb-kpi-idents'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
         "</div>"
         "</div>"
         "<div style='margin:-6px 0 16px;color:#666;font-size:11px;display:flex;align-items:center;gap:6px'>"
@@ -19804,7 +19804,7 @@ def _render_jailbreak_html() -> str:
 
         # Footer sidebar
         summary_html = (
-            f"<div class='jb-side-summary'>"
+            f"<div class='jb-side-summary' id='jb-side-summary'>"
             f"💡 <b>{total_vas}</b> VA{'s' if total_vas != 1 else ''} actif{'s' if total_vas != 1 else ''} "
             f"répartis sur <b>{total_idents_with_vas}</b> identité{'s' if total_idents_with_vas != 1 else ''}"
             f"</div>"
@@ -19981,7 +19981,7 @@ def _render_jailbreak_html() -> str:
         "<div class='jb-modal' onclick='event.stopPropagation()'>"
         "<div style='padding:24px'>"
         "<h3 id='jb-modal-title'>Ajouter un compte</h3>"
-        "<form id='jb-modal-form' method='POST'>"
+        "<form id='jb-modal-form' method='POST' onsubmit='return jbSubmitAcctModal()'>"
         "<input type='hidden' name='back_tab' value='jailbreak'>"
         "<input type='hidden' name='identity' id='jb-modal-identity'>"
         "<input type='hidden' name='account_id' id='jb-modal-account-id'>"
@@ -20077,6 +20077,34 @@ def _render_jailbreak_html() -> str:
         "  }"
         "}"
         "function jbCloseModal(){ document.getElementById('jb-modal-overlay').classList.remove('show'); }"
+        # Ajout / edition d un compte en AJAX : pas de rechargement, le VA courant
+        # reste selectionne et le scrape en cours n est pas interrompu.
+        "function jbSubmitAcctModal(){"
+        "  var form = document.getElementById('jb-modal-form');"
+        "  if(!form) return true;"
+        "  var u = ((document.getElementById('jb-modal-username') || {}).value || '').trim();"
+        "  if(!u){ if(typeof showToast === 'function') showToast('Username requis', 'error'); return false; }"
+        "  var isEdit = !!((document.getElementById('jb-modal-account-id') || {}).value || '');"
+        "  var sbtn = form.querySelector('button[type=submit]');"
+        "  if(sbtn && sbtn.disabled) return false;"
+        "  var sOld = sbtn ? sbtn.textContent : '';"
+        "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
+        "  var fd = new FormData(form);"
+        "  fd.append('ajax', '1');"
+        "  fetch(form.action, {method:'POST', body: fd})"
+        "    .then(_jbJsonOrAuth)"
+        "    .then(function(d){"
+        "      _re();"
+        "      if(d && d.ok){"
+        "        jbCloseModal();"
+        "        if(typeof showToast === 'function') showToast(isEdit ? 'Compte mis à jour' : ('Compte @' + (d.username || u) + ' ajouté — scrape lancé'), 'success', 2200);"
+        "        jbSoftRefresh('');"
+        "      } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec', 'error', 2600); }"
+        "    })"
+        "    .catch(function(e){ _re(); if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2600); });"
+        "  return false;"
+        "}"
         "function jbOpenCreateIdentityModal(){"
         "  document.getElementById('jb-create-id-name').value = '';"
         "  document.getElementById('jb-create-id-avatar').value = '';"
@@ -20150,7 +20178,27 @@ def _render_jailbreak_html() -> str:
         "    if(typeof showToast === 'function') showToast('Liste vide', 'error');"
         "    return false;"
         "  }"
-        "  return true;"
+        # Envoi AJAX : les comptes apparaissent en place, sans rechargement
+        "  var form = document.getElementById('jb-bulk-form');"
+        "  var sbtn = form.querySelector('button[type=submit]');"
+        "  if(sbtn && sbtn.disabled) return false;"
+        "  var sOld = sbtn ? sbtn.textContent : '';"
+        "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
+        "  var fd = new FormData(form);"
+        "  fd.append('ajax', '1');"
+        "  fetch('/jailbreak/bulk_add_accounts', {method:'POST', body: fd})"
+        "    .then(_jbJsonOrAuth)"
+        "    .then(function(d){"
+        "      _re();"
+        "      if(d && d.ok){"
+        "        jbCloseBulkModal();"
+        "        if(typeof showToast === 'function') showToast(d.msg || 'Comptes ajoutés', 'success', 2600);"
+        "        jbSoftRefresh('');"
+        "      } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec du bulk', 'error', 2600); }"
+        "    })"
+        "    .catch(function(e){ _re(); if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2600); });"
+        "  return false;"
         "}"
         # Counter live de lignes valides dans la textarea
         "document.addEventListener('input', function(e){"
@@ -20219,7 +20267,7 @@ def _render_jailbreak_html() -> str:
         "  var old = btn ? btn.textContent : '';"
         "  if(btn){ btn.disabled = true; btn.textContent = '⏳…'; }"
         "  fetch(form.action, {method:'POST', body:new FormData(form)})"
-        "   .then(function(r){ return r.json(); })"
+        "   .then(_jbJsonOrAuth)"
         "   .then(function(j){"
         "     if(btn){ btn.disabled=false; btn.textContent=old; }"
         "     if(!j.ok){ if(typeof showToast==='function') showToast('❌ ' + (j.error||'échec'), 'error'); return; }"
@@ -20241,13 +20289,24 @@ def _render_jailbreak_html() -> str:
         "       if(typeof showToast==='function') showToast('⚠️ VA enregistré, mais pseudo Discord introuvable sur ton serveur — pas de photo', 'error');"
         "     } else if(typeof showToast==='function') showToast('✅ VA mis à jour', 'success');"
         "   })"
-        "   .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=old; }"
+        "   .catch(function(e){ if(e && e.message === 'auth') return; if(btn){ btn.disabled=false; btn.textContent=old; }"
         "     if(typeof showToast==='function') showToast('Erreur : ' + e, 'error'); });"
         "  return false;"
         "}"
         "function jbCloseEditVaModal(){"
         "  var o = document.getElementById('jb-edit-va-overlay');"
         "  if(o) o.classList.remove('show');"
+        "}"
+        # Réponse fetch -> JSON, sauf si la session a expiré (redirect vers le
+        # login ou 401) : dans ce cas on recharge la page (montre le login) au
+        # lieu d afficher un « Erreur réseau » mensonger en boucle.
+        "function _jbJsonOrAuth(r){"
+        "  if(r.redirected || r.status === 401){"
+        "    if(typeof showToast === 'function') showToast('Session expirée — reconnexion…', 'error', 2200);"
+        "    setTimeout(function(){ window.location.reload(); }, 900);"
+        "    throw new Error('auth');"
+        "  }"
+        "  return r.json();"
         "}"
         # Recharge SEULEMENT la sidebar + les cartes détail depuis un rendu frais,
         # sans navigation : garde le scroll, la barre de scrape et l état de la page.
@@ -20268,6 +20327,11 @@ def _render_jailbreak_html() -> str:
         "      wrap.innerHTML = nw.innerHTML;"
         "      main.innerHTML = nm.innerHTML;"
         "      main.setAttribute('data-default-va', nm.getAttribute('data-default-va') || '');"
+        # Compteurs hors des 2 conteneurs (COMPTES / IDENTITÉS / résumé sidebar)
+        "      ['jb-kpi-comptes','jb-kpi-idents','jb-side-summary'].forEach(function(id){"
+        "        var o = document.getElementById(id), nn = doc.getElementById(id);"
+        "        if(o && nn) o.innerHTML = nn.innerHTML;"
+        "      });"
         "      if(selectVaId){ try { localStorage.setItem('vabot_jb_selected_va', selectVaId); } catch(e){} }"
         "      jbApplySavedOrder();"
         "      jbInitVaDrag();"
@@ -20275,6 +20339,8 @@ def _render_jailbreak_html() -> str:
         "      if(typeof jbApplyFilter === 'function') jbApplyFilter();"
         "      if(sb) sb.scrollTop = sbScroll;"
         "      window.scrollTo(0, winScroll);"
+        # Les comptes fraichement ajoutes sont NON SCRAPÉ ~3s : relance le poll
+        "      setTimeout(function(){ if(typeof jbAutoFillPending === 'function') jbAutoFillPending(0); }, 2500);"
         "    })"
         "    .catch(function(){ window.location.reload(); });"
         "}"
@@ -20294,11 +20360,17 @@ def _render_jailbreak_html() -> str:
         # Envoi AJAX : la page ne recharge plus (le reload coupait la barre de
         # scrape en cours et faisait perdre la position dans la liste).
         "  var form = document.getElementById('jb-add-va-form');"
+        "  var sbtn = form.querySelector('button[type=submit]');"
+        "  if(sbtn && sbtn.disabled) return false;"
+        "  var sOld = sbtn ? sbtn.textContent : '';"
+        "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
         "  var fd = new FormData(form);"
         "  fd.append('ajax', '1');"
         "  fetch('/jailbreak/add_va', {method:'POST', body: fd})"
-        "    .then(function(r){ return r.json(); })"
+        "    .then(_jbJsonOrAuth)"
         "    .then(function(d){"
+        "      _re();"
         "      if(d && d.ok){"
         "        jbCloseAddVaModal();"
         "        if(typeof showToast === 'function') showToast('VA ' + name + ' ajouté ✓', 'success', 2000);"
@@ -20307,20 +20379,29 @@ def _render_jailbreak_html() -> str:
         "        if(typeof showToast === 'function') showToast((d && d.error) ? d.error : 'Échec de l ajout', 'error', 2600);"
         "      }"
         "    })"
-        "    .catch(function(){ if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2600); });"
+        "    .catch(function(e){ _re(); if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2600); });"
         "  return false;"
         "}"
         # === Remove VA (avec confirm stylise) ===
         "function jbRemoveVa(identity, vaName){"
+        # AJAX : plus de rechargement de page (le reload coupait le scrape en cours)
         "  function _do(){"
-        "    var f = document.createElement('form');"
-        "    f.method='POST'; f.action='/jailbreak/remove_va'; f.style.display='none';"
-        "    ['identity','va_name','back_tab'].forEach(function(name){"
-        "      var i = document.createElement('input'); i.name = name;"
-        "      i.value = (name==='identity') ? identity : (name==='va_name' ? vaName : 'jailbreak');"
-        "      f.appendChild(i);"
-        "    });"
-        "    document.body.appendChild(f); f.submit();"
+        "    if(window.__jbRmBusy) return;"
+        "    window.__jbRmBusy = 1;"
+        "    var fd = new FormData();"
+        "    fd.append('identity', identity); fd.append('va_name', vaName); fd.append('ajax', '1');"
+        "    fetch('/jailbreak/remove_va', {method:'POST', body: fd})"
+        "      .then(_jbJsonOrAuth)"
+        "      .then(function(d){"
+        "        window.__jbRmBusy = 0;"
+        "        if(d && d.ok){"
+        "          try { var sel = localStorage.getItem('vabot_jb_selected_va') || '';"
+        "                if(sel === identity + '|' + vaName.toLowerCase()) localStorage.removeItem('vabot_jb_selected_va'); } catch(e){}"
+        "          if(typeof showToast === 'function') showToast('VA ' + vaName + ' supprimé (' + (d.removed_accounts || 0) + ' compte(s))', 'success', 2200);"
+        "          jbSoftRefresh('');"
+        "        } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
+        "      })"
+        "      .catch(function(e){ window.__jbRmBusy = 0; if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
         "  }"
         "  if(typeof showConfirmAsync === 'function'){"
         "    showConfirmAsync('Supprimer le VA et TOUS ses comptes ?', 'Le VA \"' + vaName + '\" et tous ses comptes seront supprimés définitivement (et retirés du Google Sheet).').then(function(ok){"
@@ -20669,14 +20750,21 @@ def _render_jailbreak_html() -> str:
         "  }"
         "}"
         "function _jbPostRemove(identity, accountId){"
-        "  var f = document.createElement('form');"
-        "  f.method='POST'; f.action='/jailbreak/remove_account'; f.style.display='none';"
-        "  ['identity','account_id','back_tab'].forEach(function(name){"
-        "    var i = document.createElement('input'); i.name = name;"
-        "    i.value = (name==='identity') ? identity : (name==='account_id' ? accountId : 'jailbreak');"
-        "    f.appendChild(i);"
-        "  });"
-        "  document.body.appendChild(f); f.submit();"
+        "  if(window.__jbRmBusy) return;"
+        "  window.__jbRmBusy = 1;"
+        # AJAX : la liste se met a jour en place, le VA selectionne reste affiche
+        "  var fd = new FormData();"
+        "  fd.append('identity', identity); fd.append('account_id', accountId); fd.append('ajax', '1');"
+        "  fetch('/jailbreak/remove_account', {method:'POST', body: fd})"
+        "    .then(_jbJsonOrAuth)"
+        "    .then(function(d){"
+        "      window.__jbRmBusy = 0;"
+        "      if(d && d.ok){"
+        "        if(typeof showToast === 'function') showToast('Compte supprimé', 'success', 1800);"
+        "        jbSoftRefresh('');"
+        "      } else if(typeof showToast === 'function'){ showToast((d && d.error) || 'Échec de la suppression', 'error', 2500); }"
+        "    })"
+        "    .catch(function(e){ window.__jbRmBusy = 0; if(e && e.message === 'auth') return; if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
         "}"
         # === Scraper maintenant : declenche /insta/refresh_now puis poll l etat ===
         "function jbScrapeNow(btn){"
@@ -30982,7 +31070,25 @@ def _start_auto_scrape_daemon():
 def create_app():
     from flask import Flask, request, session, redirect, make_response
     app = Flask(__name__)
-    app.secret_key = os.environ.get("WEB_SECRET", os.urandom(24).hex())
+    def _web_secret_persistent():
+        # Clé de session STABLE entre redémarrages : avant, chaque deploy
+        # (auto-restart VPS ~1×/jour) régénérait une clé aléatoire -> tout le
+        # monde déconnecté + les fetch AJAX recevaient la page de login.
+        p = DATA_DIR / "web_secret.txt"
+        try:
+            s = p.read_text(encoding="utf-8").strip()
+            if len(s) >= 32:
+                return s
+        except Exception:
+            pass
+        s = os.urandom(24).hex()
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            p.write_text(s, encoding="utf-8")
+        except Exception:
+            pass
+        return s
+    app.secret_key = os.environ.get("WEB_SECRET") or _web_secret_persistent()
     # Demarre l'auto-scrape Instagram en background
     _start_auto_scrape_daemon()
     # Job quotidien "Activité VA" (scan comptes JB + pénalités)
@@ -34763,6 +34869,10 @@ def create_app():
     @app.route("/jailbreak/add_account", methods=["POST"])
     def jailbreak_add_account():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -34785,19 +34895,32 @@ def create_app():
                            two_fa=two_fa, two_fa_validated=two_fa_validated,
                            va=va, notes=notes)
         except ValueError as e:
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "error": str(e)[:160]})
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "error": f"Ajout échoué : {e}"[:160]})
             return _error(f"❌ Ajout échoué : {e}", tab="jailbreak")
         # Scrape immediat en arriere-plan : le compte ne reste pas "NON SCRAPÉ"
         try:
             _kick_scrape_handles([username], label="jb-add-scrape")
         except Exception as _e_ks:
             print(f"[jb-add-scrape] launch fail: {_e_ks}", flush=True)
+        if request.form.get("ajax") == "1":
+            from flask import jsonify
+            return jsonify({"ok": True, "username": username})
         return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b> — scrape lancé 🔄", tab="jailbreak")
 
     @app.route("/jailbreak/bulk_add_accounts", methods=["POST"])
     def jailbreak_bulk_add_accounts():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -34819,8 +34942,14 @@ def create_app():
         try:
             res = jb.bulk_add_accounts(identity, usernames, va=va)
         except ValueError as e:
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "error": str(e)[:160]})
             return _error(f"❌ {e}", tab="jailbreak")
         except Exception as e:
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "error": f"Bulk add échoué : {e}"[:160]})
             return _error(f"❌ Bulk add échoué : {e}", tab="jailbreak")
         # Scrape immediat en arriere-plan des comptes reellement ajoutes
         n_kick = 0
@@ -34838,11 +34967,20 @@ def create_app():
             parts.append(f"sous VA <b>{va}</b>")
         if n_kick:
             parts.append("scrape lancé 🔄")
+        if request.form.get("ajax") == "1":
+            from flask import jsonify
+            import re as _re_bk
+            return jsonify({"ok": True,
+                            "msg": _re_bk.sub(r"<[^>]+>", "", " · ".join(parts))})
         return _success("✅ " + " · ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/edit_account", methods=["POST"])
     def jailbreak_edit_account():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -34865,6 +35003,9 @@ def create_app():
             va=(request.form.get("va") or "").strip(),
             notes=(request.form.get("notes") or "").strip(),
         )
+        if request.form.get("ajax") == "1":
+            from flask import jsonify
+            return jsonify({"ok": bool(ok), "error": "" if ok else "Compte introuvable"})
         if not ok:
             return _error("❌ Compte introuvable", tab="jailbreak")
         return _success("✅ Compte mis à jour", tab="jailbreak")
@@ -34872,6 +35013,10 @@ def create_app():
     @app.route("/jailbreak/add_va", methods=["POST"])
     def jailbreak_add_va():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -34959,6 +35104,10 @@ def create_app():
     @app.route("/jailbreak/update_va", methods=["POST"])
     def jailbreak_update_va():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -35004,6 +35153,10 @@ def create_app():
     @app.route("/jailbreak/remove_va", methods=["POST"])
     def jailbreak_remove_va():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -35020,15 +35173,25 @@ def create_app():
                 sheets_sync.push_all(jb._load(), force=True)  # maj le Sheet tout de suite (anti ré-import)
             except Exception:
                 pass
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": True, "removed_accounts": n})
             return _success(
                 f"✅ VA <b>{va_name}</b> supprimé avec ses <b>{n}</b> compte(s).",
                 tab="jailbreak",
             )
+        if request.form.get("ajax") == "1":
+            from flask import jsonify
+            return jsonify({"ok": False, "error": f"VA {va_name} introuvable"})
         return _error(f"❌ VA <b>{va_name}</b> introuvable", tab="jailbreak")
 
     @app.route("/jailbreak/remove_account", methods=["POST"])
     def jailbreak_remove_account():
         if not is_auth():
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "auth": True,
+                                "error": "Session expirée — la page va se recharger"}), 401
             return redirect("/")
         try:
             import jailbreak as jb
@@ -35041,7 +35204,11 @@ def create_app():
             return _error("❌ account_id invalide", tab="jailbreak")
         if not identity or not account_id:
             return _error("❌ Identité ou account_id manquant", tab="jailbreak")
-        if jb.remove_account(identity, account_id):
+        removed = jb.remove_account(identity, account_id)
+        if request.form.get("ajax") == "1":
+            from flask import jsonify
+            return jsonify({"ok": bool(removed), "error": "" if removed else "Compte introuvable"})
+        if removed:
             return _success("✅ Compte supprimé", tab="jailbreak")
         return _error("❌ Compte introuvable", tab="jailbreak")
 

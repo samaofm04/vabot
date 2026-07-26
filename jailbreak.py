@@ -189,6 +189,10 @@ def add_account(identity: str, username: str, password: str = "",
         raise ValueError("Username vide")
     data = _load()
     entry = _ensure_identity(data, identity)
+    # Anti-doublon : un double-clic sur Sauvegarder envoyait 2 POST -> 2 comptes
+    if any((a.get("username") or "").strip().lower() == username.lower()
+           for a in entry["accounts"]):
+        raise ValueError(f"@{username} existe deja pour cette identite")
     # ID unique global (toutes identites confondues)
     used_ids = set()
     for k, v in data.items():
