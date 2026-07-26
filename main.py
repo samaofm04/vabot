@@ -142,7 +142,8 @@ async def main_async():
             try:
                 import mypuls
                 if mypuls.is_configured():
-                    res = mypuls.auto_refresh()
+                    # to_thread : l'appel réseau ne gèle plus la boucle Discord
+                    res = await asyncio.to_thread(mypuls.auto_refresh)
                     if res.get("ok"):
                         if res.get("rotated"):
                             log.info("[mypuls] Cookies refreshed (REMEMBERME prolonge)")
@@ -162,7 +163,7 @@ async def main_async():
         while True:
             try:
                 import mypuls_scheduler as _ms
-                res = _ms.process_pending_deletes()
+                res = await asyncio.to_thread(_ms.process_pending_deletes)
                 if res.get("deleted"):
                     log.info(
                         f"[mypuls] Auto-delete cron: {res['deleted']} suppr, "
@@ -182,7 +183,7 @@ async def main_async():
         while True:
             try:
                 import mypuls_campaigns as _mc
-                res = _mc.extend_due_campaigns()
+                res = await asyncio.to_thread(_mc.extend_due_campaigns)
                 if res.get("extended"):
                     log.info(
                         f"[mypuls] Campaigns cron: {res['extended']} etendues, "
