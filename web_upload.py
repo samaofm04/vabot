@@ -24759,9 +24759,31 @@ def _jbanalyse_payload() -> dict:
                     clicks7[m] = clicks7.get(m, 0) + int(r.get("clicks") or 0)
     except Exception:
         clicks7 = {}
+    # Historique ABONNÉS (+ vues 7 j) : 1 point par jour, écrit au passage quand
+    # le payload est servi. La courbe « Abonnés » se construit jour après jour.
+    fhist: dict = {}
+    try:
+        _hfile = DATA_DIR / "jbanalyse_history.json"
+        try:
+            fhist = json.loads(_hfile.read_text(encoding="utf-8")) or {}
+        except Exception:
+            fhist = {}
+        _tkey = today.isoformat()
+        _snap = {i: {"f": g["followers"], "v": g["weekly"]} for i, g in idents.items()}
+        if fhist.get(_tkey) != _snap:
+            fhist[_tkey] = _snap
+            for _k in sorted(fhist.keys())[:-60]:      # garde 60 jours
+                fhist.pop(_k, None)
+            _tmp = _hfile.with_suffix(".json.tmp")
+            _tmp.write_text(json.dumps(fhist, ensure_ascii=False), encoding="utf-8")
+            os.replace(str(_tmp), str(_hfile))
+    except Exception:
+        fhist = fhist or {}
+    _fh_days = sorted(fhist.keys())[-14:]
     tot.pop("points", None)
     return {"ok": True, "days": days, "idents": _ser(idents), "vas": _ser(vas),
             "tot": tot, "has_days": has_days, "cov": cov, "clicks7": clicks7,
+            "fhist": {d: fhist[d] for d in _fh_days},
             "scraped_at": newest_scrape, "generated_at": int(_t_a.time())}
 
 
@@ -24821,7 +24843,12 @@ def _render_jbanalyse_html() -> str:
       <button class="on" onclick=jaView(0)>Par identit&eacute;</button>
       <button onclick=jaView(1)>Par VA</button>
     </div>
-    <button class="ja-refresh" onclick=jaLoad(1) title="Recharger (les vues bougent au scrape 00h/12h ou via Scraper maintenant)">&#8635;</button>
+    <div class="ja-seg" id="ja-metric">
+      <button class="on" onclick=jaMetric(0)>Vues</button>
+      <button onclick=jaMetric(1)>Abonn&eacute;s</button>
+    </div>
+    <button class="ja-refresh" onclick=jaLoad(1) title="Recharger les donn&eacute;es (sans re-scraper)">&#8635;</button>
+    <button class="ja-refresh" id="ja-scrape" onclick=jaScrape() title="Scrape TOUS les comptes maintenant (~10-15 min) &mdash; les courbes de vues arrivent &agrave; la fin">&#128260; Scraper maintenant</button>
     <span class="ja-hint" id="ja-upd"></span>
   </div>
   <div class="ja-pills" id="ja-pills"></div>
@@ -24848,7 +24875,72 @@ function jaView(v){
   if(seg){ var bs = seg.querySelectorAll('button');
     bs.forEach ? bs.forEach(function(b,i){ b.classList.toggle('on', (v===1)===(i===1)); })
                : Array.prototype.forEach.call(bs, function(b,i){ b.classList.toggle('on', (v===1)===(i===1)); }); }
+  var mseg = document.getElementById('ja-metric');
+  if(mseg) mseg.style.display = (window.__jaView === 'va') ? 'none' : '';
+  if(window.__jaView === 'va' && window.__jaMetric === 'f'){ jaMetric(0); return; }
   jaRender();
+}
+window.__jaMetric = 'v';
+function jaMetric(m){
+  window.__jaMetric = m === 1 ? 'f' : 'v';
+  var seg = document.getElementById('ja-metric');
+  if(seg){ Array.prototype.forEach.call(seg.querySelectorAll('button'), function(b, i){ b.classList.toggle('on', (m === 1) === (i === 1)); }); }
+  jaRender();
+}
+window.__jaScrapeBusy = 0;
+function jaScrape(){
+  var btn = document.getElementById('ja-scrape');
+  if(window.__jaScrapeBusy) return;
+  window.__jaScrapeBusy = 1;
+  if(btn) btn.style.opacity = '.55';
+  fetch('/insta/refresh_now', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(typeof showToast === 'function') showToast('Scrape lancé — les courbes arrivent à la fin (~10-15 min)', 'success', 3000);
+        jaPoll(btn);
+      } else if(d && String(d.error || '').toLowerCase().indexOf('deja en cours') !== -1){
+        jaPoll(btn);
+      } else {
+        window.__jaScrapeBusy = 0;
+        if(btn) btn.style.opacity = '';
+        if(typeof showToast === 'function') showToast((d && d.error) || 'Erreur', 'error', 3000);
+      }
+    })
+    .catch(function(){
+      window.__jaScrapeBusy = 0;
+      if(btn) btn.style.opacity = '';
+      if(typeof showToast === 'function') showToast('Erreur réseau', 'error', 2500);
+    });
+}
+function jaPoll(btn){
+  var upd = document.getElementById('ja-upd');
+  var ticks = 0, errs = 0;
+  var iv = setInterval(function(){
+    ticks++;
+    fetch('/insta/refresh_status')
+      .then(function(r){ return r.json(); })
+      .then(function(s){
+        errs = 0;
+        var st = (s && s.state) || {};
+        if(st.status === 'in_progress'){
+          var don = st.in_progress_done || 0, tt = st.in_progress_total || 0;
+          if(upd) upd.textContent = 'scrape en cours… ' + don + ' / ' + (tt || '?');
+        } else if(st.status === 'idle' && ticks > 1){
+          clearInterval(iv);
+          window.__jaScrapeBusy = 0;
+          if(btn) btn.style.opacity = '';
+          if(upd) upd.textContent = 'scrape terminé ✓';
+          if(typeof showToast === 'function') showToast('Scrape terminé — données à jour', 'success', 2500);
+          jaLoad(1);
+        } else if(ticks > 1200){
+          clearInterval(iv);
+          window.__jaScrapeBusy = 0;
+          if(btn) btn.style.opacity = '';
+        }
+      })
+      .catch(function(){ errs++; if(errs >= 5){ clearInterval(iv); window.__jaScrapeBusy = 0; if(btn) btn.style.opacity = ''; } });
+  }, 3000);
 }
 function jaHue(name){ var h = 0; for(var i = 0; i < name.length; i++){ h = (h * 31 + name.charCodeAt(i)) % 360; } return h; }
 function jaAvatar(g, size){
@@ -24911,15 +25003,29 @@ function jaChart(){
   var days = d.days || [];
   var gs = jaGroups().filter(function(g){ return !window.__jaOff[g.name]; });
   var head = '<h4>Vues par ' + (window.__jaView === 'va' ? 'VA' : 'identit&eacute;') + ' &mdash; 14 jours (par jour de publication)</h4>';
-  if(!d.has_days){
-    box.innerHTML = head + '<div class="ja-note">&#128200; Les courbes appara&icirc;tront apr&egrave;s le prochain scrape '
-      + '(auto &agrave; 00h / 12h, ou bouton &laquo; Scraper maintenant &raquo; de la page Jailbreak). '
+  var metricF = (window.__jaMetric === 'f' && window.__jaView === 'id');
+  var partial = '';
+  if(metricF){
+    // Courbe ABONNÉS : historique 1 point/jour, indépendant de post_days
+    var fh = d.fhist || {};
+    var fdays = Object.keys(fh).sort().slice(-14);
+    head = '<h4>Abonn&eacute;s par identit&eacute; &mdash; &eacute;volution jour par jour</h4>';
+    if(!fdays.length){
+      box.innerHTML = head + '<div class="ja-note">Historique en construction &mdash; le premier point appara&icirc;t d&egrave;s aujourd&rsquo;hui.</div>';
+      return;
+    }
+    days = fdays;
+    gs = gs.map(function(g){ return {name: g.name, points: days.map(function(dd){ var e = (fh[dd] || {})[g.name]; return e ? (e.f || 0) : 0; })}; });
+    if(fdays.length < 2){
+      partial = '<div class="ja-note">&#128200; Premier point enregistr&eacute; aujourd&rsquo;hui &mdash; un nouveau point s&rsquo;ajoute chaque jour, la courbe se construit toute seule.</div>';
+    }
+  } else if(!d.has_days){
+    box.innerHTML = head + '<div class="ja-note">&#128200; Les courbes appara&icirc;tront &agrave; la fin du scrape &mdash; clique <b>&#128260; Scraper maintenant</b> ci-dessus (ou attends le scrape auto de 00h / 12h). '
       + 'Les totaux et le tableau ci-dessous sont d&eacute;j&agrave; &agrave; jour.</div>';
     return;
   }
-  var partial = '';
   var act = (d.tot || {}).active || 0;
-  if(act && (d.cov || 0) < act){
+  if(!metricF && act && (d.cov || 0) < act){
     // Couverture incomplete : seuls les comptes re-scrapes depuis la maj ont
     // leur courbe -> on previent au lieu de laisser croire a des vues a zero.
     partial = '<div class="ja-note">&#9203; Courbes partielles : <b>' + jaNum(d.cov) + '/' + jaNum(act)
@@ -24947,15 +25053,17 @@ function jaChart(){
     svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#6b7280" font-size="10">' + p[2] + '/' + p[1] + '</text>';
   });
   var all = jaGroups();
+  var nameIdx = {};
+  all.forEach(function(g2, i2){ nameIdx[g2.name] = i2; });
   gs.forEach(function(g){
-    var ci = all.indexOf(g);
+    var ci = nameIdx[g.name] || 0;
     var col = JA_COLORS[ci % JA_COLORS.length];
     var pts = g.points || [];
     var path = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
     svg += '<path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
       svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
-           + '<title>' + jaEsc(g.name) + ' &mdash; ' + days[k] + ' : ' + jaNum(v) + ' vues</title></circle>';
+           + '<title>' + jaEsc(g.name) + ' &mdash; ' + days[k] + ' : ' + jaNum(v) + (metricF ? ' abonnés' : ' vues') + '</title></circle>';
     });
   });
   svg += '<line id="ja-guide" x1="0" y1="' + PT + '" x2="0" y2="' + (PT + ih) + '" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
@@ -24973,7 +25081,7 @@ function jaChart(){
       if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', X(i)); guide.setAttribute('x2', X(i)); }
       var p = days[i].split('-');
       var rows = gs.map(function(g){
-        return {name: g.name, v: (g.points || [])[i] || 0, ci: all.indexOf(g)};
+        return {name: g.name, v: (g.points || [])[i] || 0, ci: nameIdx[g.name] || 0};
       }).sort(function(a, b){ return b.v - a.v; });
       tip.innerHTML = '<div class="d">' + p[2] + '/' + p[1] + '</div>' + rows.map(function(x){
         return '<div class="r"><i style="background:' + JA_COLORS[x.ci % JA_COLORS.length] + '"></i>'
