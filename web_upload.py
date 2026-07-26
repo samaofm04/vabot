@@ -6653,6 +6653,12 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             error=None,
         )
         print(f"[insta-refresh:{label}] done in {dt_s:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
+        # Fige le relevé quotidien « Analyse vues » (baselines nouvelles vues /
+        # nouveaux abonnés) — notamment celui de 00h, même si personne n'ouvre la page.
+        try:
+            _jbanalyse_payload()
+        except Exception:
+            pass
         return summary
     except Exception as e:
         _set_refresh_status(status="idle", in_progress_since=None, error=str(e))
@@ -24783,23 +24789,36 @@ def _jbanalyse_payload() -> dict:
     # Historique ABONNÉS (+ vues 7 j) : 1 point par jour, écrit au passage quand
     # le payload est servi. La courbe « Abonnés » se construit jour après jour.
     fhist: dict = {}
+    fh_first: dict = {}
     try:
         _hfile = DATA_DIR / "jbanalyse_history.json"
         try:
             fhist = json.loads(_hfile.read_text(encoding="utf-8")) or {}
         except Exception:
             fhist = {}
+        if isinstance(fhist.get("_first"), dict):
+            fh_first = fhist.pop("_first")
         _tkey = today.isoformat()
         # f = abonnés, v = vues 7 j, tv = vues cumulées de la fenêtre 30 j :
         # le delta jour-à-jour de tv = « nouvelles vues » réellement gagnées.
         _snap = {i: {"f": g["followers"], "v": g["weekly"],
                      "tv": sum(g["points"].values())} for i, g in idents.items()}
+        _dirty = False
         if fhist.get(_tkey) != _snap:
-            fhist[_tkey] = _snap
+            fhist[_tkey] = _snap               # DERNIER relevé du jour (courbe abonnés)
             for _k in sorted(fhist.keys())[:-60]:      # garde 60 jours
                 fhist.pop(_k, None)
+            _dirty = True
+        if _tkey not in fh_first:
+            fh_first[_tkey] = _snap            # PREMIER relevé du jour (baseline « nouveaux »)
+            for _k in sorted(fh_first.keys())[:-60]:
+                fh_first.pop(_k, None)
+            _dirty = True
+        if _dirty:
             _tmp = _hfile.with_suffix(".json.tmp")
-            _tmp.write_text(json.dumps(fhist, ensure_ascii=False), encoding="utf-8")
+            _out = dict(fhist)
+            _out["_first"] = fh_first
+            _tmp.write_text(json.dumps(_out, ensure_ascii=False), encoding="utf-8")
             os.replace(str(_tmp), str(_hfile))
     except Exception:
         fhist = fhist or {}
@@ -24807,7 +24826,8 @@ def _jbanalyse_payload() -> dict:
     tot.pop("points", None)
     return {"ok": True, "days": days, "idents": _ser(idents), "vas": _ser(vas),
             "tot": tot, "has_days": has_days, "cov": cov, "clicks7": clicks7,
-            "fhist": {d: fhist[d] for d in _fh_days},
+            "fhist": {d: fhist[d] for d in _fh_days if not str(d).startswith("_")},
+            "fhist0": {d: fh_first[d] for d in sorted(fh_first.keys())[-2:]},
             "scraped_at": newest_scrape, "generated_at": int(_t_a.time())}
 
 
@@ -25101,11 +25121,13 @@ function jaFrD(s){ var p = String(s || '').split('-'); return p.length === 3 ? (
 function jaSigned(n){ return (n > 0 ? '+' : '') + jaNum(n); }
 function jaDeltas(){
   // « Nouvelles vues / nouveaux abonnés » sur la période : delta entre le
-  // relevé quotidien de FIN et celui d AVANT le début (fhist, 1 point/jour).
+  // relevé de FIN et une BASE = premier relevé du jour de début (fhist0,
+  // figé à 00h par le scrape) ou, à défaut, le dernier relevé d avant.
   var d = window.__jaData || {};
   var fh = d.fhist || {};
+  var fh0 = d.fhist0 || {};
   var keys = Object.keys(fh).sort();
-  if(keys.length < 2) return null;
+  if(!keys.length) return null;
   var days = d.days || [];
   var r = jaRangeIdx();
   if(r[1] < 0) return null;
@@ -25115,14 +25137,23 @@ function jaDeltas(){
     if(kk <= endD) endK = kk;
     if(kk < startD) baseK = kk;
   });
-  if(!endK || !baseK || endK <= baseK) return null;
+  var baseSnap = null, fromLbl = null;
+  if(fh0[startD]){
+    baseSnap = fh0[startD];
+    fromLbl = jaFrD(startD) + ' au réveil';
+  } else if(baseK){
+    baseSnap = fh[baseK];
+    fromLbl = jaFrD(baseK);
+  }
+  if(!endK || !baseSnap) return null;
+  if(baseK && !fh0[startD] && endK <= baseK) return null;
   var dv = 0, df = 0;
   ((d.idents) || []).forEach(function(g){
-    var ee = fh[endK][g.name] || {}, bb = fh[baseK][g.name] || {};
+    var ee = fh[endK][g.name] || {}, bb = baseSnap[g.name] || {};
     if(ee.tv != null && bb.tv != null) dv += Math.max(0, (ee.tv || 0) - (bb.tv || 0));
     if(ee.f != null && bb.f != null) df += (ee.f || 0) - (bb.f || 0);
   });
-  return {dv: dv, df: df, from: baseK, to: endK};
+  return {dv: dv, df: df, from: fromLbl, to: jaFrD(endK)};
 }
 function jaCards(){
   var d = window.__jaData || {};
@@ -25141,7 +25172,7 @@ function jaCards(){
   if(dl){
     vueCard = '<div class="ja-card"><div class="lab">Nouvelles vues &mdash; ' + jaPerLabel() + '</div>'
       + '<div class="val" style="color:#22c55e">' + jaSigned(dl.dv) + '</div>'
-      + '<div class="sub">gagn&eacute;es entre les relev&eacute;s du ' + jaFrD(dl.from) + ' et du ' + jaFrD(dl.to) + '</div></div>'
+      + '<div class="sub">gagn&eacute;es entre le ' + dl.from + ' et le relev&eacute; du ' + dl.to + '</div></div>'
       + '<div class="ja-card"><div class="lab">Vues des posts &mdash; ' + jaPerLabel() + '</div><div class="val">' + jaNum(totP) + '</div>'
       + '<div class="sub">reels publi&eacute;s sur la p&eacute;riode</div></div>';
     aboCard = '<div class="ja-card"><div class="lab">Nouveaux abonn&eacute;s</div>'
@@ -25154,7 +25185,7 @@ function jaCards(){
       + '<div class="sub">cumul des comptes actifs &middot; &laquo; nouveaux &raquo; dispo d&egrave;s demain</div></div>';
   }
   el.innerHTML = vueCard
-    + '<div class="ja-card"><div class="lab">Vues 24 h</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">pr&eacute;cis &agrave; l&rsquo;heure (scrape)</div></div>'
+    + '<div class="ja-card"><div class="lab">Vues 24 h glissantes</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">posts des 24 derni&egrave;res heures (&ne; journ&eacute;e calendaire)</div></div>'
     + aboCard
     + '<div class="ja-card"><div class="lab">Comptes</div><div class="val">' + jaNum(t.n) + '</div>'
     + '<div class="sub">' + jaNum(t.active) + ' actifs &middot; ' + jaNum(t.banned) + ' bannis'
