@@ -23581,7 +23581,11 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     with _GMSDASH_LOCK:
         hit = _GMSDASH_MEM.get(key)
     has = bool(hit and (hit.get("payload") or {}).get("links"))
-    fresh = has and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
+    # Un cache d'une ANCIENNE version de payload (déploiement) = périmé : on le
+    # sert quand même (instantané) mais on relance le calcul tout de suite au
+    # lieu d'attendre le cycle 30 min du démon.
+    fresh = (has and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
+             and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL)
     retry_in = 0
     if force or not fresh:
         # Cooldown après un échec : sans ça, chaque poll (2 s) relançait un calcul
