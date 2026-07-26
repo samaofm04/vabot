@@ -25492,6 +25492,30 @@ if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoad
 
 
 VA_ACT_CFG = DATA_DIR / "va_activity_cfg.json"
+VA_ACT_STATE = DATA_DIR / "va_activity_state.json"
+
+
+def _vaact_state_load() -> dict:
+    """État runtime : {"alerts": {"<va>": {"since": "YYYY-MM-DD"}}} — date à
+    laquelle le VA est passé sous le seuil (départ du délai de reconstruction)."""
+    try:
+        d = json.loads(VA_ACT_STATE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:
+        d = {}
+    d.setdefault("alerts", {})
+    return d
+
+
+def _vaact_state_save(d: dict):
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = VA_ACT_STATE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(str(tmp), str(VA_ACT_STATE))
+    except Exception:
+        pass
 
 
 def _vaact_cfg_load() -> dict:
@@ -25720,11 +25744,55 @@ def _vaact_payload(period: str = "14") -> dict:
             "base": base, "malus": malus, "repos": sorted(repos),
             "cadence": cadence,
             "quota": quota, "deficit": (max(0, quota - len(accts)) if quota else 0),
-            "quota_pct": quota_pct,
+            "quota_pct": quota_pct, "cd_created": [a.get("created_at") for _i, a in g["accounts"]],
             "seuil": (int(-(-quota * quota_pct // 100)) if quota else 0),
             "alert": bool(quota and len(accts) < -(-quota * quota_pct // 100)),
             "deduction": ded, "pay": pay,
         })
+    # Fenêtre de RECONSTRUCTION : sous le seuil -> le VA a rebuild_days jours
+    # pour recréer des comptes ; on fige la date de déclenchement dans l'état.
+    rebuild_days = int(cfg.get("rebuild_days") or 5)
+    _state = _vaact_state_load()
+    _st_changed = False
+    n_expired = 0
+    for v in out_vas:
+        created = v.pop("cd_created", [])
+        if v["alert"]:
+            ent = (_state["alerts"] or {}).get(v["va"])
+            since = None
+            if isinstance(ent, dict):
+                try:
+                    since = _dt_v.date.fromisoformat(str(ent.get("since")))
+                except Exception:
+                    since = None
+            if since is None:
+                since = today
+                _state["alerts"][v["va"]] = {"since": since.isoformat()}
+                _st_changed = True
+            left = rebuild_days - (today - since).days
+            rebuilt = 0
+            for _ca in created:
+                try:
+                    if _dt_v.date.fromtimestamp(int(_ca or 0)) >= since:
+                        rebuilt += 1
+                except Exception:
+                    pass
+            v["alert_since"] = since.isoformat()
+            v["rebuild_left"] = max(0, left)
+            v["rebuild_expired"] = left <= 0
+            v["rebuilt"] = rebuilt
+            if left <= 0:
+                n_expired += 1
+        else:
+            v["alert_since"] = None
+            v["rebuild_left"] = None
+            v["rebuild_expired"] = False
+            v["rebuilt"] = 0
+            if v["va"] in (_state["alerts"] or {}):
+                _state["alerts"].pop(v["va"], None)   # revenu au-dessus du seuil
+                _st_changed = True
+    if _st_changed:
+        _vaact_state_save(_state)
     out_vas.sort(key=lambda v: (-v["oublis"], -v["n_suivis"], v["va"]))
     if day_iso and day_iso[-1] == today.isoformat():
         late_today = sum(1 for v in out_vas if v["statuses"][-1:] in ("x", "p"))
@@ -25735,7 +25803,8 @@ def _vaact_payload(period: str = "14") -> dict:
             "days": day_iso, "vas": out_vas, "warmup_days": warmup,
             "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
                     "vas": len(out_vas), "late_today": late_today,
-                    "warm": n_warm_tot, "under_quota": under_quota}}
+                    "warm": n_warm_tot, "under_quota": under_quota,
+                    "rebuild_days": rebuild_days, "expired": n_expired}}
 
 
 def _render_jbactivite_html() -> str:
@@ -25863,7 +25932,8 @@ function avCards(){
   el.innerHTML =
       '<div class="av-card"><div class="lab">VAs suivis</div><div class="val">' + avNum(t.vas) + '</div><div class="sub">' + avNum(t.warm) + ' compte(s) en warm-up (' + avNum(d.warmup_days) + ' j)</div></div>'
     + '<div class="av-card"><div class="lab">Oublis &mdash; ' + avEsc(d.label || '') + '</div><div class="val" style="color:' + (t.oublis ? '#ef4444' : '#22c55e') + '">' + avNum(t.oublis) + '</div><div class="sub">1 oubli max / VA / jour</div></div>'
-    + (t.under_quota ? ('<div class="av-card"><div class="lab">&#9888; Alerte comptes</div><div class="val" style="color:#ef4444">' + avNum(t.under_quota) + '</div><div class="sub">VA(s) sous le seuil tol&eacute;r&eacute; (objectif &times; %)</div></div>') : '')
+    + (t.under_quota ? ('<div class="av-card"><div class="lab">&#9888; Alerte comptes</div><div class="val" style="color:#ef4444">' + avNum(t.under_quota) + '</div>'
+        + '<div class="sub">' + avNum(t.rebuild_days) + ' j pour recr&eacute;er' + (t.expired ? (' &middot; <b style="color:#ef4444">' + avNum(t.expired) + ' d&eacute;lai d&eacute;pass&eacute;</b>') : '') + '</div></div>') : '')
     + (t.late_today == null ? '' : ('<div class="av-card"><div class="lab">En retard l&agrave; maintenant</div><div class="val" style="color:' + (t.late_today ? '#f59e0b' : '#22c55e') + '">' + avNum(t.late_today) + '</div><div class="sub">&ge; 1 compte sans reel depuis 48 h</div></div>'))
     + '<div class="av-card"><div class="lab">Retenues totales</div><div class="val" style="color:' + (t.deduction ? '#ef4444' : '#fff') + '">' + avMoney(t.deduction) + '</div><div class="sub">oublis &times; retenue par VA</div></div>';
 }
@@ -25900,7 +25970,11 @@ function avTable(){
       + '<div class="t"><div class="n">' + avEsc(v.display) + '</div><div class="s">' + avEsc(sub) + '</div></div></div>'
       + '<span class="hidesm">' + (v.quota
           ? ('<b style="color:' + (v.alert ? '#ef4444' : (v.deficit ? '#f59e0b' : '#22c55e')) + '">' + avNum(v.n_suivis) + '</b><span class="av-hint"> / ' + avNum(v.quota) + ' requis</span>'
-             + (v.alert ? (' <span class="av-badge" style="color:#ef4444;font-weight:800">&#9888; ALERTE &lt; ' + avNum(v.seuil) + '</span>')
+             + (v.alert ? ((' <span class="av-badge" style="color:#ef4444;font-weight:800">&#9888; ALERTE &lt; ' + avNum(v.seuil) + '</span>')
+                 + (v.rebuild_expired
+                    ? (' <span class="av-badge" style="background:#7f1d1d;color:#fff;font-weight:800">&#9940; délai dépassé</span>')
+                    : (' <span class="av-badge" style="color:#f59e0b">&#128295; ' + avNum(v.rebuild_left) + ' j pour recréer</span>'))
+                 + (' <span class="av-badge" style="color:' + (v.rebuilt ? '#22c55e' : '#ef4444') + '">+' + avNum(v.rebuilt) + ' recréé(s)</span>'))
                         : (v.deficit ? (' <span class="av-badge" style="color:#f59e0b">manque ' + avNum(v.deficit) + '</span>') : '')))
           : (avNum(v.n_suivis) + '<span class="av-hint"> / ' + avNum(v.n) + '</span>'))
       + (v.n_ban ? (' <span class="av-badge" style="color:#ef4444">' + avNum(v.n_ban) + ' ban</span>') : '')
