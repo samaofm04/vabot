@@ -1145,12 +1145,39 @@ def get_chatter_meta(name: str) -> dict:
     }
 
 
+def _period_bounds(pid: str):
+    """('2026-07-01_2026-07-15') -> (debut, fin) ou None."""
+    try:
+        a, b = str(pid or "").split("_", 1)
+        if len(a) == 10 and len(b) == 10:
+            return a, b
+    except Exception:
+        pass
+    return None
+
+
 def is_chatter_paid(name: str, period_id: str) -> bool:
-    """True si le chatteur a ete marque payé pour cette période (period_id = 'start_end')."""
+    """True si le chatteur a été marqué payé pour cette période.
+
+    La case était mémorisée sur la plage de dates EXACTE : changer de préréglage
+    (7 j / 30 j / quinzaine) la faisait disparaître alors que la personne avait
+    bien été payée. On considère donc aussi comme payée toute plage INCLUSE dans
+    une période déjà réglée.
+    """
     if not period_id:
         return False
     meta = get_chatter_meta(name)
-    return period_id in meta.get("paid_periods", [])
+    paid = meta.get("paid_periods", []) or []
+    if period_id in paid:
+        return True
+    cur = _period_bounds(period_id)
+    if not cur:
+        return False
+    for p in paid:
+        b = _period_bounds(p)
+        if b and b[0] <= cur[0] and cur[1] <= b[1]:
+            return True          # plage affichée incluse dans une période payée
+    return False
 
 
 def set_chatter_paid(name: str, period_id: str, paid: bool) -> bool:
