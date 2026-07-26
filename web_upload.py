@@ -32873,10 +32873,12 @@ def create_app():
         if session.get("auth") is not True:
             return False
         try:
-            sid = session.get("sid")
-            if sid and sid in _revoked_sids():
-                session.clear()
-                return False
+            _rev = _revoked_sids()
+            for _k in ("sid", "session_id"):
+                _v = session.get(_k)
+                if _v and str(_v) in _rev:
+                    session.clear()
+                    return False
             uname = (session.get("username") or "").lower()
             if uname and uname != "admin":
                 users = _load_web_users() or {}
@@ -32937,16 +32939,32 @@ def create_app():
             pass
         return (session.get("role") or "").lower()
 
+    # Endpoints de LECTURE réservés aux accès complets : un rôle restreint ne
+    # doit pas pouvoir GET les données financières / jailbreak / analytics via
+    # leur API JSON (le masquage des onglets ne suffisait pas).
+    _ADMIN_ONLY_READ = (
+        "/facture/", "/business/", "/jailbreak/", "/jbactivite/", "/jbanalyse/",
+        "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
+        "/sheets", "/external/list", "/va/get_insta",
+    )
+
     @app.before_request
     def _guard_write_routes():
         from flask import jsonify
-        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
-            return None
         if not is_auth():
             return None                    # les handlers gèrent déjà l'anonyme
         path = request.path or ""
         if _role_allowed_tabs(_live_role()) is None:
             return None                    # owner / admin : accès complet
+        is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
+        if not is_write:
+            # LECTURE : bloquer uniquement les API sensibles (le reste des GET
+            # sert les pages/fragments/assets dont le rôle a besoin).
+            if any(path.startswith(p) for p in _ADMIN_ONLY_READ):
+                print(f"[secu] lecture refusée : {session.get('username')} "
+                      f"({_live_role()}) -> {path}", flush=True)
+                return jsonify({"ok": False, "error": "forbidden"}), 403
+            return None
         allowed = any(path.startswith(p) for p in _RESTRICTED_WRITE_ALLOW)
         if allowed and not any(path.startswith(p) for p in _ADMIN_ONLY_WRITE):
             return None
@@ -40075,6 +40093,25 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         owner = (request.args.get("owner") or "").strip()
         if not post_url and not direct_vurl:
             return ("url ou vurl requise", 400)
+        # Anti-SSRF : le proxy ne doit streamer QUE des vidéos Instagram / CDN
+        # Meta. Sans ça, ?vurl=http://169.254.169.254/… ou une URL interne était
+        # fetché et renvoyé au navigateur (fuite de métadonnées cloud, scan du
+        # réseau interne). On valide l'hôte des deux paramètres d'URL.
+        def _host_ok(u: str) -> bool:
+            try:
+                from urllib.parse import urlparse as _up
+                pr = _up(u)
+                if pr.scheme not in ("http", "https"):
+                    return False
+                h = (pr.hostname or "").lower()
+                return (h.endswith("instagram.com") or h.endswith("cdninstagram.com")
+                        or h.endswith("fbcdn.net") or h.endswith("facebook.com")
+                        or h == "instagram.com")
+            except Exception:
+                return False
+        for _u in (post_url, direct_vurl):
+            if _u and not _host_ok(_u):
+                return ("URL non autorisée (Instagram uniquement)", 403)
         ig_headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
