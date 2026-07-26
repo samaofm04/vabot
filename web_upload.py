@@ -22903,12 +22903,18 @@ GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
 # (« Aucune catégorie »). Les ids sont stables côté GetMySocial.
 GMSDASH_TEAMS = [
     ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
+    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),
 ]
 # Liste de SECOURS des liens par team (relevée le 26/07/2026) : la liste (REST)
 # est ce qui 429 sur le VPS, alors que les clics (MCP) passent. Avec ce secours,
 # le dashboard affiche des résultats même quand le listage est bloqué. Toute
 # liste fraîchement réussie est persistée dans data/gmsdash_links.json et prime.
 GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
+# Pays éligibles à la paie VA (« marché FR ») — le toggle 🇫🇷 compte CES pays
+GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
+# Version du format de payload : bump à chaque changement de structure (fr/us_points…)
+# -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
+GMSDASH_PAYLOAD_VER = 3
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23141,6 +23147,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
             _pr = _GMSDASH_PROGRESS.get(progress_key)
             if _pr is not None:
                 _pr["quick"] = {"total": q_tot, "us": q_countries.get("US", 0),
+                                "fr": sum(int(q_countries.get(_c) or 0) for _c in GMSDASH_FR_COUNTRIES),
                                 "countries": q_countries, "n_links": len(_ids_all),
                                 "complete": q_ok}
         _prog(stage="clics par lien")
@@ -23157,7 +23164,8 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         row = {"id": lid, "shortcode": l.get("shortcode") or "",
                "name": l.get("display_name") or l.get("shortcode") or "",
                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
-               "us": (ctry or {}).get("US", 0), "countries": ctry or {}}
+               "us": (ctry or {}).get("US", 0),
+               "fr": sum(int((ctry or {}).get(_c) or 0) for _c in GMSDASH_FR_COUNTRIES), "countries": ctry or {}}
         _prog(1)
         if progress_key:
             # rend ce lien visible dans la page PENDANT le calcul (tableau partiel)
@@ -23166,7 +23174,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 if pr is not None:
                     pr.setdefault("rows", []).append(
                         {"id": lid, "shortcode": row["shortcode"], "name": row["name"],
-                         "clicks": tot or 0, "us": row["us"]})
+                         "clicks": tot or 0, "us": row["us"], "fr": row["fr"]})
         return row
 
     try:
@@ -23188,6 +23196,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         if tot2 is not None:
             r["clicks"] = tot2
             r["us"] = (ctry2 or {}).get("US", 0)
+            r["fr"] = sum(int((ctry2 or {}).get(_c) or 0) for _c in GMSDASH_FR_COUNTRIES)
             r["countries"] = ctry2 or {}
     failed = sum(1 for r in rows if r["clicks"] is None)
     countries: dict = {}
@@ -23242,7 +23251,8 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
             tot, ctry = None, None
         if prog:
             prog(1)
-        return (lid, day, tot or 0, (ctry or {}).get("US", 0))
+        return (lid, day, tot or 0, (ctry or {}).get("US", 0),
+                sum(int((ctry or {}).get(_c) or 0) for _c in GMSDASH_FR_COUNTRIES))
 
     jobs = [(r["id"], d) for r in top for d in day_list]
     if prog:
@@ -23250,18 +23260,19 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
     got: dict = {}
     try:
         with gms.bulk_mode(), ThreadPoolExecutor(max_workers=4) as ex:
-            for lid, day, tot, us in ex.map(_cell, jobs):
-                got[(lid, day)] = (tot, us)
+            for lid, day, tot, us, fr in ex.map(_cell, jobs):
+                got[(lid, day)] = (tot, us, fr)
     except Exception:
         pass
     out = []
     for r in top:
-        pts = [got.get((r["id"], d), (0, 0))[0] for d in day_list]
-        ups = [got.get((r["id"], d), (0, 0))[1] for d in day_list]
+        pts = [got.get((r["id"], d), (0, 0, 0))[0] for d in day_list]
+        ups = [got.get((r["id"], d), (0, 0, 0))[1] for d in day_list]
+        fps = [got.get((r["id"], d), (0, 0, 0))[2] for d in day_list]
         out.append({"id": r.get("id"), "name": r.get("name") or r.get("shortcode"),
                     "shortcode": r.get("shortcode"),
-                    "points": pts, "us_points": ups,
-                    "total": sum(pts), "us_total": sum(ups)})
+                    "points": pts, "us_points": ups, "fr_points": fps,
+                    "total": sum(pts), "us_total": sum(ups), "fr_total": sum(fps)})
     return {"days": day_list, "links": out, "us_available": True}
 
 
@@ -23269,6 +23280,7 @@ def _gmsdash_store(team: str, period: str, payload: dict):
     import time as _t_s
     if not payload.get("ok"):
         return
+    payload["ver"] = GMSDASH_PAYLOAD_VER
     with _GMSDASH_LOCK:
         _GMSDASH_MEM[f"{team}|{period}"] = {"ts": int(_t_s.time()), "payload": payload}
         _gmsdash_save_disk()
@@ -23392,8 +23404,9 @@ def _gmsdash_warm_loop():
                     with _GMSDASH_LOCK:
                         hit = _GMSDASH_MEM.get(key)
                     if (hit and (hit.get("payload") or {}).get("links")
+                            and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
                             and (_t_w.time() - int(hit.get("ts", 0))) < 25 * 60):
-                        continue          # encore frais (redémarrage récent) -> pas de recalcul
+                        continue          # frais ET au bon format -> pas de recalcul
                     try:
                         _res_w = _gmsdash_compute(tid, per)
                         if _res_w.get("ok"):
@@ -23518,6 +23531,9 @@ def _render_gmsdash_html() -> str:
     <div class="gd-tg" id="gd-us" onclick="gdToggleUs()" title="N'afficher que les clics venant des États-Unis">
       <span class="dot"></span><span>🇺🇸 US uniquement</span>
     </div>
+    <div class="gd-tg" id="gd-fr" onclick="gdToggleFr()" title="Clics du marché FR : France + Belgique + Suisse + Luxembourg + Monaco (les pays éligibles à la paie)">
+      <span class="dot"></span><span>🇫🇷 FR uniquement</span>
+    </div>
     <button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache">↻</button>
     __GDKEY2__
 
@@ -23530,6 +23546,12 @@ def _render_gmsdash_html() -> str:
 <script>
 window.__gdPeriod = '7';
 window.__gdUs = false;
+window.__gdFr = false;
+function gdMode(){ return window.__gdUs ? 'us' : (window.__gdFr ? 'fr' : ''); }
+function gdModeLabel(){ var m = gdMode(); return m === 'us' ? 'Clics US' : (m === 'fr' ? 'Clics FR (éligibles)' : 'Clics totaux'); }
+function gdV(l){ var m = gdMode(); return m === 'us' ? (l.us||0) : (m === 'fr' ? (l.fr||0) : (l.clicks||0)); }
+function gdPts(l){ var m = gdMode(); return (m === 'us' ? l.us_points : (m === 'fr' ? l.fr_points : l.points)) || []; }
+function gdTot(l){ var m = gdMode(); return m === 'us' ? (l.us_total||0) : (m === 'fr' ? (l.fr_total||0) : (l.total||0)); }
 function gdPeriod(b){
   document.querySelectorAll('#gd-period button').forEach(function(x){ x.classList.remove('on'); });
   b.classList.add('on'); window.__gdPeriod = b.getAttribute('data-p');
@@ -23537,7 +23559,16 @@ function gdPeriod(b){
 }
 function gdToggleUs(){
   window.__gdUs = !window.__gdUs;
+  if(window.__gdUs){ window.__gdFr = false; }
   document.getElementById('gd-us').classList.toggle('on', window.__gdUs);
+  document.getElementById('gd-fr').classList.toggle('on', window.__gdFr);
+  gdRender(window.__gdData);
+}
+function gdToggleFr(){
+  window.__gdFr = !window.__gdFr;
+  if(window.__gdFr){ window.__gdUs = false; }
+  document.getElementById('gd-us').classList.toggle('on', window.__gdUs);
+  document.getElementById('gd-fr').classList.toggle('on', window.__gdFr);
   gdRender(window.__gdData);
 }
 function gdEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, function(c){
@@ -23593,10 +23624,10 @@ function gdSchedulePoll(ms){
 }
 // Barre de progression du calcul (X / Y appels) — affichée tant qu'il n'y a rien à montrer
 function gdQuickCards(q, label){
-  var us = window.__gdUs;
+  var m = gdMode();
   document.getElementById('gd-cards').innerHTML =
-      '<div class="gd-card"><div class="lab">'+(us?'Clics US':'Clics totaux')+'</div>'
-    + '<div class="val">'+gdNum(us?(q.us||0):(q.total||0))+'</div>'
+      '<div class="gd-card"><div class="lab">'+gdModeLabel()+'</div>'
+    + '<div class="val">'+gdNum(m==='us'?(q.us||0):(m==='fr'?(q.fr||0):(q.total||0)))+'</div>'
     + '<div class="sub">'+gdEsc(label||'')+(q.complete===false?' · incomplet':'')+' — détail par lien en cours…</div></div>'
     + '<div class="gd-card"><div class="lab">Liens</div><div class="val">'+(q.n_links||0)+'</div>'
     + '<div class="sub">dans la catégorie</div></div>';
@@ -23691,26 +23722,29 @@ function gdChart(d){
   var se = (d && d.series) || {days:[], links:[]};
   var days = se.days || [], links = se.links || [];
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
-  var us = window.__gdUs;
-  if(us && se.us_available === false){
-    // Ancien cache sans détail US par jour : le démon recalcule en fond -> on
-    // re-tente tout seul jusqu'à ce que la courbe US soit disponible.
+  var mode = gdMode();
+  var geoMissing = mode && (se.us_available === false
+      || (links[0] && !((mode === 'us' ? links[0].us_points : links[0].fr_points) || []).length));
+  if(geoMissing){
+    // Ancien cache sans détail pays par jour : le démon recalcule en fond -> on
+    // re-tente tout seul jusqu'à ce que la courbe soit disponible.
+    var flag0 = (mode === 'us') ? '🇺🇸' : '🇫🇷';
     var leg0 = links.map(function(l, i){
       return '<button style="cursor:default"><i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
-           + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(l.us_total || 0) + '</b></button>';
+           + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(gdTot(l)) + '</b></button>';
     }).join('');
     box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
-      + '<div class="hint">🇺🇸 Courbe US en cours de calcul en arrière-plan — elle s’affichera toute seule '
-      + '(ou clique ↻). En attendant : totaux US de la période par lien.</div>'
+      + '<div class="hint">' + flag0 + ' Courbe en cours de calcul en arrière-plan — elle s’affichera toute seule '
+      + '(ou clique ↻). En attendant : totaux de la période par lien.</div>'
       + '<div class="gd-leg">' + leg0 + '</div>';
     window.__gdUsRetry = (window.__gdUsRetry || 0) + 1;
-    if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(window.__gdUs) gdLoad(); }, 10000); }
+    if(window.__gdUsRetry <= 12){ setTimeout(function(){ if(gdMode()) gdLoad(); }, 10000); }
     return;
   }
   window.__gdUsRetry = 0;
   var W = 900, H = 260, PL = 46, PR = 14, PT = 12, PB = 26;
   var iw = W - PL - PR, ih = H - PT - PB;
-  var vals = links.map(function(l, i){ return window.__gdHidden[i] ? [] : (us ? l.us_points : l.points); });
+  var vals = links.map(function(l, i){ return window.__gdHidden[i] ? [] : gdPts(l); });
   var max = 0;
   vals.forEach(function(p){ (p||[]).forEach(function(v){ if(v > max) max = v; }); });
   if(max <= 0) max = 1;
@@ -23733,26 +23767,26 @@ function gdChart(d){
   // courbes
   links.forEach(function(l, i){
     if(window.__gdHidden[i]) return;
-    var pts = (us ? l.us_points : l.points) || [];
+    var pts = gdPts(l);
     var col = GD_COLORS[i % GD_COLORS.length];
     var dpath = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
     svg += '<path d="' + dpath + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
       svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
-           + '<title>' + gdEsc(l.name) + ' — ' + days[k] + ' : ' + v + (us ? ' clics US' : ' clics') + '</title></circle>';
+           + '<title>' + gdEsc(l.name) + ' — ' + days[k] + ' : ' + v + ' clics' + (mode ? (' ' + mode.toUpperCase()) : '') + '</title></circle>';
     });
   });
   svg += '<line id="gd-guide" x1="0" y1="' + PT + '" x2="0" y2="' + (PT + ih) + '" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
   svg += '</svg>';
   var leg = links.map(function(l, i){
-    var tot = us ? l.us_total : l.total;
+    var tot = gdTot(l);
     return '<button class="' + (window.__gdHidden[i] ? 'off' : '') + '" onclick="gdToggleSerie(' + i + ')" '
          + 'title="Clique pour masquer/afficher cette courbe">'
          + '<i style="background:' + GD_COLORS[i % GD_COLORS.length] + '"></i>'
          + gdEsc(l.name || l.shortcode) + ' <b>' + gdNum(tot) + '</b></button>';
   }).join('');
   box.innerHTML = '<h4>Clics par lien — 7 derniers jours</h4>'
-    + '<div class="hint">' + (us ? 'Clics US uniquement' : 'Tous les clics') + ' · les ' + links.length
+    + '<div class="hint">' + (mode === 'us' ? 'Clics US uniquement' : (mode === 'fr' ? 'Clics FR/BE/CH/LU/MC uniquement' : 'Tous les clics')) + ' · les ' + links.length
     + ' meilleurs liens · survole la courbe : détail de TOUS les liens · clique une légende pour masquer</div>'
     + svg + '<div class="gd-tip" id="gd-tip"></div>' + '<div class="gd-leg">' + leg + '</div>';
   // Survol : ligne-guide + tooltip listant TOUS les liens pour le jour pointé
@@ -23769,7 +23803,7 @@ function gdChart(d){
       if(guide){ guide.style.display = 'block'; guide.setAttribute('x1', gx); guide.setAttribute('x2', gx); }
       var p = days[i].split('-');
       var rows = links.map(function(l, k){
-        return {k: k, n: l.name || l.shortcode, v: ((us ? l.us_points : l.points) || [])[i] || 0,
+        return {k: k, n: l.name || l.shortcode, v: (gdPts(l))[i] || 0,
                 off: !!window.__gdHidden[k]};
       }).filter(function(x){ return !x.off; })
         .sort(function(a, b){ return b.v - a.v; });
@@ -23795,15 +23829,15 @@ function gdChart(d){
 }
 function gdRender(d){
   if(!d) return;
-  var us = window.__gdUs;
+  var m = gdMode();
   var links = (d.links||[]).slice();
-  links.forEach(function(l){ l._v = us ? (l.us||0) : (l.clicks||0); });
+  links.forEach(function(l){ l._v = gdV(l); });
   links.sort(function(a,b){ return b._v - a._v; });
   var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
   var actifs = links.filter(function(l){ return l._v > 0; }).length;
   var max = links.length ? links[0]._v : 0;
   document.getElementById('gd-cards').innerHTML =
-      '<div class="gd-card"><div class="lab">'+(us?'Clics US':'Clics totaux')+'</div><div class="val">'+gdNum(tot)+'</div>'
+      '<div class="gd-card"><div class="lab">'+gdModeLabel()+'</div><div class="val">'+gdNum(tot)+'</div>'
     + '<div class="sub">'+gdEsc(d.label||'')+'</div></div>'
     + '<div class="gd-card"><div class="lab">Liens</div><div class="val">'+links.length+'</div>'
     + '<div class="sub">'+actifs+' avec au moins 1 clic</div></div>'
@@ -23819,14 +23853,15 @@ function gdRender(d){
        + '<div class="val" style="font-size:16px;color:#fb923c">données gardées</div>'
        + '<div class="sub">dernier relevé il y a '+(d.age_min||0)+' min — réessaie ↻ dans quelques minutes</div></div>' : '');
   var rows = '<div class="gd-row gd-head"><span>#</span><span>Lien</span><span style="text-align:right">'
-           + (us?'Clics US':'Clics')+'</span><span>Part</span></div>';
+           + (m==='us'?'Clics US':(m==='fr'?'Clics FR':'Clics'))+'</span><span>Part</span></div>';
   if(!links.length){ rows += '<div class="gd-msg">Aucun lien dans cette catégorie.</div>'; }
   links.forEach(function(l, i){
     var pct = max ? Math.round(l._v*100/max) : 0;
     rows += '<div class="gd-row">'
       + '<div class="gd-rank'+(i<3?' top':'')+'">'+(i+1)+'</div>'
       + '<div style="min-width:0"><div class="gd-name">'+gdEsc(l.name||l.shortcode)+'</div>'
-      + '<div class="gd-sc">/'+gdEsc(l.shortcode)+(us?'':(' · 🇺🇸 '+gdNum(l.us||0)+' US'))+'</div></div>'
+      + '<div class="gd-sc">/'+gdEsc(l.shortcode)
+      + (m==='us' ? (' · 🇫🇷 '+gdNum(l.fr||0)) : (m==='fr' ? (' · 🇺🇸 '+gdNum(l.us||0)) : (' · 🇺🇸 '+gdNum(l.us||0)+' · 🇫🇷 '+gdNum(l.fr||0))))+'</div></div>'
       + '<div class="gd-clicks">'+gdNum(l._v)+'</div>'
       + '<div class="gd-share"><i style="width:'+pct+'%"></i></div>'
       + '</div>';
