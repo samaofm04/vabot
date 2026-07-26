@@ -33360,11 +33360,22 @@ def create_app():
                         if (n == f"{stem}.txt" or n == f"{stem}.desc.txt"
                                 or n.startswith(f"{stem}.example.")):
                             to_delete.append(sibling)
+
+                        if (n == f"{stem}.montage.json"      # brouillon d'édition
+                                or n == f"{stem}.montage.png"):  # aperçu généré
+                            to_delete.append(sibling)
                 for t in to_delete:
                     try:
                         t.unlink()
                     except Exception:
                         pass
+                # Marque « banger » (⭐) : sans ce nettoyage, un NOUVEAU fichier
+                # portant le même nom héritait de l'étoile — et du texte de
+                # montage — du fichier supprimé.
+                try:
+                    _pop_banger_mark(fid)
+                except Exception:
+                    pass
                 deleted.append(filename)
             except Exception as e:
                 failed.append((fid, str(e)))
