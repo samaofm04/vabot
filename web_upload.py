@@ -24790,7 +24790,10 @@ def _jbanalyse_payload() -> dict:
         except Exception:
             fhist = {}
         _tkey = today.isoformat()
-        _snap = {i: {"f": g["followers"], "v": g["weekly"]} for i, g in idents.items()}
+        # f = abonnés, v = vues 7 j, tv = vues cumulées de la fenêtre 30 j :
+        # le delta jour-à-jour de tv = « nouvelles vues » réellement gagnées.
+        _snap = {i: {"f": g["followers"], "v": g["weekly"],
+                     "tv": sum(g["points"].values())} for i, g in idents.items()}
         if fhist.get(_tkey) != _snap:
             fhist[_tkey] = _snap
             for _k in sorted(fhist.keys())[:-60]:      # garde 60 jours
@@ -25094,6 +25097,33 @@ function jaTogglePill(i){
   if(window.__jaOff[g.name]){ delete window.__jaOff[g.name]; } else { window.__jaOff[g.name] = true; }
   jaRender();
 }
+function jaFrD(s){ var p = String(s || '').split('-'); return p.length === 3 ? (p[2] + '/' + p[1]) : s; }
+function jaSigned(n){ return (n > 0 ? '+' : '') + jaNum(n); }
+function jaDeltas(){
+  // « Nouvelles vues / nouveaux abonnés » sur la période : delta entre le
+  // relevé quotidien de FIN et celui d AVANT le début (fhist, 1 point/jour).
+  var d = window.__jaData || {};
+  var fh = d.fhist || {};
+  var keys = Object.keys(fh).sort();
+  if(keys.length < 2) return null;
+  var days = d.days || [];
+  var r = jaRangeIdx();
+  if(r[1] < 0) return null;
+  var endD = days[r[1]], startD = days[r[0]];
+  var endK = null, baseK = null;
+  keys.forEach(function(kk){
+    if(kk <= endD) endK = kk;
+    if(kk < startD) baseK = kk;
+  });
+  if(!endK || !baseK || endK <= baseK) return null;
+  var dv = 0, df = 0;
+  ((d.idents) || []).forEach(function(g){
+    var ee = fh[endK][g.name] || {}, bb = fh[baseK][g.name] || {};
+    if(ee.tv != null && bb.tv != null) dv += Math.max(0, (ee.tv || 0) - (bb.tv || 0));
+    if(ee.f != null && bb.f != null) df += (ee.f || 0) - (bb.f || 0);
+  });
+  return {dv: dv, df: df, from: baseK, to: endK};
+}
 function jaCards(){
   var d = window.__jaData || {};
   var t = d.tot || {};
@@ -25106,17 +25136,33 @@ function jaCards(){
   }
   var totP = 0;
   ((d.idents) || []).forEach(function(g){ totP += jaPerVal(g); });
-  el.innerHTML =
-      '<div class="ja-card"><div class="lab">Vues &mdash; ' + jaPerLabel() + '</div><div class="val">' + jaNum(totP) + '</div><div class="sub">reels publi&eacute;s sur la p&eacute;riode</div></div>'
+  var dl = jaDeltas();
+  var vueCard, aboCard;
+  if(dl){
+    vueCard = '<div class="ja-card"><div class="lab">Nouvelles vues &mdash; ' + jaPerLabel() + '</div>'
+      + '<div class="val" style="color:#22c55e">' + jaSigned(dl.dv) + '</div>'
+      + '<div class="sub">gagn&eacute;es entre les relev&eacute;s du ' + jaFrD(dl.from) + ' et du ' + jaFrD(dl.to) + '</div></div>'
+      + '<div class="ja-card"><div class="lab">Vues des posts &mdash; ' + jaPerLabel() + '</div><div class="val">' + jaNum(totP) + '</div>'
+      + '<div class="sub">reels publi&eacute;s sur la p&eacute;riode</div></div>';
+    aboCard = '<div class="ja-card"><div class="lab">Nouveaux abonn&eacute;s</div>'
+      + '<div class="val" style="color:' + (dl.df >= 0 ? '#22c55e' : '#ef4444') + '">' + jaSigned(dl.df) + '</div>'
+      + '<div class="sub">total actuel : ' + jaNum(t.followers) + '</div></div>';
+  } else {
+    vueCard = '<div class="ja-card"><div class="lab">Vues &mdash; ' + jaPerLabel() + '</div><div class="val">' + jaNum(totP) + '</div>'
+      + '<div class="sub">reels publi&eacute;s sur la p&eacute;riode &middot; &laquo; nouvelles vues &raquo; dispo d&egrave;s demain (1er relev&eacute; aujourd&rsquo;hui)</div></div>';
+    aboCard = '<div class="ja-card"><div class="lab">Abonn&eacute;s</div><div class="val">' + jaNum(t.followers) + '</div>'
+      + '<div class="sub">cumul des comptes actifs &middot; &laquo; nouveaux &raquo; dispo d&egrave;s demain</div></div>';
+  }
+  el.innerHTML = vueCard
     + '<div class="ja-card"><div class="lab">Vues 24 h</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">pr&eacute;cis &agrave; l&rsquo;heure (scrape)</div></div>'
-    + '<div class="ja-card"><div class="lab">Abonn&eacute;s</div><div class="val">' + jaNum(t.followers) + '</div><div class="sub">cumul des comptes actifs</div></div>'
+    + aboCard
     + '<div class="ja-card"><div class="lab">Comptes</div><div class="val">' + jaNum(t.n) + '</div>'
     + '<div class="sub">' + jaNum(t.active) + ' actifs &middot; ' + jaNum(t.banned) + ' bannis'
     + (t.pending ? (' &middot; ' + jaNum(t.pending) + ' en attente') : '') + '</div></div>'
     + '<div class="ja-card"><div class="lab">Dernier scrape</div><div class="val" style="font-size:19px">' + (age || '&mdash;') + '</div>'
     + '<div class="sub">auto 00h / 12h &middot; &#8635; recharge</div></div>';
   var upd = document.getElementById('ja-upd');
-  if(upd) upd.textContent = age ? ('donn\\u00e9es du dernier scrape \\u00b7 ' + age) : '';
+  if(upd) upd.textContent = age ? ('données du dernier scrape · ' + age) : '';
 }
 function jaChart(){
   var d = window.__jaData || {};
@@ -25166,7 +25212,9 @@ function jaChart(){
   gs.forEach(function(g){ (g.points || []).forEach(function(v){ if(v > max) max = v; }); });
   if(max <= 0) max = 1;
   var stepX = days.length > 1 ? iw / (days.length - 1) : 0;
-  function X(i){ return PL + i * stepX; }
+  // 1 seul jour (aujourd'hui / hier / 1er relevé) : point CENTRÉ et plus gros,
+  // sinon tout s'empilait collé au bord gauche.
+  function X(i){ return days.length > 1 ? (PL + i * stepX) : (PL + iw / 2); }
   function Y(v){ return PT + ih - (v / max) * ih; }
   var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
   for(var gi = 0; gi <= 4; gi++){
@@ -25190,7 +25238,7 @@ function jaChart(){
     var path = pts.map(function(v, k){ return (k ? 'L' : 'M') + X(k).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' ');
     svg += '<path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
     pts.forEach(function(v, k){
-      svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + col + '">'
+      svg += '<circle cx="' + X(k).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="' + (days.length > 1 ? 2.6 : 5) + '" fill="' + col + '">'
            + '<title>' + jaEsc(g.name) + ' &mdash; ' + days[k] + ' : ' + jaNum(v) + (metricF ? ' abonnés' : ' vues') + '</title></circle>';
     });
   });
