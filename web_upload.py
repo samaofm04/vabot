@@ -25557,6 +25557,7 @@ def _vaact_payload(period: str = "14") -> dict:
         repos = set(int(x) for x in (vcfg.get("repos") or []) if str(x).strip() != "")
         base = float(vcfg.get("base") or 0)
         malus = float(vcfg.get("malus") or 0)
+        quota = int(vcfg.get("quota") or 0)      # nb de comptes ACTIFS à maintenir (0 = pas d'objectif)
         # Pré-calcul par compte : set des jours avec reel + plancher de fenêtre
         accts = []
         n_ban = n_warm = n_nodata = 0
@@ -25668,6 +25669,7 @@ def _vaact_payload(period: str = "14") -> dict:
             "statuses": "".join(statuses), "oublis": oublis,
             "miss": miss_detail,
             "base": base, "malus": malus, "repos": sorted(repos),
+            "quota": quota, "deficit": (max(0, quota - len(accts)) if quota else 0),
             "deduction": ded, "pay": pay,
         })
     out_vas.sort(key=lambda v: (-v["oublis"], -v["n_suivis"], v["va"]))
@@ -25675,11 +25677,12 @@ def _vaact_payload(period: str = "14") -> dict:
         late_today = sum(1 for v in out_vas if v["statuses"][-1:] in ("x", "p"))
     else:
         late_today = None      # période passée : « là maintenant » n'a pas de sens
+    under_quota = sum(1 for v in out_vas if v["deficit"] > 0)
     return {"ok": True, "period": period, "label": lab, "payable": payable,
             "days": day_iso, "vas": out_vas, "warmup_days": warmup,
             "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
                     "vas": len(out_vas), "late_today": late_today,
-                    "warm": n_warm_tot}}
+                    "warm": n_warm_tot, "under_quota": under_quota}}
 
 
 def _render_jbactivite_html() -> str:
@@ -25762,6 +25765,8 @@ def _render_jbactivite_html() -> str:
     <input type="number" id="av-m-base" min="0" step="1">
     <label>Retenue par jour d&#39;oubli ($)</label>
     <input type="number" id="av-m-malus" min="0" step="0.5">
+    <label>Comptes actifs &agrave; maintenir (objectif &mdash; 0 = aucun)</label>
+    <input type="number" id="av-m-quota" min="0" step="1">
     <label>Jours de repos (jamais comptabilis&eacute;s)</label>
     <div class="av-days" id="av-m-repos"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
@@ -25793,6 +25798,7 @@ function avCards(){
   el.innerHTML =
       '<div class="av-card"><div class="lab">VAs suivis</div><div class="val">' + avNum(t.vas) + '</div><div class="sub">' + avNum(t.warm) + ' compte(s) en warm-up (' + avNum(d.warmup_days) + ' j)</div></div>'
     + '<div class="av-card"><div class="lab">Oublis &mdash; ' + avEsc(d.label || '') + '</div><div class="val" style="color:' + (t.oublis ? '#ef4444' : '#22c55e') + '">' + avNum(t.oublis) + '</div><div class="sub">1 oubli max / VA / jour</div></div>'
+    + (t.under_quota ? ('<div class="av-card"><div class="lab">Sous l&#39;objectif de comptes</div><div class="val" style="color:#ef4444">' + avNum(t.under_quota) + '</div><div class="sub">VA(s) en dessous de leur quota de comptes actifs</div></div>') : '')
     + (t.late_today == null ? '' : ('<div class="av-card"><div class="lab">En retard l&agrave; maintenant</div><div class="val" style="color:' + (t.late_today ? '#f59e0b' : '#22c55e') + '">' + avNum(t.late_today) + '</div><div class="sub">&ge; 1 compte sans reel depuis 48 h</div></div>'))
     + '<div class="av-card"><div class="lab">Retenues totales</div><div class="val" style="color:' + (t.deduction ? '#ef4444' : '#fff') + '">' + avMoney(t.deduction) + '</div><div class="sub">oublis &times; retenue par VA</div></div>';
 }
@@ -25827,7 +25833,10 @@ function avTable(){
     h += '<div class="av-row">'
       + '<div class="av-nm"><span class="av-pfb" style="background:hsl(' + avHue(v.va) + ',55%,42%)">' + avEsc(v.display.charAt(0).toUpperCase()) + '</span>'
       + '<div class="t"><div class="n">' + avEsc(v.display) + '</div><div class="s">' + avEsc(sub) + '</div></div></div>'
-      + '<span class="hidesm">' + avNum(v.n_suivis) + '<span class="av-hint"> / ' + avNum(v.n) + '</span>'
+      + '<span class="hidesm">' + (v.quota
+          ? ('<b style="color:' + (v.deficit ? '#ef4444' : '#22c55e') + '">' + avNum(v.n_suivis) + '</b><span class="av-hint"> / ' + avNum(v.quota) + ' requis</span>'
+             + (v.deficit ? (' <span class="av-badge" style="color:#ef4444">manque ' + avNum(v.deficit) + '</span>') : ''))
+          : (avNum(v.n_suivis) + '<span class="av-hint"> / ' + avNum(v.n) + '</span>'))
       + (v.n_ban ? (' <span class="av-badge" style="color:#ef4444">' + avNum(v.n_ban) + ' ban</span>') : '')
       + (v.n_warm ? (' <span class="av-badge" style="color:#a855f7">' + avNum(v.n_warm) + ' warm</span>') : '') + '</span>'
       + '<div class="av-hm">' + hm + '</div>'
@@ -25847,6 +25856,7 @@ function avCfgOpen(idx){
   document.getElementById('av-m-va').value = v.va;
   document.getElementById('av-m-base').value = v.base || 0;
   document.getElementById('av-m-malus').value = v.malus || 0;
+  document.getElementById('av-m-quota').value = v.quota || 0;
   var box = document.getElementById('av-m-repos');
   box.innerHTML = AV_DAYS_FR.map(function(nm, k){
     return '<label><input type="checkbox" value="' + k + '"' + ((v.repos || []).indexOf(k) !== -1 ? ' checked' : '') + '> ' + nm + '</label>';
@@ -25859,6 +25869,7 @@ function avCfgSave(){
   fd.append('va', document.getElementById('av-m-va').value);
   fd.append('base', document.getElementById('av-m-base').value || '0');
   fd.append('malus', document.getElementById('av-m-malus').value || '0');
+  fd.append('quota', document.getElementById('av-m-quota').value || '0');
   var ks = [];
   Array.prototype.forEach.call(document.querySelectorAll('#av-m-repos input:checked'), function(c){ ks.push(c.value); });
   fd.append('repos', ks.join(','));
@@ -36398,8 +36409,13 @@ def create_app():
             return jsonify({"ok": False, "error": "montants invalides"})
         repos = sorted({int(x) for x in (request.form.get("repos") or "").split(",")
                         if x.strip().isdigit() and 0 <= int(x) <= 6})
+        try:
+            quota = max(0, int(float(request.form.get("quota") or 0)))
+        except Exception:
+            quota = 0
         cfg = _vaact_cfg_load()
-        cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus, "repos": repos}
+        cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus,
+                                         "repos": repos, "quota": quota}
         _vaact_cfg_save(cfg)
         return jsonify({"ok": True})
 
