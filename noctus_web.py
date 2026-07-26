@@ -480,6 +480,19 @@ def gen_from_draft(src_path, draft, folders=None, model=None):
     if not model:                                 # id UNIQUE par appel -> 2 VA simultanés
         base = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"vam-{src.stem}")[:26]   # ne collisionnent pas
         model = f"{base}-{int(_t.time() * 1000) % 1000000}{_rnd.randint(100, 999)}"
+    # PURGE des generations a la demande precedentes : chaque « Reel deja monte »
+    # creait un dossier models/vam-... (video source + sorties) jamais supprime,
+    # le disque du VPS se remplissait a l'infini. On garde les 12 plus recents.
+    try:
+        _mdir = _models_dir()
+        _olds = sorted((d for d in _mdir.glob("vam-*") if d.is_dir()),
+                       key=lambda d: d.stat().st_mtime, reverse=True)[12:]
+        for _o in _olds:
+            _sh.rmtree(str(_o), ignore_errors=True)
+        if _olds:
+            print(f"[noctus] purge : {len(_olds)} dossier(s) de generation supprime(s)", flush=True)
+    except Exception as _e_purge:
+        print(f"[noctus] purge : {_e_purge}", flush=True)
     inp = _models_dir() / model / "input"
     inp.mkdir(parents=True, exist_ok=True)
     for f in inp.glob("*"):
