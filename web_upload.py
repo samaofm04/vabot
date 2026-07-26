@@ -25530,18 +25530,23 @@ def _vaact_days(period: str):
         start = today.replace(day=1) if today.day <= 15 else today.replace(day=16)
         end = today
         lab = ("quinzaine 1-15" if today.day <= 15 else "quinzaine 16-fin") + " (en cours)"
-        payable = True
+        payable = "q"
     elif period == "qprev":
         if today.day <= 15:
             _last = today.replace(day=1) - _dt_v.timedelta(days=1)
             start, end, lab = _last.replace(day=16), _last, "quinzaine 16-fin (précédente)"
         else:
             start, end, lab = today.replace(day=1), today.replace(day=15), "quinzaine 1-15 (précédente)"
-        payable = True
+        payable = "q"
+    elif period == "m":
+        start, end, lab, payable = today.replace(day=1), today, "mois en cours", "m"
+    elif period == "mprev":
+        _last = today.replace(day=1) - _dt_v.timedelta(days=1)
+        start, end, lab, payable = _last.replace(day=1), _last, "mois précédent", "m"
     elif period == "30":
-        start, end, lab, payable = today - _dt_v.timedelta(days=29), today, "30 derniers jours", False
+        start, end, lab, payable = today - _dt_v.timedelta(days=29), today, "30 derniers jours", None
     else:
-        start, end, lab, payable = today - _dt_v.timedelta(days=13), today, "14 derniers jours", False
+        start, end, lab, payable = today - _dt_v.timedelta(days=13), today, "14 derniers jours", None
     days = []
     d = start
     while d <= end:
@@ -25599,6 +25604,7 @@ def _vaact_payload(period: str = "14") -> dict:
         malus = float(vcfg.get("malus") or 0)
         quota = int(vcfg.get("quota") or 0)      # nb de comptes ACTIFS à maintenir (0 = pas d'objectif)
         quota_pct = int(vcfg.get("quota_pct") or 100)   # % toléré avant ALERTE (ex. 80)
+        cadence = str(vcfg.get("cadence") or "q")        # paie « q » (quinzaine) ou « m » (mois)
         # Pré-calcul par compte : set des jours avec reel + plancher de fenêtre
         accts = []
         n_ban = n_warm = n_nodata = 0
@@ -25699,7 +25705,9 @@ def _vaact_payload(period: str = "14") -> dict:
             else:
                 statuses.append("g")
         ded = round(oublis * malus, 2)
-        pay = round(max(0.0, base - ded), 2) if payable else None
+        # « À payer » seulement quand la période correspond à la cadence de paie
+        # du VA (quinzaine sélectionnée + VA payé à la quinzaine, ou mois + mois)
+        pay = round(max(0.0, base - ded), 2) if (payable and payable == cadence) else None
         tot_oublis += oublis
         tot_ded += ded
         out_vas.append({
@@ -25710,6 +25718,7 @@ def _vaact_payload(period: str = "14") -> dict:
             "statuses": "".join(statuses), "oublis": oublis,
             "miss": miss_detail,
             "base": base, "malus": malus, "repos": sorted(repos),
+            "cadence": cadence,
             "quota": quota, "deficit": (max(0, quota - len(accts)) if quota else 0),
             "quota_pct": quota_pct,
             "seuil": (int(-(-quota * quota_pct // 100)) if quota else 0),
@@ -25722,7 +25731,7 @@ def _vaact_payload(period: str = "14") -> dict:
     else:
         late_today = None      # période passée : « là maintenant » n'a pas de sens
     under_quota = sum(1 for v in out_vas if v["alert"])
-    return {"ok": True, "period": period, "label": lab, "payable": payable,
+    return {"ok": True, "period": period, "label": lab, "payable": bool(payable),
             "days": day_iso, "vas": out_vas, "warmup_days": warmup,
             "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
                     "vas": len(out_vas), "late_today": late_today,
@@ -25786,6 +25795,8 @@ def _render_jbactivite_html() -> str:
       <button data-p="14" class="on" onclick=avPeriod(this)>14 jours</button>
       <button data-p="q" onclick=avPeriod(this)>Quinzaine en cours</button>
       <button data-p="qprev" onclick=avPeriod(this)>Quinzaine pr&eacute;c.</button>
+      <button data-p="m" onclick=avPeriod(this)>Mois en cours</button>
+      <button data-p="mprev" onclick=avPeriod(this)>Mois pr&eacute;c.</button>
       <button data-p="30" onclick=avPeriod(this)>30 jours</button>
     </div>
     <button class="av-cfg" onclick=avLoad() title="Recharger">&#8635;</button>
@@ -25805,8 +25816,14 @@ def _render_jbactivite_html() -> str:
   <div class="box">
     <h3 id="av-m-title">Configurer</h3>
     <input type="hidden" id="av-m-va">
-    <label>Base de paie ($ / quinzaine)</label>
-    <input type="number" id="av-m-base" min="0" step="1">
+    <label>Base de paie ($)</label>
+    <div style="display:flex;gap:8px">
+      <input type="number" id="av-m-base" min="0" step="1" style="flex:2">
+      <select id="av-m-cadence" style="flex:1;background:#0c0e12;border:1px solid #23262f;border-radius:9px;color:#fff;padding:9px 8px;font-size:12px">
+        <option value="q">par quinzaine</option>
+        <option value="m">par mois</option>
+      </select>
+    </div>
     <label>Retenue par jour d&#39;oubli ($)</label>
     <input type="number" id="av-m-malus" min="0" step="0.5">
     <label>Comptes actifs &agrave; maintenir (objectif &mdash; 0 = aucun)</label>
@@ -25890,7 +25907,7 @@ function avTable(){
       + (v.n_warm ? (' <span class="av-badge" style="color:#a855f7">' + avNum(v.n_warm) + ' warm</span>') : '') + '</span>'
       + '<div class="av-hm">' + hm + '</div>'
       + '<span class="num" style="color:' + (v.oublis ? '#ef4444' : '#22c55e') + ';font-weight:800">' + avNum(v.oublis) + '</span>'
-      + '<span class="num hidesm">' + (v.base ? avMoney(v.base) : '<span class="av-hint">&mdash;</span>') + '</span>'
+      + '<span class="num hidesm">' + (v.base ? (avMoney(v.base) + '<span class="av-hint">/' + (v.cadence === 'm' ? 'mois' : 'quinz.') + '</span>') : '<span class="av-hint">&mdash;</span>') + '</span>'
       + '<span class="num hidesm" style="color:' + (v.deduction ? '#ef4444' : '#6b7280') + '">' + (v.deduction ? ('&minus;' + avMoney(v.deduction)) : '0 $') + '</span>'
       + '<span class="num">' + payTxt + '</span>'
       + '<button class="av-cfg" onclick=avCfgOpen(' + idx + ') title="Base de paie, retenue, jours de repos">&#9998;</button>'
@@ -25904,6 +25921,7 @@ function avCfgOpen(idx){
   document.getElementById('av-m-title').textContent = 'Configurer ' + v.display;
   document.getElementById('av-m-va').value = v.va;
   document.getElementById('av-m-base').value = v.base || 0;
+  document.getElementById('av-m-cadence').value = (v.cadence === 'm') ? 'm' : 'q';
   document.getElementById('av-m-malus').value = v.malus || 0;
   document.getElementById('av-m-quota').value = v.quota || 0;
   document.getElementById('av-m-quotapct').value = v.quota_pct || 100;
@@ -25918,6 +25936,7 @@ function avCfgSave(){
   var fd = new FormData();
   fd.append('va', document.getElementById('av-m-va').value);
   fd.append('base', document.getElementById('av-m-base').value || '0');
+  fd.append('cadence', document.getElementById('av-m-cadence').value || 'q');
   fd.append('malus', document.getElementById('av-m-malus').value || '0');
   fd.append('quota', document.getElementById('av-m-quota').value || '0');
   fd.append('quota_pct', document.getElementById('av-m-quotapct').value || '100');
@@ -36469,9 +36488,10 @@ def create_app():
         except Exception:
             quota_pct = 100
         cfg = _vaact_cfg_load()
+        cadence = "m" if (request.form.get("cadence") or "q").strip() == "m" else "q"
         cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus,
                                          "repos": repos, "quota": quota,
-                                         "quota_pct": quota_pct}
+                                         "quota_pct": quota_pct, "cadence": cadence}
         _vaact_cfg_save(cfg)
         return jsonify({"ok": True})
 
