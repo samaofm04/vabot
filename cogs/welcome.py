@@ -505,10 +505,11 @@ async def setup_va_ticket(guild, member, bot=None):
             except Exception:
                 pass
             return existing_channel, None
-        # Salon supprime -> clear et continuer comme nouveau VA
-        users.pop(str(member.id), None)
+        # Salon supprimé -> on oublie SEULEMENT le channel mort, on conserve le
+        # reste de la fiche (moyen de paiement, comptes Insta, identité).
+        if isinstance(users.get(str(member.id)), dict):
+            users[str(member.id)].pop("channel_id", None)
         save_users(users)
-        existing = None
 
     # Determiner l'identite
     if isinstance(existing, dict) and existing.get("identity"):
@@ -534,12 +535,12 @@ async def setup_va_ticket(guild, member, bot=None):
     if not channel:
         return None, "Le bot n'a pas la permission de créer un salon."
 
-    # Sauvegarder
-    users[str(member.id)] = {
-        "identity": identity,
-        "channel_id": channel.id,
-        "auto_post": True,
-    }
+    # Sauvegarder (FUSION : ne pas écraser paiement / comptes Insta / notes)
+    _e = users.get(str(member.id))
+    _entry = dict(_e) if isinstance(_e, dict) else {}
+    _entry.update({"identity": identity, "channel_id": channel.id})
+    _entry.setdefault("auto_post", True)
+    users[str(member.id)] = _entry
     save_users(users)
 
     # Contenu d'accueil du ticket.

@@ -245,7 +245,18 @@ def _mypuls_month_amount(model: str, month: str, creator_id=None):
                 if r.get("ok"):
                     rev = ((r.get("data") or {}).get("revenue") or {})
                     cur = (rev.get("currency") or match.get("currency") or "USD").upper()
-                    return float(rev.get("total") or 0), cur, True, dict(info, api=True)
+                    # STALE : api_creator_stats_cached sert le dernier bon relevé
+                    # quand l'API échoue. On garde ce montant (mieux que le repli
+                    # scraping EUR/brut) mais on le SIGNALE — sinon une valeur
+                    # périmée passait pour un chiffre API exact (revenus, net et
+                    # part lead faussés sans aucun indice).
+                    _st = bool(r.get("stale"))
+                    _inf = dict(info, api=True)
+                    if _st:
+                        _inf["stale"] = True
+                        _inf["stale_ts"] = r.get("stale_ts")
+                        _inf["why"] = "dernier relevé MyPuls (API momentanément indisponible)"
+                    return float(rev.get("total") or 0), cur, True, _inf
                 info["why"] = (f"stats API KO (créatrice #{match.get('id')}) : "
                                f"{str(r.get('error'))[:120]}")
         except Exception as e:
@@ -1062,7 +1073,9 @@ def register(app, is_auth):
         amt, cur, net, info = _mypuls_month_amount(model, month,
                                                    request.args.get("creator_id"))
         out["resultat"] = {"montant": amt, "devise": cur, "deja_net": net,
-                           "source": "API MyPuls" if net else "scraping (repli)",
+                           "source": ("dernier relevé MyPuls (API indispo)" if info.get("stale")
+                                      else ("API MyPuls" if net else "scraping (repli)")),
+                           "stale": bool(info.get("stale")),
                            "creator_id": info.get("creator_id"),
                            "resolution": info.get("resolution")}
         out["repli_cause"] = info.get("why") or None
