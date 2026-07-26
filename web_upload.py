@@ -22959,7 +22959,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 5
+GMSDASH_PAYLOAD_VER = 6
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23197,6 +23197,12 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                                 "complete": q_ok}
         _prog(stage="clics par lien")
 
+    _mmap_c = _gmsdash_model_map()
+
+    def _model_of_sc(sc):
+        sc = (sc or "").lower()
+        return next((_mmap_c[suf] for suf in _mmap_c if sc.endswith(suf)), "autres")
+
     def _one(l):
         lid = l.get("id")
         if not lid:
@@ -23207,6 +23213,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         except Exception:
             tot, ctry = None, None
         row = {"id": lid, "shortcode": l.get("shortcode") or "",
+               "model": _model_of_sc(l.get("shortcode")),
                "name": l.get("display_name") or l.get("shortcode") or "",
                "clicks": tot,                 # None = lecture ratée (surtout pas 0)
                "us": (ctry or {}).get("US", 0),
@@ -23219,6 +23226,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
                 if pr is not None:
                     pr.setdefault("rows", []).append(
                         {"id": lid, "shortcode": row["shortcode"], "name": row["name"],
+                         "model": row["model"],
                          "clicks": tot or 0, "us": row["us"], "fr": row["fr"]})
         return row
 
@@ -23255,8 +23263,15 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
     # L'analytics ne renvoie qu'un total par appel : une série coûte 1 appel par
     # lien ET par jour. On se limite donc aux N meilleurs liens sur 7 jours
     # (8 x 7 = 56 appels), ce qui suffit à voir qui génère quoi.
+    _mods = sorted({r.get("model") for r in rows if r.get("model") and r.get("model") != "autres"})
+    _avs = {}
+    for _m in _mods:
+        try:
+            _avs[_m] = _identity_avatar_url(_m) or ""
+        except Exception:
+            _avs[_m] = ""
     base = {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
-            "links": rows, "countries": countries,
+            "links": rows, "countries": countries, "model_avatars": _avs,
             "failed": failed, "partial": failed > 0}
     if store_cb and rows:
         # Publie le tableau COMPLET tout de suite (la courbe suit) : la page passe
@@ -23317,7 +23332,7 @@ def _gmsdash_series(rows: list, days: int = 7, top_n: int = 8, prog=None) -> dic
         ups = [got.get((r["id"], d), (0, 0, 0))[1] for d in day_list]
         fps = [got.get((r["id"], d), (0, 0, 0))[2] for d in day_list]
         out.append({"id": r.get("id"), "name": r.get("name") or r.get("shortcode"),
-                    "shortcode": r.get("shortcode"),
+                    "shortcode": r.get("shortcode"), "model": r.get("model") or "",
                     "points": pts, "us_points": ups, "fr_points": fps,
                     "total": sum(pts), "us_total": sum(ups), "fr_total": sum(fps)})
     return {"days": day_list, "links": out, "us_available": True}
@@ -23391,6 +23406,7 @@ def _gmsdash_series_groups(rows: list, group_of, days: int = 7, prog=None,
             for name, g, m in ex.map(_one_grp, items):
                 pts = [int(m.get(d) or 0) for d in day_list]
                 out.append({"name": f"{name} ({len(g['ids'])} liens)", "shortcode": "",
+                            "model": name,
                             "points": pts, "us_points": [], "fr_points": [],
                             "total": sum(pts), "us_total": g["us"], "fr_total": g["fr"]})
     except Exception:
@@ -23656,6 +23672,12 @@ def _render_gmsdash_html() -> str:
 .gd-share{height:6px;background:#1b1e27;border-radius:20px;overflow:hidden}
 .gd-share i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:20px}
 .gd-msg{padding:40px;text-align:center;color:#6b7280;font-size:13px}
+.gd-mpills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.gd-mpills button{display:inline-flex;align-items:center;gap:7px;background:#14161c;border:1px solid #2b2f3a;border-radius:20px;padding:5px 13px 5px 6px;font-size:12px;color:#c4c4cc;font-family:inherit;cursor:pointer;font-weight:700;transition:all .12s}
+.gd-mpills button:hover{border-color:#3a3f4d}
+.gd-mpills button.on{background:rgba(37,99,235,.18);border-color:#2563eb;color:#fff}
+.gd-mpills img,.gd-mpills .fb{width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.gd-mpills .fb{background:linear-gradient(135deg,#3b82f6,#a855f7);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800}
 .gd-chart{background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:18px;position:relative}
 .gd-tip{position:absolute;display:none;background:#16181f;border:1px solid #2b2f3a;border-radius:10px;padding:10px 12px;font-size:11.5px;pointer-events:none;z-index:10;box-shadow:0 8px 22px rgba(0,0,0,.5);min-width:170px}
 .gd-tip .d{font-weight:800;color:#fff;margin-bottom:6px}
@@ -23695,6 +23717,7 @@ def _render_gmsdash_html() -> str:
     __GDKEY2__
 
   </div>
+  <div class="gd-mpills" id="gd-mpills"></div>
   <div class="gd-cards" id="gd-cards"></div>
   <div class="gd-chart" id="gd-chart"></div>
   <div class="gd-tbl" id="gd-tbl"><div class="gd-msg">Choisis une catégorie…</div></div>
@@ -23702,6 +23725,9 @@ def _render_gmsdash_html() -> str:
 </div>
 <script>
 window.__gdPeriod = '7';
+window.__gdView = 'models';        // par défaut : les courbes PAR MODÈLE (retombe sur « par lien » si 1 seul modèle)
+window.__gdModel = '';             // filtre : '' = toutes les models
+window.__gdModelList = [];
 window.__gdUs = false;
 window.__gdFr = false;
 function gdMode(){ return window.__gdUs ? 'us' : (window.__gdFr ? 'fr' : ''); }
@@ -23780,6 +23806,26 @@ function gdSchedulePoll(ms){
   window.__gdPollTimer = setTimeout(function(){ gdLoad(); }, ms);
 }
 // Barre de progression du calcul (X / Y appels) — affichée tant qu'il n'y a rien à montrer
+function gdModelPills(d){
+  var box = document.getElementById('gd-mpills');
+  if(!box) return;
+  var seen = {};
+  ((d && d.links) || []).forEach(function(l){ if(l.model && l.model !== 'autres') seen[l.model] = 1; });
+  var models = Object.keys(seen).sort();
+  window.__gdModelList = models;
+  if(models.length < 2){ box.innerHTML = ''; return; }
+  var avs = (d && d.model_avatars) || {};
+  var htmlP = '<button class="' + (window.__gdModel ? '' : 'on') + '" onclick=gdModelSel(-1)>'
+    + '<span class="fb">∀</span>Toutes</button>';
+  models.forEach(function(mn, i){
+    var av = avs[mn];
+    var head = av ? ('<img src="' + gdEsc(av) + '" onerror="this.style.display=String.fromCharCode(110,111,110,101)">')
+                  : ('<span class="fb">' + gdEsc(mn.charAt(0).toUpperCase()) + '</span>');
+    htmlP += '<button class="' + (window.__gdModel === mn ? 'on' : '') + '" onclick=gdModelSel(' + i + ')>'
+      + head + gdEsc(mn.charAt(0).toUpperCase() + mn.slice(1)) + '</button>';
+  });
+  box.innerHTML = htmlP;
+}
 function gdQuickCards(q, label){
   var m = gdMode();
   document.getElementById('gd-cards').innerHTML =
@@ -23872,6 +23918,13 @@ function gdToggleSerie(i){
   window.__gdHidden[i] = !window.__gdHidden[i];
   gdChart(window.__gdData);
 }
+function gdModelSel(i){
+  var list = window.__gdModelList || [];
+  var pick = (i < 0) ? '' : (list[i] || '');
+  window.__gdModel = (window.__gdModel === pick) ? '' : pick;   // re-cliquer = tout afficher
+  window.__gdHidden = {};
+  gdRender(window.__gdData);
+}
 function gdView(v){
   // v numérique (0=liens, 1=modèles, 2=VA jailbreak) : PAS de quotes dans
   // l'attribut onclick — un ' dans ce fichier casse tout le script (piège connu).
@@ -23892,6 +23945,9 @@ function gdChart(d){
            : ((window.__gdView === 'vajb' && hasJ) ? 'vajb' : 'links');
   var se = (view === 'models') ? seM : (view === 'vajb' ? seJ : seL);
   var days = se.days || [], links = se.links || [];
+  if(window.__gdModel && view !== 'vajb'){
+    links = links.filter(function(l){ return (l.model || '') === window.__gdModel; });
+  }
   if(!days.length || !links.length){ box.innerHTML = ''; return; }
   var viewLbl = (view === 'models') ? 'modèle' : (view === 'vajb' ? 'VA jailbreak' : 'lien');
   var segHtml = (hasM || hasJ) ? ('<div class="gd-seg" style="margin-left:auto;font-size:11px">'
@@ -24012,7 +24068,10 @@ function gdChart(d){
 function gdRender(d){
   if(!d) return;
   var m = gdMode();
-  var links = (d.links||[]).slice();
+  gdModelPills(d);
+  var links = (d.links||[]).filter(function(l){
+    return !window.__gdModel || (l.model || '') === window.__gdModel;
+  });
   links.forEach(function(l){ l._v = gdV(l); });
   links.sort(function(a,b){ return b._v - a._v; });
   var tot = links.reduce(function(s,l){ return s + l._v; }, 0);
