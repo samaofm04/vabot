@@ -24696,7 +24696,9 @@ def _jbanalyse_payload() -> dict:
         today = _dt_a.datetime.now(_Zi_a("Europe/Paris")).date()
     except Exception:
         today = _dt_a.date.today()
-    days = [(today - _dt_a.timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
+    # 30 jours d'axe : le sélecteur de période du front (aujourd'hui / hier /
+    # 7 j / 14 j / 30 j / dates libres) découpe dans ces points.
+    days = [(today - _dt_a.timedelta(days=i)).isoformat() for i in range(29, -1, -1)]
     dayset = set(days)
 
     def _blank():
@@ -24839,7 +24841,7 @@ def _render_jbanalyse_html() -> str:
 .ja-tip .r{display:flex;align-items:center;gap:6px;margin:2px 0}
 .ja-tip .r i{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
 .ja-tip .r b{margin-left:auto;padding-left:12px}
-.ja-row{display:grid;grid-template-columns:26px minmax(140px,1.4fr) 70px 70px 70px 90px 90px 90px 90px 1fr;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #16181e;color:#d1d5db;font-size:12px}
+.ja-row{display:grid;grid-template-columns:26px minmax(140px,1.4fr) 74px 70px 70px 120px 92px 1fr;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #16181e;color:#d1d5db;font-size:12px}
 .ja-row.head{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid #23262f}
 .ja-row .num{text-align:right;font-variant-numeric:tabular-nums}
 .ja-row .nm{display:flex;align-items:center;gap:8px;font-weight:700;color:#fff;min-width:0}
@@ -24851,7 +24853,7 @@ def _render_jbanalyse_html() -> str:
 .ja-irow.head{color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid #23262f}
 .ja-irow .num{text-align:right;font-variant-numeric:tabular-nums}
 .ja-irow .nm{font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media(max-width:900px){.ja-row{grid-template-columns:22px minmax(110px,1.2fr) 60px 70px 70px 1fr}.ja-row .hidesm{display:none}
+@media(max-width:900px){.ja-row{grid-template-columns:22px minmax(110px,1.2fr) 60px 96px 1fr}.ja-row .hidesm{display:none}
 .ja-irow{grid-template-columns:minmax(100px,1fr) 74px 74px 96px 1fr}.ja-irow .hidesm{display:none}}
 </style>
 """
@@ -24876,6 +24878,21 @@ def _render_jbanalyse_html() -> str:
     <button class="ja-refresh" id="ja-scrape" onclick=jaScrape() title="Lance le scrape (m&ecirc;me quota que la page Jailbreak &mdash; les 2 pages partagent le M&Ecirc;ME cache)">&#128260; Scraper</button>
     <span class="ja-hint" id="ja-upd"></span>
   </div>
+  <div class="ja-top">
+    <div class="ja-seg" id="ja-period">
+      <button data-k="today" onclick=jaPeriod(this)>Aujourd&#39;hui</button>
+      <button data-k="yest" onclick=jaPeriod(this)>Hier</button>
+      <button data-k="7" class="on" onclick=jaPeriod(this)>7 jours</button>
+      <button data-k="14" onclick=jaPeriod(this)>14 jours</button>
+      <button data-k="30" onclick=jaPeriod(this)>30 jours</button>
+      <button data-k="custom" onclick=jaPeriod(this)>&#128197; Dates</button>
+    </div>
+    <span id="ja-custom" style="display:none">
+      <input type="date" id="ja-from" class="ja-refresh" style="padding:6px 8px" onchange=jaCustomChange()>
+      <span class="ja-hint">&rarr;</span>
+      <input type="date" id="ja-to" class="ja-refresh" style="padding:6px 8px" onchange=jaCustomChange()>
+    </span>
+  </div>
   <div class="ja-pills" id="ja-pills"></div>
   <div class="ja-cards" id="ja-cards"></div>
   <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg">Chargement&hellip;</div></div></div>
@@ -24892,6 +24909,69 @@ function jaNum(n){ n = Math.round(n || 0); return n.toLocaleString('fr-FR'); }
 function jaGroups(){
   var d = window.__jaData || {};
   return (window.__jaView === 'va' ? d.vas : d.idents) || [];
+}
+window.__jaPeriod = {k: '7'};
+function jaRangeIdx(){
+  var d = window.__jaData || {};
+  var days = d.days || [];
+  var n = days.length;
+  if(!n) return [0, -1];
+  var k = (window.__jaPeriod || {}).k || '7';
+  if(k === 'today') return [n - 1, n - 1];
+  if(k === 'yest'){ var y = Math.max(0, n - 2); return [y, y]; }
+  if(k === '14') return [Math.max(0, n - 14), n - 1];
+  if(k === '30') return [0, n - 1];
+  if(k === 'custom'){
+    var f = window.__jaPeriod.from || days[0];
+    var t = window.__jaPeriod.to || days[n - 1];
+    if(f > t){ var tmp = f; f = t; t = tmp; }
+    var i0 = days.indexOf(f), i1 = days.indexOf(t);
+    if(i0 === -1) i0 = 0;
+    if(i1 === -1) i1 = n - 1;
+    return [i0, i1];
+  }
+  return [Math.max(0, n - 7), n - 1];
+}
+function jaPerVal(g){
+  var r = jaRangeIdx(), s = 0;
+  for(var i = r[0]; i <= r[1]; i++){ s += (g.points || [])[i] || 0; }
+  return s;
+}
+function jaPerLabel(){
+  var k = (window.__jaPeriod || {}).k || '7';
+  if(k === 'today') return 'aujourd’hui';
+  if(k === 'yest') return 'hier';
+  if(k === '14') return '14 derniers jours';
+  if(k === '30') return '30 derniers jours';
+  if(k === 'custom'){
+    var r = jaRangeIdx();
+    var days = (window.__jaData || {}).days || [];
+    function fr(s){ var p = String(s || '').split('-'); return p.length === 3 ? (p[2] + '/' + p[1]) : s; }
+    return 'du ' + fr(days[r[0]]) + ' au ' + fr(days[r[1]]);
+  }
+  return '7 derniers jours';
+}
+function jaPeriod(btn){
+  var k = btn.getAttribute('data-k') || '7';
+  window.__jaPeriod = {k: k, from: (window.__jaPeriod || {}).from, to: (window.__jaPeriod || {}).to};
+  var seg = document.getElementById('ja-period');
+  if(seg){ Array.prototype.forEach.call(seg.querySelectorAll('button'), function(b){ b.classList.toggle('on', b === btn); }); }
+  var cust = document.getElementById('ja-custom');
+  if(cust) cust.style.display = (k === 'custom') ? '' : 'none';
+  if(k === 'custom'){
+    var days = (window.__jaData || {}).days || [];
+    var f = document.getElementById('ja-from'), t = document.getElementById('ja-to');
+    if(f && days.length){ f.min = days[0]; f.max = days[days.length - 1]; if(!f.value) f.value = days[Math.max(0, days.length - 7)]; }
+    if(t && days.length){ t.min = days[0]; t.max = days[days.length - 1]; if(!t.value) t.value = days[days.length - 1]; }
+    jaCustomChange();
+    return;
+  }
+  jaRender();
+}
+function jaCustomChange(){
+  var f = document.getElementById('ja-from'), t = document.getElementById('ja-to');
+  window.__jaPeriod = {k: 'custom', from: (f && f.value) || '', to: (t && t.value) || ''};
+  jaRender();
 }
 function jaView(v){
   window.__jaView = v === 1 ? 'va' : 'id';
@@ -25004,7 +25084,7 @@ function jaPills(){
     return '<button class="ja-pill' + (window.__jaOff[g.name] ? ' off' : '') + '" '
          + 'style="border-color:' + (window.__jaOff[g.name] ? '#2a2d36' : col) + '" '
          + 'onclick=jaTogglePill(' + i + ') title="Clique pour masquer/afficher">'
-         + jaAvatar(g) + '<span>' + jaEsc(g.name) + '</span> <b style="color:' + col + '">' + jaNum(g.weekly) + '</b>'
+         + jaAvatar(g) + '<span>' + jaEsc(g.name) + '</span> <b style="color:' + col + '">' + jaNum(jaPerVal(g)) + '</b>'
          + '</button>';
   }).join('');
 }
@@ -25024,10 +25104,11 @@ function jaCards(){
     var m = Math.max(0, Math.round((Date.now()/1000 - d.scraped_at) / 60));
     age = m < 60 ? ('il y a ' + m + ' min') : ('il y a ' + Math.round(m/60) + ' h');
   }
+  var totP = 0;
+  ((d.idents) || []).forEach(function(g){ totP += jaPerVal(g); });
   el.innerHTML =
-      '<div class="ja-card"><div class="lab">Vues 24 h</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">reels post&eacute;s ces 24 h</div></div>'
-    + '<div class="ja-card"><div class="lab">Vues 7 jours</div><div class="val">' + jaNum(t.weekly) + '</div><div class="sub">reels des 7 derniers jours</div></div>'
-    + '<div class="ja-card"><div class="lab">Vues 14 jours</div><div class="val">' + jaNum(t.biweekly) + '</div><div class="sub">reels des 14 derniers jours</div></div>'
+      '<div class="ja-card"><div class="lab">Vues &mdash; ' + jaPerLabel() + '</div><div class="val">' + jaNum(totP) + '</div><div class="sub">reels publi&eacute;s sur la p&eacute;riode</div></div>'
+    + '<div class="ja-card"><div class="lab">Vues 24 h</div><div class="val">' + jaNum(t.daily) + '</div><div class="sub">pr&eacute;cis &agrave; l&rsquo;heure (scrape)</div></div>'
     + '<div class="ja-card"><div class="lab">Abonn&eacute;s</div><div class="val">' + jaNum(t.followers) + '</div><div class="sub">cumul des comptes actifs</div></div>'
     + '<div class="ja-card"><div class="lab">Comptes</div><div class="val">' + jaNum(t.n) + '</div>'
     + '<div class="sub">' + jaNum(t.active) + ' actifs &middot; ' + jaNum(t.banned) + ' bannis'
@@ -25043,7 +25124,7 @@ function jaChart(){
   if(!box) return;
   var days = d.days || [];
   var gs = jaGroups().filter(function(g){ return !window.__jaOff[g.name]; });
-  var head = '<h4>Vues par ' + (window.__jaView === 'va' ? 'VA' : 'identit&eacute;') + ' &mdash; 14 jours (par jour de publication)</h4>';
+  var head = '<h4>Vues par ' + (window.__jaView === 'va' ? 'VA' : 'identit&eacute;') + ' &mdash; ' + jaPerLabel() + ' (par jour de publication)</h4>';
   var metricF = (window.__jaMetric === 'f' && window.__jaView === 'id');
   var partial = '';
   if(metricF){
@@ -25064,6 +25145,11 @@ function jaChart(){
     box.innerHTML = head + '<div class="ja-note">&#128200; Les courbes appara&icirc;tront &agrave; la fin du scrape &mdash; clique <b>&#128260; Scraper maintenant</b> ci-dessus (ou attends le scrape auto de 00h / 12h). '
       + 'Les totaux et le tableau ci-dessous sont d&eacute;j&agrave; &agrave; jour.</div>';
     return;
+  }
+  if(!metricF){
+    var rr = jaRangeIdx();
+    days = days.slice(rr[0], rr[1] + 1);
+    gs = gs.map(function(g){ return {name: g.name, points: (g.points || []).slice(rr[0], rr[1] + 1)}; });
   }
   var act = (d.tot || {}).active || 0;
   if(!metricF && act && (d.cov || 0) < act){
@@ -25089,6 +25175,7 @@ function jaChart(){
     svg += '<text x="' + (PL - 8) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#6b7280" font-size="10">' + jaNum(yv) + '</text>';
   }
   days.forEach(function(dd, i){
+    if(days.length > 20 && (i % 3)) return;
     if(days.length > 8 && (i % 2)) return;
     var p = dd.split('-');
     svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#6b7280" font-size="10">' + p[2] + '/' + p[1] + '</text>';
@@ -25147,26 +25234,26 @@ function jaTable(){
   var gs = jaGroups();
   var el = document.getElementById('ja-tbl');
   if(!el) return;
+  var sorted = gs.slice().sort(function(a, b){ return (jaPerVal(b) - jaPerVal(a)) || (b.weekly - a.weekly); });
   var max = 0;
-  gs.forEach(function(g){ if(g.weekly > max) max = g.weekly; });
+  sorted.forEach(function(g){ var v = jaPerVal(g); if(v > max) max = v; });
   var rows = '<div class="ja-row head"><span>#</span><span>' + (window.__jaView === 'va' ? 'VA' : 'Identit&eacute;') + '</span>'
-    + '<span class="num">Comptes</span><span class="num">Actifs</span><span class="num">Bannis</span>'
-    + '<span class="num hidesm">Vues 24 h</span><span class="num">Vues 7 j</span><span class="num hidesm">Vues 14 j</span>'
-    + '<span class="num hidesm">Abonn&eacute;s</span><span class="hidesm">Part 7 j</span></div>';
-  if(!gs.length){ rows += '<div class="ja-msg">Aucun compte.</div>'; }
-  gs.forEach(function(g, i){
-    var pct = max ? Math.round(g.weekly * 100 / max) : 0;
+    + '<span class="num hidesm">Comptes</span><span class="num">Actifs</span><span class="num hidesm">Bannis</span>'
+    + '<span class="num">Vues &mdash; ' + jaPerLabel() + '</span>'
+    + '<span class="num hidesm">Abonn&eacute;s</span><span>Part</span></div>';
+  if(!sorted.length){ rows += '<div class="ja-msg">Aucun compte.</div>'; }
+  sorted.forEach(function(g, i){
+    var v = jaPerVal(g);
+    var pct = max ? Math.round(v * 100 / max) : 0;
     rows += '<div class="ja-row">'
       + '<span style="color:#6b7280">' + (i + 1) + '</span>'
       + '<span class="nm">' + jaAvatar(g) + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + jaEsc(g.name) + '</span></span>'
-      + '<span class="num">' + jaNum(g.n) + '</span>'
+      + '<span class="num hidesm">' + jaNum(g.n) + '</span>'
       + '<span class="num" style="color:#22c55e">' + jaNum(g.active) + '</span>'
-      + '<span class="num" style="color:' + (g.banned ? '#ef4444' : '#6b7280') + '">' + jaNum(g.banned) + '</span>'
-      + '<span class="num hidesm">' + jaNum(g.daily) + '</span>'
-      + '<span class="num" style="color:#fff;font-weight:800">' + jaNum(g.weekly) + '</span>'
-      + '<span class="num hidesm">' + jaNum(g.biweekly) + '</span>'
+      + '<span class="num hidesm" style="color:' + (g.banned ? '#ef4444' : '#6b7280') + '">' + jaNum(g.banned) + '</span>'
+      + '<span class="num" style="color:#fff;font-weight:800">' + jaNum(v) + '</span>'
       + '<span class="num hidesm">' + jaNum(g.followers) + '</span>'
-      + '<span class="ja-share hidesm"><i style="width:' + pct + '%"></i></span>'
+      + '<span class="ja-share"><i style="width:' + pct + '%"></i></span>'
       + '</div>';
   });
   el.innerHTML = rows;
