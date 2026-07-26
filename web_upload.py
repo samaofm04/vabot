@@ -16141,7 +16141,7 @@ function mpRecompute(){
     // Commission + à payer — devise par devise : la part USD (OnlyFans)
     // n'est PAS convertie (même règle que le calcul serveur _pay_usd)
     var pct = (window.__mpCryptoData[name] && window.__mpCryptoData[name].commission_pct) || 0;
-    var payUsd = ((data.ca_eur || 0) * rate + (data.ca_usd || 0)) * pct / 100;
+    var payUsd = mpPayUsd(data, pct, rate);
     var cellPay = row.querySelector('.mp-cell-pay');
     if(cellPay){
       cellPay.textContent = '$' + payUsd.toFixed(2);
@@ -16160,12 +16160,24 @@ function mpRecompute(){
   Object.keys(byChat).forEach(function(n){
     var d2 = byChat[n];
     var p2 = (window.__mpCryptoData[n] && window.__mpCryptoData[n].commission_pct) || 0;
-    totalPayUsd += ((d2.ca_eur || 0) * rate + (d2.ca_usd || 0)) * p2 / 100;
+    totalPayUsd += mpPayUsd(d2, p2, rate);
   });
   var totalUsdEl = document.querySelector('[data-mp-stat="total_pay_usd"]');
   if(totalUsdEl) totalUsdEl.textContent = '$' + totalPayUsd.toFixed(2);
   var totalEurEl = document.querySelector('[data-mp-stat="total_pay_eur"]');
   if(totalEurEl) totalEurEl.textContent = '≈ ' + (totalPayUsd / rate).toFixed(2) + '€';
+}
+// Même règle que le calcul serveur _pay_usd, GARDE-FOU COMPRIS : si le journal
+// des transactions ne recoupe pas le CA de la table (>5 % d'écart : log tronqué
+// ou nom différent), on garde l'ancien calcul pour ce chatteur au lieu de
+// sous-payer en silence. Sans ce garde-fou côté navigateur, le simple fait de
+// toucher un filtre faisait CHANGER le « Total à payer ».
+function mpPayUsd(d, pct, rate){
+  var e = (d && d.ca_eur) || 0, u = (d && d.ca_usd) || 0, t = (d && d.ca_total) || 0;
+  if((e + u) > 0 && Math.abs((e + u) - t) <= Math.max(1, 0.05 * t)){
+    return (e * rate + u) * pct / 100;
+  }
+  return t * pct / 100 * rate;
 }
 function mpShowPeriodLoader(){
   var ov = document.getElementById('mp-loading');
