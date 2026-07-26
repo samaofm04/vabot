@@ -666,8 +666,20 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                         _LAST_FOLDER["err"] = str(e)[:250]
                     print(f"[sheets_sync] création classeur '{identity}': {e}", flush=True)
                     continue
-                ws = sh.sheet1  # 1re feuille = TOUS les comptes de l'identité
-                if ws.title.strip().lower() != str(identity).strip().lower():
+                # Onglet principal par NOM (= identité), PAS par position : si un
+                # onglet parasite (« Feuille 2 ») passe premier, sheet1 pointait
+                # dessus -> les comptes s'écrivaient dedans et l'onglet identité
+                # restait périmé.
+                ws = None
+                try:
+                    for _w0 in sh.worksheets():
+                        if _w0.title.strip().lower() == str(identity).strip().lower():
+                            ws = _w0
+                            break
+                except Exception:
+                    pass
+                if ws is None:
+                    ws = sh.sheet1  # classeur neuf : on renomme la 1re feuille
                     try:
                         ws.update_title(str(identity))
                     except Exception:
@@ -686,6 +698,27 @@ def _push_all_folder(data: dict, force: bool = False) -> bool:
                         tab_ncols[vw.id] = len(_VIEW_HEADER)   # onglets VA = 6 colonnes
                 except Exception as e:
                     print(f"[sheets_sync] vues VA '{identity}': {e}", flush=True)
+                # Onglets par défaut parasites (« Feuille N » / « Sheet N ») :
+                # supprimés s'ils sont VIDES ou si c'est un vieux tableau de
+                # comptes (en-tête username…) — jamais si ça ressemble à des
+                # notes perso de l'utilisateur.
+                try:
+                    import re as _re_fn
+                    for _w in list(sh.worksheets()):
+                        _t = (_w.title or "").strip().lower()
+                        if not _re_fn.match(r"^(feuille|sheet)\s*\d*$", _t):
+                            continue
+                        if len(sh.worksheets()) <= 1:
+                            break
+                        try:
+                            _r1 = [str(c).strip().lower() for c in (_w.row_values(1) or [])]
+                        except Exception:
+                            continue
+                        if not _r1 or _r1[0] == "username":
+                            sh.del_worksheet(_w)
+                            print(f"[sheets_sync] onglet parasite supprimé: {_w.title} ({identity})", flush=True)
+                except Exception:
+                    pass
                 # Mise en forme "pro" de tout le classeur (1 batch)
                 _beautify_sheet(sh, tab_ncols)
                 _last_hash[identity] = h
