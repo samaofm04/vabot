@@ -6190,7 +6190,10 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                     return hit[1]
                 stale = hit[1] if hit else None
                 refreshing = k in _TTL_REFRESHING
-                if stale is not None and not refreshing:
+                # UN SEUL thread calcule (froid OU rafraîchissement) : les autres
+                # servent la valeur périmée, ou attendent la 1re valeur au froid.
+                claim = not refreshing
+                if claim:
                     _TTL_REFRESHING.add(k)
             # PÉRIMÉ MAIS DISPONIBLE : on rend l'ancien TOUT DE SUITE et on
             # rafraîchit en arrière-plan. Avant, le premier visiteur après
@@ -6198,7 +6201,7 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
             # qui interroge GetMySocial) — et chaque expiration re-consommait
             # du quota API pendant le rendu.
             if stale is not None:
-                if not refreshing:
+                if claim:
                     def _refresh():
                         try:
                             val = fn(*args, **kwargs)
@@ -6212,17 +6215,34 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                     _th_perf.Thread(target=_refresh, daemon=True,
                                     name="ttl-refresh").start()
                 return stale
+            # CACHE FROID (rien à servir) : si un autre thread calcule déjà la 1re
+            # valeur, on l'attend brièvement au lieu de lancer un 2e appel réseau
+            # (thundering herd au démarrage / après invalidation globale).
+            if not claim:
+                _deadline = _time_perf.time() + 5.0
+                while _time_perf.time() < _deadline:
+                    _time_perf.sleep(0.02)
+                    with _TTL_CACHE_LOCK:
+                        hit = _TTL_CACHE.get(k)
+                    if hit:
+                        return hit[1]
+                # filet de sécurité : le calculateur n'a rien produit -> on calcule.
             # Compute hors lock pour ne pas bloquer d autres threads
-            result = fn(*args, **kwargs)
-            with _TTL_CACHE_LOCK:
-                _TTL_CACHE[k] = (now, result)
-                # Cleanup si trop d entrees
-                if len(_TTL_CACHE) > max_entries:
-                    # Drop les 50 plus vieilles
-                    olds = sorted(_TTL_CACHE.items(), key=lambda x: x[1][0])[:50]
-                    for kk, _ in olds:
-                        _TTL_CACHE.pop(kk, None)
-            return result
+            try:
+                result = fn(*args, **kwargs)
+                with _TTL_CACHE_LOCK:
+                    _TTL_CACHE[k] = (_time_perf.time(), result)
+                    # Cleanup si trop d entrees
+                    if len(_TTL_CACHE) > max_entries:
+                        # Drop les 50 plus vieilles
+                        olds = sorted(_TTL_CACHE.items(), key=lambda x: x[1][0])[:50]
+                        for kk, _ in olds:
+                            _TTL_CACHE.pop(kk, None)
+                return result
+            finally:
+                if claim:
+                    with _TTL_CACHE_LOCK:
+                        _TTL_REFRESHING.discard(k)
         wrapper.invalidate = lambda: [
             _TTL_CACHE.pop(k, None)
             for k in [kk for kk in list(_TTL_CACHE.keys()) if kk[0] == cache_key_prefix]
@@ -32980,7 +33000,10 @@ def create_app():
     _RESTRICTED_WRITE_ALLOW = (
         "/chatting/",          # planning chatteurs (onglet chatplanning)
         "/logout",
-        "/prefs/", "/settings/prefs", "/theme", "/sfw",
+        # NB : /settings/my_password est autorisé plus haut par un retour
+        # anticipé du guard (exact-match), pas via cette liste de préfixes.
+        # (Anciennes entrées /prefs//theme/sfw retirées : aucune route ne leur
+        # correspond — l'onglet préférences est 100% client-side localStorage.)
     )
     # Écritures réservées aux accès complets, même si un rôle a l'onglet.
     _ADMIN_ONLY_WRITE = (
@@ -41222,7 +41245,12 @@ def start_in_thread():
                         pass
             except Exception as _e_wh:
                 print(f"[warm-home] {_e_wh}", flush=True)
-            _t_wh.sleep(240)                 # entretient le cache (4 min)
+            # DOIT rester <= le TTL du dashboard home (_arg_cached 60 s) : sinon le
+            # cache expirait ~180 s avant la chauffe suivante et le 1er visiteur de
+            # chaque minute repayait l'appel. 55 s garde l'accueil (période par
+            # défaut) toujours chaud. Le rendu lit des données MyPuls déjà en cache,
+            # donc la chauffe ne déclenche pas d'appel réseau supplémentaire.
+            _t_wh.sleep(55)
     try:
         threading.Thread(target=_warm_home, daemon=True, name="warm-home").start()
         print("[warm-home] préchauffage de l'accueil armé", flush=True)

@@ -592,8 +592,76 @@ try:
     }, _jb2, force_delete=False)
     _b = {a["username"]: a for a in _jb2._data["test"]["accounts"]}.get("acc2")
     check("FIX6 chemin normal (colonne va) intact", bool(_b) and _b["va"] == "andry")
+    # -- FIX7 : colonne absente (renommée) n'efface AUCUN champ (protection __cols__) --
+    _jb7 = _FJB({"test": {"vas": ["v"], "accounts": [{"id": 9, "username": "u1", "va": "v",
+                          "password": "KEEP", "two_fa": "T2", "email": "e"}]}})
+    _ss._merge_sheet_into_data({
+        "test": [{"username": "u1", "va": "v", "email": "e", "two_fa": "T2",
+                  "__cols__": ["username", "va", "email", "two_fa"]}],  # 'password' absente
+    }, _jb7, force_delete=False)
+    _u = {a["username"]: a for a in _jb7._data["test"]["accounts"]}.get("u1")
+    check("FIX7 colonne absente n'efface pas le mdp", bool(_u) and _u["password"] == "KEEP")
+    # -- FIX14 : doublon périmé dans un autre onglet VA ne réassigne PAS --
+    _jb14 = _FJB({"test": {"vas": ["v1", "v2"], "accounts": [{"id": 8, "username": "d1", "va": "v1",
+                           "password": "S", "two_fa": "T", "email": "e"}]}})
+    _ss._merge_sheet_into_data({
+        "test": [{"username": "d1", "va": "v1", "password": "S", "email": "e",
+                  "two_fa": "T", "__cols__": _COLS}],
+        "test v1": [{"username": "d1", "__cols__": ["username"]}],   # toujours chez v1
+        "test v2": [{"username": "d1", "__cols__": ["username"]}],   # doublon périmé
+    }, _jb14, force_delete=False)
+    _d = {a["username"]: a for a in _jb14._data["test"]["accounts"]}.get("d1")
+    check("FIX14 doublon périmé ne réassigne pas à tort", bool(_d) and _d["va"] == "v1")
 except Exception as _e:
-    check("FIX6 : testable", False, repr(_e)[:90])
+    check("FIX6/7/14 : testable", False, repr(_e)[:90])
+
+try:
+    import importlib as _il, tempfile as _tf, pathlib as _pl
+    import facture_web as _fw
+    # -- FIX8 : _month_rate (chemin GET) ne clobber PAS une écriture POST concurrente --
+    _fw.FACTURE_FILE = _pl.Path(_tf.mkdtemp()) / "facture.json"
+    _fw._save({"settings": {}, "months": {"2020-01": {"lines": []}}})
+    _snap = _fw._load()                       # snapshot d'un GET compute_state
+    _d2 = _fw._load(); _d2["months"]["2020-01"]["lines"].append({"id": 1})  # POST concurrent
+    _fw._save(_d2)
+    _fw._live_eur_usd_src = lambda: (1.14, "api")
+    _fw._month_rate(_snap, "2020-01")
+    _after = _fw._load()
+    check("FIX8 ligne POST concurrente non clobberée",
+          len(_after["months"]["2020-01"]["lines"]) == 1)
+    check("FIX8 taux mois clos figé atomiquement",
+          abs(float(_after["settings"]["month_rates"]["2020-01"]) - 1.14) < 1e-9)
+    # -- FIX9 : ne JAMAIS figer le repli 1.10 (source 'fallback') --
+    _fw.FACTURE_FILE = _pl.Path(_tf.mkdtemp()) / "facture.json"
+    _fw._save({"settings": {}, "months": {"2020-02": {"lines": []}}})
+    _snap2 = _fw._load()
+    _fw._live_eur_usd_src = lambda: (1.10, "fallback")
+    _fw._month_rate(_snap2, "2020-02")
+    _frozen = "2020-02" in ((_fw._load().get("settings") or {}).get("month_rates") or {})
+    check("FIX9 repli 1.10 (fallback) NON figé", not _frozen)
+    _fw._live_eur_usd_src = lambda: (1.145, "cache")
+    _fw._month_rate(_snap2, "2020-02")
+    check("FIX9 se fige au vrai taux une fois dispo",
+          abs(float(_fw._load()["settings"]["month_rates"]["2020-02"]) - 1.145) < 1e-9)
+except Exception as _e:
+    check("FIX8/9 facture : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _wp, threading as _thr, time as _tm
+    _cnt = {"n": 0}; _lk = _thr.Lock()
+    @_wp.ttl_cache(seconds=30)
+    def _slow_cold():
+        with _lk: _cnt["n"] += 1
+        _tm.sleep(0.2)
+        return "V"
+    _res = []
+    _ts = [_thr.Thread(target=lambda: _res.append(_slow_cold())) for _ in range(10)]
+    for _t in _ts: _t.start()
+    for _t in _ts: _t.join()
+    check("FIX11 cache froid : 1 seule invocation (pas de thundering herd)", _cnt["n"] == 1)
+    check("FIX11 les 10 requêtes obtiennent la valeur", _res.count("V") == 10)
+except Exception as _e:
+    check("FIX11 ttl_cache froid : testable", False, repr(_e)[:90])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

@@ -86,17 +86,24 @@ def _month_bounds(month: str):
     return datetime.date(y, m, 1), datetime.date(y, m, last)
 
 
+def _live_eur_usd_src() -> tuple:
+    """(taux, source) — source in {api, cache, stale_cache, fallback, error}.
+    Sert à ne JAMAIS figer un mois clos sur le repli 1.10 (source 'fallback')."""
+    try:
+        import mypuls
+        r = mypuls.get_eur_usd_rate()
+        return float(r["rate"]), str(r.get("source") or "?")
+    except Exception:
+        return 1.10, "error"
+
+
 def _live_eur_usd() -> float:
     """Taux EUR->USD UNIQUE pour tout le site : le taux BCE live (cache 24 h),
     repli 1.10. Avant : la Facture convertissait à 1.08, la home à 1.14 et la
     paie chatteurs au taux BCE -> trois valeurs différentes pour le même revenu
     (jusqu'à ~8 % d'écart sur la part lead). settings.eur_usd reste prioritaire
     si l'utilisateur l'a fixé explicitement."""
-    try:
-        import mypuls
-        return float(mypuls.get_eur_usd_rate()["rate"])
-    except Exception:
-        return 1.10
+    return _live_eur_usd_src()[0]
 
 
 def _to_usd(amount: float, currency: str, settings: dict) -> float:
@@ -437,15 +444,40 @@ def _month_rate(d: dict, month: str) -> float:
                 return v
         except Exception:
             pass
-    cur_rate = float((d.get("settings") or {}).get("eur_usd") or 0) or _live_eur_usd()
+    override = float((d.get("settings") or {}).get("eur_usd") or 0)
+    if override > 0:
+        cur_rate, src = override, "override"
+    else:
+        cur_rate, src = _live_eur_usd_src()
     if month < _cur_month():
-        # mois terminé : on fige le taux courant pour toujours
-        try:
-            d.setdefault("settings", {}).setdefault("month_rates", {})[month] = cur_rate
-            _save(d)
-        except Exception:
-            pass
+        # Mois terminé : on fige le taux pour toujours — MAIS :
+        #  - jamais le repli 1.10 (source 'fallback'/'error') : un mois clos
+        #    consulté avant le 1er fetch BCE réussi resterait bloqué à 1.10 ;
+        #  - via un upsert ATOMIQUE re-lisant le document (jamais _save du
+        #    snapshot d'un GET, qui écraserait une ligne saisie en parallèle).
+        if src in ("api", "cache", "stale_cache", "override") and cur_rate > 0:
+            _freeze_month_rate(month, cur_rate)
+            # reflète dans le snapshot courant (mémoire seule, pas de persistance)
+            d.setdefault("settings", {}).setdefault("month_rates", {}).setdefault(month, cur_rate)
     return cur_rate
+
+
+def _freeze_month_rate(month: str, rate: float) -> None:
+    """Fige le taux d'un mois clos de façon ATOMIQUE : re-lit le document sous
+    verrou et n'ajoute QUE settings.month_rates[month] s'il est absent. Ne
+    réécrit jamais un snapshot venu d'un chemin GET -> pas de lost-update d'une
+    ligne/toggle enregistré par une requête POST concurrente."""
+    try:
+        with _LOCK:
+            cur = _load()
+            mr = cur.setdefault("settings", {}).setdefault("month_rates", {})
+            if month in mr:
+                return
+            mr[month] = rate
+            FACTURE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            safe_json.write_text(FACTURE_FILE, json.dumps(cur, ensure_ascii=False, indent=1))
+    except Exception:
+        pass
 
 
 def compute_state(month: str) -> dict:

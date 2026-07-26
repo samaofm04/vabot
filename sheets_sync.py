@@ -919,6 +919,10 @@ def _pull_all_single() -> dict | None:
                      for i in range(len(header))}
                 if not (d.get("username") or "").strip():
                     continue
+                # MEME protection qu en mode dossier (_parse_ws) : sans __cols__,
+                # renommer/supprimer une colonne du Sheet en mode mono-classeur
+                # vidait password/2FA/email de tous les comptes de l identite.
+                d["__cols__"] = header
                 accts.append(d)
             out[title] = accts
         return out
@@ -1096,9 +1100,15 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
         for a in accts:
             u = (a.get("username") or "").strip().lower()
             vx = (a.get("va") or "").strip().lower()
-            moved_to = seen_in_va.get(u)
-            if moved_to and moved_to != vx:
-                # Ligne DEPLACEE dans l onglet d un autre VA -> reassignation.
+            # Reassignation par DEPLACEMENT : on ne considere un compte deplace que
+            # s il a VRAIMENT quitte son onglet VA d origine (absent de vx) ET
+            # apparait dans un SEUL autre onglet. Sinon un doublon perime (course
+            # pull/push, copie manuelle) reassignait a tort (le 1er onglet gagnait).
+            tabs_with_u = [vl for vl, us in va_present.items() if u in us]
+            other_tabs = [vl for vl in tabs_with_u if vl != vx]
+            in_own = vx in tabs_with_u
+            if (not in_own) and len(other_tabs) == 1:
+                moved_to = other_tabs[0]
                 # Avant, le compte etait supprime (mot de passe et 2FA perdus).
                 a["va"] = va_meta.get(moved_to, (moved_to, None))[0]
                 moved_users.add(u)   # le 'va' de l onglet identite (perime) ne doit PAS l ecraser
