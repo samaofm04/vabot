@@ -32038,6 +32038,14 @@ def _render_account_section_html() -> str:
     )
 
 
+def _safe_upload_name(name: str) -> str:
+    """Nom de fichier SUR : une tentative de traversee de repertoire
+    (chemin relatif dans le nom du fichier) ne peut plus sortir du dossier."""
+    base = os.path.basename(str(name or "").replace("\\", "/").strip())
+    base = re.sub(r"[^A-Za-z0-9._()\- ]", "_", base).strip().lstrip(".") or "fichier"
+    return base[:120]
+
+
 def _render_upload(msg=None, error=None):
     try:
         return _render_upload_inner(msg=msg, error=error)
@@ -32720,8 +32728,46 @@ def create_app():
             pass
         return response
 
+    def _revoked_sids() -> set:
+        try:
+            d = safe_json.load(DATA_DIR / "revoked_sessions.json", default=[]) or []
+            return {str(x) for x in d}
+        except Exception:
+            return set()
+
+    def _revoke_sid(sid: str):
+        if not sid:
+            return
+        cur = _revoked_sids()
+        cur.add(str(sid))
+        # borne : on ne garde que les 500 dernières révocations
+        safe_json.write_text(DATA_DIR / "revoked_sessions.json",
+                             json.dumps(sorted(cur)[-500:], ensure_ascii=False))
+
     def is_auth():
-        return session.get("auth") is True
+        """Authentifié ET toujours autorisé : un compte supprimé/désactivé ou
+        une session révoquée perd l'accès IMMÉDIATEMENT (avant : jusqu'à 30
+        jours, le cookie seul faisait foi)."""
+        if session.get("auth") is not True:
+            return False
+        try:
+            sid = session.get("sid")
+            if sid and sid in _revoked_sids():
+                session.clear()
+                return False
+            uname = (session.get("username") or "").lower()
+            if uname and uname != "admin":
+                users = _load_web_users() or {}
+                rec = users.get(uname)
+                if users and rec is None:
+                    session.clear()        # compte supprimé
+                    return False
+                if isinstance(rec, dict) and (rec.get("disabled") or rec.get("actif") is False):
+                    session.clear()        # compte désactivé
+                    return False
+        except Exception:
+            pass
+        return True
 
     def _is_admin():
         """True si l'utilisateur connecte a un acces complet (owner/admin ou
@@ -32920,6 +32966,11 @@ def create_app():
                 session["auth"] = True
                 session["username"] = username or "admin"
                 session["role"] = _web_user_role(username, password)
+                # Identifiant de session : permet de la RÉVOQUER vraiment
+                # (avant, « Déconnecter cette session » ne faisait que retirer
+                # une ligne d'affichage, l'accès restait valide 30 jours).
+                import uuid as _uuid_s
+                session["sid"] = _uuid_s.uuid4().hex
                 # "Se souvenir de moi" : session de 30 jours au lieu de session navigateur
                 if remember:
                     session.permanent = True
@@ -32999,7 +33050,7 @@ def create_app():
             return _error(f"Format non supporté ({ext})")
         target_dir = IDENTITIES_DIR / identity / subdir_name
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / photo.filename
+        target = target_dir / _safe_upload_name(photo.filename)
         if target.exists():
             return _error(f"Fichier {photo.filename} existe déjà")
         photo.save(str(target))
@@ -33062,7 +33113,7 @@ def create_app():
             return _error(f"Format non supporté ({ext})")
         target_dir = IDENTITIES_DIR / identity / "storyctas"
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / photo.filename
+        target = target_dir / _safe_upload_name(photo.filename)
         if target.exists():
             return _error(f"Fichier existe déjà")
         photo.save(str(target))
@@ -39249,6 +39300,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not is_auth():
             return redirect("/")
         sid = (request.form.get("session_id") or "").strip()
+        _revoke_sid(sid)                    # révocation EFFECTIVE (pas juste l'affichage)
         sessions = _load_active_sessions()
         sessions = [s for s in sessions if s.get("id") != sid]
         try:
@@ -40533,6 +40585,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "forbidden"}), 403   # identifiants Insta (mdp + 2FA)
         uid = (request.args.get("user_id") or "").strip()
         if not uid:
             return jsonify({"ok": False, "error": "user_id manquant"}), 400
@@ -40543,6 +40597,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "forbidden"}), 403   # identifiants Insta (mdp + 2FA)
         return jsonify({"ok": True, "items": _load_external_insta()})
 
     @app.route("/external/add", methods=["POST"])

@@ -369,6 +369,64 @@ try:
 except Exception as _e:
     check("paie : testable", False, repr(_e)[:90])
 
+
+print()
+print("=" * 70)
+print("9) Sécurité : secrets, sessions révocables, uploads")
+print("=" * 70)
+try:
+    import web_upload as _w2
+    _app2 = _w2.create_app()
+    _app2.config["TESTING"] = True
+    _sav = _w2._load_web_users
+    # identifiants Instagram (mots de passe + 2FA) : réservés aux accès complets
+    _w2._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _cc = _app2.test_client()
+    with _cc.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "chat"
+        _s["role"] = "chatter"
+        _s["sid"] = "T1"
+    check("rôle restreint : identifiants Insta refusés", _cc.get("/external/list").status_code == 403)
+    check("rôle restreint : /va/get_insta_3 refusé", _cc.get("/va/get_insta_3?user_id=1").status_code == 403)
+    # compte supprimé / désactivé : coupure immédiate
+    _w2._load_web_users = lambda: {"autre": {"role": "owner"}}
+    _c3 = _app2.test_client()
+    with _c3.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "vire"
+        _s["role"] = "owner"
+        _s["sid"] = "T2"
+    check("compte supprimé : accès coupé", _c3.get("/external/list").status_code in (302, 401, 403))
+    _w2._load_web_users = lambda: {"susp": {"role": "owner", "disabled": True}}
+    _c4 = _app2.test_client()
+    with _c4.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "susp"
+        _s["role"] = "owner"
+        _s["sid"] = "T3"
+    check("compte désactivé : accès coupé", _c4.get("/external/list").status_code in (302, 401, 403))
+    # révocation effective d'une session
+    _w2._load_web_users = lambda: {"boss": {"role": "owner"}}
+    _c5 = _app2.test_client()
+    with _c5.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "boss"
+        _s["role"] = "owner"
+        _s["sid"] = "T9"
+    check("owner : accès normal", _c5.get("/external/list").status_code == 200)
+    _c5.post("/security/revoke_session", data={"session_id": "T9"})
+    check("session révoquée : accès coupé", _c5.get("/external/list").status_code in (302, 401, 403))
+    pathlib.Path("data/revoked_sessions.json").unlink(missing_ok=True)
+    _w2._load_web_users = _sav
+    # noms de fichiers uploadés
+    for _raw, _exp in (("../../etc/passwd", "passwd"), ("..\..\win.ini", "win.ini"),
+                       ("photo (1).png", "photo (1).png"), ("", "fichier")):
+        check(f"upload assaini : {_raw or '(vide)'}", _w2._safe_upload_name(_raw) == _exp,
+              _w2._safe_upload_name(_raw))
+except Exception as _e:
+    check("sécurité 2 : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
