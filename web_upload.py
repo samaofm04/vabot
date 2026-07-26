@@ -22947,8 +22947,8 @@ GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
 # list_teams échoue par moments sur le VPS et la page se retrouvait vide
 # (« Aucune catégorie »). Les ids sont stables côté GetMySocial.
 GMSDASH_TEAMS = [
+    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),   # 1er = catégorie par DÉFAUT (lola, emma, amelia…)
     ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
-    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),
 ]
 # Liste de SECOURS des liens par team (relevée le 26/07/2026) : la liste (REST)
 # est ce qui 429 sur le VPS, alors que les clics (MCP) passent. Avec ce secours,
