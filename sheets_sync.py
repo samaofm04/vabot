@@ -531,7 +531,9 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool, save_cfg: bool =
             others = [w for w in allws if w not in views and w not in idents]
             idents.sort(key=lambda w: w.title.lower())
             views.sort(key=lambda w: w.title.lower())
-            sh.reorder_worksheets(others + idents + views)
+            # Identité(s) EN PREMIER (l'onglet principal doit être le n°1 du
+            # classeur), puis les vues par VA, puis le reste (Feuille N…) au fond.
+            sh.reorder_worksheets(idents + views + others)
         except Exception:
             pass
     return wanted   # {clé onglet -> worksheet} (VA views créées)
