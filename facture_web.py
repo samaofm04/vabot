@@ -411,11 +411,37 @@ def _pin_creator_id(month: str, line_id, cid: int) -> None:
             break
 
 
+def _month_rate(d: dict, month: str) -> float:
+    """Taux EUR->USD à utiliser pour CE mois.
+
+    Un mois CLOS garde le taux figé au moment de sa clôture : sans ça, ses
+    totaux (et le Bilan cumulé) changeaient tout seuls chaque jour au gré du
+    marché des changes. Le mois EN COURS suit le taux courant.
+    """
+    fixed = (d.get("settings") or {}).get("month_rates") or {}
+    if month in fixed:
+        try:
+            v = float(fixed[month] or 0)
+            if v > 0:
+                return v
+        except Exception:
+            pass
+    cur_rate = float((d.get("settings") or {}).get("eur_usd") or 0) or _live_eur_usd()
+    if month < _cur_month():
+        # mois terminé : on fige le taux courant pour toujours
+        try:
+            d.setdefault("settings", {}).setdefault("month_rates", {})[month] = cur_rate
+            _save(d)
+        except Exception:
+            pass
+    return cur_rate
+
+
 def compute_state(month: str) -> dict:
     """État complet du mois : settings + lignes (montants USD résolus) + totaux."""
     d = _load()
     settings = {
-        "eur_usd": float(d["settings"].get("eur_usd") or 0) or _live_eur_usd(),
+        "eur_usd": _month_rate(d, month),
         "cutoff": int(d["settings"].get("cutoff") or 15),
         "associates": d["settings"].get("associates") or [],
     }
