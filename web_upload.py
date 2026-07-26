@@ -22969,7 +22969,7 @@ GMSDASH_LINKS_FILE = DATA_DIR / "gmsdash_links.json"
 GMSDASH_FR_COUNTRIES = ("FR", "BE", "CH", "LU", "MC")
 # Version du format de payload : bump à chaque changement de structure (fr/us_points…)
 # -> le démon recalcule les caches à l'ancien format au lieu de les croire « frais ».
-GMSDASH_PAYLOAD_VER = 9
+GMSDASH_PAYLOAD_VER = 10
 GMSDASH_SEED_LINKS = {
     "tm_6a0e4739bfa0c238f20a8bf5": [
         {
@@ -23229,9 +23229,12 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         dn = str(l.get("display_name") or "")
         g = str((_grp_map or {}).get(l.get("id")) or "").strip()
         if g and g.lower() != "ungrouped links":
-            parts = g.split()
+            parts = [p for p in g.lower().split() if p != "jb"]
             if len(parts) >= 2:
-                return True, parts[-1].lower()      # « AMELIA JB TOKY » -> toky
+                # Le VA = le mot qui n'est PAS une identité connue : l'ordre varie
+                # selon les groupes (« ALICIA ANDRY » -> andry, « FANY EMMA » -> fany).
+                _cand = [p for p in parts if p not in _mmap_c]
+                return True, (_cand[-1] if _cand else parts[-1])
             return False, ""                        # groupe identité simple -> classique
         if _gmsdash_kind_is_jb(dn):
             return True, dn.lower().split()[0]
