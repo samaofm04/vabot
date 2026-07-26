@@ -32264,7 +32264,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
         .replace("{gmsdash_html}", _g("gmsdash", _render_gmsdash_html))
         .replace("{facture_html}", _g("facture", _render_facture_html))
-        .replace("{depenses_html}", _g("depenses", _render_depenses_html))
+        .replace("{depenses_html}", _lazy("depenses"))
         .replace("{paievas_html}", _g("paievas", _render_paievas_html))
         .replace("{biolinks_html}", _lazy("biolinks"))
         .replace("{onboarding_html}", _lazy("onboarding"))
@@ -32281,7 +32281,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{vtg_html}", _lazy("vtg"))
         .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
-        .replace("{chatplanning_html}", _g("chatplanning", _render_chatplanning_html))
+        .replace("{chatplanning_html}", _lazy("chatplanning"))
         .replace("{videocrea_html}", _lazy("videocrea"))
         .replace("{bilan_html}", _lazy("bilan"))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
@@ -33187,6 +33187,8 @@ def create_app():
                 "onboarding": _render_onboarding_html,
                 "videocrea": _render_videocrea_html,
                 "srole": _render_role_settings_html,
+                "chatplanning": _render_chatplanning_html,
+                "depenses": _render_depenses_html,
             }
             _prod = _prods.get(_name)
             if _prod is None:
