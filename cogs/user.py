@@ -495,6 +495,19 @@ _REAL_PREFIXES = ("its", "real", "iam")
 _REAL_SUFFIXES = ("off", "ofc")
 
 
+def _ascii_name(s: str) -> str:
+    """Prenom -> minuscules SANS ACCENT ni espace, lettres ASCII uniquement.
+
+    Indispensable : Instagram REFUSE les caracteres accentues. Une identite
+    nommee « Amélia » produisait « amélia_fntn », un pseudo impossible a creer
+    (str.isalnum() accepte les lettres accentuees, d'ou le trou).
+    """
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "").lower().strip())
+    s = s.encode("ascii", "ignore").decode("ascii")
+    return "".join(c for c in s if c.isalpha())
+
+
 def _consonant_tag(word: str) -> str:
     """Nom de famille -> son abreviation SANS VOYELLES, facon initiales.
 
@@ -518,8 +531,7 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     checker de dispo prend les premiers libres, donc on propose toujours le
     plus credible en premier.
     """
-    base = base.lower().strip()
-    base = "".join(c for c in base if c.isalpha())
+    base = _ascii_name(base)
     if not base:
         return []
 
@@ -536,8 +548,9 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
         # filtre 4+ jetait.
         if not u or not (3 <= len(u) <= 30) or u in seen:
             return
-        if not core.isalnum() or core.isdigit():
-            return                              # doit contenir des lettres
+        # isalnum() seul ne suffit PAS : il accepte « é ». Instagram, non.
+        if not u.isascii() or not core.isalnum() or core.isdigit():
+            return                              # doit contenir des lettres ASCII
         if u[0] == "." or u[-1] == "." or ".." in u or "__" in u:
             return
         seen.add(u)
@@ -795,8 +808,7 @@ def _get_diminutives(base: str) -> list:
         julia  -> ['jul', 'juju', 'juli', 'julie']
         lola   -> ['lolo', 'lou', 'loula']
     """
-    base = base.lower().strip()
-    base = "".join(c for c in base if c.isalpha())
+    base = _ascii_name(base)          # « Amélia » -> « amelia » (sinon aucun surnom)
     if len(base) < 3:
         return []
     out = []
@@ -1412,20 +1424,30 @@ class UserCog(commands.Cog):
         try:
             available = await find_available_usernames(identity, max_check=30, want=5)
         except Exception as e:
+            # Repli : on RE-GENERE avec les regles actuelles au lieu de servir le
+            # vieux fichier usernames.txt (lot fige, jamais reverifie). On previent
+            # clairement que la dispo n'a PAS pu etre controlee.
+            props = generate_username_candidates(identity, count=5)
+            if not props:
+                props = [u for u in [random_username_for(identity)] if u]
+            txt = "\n".join(f"`{u}`" for u in props) or "_(rien à proposer)_"
             await interaction.followup.send(
-                f"⚠️ Erreur lors du check Instagram : {e}\n"
-                "Fallback sur la liste pré-définie :"
+                f"⚠️ Instagram n'a pas répondu ({e}) — **dispo NON vérifiée**, "
+                f"teste-les à la création :\n{txt}"
             )
-            u = random_username_for(identity)
-            if u:
-                await interaction.followup.send(u)
             return
         if not available:
-            # Tous pris -> fallback sur la liste manuelle
-            u = random_username_for(identity)
+            # Tous pris : on propose quand meme des pseudos du MEME style (non
+            # verifies) plutot que de renvoyer l'utilisateur vers une liste figee.
+            props = [u for u in generate_username_candidates(identity, count=8)][:3]
+            extra = random_username_for(identity)
+            if extra and extra not in props:
+                props.append(extra)
+            txt = "\n".join(f"`{u}`" for u in props)
             await interaction.followup.send(
-                f"😬 Tous les pseudos auto-générés sont déjà pris pour `{identity}`. "
-                + (f"Essaie celui-ci :\n`{u}`" if u else "Demande à un admin (`/addusernames`).")
+                f"😬 Les pseudos testés pour `{identity}` sont tous pris. "
+                + (f"À tenter (dispo non vérifiée) :\n{txt}" if props
+                   else "Demande à un admin (`/addusernames`).")
             )
             return
         # Affichage des dispo
