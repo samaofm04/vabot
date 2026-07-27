@@ -832,6 +832,61 @@ try:
 except Exception as _e:
     check("C ttl generation guard : testable", False, repr(_e)[:90])
 
+print()
+print("=" * 70)
+print("13) Régressions du 4e sweep (wn87bca3a) — génération PAR PRÉFIXE")
+print("=" * 70)
+try:
+    import web_upload as _wD, threading as _thD, time as _tmD
+    # -- CROSS-KEY : invalider F ne doit PAS rejeter le store en vol de G --
+    _gcD = {"n": 0}
+    @_wD.ttl_cache(30)
+    def _GD():
+        _gcD["n"] += 1; _tmD.sleep(0.25); return "G"
+    @_wD.ttl_cache(30)
+    def _FD():
+        return "F"
+    _FD()
+    _thg = _thD.Thread(target=_GD); _thg.start()
+    _tmD.sleep(0.08)
+    _FD.invalidate()                 # invalidation SANS RAPPORT pendant le calcul de G
+    _thg.join()
+    _b = _gcD["n"]; _GD()            # doit être un HIT
+    check("cross-key: G caché malgré F.invalidate (gen par préfixe)", _gcD["n"] == _b)
+    # -- FULL-CLEAR : _invalidate_all rejette bien le store en vol (fix C préservé) --
+    _hcD = {"n": 0}
+    @_wD.ttl_cache(30)
+    def _HD():
+        _hcD["n"] += 1; _tmD.sleep(0.25); return "H"
+    _thh = _thD.Thread(target=_HD); _thh.start()
+    _tmD.sleep(0.08)
+    _wD._invalidate_all_ttl_cache()  # vidage total pendant le calcul
+    _thh.join()
+    _b2 = _hcD["n"]; _HD()           # doit RECOMPUTER (store rejeté par l'époque)
+    check("full-clear: store en vol rejeté (contrat _success préservé)", _hcD["n"] == _b2 + 1)
+except Exception as _e:
+    check("4e sweep cross-key/full-clear : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _wE, threading as _thE, time as _tmE
+    # -- DEADLINE-FALLBACK : leader lent > 5 s -> UN SEUL relais, pas de troupeau --
+    _lcE = {"n": 0}; _lkE = _thE.Lock()
+    @_wE.ttl_cache(30)
+    def _LE():
+        with _lkE: _lcE["n"] += 1; _n = _lcE["n"]
+        _tmE.sleep(5.4 if _n == 1 else 0.1)   # seul le leader est lent
+        return "L"
+    _rE = []
+    _tE = [_thE.Thread(target=lambda: _rE.append(_LE())) for _ in range(5)]
+    for _t in _tE: _t.start()
+    for _t in _tE: _t.join()
+    check("deadline-fallback: leader lent -> <=2 computes (pas de troupeau)", _lcE["n"] <= 2)
+    check("deadline-fallback: les 5 requêtes obtiennent la valeur", _rE.count("L") == 5)
+    check("deadline-fallback: _TTL_FALLBACK/_TTL_REFRESHING vidés (pas de fuite)",
+          len(_wE._TTL_FALLBACK) == 0 and len(_wE._TTL_REFRESHING) == 0)
+except Exception as _e:
+    check("deadline-fallback : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

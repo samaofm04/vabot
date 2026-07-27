@@ -6166,10 +6166,15 @@ import threading as _th_perf
 _TTL_CACHE: dict = {}
 _TTL_CACHE_LOCK = _th_perf.Lock()
 _TTL_REFRESHING: set = set()   # clés en cours de rafraîchissement en fond
-_TTL_GEN = 0                   # génération : +1 à CHAQUE invalidation. Un
-                               # refresh/compute en vol ne réécrit PAS le cache si
-                               # la génération a changé entre-temps (sinon il
-                               # ressusciterait une valeur d'AVANT la mutation).
+_TTL_FALLBACK: set = set()     # clés dont le RELAIS d'attente (leader lent > 5 s)
+                               # est déjà pris par un waiter (borne le troupeau à 1).
+# Génération PAR PRÉFIXE de fonction (pas un scalaire global) : invalider la
+# fonction G ne doit PAS rejeter le store en vol de la fonction F. Un
+# refresh/compute ne réécrit le cache que si NI la génération de SA fonction NI
+# l'époque globale (vidage total) n'ont changé pendant le calcul — sinon il
+# ressusciterait une valeur d'AVANT la mutation.
+_TTL_GEN: dict = {}            # cache_key_prefix -> int (bumpé par le invalidate de CETTE fonction)
+_TTL_EPOCH = 0                 # bumpé UNIQUEMENT par _invalidate_all_ttl_cache (vidage total)
 
 
 def ttl_cache(seconds: int = 30, max_entries: int = 256):
@@ -6206,14 +6211,16 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
             # du quota API pendant le rendu.
             if stale is not None:
                 if claim:
-                    def _refresh(_gen0=_TTL_GEN):
+                    def _refresh(_g0=_TTL_GEN.get(cache_key_prefix, 0), _e0=_TTL_EPOCH):
                         try:
                             val = fn(*args, **kwargs)
                             with _TTL_CACHE_LOCK:
-                                # ne réécrit PAS si une invalidation est survenue
-                                # pendant le calcul (sinon on ressusciterait une
-                                # valeur d'AVANT la mutation -> _success trahi).
-                                if _TTL_GEN == _gen0:
+                                # ne réécrit PAS si une invalidation de CETTE fonction
+                                # (ou un vidage total) est survenue pendant le calcul
+                                # (sinon on ressusciterait une valeur d'AVANT la
+                                # mutation -> _success trahi). Une invalidation d'une
+                                # AUTRE fonction ne bloque plus ce store.
+                                if _TTL_GEN.get(cache_key_prefix, 0) == _g0 and _TTL_EPOCH == _e0:
                                     _TTL_CACHE[k] = (_time_perf.time(), val)
                         except Exception:
                             pass
@@ -6228,6 +6235,7 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
             # (ex. GMS 429), UN SEUL waiter re-claim et recalcule ; les autres
             # continuent d'attendre (sinon N waiters recalculent en rafale = le
             # troupeau que ce chemin est censé empêcher).
+            _took_fallback = False
             if not claim:
                 _deadline = _time_perf.time() + 5.0
                 while True:
@@ -6235,22 +6243,37 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                     with _TTL_CACHE_LOCK:
                         hit = _TTL_CACHE.get(k)
                         if hit is None and k not in _TTL_REFRESHING:
-                            _TTL_REFRESHING.add(k)   # je deviens le leader unique
+                            _TTL_REFRESHING.add(k)   # le leader a abandonné -> je reprends
                             claim = True
                     if hit:
                         return hit[1]
                     if claim:
                         break
                     if _time_perf.time() >= _deadline:
-                        break   # filet : leader bloqué > 5 s -> calcule sans claim
+                        # Leader LENT-mais-vivant (> 5 s) : UN SEUL waiter prend le
+                        # relais (sinon les N waiters recalculent en rafale = troupeau
+                        # sur une API déjà lente). Les autres prolongent et attendent.
+                        with _TTL_CACHE_LOCK:
+                            if k in _TTL_FALLBACK:
+                                _take = False
+                            else:
+                                _TTL_FALLBACK.add(k)
+                                _take = True
+                                _took_fallback = True
+                        if _take:
+                            break
+                        _deadline = _time_perf.time() + 5.0
+                        continue
             # Compute hors lock pour ne pas bloquer d autres threads
             try:
-                _gen0 = _TTL_GEN
+                _g0 = _TTL_GEN.get(cache_key_prefix, 0)
+                _e0 = _TTL_EPOCH
                 result = fn(*args, **kwargs)
                 with _TTL_CACHE_LOCK:
                     # idem : ne cache pas un résultat calculé sur un état invalidé
-                    # entre-temps (le prochain GET recalculera du frais).
-                    if _TTL_GEN == _gen0:
+                    # entre-temps (le prochain GET recalculera du frais). Une
+                    # invalidation d'une AUTRE fonction ne bloque plus ce store.
+                    if _TTL_GEN.get(cache_key_prefix, 0) == _g0 and _TTL_EPOCH == _e0:
                         _TTL_CACHE[k] = (_time_perf.time(), result)
                         # Cleanup si trop d entrees
                         if len(_TTL_CACHE) > max_entries:
@@ -6263,12 +6286,16 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                 if claim:
                     with _TTL_CACHE_LOCK:
                         _TTL_REFRESHING.discard(k)
+                if _took_fallback:
+                    with _TTL_CACHE_LOCK:
+                        _TTL_FALLBACK.discard(k)
         def _invalidate_this():
-            global _TTL_GEN
             with _TTL_CACHE_LOCK:
                 for kk in [x for x in list(_TTL_CACHE.keys()) if x[0] == cache_key_prefix]:
                     _TTL_CACHE.pop(kk, None)
-                _TTL_GEN += 1     # invalide aussi les refresh/compute en vol
+                # bumpe SEULEMENT la génération de CETTE fonction (n'affecte pas
+                # le store en vol des autres fonctions).
+                _TTL_GEN[cache_key_prefix] = _TTL_GEN.get(cache_key_prefix, 0) + 1
         wrapper.invalidate = _invalidate_this
         return wrapper
     return deco
@@ -6276,10 +6303,11 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
 
 def _invalidate_all_ttl_cache():
     """Vide tout le cache TTL (a appeler apres une mutation importante)."""
-    global _TTL_GEN
+    global _TTL_EPOCH
     with _TTL_CACHE_LOCK:
         _TTL_CACHE.clear()
-        _TTL_GEN += 1     # un refresh en vol ne réécrira pas une valeur pré-mutation
+        _TTL_EPOCH += 1   # un refresh/compute en vol (toute fonction) ne réécrira
+                          # pas une valeur pré-mutation après ce vidage total.
 
 
 def _arg_cached(seconds: int = 60, key_args=()):
@@ -6306,14 +6334,23 @@ def _arg_cached(seconds: int = 60, key_args=()):
                 hit = _TTL_CACHE.get(k)
                 if hit and (now - hit[0]) < seconds:
                     return hit[1]
+            _g0 = _TTL_GEN.get(cache_key_prefix, 0)
+            _e0 = _TTL_EPOCH
             result = fn(*args, **kwargs)
             with _TTL_CACHE_LOCK:
-                _TTL_CACHE[k] = (now, result)
+                # même garde que ttl_cache : ne cache pas un résultat calculé sur
+                # un état invalidé pendant le calcul (sinon le home dashboard
+                # servirait une valeur pré-mutation jusqu'à 60 s après _success).
+                if _TTL_GEN.get(cache_key_prefix, 0) == _g0 and _TTL_EPOCH == _e0:
+                    _TTL_CACHE[k] = (now, result)
             return result
-        wrapper.invalidate = lambda: [
-            _TTL_CACHE.pop(k, None)
-            for k in [kk for kk in list(_TTL_CACHE.keys()) if kk[0] == cache_key_prefix]
-        ]
+
+        def _invalidate_this_arg():
+            with _TTL_CACHE_LOCK:
+                for kk in [x for x in list(_TTL_CACHE.keys()) if x[0] == cache_key_prefix]:
+                    _TTL_CACHE.pop(kk, None)
+                _TTL_GEN[cache_key_prefix] = _TTL_GEN.get(cache_key_prefix, 0) + 1
+        wrapper.invalidate = _invalidate_this_arg
         return wrapper
     return deco
 
