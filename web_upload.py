@@ -16758,7 +16758,11 @@ def _compute_va_pay_report(period: str) -> dict:
     from concurrent.futures import ThreadPoolExecutor
 
     cached = _PAY_REPORT_CACHE.get(period)
-    if cached and time.time() - cached[0] < 300:
+    # Ne JAMAIS servir un rapport PARTIEL depuis le cache : sinon « relance avant
+    # de payer » renverrait le même minimum périmé pendant 5 min même après le
+    # rétablissement de GMS -> l'opérateur paie le minimum. Un rapport partial
+    # force donc un vrai recalcul (qui re-tente les jours en panne).
+    if cached and time.time() - cached[0] < 300 and not cached[1].get("partial"):
         return cached[1]
 
     today = _paris_now_web().date()   # jour "aujourd'hui" en heure de Paris
@@ -16855,7 +16859,10 @@ def _compute_va_pay_report(period: str) -> dict:
         # MINIMUM -> le front affiche un avertissement au lieu d'un total figé.
         "partial": any_missing,
     }
-    _PAY_REPORT_CACHE[period] = (time.time(), payload)
+    # Ne mémoriser QUE les rapports complets : un rapport partial ne doit pas
+    # figer un minimum (le prochain appel recalculera et re-tentera GMS).
+    if not any_missing:
+        _PAY_REPORT_CACHE[period] = (time.time(), payload)
     return payload
 
 

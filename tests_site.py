@@ -920,6 +920,19 @@ try:
     _pn = _wM._compute_va_pay_report("current")
     check("#1/#2 aucune panne -> partial=False & missing=0",
           _pn["partial"] is False and _pn["categories"][0]["vas"][0]["missing"] == 0)
+    # -- rapport PARTIEL non caché : « relance » recalcule après rétablissement GMS --
+    _wM._pay_list_discord_vas = lambda: [("Team A", "marie")]
+    _wM._pay_gms_exact_link = lambda h, links: {"id": "L1"}
+    _gmsM.analytics_for_link = _mixed
+    _reset_pay()
+    _pp1 = _wM._compute_va_pay_report("current")
+    check("rapport partiel NON mis en cache", "current" not in _wM._PAY_REPORT_CACHE)
+    with _wM._PAY_DAYCACHE_LOCK: _wM._PAY_DAYCACHE.clear()
+    _gmsM.analytics_for_link = lambda lid, a, b: (80, {"FR": 80})   # GMS rétabli
+    _pp2 = _wM._compute_va_pay_report("current")
+    check("relance après rétablissement -> total complet (pas le minimum stale)",
+          (not _pp2["partial"]) and _pp2["total"] > _pp1["total"])
+    check("rapport complet, lui, mis en cache", "current" in _wM._PAY_REPORT_CACHE)
     # -- #7 : deux handles -> même lien GMS -> UNE seule ligne payée --
     _wM._pay_list_discord_vas = lambda: [("Cat", "marie.rose"), ("Cat", "marierose")]
     _wM._pay_gms_exact_link = lambda h, links: {"id": "L1"}
