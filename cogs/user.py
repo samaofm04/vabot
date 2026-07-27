@@ -495,6 +495,19 @@ _REAL_PREFIXES = ("its", "real", "iam")
 _REAL_SUFFIXES = ("off", "ofc")
 
 
+def _consonant_tag(word: str) -> str:
+    """Nom de famille -> son abreviation SANS VOYELLES, facon initiales.
+
+    C'est LE motif dominant de la niche (releve Veille) : @anna_vnbs,
+    @ludivine_dstr, @lorenastms, @lousmtr, @ninicsti. Ce n'est PAS du hasard :
+    ca se lit comme les initiales d'un vrai nom, d'ou le rendu credible.
+    Ex : Dubois -> dbs, Martin -> mrtn, Mercier -> mrcr, Rousseau -> rss.
+    """
+    w = "".join(c for c in (word or "").lower() if c.isalpha())
+    tag = "".join(c for c in w if c not in "aeiouy")
+    return tag[:4]                       # 2-4 lettres comme les vrais comptes
+
+
 def generate_username_candidates(base: str, count: int = 40) -> list:
     """Pseudos LISIBLES batis UNIQUEMENT sur le prenom (+ ses diminutifs) et de
     VRAIS mots. Plus jamais de consonnes au hasard.
@@ -544,7 +557,20 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     # famille invente (« lola.blanc »), consonnes au hasard (« amelia_xqks »).
     # Modeles observes : @elsafraise, @jadelapinee, @alice.moreee, @lolabloomy_,
     # @mila.tacrush, @anais.cutiee, @_jade.vibess, @itsncyoff.
-    fam_double, fam_word, fam_under, fam_pre = [], [], [], []
+    fam_tag, fam_double, fam_word, fam_under, fam_pre = [], [], [], [], []
+    # 0) LE motif dominant de la niche : prenom + initiales de nom sans voyelles
+    #    (@anna_vnbs, @ludivine_dstr, @lorenastms, @lousmtr). En premier car c'est
+    #    ce que l'user a designe comme la reference.
+    # 3-4 lettres comme les vrais comptes (vnbs, dstr, stms, smtr, csti) : a 2
+    # lettres (« amy_fr ») ca ne ressemble plus a des initiales.
+    tags = [t for t in (_consonant_tag(l) for l in _LAST_NAMES) if 3 <= len(t) <= 4]
+    tags = list(dict.fromkeys(tags))
+    random.shuffle(tags)
+    for t in tags:
+        for n in names[:3]:
+            for sep in ("_", ""):
+                fam_tag.append(f"{n}{sep}{t}")
+    random.shuffle(fam_tag)
     # a) voyelle finale allongee : ameliaa, ameliaaa  (@alice.moreee, @jadelioraaa)
     for n in names[:4]:
         if n and n[-1] in "aeiouy":
@@ -569,15 +595,26 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
         for n in names[:3]:
             fam_pre += [f"{n}.{suf}", f"{n}{suf}"]
 
-    # Alternance : un pseudo de chaque famille a tour de role -> les 10 premiers
-    # sont varies au lieu d'etre 10 variantes du meme motif.
-    fams = [fam_word, fam_double, fam_under, fam_pre]
-    for i in range(max(len(f) for f in fams) if any(fams) else 0):
-        for f in fams:
-            if i < len(f):
-                add(f[i])
-        if len(out) >= count:
-            break
+    # Alternance PONDEREE : a chaque tour on sert 2 pseudos du motif de reference
+    # (prenom + initiales, facon @anna_vnbs) et 1 de chaque autre famille. Sinon
+    # les 10 premiers seraient 10 variantes du meme motif.
+    # NB : on avance un CURSEUR par famille — repeter la meme liste dans `fams`
+    # ne marcherait pas (on re-ajouterait l'element deja vu, donc ignore).
+    plan = [(fam_tag, 2), (fam_word, 1), (fam_double, 1),
+            (fam_under, 1), (fam_pre, 1)]
+    pos = [0] * len(plan)
+    while len(out) < count:
+        progressed = False
+        for j, (fam, weight) in enumerate(plan):
+            for _ in range(weight):
+                if pos[j] < len(fam):
+                    add(fam[pos[j]])
+                    pos[j] += 1
+                    progressed = True
+            if len(out) >= count:
+                break
+        if not progressed:
+            break                        # toutes les familles sont epuisees
 
     return out[:count]
 
