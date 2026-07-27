@@ -86,15 +86,32 @@ def _month_bounds(month: str):
     return datetime.date(y, m, 1), datetime.date(y, m, last)
 
 
+_EUR_USD_SRC_CACHE = {"ts": 0.0, "val": None}   # mémo process (taux, source)
+_EUR_USD_SRC_TTL = 60
+
+
 def _live_eur_usd_src() -> tuple:
     """(taux, source) — source in {api, cache, stale_cache, fallback, error}.
-    Sert à ne JAMAIS figer un mois clos sur le repli 1.10 (source 'fallback')."""
+    Sert à ne JAMAIS figer un mois clos sur le repli 1.10 (source 'fallback').
+
+    MÉMOÏSÉ 60 s en process : compute_bilan appelle _month_rate pour CHAQUE mois
+    clos ; sans ce cache, un cache BCE froid + API injoignable relançait un
+    requests.get(timeout=10) par mois (~120 s de hang par rendu, rejoué à chaque
+    ouverture). Ici : au plus un appel réseau court par salve de rendu."""
+    import time as _t
+    now = _t.time()
+    c = _EUR_USD_SRC_CACHE
+    if c["val"] is not None and (now - c["ts"]) < _EUR_USD_SRC_TTL:
+        return c["val"]
     try:
         import mypuls
         r = mypuls.get_eur_usd_rate()
-        return float(r["rate"]), str(r.get("source") or "?")
+        val = (float(r["rate"]), str(r.get("source") or "?"))
     except Exception:
-        return 1.10, "error"
+        val = (1.10, "error")
+    c["val"] = val
+    c["ts"] = now
+    return val
 
 
 def _live_eur_usd() -> float:

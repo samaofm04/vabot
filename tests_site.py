@@ -548,7 +548,7 @@ try:
         _nd = _dtp.date.fromisoformat(_iso) + _dtp.timedelta(days=1)
         _d0 = _dtp.date(_nd.year, 3, _wr._last_sunday_web(_nd.year, 3))
         _d1 = _dtp.date(_nd.year, 10, _wr._last_sunday_web(_nd.year, 10))
-        _off = 2 if (_d0 <= _nd < _d1) else 1
+        _off = 2 if (_d0 < _nd <= _d1) else 1   # bornes décalées (bascule DST)
         return _calp.timegm((_dtp.datetime(_nd.year, _nd.month, _nd.day)
                              - _dtp.timedelta(hours=_off)).timetuple())
     check("FIX5 fin de jour Paris été (CEST)",
@@ -618,6 +618,7 @@ except Exception as _e:
 try:
     import importlib as _il, tempfile as _tf, pathlib as _pl
     import facture_web as _fw
+    _orig_src = _fw._live_eur_usd_src   # restauré en fin de bloc (sinon #5 teste un stub)
     # -- FIX8 : _month_rate (chemin GET) ne clobber PAS une écriture POST concurrente --
     _fw.FACTURE_FILE = _pl.Path(_tf.mkdtemp()) / "facture.json"
     _fw._save({"settings": {}, "months": {"2020-01": {"lines": []}}})
@@ -643,6 +644,7 @@ try:
     _fw._month_rate(_snap2, "2020-02")
     check("FIX9 se fige au vrai taux une fois dispo",
           abs(float(_fw._load()["settings"]["month_rates"]["2020-02"]) - 1.145) < 1e-9)
+    _fw._live_eur_usd_src = _orig_src   # restaure la vraie fonction (pour le test #5)
 except Exception as _e:
     check("FIX8/9 facture : testable", False, repr(_e)[:90])
 
@@ -662,6 +664,103 @@ try:
     check("FIX11 les 10 requêtes obtiennent la valeur", _res.count("V") == 10)
 except Exception as _e:
     check("FIX11 ttl_cache froid : testable", False, repr(_e)[:90])
+
+print()
+print("=" * 70)
+print("11) Régressions du 2e sweep (w22vueppt) — verrouillage")
+print("=" * 70)
+try:
+    import web_upload as _w2s
+    _a2 = _w2s.create_app(); _a2.config["TESTING"] = True
+    _sv2 = _w2s._load_web_users
+    _svr2 = getattr(_w2s, "_load_role_definitions", None)
+    _w2s._load_web_users = lambda: {"mgr": {"role": "manager"}, "chat": {"role": "chatter"}, "boss": {"role": "owner"}}
+    _w2s._load_role_definitions = lambda: {"manager": {"permissions": {"paievas": {"enabled": True}}}}
+
+    def _mk(user, role, sid):
+        _c = _a2.test_client()
+        with _c.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = user; _s["role"] = role; _s["sid"] = sid
+        return _c
+    def _forbidden(cl, path):
+        _r = cl.get(path); return _r.status_code == 403 and b"forbidden" in _r.data
+    _chat = _mk("chat", "chatter", "V2C")
+    # -- #1 : revenus agence MyPuls fermés au chatter --
+    check("#1 chatter bloqué sur /mypuls/sales_window",
+          _forbidden(_chat, "/mypuls/sales_window?start=2026-07-01&end=2026-07-31"))
+    check("#1 chatter bloqué sur /mypuls/api_stats_test",
+          _forbidden(_chat, "/mypuls/api_stats_test?id=1"))
+    check("#1 chatter garde /mypuls/avatar (pas un 403 du guard)",
+          not _forbidden(_chat, "/mypuls/avatar/1"))
+    # -- #6 : un rôle AVEC la permission paievas lit /paievas/report ; sans -> bloqué --
+    check("#6 manager(paievas) lit /paievas/report",
+          _mk("mgr", "manager", "V2M").get("/paievas/report?period=current").status_code != 403)
+    check("#6 chatter (sans paievas) reste bloqué",
+          _forbidden(_chat, "/paievas/report?period=current"))
+    check("#6b manager(paievas) NE lit PAS les revenus agence",
+          _forbidden(_mk("mgr", "manager", "V2M2"), "/mypuls/sales_window?start=2026-07-01&end=2026-07-31"))
+    # -- #2 : SSRF host-confusion (backslash / %5C / userinfo) bloqué --
+    from urllib.parse import quote as _q
+    _boss = _mk("boss", "owner", "V2B")
+    for _p in ("http://169.254.169.254\\.instagram.com/",
+               "http://169.254.169.254%5C.instagram.com/",
+               "http://instagram.com@169.254.169.254/"):
+        check("#2 SSRF bloqué: " + _p[:38],
+              _boss.get("/insta/proxy_video?vurl=" + _q(_p, safe='')).status_code == 403)
+    check("#2 vrai CDN passe encore",
+          _boss.get("/insta/proxy_video?vurl=https://scontent.cdninstagram.com/v/x.mp4").status_code != 403)
+    _w2s._load_web_users = _sv2
+    if _svr2 is not None:
+        _w2s._load_role_definitions = _svr2
+except Exception as _e:
+    check("#1/#2/#6 : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _w3s, threading as _thr3, time as _tm3
+    # -- #3 : leader échoue -> waiters ne bloquent PAS 5s --
+    _c3 = {"n": 0}; _l3 = _thr3.Lock()
+    @_w3s.ttl_cache(seconds=30)
+    def _failing():
+        with _l3: _c3["n"] += 1
+        _tm3.sleep(0.15)
+        raise RuntimeError("429")
+    def _wk():
+        try: _failing()
+        except Exception: pass
+    _tt = [_thr3.Thread(target=_wk) for _ in range(6)]
+    _t0 = _tm3.time()
+    for _t in _tt: _t.start()
+    for _t in _tt: _t.join()
+    check("#3 échec leader : pas de blocage 5s (< 3s total)", (_tm3.time() - _t0) < 3.0)
+except Exception as _e:
+    check("#3 ttl_cache échec : testable", False, repr(_e)[:90])
+
+try:
+    import facture_web as _fw3, mypuls as _mp3
+    # -- #5 : _live_eur_usd_src mémoïsé (pas d'amplification réseau par mois) --
+    _rc = {"n": 0}
+    _mp3.get_eur_usd_rate = lambda force_refresh=False: (_rc.__setitem__("n", _rc["n"] + 1) or {"rate": 1.14, "source": "api"})
+    _fw3._EUR_USD_SRC_CACHE = {"ts": 0.0, "val": None}
+    for _ in range(12):
+        _fw3._live_eur_usd_src()
+    check("#5 12 appels -> 1 seul appel réseau (mémoïsé 60s)", _rc["n"] == 1)
+except Exception as _e:
+    check("#5 eur_usd mémo : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _w7, datetime as _d7, calendar as _c7
+    def _de(_iso):
+        _nd = _d7.date.fromisoformat(_iso) + _d7.timedelta(days=1); _y = _nd.year
+        _d0 = _d7.date(_y, 3, _w7._last_sunday_web(_y, 3)); _d1 = _d7.date(_y, 10, _w7._last_sunday_web(_y, 10))
+        _off = 2 if (_d0 < _nd <= _d1) else 1
+        return _c7.timegm((_d7.datetime(_nd.year, _nd.month, _nd.day) - _d7.timedelta(hours=_off)).timetuple())
+    # veille du spring-forward -> minuit encore CET (+1) = 23:00 UTC ; veille du fall-back -> CEST (+2) = 22:00 UTC
+    check("#7 veille spring-forward = 23:00 UTC (CET)",
+          _de("2026-03-28") == _c7.timegm(_d7.datetime(2026, 3, 28, 23, 0).timetuple()))
+    check("#8 veille fall-back = 22:00 UTC (CEST)",
+          _de("2026-10-24") == _c7.timegm(_d7.datetime(2026, 10, 24, 22, 0).timetuple()))
+except Exception as _e:
+    check("#7/#8 bornes DST : testable", False, repr(_e)[:90])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

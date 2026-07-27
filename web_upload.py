@@ -6224,8 +6224,14 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                     _time_perf.sleep(0.02)
                     with _TTL_CACHE_LOCK:
                         hit = _TTL_CACHE.get(k)
+                        still = k in _TTL_REFRESHING
                     if hit:
                         return hit[1]
+                    if not still:
+                        # Le leader a terminé/ÉCHOUÉ sans produire de valeur (ex.
+                        # API GMS 429). Ne pas attendre les 5 s : calculer tout de
+                        # suite (sinon N workers gèlent 5 s -> dashboard figé).
+                        break
                 # filet de sécurité : le calculateur n'a rien produit -> on calcule.
             # Compute hors lock pour ne pas bloquer d autres threads
             try:
@@ -16583,7 +16589,11 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
         _y = _nd.year
         _dst0 = _dt_pd.date(_y, 3, _last_sunday_web(_y, 3))
         _dst1 = _dt_pd.date(_y, 10, _last_sunday_web(_y, 10))
-        _off = 2 if (_dst0 <= _nd < _dst1) else 1     # CEST(+2) l ete, CET(+1) l hiver
+        # Bornes DÉCALÉES : minuit du dimanche de bascule de mars est encore CET
+        # (le DST démarre à 02:00), donc _nd == _dst0 doit rester +1 -> on exclut
+        # la borne de mars et on inclut celle d'octobre. Sans ça, un jour partiel
+        # était figé la veille du passage à l'heure d'été (sous-paiement 1x/an).
+        _off = 2 if (_dst0 < _nd <= _dst1) else 1     # CEST(+2) l ete, CET(+1) l hiver
         _naive_utc = _dt_pd.datetime(_nd.year, _nd.month, _nd.day) - _dt_pd.timedelta(hours=_off)
         day_end_ts = _cal_pd.timegm(_naive_utc.timetuple())
     except Exception:
@@ -33036,7 +33046,26 @@ def create_app():
         # role restreint (le chatter n'a que sa propre page revenus, servie
         # cote page ; ces GET-la exposaient le CA agence et les salaires VA).
         "/home/overview", "/paievas/",
+        # Diagnostics/API revenus MyPuls AGENCE (CA total, ventes par créateur/
+        # chatteur). On NE bloque PAS "/mypuls/" en bloc (le rôle restreint a
+        # besoin de /mypuls/avatar/<id> et /mypuls/chatter/crypto/<name>) : on
+        # liste les endpoints sensibles précis.
+        "/mypuls/sales_window", "/mypuls/api_test", "/mypuls/api_stats_test",
+        "/mypuls/api_probe", "/mypuls/calendar_probe",
+        "/mypuls/pushs_refresh_probe", "/mypuls/refresh_pushs_now",
     )
+    # Prefixe de lecture -> onglet (showTab) qui le sert. Un rôle restreint à qui
+    # on a EXPLICITEMENT accordé cet onglet peut lire ses données ; les autres
+    # sont bloqués. (Corrige le sur-blocage : un rôle avec la permission "Paie
+    # VAs" doit pouvoir charger /paievas/report.) Les préfixes ABSENTS de cette
+    # map (/home/overview, /settings/role, /admin/, /sheets, /external/list,
+    # /va/get_insta, endpoints MyPuls agence) restent réservés aux accès complets.
+    _READ_PREFIX_TO_TAB = {
+        "/facture/": "facture", "/business/": "business",
+        "/jailbreak/": "jailbreak", "/jbactivite/": "jbactivite",
+        "/jbanalyse/": "jbanalyse", "/gmsdash/": "gmsdash", "/gms/": "gms",
+        "/linkscale/": "linkscale", "/paievas/": "paievas",
+    }
 
     @app.before_request
     def _guard_write_routes():
@@ -33044,7 +33073,8 @@ def create_app():
         if not is_auth():
             return None                    # les handlers gèrent déjà l'anonyme
         path = request.path or ""
-        if _role_allowed_tabs(_live_role()) is None:
+        _at = _role_allowed_tabs(_live_role())
+        if _at is None:
             return None                    # owner / admin : accès complet
         # Exception : chaque rôle peut changer SON propre mot de passe (seule
         # écriture de l'onglet « Mon compte » d'un rôle restreint) — sinon un
@@ -33058,9 +33088,18 @@ def create_app():
             # (sinon on casserait une page si elle référençait cet asset).
             if path.endswith((".js", ".css", ".map", ".ico", ".png", ".svg", ".woff", ".woff2")):
                 return None
-            # LECTURE : bloquer uniquement les API sensibles (le reste des GET
-            # sert les pages/fragments/assets dont le rôle a besoin).
-            if any(path.startswith(p) for p in _ADMIN_ONLY_READ):
+            # LECTURE : trouver le préfixe sensible le PLUS LONG qui matche (pour
+            # que "/mypuls/sales_window" l'emporte sur un préfixe court).
+            matched = None
+            for p in _ADMIN_ONLY_READ:
+                if path.startswith(p) and (matched is None or len(p) > len(matched)):
+                    matched = p
+            if matched is not None:
+                # Un rôle restreint peut LIRE les données d'un onglet qu'il a
+                # explicitement (ex. permission "Paie VAs" -> /paievas/report).
+                tab = _READ_PREFIX_TO_TAB.get(matched)
+                if tab and tab in _at:
+                    return None
                 print(f"[secu] lecture refusée : {session.get('username')} "
                       f"({_live_role()}) -> {path}", flush=True)
                 return jsonify({"ok": False, "error": "forbidden"}), 403
@@ -40204,6 +40243,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 if pr.scheme not in ("http", "https"):
                     return False
                 h = (pr.hostname or "").lower().rstrip(".")
+                # Le hostname vu par urlparse n'est PAS forcément celui que
+                # urllib3 va joindre : « 169.254.169.254\.instagram.com » a un
+                # hostname qui FINIT par .instagram.com (donc validé) mais
+                # urllib3 traite le « \ » comme séparateur de chemin et se
+                # connecte à 169.254.169.254 (SSRF). On rejette donc tout host
+                # contenant un caractère hors [a-z0-9.-] AVANT l'allowlist.
+                if not h or _re.fullmatch(r"[a-z0-9.-]+", h) is None:
+                    return False
                 # Ancré sur une frontière de point : « evil-instagram.com » ou
                 # « attacker-facebook.com » ne doivent PLUS passer.
                 _ok_dom = ("instagram.com", "cdninstagram.com", "fbcdn.net", "facebook.com")
@@ -40233,15 +40280,33 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             # ou le scrape de page (pas seulement les paramètres url/vurl de l'appelant).
             if not _host_ok(video_url or ""):
                 return None
+            # requests suit les 30x par défaut SANS re-valider l'hôte final : un
+            # 302 vers 169.254.169.254 serait suivi et streamé (SSRF). On suit
+            # donc les redirections À LA MAIN en re-validant chaque saut.
+            from urllib.parse import urljoin as _urljoin
             try:
-                upstream = _rq.get(
-                    video_url, headers=ig_headers, stream=True,
-                    timeout=(4 if fast else 30),
-                )
+                cur = video_url
+                upstream = None
+                for _hop in range(4):
+                    upstream = _rq.get(
+                        cur, headers=ig_headers, stream=True,
+                        timeout=(4 if fast else 30), allow_redirects=False,
+                    )
+                    if upstream.status_code in (301, 302, 303, 307, 308):
+                        loc = upstream.headers.get("Location") or ""
+                        upstream.close()
+                        nxt = _urljoin(cur, loc)     # relatif -> même hôte (déjà validé)
+                        if not _host_ok(nxt):
+                            return None               # redirection hors allowlist : STOP
+                        cur = nxt
+                        upstream = None
+                        continue
+                    break
             except Exception:
                 return None
-            if upstream.status_code != 200:
-                upstream.close()
+            if upstream is None or upstream.status_code != 200:
+                if upstream is not None:
+                    upstream.close()
                 return None
             content_type = upstream.headers.get("Content-Type", "video/mp4")
             content_length = upstream.headers.get("Content-Length")
