@@ -484,11 +484,14 @@ def random_username_for(identity):
 # @elsafraise, @jadelapinee, @mila.tacrush, @lolabloomy_, @julie.tatoueuse,
 # @anais.cutiee, @jade.minili. Ce sont des mots FR mignons/concrets, jamais du
 # jargon marketing anglais (l'ancien « lolavibes » sonnait faux).
+# AUCUN ALIMENT (demande user) : « alicesucre » ne ressemble pas a un pseudo.
+# Retires : fraise, praline, caramel, vanille, noisette, pomme, miel, sucre,
+# peche. On garde animaux / tendresse / ciel, qui se lisent comme un surnom.
 _CUTE_WORDS = [
-    "fraise", "lapine", "jolie", "cherie", "bloomy", "cutie", "crush",
-    "minou", "bisou", "coeur", "ange", "reve", "praline", "caramel",
-    "vanille", "noisette", "pomme", "miel", "sucre", "peche", "biche",
-    "chatonne", "pepite", "douce", "lune", "etoile", "mimi", "bella",
+    "lapine", "jolie", "cherie", "bloomy", "cutie", "crush", "biche",
+    "minou", "bisou", "coeur", "ange", "reve", "chatonne", "douce",
+    "lune", "etoile", "mimi", "bella", "belle", "chou", "poupee",
+    "rose", "soleil", "nuit", "fee", "sirene", "papillon", "cygne",
 ]
 # Prefixes/suffixes reellement observes : @itsncyoff, @lolabloomy_, @_jade.vibess
 _REAL_PREFIXES = ("its", "real", "iam")
@@ -560,9 +563,12 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     names = [base] + _get_diminutives(base)
     names = list(dict.fromkeys(names))
 
-    # --- Niveau 1 : le prenom NU (le meilleur pseudo si jamais il est libre) ---
-    for n in names:
-        add(n)
+    # --- Niveau 1 : le prenom complet NU, et LUI SEUL ---
+    # Les surnoms courts nus (« ali », « ame », « amy », « mel ») sont pris depuis
+    # 15 ans sur Instagram : les proposer, c'est gaspiller une ligne sur 10 et un
+    # appel de verification. Ils restent utilises comme BASE des combinaisons
+    # (ali_grnr, alice.biche) — c'est la qu'ils servent vraiment.
+    add(base)
 
     # --- Niveau 2 : pseudos COMPLETS, calques sur les vrais comptes de la niche ---
     # Les formes nues ci-dessus sont quasi toujours prises : c'est ICI que sortent
@@ -587,13 +593,19 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     # a) voyelle finale allongee : ameliaa, ameliaaa  (@alice.moreee, @jadelioraaa)
     for n in names[:4]:
         if n and n[-1] in "aeiouy":
-            fam_double += [n + n[-1], n + n[-1] * 2]
+            # Resultat >= 6 caracteres : « amee »/« amyy »/« alii » sont aussi
+            # courts que les surnoms nus, donc pris depuis longtemps. On garde
+            # « ameliaa », « aliciaa », « jessyee ».
+            for v in (n + n[-1], n + n[-1] * 2):
+                if len(v) >= 6:
+                    fam_double.append(v)
     # b) prenom + mot FR mignon : amelia.fraise, ameliajolie, amy.cherie
     words = list(_CUTE_WORDS)
     random.shuffle(words)
     for w in words:
         for n in names[:3]:
-            for sep in (".", "", "_"):
+            # Separateur OBLIGATOIRE : « alice.biche » se lit, « alicesucre » non.
+            for sep in (".", "_"):
                 fam_word.append(f"{n}{sep}{w}")
     # melange : sinon on sortait 3x le meme mot a la suite
     random.shuffle(fam_word)
