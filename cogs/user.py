@@ -480,19 +480,11 @@ def random_username_for(identity):
 
 # === USERNAME GENERATOR + INSTAGRAM AVAILABILITY CHECK ===
 
-# Sufixes / prefixes utilises par les VAs pour creer des pseudos qui ont du sens
-_PREFIXES = [
-    "sweet", "baby", "miss", "lil", "kiss", "cute", "iam", "its", "the",
-    "queen", "princess", "honey", "tiny", "bb", "babe", "real",
-]
-_SUFFIXES = [
-    "xx", "xo", "xoxo", "cuty", "cute", "babe", "honey",
-    "love", "angel", "doll", "vibes", "muse", "girl",
-    "bunny", "rose", "lover", "kiss", "fr", "official",
-    "ofc",
-]
-_LETTERS_BLOCKS = ["xx", "yy", "zz", "qq", "mm", "ll", "bb"]
-_RANDOM_DOUBLE_LETTERS = ["ee", "oo", "ii", "aa", "uu"]
+# NB : les anciennes listes de mots gadget (_PREFIXES/_SUFFIXES : sweet, baby,
+# cuty, vibes, bunny...) ont ete SUPPRIMEES. Elles etaient definies ici sans
+# jamais etre utilisees, et une fois branchees elles donnaient des pseudos
+# ridicules (« lolavibes »). Un pseudo se construit avec le prenom, ses surnoms
+# cures (_KNOWN_DIM) et un vrai nom de famille (_LAST_NAMES).
 
 
 def generate_username_candidates(base: str, count: int = 40) -> list:
@@ -532,30 +524,30 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     for n in names:
         add(n)
 
-    # --- Niveau 2 : prenom + vrai mot (amelia.rose, amyxo, ame_babe) ---
-    # melange les suffixes pour varier d'un appel a l'autre, mais garde les
-    # formes courtes/discretes en tete.
-    sufs = list(_SUFFIXES)
-    random.shuffle(sufs)                    # varie d'un modele/appel a l'autre
-    # Le SEPARATEUR est la boucle exterieure : on epuise d'abord des mots
-    # DIFFERENTS (ameliarose, ameliaxo...) avant de re-proposer le meme mot avec
-    # un point ou un underscore. Sinon la liste repetait 3x le meme pseudo.
+    # --- Niveau 2 : prenom + vrai NOM DE FAMILLE (amelia.faure, amypetit) ---
+    # C'est ce qu'utilise une vraie personne. On n'accole plus de mots gadget
+    # (vibes, cuty, bunny...) qui donnaient des pseudos ridicules : « lolavibes ».
+    lasts = [l.lower() for l in _LAST_NAMES]
+    random.shuffle(lasts)                   # varie d'un modele/appel a l'autre
+    # Le SEPARATEUR est la boucle exterieure : on epuise d'abord des noms
+    # DIFFERENTS (amelia.faure, amelia.petit...) avant de re-proposer le meme nom
+    # avec un autre separateur. Sinon la liste repetait 3x le meme pseudo.
     for sep in _USERNAME_SEPS:
-        for suf in sufs:
-            for n in names[:4]:             # le prenom + ses 3 meilleurs diminutifs
-                add(f"{n}{sep}{suf}")
+        for last in lasts:
+            for n in names[:4]:             # le prenom + ses 3 meilleurs surnoms
+                add(f"{n}{sep}{last}")
+            if len(out) >= count * 2:
+                break
         if len(out) >= count * 2:
             break
 
-    # --- Niveau 3 : vrai mot + prenom (itsamelia, sweetamy) ---
-    pres = list(_PREFIXES)
-    random.shuffle(pres)
-    for pre in pres:
+    # --- Niveau 3 : conventions Instagram reelles (itsamelia, amelia.ofc) ---
+    for pre in ("its", "real", "iam"):
         for n in names[:3]:
             add(f"{pre}{n}")
-            add(f"{pre}.{n}")
-        if len(out) >= count * 3:
-            break
+    for suf in ("ofc", "off"):
+        for n in names[:3]:
+            add(f"{n}.{suf}")
 
     return out[:count]
 
@@ -699,60 +691,52 @@ def _capitalize_smart(s: str) -> str:
     return s[0].upper() + s[1:]
 
 
-# Diminutifs CURES par prenom : ce sont les formes qu'une vraie fille utiliserait.
-# Elles passent AVANT les regles automatiques (elles sonnent toujours mieux).
+# Diminutifs CURES par prenom. REGLE : chaque forme doit se lire comme un vrai
+# surnom/prenom qu'une fille utiliserait vraiment. On n'accepte AUCUN bout de mot
+# decoupe qui ne veut rien dire (« lia », « licia », « alic », « emm », « jes »).
 _KNOWN_DIM = {
-    "amelia": ["ame", "amy", "mel", "lia", "melie"],
-    "emma": ["emy", "emmy", "em", "emmi"],
-    "julia": ["jul", "juju", "lia", "juli"],
-    "lola": ["lolo", "lo", "lou"],
-    "alicia": ["ali", "alice", "licia", "lili"],
-    "jessye": ["jess", "jessy", "jessie", "jes"],
+    "amelia": ["ame", "amy", "mel", "ameli", "melie"],
+    "emma": ["emy", "emmy", "emmi"],
+    "julia": ["jul", "juju", "juli", "julie"],
+    "lola": ["lolo", "lou", "loula"],
+    "alicia": ["ali", "alice", "lili"],
+    "jessye": ["jess", "jessy", "jessie"],
     "jessy": ["jess", "jessi", "jessie"],
-    "sarah": ["sara", "say", "sasa"],
-    "sophia": ["soph", "sofy", "phia", "sophie"],
-    "chloe": ["clo", "chlo", "cloe"],
-    "lea": ["leya", "leaa"],
-    "ines": ["ine", "nes"],
+    "sarah": ["sara", "sasa", "sarra"],
+    "sophia": ["soph", "sofy", "sophie"],
+    "chloe": ["chlo", "cloe", "kloe"],
+    "lea": ["leya", "leia"],
+    "ines": ["inez", "inou"],
     "manon": ["mano", "manou"],
     "lucie": ["lulu", "luce", "lucy"],
     "camille": ["cam", "cami", "milie"],
-    "marie": ["mary", "mimi"],
+    "marie": ["mary", "mimi", "marion"],
 }
 
 
 def _get_diminutives(base: str) -> list:
-    """Diminutifs PROCHES du vrai prenom, ORDONNES du plus reconnaissable au moins.
+    """Surnoms PROCHES du vrai prenom, ORDONNES du plus reconnaissable au moins.
 
-    Ex: amelia -> ['ame', 'amy', 'mel', 'lia', 'melie', 'ameli']
-        julia  -> ['jul', 'juju', 'lia', 'juli']
-        lola   -> ['lolo', 'lo', 'lou']
+    UNIQUEMENT la liste CUREE (_KNOWN_DIM). On ne decoupe plus le prenom
+    automatiquement : toutes les regles de troncature finissaient par sortir des
+    bouts de mots qui ne veulent rien dire (« lia », « licia », « alic », « emm »,
+    « jes », « lol ») ou des doublages ratés (« jeje », « mama »). Un prenom
+    inconnu n'a donc pas de surnom — il recevra des pseudos « prenom + nom de
+    famille », qui se lisent toujours comme une vraie personne.
+
+    Ex: amelia -> ['ame', 'amy', 'mel', 'ameli', 'melie']
+        julia  -> ['jul', 'juju', 'juli', 'julie']
+        lola   -> ['lolo', 'lou', 'loula']
     """
     base = base.lower().strip()
     base = "".join(c for c in base if c.isalpha())
     if len(base) < 3:
         return []
     out = []
-
-    def add(d):
+    for d in _KNOWN_DIM.get(base, []):
         d = (d or "").strip().lower()
         if 2 <= len(d) <= 7 and d.isalpha() and d != base and d not in out:
             out.append(d)
-
-    # 1. formes CUREES (les plus credibles) en premier
-    for d in _KNOWN_DIM.get(base, []):
-        add(d)
-    # 2. DEBUTS du prenom : se lisent immediatement comme le prenom (ame, ameli).
-    #    On s'en tient aux debuts : les fins de prenom donnaient du bizarre
-    #    (« elia », « mma », « ssye », « cia ») — exactement ce qu'on ne veut plus.
-    add(base[:3])
-    add(base[:4])
-    if len(base) >= 6:
-        add(base[:5])
-    # 3. syllabe doublee (juju, lolo, mimi) UNIQUEMENT si la syllabe finit par une
-    #    voyelle : "ju"->juju et "lo"->lolo sonnent juste, "am"->amam non.
-    if len(base) >= 3 and base[1] in "aeiouy":
-        add(base[:2] + base[:2])
     return out
 
 
