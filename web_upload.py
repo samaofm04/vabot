@@ -6166,6 +6166,10 @@ import threading as _th_perf
 _TTL_CACHE: dict = {}
 _TTL_CACHE_LOCK = _th_perf.Lock()
 _TTL_REFRESHING: set = set()   # clés en cours de rafraîchissement en fond
+_TTL_GEN = 0                   # génération : +1 à CHAQUE invalidation. Un
+                               # refresh/compute en vol ne réécrit PAS le cache si
+                               # la génération a changé entre-temps (sinon il
+                               # ressusciterait une valeur d'AVANT la mutation).
 
 
 def ttl_cache(seconds: int = 30, max_entries: int = 256):
@@ -6202,11 +6206,15 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
             # du quota API pendant le rendu.
             if stale is not None:
                 if claim:
-                    def _refresh():
+                    def _refresh(_gen0=_TTL_GEN):
                         try:
                             val = fn(*args, **kwargs)
                             with _TTL_CACHE_LOCK:
-                                _TTL_CACHE[k] = (_time_perf.time(), val)
+                                # ne réécrit PAS si une invalidation est survenue
+                                # pendant le calcul (sinon on ressusciterait une
+                                # valeur d'AVANT la mutation -> _success trahi).
+                                if _TTL_GEN == _gen0:
+                                    _TTL_CACHE[k] = (_time_perf.time(), val)
                         except Exception:
                             pass
                         finally:
@@ -6215,52 +6223,63 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
                     _th_perf.Thread(target=_refresh, daemon=True,
                                     name="ttl-refresh").start()
                 return stale
-            # CACHE FROID (rien à servir) : si un autre thread calcule déjà la 1re
-            # valeur, on l'attend brièvement au lieu de lancer un 2e appel réseau
-            # (thundering herd au démarrage / après invalidation globale).
+            # CACHE FROID (rien à servir) : SINGLE-FLIGHT. Si un autre thread
+            # calcule déjà la 1re valeur, on l'attend. S'il ABANDONNE sans valeur
+            # (ex. GMS 429), UN SEUL waiter re-claim et recalcule ; les autres
+            # continuent d'attendre (sinon N waiters recalculent en rafale = le
+            # troupeau que ce chemin est censé empêcher).
             if not claim:
                 _deadline = _time_perf.time() + 5.0
-                while _time_perf.time() < _deadline:
+                while True:
                     _time_perf.sleep(0.02)
                     with _TTL_CACHE_LOCK:
                         hit = _TTL_CACHE.get(k)
-                        still = k in _TTL_REFRESHING
+                        if hit is None and k not in _TTL_REFRESHING:
+                            _TTL_REFRESHING.add(k)   # je deviens le leader unique
+                            claim = True
                     if hit:
                         return hit[1]
-                    if not still:
-                        # Le leader a terminé/ÉCHOUÉ sans produire de valeur (ex.
-                        # API GMS 429). Ne pas attendre les 5 s : calculer tout de
-                        # suite (sinon N workers gèlent 5 s -> dashboard figé).
+                    if claim:
                         break
-                # filet de sécurité : le calculateur n'a rien produit -> on calcule.
+                    if _time_perf.time() >= _deadline:
+                        break   # filet : leader bloqué > 5 s -> calcule sans claim
             # Compute hors lock pour ne pas bloquer d autres threads
             try:
+                _gen0 = _TTL_GEN
                 result = fn(*args, **kwargs)
                 with _TTL_CACHE_LOCK:
-                    _TTL_CACHE[k] = (_time_perf.time(), result)
-                    # Cleanup si trop d entrees
-                    if len(_TTL_CACHE) > max_entries:
-                        # Drop les 50 plus vieilles
-                        olds = sorted(_TTL_CACHE.items(), key=lambda x: x[1][0])[:50]
-                        for kk, _ in olds:
-                            _TTL_CACHE.pop(kk, None)
+                    # idem : ne cache pas un résultat calculé sur un état invalidé
+                    # entre-temps (le prochain GET recalculera du frais).
+                    if _TTL_GEN == _gen0:
+                        _TTL_CACHE[k] = (_time_perf.time(), result)
+                        # Cleanup si trop d entrees
+                        if len(_TTL_CACHE) > max_entries:
+                            # Drop les 50 plus vieilles
+                            olds = sorted(_TTL_CACHE.items(), key=lambda x: x[1][0])[:50]
+                            for kk, _ in olds:
+                                _TTL_CACHE.pop(kk, None)
                 return result
             finally:
                 if claim:
                     with _TTL_CACHE_LOCK:
                         _TTL_REFRESHING.discard(k)
-        wrapper.invalidate = lambda: [
-            _TTL_CACHE.pop(k, None)
-            for k in [kk for kk in list(_TTL_CACHE.keys()) if kk[0] == cache_key_prefix]
-        ]
+        def _invalidate_this():
+            global _TTL_GEN
+            with _TTL_CACHE_LOCK:
+                for kk in [x for x in list(_TTL_CACHE.keys()) if x[0] == cache_key_prefix]:
+                    _TTL_CACHE.pop(kk, None)
+                _TTL_GEN += 1     # invalide aussi les refresh/compute en vol
+        wrapper.invalidate = _invalidate_this
         return wrapper
     return deco
 
 
 def _invalidate_all_ttl_cache():
     """Vide tout le cache TTL (a appeler apres une mutation importante)."""
+    global _TTL_GEN
     with _TTL_CACHE_LOCK:
         _TTL_CACHE.clear()
+        _TTL_GEN += 1     # un refresh en vol ne réécrira pas une valeur pré-mutation
 
 
 def _arg_cached(seconds: int = 60, key_args=()):
@@ -33065,6 +33084,11 @@ def create_app():
         "/jailbreak/": "jailbreak", "/jbactivite/": "jbactivite",
         "/jbanalyse/": "jbanalyse", "/gmsdash/": "gmsdash", "/gms/": "gms",
         "/linkscale/": "linkscale", "/paievas/": "paievas",
+        # /mypuls/refresh_pushs_now n'expose AUCUN revenu (il lance juste une MAJ
+        # des pushs en fond) : c'est le bouton « ⟳ MAJ profils » de la page SFS
+        # Planning. On le mappe donc à l'onglet "sfs" (sinon un rôle SFS légitime
+        # se prenait un 403 en cliquant). Un chatter reste bloqué (pas d'onglet sfs).
+        "/mypuls/refresh_pushs_now": "sfs",
     }
 
     @app.before_request

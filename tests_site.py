@@ -762,6 +762,76 @@ try:
 except Exception as _e:
     check("#7/#8 bornes DST : testable", False, repr(_e)[:90])
 
+print()
+print("=" * 70)
+print("12) Régressions du 3e sweep (wql4zarky) — verrouillage")
+print("=" * 70)
+try:
+    import web_upload as _wA
+    _aA = _wA.create_app(); _aA.config["TESTING"] = True
+    _svA = _wA._load_web_users; _svrA = getattr(_wA, "_load_role_definitions", None)
+    _wA._load_web_users = lambda: {"sfsu": {"role": "sfsrole"}, "chat": {"role": "chatter"}}
+    _wA._load_role_definitions = lambda: {"sfsrole": {"permissions": {"sfs": {"enabled": True}}}}
+    def _cA(u, r, sid):
+        _c = _aA.test_client()
+        with _c.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = u; _s["role"] = r; _s["sid"] = sid
+        return _c
+    # -- A : bouton SFS « MAJ profils » (rôle sfs OK, chatter bloqué) --
+    check("SFS: rôle sfs peut /mypuls/refresh_pushs_now (≠403)",
+          _cA("sfsu", "sfsrole", "SA1").get("/mypuls/refresh_pushs_now").status_code != 403)
+    _rc2 = _cA("chat", "chatter", "SA2").get("/mypuls/refresh_pushs_now")
+    check("SFS: chatter reste bloqué (403)",
+          _rc2.status_code == 403 and b"forbidden" in _rc2.data)
+    _wA._load_web_users = _svA
+    if _svrA is not None: _wA._load_role_definitions = _svrA
+except Exception as _e:
+    check("SFS refresh_pushs_now : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _wB, threading as _thB, time as _tmB
+    # -- B : échec TRANSITOIRE du leader -> single-flight (pas de herd) --
+    _cB = {"n": 0}; _lB = _thB.Lock()
+    @_wB.ttl_cache(seconds=30)
+    def _transient():
+        with _lB: _cB["n"] += 1; _n = _cB["n"]
+        _tmB.sleep(0.12)
+        if _n == 1:
+            raise RuntimeError("429 transitoire")
+        return "OK"
+    _rB = []
+    def _wkB():
+        try: _rB.append(_transient())
+        except Exception: _rB.append("ERR")
+    _ttB = [_thB.Thread(target=_wkB) for _ in range(6)]
+    for _t in _ttB: _t.start()
+    for _t in _ttB: _t.join()
+    check("B échec transitoire : single-flight (<=2 invocations, pas de herd)", _cB["n"] <= 2)
+    check("B les waiters récupèrent la valeur (>=5/6)", _rB.count("OK") >= 5)
+except Exception as _e:
+    check("B ttl single-flight : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _wC, threading as _thC, time as _tmC
+    # -- C : refresh en vol ne réécrit PAS le cache après invalidation --
+    _stC = {"v": "old"}; _gate = _thC.Event(); _enter = _thC.Event()
+    @_wC.ttl_cache(seconds=0.05)
+    def _renderC():
+        _enter.set(); _gate.wait(2)
+        return _stC["v"]
+    _gate.set()
+    _renderC()                      # amorce le cache avec 'old'
+    _gate.clear(); _enter.clear()
+    _tmC.sleep(0.08)                # laisse périmer
+    _renderC()                      # chemin stale -> lance le refresh en fond
+    _enter.wait(1)                  # le refresh a lu 'old' et bloque
+    _stC["v"] = "new"; _wC._invalidate_all_ttl_cache()   # mutation + invalidation
+    _gate.set(); _tmC.sleep(0.15)   # le refresh finit et tente d'écrire 'old'
+    check("C invalidation non défaite par un write-back périmé",
+          _renderC() == "new")
+except Exception as _e:
+    check("C ttl generation guard : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
