@@ -480,11 +480,19 @@ def random_username_for(identity):
 
 # === USERNAME GENERATOR + INSTAGRAM AVAILABILITY CHECK ===
 
-# NB : les anciennes listes de mots gadget (_PREFIXES/_SUFFIXES : sweet, baby,
-# cuty, vibes, bunny...) ont ete SUPPRIMEES. Elles etaient definies ici sans
-# jamais etre utilisees, et une fois branchees elles donnaient des pseudos
-# ridicules (« lolavibes »). Un pseudo se construit avec le prenom, ses surnoms
-# cures (_KNOWN_DIM) et un vrai nom de famille (_LAST_NAMES).
+# Mots calques sur les VRAIS comptes de la niche (releve de la Veille) :
+# @elsafraise, @jadelapinee, @mila.tacrush, @lolabloomy_, @julie.tatoueuse,
+# @anais.cutiee, @jade.minili. Ce sont des mots FR mignons/concrets, jamais du
+# jargon marketing anglais (l'ancien « lolavibes » sonnait faux).
+_CUTE_WORDS = [
+    "fraise", "lapine", "jolie", "cherie", "bloomy", "cutie", "crush",
+    "minou", "bisou", "coeur", "ange", "reve", "praline", "caramel",
+    "vanille", "noisette", "pomme", "miel", "sucre", "peche", "biche",
+    "chatonne", "pepite", "douce", "lune", "etoile", "mimi", "bella",
+]
+# Prefixes/suffixes reellement observes : @itsncyoff, @lolabloomy_, @_jade.vibess
+_REAL_PREFIXES = ("its", "real", "iam")
+_REAL_SUFFIXES = ("off", "ofc")
 
 
 def generate_username_candidates(base: str, count: int = 40) -> list:
@@ -508,13 +516,19 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     def add(u):
         u = (u or "").lower()
         core = u.replace("_", "").replace(".", "")
-        # 3-30 char : il FAUT accepter les formes courtes (ame, amy, lia) — c'est
-        # justement ce que l'ancien filtre 4+ jetait. Lettres + . _ uniquement,
-        # jamais de . ou _ en bord (Instagram le refuse).
-        if (u and 3 <= len(u) <= 30 and u not in seen and core.isalpha()
-                and u[0].isalpha() and u[-1].isalpha()):
-            seen.add(u)
-            out.append(u)
+        # Regles Instagram reelles : lettres/chiffres/point/underscore, 30 max,
+        # le POINT interdit en bord — mais l'UNDERSCORE est autorise en bord
+        # (@lolabloomy_, @_jade.vibess). Mon filtre precedent le refusait a tort.
+        # Minimum 3 : il faut garder les formes courtes (ame, amy) que l'ancien
+        # filtre 4+ jetait.
+        if not u or not (3 <= len(u) <= 30) or u in seen:
+            return
+        if not core.isalnum() or core.isdigit():
+            return                              # doit contenir des lettres
+        if u[0] == "." or u[-1] == "." or ".." in u or "__" in u:
+            return
+        seen.add(u)
+        out.append(u)
 
     # Toutes les formes du prenom, de la plus reconnaissable a la moins
     names = [base] + _get_diminutives(base)
@@ -524,17 +538,46 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     for n in names:
         add(n)
 
-    # --- Niveau 2 : conventions Instagram reelles, SANS nom de famille ---
-    # Demande explicite : pas de « blaze » (lola.blanc) — mieux vaut rendre MOINS
-    # de pseudos que des pseudos avec un nom de famille invente. Et plus jamais
-    # de mots gadget (vibes, cuty, bunny...) : « lolavibes » etait ridicule.
-    for pre in ("its", "real", "iam"):
-        for n in names[:4]:
-            add(f"{pre}{n}")
-    for suf in ("ofc", "off"):
-        for n in names[:4]:
-            add(f"{n}.{suf}")
-            add(f"{n}_{suf}")
+    # --- Niveau 2 : pseudos COMPLETS, calques sur les vrais comptes de la niche ---
+    # Les formes nues ci-dessus sont quasi toujours prises : c'est ICI que sortent
+    # les pseudos reellement posables. Interdits : chiffres (demande user), nom de
+    # famille invente (« lola.blanc »), consonnes au hasard (« amelia_xqks »).
+    # Modeles observes : @elsafraise, @jadelapinee, @alice.moreee, @lolabloomy_,
+    # @mila.tacrush, @anais.cutiee, @_jade.vibess, @itsncyoff.
+    fam_double, fam_word, fam_under, fam_pre = [], [], [], []
+    # a) voyelle finale allongee : ameliaa, ameliaaa  (@alice.moreee, @jadelioraaa)
+    for n in names[:4]:
+        if n and n[-1] in "aeiouy":
+            fam_double += [n + n[-1], n + n[-1] * 2]
+    # b) prenom + mot FR mignon : amelia.fraise, ameliajolie, amy.cherie
+    words = list(_CUTE_WORDS)
+    random.shuffle(words)
+    for w in words:
+        for n in names[:3]:
+            for sep in (".", "", "_"):
+                fam_word.append(f"{n}{sep}{w}")
+    # melange : sinon on sortait 3x le meme mot a la suite
+    random.shuffle(fam_word)
+    # c) underscore decoratif : amelia_, _amelia, _amelia_  (@lolabloomy_)
+    for n in names[:4]:
+        fam_under += [f"{n}_", f"_{n}", f"_{n}_"]
+    # d) prefixes/suffixes de vrais comptes : itsamelia, amelia.off
+    for pre in _REAL_PREFIXES:
+        for n in names[:3]:
+            fam_pre.append(f"{pre}{n}")
+    for suf in _REAL_SUFFIXES:
+        for n in names[:3]:
+            fam_pre += [f"{n}.{suf}", f"{n}{suf}"]
+
+    # Alternance : un pseudo de chaque famille a tour de role -> les 10 premiers
+    # sont varies au lieu d'etre 10 variantes du meme motif.
+    fams = [fam_word, fam_double, fam_under, fam_pre]
+    for i in range(max(len(f) for f in fams) if any(fams) else 0):
+        for f in fams:
+            if i < len(f):
+                add(f[i])
+        if len(out) >= count:
+            break
 
     return out[:count]
 
