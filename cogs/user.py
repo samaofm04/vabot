@@ -540,7 +540,7 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     # Le SEPARATEUR est la boucle exterieure : on epuise d'abord des mots
     # DIFFERENTS (ameliarose, ameliaxo...) avant de re-proposer le meme mot avec
     # un point ou un underscore. Sinon la liste repetait 3x le meme pseudo.
-    for sep in _SEPARATORS:
+    for sep in _USERNAME_SEPS:
         for suf in sufs:
             for n in names[:4]:             # le prenom + ses 3 meilleurs diminutifs
                 add(f"{n}{sep}{suf}")
