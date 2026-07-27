@@ -305,12 +305,14 @@ _now = int(time.time())
 _today = dt.date.today()
 _D = lambda k: (_today - dt.timedelta(days=k)).isoformat()
 jb.add_va(IDENT, "Paie")
-for _u in ("prive", "aveugle", "aveugle_hist", "fautif"):
+for _u in ("prive", "aveugle", "aveugle_hist", "fautif", "readd"):
     jb.add_account(IDENT, _u, va="Paie")
 with jb.transaction():
     _d = jb._load()
     for _a in _d[IDENT]["accounts"]:
-        _a["created_at"] = _now - 90 * 86400
+        # 'readd' = ré-ajout AUJOURD'HUI d'un compte établi (created_at récent) ;
+        # les autres sont anciens (pas de warm-up).
+        _a["created_at"] = _now if _a["username"] == "readd" else _now - 90 * 86400
     jb._save(_d)
 _cache13 = {
     "prive":   {"followers": 5, "posts_count": 30, "scraped_at": _now, "reel_days": {},
@@ -327,6 +329,11 @@ _cache13 = {
     "fautif":  {"followers": 5, "posts_count": 30, "scraped_at": _now, "reels_seen": 12,
                 "reel_days": {_D(k): 1 for k in range(6, 14)},
                 "last_reel_at": (dt.datetime.now() - dt.timedelta(days=6)).isoformat()},
+    # ré-ajout aujourd'hui MAIS historique prouvant une activité avant l'ajout ->
+    # pas de warm-up indu (regression #10 de l'audit argent).
+    "readd":   {"followers": 5, "posts_count": 30, "scraped_at": _now, "reels_seen": 5,
+                "reel_days": {_D(k): 1 for k in range(8, 13)},
+                "last_reel_at": (dt.datetime.now() - dt.timedelta(days=8)).isoformat()},
 }
 w._load_insta_3_stats_cache = lambda: _cache13
 w._vaact_cfg_load = lambda: {"vas": {"paie": {"base": 300, "malus": 10, "cadence": "q"}},
@@ -340,6 +347,7 @@ check("compte prive jamais accuse", "prive" not in _det, str(set(_det)))
 check("compte illisible (0 media) jamais accuse", "aveugle" not in _det, str(set(_det)))
 check("compte illisible AVEC historique jamais accuse", "aveugle_hist" not in _det, str(set(_det)))
 check("vrai fautif detecte", "fautif" in _det, str(set(_det)))
+check("re-ajout d'un compte etabli : pas de warm-up indu (accuse)", "readd" in _det, str(set(_det)))
 check("retenue = oublis x malus", _v13["deduction"] == _v13["oublis"] * 10)
 
 print(SEP1, "14) Cache Insta : historique fusionne, erreur non destructrice", SEP1)

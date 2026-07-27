@@ -25978,6 +25978,19 @@ def _vaact_payload(period: str = "14") -> dict:
             except Exception:
                 cd = None
             first_ok = (cd + _dt_v.timedelta(days=warmup)) if cd else None
+            # created_at = date d'AJOUT au système (pas l'âge réel du compte IG).
+            # Ré-ajouter un compte ÉTABLI remettait le warm-up à 5 j (retenue
+            # esquivée à chaque ré-ajout). Si l'historique scrapé prouve une
+            # activité AVANT created_at, le compte n'est pas neuf -> pas de grâce.
+            if first_ok and cd:
+                _hk = list((st.get("reel_days") or {}).keys()) + \
+                      list((st.get("post_days") or {}).keys())
+                if _hk:
+                    try:
+                        if min(_dt_v.date.fromisoformat(x) for x in _hk) < cd:
+                            first_ok = None
+                    except Exception:
+                        pass
             if first_ok and first_ok > today:
                 n_warm += 1
             floor = min(rd) if rd else None
