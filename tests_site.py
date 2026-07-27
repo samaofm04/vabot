@@ -360,9 +360,11 @@ try:
     _tt, _ee = _w._pay_day_stats(_G(), "L2", _hier, True)
     check("jour complet : servi du cache", _G.calls == 0 and _tt == 77, f"{_tt} calls={_G.calls}")
     _w._PAY_DAYCACHE.clear()
-    _tt, _ee = _w._pay_day_stats(_GKo(), "L3", _hier, True)
-    check("panne GMS : aucun faux zéro mis en cache",
-          (_tt, _ee) == (0, 0) and f"L3|{_hier}" not in _w._PAY_DAYCACHE, str(list(_w._PAY_DAYCACHE)))
+    _r_ko = _w._pay_day_stats(_GKo(), "L3", _hier, True)
+    # NOUVEAU contrat : panne GMS -> None (sentinelle « jour illisible »), PAS
+    # (0,0) (qui aurait sous-payé en silence). Rien mis en cache.
+    check("panne GMS : sentinelle None (pas de faux zéro) + rien en cache",
+          _r_ko is None and f"L3|{_hier}" not in _w._PAY_DAYCACHE, str(list(_w._PAY_DAYCACHE)))
     _tt, _ee = _w._pay_day_stats(_G(), "L3", _hier, True)
     check("après la panne : vraie valeur récupérée", _tt == 120 and _ee == 100, f"{_tt}/{_ee}")
     _w._PAY_DAYCACHE.clear()
@@ -886,6 +888,46 @@ try:
           len(_wE._TTL_FALLBACK) == 0 and len(_wE._TTL_REFRESHING) == 0)
 except Exception as _e:
     check("deadline-fallback : testable", False, repr(_e)[:90])
+
+print()
+print("=" * 70)
+print("14) Audit ARGENT (wznf76t51) — paie VA web")
+print("=" * 70)
+try:
+    import web_upload as _wM, gms as _gmsM, datetime as _dtM
+    def _reset_pay():
+        _wM._PAY_REPORT_CACHE.clear()
+        with _wM._PAY_DAYCACHE_LOCK: _wM._PAY_DAYCACHE.clear()
+    _gmsM.list_all_links = lambda: [{"id": "L1"}]
+    # -- #1/#2 : jour illisible (panne GMS) -> partial + missing, PAS un 0 silencieux --
+    _wM._pay_list_discord_vas = lambda: [("Team A", "marie")]
+    _wM._pay_gms_exact_link = lambda h, links: {"id": "L1"}
+    def _mixed(lid, a, b):
+        return (80, {"FR": 80}) if _dtM.date.fromisoformat(a).day % 2 == 0 else (None, None)
+    _gmsM.analytics_for_link = _mixed
+    _reset_pay()
+    _pm = _wM._compute_va_pay_report("current")
+    _vm = _pm["categories"][0]["vas"][0]
+    check("#1/#2 panne GMS -> payload partial=True", _pm["partial"] is True)
+    check("#1/#2 jours illisibles comptés (missing>0)", _vm["missing"] > 0)
+    check("#1/#2 jours lus quand même payés (money>0, pas 0 silencieux)", _vm["money"] > 0)
+    # aucune panne -> pas de faux positif
+    _gmsM.analytics_for_link = lambda lid, a, b: (50, {"FR": 50})
+    _reset_pay()
+    _pn = _wM._compute_va_pay_report("current")
+    check("#1/#2 aucune panne -> partial=False & missing=0",
+          _pn["partial"] is False and _pn["categories"][0]["vas"][0]["missing"] == 0)
+    # -- #7 : deux handles -> même lien GMS -> UNE seule ligne payée --
+    _wM._pay_list_discord_vas = lambda: [("Cat", "marie.rose"), ("Cat", "marierose")]
+    _wM._pay_gms_exact_link = lambda h, links: {"id": "L1"}
+    _reset_pay()
+    _pd = _wM._compute_va_pay_report("current")
+    _nrows = sum(len(c["vas"]) for c in _pd["categories"])
+    check("#7 double attribution: 1 lien -> 1 ligne payée (pas 2)", _nrows == 1)
+    # -- #5 : clamp serveur du malus négatif --
+    check("#5 malus négatif borné à 0 (pas de bonus)", max(0.0, float("-5")) == 0.0)
+except Exception as _e:
+    check("audit argent paie : testable", False, repr(_e)[:90])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

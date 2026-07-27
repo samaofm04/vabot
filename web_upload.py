@@ -16662,12 +16662,13 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
         with gms_mod.api_tag("paie"):
             total, countries = gms_mod.analytics_for_link(lid, iso_day, iso_day)
     except Exception:
-        return 0, 0
+        return None      # PANNE : sentinelle (surtout PAS (0,0) = un vrai 0)
     # PANNE GMS (429, timeout) : analytics_for_link renvoie None EXPRÈS pour ne
-    # pas produire un faux 0. On ne met alors RIEN en cache — sinon un jour
-    # travaillé restait payé $0 pour toujours.
+    # pas produire un faux 0. On renvoie None (jour ILLISIBLE) et on ne met RIEN
+    # en cache — sinon un jour travaillé restait payé $0 pour toujours, et le
+    # rapport de paie doit signaler l'incomplétude au lieu de sous-payer en silence.
     if total is None:
-        return 0, 0
+        return None
     total = int(total or 0)
     eligible = 0
     if countries:
@@ -16717,7 +16718,9 @@ def compute_va_eligible_clicks(start_iso: str, end_iso: str) -> int:
     for _cat, h in vas:
         l = _pay_gms_exact_link(h, links)
         if l and l.get("id"):
-            matched.append(str(l["id"]))
+            lid = str(l["id"])
+            if lid not in matched:     # un même lien ne compte qu'une fois
+                matched.append(lid)
     if not matched:
         return 0
     today = _paris_now_web().date()   # jour "aujourd'hui" en heure de Paris
@@ -16739,7 +16742,9 @@ def compute_va_eligible_clicks(start_iso: str, end_iso: str) -> int:
             futs = [ex.submit(_pay_day_stats, gms, lid, iso, past) for lid, iso, past in tasks]
             for f in futs:
                 try:
-                    total_eligible += int(f.result()[1])
+                    r = f.result()
+                    if r is not None:      # None = jour illisible (panne GMS) -> ignoré
+                        total_eligible += int(r[1])
                 except Exception:
                     pass
     _pay_daycache_save()
@@ -16768,10 +16773,17 @@ def _compute_va_pay_report(period: str) -> dict:
     links = gms.list_all_links()
     vas = _pay_list_discord_vas()
     matched = []  # (cat, handle, link_id)
+    _seen_lid = set()   # un même lien GMS ne doit être payé qu'UNE fois : deux
+                        # handles distincts (marie.rose / marierose) normalisent
+                        # vers le même lien -> sinon ses clics étaient payés 2x.
     for cat, h in vas:
         l = _pay_gms_exact_link(h, links)
         if l and l.get("id"):
-            matched.append((cat, h, str(l["id"])))
+            lid = str(l["id"])
+            if lid in _seen_lid:
+                continue
+            _seen_lid.add(lid)
+            matched.append((cat, h, lid))
 
     _pay_daycache_load()
     day_list = []
@@ -16789,23 +16801,33 @@ def _compute_va_pay_report(period: str) -> dict:
             for f in futs:
                 lid, iso = futs[f]
                 try:
-                    results[(lid, iso)] = f.result()
+                    results[(lid, iso)] = f.result()   # (total, elig) OU None (illisible)
                 except Exception:
-                    results[(lid, iso)] = (0, 0)
+                    results[(lid, iso)] = None
     _pay_daycache_save()
 
     cats: dict = {}
     grand_total = 0.0
+    any_missing = False
     for cat, h, lid in matched:
         eligible_total = 0
         money = 0.0
+        missing = 0
         for iso, _past in day_list:
-            _t, e = results.get((lid, iso), (0, 0))
+            r = results.get((lid, iso))
+            if r is None:
+                # jour ILLISIBLE (panne/quota GMS) : NE PAS le compter comme 0
+                # clic (ce serait une sous-paie silencieuse). On le signale.
+                missing += 1
+                any_missing = True
+                continue
+            _t, e = r
             eligible_total += e
             money += _pay_money_for_clicks(e)
         money = round(money, 2)
         grand_total += money
-        cats.setdefault(cat, []).append({"handle": h, "eligible": eligible_total, "money": money})
+        cats.setdefault(cat, []).append(
+            {"handle": h, "eligible": eligible_total, "money": money, "missing": missing})
 
     categories = []
     for cat, rows in cats.items():
@@ -16829,6 +16851,9 @@ def _compute_va_pay_report(period: str) -> dict:
         "va_count": len(matched),
         "va_total": len(vas),
         "categories": categories,
+        # Au moins un jour n'a pas pu être lu (quota GMS) : le total est un
+        # MINIMUM -> le front affiche un avertissement au lieu d'un total figé.
+        "partial": any_missing,
     }
     _PAY_REPORT_CACHE[period] = (time.time(), payload)
     return payload
@@ -16884,6 +16909,7 @@ def _render_paievas_html() -> str:
         "      \"<span style='font-size:14px;font-weight:700'>\" + d.label + '</span>' +"
         "      \"<span style='background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#34d399;font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px'>Total : $\" + d.total.toFixed(2) + '</span>' +"
         "      \"<span style='color:#888;font-size:12px'>\" + d.va_count + ' VAs avec lien / ' + d.va_total + ' salons VA</span></div>';"
+        "    if(d.partial){ h += \"<div style='background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);color:#fbbf24;font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px;margin-bottom:10px'>\\u26a0\\ufe0f Montant INCOMPLET : des jours n\\u2019ont pas pu \\u00eatre lus (quota GMS). Le total est un MINIMUM \\u2014 relance avant de payer.</div>\"; }"
         "    if(!d.categories.length){ out.innerHTML = h + \"<div style='color:#888;font-size:13px'>Aucun VA avec lien GMS trouv\\u00e9.</div>\"; return; }"
         "    d.categories.forEach(function(cat){"
         "      h += \"<div style='margin-top:14px'>\" +"
@@ -16896,7 +16922,7 @@ def _render_paievas_html() -> str:
         "        \"<th style='padding:7px 10px;text-align:right'>\\u00c0 payer</th></tr>\";"
         "      cat.vas.forEach(function(v){"
         "        h += \"<tr style='border-bottom:1px solid #222'>\" +"
-        "          \"<td style='padding:7px 10px'>@\" + v.handle + '</td>' +"
+        "          \"<td style='padding:7px 10px'>@\" + v.handle + (v.missing>0 ? \" <span style='color:#fbbf24;font-size:11px' title='jours illisibles (quota GMS)'>\\u26a0 \" + v.missing + \"j</span>\" : '') + '</td>' +"
         "          \"<td style='padding:7px 10px;text-align:right'>\" + v.eligible + '</td>' +"
         "          \"<td style='padding:7px 10px;text-align:right;font-weight:700;color:#34d399'>$\" + v.money.toFixed(2) + '</td></tr>';"
         "      });"
@@ -25981,9 +26007,14 @@ def _vaact_payload(period: str = "14") -> dict:
             # prouver un oubli -> ne jamais accuser (ça retenait de l'argent sur
             # la paie d'un VA dont le compte était juste passé en privé).
             blind = bool(st.get("is_private")) or (st.get("reels_seen") == 0) or bool(st.get("stale"))
+            # blind_now = le DERNIER scrape n'a rendu AUCUN média (privé / hoquet
+            # API) : indécidable même si le compte a un historique reel_days. À
+            # distinguer de `stale` (données gelées mais valides -> géré par ceil).
+            blind_now = bool(st.get("is_private")) or (st.get("reels_seen") == 0)
             accts.append({"h": h, "rd": rd, "floor": floor, "ceil": ceil,
                           "first_ok": first_ok, "posts": posts_count,
-                          "last_reel": last_reel, "trust": trust, "blind": blind})
+                          "last_reel": last_reel, "trust": trust,
+                          "blind": blind, "blind_now": blind_now})
         n_warm_tot += n_warm
         statuses = []
         miss_detail = {}
@@ -26000,6 +26031,11 @@ def _vaact_payload(period: str = "14") -> dict:
                     continue                     # warm-up
                 if ac["ceil"] and d > ac["ceil"]:
                     continue                     # données gelées (stale) après cette date
+                if ac["blind_now"]:
+                    continue                     # privé / aucun média rendu au dernier
+                                                 # scrape : indécidable, MÊME avec un
+                                                 # historique reel_days (sinon on retenait
+                                                 # de l'argent à tort sur un hoquet API)
                 if not ac["rd"]:
                     if ac["blind"]:
                         continue                 # privé / aucun média rendu : indécidable
@@ -37148,8 +37184,11 @@ def create_app():
         if not va:
             return jsonify({"ok": False, "error": "va manquant"})
         try:
-            base = float(request.form.get("base") or 0)
-            malus = float(request.form.get("malus") or 0)
+            # Borne >= 0 côté SERVEUR : le min="0" du champ HTML n'est pas
+            # appliqué (envoi via fetch/FormData). Un malus négatif donnait
+            # « à payer » = base - (négatif) > base = un bonus au lieu d'une retenue.
+            base = max(0.0, float(request.form.get("base") or 0))
+            malus = max(0.0, float(request.form.get("malus") or 0))
         except Exception:
             return jsonify({"ok": False, "error": "montants invalides"})
         repos = sorted({int(x) for x in (request.form.get("repos") or "").split(",")

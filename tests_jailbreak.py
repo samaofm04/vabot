@@ -305,7 +305,7 @@ _now = int(time.time())
 _today = dt.date.today()
 _D = lambda k: (_today - dt.timedelta(days=k)).isoformat()
 jb.add_va(IDENT, "Paie")
-for _u in ("prive", "aveugle", "fautif"):
+for _u in ("prive", "aveugle", "aveugle_hist", "fautif"):
     jb.add_account(IDENT, _u, va="Paie")
 with jb.transaction():
     _d = jb._load()
@@ -317,6 +317,13 @@ _cache13 = {
                 "is_private": True, "reels_seen": 0},
     "aveugle": {"followers": 5, "posts_count": 30, "scraped_at": _now, "reel_days": {},
                 "is_private": False, "reels_seen": 0},
+    # illisible (0 media rendu) MAIS avec un historique reel_days ancien : le
+    # dernier scrape n'a rien rendu (hoquet API) -> indécidable, ne doit PAS être
+    # accusé pour les jours récents non couverts (regression #6 de l'audit argent).
+    "aveugle_hist": {"followers": 5, "posts_count": 30, "scraped_at": _now, "reels_seen": 0,
+                     "is_private": False,
+                     "reel_days": {_D(k): 1 for k in range(10, 14)},
+                     "last_reel_at": (dt.datetime.now() - dt.timedelta(days=10)).isoformat()},
     "fautif":  {"followers": 5, "posts_count": 30, "scraped_at": _now, "reels_seen": 12,
                 "reel_days": {_D(k): 1 for k in range(6, 14)},
                 "last_reel_at": (dt.datetime.now() - dt.timedelta(days=6)).isoformat()},
@@ -331,6 +338,7 @@ _v13 = _p13["vas"][0]
 _det = [u for day in _p13["days"] for u in (_v13["miss"].get(day) or [])]
 check("compte prive jamais accuse", "prive" not in _det, str(set(_det)))
 check("compte illisible (0 media) jamais accuse", "aveugle" not in _det, str(set(_det)))
+check("compte illisible AVEC historique jamais accuse", "aveugle_hist" not in _det, str(set(_det)))
 check("vrai fautif detecte", "fautif" in _det, str(set(_det)))
 check("retenue = oublis x malus", _v13["deduction"] == _v13["oublis"] * 10)
 
