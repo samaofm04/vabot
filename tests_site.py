@@ -619,8 +619,11 @@ except Exception as _e:
 
 try:
     import importlib as _il, tempfile as _tf, pathlib as _pl
-    import facture_web as _fw
+    import facture_web as _fw, mypuls as _mp8
     _orig_src = _fw._live_eur_usd_src   # restauré en fin de bloc (sinon #5 teste un stub)
+    # Ce bloc teste la logique de fiabilité du taux LIVE : on neutralise le taux
+    # HISTORIQUE (testé séparément en #9) pour que le chemin de repli live soit exercé.
+    _mp8.get_eur_usd_rate_for_date = lambda iso: {"rate": 0.0, "source": "error"}
     # -- FIX8 : _month_rate (chemin GET) ne clobber PAS une écriture POST concurrente --
     _fw.FACTURE_FILE = _pl.Path(_tf.mkdtemp()) / "facture.json"
     _fw._save({"settings": {}, "months": {"2020-01": {"lines": []}}})
@@ -957,6 +960,20 @@ try:
     _s4 = _fwM.compute_state("2020-06")
     _pl4 = [l for l in _s4["lines"] if l.get("id") == "pay"][0]
     check("#4 paye orpheline -> 0 (pas rebasée sur rev_total)", abs(_pl4.get("usd", 1)) < 0.01)
+    # -- #9 : mois clos figé sur le taux HISTORIQUE, pas le 'latest' du jour --
+    import mypuls as _mpH
+    _fwM.FACTURE_FILE = _plM.Path(_tfM.mkdtemp()) / "facture.json"
+    _fwM._EUR_USD_SRC_CACHE = {"ts": 0.0, "val": None}
+    _fwM._live_eur_usd_src = lambda: (1.16, "api")               # taux du JOUR
+    _mpH.get_eur_usd_rate_for_date = lambda iso: {"rate": 1.07, "source": "api"}  # taux d'ÉPOQUE
+    _fwM._save({"settings": {}, "months": {"2020-06": {"lines": []}}})
+    _r9 = _fwM._month_rate(_fwM._load(), "2020-06")
+    check("#9 mois clos figé sur le taux historique (pas le latest)", abs(_r9 - 1.07) < 1e-9)
+    _mpH.get_eur_usd_rate_for_date = lambda iso: {"rate": 0.0, "source": "error"}
+    _fwM.FACTURE_FILE = _plM.Path(_tfM.mkdtemp()) / "facture.json"
+    _fwM._save({"settings": {}, "months": {"2020-07": {"lines": []}}})
+    check("#9 repli si historique indispo -> live fiable",
+          abs(_fwM._month_rate(_fwM._load(), "2020-07") - 1.16) < 1e-9)
 except Exception as _e:
     check("audit argent facture : testable", False, repr(_e)[:90])
 

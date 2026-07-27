@@ -1331,6 +1331,39 @@ def get_eur_usd_rate(force_refresh: bool = False) -> Dict[str, Any]:
     return {"rate": 1.10, "date": "?", "cached_age_h": 999, "source": "fallback"}
 
 
+def get_eur_usd_rate_for_date(iso_date: str) -> Dict[str, Any]:
+    """Taux EUR->USD BCE HISTORIQUE pour une date (mois clos). Immuable -> caché
+    à vie par date dans config['eur_usd_hist']. Sert à figer un mois clos sur SON
+    taux d'époque et non sur le 'latest' du jour de consultation.
+    Retourne {rate, date, source} ; source in {api, cache, error}.
+    (Frankfurter renvoie le dernier jour ouvré si la date tombe un week-end.)"""
+    cfg = load_config()
+    hist = cfg.get("eur_usd_hist") or {}
+    if iso_date in hist:
+        try:
+            v = float(hist[iso_date])
+            if v > 0:
+                return {"rate": v, "date": iso_date, "source": "cache"}
+        except Exception:
+            pass
+    try:
+        r = requests.get(
+            f"https://api.frankfurter.dev/v1/{iso_date}?base=EUR&symbols=USD",
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            rate = float(data["rates"]["USD"])
+            if rate > 0:
+                hist[iso_date] = rate
+                cfg["eur_usd_hist"] = hist
+                save_config(cfg)
+                return {"rate": rate, "date": data.get("date", iso_date), "source": "api"}
+    except Exception:
+        pass
+    return {"rate": 0.0, "date": iso_date, "source": "error"}
+
+
 def delete_crypto_file(name: str) -> bool:
     p = crypto_path_for(name)
     if p:

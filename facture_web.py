@@ -86,6 +86,11 @@ def _month_bounds(month: str):
     return datetime.date(y, m, 1), datetime.date(y, m, last)
 
 
+def _month_last_day(month: str) -> str:
+    """'YYYY-MM' -> 'YYYY-MM-DD' du dernier jour du mois (pour le taux historique)."""
+    return _month_bounds(month)[1].isoformat()
+
+
 _EUR_USD_SRC_CACHE = {"ts": 0.0, "val": None}   # mémo process (taux, source)
 _EUR_USD_SRC_TTL = 60
 
@@ -468,14 +473,31 @@ def _month_rate(d: dict, month: str) -> float:
         cur_rate, src = _live_eur_usd_src()
     if month < _cur_month():
         # Mois terminé : on fige le taux pour toujours — MAIS :
-        #  - jamais le repli 1.10 (source 'fallback'/'error') : un mois clos
-        #    consulté avant le 1er fetch BCE réussi resterait bloqué à 1.10 ;
-        #  - via un upsert ATOMIQUE re-lisant le document (jamais _save du
-        #    snapshot d'un GET, qui écraserait une ligne saisie en parallèle).
-        if src in ("api", "cache", "stale_cache", "override") and cur_rate > 0:
-            _freeze_month_rate(month, cur_rate)
+        #  - un mois SAISI TARDIVEMENT (ex. juin saisi en octobre) doit être figé
+        #    sur SON taux d'époque, pas sur le 'latest' du jour (qui sur/sous-
+        #    évaluait ses lignes EUR de quelques %). On récupère donc le taux BCE
+        #    HISTORIQUE du dernier jour du mois ;
+        #  - jamais le repli 1.10 (source 'fallback'/'error') ;
+        #  - via un upsert ATOMIQUE (jamais _save du snapshot d'un GET).
+        freeze = None
+        if override > 0:
+            freeze = override                       # taux manuel = autorité
+        else:
+            try:
+                import mypuls
+                h = mypuls.get_eur_usd_rate_for_date(_month_last_day(month))
+                if h.get("source") in ("api", "cache") and float(h.get("rate") or 0) > 0:
+                    freeze = float(h["rate"])
+            except Exception:
+                freeze = None
+            # Repli : historique indisponible -> taux live SEULEMENT s'il est fiable.
+            if freeze is None and src in ("api", "cache", "stale_cache") and cur_rate > 0:
+                freeze = cur_rate
+        if freeze and freeze > 0:
+            _freeze_month_rate(month, freeze)
             # reflète dans le snapshot courant (mémoire seule, pas de persistance)
-            d.setdefault("settings", {}).setdefault("month_rates", {}).setdefault(month, cur_rate)
+            d.setdefault("settings", {}).setdefault("month_rates", {}).setdefault(month, freeze)
+            return freeze
     return cur_rate
 
 
