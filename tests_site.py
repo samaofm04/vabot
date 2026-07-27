@@ -929,6 +929,37 @@ try:
 except Exception as _e:
     check("audit argent paie : testable", False, repr(_e)[:90])
 
+try:
+    import facture_web as _fwM, tempfile as _tfM, pathlib as _plM
+    _fwM.FACTURE_FILE = _plM.Path(_tfM.mkdtemp()) / "facture.json"
+    _fwM._EUR_USD_SRC_CACHE = {"ts": 0.0, "val": (1.0, "api")}
+    # -- #8 : parts lead par marché == part lead globale (marché en perte) --
+    _fwM._save({"settings": {"associates": [{"name": "A", "pct": 20}], "eur_usd": 1.0},
+                "months": {"2020-05": {"lines": [
+                    {"id": "r1", "type": "rev", "form": "fixed", "amount": 4080.42, "currency": "USD", "market": "fr", "label": "FR"},
+                    {"id": "e1", "type": "exp", "form": "fixed", "amount": 4254.88, "currency": "USD", "market": "fr", "label": "cFR"},
+                    {"id": "r2", "type": "rev", "form": "fixed", "amount": 1000, "currency": "USD", "market": "us", "label": "US"},
+                    {"id": "e2", "type": "exp", "form": "fixed", "amount": 300, "currency": "USD", "market": "us", "label": "cUS"}]}}})
+    _s8 = _fwM.compute_state("2020-05")
+    _sum = round(sum(m.get("lead", 0) for m in (_s8.get("by_market") or {}).values()), 2)
+    check("#8 somme parts lead par marché == part lead globale",
+          abs(_sum - _s8["totals"]["lead"]) < 0.02)
+    # -- #4 : supprimer la base d'une paye % ne la rebase PAS sur rev_total --
+    _fwM.FACTURE_FILE = _plM.Path(_tfM.mkdtemp()) / "facture.json"
+    _fwM._save({"settings": {"associates": [], "eur_usd": 1.0},
+                "months": {"2020-06": {"lines": [
+                    {"id": "of", "type": "rev", "form": "fixed", "amount": 2286.12, "currency": "USD", "market": "fr", "label": "OF Lola"},
+                    {"id": "other", "type": "rev", "form": "fixed", "amount": 5000, "currency": "USD", "market": "fr", "label": "Autres"},
+                    {"id": "pay", "type": "exp", "form": "pct", "pct": 35, "pct_of": "line:of", "market": "fr", "label": "Paye 35%"}]}}})
+    _d4 = _fwM._load(); _m4 = _d4["months"]["2020-06"]
+    _m4["lines"] = [l for l in _m4["lines"] if l.get("id") != "of"]  # base supprimée (sans rebase)
+    _fwM._save(_d4)
+    _s4 = _fwM.compute_state("2020-06")
+    _pl4 = [l for l in _s4["lines"] if l.get("id") == "pay"][0]
+    check("#4 paye orpheline -> 0 (pas rebasée sur rev_total)", abs(_pl4.get("usd", 1)) < 0.01)
+except Exception as _e:
+    check("audit argent facture : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

@@ -620,9 +620,17 @@ def compute_state(month: str) -> dict:
     for bm in by_market.values():
         bm["rev"] = round(bm["rev"], 2)
         bm["exp"] = round(bm["exp"], 2)
-        n = round(bm["rev"] - bm["exp"], 2)
-        bm["net"] = n
-        bm["lead"] = round(n * max(0.0, (100.0 - assoc_pct)) / 100.0, 2) if n > 0 else n
+        bm["net"] = round(bm["rev"] - bm["exp"], 2)
+    # Part LEAD par marché = RÉPARTITION AU PRORATA du net de la part lead
+    # GLOBALE (et non le facteur associés ré-appliqué marché par marché). Sinon,
+    # dès qu'un marché était en perte, la somme des parts lead par marché ≠ la
+    # part lead globale et les deux vues du Bilan donnaient deux montants à payer.
+    if net > 0:
+        for bm in by_market.values():
+            bm["lead"] = round(lead * bm["net"] / net, 2)
+    else:
+        for bm in by_market.values():
+            bm["lead"] = bm["net"]   # pas de profit -> lead = net (somme = net global)
 
     return {
         "ok": True,
@@ -1182,15 +1190,26 @@ def register(app, is_auth):
             return jsonify({"ok": False, "needs_confirm": True, "dependents": deps,
                             "error": "Des payes en % utilisent cette ligne comme base : "
                                      + ", ".join(str(x) for x in deps[:6])})
+        def _flag_base_gone(l):
+            # NE PAS rebaser sur rev_total : ça paierait ce % sur le CA des AUTRES
+            # modèles, en boucle chaque mois. Le base disparue -> _line_usd rend
+            # déjà 0 (base introuvable). On flague pour révision manuelle.
+            n = l.get("notes") or ""
+            if "base supprimée" not in n:
+                l["notes"] = (n + " ⚠ base supprimée — à revérifier").strip()
         for l in lines:
             po = str(l.get("pct_of") or "")
             if l.get("form") != "pct" or not lid:
                 continue
             if po == f"line:{lid}":
-                l["pct_of"] = "rev_total"          # base disparue -> total des revenus
+                # base unique disparue : on LAISSE pct_of pendant (résout à 0),
+                # on ne rebase PAS sur rev_total.
+                _flag_base_gone(l)
             elif po.startswith("lines:"):
                 rest = [i for i in po[6:].split(",") if i and i != lid]
-                l["pct_of"] = ("lines:" + ",".join(rest)) if rest else "rev_total"
+                l["pct_of"] = "lines:" + ",".join(rest)   # vide -> base 0
+                if not rest:
+                    _flag_base_gone(l)
         before = len(lines)
         m["lines"] = [l for l in lines if l.get("id") != lid]
         _save(d)
