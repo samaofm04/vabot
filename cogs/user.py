@@ -524,30 +524,17 @@ def generate_username_candidates(base: str, count: int = 40) -> list:
     for n in names:
         add(n)
 
-    # --- Niveau 2 : prenom + vrai NOM DE FAMILLE (amelia.faure, amypetit) ---
-    # C'est ce qu'utilise une vraie personne. On n'accole plus de mots gadget
-    # (vibes, cuty, bunny...) qui donnaient des pseudos ridicules : « lolavibes ».
-    lasts = [l.lower() for l in _LAST_NAMES]
-    random.shuffle(lasts)                   # varie d'un modele/appel a l'autre
-    # Le SEPARATEUR est la boucle exterieure : on epuise d'abord des noms
-    # DIFFERENTS (amelia.faure, amelia.petit...) avant de re-proposer le meme nom
-    # avec un autre separateur. Sinon la liste repetait 3x le meme pseudo.
-    for sep in _USERNAME_SEPS:
-        for last in lasts:
-            for n in names[:4]:             # le prenom + ses 3 meilleurs surnoms
-                add(f"{n}{sep}{last}")
-            if len(out) >= count * 2:
-                break
-        if len(out) >= count * 2:
-            break
-
-    # --- Niveau 3 : conventions Instagram reelles (itsamelia, amelia.ofc) ---
+    # --- Niveau 2 : conventions Instagram reelles, SANS nom de famille ---
+    # Demande explicite : pas de « blaze » (lola.blanc) — mieux vaut rendre MOINS
+    # de pseudos que des pseudos avec un nom de famille invente. Et plus jamais
+    # de mots gadget (vibes, cuty, bunny...) : « lolavibes » etait ridicule.
     for pre in ("its", "real", "iam"):
-        for n in names[:3]:
+        for n in names[:4]:
             add(f"{pre}{n}")
     for suf in ("ofc", "off"):
-        for n in names[:3]:
+        for n in names[:4]:
             add(f"{n}.{suf}")
+            add(f"{n}_{suf}")
 
     return out[:count]
 
@@ -696,12 +683,12 @@ def _capitalize_smart(s: str) -> str:
 # decoupe qui ne veut rien dire (« lia », « licia », « alic », « emm », « jes »).
 _KNOWN_DIM = {
     "amelia": ["ame", "amy", "mel", "ameli", "melie"],
-    "emma": ["emy", "emmy", "emmi"],
+    "emma": ["emy", "emmy", "emmi", "emmie", "em"],
     "julia": ["jul", "juju", "juli", "julie"],
-    "lola": ["lolo", "lou", "loula"],
-    "alicia": ["ali", "alice", "lili"],
-    "jessye": ["jess", "jessy", "jessie"],
-    "jessy": ["jess", "jessi", "jessie"],
+    "lola": ["lolo", "lou", "loula", "lolie", "lolou"],
+    "alicia": ["ali", "alice", "lili", "alissa", "alicya"],
+    "jessye": ["jess", "jessy", "jessie", "jessica", "jessa"],
+    "jessy": ["jess", "jessi", "jessie", "jessica"],
     "sarah": ["sara", "sasa", "sarra"],
     "sophia": ["soph", "sofy", "sophie"],
     "chloe": ["chlo", "cloe", "kloe"],
