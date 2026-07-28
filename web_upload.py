@@ -11155,17 +11155,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
 
     # Mapping subdir -> upload tab name (pour le bouton + Add media)
     upload_tab_map = {
-        "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description"),
-        "posts": ("post", "Upload Post", "Photo simple pour le feed"),
-        "stories": ("story", "Upload Story", "Photo simple pour story"),
-        "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien"),
-        "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité"),
-        "brutes": ("brute", "Rush brut", "Matière première des montages"),
-        "templates": ("template", "Template montage", "Modèle CapCut — apporte le son"),
+        "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description", "Add media"),
+        "posts": ("post", "Upload Post", "Photo simple pour le feed", "Add media"),
+        "stories": ("story", "Upload Story", "Photo simple pour story", "Add media"),
+        "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien", "Add media"),
+        "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité", "Add media"),
+        "brutes": ("brute", "Rush brut", "Matière première des montages", "Add vidéo"),
+        "templates": ("template", "Template montage", "Modèle CapCut — apporte le son",
+                      "Add template"),
     }
     add_media_btn = ""
     if subdir in upload_tab_map:
-        utab, utitle, usub = upload_tab_map[subdir]
+        _entry = upload_tab_map[subdir]
+        utab, utitle, usub = _entry[0], _entry[1], _entry[2]
+        _btn_lbl = _entry[3] if len(_entry) > 3 else "Add media"
         # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
         add_media_btn = (
             f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
@@ -11175,7 +11178,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
             f"box-shadow:0 4px 12px rgba(59,130,246,.25);letter-spacing:.01em'>"
             f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
-            f"Add media</button>"
+            f"{_btn_lbl}</button>"
         )
 
     gallery_header = (
@@ -11264,6 +11267,27 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             + "".join(cards_html)
             + "</div>"
         )
+        # Retour d'un upload de TEMPLATE : on enchaine directement sur l'editeur
+        # de montage du fichier qui vient d'etre depose (le plus recent = 1re
+        # carte). C'est le « je fais le montage et ca arrive » demande.
+        # NB : `request` n'est PAS global dans ce module (importé localement
+        # partout) — sans cet import, le NameError était avalé par le except
+        # et l'ouverture auto ne partait jamais, en silence.
+        _want_open = False
+        if subdir == "templates" and cards_html:
+            try:
+                from flask import request as _rq_open
+                _want_open = (_rq_open.args.get("openmontage") or "") == "1"
+            except Exception:
+                _want_open = False
+        if _want_open:
+            gallery += (
+                "<script>(function(){"
+                "var g=document.getElementById('vault-grid');if(!g)return;"
+                "var b=g.querySelector('.card-edit-btn[onclick*=nxMontageOpen]');"
+                "if(b)setTimeout(function(){b.click();},350);"
+                "})();</script>"
+            )
         # Compteur en bas + auto-scroll trigger
         if total_files > INITIAL_BATCH:
             gallery += (
@@ -11912,7 +11936,8 @@ document.addEventListener('submit', function(e){
       var curTab = new URLSearchParams(window.location.search).get('tab');
       if(curTab === _g[0]){
         setTimeout(function(){
-          window.location.href = '?tab=' + _g[0] + (_g[1] && _ident ? '&' + _g[1] + '=' + encodeURIComponent(_ident) : '');
+          var _extra = (form.dataset.utype === 'template') ? '&openmontage=1' : '';
+          window.location.href = '?tab=' + _g[0] + (_g[1] && _ident ? '&' + _g[1] + '=' + encodeURIComponent(_ident) : '') + _extra;
         }, 900);
       }
     }
