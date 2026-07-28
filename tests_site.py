@@ -1040,7 +1040,10 @@ try:
     # faisait échouer is_auth() pour les clients précédents (artefact de test).
     _allUsersF = {"chat": {"role": "chatter"}, "toki": {"role": "VA JB"},
                   "boss": {"role": "owner"}}
-    _allDefsF = {"va jb": {"permissions": {"jailbreak": {"enabled": True}}}}
+    # « jbactivite » est désormais une case DISTINCTE de « jailbreak » (une case
+    # = une page) : ce rôle a donc explicitement les deux.
+    _allDefsF = {"va jb": {"permissions": {"jailbreak": {"enabled": True},
+                                           "jbactivite": {"enabled": True}}}}
     _wF._load_web_users = lambda: _allUsersF
     _wF._load_role_definitions = lambda: _allDefsF
 
@@ -1071,9 +1074,14 @@ try:
           _jbF.get("/", headers={"X-Chat-Ajax": "1"}).status_code == 403)
     check("X-Chat-Ajax servi au rôle qui a chatplanning",
           "form-chatplanning" in _chF.get("/", headers={"X-Chat-Ajax": "1"}).get_data(as_text=True))
-    # -- pas de sur-blocage : la permission Jailbreak ouvre bien /jbactivity --
-    check("/jbactivity ouvert au rôle qui a la permission Jailbreak",
+    # -- pas de sur-blocage : la case « Activité VA » ouvre bien /jbactivity --
+    check("/jbactivity ouvert au rôle qui a la case « Activité VA »",
           _jbF.get("/jbactivity").status_code != 403)
+    # -- et la case « Jailbreak » SEULE ne l'ouvre plus (une case = une page) --
+    _allDefsF["va jb"]["permissions"].pop("jbactivite", None)
+    check("« Jailbreak » seule n'ouvre PAS Activité VA",
+          _cliF("toki", "VA JB", None, "F2b").get("/jbactivity").status_code == 403)
+    _allDefsF["va jb"]["permissions"]["jbactivite"] = {"enabled": True}
     # -- owner : rien n'est bloqué --
     _owF = _cliF("boss", "owner", None, "F3")
     check("owner : /jbactivity accessible", _owF.get("/jbactivity").status_code != 403)
@@ -1096,6 +1104,41 @@ try:
           bool(_users[0].get("password_hash")))
 except Exception as _e:
     check("réactivation employé : testable", False, repr(_e)[:90])
+
+print()
+print("=" * 70)
+print("17) Rôles : l'éditeur doit rester SYNCHRO avec les vraies pages")
+print("=" * 70)
+try:
+    import re as _reS, pathlib as _plS
+    import web_upload as _wS
+    _srcS = _plS.Path("web_upload.py").read_text(encoding="utf-8")
+    # onglets RÉELS de la sidebar (source de vérité)
+    _realS = set(_reS.findall(r"showTab\(\s*'[^']*'\s*,\s*'([a-z0-9_]+)'", _srcS))
+    _realS |= set(_reS.findall(r'id="tab-([a-z0-9_]+)"', _srcS))
+    _keysS = {it["key"] for sec in _wS.ROLE_MENU_STRUCTURE for it in sec["items"]}
+    # 1) aucune case ne doit être un no-op (elle doit ouvrir au moins une vraie page)
+    _noop = sorted(k for k in _keysS
+                   if not (_wS._PERM_KEY_TO_TABS.get(k, {k}) & _realS))
+    check("aucune case de permission n'est un no-op", not _noop, str(_noop))
+    # 2) aucune page ne doit être ingouvernable (ni donnable ni retirable)
+    _covered = set()
+    for _k in _keysS:
+        _covered |= _wS._PERM_KEY_TO_TABS.get(_k, {_k})
+    # onglets internes/panneaux non listés dans la sidebar : tolérés
+    _exempt = {"reel", "post", "story", "storycta", "pp", "veille"}
+    _ungov = sorted(_realS - _covered - _exempt)
+    check("aucune page n'échappe à l'éditeur de permissions", not _ungov, str(_ungov))
+    # 3) une case ne doit pas ouvrir une page qu'elle n'annonce pas
+    check("cocher « Jailbreak » n'ouvre QUE Jailbreak",
+          _wS._PERM_KEY_TO_TABS.get("jailbreak") == {"jailbreak"})
+    check("« Analyse vues » et « Activité VA » ont leur propre case",
+          {"jbanalyse", "jbactivite"} <= _keysS)
+    # 4) tout set remappé doit contenir la clé elle-même si un _g() porte ce nom
+    check("la case « Veille » débloque bien le contenu Veille",
+          "veille" in _wS._PERM_KEY_TO_TABS.get("veille", set()))
+except Exception as _e:
+    check("synchro éditeur/pages : testable", False, repr(_e)[:90])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

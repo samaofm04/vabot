@@ -31462,6 +31462,13 @@ ROLE_MENU_STRUCTURE = [
         {"key": "cloud", "name": "Cloud (stockage par type)", "perms": ["view", "delete"]},
         {"key": "textpool", "name": "Bibliothèque texte (Names/Bios/CTAs)", "perms": ["view", "edit"]},
     ]},
+    {"section": "Création", "items": [
+        {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
+        {"key": "svideo", "name": "Métadonnées vidéo (uniquification)", "perms": ["view", "edit"]},
+    ]},
+    {"section": "Liens", "items": [
+        {"key": "gmsdash", "name": "Dashboard clics (GMS)", "perms": ["view"]},
+    ]},
     {"section": "Management — VAs", "items": [
         {"key": "valist", "name": "Liste VAs / Délégations", "perms": ["view", "edit"]},
         {"key": "onboarding", "name": "Onboarding", "perms": ["view", "edit"]},
@@ -31474,7 +31481,8 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Trends", "items": [
         {"key": "igaccounts", "name": "Instagram — Accounts (watchlist)", "perms": ["view", "edit"]},
         {"key": "igtrends", "name": "Instagram — Trends", "perms": ["view", "scrape"]},
-        {"key": "veille", "name": "Veille (reels sauvegardés)", "perms": ["view", "create"]},
+        {"key": "veille", "name": "Veille (reels sauvegardés) — ouvre aussi Instagram Trends",
+         "perms": ["view", "create"]},
     ]},
     {"section": "Outils — SFS", "items": [
         {"key": "sfs", "name": "SFS — Planning", "perms": ["view", "create", "edit"]},
@@ -31483,10 +31491,16 @@ ROLE_MENU_STRUCTURE = [
     ]},
     {"section": "Outils — Autres", "items": [
         {"key": "geelark", "name": "GeeLark — Cloud phones", "perms": ["view", "create"]},
+        # Jailbreak ÉCLATÉ en 3 cases : avant, cocher « Jailbreak » ouvrait aussi
+        # Analyse vues ET Activité VA (une case en donnait trois -> « il voit
+        # trop de choses »). Maintenant chaque page se coche séparément.
         {"key": "jailbreak", "name": "Jailbreak — Comptes par identité", "perms": ["view", "edit"]},
+        {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
+        {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
     ]},
     {"section": "Finances", "items": [
-        {"key": "depenses", "name": "Dépenses", "perms": ["view", "create"]},
+        # « Dépenses » ne correspondait à AUCUNE page : la case ne faisait rien.
+        {"key": "facture", "name": "Facture (compta mensuelle)", "perms": ["view", "edit"]},
         {"key": "bilan", "name": "Bilan", "perms": ["view"]},
     ]},
     {"section": "Settings", "items": [
@@ -31497,6 +31511,8 @@ ROLE_MENU_STRUCTURE = [
         {"key": "semp", "name": "Manage employees", "perms": ["view", "edit"]},
         {"key": "stoken", "name": "Token bot admin", "perms": ["view", "edit"]},
         {"key": "sinsta", "name": "Cookies Instagram", "perms": ["view", "edit"]},
+        {"key": "smypuls", "name": "Cookies MyPuls", "perms": ["view", "edit"]},
+        {"key": "saikey", "name": "Clé IA", "perms": ["view", "edit"]},
         {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
     ]},
 ]
@@ -31507,16 +31523,21 @@ ROLE_MENU_STRUCTURE = [
 _PERM_KEY_TO_TABS = {
     "cloud": {"cloudoverview", "cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
-    # "Instagram Trends" (igtrends). On mappe donc la permission veille vers
-    # igtrends, sinon l'accorder ne révèle aucun menu (écran vide).
-    "veille": {"igtrends"},
+    # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
+    # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
+    # cocher la case. igtrends est inclus car c'est la page qui la contient :
+    # c'est une DÉPENDANCE, annoncée telle quelle dans le libellé de la case.
+    "veille": {"veille", "igtrends"},
     # "upload" non plus n'est pas un onglet : les vrais panneaux (reel/post/story/
     # storycta/pp) s'ouvrent via les boutons « Add media » DANS la Bibliothèque.
     # On révèle donc la Bibliothèque (cloudoverview = navigable) + on dé-masque les
     # panneaux d'upload. Sans cloudoverview, accorder "upload" ne montrait aucun menu.
     "upload": {"cloudoverview", "reel", "post", "story", "storycta", "pp"},
-    # La permission « Jailbreak » couvre aussi le sous-onglet Analyse vues.
-    "jailbreak": {"jailbreak", "jbanalyse", "jbactivite"},
+    # Jailbreak n'ouvre PLUS que sa propre page : « Analyse vues » et
+    # « Activité VA » ont désormais leur propre case (une case = une page).
+    "jailbreak": {"jailbreak"},
+    # La Bibliothèque texte gère Names/Bios/CTAs sur la même page.
+    "textpool": {"textpool"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
