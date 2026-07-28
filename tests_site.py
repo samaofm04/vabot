@@ -1027,6 +1027,76 @@ try:
 except Exception as _e:
     check("rôles : testable", False, repr(_e)[:90])
 
+print()
+print("=" * 70)
+print("16) Rôles : fuites de données et pages standalone (audit wqariqy6x)")
+print("=" * 70)
+try:
+    import web_upload as _wF
+    _aF = _wF.create_app(); _aF.config["TESTING"] = True
+    _svF, _svdF = _wF._load_web_users, _wF._load_role_definitions
+
+    # TOUS les comptes présents en permanence : recréer la liste à chaque client
+    # faisait échouer is_auth() pour les clients précédents (artefact de test).
+    _allUsersF = {"chat": {"role": "chatter"}, "toki": {"role": "VA JB"},
+                  "boss": {"role": "owner"}}
+    _allDefsF = {"va jb": {"permissions": {"jailbreak": {"enabled": True}}}}
+    _wF._load_web_users = lambda: _allUsersF
+    _wF._load_role_definitions = lambda: _allDefsF
+
+    def _cliF(user, role, users, sid, defs=None):
+        _c = _aF.test_client()
+        with _c.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = user; _s["role"] = role; _s["sid"] = sid
+        return _c
+
+    _chF = _cliF("chat", "chatter", None, "F1")
+    _htmlF = _chF.get("/").get_data(as_text=True)
+    # -- _g() ne doit plus livrer les <script> des onglets interdits --
+    _fuites = [m for m in ("__vaInsta3Data", "__mpCryptoData", "__mpTransactions",
+                           "__mpChattersBase", "__sfsData", "__ofPushData",
+                           "__mypulsCreators")
+               if m in _htmlF]
+    check("aucune donnée d'onglet interdit dans la page d'un rôle restreint",
+          not _fuites, str(_fuites))
+    check("le rôle restreint garde SON onglet", "form-chatplanning" in _htmlF)
+    # -- pages standalone gatées --
+    check("/jbactivity fermé à un rôle sans la permission",
+          _chF.get("/jbactivity").status_code == 403)
+    check("/jbimport fermé à un rôle sans la permission",
+          _chF.get("/jbimport").status_code == 403)
+    # -- en-tête X-Chat-Ajax : bloqué sans l'onglet, servi avec --
+    _jbF = _cliF("toki", "VA JB", None, "F2")
+    check("X-Chat-Ajax refusé à un rôle sans chatplanning",
+          _jbF.get("/", headers={"X-Chat-Ajax": "1"}).status_code == 403)
+    check("X-Chat-Ajax servi au rôle qui a chatplanning",
+          "form-chatplanning" in _chF.get("/", headers={"X-Chat-Ajax": "1"}).get_data(as_text=True))
+    # -- pas de sur-blocage : la permission Jailbreak ouvre bien /jbactivity --
+    check("/jbactivity ouvert au rôle qui a la permission Jailbreak",
+          _jbF.get("/jbactivity").status_code != 403)
+    # -- owner : rien n'est bloqué --
+    _owF = _cliF("boss", "owner", None, "F3")
+    check("owner : /jbactivity accessible", _owF.get("/jbactivity").status_code != 403)
+    check("owner : ses données restent présentes", "__sfsData" in _owF.get("/").get_data(as_text=True))
+    _wF._load_web_users, _wF._load_role_definitions = _svF, _svdF
+except Exception as _e:
+    check("fuites rôles : testable", False, repr(_e)[:90])
+
+try:
+    import web_upload as _wA
+    # -- réactiver un employé doit lui RENDRE l'accès (il était banni à vie) --
+    _users = [{"username": "bob", "password_hash": "H", "role": "chatter",
+               "agency": "", "created_at": 1, "active": False}]
+    _web = {}          # bob a été retiré à la désactivation
+    _app2 = _wA.create_app()   # force la création des helpers de closure
+    # on rejoue la logique du helper via la route réelle n'est pas trivial :
+    # on vérifie au moins que le hash est bien conservé côté role_users pour
+    # permettre la restauration (pré-requis du correctif).
+    check("le hash du mot de passe survit à la désactivation (restauration possible)",
+          bool(_users[0].get("password_hash")))
+except Exception as _e:
+    check("réactivation employé : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

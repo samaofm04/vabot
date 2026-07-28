@@ -32459,24 +32459,25 @@ def _render_upload_inner(msg=None, error=None):
 
         Rôle RESTREINT + onglet interdit : on ne renvoie plus les DONNÉES au
         navigateur (elles étaient dans le HTML, donc lisibles en « voir la
-        source » malgré le masquage visuel). On conserve uniquement les blocs
-        <style>/<script> de la page — c'est eux qui sont partagés entre onglets
-        et dont la suppression cassait le rendu des onglets autorisés.
+        source » malgré le masquage visuel).
+
+        ATTENTION — on ne garde QUE les <style>. Les <script> étaient conservés
+        au départ pour ne pas casser le JS partagé, mais c'est EXACTEMENT là que
+        vivent les données sensibles : window.__vaInsta3Data (mots de passe
+        Instagram + graines 2FA), __mpCryptoData (portefeuilles crypto),
+        __mpTransactions (CA agence), __sfsData / __ofPushData. Les conserver
+        revenait à livrer les secrets à tout employé connecté. Le CSS, lui, ne
+        porte aucune donnée : on le garde pour ne pas casser la mise en page.
         """
+        if allowed is not None and tab not in allowed:
+            # On n'exécute même PAS le producer : pas de données construites,
+            # pas de requête réseau inutile pour un onglet qu'il ne verra pas.
+            return ("<div style='padding:40px;text-align:center;color:#6b7280'>"
+                    "Accès non autorisé.</div>")
         try:
-            html = producer()
+            return producer()
         except Exception:
             return ""
-        try:
-            if allowed is not None and tab not in allowed:
-                import re as _re_g
-                keep = "".join(_re_g.findall(r"<style[^>]*>.*?</style>", html, _re_g.S))
-                keep += "".join(_re_g.findall(r"<script[^>]*>.*?</script>", html, _re_g.S))
-                return keep + ("<div style='padding:40px;text-align:center;color:#6b7280'>"
-                               "Accès non autorisé.</div>")
-        except Exception:
-            pass
-        return html
 
     # Onglets LOURDS (I/O réseau) : on ne les rend PAS au 1er chargement. On pose
     # un placeholder ; showTab() va chercher le fragment via /?lazy=<name> au 1er
@@ -33145,14 +33146,10 @@ def create_app():
     def _is_admin():
         """True si l'utilisateur connecte a un acces complet (owner/admin ou
         role non restreint). Sert a proteger les routes sensibles."""
-        try:
-            role = (session.get("role") or "").lower()
-            if not role:
-                u = _load_web_users().get((session.get("username") or "").lower())
-                role = (u.get("role") or "").lower() if isinstance(u, dict) else ""
-        except Exception:
-            role = ""
-        return _role_allowed_tabs(role) is None
+        # Lit le rôle VIVANT (stockage d'abord, session en repli) : la session
+        # fige le rôle au login, donc promouvoir ou rétrograder quelqu'un ne
+        # prenait effet qu'à la reconnexion — dans les deux sens.
+        return _role_allowed_tabs(_live_role()) is None
 
     # ==================================================================
     # GARDE-FOU SERVEUR (faille critique corrigée) : le gating par rôle
@@ -33209,6 +33206,10 @@ def create_app():
         "/mypuls/sales_window", "/mypuls/api_test", "/mypuls/api_stats_test",
         "/mypuls/api_probe", "/mypuls/calendar_probe",
         "/mypuls/pushs_refresh_probe", "/mypuls/refresh_pushs_now",
+        # Pages STANDALONE (hors système d'onglets) : elles échappaient au filet
+        # car aucun préfixe ne les couvrait. « /jbactivity » (orthographe -y) ne
+        # commence pas par « /jbactivite/ » (-e), d'où le trou.
+        "/jbactivity", "/jbimport",
     )
     # Prefixe de lecture -> onglet (showTab) qui le sert. Un rôle restreint à qui
     # on a EXPLICITEMENT accordé cet onglet peut lire ses données ; les autres
@@ -33221,6 +33222,9 @@ def create_app():
         "/jailbreak/": "jailbreak", "/jbactivite/": "jbactivite",
         "/jbanalyse/": "jbanalyse", "/gmsdash/": "gmsdash", "/gms/": "gms",
         "/linkscale/": "linkscale", "/paievas/": "paievas",
+        # pages standalone -> onglet équivalent (un rôle qui a la permission
+        # Jailbreak garde donc bien l'accès, il n'est pas sur-bloqué)
+        "/jbactivity": "jbactivite", "/jbimport": "jailbreak",
         # /mypuls/refresh_pushs_now n'expose AUCUN revenu (il lance juste une MAJ
         # des pushs en fond) : c'est le bouton « ⟳ MAJ profils » de la page SFS
         # Planning. On le mappe donc à l'onglet "sfs" (sinon un rôle SFS légitime
@@ -33434,6 +33438,15 @@ def create_app():
         # du planning au lieu de toute la page (~1.4MB, tous les onglets) ->
         # changement d'EDT/semaine quasi instantane au lieu de "ca charge trop".
         if request.headers.get("X-Chat-Ajax"):
+            # MEME garde de rôle que la route lazy : sans ça, n'importe quel
+            # employé connecté récupérait le planning chatteurs en ajoutant un
+            # simple en-tête (le masquage de l'onglet ne protégeait rien).
+            try:
+                _al_chat = _role_allowed_tabs(_live_role())
+            except Exception:
+                _al_chat = None
+            if _al_chat is not None and "chatplanning" not in _al_chat:
+                return ("", 403)
             try:
                 return f"<div id='form-chatplanning'>{_render_chatplanning_html()}</div>"
             except Exception:
@@ -38096,6 +38109,15 @@ def create_app():
     def jbactivity_page():
         if not is_auth():
             return redirect("/")
+        # Page STANDALONE (pas un onglet) : le masquage du bouton dans la barre
+        # latérale ne protégeait rien, il suffisait de taper l'URL pour lire les
+        # VA jailbreak, leurs comptes Instagram et leurs pénalités.
+        try:
+            _al_jb = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al_jb = None
+        if _al_jb is not None and "jbactivite" not in _al_jb:
+            return ("Accès non autorisé", 403)
         from flask import request as _rq
         import time as _t
         from datetime import datetime as _dt
@@ -39854,6 +39876,29 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             tab="semp",
         )
 
+    def _reactivate_web_user(username: str, users: list, web_users: dict) -> bool:
+        """REMET l'entrée de connexion d'un employé réactivé.
+
+        Désactiver SUPPRIME l'entrée de web_admin_users.json ; sans cette
+        restauration, « activer » ne faisait que rebasculer un drapeau
+        d'affichage : la table indiquait « Activated » alors que la personne ne
+        pouvait PLUS JAMAIS se connecter. Le hash du mot de passe est conservé
+        dans role_users.json, on repart de là.
+        """
+        if not username or username in web_users:
+            return False
+        rec = next((u for u in users
+                    if (u.get("username") or "").lower() == username), None)
+        if not (rec and rec.get("password_hash")):
+            return False
+        web_users[username] = {
+            "password_hash": rec["password_hash"],
+            "role": rec.get("role", ""),
+            "agency": rec.get("agency", ""),
+            "created_at": rec.get("created_at", int(time.time())),
+        }
+        return True
+
     @app.route("/settings/role/toggle_active", methods=["POST"])
     def settings_role_toggle_active():
         if not is_auth():
@@ -39866,12 +39911,21 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 u["active"] = (action == "activate")
                 break
         _save_role_users(users)
-        # Sync : si deactivate -> retirer de web_admin_users.json
         web_users = _load_web_users()
+        restored = False
         if action == "deactivate" and username in web_users:
             web_users.pop(username, None)
             _save_web_users(web_users)
-        return _success(f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}", tab="semp")
+        elif action == "activate":
+            if _reactivate_web_user(username, users, web_users):
+                _save_web_users(web_users)
+                restored = True
+        note = ""
+        if action == "activate" and not restored and username not in web_users:
+            note = " ⚠️ aucun mot de passe enregistré — recrée-le pour qu'il puisse se connecter."
+        return _success(
+            f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}{note}",
+            tab="semp")
 
     @app.route("/settings/role/edit_user", methods=["POST"])
     def settings_role_edit_user():
@@ -39930,6 +39984,10 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             if not is_act:
                 for n in names:
                     web_users.pop(n, None)
+            else:
+                # symétrique de la désactivation : on REMET l'entrée de connexion
+                for n in names:
+                    _reactivate_web_user(n, users, web_users)
         _save_role_users(users)
         _save_web_users(web_users)
         verb = {"activate": "activé(s)", "deactivate": "désactivé(s)", "delete": "supprimé(s)"}[action]
@@ -39975,19 +40033,35 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     def settings_role_delete():
         if not is_auth():
             return redirect("/")
-        key = (request.form.get("role_key") or "").strip()
+        key = _role_key(request.form.get("role_key"))
         if not key or key == "owner":
             return _error("❌ Impossible de supprimer ce rôle")
         defs = _load_role_definitions()
         if key in defs:
             del defs[key]
             _save_role_definitions(defs)
-        # Réinitialiser les users qui avaient ce rôle
+        # Réinitialiser les users qui avaient ce rôle (comparaison NORMALISÉE :
+        # « VA JB » et « va jb » désignent le même rôle)
         users = _load_role_users()
         for u in users:
-            if u.get("role") == key:
+            if _role_key(u.get("role")) == key:
                 u["role"] = "va"  # downgrade en VA par défaut
         _save_role_users(users)
+        # ET dans web_admin_users.json, qui est la SOURCE du rôle réellement
+        # appliqué : sans ça l'employé gardait le rôle supprimé, et il se
+        # réactivait tout seul si on recréait un rôle du même nom.
+        web_users = _load_web_users()
+        changed = False
+        for _un, _rec in web_users.items():
+            if isinstance(_rec, dict) and _role_key(_rec.get("role")) == key:
+                _rec["role"] = "va"
+                changed = True
+        if changed:
+            _save_web_users(web_users)
+        try:
+            _invalidate_all_ttl_cache()
+        except Exception:
+            pass
         return _success(f"✅ Rôle <b>{key}</b> supprimé")
 
     @app.route("/settings/role/create", methods=["POST"])
