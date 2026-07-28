@@ -33680,16 +33680,33 @@ def create_app():
             request.form, "videos", VIDEO_EXTS,
         )
 
+    def _save_many_videos(field: str, subdir: str):
+        """Enregistre TOUS les fichiers du champ, pas seulement le premier.
+
+        L'interface envoie déjà une requête par fichier, mais un envoi groupé
+        (JS coupé, POST direct) ne gardait que le 1er fichier EN SILENCE.
+        """
+        files = [f for f in request.files.getlist(field) if f and f.filename]
+        if not files:
+            return _save_image_or_video_with_pair(
+                {"photo": None, "example": request.files.get("example")},
+                request.form, subdir, VIDEO_EXTS,
+            )
+        last = None
+        for f in files:
+            last = _save_image_or_video_with_pair(
+                {"photo": f, "example": None},
+                request.form, subdir, VIDEO_EXTS,
+            )
+        return last
+
     @app.route("/upload/brute", methods=["POST"])
     def upload_brute():
         """Rushs BRUTS (page « Reel montage ») : rangés dans <identite>/brutes/,
         séparés des reels prêts à poster pour ne pas mélanger les deux stocks."""
         if not is_auth():
             return redirect("/")
-        return _save_image_or_video_with_pair(
-            {"photo": request.files.get("video"), "example": request.files.get("example")},
-            request.form, "brutes", VIDEO_EXTS,
-        )
+        return _save_many_videos("video", "brutes")
 
     @app.route("/upload/template", methods=["POST"])
     def upload_template():
@@ -33697,10 +33714,7 @@ def create_app():
         Chacun apporte SA piste son — c'est elle qui sera gardée à l'assemblage."""
         if not is_auth():
             return redirect("/")
-        return _save_image_or_video_with_pair(
-            {"photo": request.files.get("video"), "example": request.files.get("example")},
-            request.form, "templates", VIDEO_EXTS,
-        )
+        return _save_many_videos("video", "templates")
 
     @app.route("/upload/post", methods=["POST"])
     def upload_post():
