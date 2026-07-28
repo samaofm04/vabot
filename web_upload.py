@@ -4524,10 +4524,6 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
     </button>
-    <button class="item" onclick="showTab('cloud','cloudbrutes','Reel montage','Rushs bruts par identité — matière première des montages')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>
-      Reel montage
-    </button>
     <button class="item" onclick="showTab('cloud','cloudposts','Posts','Tous les posts stockés')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
       Posts
@@ -4560,6 +4556,24 @@ document.addEventListener('click',function(e){
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z" fill="currentColor"/></svg>
   🎬 Métadonnées vidéo
 </button>
+
+<div class="group" id="grp-montage">
+  <button class="group-head" onclick="toggleGroup('montage')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+    <span class="label">✂️ Reel montage</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-cloudbrutes" onclick="showTab('montage','cloudbrutes','Vidéo brut','Tes rushs bruts par identité — la matière première des montages')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Vidéo brut
+    </button>
+    <button class="item" id="tab-cloudtemplates" onclick="showTab('montage','cloudtemplates','Template montage','Tes modèles CapCut — chacun apporte son son et son rythme')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Template montage
+    </button>
+  </div>
+</div>
 
 <div class="section-label">Management</div>
 
@@ -5045,9 +5059,14 @@ document.addEventListener('click',function(e){
 {cloud_reels_html}
 </div>
 
-<!-- CLOUD : brutes (Reel montage) -->
+<!-- REEL MONTAGE : rushs bruts -->
 <div class="form-section" id="form-cloudbrutes" style="display:none">
 {cloud_brutes_html}
+</div>
+
+<!-- REEL MONTAGE : modeles CapCut -->
+<div class="form-section" id="form-cloudtemplates" style="display:none">
+{cloud_templates_html}
 </div>
 
 <!-- CLOUD : posts -->
@@ -10896,8 +10915,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
                 "stories": "cloudstories", "storyctas": "cloudstoryctas",
                 "profile_pics": "cloudpps",
-                # « brutes » = rushs par identite, matiere premiere des montages
-                "brutes": "cloudbrutes"}.get(subdir, "cloudoverview")
+                # « brutes » = rushs par identite ; « templates » = modeles CapCut
+                # (chacun porte SON son) -> les 2 bibliotheques de Reel montage
+                "brutes": "cloudbrutes",
+                "templates": "cloudtemplates"}.get(subdir, "cloudoverview")
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
@@ -11096,6 +11117,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien"),
         "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité"),
         "brutes": ("brute", "Rush brut", "Matière première des montages"),
+        "templates": ("template", "Template montage", "Modèle CapCut — apporte le son"),
     }
     add_media_btn = ""
     if subdir in upload_tab_map:
@@ -11792,7 +11814,7 @@ document.addEventListener('submit', function(e){
   };
   const _g = _gmap[form.dataset.utype];
   const _ident = nonFileFields['identity'] || '';
-  const typeLbl = {reel:'reel(s)', post:'post(s)', story:'story(s)', storycta:'story CTA', pp:'photo(s) de profil', brute:'rush(s) brut(s)'}[form.dataset.utype] || 'fichier(s)';
+  const typeLbl = {reel:'reel(s)', post:'post(s)', story:'story(s)', storycta:'story CTA', pp:'photo(s) de profil', brute:'rush(s) brut(s)', template:'template(s)'}[form.dataset.utype] || 'fichier(s)';
   // Carte de progression façon Infloww, avec miniature du 1er fichier image
   const taskId = 'up-' + Date.now();
   let thumbUrl = null;
@@ -31481,6 +31503,7 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Création", "items": [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
         {"key": "svideo", "name": "Métadonnées vidéo (uniquification)", "perms": ["view", "edit"]},
+        {"key": "montage", "name": "Reel montage (rushs bruts + templates)", "perms": ["view", "create"]},
     ]},
     {"section": "Liens", "items": [
         {"key": "gmsdash", "name": "Dashboard clics (GMS)", "perms": ["view"]},
@@ -31540,8 +31563,9 @@ _PERM_KEY_TO_TABS = {
     # « Vue d'ensemble » (cloudoverview) retirée de la barre latérale à la
     # demande de l'user : elle ne doit plus apparaître dans les mappings, sinon
     # une case pointerait sur une page inatteignable.
-    "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps",
-              "cloudbrutes"},
+    "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
+    # Reel montage = ses 2 bibliotheques (rushs bruts + modeles CapCut)
+    "montage": {"cloudbrutes", "cloudtemplates"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
     # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
     # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
@@ -32538,6 +32562,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{stat_pps}", str(stat_pps))
         .replace("{cloud_reels_html}", _g("cloudreels", lambda: _render_cloud_content_html("videos", VIDEO_EXTS)))
         .replace("{cloud_brutes_html}", _g("cloudbrutes", lambda: _render_cloud_content_html("brutes", VIDEO_EXTS)))
+        .replace("{cloud_templates_html}", _g("cloudtemplates", lambda: _render_cloud_content_html("templates", VIDEO_EXTS)))
         .replace("{cloud_posts_html}", _g("cloudposts", lambda: _render_cloud_content_html("posts", IMAGE_EXTS)))
         .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
         .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
@@ -33626,6 +33651,17 @@ def create_app():
             request.form, "brutes", VIDEO_EXTS,
         )
 
+    @app.route("/upload/template", methods=["POST"])
+    def upload_template():
+        """Modèles de montage (exports CapCut) : rangés dans <identite>/templates/.
+        Chacun apporte SA piste son — c'est elle qui sera gardée à l'assemblage."""
+        if not is_auth():
+            return redirect("/")
+        return _save_image_or_video_with_pair(
+            {"photo": request.files.get("video"), "example": request.files.get("example")},
+            request.form, "templates", VIDEO_EXTS,
+        )
+
     @app.route("/upload/post", methods=["POST"])
     def upload_post():
         if not is_auth():
@@ -33712,7 +33748,7 @@ def create_app():
     def cloud_thumb_file(identity, subdir, filename):
         if not is_auth():
             return redirect("/")
-        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -33762,7 +33798,7 @@ def create_app():
         if not is_auth():
             return redirect("/")
         # Sécurité : restreindre aux dossiers valides
-        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -33796,7 +33832,7 @@ def create_app():
         identity, subdir, filename = parts
         identity = identity.lower().strip()
         # Securite (meme regles que cloud_serve_file / cloud_delete)
-        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes"}:
+        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
             return jsonify({"ok": False, "error": "dossier invalide"})
         if identity not in _list_identities():
             return jsonify({"ok": False, "error": "identité inconnue"})
@@ -33867,7 +33903,7 @@ def create_app():
         deleted = []
         failed = []
         identities_list = _list_identities()
-        valid_subdirs = {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes"}
+        valid_subdirs = {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}
         for fid in files:
             try:
                 parts = fid.split("|", 2)
@@ -33954,7 +33990,7 @@ def create_app():
         ident, subdir, name = parts
         if ".." in name or "/" in name or "\\" in name:
             return None
-        if subdir not in ("videos", "posts", "stories", "storyctas", "profile_pics", "brutes"):
+        if subdir not in ("videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"):
             return None
         target_dir = IDENTITIES_DIR / ident / subdir
         target = target_dir / name
