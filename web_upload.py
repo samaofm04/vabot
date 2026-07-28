@@ -3658,19 +3658,29 @@ function nxMRenderCaps(){
   if(thumbs.length){ var cw=W/thumbs.length; thumbs.forEach(function(u,k){ if(u) strip+='<img src="'+u+'" style="position:absolute;left:'+Math.round(k*cw)+'px;top:0;width:'+Math.ceil(cw+1)+'px;height:'+vidTrackH+'px;object-fit:cover;pointer-events:none">'; }); }
   else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">⏳ miniatures…</div>'; }
   var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">🎬 '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
-  // MARQUEUR DE COUPE : ou le template s'arrete et ou la video BRUTE prend le
-  // relais a la generation. Glissable. Par defaut = fin de la video.
-  var cutT=(nxMState.cut==null?dur:Math.max(0,Math.min(dur,nxMState.cut)));
+  // MARQUEUR DE COUPE : tout ce qui est AVANT le trait est RETIRE du template
+  // et remplace par la VIDEO BRUTE a la generation. Le template ne garde que la
+  // partie apres le trait. Glissable. Par defaut : 0 = rien de remplace.
+  var cutT=(nxMState.cut==null?0:Math.max(0,Math.min(dur,nxMState.cut)));
   nxMState.cut=cutT;
   var cutX=cutT*pps;
-  var cutMark='<div id="nx-m-cut" title="Point de coupe : le template s arrete ici, la video brute prend le relais" '
-    +'style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:3px;background:#22d3ee;z-index:6;cursor:ew-resize;touch-action:none;box-shadow:0 0 8px rgba(34,211,238,.8)">'
+  var cutMark='<div id="nx-m-cut" title="Glisse : tout ce qui est a GAUCHE est remplace par la video brute" '
+    +'style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:3px;background:#22d3ee;z-index:7;cursor:ew-resize;touch-action:none;box-shadow:0 0 8px rgba(34,211,238,.8)">'
     +'<div style="position:absolute;left:-9px;top:-2px;width:21px;height:16px;background:#22d3ee;border-radius:4px;color:#04222a;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">✂</div>'
     +'</div>';
-  var cutZone='<div style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:'+Math.max(0,(dur-cutT)*pps)+'px;background:repeating-linear-gradient(45deg,rgba(34,211,238,.10),rgba(34,211,238,.10) 8px,rgba(34,211,238,.19) 8px,rgba(34,211,238,.19) 16px);pointer-events:none;z-index:2"></div>';
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse le trait ✂ : le template s arrete la, la video brute prend le relais</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
+  // Bloc « VIDEO BRUT » : couvre la partie retiree (sombre, pas noir) et annonce
+  // ce qui viendra s y mettre. Rien si le trait est a 0.
+  var cutZone='';
+  if(cutT>0.02){
+    cutZone='<div style="position:absolute;left:0;top:'+rulerH+'px;bottom:0;width:'+cutX+'px;z-index:6;pointer-events:none;'
+      +'background:repeating-linear-gradient(45deg,rgba(15,23,30,.93),rgba(15,23,30,.93) 10px,rgba(30,44,56,.93) 10px,rgba(30,44,56,.93) 20px);'
+      +'border-right:2px dashed rgba(34,211,238,.85);display:flex;align-items:center;justify-content:center;overflow:hidden">'
+      +'<span style="color:#7dd3fc;font-size:11px;font-weight:800;letter-spacing:.08em;text-shadow:0 1px 4px #000;white-space:nowrap;padding:0 6px">VIDEO BRUT</span>'
+      +'</div>';
+  }
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse le trait ✂ : tout ce qui est a GAUCHE est remplace par la video brute</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
-    + grid + rulerStrip + cutZone + vtrack + cutMark
+    + grid + rulerStrip + vtrack + cutZone + cutMark
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"><div style="position:absolute;top:0;left:-7px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"></div></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
