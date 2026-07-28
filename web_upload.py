@@ -4509,10 +4509,6 @@ document.addEventListener('click',function(e){
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
     Dashboard
   </button>
-  <button class="item solo-item" onclick="location.href='/jbactivity'" title="Activité des VA jailbreak + pénalités">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-    Activité VA
-  </button>
 </div>
 
 <div class="section-label">Contenu</div>
@@ -4524,10 +4520,6 @@ document.addEventListener('click',function(e){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" onclick="showTab('cloud','cloudoverview','Vue d ensemble','Tout ton stockage par type de contenu')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-      Vue d'ensemble
-    </button>
     <button class="item" onclick="showTab('cloud','cloudreels','Reels','Tous les reels stockés par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
@@ -31521,18 +31513,22 @@ ROLE_MENU_STRUCTURE = [
 # Clé de permission (ROLE_MENU_STRUCTURE) -> noms d'onglets réels (showTab).
 # La plupart matchent déjà ; "cloud" couvre plusieurs sous-onglets Bibliothèque.
 _PERM_KEY_TO_TABS = {
-    "cloud": {"cloudoverview", "cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
+    # « Vue d'ensemble » (cloudoverview) retirée de la barre latérale à la
+    # demande de l'user : elle ne doit plus apparaître dans les mappings, sinon
+    # une case pointerait sur une page inatteignable.
+    "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
     # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
     # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
     # cocher la case. igtrends est inclus car c'est la page qui la contient :
     # c'est une DÉPENDANCE, annoncée telle quelle dans le libellé de la case.
     "veille": {"veille", "igtrends"},
-    # "upload" non plus n'est pas un onglet : les vrais panneaux (reel/post/story/
-    # storycta/pp) s'ouvrent via les boutons « Add media » DANS la Bibliothèque.
-    # On révèle donc la Bibliothèque (cloudoverview = navigable) + on dé-masque les
-    # panneaux d'upload. Sans cloudoverview, accorder "upload" ne montrait aucun menu.
-    "upload": {"cloudoverview", "reel", "post", "story", "storycta", "pp"},
+    # "upload" n'est pas un onglet : les vrais panneaux (reel/post/story/storycta/
+    # pp) s'ouvrent via les boutons « Add media » DANS la Bibliothèque. On révèle
+    # donc une page navigable de la Bibliothèque (Reels, désormais la première)
+    # + on dé-masque les panneaux d'upload. Sans page navigable, accorder
+    # "upload" ne montrerait aucun menu.
+    "upload": {"cloudreels", "reel", "post", "story", "storycta", "pp"},
     # Jailbreak n'ouvre PLUS que sa propre page : « Analyse vues » et
     # « Activité VA » ont désormais leur propre case (une case = une page).
     "jailbreak": {"jailbreak"},
@@ -32167,28 +32163,17 @@ function openPermissions(key, name){
       window.__roleMenuStructure.forEach(function(section){
         html += '<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700">' + section.section + '</h4>';
         html += '<table style="width:100%;border-collapse:collapse;background:#0f0f0f;border-radius:8px;overflow:hidden;margin-bottom:14px">';
-        html += '<tr style="background:#1a1a1a"><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Menus</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Permissions</th><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Data scope</th></tr>';
+        html += '<tr style="background:#1a1a1a"><th style="padding:8px 10px;text-align:left;font-size:11px;color:#888;text-transform:uppercase">Page — cocher = y donner acces</th></tr>';
         section.items.forEach(function(item){
           var menuPerms = perms[item.key] || {};
           var enabled = menuPerms.enabled === true;  // fail-closed : décoché par défaut (sinon un rôle vierge voyait TOUT au save)
           var scope = menuPerms.scope || 'self';
           html += '<tr style="border-top:1px solid #1a1a1a">';
           html += '<td style="padding:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="enabled" onchange="toggleMenuRow(this)" ' + (enabled ? 'checked' : '') + ' style="accent-color:#3b82f6;width:18px;height:18px"> ' + item.name + '</label></td>';
-          // Function perms
-          var fnHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
-          (item.perms || []).forEach(function(p){
-            var checked = (menuPerms.perms || []).indexOf(p) !== -1;  // coché seulement si explicitement accordé
-            fnHtml += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" data-menu="' + item.key + '" data-field="perm" data-perm="' + p + '" ' + (checked ? 'checked' : '') + ' style="accent-color:#3b82f6"> ' + p + '</label>';
-          });
-          fnHtml += '</div>';
-          html += '<td style="padding:10px">' + fnHtml + '</td>';
-          // Data scope
-          var scopeHtml = '<div style="display:flex;gap:10px">'
-            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="all" ' + (scope === 'all' ? 'checked' : '') + '> All data</label>'
-            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="sub" ' + (scope === 'sub' ? 'checked' : '') + '> Self+subordinates</label>'
-            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="radio" name="scope_' + item.key + '" data-menu="' + item.key + '" data-field="scope" value="self" ' + (scope === 'self' ? 'checked' : '') + '> Self only</label>'
-            + '</div>';
-          html += '<td style="padding:10px">' + scopeHtml + '</td>';
+          // Les colonnes « Permissions » (view/create/edit/delete) et « Data
+          // scope » ont ete RETIREES : elles etaient enregistrees mais JAMAIS
+          // relues par le controle d'acces. Elles laissaient croire a un
+          // reglage fin qui n'existait pas. Une case = acces a la page, point.
           html += '</tr>';
         });
         html += '</table>';
