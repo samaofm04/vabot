@@ -4876,13 +4876,47 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-brute" style="display:none">
 <form method="POST" action="/upload/brute" enctype="multipart/form-data" class="up-form" data-utype="brute" data-accept="video/*">
-  <h3 style="margin:0 0 4px">Ajouter des rushs bruts</h3>
-  <p style="margin:0 0 14px;color:#888;font-size:13px">Matière première des montages. Rangés par identité, séparés des reels prêts à poster.</p>
-  <label>Identité</label>
-  <select name="identity" required>{identity_options}</select>
-  <label>Vidéo(s)</label>
-  <input type="file" name="video" accept="video/*" multiple required>
-  <button type="submit">Envoyer</button>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<label class="up-drop">
+<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop — tu peux selectionner plusieurs videos d un coup</div>
+<div class="up-drop-limits"><span>Video size limit: 500MB</span><span>·</span><span>MP4 / MOV</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader les rushs</button>
+</form>
+</div>
+
+<div class="form-section" id="form-template" style="display:none">
+<form method="POST" action="/upload/template" enctype="multipart/form-data" class="up-form" data-utype="template" data-accept="video/*">
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
+<select name="identity" required class="up-input">{ident_opts}</select>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<label class="up-drop">
+<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
+<div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
+<div class="up-drop-hint">Drag and drop — chaque template garde SON son a l assemblage</div>
+<div class="up-drop-limits"><span>Video size limit: 500MB</span><span>·</span><span>MP4 / MOV</span></div>
+</label>
+<div class="up-edit-table" style="display:none">
+<div class="up-edit-head"><div>Media</div><div>Action</div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+</div>
+</div>
+<button type="submit" class="up-submit">⬆ Uploader les templates</button>
 </form>
 </div>
 
