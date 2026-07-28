@@ -10915,7 +10915,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 identities.append(_jb)
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
-    is_video = subdir == "videos"
+    # Rendu : vignette + badge lecture pour tout dossier video.
+    is_video = subdir in ("videos", "brutes", "templates")
+    # Fonctions PROPRES aux Reels (banger, montage, va_ready) : elles ne doivent
+    # PAS apparaitre sur « Video brut » ni « Template montage ».
+    is_reels = subdir == "videos"
 
     # Stats par identité (counts + size) — cachées 30s (cf helper ci-dessus)
     ident_stats = _cloud_ident_stats_cached(
@@ -11105,7 +11109,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"onclick='purgeBanger(\"{selected}\", this)' "
             "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
             "<span class='vault-radio'></span>🗑 Vider le salon banger</button>")
-           if is_video else "")
+           if is_reels else "")
         + "</div>"
         "</div>"
     )
@@ -11118,7 +11122,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Reels Banger</button>"
-    ) if is_video else ""
+    ) if is_reels else ""
 
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
     # Reels = vidéos only, Posts = photos only → pas de filtre.
@@ -11216,7 +11220,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
         _va_ready_stems = set()
-        if is_video and folder.exists():
+        if is_reels and folder.exists():
             import json as _jvr
             for _mj in folder.glob("*.montage.json"):
                 try:
@@ -11247,7 +11251,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_video and p.stem in _va_ready_stems)))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_reels and p.stem in _va_ready_stems)))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
@@ -33795,7 +33799,9 @@ def create_app():
         if not src.exists() or not src.is_file():
             return "Not found", 404
         rel_key = f"{safe_identity}/{subdir}/{filename}"
-        is_video = subdir == "videos"
+        # TOUS les dossiers video (reels, rushs bruts, templates) : sinon la
+        # miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
+        is_video = subdir in ("videos", "brutes", "templates")
         thumb = _get_or_create_thumbnail(src, rel_key, is_video)
         if thumb is None or not thumb.exists():
             # Fallback : servir le fichier original
