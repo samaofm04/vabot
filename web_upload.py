@@ -3632,12 +3632,30 @@ function nxMRenderCaps(){
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+6;
   // Tons chauds (plus de bleu/violet) — la caption sélectionnée passe en orange #9C4937
   var colors=['#6e5a4f','#7a5f4a','#6b564d','#755a4a','#6e584a','#725c4d'];
-  var step=dur<=8?1:(dur<=20?2:(dur<=60?5:10)), grid='', rlabels=''; nxMState.step=step;
+  // PAS de graduation choisi d'apres le ZOOM (pps) : on vise ~90px entre deux
+  // reperes, donc plus on zoome, plus le pas est fin (0.1s ... 60s).
+  var STEPS=[0.1,0.2,0.5,1,2,5,10,15,30,60,120,300];
+  var step=STEPS[STEPS.length-1];
+  for(var si=0; si<STEPS.length; si++){ if(STEPS[si]*pps>=90){ step=STEPS[si]; break; } }
+  var grid='', rlabels=''; nxMState.step=step;
+  // libelle facon CapCut : MM:SS (+ dixiemes quand le pas descend sous 1s)
+  function nxMClock(t){
+    var m=Math.floor(t/60), sec=t-m*60;
+    var ss=(step<1)?(sec.toFixed(1)):String(Math.round(sec));
+    if(step>=1 && Math.round(sec)===60){ m+=1; ss='0'; }
+    if(parseFloat(ss)<10) ss='0'+ss;
+    return m+':'+ss;
+  }
+  var MINOR=(step<1)?5:(step===15||step===30||step===60?3:5);   // petites graduations
   for(var s=0;s<=dur+0.001;s+=step){ var x=s*pps;
     grid+='<div style="position:absolute;left:'+x+'px;top:'+rulerH+'px;bottom:0;width:1px;background:#242424;pointer-events:none"></div>';
-    rlabels+='<div style="position:absolute;left:'+(x+6)+'px;top:8px;font-size:12px;font-weight:600;color:#dcdcdc;pointer-events:none">'+nxMFmt(s)+'s</div>';
-    rlabels+='<div style="position:absolute;left:'+x+'px;top:'+(rulerH-11)+'px;width:2px;height:11px;background:#6f6f6f;pointer-events:none"></div>';
-    var xh=(s+step/2)*pps; if(s+step/2<=dur+0.001) rlabels+='<div style="position:absolute;left:'+xh+'px;top:'+(rulerH-7)+'px;width:1px;height:7px;background:#454545;pointer-events:none"></div>';
+    rlabels+='<div style="position:absolute;left:'+(x+5)+'px;top:7px;font-size:11px;font-weight:600;color:#cfcfcf;pointer-events:none;white-space:nowrap">'+nxMClock(s)+'</div>';
+    rlabels+='<div style="position:absolute;left:'+x+'px;top:'+(rulerH-13)+'px;width:2px;height:13px;background:#8a8a8a;pointer-events:none"></div>';
+    // petites secondes entre deux reperes
+    for(var k=1;k<MINOR;k++){
+      var ts=s+step*k/MINOR; if(ts>dur+0.001) break;
+      rlabels+='<div style="position:absolute;left:'+(ts*pps)+'px;top:'+(rulerH-6)+'px;width:1px;height:6px;background:#5a5a5a;pointer-events:none"></div>';
+    }
   }
   // réglette de lecture cliquable/scrubbable (bande dédiée en haut, bien grande façon CapCut)
   var rulerStrip='<div id="nx-m-ruler" title="Clique ou glisse ici pour déplacer la lecture de la vidéo" style="position:absolute;left:0;right:0;top:0;height:'+rulerH+'px;background:linear-gradient(#242424,#1a1a1a);border-bottom:1px solid #333;cursor:pointer;z-index:4;touch-action:none">'+rlabels+'</div>';
