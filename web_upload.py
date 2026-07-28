@@ -3030,6 +3030,9 @@ function nxMSnap(t, ex){
   nxMState.snap=null;
   var pps=nxMState.pps||0, dur=nxMState.dur||0; if(!pps) return t;
   var thr=10/pps, cands=[0,dur];
+  // le TRAIT DE COUPE aimante aussi : on cale une caption pile sur la limite
+  // entre la video brute et le template sans viser au pixel.
+  if(nxMState.cut!=null) cands.push(nxMState.cut);
   var v=document.getElementById('nx-m-video'); if(v&&!isNaN(v.currentTime)) cands.push(v.currentTime);
   (nxMState.caps||[]).forEach(function(c,idx){ if(idx===ex||c.start==null) return; cands.push(c.start); cands.push(c.end); });
   // graduations de la règle (les lignes visibles : 1s, 2s, 3s…) -> aimantation propre
@@ -3620,8 +3623,10 @@ function nxMRenderCaps(){
   list.querySelectorAll('[data-del]').forEach(function(el){ el.addEventListener('click',function(){ nxMDelCap(parseInt(el.getAttribute('data-del'),10)); }); });
   // --- TIMELINE ---
   if(!dur){ wrap.innerHTML='<div style="font-size:11px;color:#888;border:1px dashed #2a2a2a;border-radius:8px;padding:10px;text-align:center">▶ Lance la lecture une seconde pour activer la timeline…</div>'; return; }
-  var W=wrap.clientWidth||480, pps=W/dur;
-  nxMState.dur=dur; nxMState.pps=pps;
+  var VW=wrap.clientWidth||480;                 // largeur VISIBLE du conteneur
+  var Z=nxMState.zoom||1;                      // facteur de zoom (Ctrl+molette)
+  var W=Math.round(VW*Z), pps=W/dur;           // W = largeur DESSINEE (peut deborder)
+  nxMState.dur=dur; nxMState.pps=pps; nxMState.vw=VW;
   var La=caps.length?nxMLanes():{n:0,laneOf:{}}, nLanes=La.n||0, laneH=38, gap=9, rulerH=48;
   var vidTrackH=70;   // piste vidéo (miniatures) façon CapCut — bien haute pour cliquer facile
   var tracksH=nLanes*(laneH+gap), totalH=rulerH+tracksH+gap+vidTrackH+6;
@@ -3644,7 +3649,7 @@ function nxMRenderCaps(){
     var sel=(nxMState.editIdx===i);                       // caption sélectionnée (en cours d'édition)
     var col='#9C4937';                                    // couleur caption demandée
     var deco=sel?'border:2px solid #ff9d6b;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 2px 10px rgba(156,73,55,.65)':'box-shadow:0 1px 3px rgba(0,0,0,.4)';
-    blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;'+deco+'">'
+    blocks+='<div class="nxm-block" data-i="'+i+'" style="position:absolute;left:'+left+'px;width:'+wpx+'px;top:'+top+'px;height:'+laneH+'px;background:'+col+';border-radius:6px;box-sizing:border-box;overflow:hidden;z-index:5;'+deco+'">'
       +'<div class="nxm-h" data-i="'+i+'" data-mode="left" style="position:absolute;left:0;top:0;bottom:0;width:11px;cursor:ew-resize;background:rgba(255,255,255,.28);border-radius:6px 0 0 6px;touch-action:none"></div>'
       +'<div class="nxm-h" data-i="'+i+'" data-mode="move" title="'+nxMEsc(c.text)+'" style="position:absolute;left:11px;right:11px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;padding:0 4px;cursor:grab;overflow:hidden;touch-action:none">'
       +'<span style="color:#fff;font-size:11px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">'+nxMEsc(c.text)+'</span>'
@@ -3665,26 +3670,53 @@ function nxMRenderCaps(){
   nxMState.cut=cutT;
   var cutX=cutT*pps;
   var cutMark='<div id="nx-m-cut" title="Glisse : tout ce qui est a GAUCHE est remplace par la video brute" '
-    +'style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:3px;background:#22d3ee;z-index:7;cursor:ew-resize;touch-action:none;box-shadow:0 0 8px rgba(34,211,238,.8)">'
+    +'style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:3px;background:#22d3ee;z-index:9;cursor:ew-resize;touch-action:none;box-shadow:0 0 8px rgba(34,211,238,.8)">'
     +'<div style="position:absolute;left:-9px;top:-2px;width:21px;height:16px;background:#22d3ee;border-radius:4px;color:#04222a;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">✂</div>'
     +'</div>';
   // Bloc « VIDEO BRUT » : couvre la partie retiree (sombre, pas noir) et annonce
   // ce qui viendra s y mettre. Rien si le trait est a 0.
   var cutZone='';
   if(cutT>0.02){
-    cutZone='<div style="position:absolute;left:0;top:'+rulerH+'px;bottom:0;width:'+cutX+'px;z-index:6;pointer-events:none;'
+    cutZone='<div style="position:absolute;left:0;top:'+rulerH+'px;bottom:0;width:'+cutX+'px;z-index:3;pointer-events:none;'
       +'background:repeating-linear-gradient(45deg,rgba(15,23,30,.93),rgba(15,23,30,.93) 10px,rgba(30,44,56,.93) 10px,rgba(30,44,56,.93) 20px);'
       +'border-right:2px dashed rgba(34,211,238,.85);display:flex;align-items:center;justify-content:center;overflow:hidden">'
       +'<span style="color:#7dd3fc;font-size:11px;font-weight:800;letter-spacing:.08em;text-shadow:0 1px 4px #000;white-space:nowrap;padding:0 6px">VIDEO BRUT</span>'
       +'</div>';
   }
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse le trait ✂ : tout ce qui est a GAUCHE est remplace par la video brute</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse le trait ✂ : tout ce qui est a GAUCHE est remplace par la video brute · Ctrl+molette = zoom</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
+    +'<div id="nx-m-tlscroll" style="overflow-x:auto;overflow-y:hidden;width:100%">'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
     + grid + rulerStrip + vtrack + cutZone + cutMark
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"><div style="position:absolute;top:0;left:-7px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"></div></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
-    + blocks + '</div>';
+    + blocks + '</div></div>';
   var tl=document.getElementById('nx-m-timeline');
+  var tlsc=document.getElementById('nx-m-tlscroll');
+  // conserve la position de defilement entre deux rendus (sinon le zoom saute)
+  if(tlsc && nxMState.scrollLeft) tlsc.scrollLeft=nxMState.scrollLeft;
+  // CTRL + MOLETTE : zoom avant/arriere, centre sur le curseur, pour placer le
+  // trait de coupe a la fraction de seconde pres.
+  if(tlsc && !tlsc.dataset.zoomBound){
+    tlsc.dataset.zoomBound='1';
+    tlsc.addEventListener('wheel',function(ev){
+      if(!ev.ctrlKey) return;                 // molette seule = defilement normal
+      ev.preventDefault();
+      var oldZ=nxMState.zoom||1;
+      var f=(ev.deltaY<0)?1.25:0.8;           // haut = zoom avant, bas = arriere
+      var nz=Math.max(1,Math.min(60,oldZ*f));
+      if(nz===oldZ) return;
+      // garde le point sous la souris au meme endroit a l ecran
+      var r=tlsc.getBoundingClientRect();
+      var mx=ev.clientX-r.left;
+      var ratio=nz/oldZ;
+      var target=(tlsc.scrollLeft+mx)*ratio-mx;
+      nxMState.zoom=nz;
+      nxMRenderCaps();
+      var sc2=document.getElementById('nx-m-tlscroll');
+      if(sc2){ sc2.scrollLeft=Math.max(0,target); nxMState.scrollLeft=sc2.scrollLeft; }
+    },{passive:false});
+    tlsc.addEventListener('scroll',function(){ nxMState.scrollLeft=tlsc.scrollLeft; });
+  }
   function nxMSeekAt(cx){ var r=tl.getBoundingClientRect(); var v=document.getElementById('nx-m-video'); if(v){ if(!v.paused){ try{ v.pause(); nxMPlayBtn(); }catch(_){} } try{ v.currentTime=Math.max(0,Math.min(dur,(cx-r.left)/pps)); }catch(_){} } nxMSyncPlayhead(); nxMUpdatePreview(); }
   // clic sur le fond (hors blocs) = déplace la lecture
   tl.addEventListener('pointerdown',function(e){ if(e.target.closest('.nxm-block')||e.target.closest('#nx-m-ruler')) return; nxMSeekAt(e.clientX); });
@@ -3775,7 +3807,7 @@ async function nxMontageOpen(fid, exampleUrl){
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
-  nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc=''; nxMState.cut=null;
+  nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc=''; nxMState.cut=null; nxMState.zoom=1; nxMState.scrollLeft=0;
   var _sub=parts[1]||'videos';   // BUG: '/videos/' etait code en dur -> un template
                                  // (dossier templates/) donnait un 404, donc video
                                  // noire, duree inconnue et timeline vide.
