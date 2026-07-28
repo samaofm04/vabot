@@ -990,6 +990,43 @@ try:
 except Exception as _e:
     check("audit argent facture : testable", False, repr(_e)[:90])
 
+print()
+print("=" * 70)
+print("15) Rôles : la casse du nom ne doit JAMAIS perdre les permissions")
+print("=" * 70)
+try:
+    import web_upload as _wR, json as _jR
+    _tmpR = TMP / "roles"; _tmpR.mkdir(parents=True, exist_ok=True)
+    _savedDir = _wR.DATA_DIR
+    _wR.DATA_DIR = _tmpR
+    # fichier ANCIEN : clé écrite telle que tapée, avec majuscules
+    (_tmpR / "role_definitions.json").write_text(
+        _jR.dumps({"VA JB": {"permissions": {"jailbreak": {"enabled": True}}}}),
+        encoding="utf-8")
+    _tabs = {r: _wR._role_allowed_tabs(r) for r in
+             ["VA JB", "va jb", "VA  JB", " Va Jb ", "vA jB"]}
+    check("rôle 'VA JB' (majuscules) : permissions bien appliquées",
+          "jailbreak" in (_tabs["VA JB"] or set()))
+    check("toutes les casses/espacements donnent le MÊME accès",
+          len({frozenset(v or ()) for v in _tabs.values()}) == 1, str(_tabs))
+    # écriture : toujours en clé canonique
+    _wR._save_role_definitions({"Nouveau Role": {"permissions": {"sfs": {"enabled": True}}}})
+    _keysR = list(_jR.loads((_tmpR / "role_definitions.json").read_text(encoding="utf-8")))
+    check("sauvegarde en clé canonique (minuscules)", _keysR == ["nouveau role"], str(_keysR))
+    check("rôle relu juste après la sauvegarde",
+          "sfs" in (_wR._role_allowed_tabs("Nouveau Role") or set()))
+    # owner/admin et le fallback chatter ne bougent pas
+    check("owner/admin gardent l'accès complet",
+          _wR._role_allowed_tabs("owner") is None and _wR._role_allowed_tabs("Admin") is None)
+    _savR = _wR._load_role_definitions
+    _wR._load_role_definitions = lambda: {}
+    check("chatter garde son jeu d'onglets par défaut",
+          "chatplanning" in (_wR._role_allowed_tabs("Chatter") or set()))
+    _wR._load_role_definitions = _savR
+    _wR.DATA_DIR = _savedDir
+except Exception as _e:
+    check("rôles : testable", False, repr(_e)[:90])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

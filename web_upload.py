@@ -31390,20 +31390,64 @@ def _save_role_users(users: list):
     safe_json.write_text(f, json.dumps(users, indent=2, ensure_ascii=False))
 
 
+def _role_key(name) -> str:
+    """Clé CANONIQUE d'un rôle : minuscules, espaces normalisés.
+
+    BUG HISTORIQUE : les permissions étaient ENREGISTRÉES sous le nom tapé
+    (« VA JB ») mais RELUES en minuscules par _role_allowed_tabs (« va jb »).
+    Résultat : les droits n'étaient jamais trouvés -> l'employé retombait sur le
+    minimum {saccount, sprefs}. Et comme l'éditeur relisait avec la clé brute,
+    il réaffichait les cases cochées : on croyait la config enregistrée alors
+    qu'elle ne s'appliquait pas. Tout passe désormais par cette fonction.
+    """
+    return " ".join(str(name or "").strip().lower().split())
+
+
 def _load_role_definitions() -> dict:
-    """Charge les définitions des rôles personnalisés (nom, description, permissions)."""
+    """Charge les définitions des rôles personnalisés (nom, description, permissions).
+
+    Les clés sont NORMALISÉES à la lecture : les anciennes entrées écrites avec
+    des majuscules (« VA JB ») redeviennent donc actives immédiatement, sans
+    migration manuelle. Si deux variantes de casse coexistent, on garde celle
+    qui a réellement des permissions.
+    """
     f = DATA_DIR / "role_definitions.json"
     if not f.exists():
         return {}
     try:
-        return json.loads(f.read_text(encoding="utf-8"))
+        raw = json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for k, v in raw.items():
+        nk = _role_key(k)
+        if not nk:
+            continue
+        prev = out.get(nk)
+        if prev is None:
+            out[nk] = v
+            continue
+        # doublon de casse : on privilégie l'entrée qui porte des permissions
+        def _npterms(d):
+            p = (d or {}).get("permissions") or {}
+            return sum(1 for x in p.values() if isinstance(x, dict) and x.get("enabled"))
+        if _npterms(v) > _npterms(prev):
+            out[nk] = v
+    return out
 
 
 def _save_role_definitions(data: dict):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    safe_json.write_text(DATA_DIR / "role_definitions.json", json.dumps(data, indent=2, ensure_ascii=False))
+    # Écrit TOUJOURS en clés canoniques : plus jamais de « VA JB » vs « va jb ».
+    clean = {}
+    for k, v in (data or {}).items():
+        nk = _role_key(k)
+        if nk:
+            clean[nk] = v
+    safe_json.write_text(DATA_DIR / "role_definitions.json",
+                         json.dumps(clean, indent=2, ensure_ascii=False))
 
 
 # Structure des menus avec permissions disponibles
@@ -31490,7 +31534,7 @@ def _role_allowed_tabs(role):
     - Rôle sans permissions définies : map connu (chatter) sinon MINIMAL
       (juste son compte) -> deny par défaut (un nouveau compte ne voit PAS tout).
     """
-    r = (role or "").lower().strip()
+    r = _role_key(role)      # MÊME normalisation qu'à l'enregistrement (casse + espaces)
     if r in ("owner", "admin"):
         return None
     if not r:
@@ -39995,15 +40039,19 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             from flask import jsonify
             return jsonify({"error": "auth required"}), 401
         from flask import jsonify
+        # Clé CANONIQUE des deux côtés (_role_key) : sinon on enregistrait sous
+        # « VA JB » et le gating relisait « va jb » -> droits jamais appliqués.
         if request.method == "GET":
-            key = (request.args.get("key") or "").strip()
+            key = _role_key(request.args.get("key"))
             if not key:
                 return jsonify({"error": "key required"}), 400
             defs = _load_role_definitions()
             perms = defs.get(key, {}).get("permissions", {})
             return jsonify({"key": key, "permissions": perms})
         # POST
-        key = (request.form.get("role_key") or "").strip()
+        key = _role_key(request.form.get("role_key"))
+        if not key:
+            return jsonify({"error": "key required"}), 400
         perms_json = request.form.get("permissions") or "{}"
         try:
             perms = json.loads(perms_json)
@@ -40014,6 +40062,12 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             defs[key] = {}
         defs[key]["permissions"] = perms
         _save_role_definitions(defs)
+        # Les rendus en cache peuvent contenir l'ANCIENNE sidebar/onglets de ce
+        # rôle : on vide pour que le changement soit visible tout de suite.
+        try:
+            _invalidate_all_ttl_cache()
+        except Exception:
+            pass
         return jsonify({"success": True})
 
     @app.route("/settings/insta_rapidapi", methods=["POST"])
