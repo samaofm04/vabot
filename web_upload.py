@@ -4881,12 +4881,12 @@ document.addEventListener('click',function(e){
 <select name="identity" required class="up-input">{ident_opts}</select>
 </div>
 <div class="up-card">
-<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<div class="up-step"><span class="up-dot"></span><h3>Vidéo</h3></div>
 <label class="up-drop">
 <input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop — tu peux selectionner plusieurs videos d un coup</div>
-<div class="up-drop-limits"><span>Video size limit: 500MB</span><span>·</span><span>MP4 / MOV</span></div>
+<div class="up-drop-hint">Drag and drop the video here — plusieurs videos possibles</div>
+<div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
@@ -4904,12 +4904,12 @@ document.addEventListener('click',function(e){
 <select name="identity" required class="up-input">{ident_opts}</select>
 </div>
 <div class="up-card">
-<div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
+<div class="up-step"><span class="up-dot"></span><h3>Vidéo</h3></div>
 <label class="up-drop">
 <input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop — chaque template garde SON son a l assemblage</div>
-<div class="up-drop-limits"><span>Video size limit: 500MB</span><span>·</span><span>MP4 / MOV</span></div>
+<div class="up-drop-hint">Drag and drop the template here — il apporte SON son</div>
+<div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
@@ -11844,7 +11844,9 @@ document.addEventListener('submit', function(e){
     post: ['cloudposts','cloud_posts_ident'],
     story: ['cloudstories','cloud_stories_ident'],
     storycta: ['cloudstoryctas','cloud_storyctas_ident'],
-    pp: ['cloudpps', null]
+    pp: ['cloudpps', null],
+    brute: ['cloudbrutes','cloud_brutes_ident'],
+    template: ['cloudtemplates','cloud_templates_ident']
   };
   const _g = _gmap[form.dataset.utype];
   const _ident = nonFileFields['identity'] || '';
