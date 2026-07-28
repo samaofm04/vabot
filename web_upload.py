@@ -10726,7 +10726,7 @@ def _va_ready_watermark_uri():
 _VA_READY_WM = _va_ready_watermark_uri()
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -10734,6 +10734,9 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     se charge de la swap au moment ou la card devient visible.
     """
     name = file_path.name
+    # can_montage non precise -> ancien comportement (= is_video)
+    if can_montage is None:
+        can_montage = is_video
     # Date upload courte format français (ex. "27 mai")
     try:
         import datetime as _dt_pc
@@ -10800,9 +10803,10 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     show_edit = "|videos|" in (file_id or "")
     actions_html = ""
     if file_id:
-        # ⭐ Banger : envoie cette video dans le salon banger-{identite} (videos uniquement)
+        # ⭐ Banger : envoie cette video dans le salon banger-{identite}. RESERVE
+        # aux Reels : un rush brut ou un template n'a rien a y faire.
         banger_btn = ""
-        if is_video:
+        if "|videos|" in (file_id or ""):
             _on = bool(is_banger)
             _scol = "#ffd54a" if _on else "#9aa0a6"        # jaune si marqué, gris sinon
             _sfill = "#ffd54a" if _on else "none"          # rempli si marqué, contour sinon
@@ -10816,7 +10820,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"</button>"
             )
         montage_btn = ""
-        if is_video:
+        if can_montage:
             montage_btn = (
                 f"<button class='card-edit-btn' onclick='event.stopPropagation();nxMontageOpen(\"{fid_safe}\", \"{montage_ex_safe}\")' "
                 f"title='🎬 Montage : générer des variations de ce reel' style='color:#a855f7'>"
@@ -10917,8 +10921,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         return "<p style='color:#888'>Aucune identité créée.</p>"
     # Rendu : vignette + badge lecture pour tout dossier video.
     is_video = subdir in ("videos", "brutes", "templates")
-    # Fonctions PROPRES aux Reels (banger, montage, va_ready) : elles ne doivent
-    # PAS apparaitre sur « Video brut » ni « Template montage ».
+    # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
+    # PAS sur « Video brut » — l'user veut des rushs nus, sans caption ni rien.
+    can_montage = subdir in ("videos", "templates")
+    # Fonctions PROPRES aux Reels (banger, va_ready) : ni sur brut ni sur template.
     is_reels = subdir == "videos"
 
     # Stats par identité (counts + size) — cachées 30s (cf helper ci-dessus)
@@ -11251,7 +11257,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_reels and p.stem in _va_ready_stems)))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_reels and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
