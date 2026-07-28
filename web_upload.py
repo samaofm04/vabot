@@ -3514,6 +3514,8 @@ function nxMontageSave(){
   fd.set('segments',JSON.stringify(nxMState.caps||[]));
   fd.set('font',(document.getElementById('nx-m-font')||{}).value||'Strong');
   fd.set('style',JSON.stringify(nxMState.style||{}));
+  // point de coupe : ou le template s arrete et ou la brute prend le relais
+  if(nxMState.cut!=null) fd.set('cut_at',String(nxMState.cut));
   fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
     reset(j.ok?'✅ Enregistré !':'❌ Erreur');
     if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ta caption + le style sont gardés':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
@@ -3531,6 +3533,7 @@ function nxMLoadDraft(fid){
     var szv=document.getElementById('nx-m-size-val'); if(szv) szv.textContent=s.size||44;
     var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
     try{ nxMStylePaint(); }catch(e){}
+    try{ var _c=parseFloat(j.draft.cut_at); if(!isNaN(_c)&&_c>0) nxMState.cut=_c; }catch(e){}
     try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
     try{ nxMSetApproveBtn(!!j.draft.va_ready); }catch(e){}   // reflète « dispo VA » sur le bouton
     nxMHistInit();   // baseline = état chargé (undo ne revient pas avant le brouillon)
@@ -3655,9 +3658,19 @@ function nxMRenderCaps(){
   if(thumbs.length){ var cw=W/thumbs.length; thumbs.forEach(function(u,k){ if(u) strip+='<img src="'+u+'" style="position:absolute;left:'+Math.round(k*cw)+'px;top:0;width:'+Math.ceil(cw+1)+'px;height:'+vidTrackH+'px;object-fit:cover;pointer-events:none">'; }); }
   else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">⏳ miniatures…</div>'; }
   var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">🎬 '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
-  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — clique une caption pour la modifier · glisse les blocs · tire les bords</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
+  // MARQUEUR DE COUPE : ou le template s'arrete et ou la video BRUTE prend le
+  // relais a la generation. Glissable. Par defaut = fin de la video.
+  var cutT=(nxMState.cut==null?dur:Math.max(0,Math.min(dur,nxMState.cut)));
+  nxMState.cut=cutT;
+  var cutX=cutT*pps;
+  var cutMark='<div id="nx-m-cut" title="Point de coupe : le template s arrete ici, la video brute prend le relais" '
+    +'style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:3px;background:#22d3ee;z-index:6;cursor:ew-resize;touch-action:none;box-shadow:0 0 8px rgba(34,211,238,.8)">'
+    +'<div style="position:absolute;left:-9px;top:-2px;width:21px;height:16px;background:#22d3ee;border-radius:4px;color:#04222a;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">✂</div>'
+    +'</div>';
+  var cutZone='<div style="position:absolute;left:'+cutX+'px;top:'+rulerH+'px;bottom:0;width:'+Math.max(0,(dur-cutT)*pps)+'px;background:repeating-linear-gradient(45deg,rgba(34,211,238,.10),rgba(34,211,238,.10) 8px,rgba(34,211,238,.19) 8px,rgba(34,211,238,.19) 16px);pointer-events:none;z-index:2"></div>';
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:3px"><span>Timeline ('+nxMFmt(dur)+'s) — glisse le trait ✂ : le template s arrete la, la video brute prend le relais</span><span id="nx-m-phlabel" style="color:#ff9d6b;font-weight:700">0s</span></div>'
     +'<div id="nx-m-timeline" style="position:relative;width:'+W+'px;height:'+totalH+'px;background:#141414;border:1px solid #262626;border-radius:8px;overflow:hidden;touch-action:none">'
-    + grid + rulerStrip + vtrack
+    + grid + rulerStrip + cutZone + vtrack + cutMark
     + '<div id="nx-m-playhead" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 4px rgba(255,255,255,.6);pointer-events:none;z-index:5"><div style="position:absolute;top:0;left:-7px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"></div></div>'
     + '<div id="nx-m-snapline" style="position:absolute;top:0;bottom:0;width:2px;background:#22d3ee;box-shadow:0 0 6px #22d3ee;display:none;pointer-events:none;z-index:6"></div>'
     + blocks + '</div>';
@@ -3675,6 +3688,21 @@ function nxMRenderCaps(){
     ruler.addEventListener('pointermove',m); ruler.addEventListener('pointerup',u); ruler.addEventListener('pointercancel',u);
   }); }
   tl.querySelectorAll('.nxm-h').forEach(function(el){ el.addEventListener('pointerdown',function(ev){ nxMBeginDrag(ev, parseInt(el.getAttribute('data-i'),10), el.getAttribute('data-mode')); }); });
+  // GLISSER le point de coupe (trait cyan) : definit ou le template s arrete.
+  var cutEl=document.getElementById('nx-m-cut');
+  if(cutEl){ cutEl.addEventListener('pointerdown',function(e){
+    e.preventDefault(); e.stopPropagation(); try{ cutEl.setPointerCapture(e.pointerId); }catch(_){}
+    var r=tl.getBoundingClientRect();
+    function mv(ev){
+      var t=Math.max(0,Math.min(dur,(ev.clientX-r.left)/pps));
+      nxMState.cut=t; nxMRenderCaps();
+      var c2=document.getElementById('nx-m-cut');
+      if(c2){ try{ c2.setPointerCapture(ev.pointerId); }catch(_){} }
+    }
+    function up(){ try{ cutEl.releasePointerCapture(e.pointerId); }catch(_){}
+      document.removeEventListener('pointermove',mv); document.removeEventListener('pointerup',up); }
+    document.addEventListener('pointermove',mv); document.addEventListener('pointerup',up);
+  }); }
   nxMSyncPlayhead(); nxMUpdatePreview();
 }
 function nxMEditCap(i){
@@ -3737,8 +3765,11 @@ async function nxMontageOpen(fid, exampleUrl){
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
-  nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc='';
-  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/videos/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); nxMPlayBtn(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onplay=nxMPlayBtn; vid.onpause=nxMPlayBtn; vid.onended=nxMPlayBtn; }
+  nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc=''; nxMState.cut=null;
+  var _sub=parts[1]||'videos';   // BUG: '/videos/' etait code en dur -> un template
+                                 // (dossier templates/) donnait un 404, donc video
+                                 // noire, duree inconnue et timeline vide.
+  if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/'+encodeURIComponent(_sub)+'/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); nxMPlayBtn(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onplay=nxMPlayBtn; vid.onpause=nxMPlayBtn; vid.onended=nxMPlayBtn; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
   if(exampleUrl && exV && exWrap){ exV.src=exampleUrl; exWrap.style.display='block'; }
@@ -34312,6 +34343,14 @@ def create_app():
             "font": (request.form.get("font") or "Strong").strip(),
             "style": request.form.get("style") or "{}",
         }
+        # Point de COUPE (s) : le template s'arrête là, la vidéo brute prend le
+        # relais à la génération. Absent = pas de coupe (template entier).
+        try:
+            _cut = float(request.form.get("cut_at") or 0)
+            if _cut > 0:
+                draft["cut_at"] = round(_cut, 3)
+        except Exception:
+            pass
         try:                                    # préserve l'approbation VA existante
             old = _js.loads(p.read_text(encoding="utf-8"))
             if isinstance(old, dict) and old.get("va_ready"):
