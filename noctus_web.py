@@ -308,12 +308,23 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
     node_bin = _node_bin() or "node"
     # Logs du pipeline -> _run.log (au lieu de DEVNULL) : si ça crashe, on voit pourquoi
     # et status() en renvoie un extrait au front.
+    mdir = _models_dir() / mid
     try:
-        mdir = _models_dir() / mid
         mdir.mkdir(parents=True, exist_ok=True)
         logf = open(str(mdir / "_run.log"), "wb")
     except Exception:
         logf = subprocess.DEVNULL
+    # ÉTAT « running » ÉCRIT ICI, AVANT de lancer Node.
+    # Sinon : l'identifiant du modèle est fixe pour un reel donné, donc
+    # _status.json contient encore le « done » de la génération précédente. Le
+    # front interroge l'état juste après la réponse HTTP, avant que Node ait
+    # démarré et écrit son propre « running » : il lit l'ancien « done », va
+    # chercher les vidéos dans output/ qui vient d'être vidé, et annonce
+    # « aucune vidéo produite » alors que le rendu tourne encore.
+    if not safe_json.write(mdir / "_status.json",
+                           {"state": "running", "current": 0, "total": 0,
+                            "pct": 0, "eta": None}, indent=None):
+        print("[noctus] etat initial non ecrit", flush=True)
     proc = subprocess.Popen(
         [node_bin, "noctus_runner.js", json.dumps(payload)],
         cwd=str(NOCTUS_SRC),

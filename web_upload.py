@@ -4017,7 +4017,9 @@ async function nxMontageGen(count){
   try{
     var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
     if(!j.ok){ nxMGenReset(); document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
-    nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMState.genStart=Date.now(); nxMontagePoll();
+    nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMState.genStart=Date.now();
+    nxMState.resultTries=0;   // remis a zero : sinon un echec precedent bloque les nouvelles tentatives
+    nxMontagePoll();
   }catch(e){ nxMGenReset(); if(typeof showToast==='function') showToast('Erreur : '+e,'error'); else alert('Erreur: '+e); }
 }
 function nxMGenFail(msg){
@@ -4035,7 +4037,13 @@ async function nxMontagePoll(){
     var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
     var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
     if(s.state==='running'){ var pc=(s.pct||0); p.textContent='⏳ '+pc+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); if(gen) gen.textContent='⏳ '+pc+'%'; setTimeout(nxMontagePoll,1500); }
-    else if(s.state==='done'){ p.textContent='✅ Terminé'; nxMState.genStart=0; nxMontageResults(); }
+    else if(s.state==='done'){
+      // Un « terminé » qui tombe dans les 2,5 s du lancement est forcement un
+      // reste de la generation precedente (un rendu prend bien plus longtemps).
+      // On l ignore au lieu d annoncer « aucune video produite » a tort.
+      if(Date.now()-nxMState.genStart < 2500){ p.textContent='⏳ démarrage…'; setTimeout(nxMontagePoll,1200); return; }
+      p.textContent='✅ Terminé'; nxMState.genStart=0; nxMontageResults();
+    }
     else if(s.state==='error'){ nxMGenFail((s.error||'erreur').toString().slice(0,180)); }
     else if(s.state==='idle'||s.state==='stopped'){ nxMGenFail('le rendu a été arrêté'); }
     else { setTimeout(nxMontagePoll,1500); }
@@ -4050,7 +4058,33 @@ async function nxMontageResults(){
     Object.keys(o).forEach(function(v){ (o[v]||[]).forEach(function(f){
       dls.push({url:'/noctus/file/'+encodeURIComponent(nxMState.model)+'/'+v+'/'+encodeURIComponent(f)+'?dl=1', file:f, vf:v});
     }); });
-    if(!dls.length){ nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return; }
+    if(!dls.length){
+      // Aucune sortie : avant de crier a l echec, on verifie si le moteur
+      // tourne ENCORE. C est exactement le piege qui faisait annoncer « aucune
+      // video produite » alors que le rendu etait en cours.
+      var alive=false;
+      try{
+        var rs=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model));
+        var st=await rs.json();
+        alive=(st && st.state==='running');
+      }catch(e){}
+      if(!alive && (nxMState.resultTries||0)<3){
+        // pas « running » mais peut-etre juste pas encore ecrit sur le disque :
+        // on redonne 3 chances espacees avant de conclure.
+        nxMState.resultTries=(nxMState.resultTries||0)+1;
+        var pr=document.getElementById('nx-m-prog');
+        if(pr) pr.textContent='⏳ finalisation…';
+        setTimeout(nxMontageResults,2500); return;
+      }
+      if(alive){
+        var pr2=document.getElementById('nx-m-prog');
+        if(pr2) pr2.textContent='⏳ rendu en cours…';
+        if(!nxMState.genStart) nxMState.genStart=Date.now();
+        setTimeout(nxMontagePoll,2000); return;   // le rendu continue -> on reprend le suivi
+      }
+      nxMShowGenLog(); nxMGenFail('aucune vidéo produite (voir le détail affiché)'); return;
+    }
+    nxMState.resultTries=0;
     nxMDownloadAll(dls);   // chaque vidéo téléchargée directement (le navigateur peut demander 1x l'autorisation pour plusieurs)
     var n=dls.length;
     if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s':'')+' sur ton PC'+(n>1?' <span style="color:#9a9aa6;font-weight:500">(autorise « télécharger plusieurs fichiers » si le navigateur demande)</span>':'')+'</div>';
