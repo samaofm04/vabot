@@ -3728,7 +3728,7 @@ function nxMApplyOpen(){
             ov.remove();
             if(j.ok){
               var n=(j.done||[]).length;
-              var msg='📤 Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j.done||[]).join(', ');
+              var msg='Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j.done||[]).join(', ');
               if(j.errors&&j.errors.length) msg+=' — échec : '+j.errors.join(' ; ');
               if(typeof showToast==='function') showToast(msg,(j.errors&&j.errors.length)?'warning':'success',10000);
             } else if(typeof showToast==='function') showToast('❌ '+(j.error||'échec'),'error',8000);
@@ -6262,7 +6262,7 @@ body.light .action-icon{color:#666}
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
       <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">Analyser</button>
-      <button class="ce-btn" id="nx-m-apply" onclick="nxMApplyOpen()" style="display:none" title="Copie ce template (vidéo + captions + trait ✂) chez les models que tu choisis. Chacune utilisera ses propres vidéos brutes.">📤 Appliquer aux autres</button>
+      <button class="ce-btn" id="nx-m-apply" onclick="nxMApplyOpen()" style="display:none" title="Copie ce template (vidéo + captions + trait ✂) chez les models que tu choisis. Chacune utilisera ses propres vidéos brutes.">Appliquer aux autres</button>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
@@ -6283,7 +6283,7 @@ body.light .action-icon{color:#666}
           <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
           <div id="nxm-apply-sec" style="display:none">
             <div class="nxm-plabel" style="margin-top:18px">Appliquer à d'autres models</div>
-            <div class="ce-card" style="height:46px;font-style:normal" onclick="nxMApplyOpen()">📤 Appliquer ce montage…</div>
+            <div class="ce-card" style="height:46px;font-style:normal" onclick="nxMApplyOpen()">Appliquer ce montage…</div>
             <div style="font-size:11px;color:#75757f;line-height:1.5;margin-top:8px">Copie ce template (vidéo + captions + trait <b style="color:#22d3ee">✂</b>) chez les models que tu choisis. Chacune utilisera <b>ses propres</b> vidéos brutes.</div>
           </div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
