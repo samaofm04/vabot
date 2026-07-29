@@ -590,22 +590,26 @@ def assemble_brute_template(template, brute, cut_at, out_path):
     fc = (f"[0:v]{fit},trim=duration={cut:.3f},setpts=PTS-STARTPTS[a];"
           f"[1:v]{fit},trim=start={cut:.3f},setpts=PTS-STARTPTS[b];"
           f"[a][b]concat=n=2:v=1:a=0[v]")
-    cmd = ["ffmpeg", "-y", "-loglevel", "error",
-           "-stream_loop", "-1"]
-    if start > 0:
-        cmd += ["-ss", f"{start:.2f}"]
-    cmd += ["-t", f"{cut:.3f}", "-i", str(brute),
-            "-i", str(template),
-            "-filter_complex", fc,
-            "-map", "[v]", "-map", "1:a?",     # « ? » : template sans son -> muet
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart", str(out_path)]
+    def _cmd(seek):
+        c = ["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1"]
+        if seek > 0:
+            c += ["-ss", f"{seek:.2f}"]
+        return c + ["-t", f"{cut:.3f}", "-i", str(brute),
+                    "-i", str(template),
+                    "-filter_complex", fc,
+                    "-map", "[v]", "-map", "1:a?",   # « ? » : template sans son -> muet
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                    "-movflags", "+faststart", str(out_path)]
+
     # Deux essais : sous charge (plusieurs assemblages en parallele + le moteur
     # Node qui tourne encore), ffmpeg echoue parfois de facon passagere. Sans
     # reprise, cette variante-la repartirait du template seul, sans video brute.
+    # Le 2e essai repart du DEBUT de la brute : rejouer le meme decalage
+    # aleatoire rejouerait aussi l echec s'il venait de la.
     last = ""
     for essai in (1, 2):
+        cmd = _cmd(start if essai == 1 else 0.0)
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=300)
         except subprocess.TimeoutExpired:
