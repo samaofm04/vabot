@@ -5990,6 +5990,10 @@ body.light .action-icon{color:#666}
           <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#00d9c0">Télécharger</b>.</div>
+          <div class="nxm-plabel" style="margin-top:16px">Tout faire automatiquement</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Le bouton <b style="color:#e6e6ea">🪄 Analyser</b>, tout en haut, regarde la vidéo à ta place : il place le trait de coupe <b style="color:#22d3ee">✂</b> et recopie la caption (texte, position, style). Tu n'as plus qu'à vérifier. <b>Ctrl+Z</b> annule si ça tombe à côté.</div>
+          <div class="nxm-plabel" style="margin-top:16px">Le trait ✂</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Tout ce qui est à <b>gauche</b> du trait est remplacé, à la génération, par une vidéo tirée au hasard dans le dossier <b>Vidéo brut</b> de la model. Le <b>son</b> du montage, lui, est gardé en entier. Trait à 0 = pas de remplacement.</div>
         </div>
       </div>
       <!-- CENTRE : lecteur -->
