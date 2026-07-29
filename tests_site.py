@@ -1140,6 +1140,100 @@ try:
 except Exception as _e:
     check("synchro éditeur/pages : testable", False, repr(_e)[:90])
 
+print()
+print("=" * 70)
+print("18) Montage : assemblage brute + template")
+print("=" * 70)
+# Le point de coupe pilote le remplacement du debut du template par une video
+# brute. S'il disparait quelque part, la generation repart du template seul —
+# en silence, sans erreur. D'ou ces tests.
+try:
+    import os as _osM
+    _osM.environ.setdefault("WEB_UPLOAD_PASSWORD", "testlocal")
+    import noctus_web as _nw
+
+    # -- tri des brutes : ne doit ramener QUE des videos exploitables ----------
+    _bd = TMP / "brutes"
+    _bd.mkdir(parents=True, exist_ok=True)
+    for _n in ("a.mp4", "b.MOV", "c.example.mp4", "vide.mp4"):
+        (_bd / _n).write_bytes(b"\0" * (5000 if "vide" not in _n else 10))
+    for _n in ("a.txt", "a.desc.txt", "a.montage.json", ".DS_Store", "note.md"):
+        (_bd / _n).write_text("x", encoding="utf-8")
+    _got = {p.name for p in _nw.list_brutes(_bd)}
+    check("brutes : garde les videos (extensions variees)", _got == {"a.mp4", "b.MOV"}, str(sorted(_got)))
+    check("brutes : exclut les .example", "c.example.mp4" not in _got)
+    check("brutes : exclut txt/desc/montage.json/caches", not (_got & {"a.txt", "a.desc.txt", "a.montage.json", ".DS_Store", "note.md"}))
+    check("brutes : exclut les fichiers vides ou tronques", "vide.mp4" not in _got)
+    check("brutes : dossier inexistant -> liste vide", _nw.list_brutes(TMP / "nulle_part") == [])
+
+    # -- garde-fous de l'assemblage sans lancer ffmpeg -------------------------
+    _ok, _err = _nw.assemble_brute_template(TMP / "absent.mp4", _bd / "a.mp4", 3.0, TMP / "o.mp4")
+    check("assemblage : template absent -> echec explicite", (not _ok) and "template" in _err, _err)
+    _ok, _err = _nw.assemble_brute_template(_bd / "a.mp4", TMP / "absent.mp4", 3.0, TMP / "o.mp4")
+    check("assemblage : brute absente -> echec explicite", (not _ok) and "brute" in _err, _err)
+
+    # -- videoFolderMap : sans lui, N videos x N variantes = N² exports --------
+    import inspect as _insp
+    _runsrc = _insp.getsource(_nw.run)
+    check("run() transmet videoFolderMap au moteur", "videoFolderMap" in _runsrc)
+    _rjs = (pathlib.Path(__file__).parent / "noctus" / "noctus_runner.js").read_text(encoding="utf-8")
+    check("le runner Node lit videoFolderMap", "args.videoFolderMap" in _rjs)
+    check("le runner passe videoFolderMap au pipeline",
+          "videoFolderMap, targetFiles" in _rjs.replace("  ", " "))
+
+    # -- le point de coupe doit survivre a l'approbation VA -------------------
+    import web_upload as _wM
+    _idM = pathlib.Path("data/identities/_tst_montage") / "videos"
+    shutil.rmtree(_idM.parent, ignore_errors=True)
+    _idM.mkdir(parents=True)
+    (_idM / "r.mp4").write_bytes(b"\0" * 3000)
+    _pM = _idM / "r.montage.json"
+    _appM = _wM.create_app()
+    _appM.testing = True
+    _cM = _appM.test_client()
+    # Des sections precedentes remplacent _load_web_users sans toujours le
+    # restaurer : on pose nous-memes un owner et on ouvre la session a la main,
+    # sinon is_auth() renvoie False et les POST repondent 401 en silence.
+    _savM = _wM._load_web_users
+    _wM._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    with _cM.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "boss"
+    _base = {"file_id": "_tst_montage|videos|r.mp4", "segments": "[]", "font": "Strong", "style": "{}"}
+    _rM = _cM.post("/noctus/montage_save", data=dict(_base, cut_at="2.75"))
+    check("le point de coupe est enregistre",
+          _rM.status_code == 200 and _pM.exists()
+          and json.loads(_pM.read_text()).get("cut_at") == 2.75,
+          f"http {_rM.status_code}")
+    _cM.post("/noctus/montage_approve", data=dict(_base))          # sans cut_at au formulaire
+    _dM = json.loads(_pM.read_text())
+    check("« dispo VA » ne detruit PAS le point de coupe", _dM.get("cut_at") == 2.75, str(_dM))
+    check("« dispo VA » pose bien va_ready", _dM.get("va_ready") is True)
+    _cM.post("/noctus/montage_approve", data=dict(_base, cut_at="4.5"))
+    check("un point de coupe envoye au formulaire gagne", json.loads(_pM.read_text()).get("cut_at") == 4.5)
+    _cM.post("/noctus/montage_unapprove", data={"file_id": _base["file_id"]})
+    _dM = json.loads(_pM.read_text())
+    check("retirer du stock VA garde le point de coupe", _dM.get("cut_at") == 4.5)
+    check("retirer du stock VA enleve va_ready", "va_ready" not in _dM)
+    _wM._load_web_users = _savM          # rend le magasin d'utilisateurs intact
+    shutil.rmtree(_idM.parent, ignore_errors=True)
+
+    # -- les deux chemins de generation doivent passer les brutes -------------
+    check("gen_from_draft accepte brutes_dir",
+          "brutes_dir" in _insp.signature(_nw.gen_from_draft).parameters)
+    _uM = (pathlib.Path(__file__).parent / "cogs" / "user.py").read_text(encoding="utf-8")
+    check("le reel monte a la demande (VA) passe le dossier brutes", "_brutes" in _uM and "brutes" in _uM)
+    _wsrc = (pathlib.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
+    check("la generation depuis le site passe par _prepare_inputs", "_prepare_inputs(" in _wsrc)
+    check("l editeur envoie le point de coupe a la generation",
+          _wsrc.count("fd.set('cut_at'") >= 3, "save + gen + approve")
+except Exception as _e:
+    # Trace complete : cette section enchaine ffprobe, routes HTTP et fichiers,
+    # un « FileNotFoundError(2) » nu ne dit pas lequel a lache.
+    import traceback as _tb
+    _tb.print_exc()
+    check("montage : testable", False, repr(_e)[:120])
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)

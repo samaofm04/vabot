@@ -4043,6 +4043,9 @@ function nxMontageApprove(){
   fd.set('font', document.getElementById('nx-m-font').value);
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
   fd.set('style', JSON.stringify(nxMState.style||{}));
+  // sans ca l approbation ecrase le point de coupe : les VA recevraient le
+  // template seul, sans la video brute au debut.
+  if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
   fetch(url,{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
       if(btn) btn.disabled=false;
@@ -35290,15 +35293,32 @@ def create_app():
             return jsonify({"ok": False, "error": "reel introuvable"})
         target_dir, src = parsed
         import json as _js
+        p = target_dir / f"{src.stem}.montage.json"
         draft = {
             "segments": request.form.get("segments") or "[]",
             "font": (request.form.get("font") or "Strong").strip(),
             "style": request.form.get("style") or "{}",
             "va_ready": True,
         }
+        # Le POINT DE COUPE doit survivre à l'approbation : sans lui, le reel
+        # généré à la demande pour un VA repartirait du template seul, sans la
+        # vidéo brute au début. On prend celui du formulaire, sinon celui déjà
+        # enregistré par montage_save.
         try:
-            (target_dir / f"{src.stem}.montage.json").write_text(
-                _js.dumps(draft), encoding="utf-8")
+            _cut = float(request.form.get("cut_at") or 0)
+        except (TypeError, ValueError):
+            _cut = 0.0
+        if _cut <= 0:
+            try:
+                _old = _js.loads(p.read_text(encoding="utf-8"))
+                if isinstance(_old, dict):
+                    _cut = float(_old.get("cut_at") or 0)
+            except Exception:
+                _cut = 0.0
+        if _cut > 0:
+            draft["cut_at"] = round(_cut, 3)
+        try:
+            p.write_text(_js.dumps(draft), encoding="utf-8")
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})

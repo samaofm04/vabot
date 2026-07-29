@@ -533,6 +533,8 @@ def list_brutes(brutes_dir):
     for f in sorted(d.iterdir()):
         if not f.is_file() or f.name.startswith("."):
             continue
+        if ".example" in f.name:          # <stem>.example.mp4 = vidéo d'exemple
+            continue                      # (même convention que la Bibliothèque)
         if f.suffix.lower() not in VIDEO_EXTS:
             continue
         try:
@@ -637,8 +639,15 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
         name = f"asm{i + 1}_{stem}.mp4"
         ok, err = assemble_brute_template(src, brute, cut, inp / name)
         if not ok:
-            print(f"[noctus] assemblage {brute.name} -> {vf} : {err}", flush=True)
-            continue
+            # Une brute abîmée ne doit pas faire disparaître une variante : on
+            # rend le template seul pour celle-là, l'utilisateur a bien ses N
+            # vidéos et le log dit laquelle n'a pas été montée.
+            print(f"[noctus] assemblage {brute.name} -> {vf} : {err} "
+                  f"(cette variante partira du template seul)", flush=True)
+            try:
+                _sh.copy(str(src), str(inp / name))
+            except Exception:
+                continue
         targets.append(name)
         fmap[name] = [vf]
     if not targets:                        # aucun assemblage n'a abouti
