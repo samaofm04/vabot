@@ -31449,6 +31449,8 @@ _MONTAGE_SCHEMA = {
                     "text": {"type": "string"},
                     "x": {"type": "number"},
                     "y": {"type": "number"},
+                    "block_w": {"type": "number"},
+                    "block_h": {"type": "number"},
                     "line_height": {"type": "number"},
                     "start": {"type": "number"},
                     "end": {"type": "number"},
@@ -31458,8 +31460,8 @@ _MONTAGE_SCHEMA = {
                     "align": {"type": "string", "enum": ["left", "center", "right"]},
                     "upper": {"type": "boolean"},
                 },
-                "required": ["text", "x", "y", "line_height", "start", "end",
-                             "box", "color", "box_color", "align", "upper"],
+                "required": ["text", "x", "y", "block_w", "block_h", "line_height",
+                             "start", "end", "box", "color", "box_color", "align", "upper"],
                 "additionalProperties": False,
             },
         },
@@ -31506,8 +31508,13 @@ def _montage_prompt(duration: float, cuts) -> str:
         "  - text : le texte exact, avec ses sauts de ligne\n"
         "  - x, y : le CENTRE du bloc de texte, en fraction de l'image "
         "(x=0 bord gauche, x=1 bord droit, y=0 tout en haut, y=1 tout en bas)\n"
+        "  - block_w : largeur du bloc de texte (sa ligne la plus large, fond compris) "
+        "divisée par la largeur de l'image — mesure soigneusement, c'est ce qui fixe "
+        "la taille du texte reproduit\n"
+        "  - block_h : hauteur totale du bloc (de la 1re à la dernière ligne) divisée "
+        "par la hauteur de l'image\n"
         "  - line_height : hauteur d'UNE LETTRE MAJUSCULE divisée par la hauteur totale "
-        "de l'image (souvent entre 0.02 et 0.07)\n"
+        "de l'image (souvent entre 0.02 et 0.05)\n"
         "  - start, end : secondes d'apparition et de disparition, d'après les instants "
         "des images que je te donne\n"
         "  - box : true s'il y a un rectangle / une bulle de couleur derrière le texte\n"
@@ -31710,14 +31717,17 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
             entry["end"] = round(end, 2)
         caps.append(entry)
         if style is None:
-            # line_height = hauteur d'une MAJUSCULE / hauteur image. Le moteur rend
-            # sur un cadre de 1920 px de haut, où une majuscule fait ~0.72 × la
-            # taille de police -> taille = fraction × 1920 / 0.72.
+            # Estimation de secours par la hauteur d'une majuscule (~0.72 × la
+            # taille de police sur un cadre de 1920 px). Peu fiable : le modèle
+            # surestime — c'est le calibrage par la LARGEUR du bloc (rendu réel
+            # dans _analyze_montage_template) qui fixe la taille quand il peut.
             lh = _num(c.get("line_height"), 0.012, 0.20, 0.0)
             size = int(round(lh * 1920 / 0.72)) if lh else 44
             box = bool(c.get("box"))
             style = {
-                "size": max(16, min(160, size)),
+                "_bw": round(_num(c.get("block_w"), 0.0, 1.0, 0.0), 4),
+                "_bh": round(_num(c.get("block_h"), 0.0, 0.95, 0.0), 4),
+                "size": max(16, min(120, size)),
                 "color": _hex(c.get("color"), "#ffffff"),
                 "box": box,
                 "boxColor": _hex(c.get("box_color"), "#000000"),
@@ -31733,6 +31743,52 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
         "style": style,
         "scenes": [t for t, _s in cuts],
     }
+
+
+def _caption_size_for_width(text: str, target_w_px: float,
+                            wrap_w: float = 0.97, font: str = "Strong"):
+    """Taille de police qui donne au bloc rendu EXACTEMENT la largeur mesurée
+    sur la vidéo. On fait rendre le texte par le MÊME moteur que la vidéo
+    finale (render_caption.js) à une taille d'essai, on lit la largeur
+    obtenue, et on met à l'échelle. None si le moteur n'est pas disponible."""
+    if not text or target_w_px < 40:
+        return None
+    try:
+        import noctus_web
+        if not noctus_web.setup_ok():
+            return None
+        node = noctus_web._node_bin()
+        if not node:
+            return None
+    except Exception:
+        return None
+    import tempfile
+    trial = 44
+    for _ in range(2):      # 2 passes : la mise à l'échelle converge vite
+        with tempfile.TemporaryDirectory(prefix="nxmcal_") as td:
+            outp = Path(td) / "c.png"
+            spec = {"text": text, "font": font, "size": trial, "tight": True,
+                    "wrapW": round(max(0.2, min(0.97, wrap_w)), 4), "out": str(outp)}
+            try:
+                r = subprocess.run([node, "render_caption.js", json.dumps(spec)],
+                                   cwd=str(BOT_DIR / "noctus"),
+                                   capture_output=True, timeout=25)
+            except Exception:
+                return None
+            if r.returncode != 0:
+                return None
+            try:
+                bb = json.loads((r.stdout or b"").decode("utf-8", "ignore").strip()).get("bbox") or {}
+                w = float(bb.get("w") or 0)
+            except Exception:
+                return None
+            if w <= 1:
+                return None
+        new = max(16, min(120, int(round(trial * target_w_px / w))))
+        if abs(new - trial) <= 2:
+            return new
+        trial = new
+    return trial
 
 
 def _analyze_montage_template(src: Path):
@@ -31761,6 +31817,25 @@ def _analyze_montage_template(src: Path):
     if err:
         return None, err
     out = _montage_to_editor(raw, duration, cuts)
+    # TAILLE DU TEXTE : on la cale sur la LARGEUR du bloc mesurée sur la vidéo,
+    # en faisant rendre le texte par le vrai moteur — l'estimation à l'œil de
+    # la hauteur d'une lettre donnait des captions beaucoup trop grosses.
+    st, caps_out = out.get("style"), out.get("captions") or []
+    if isinstance(st, dict):
+        bw = st.pop("_bw", 0) or 0
+        bh = st.pop("_bh", 0) or 0
+        if caps_out:
+            txt = caps_out[0]["text"]
+            nlines = txt.count("\n") + 1
+            size = None
+            if bw > 0.04:
+                size = _caption_size_for_width(
+                    txt, bw * 1080, wrap_w=caps_out[0].get("wrapW", 0.88))
+            if size is None and bh > 0.01:
+                # secours : hauteur totale du bloc / nb de lignes (interligne 1.45)
+                size = int(round(bh * 1920 / ((nlines - 1) * 1.45 + 1.05)))
+            if size:
+                st["size"] = max(16, min(120, size))
     out["duration"] = round(duration, 3)
     return out, ""
 
