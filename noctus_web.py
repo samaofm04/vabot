@@ -601,16 +601,29 @@ def assemble_brute_template(template, brute, cut_at, out_path):
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart", str(out_path)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=300)
-    except subprocess.TimeoutExpired:
-        return False, "assemblage trop long (>5 min)"
-    except Exception as e:
-        return False, f"ffmpeg indisponible : {e}"
-    if r.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 10000:
+    # Deux essais : sous charge (plusieurs assemblages en parallele + le moteur
+    # Node qui tourne encore), ffmpeg echoue parfois de facon passagere. Sans
+    # reprise, cette variante-la repartirait du template seul, sans video brute.
+    last = ""
+    for essai in (1, 2):
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            return False, "assemblage trop long (>5 min)"
+        except Exception as e:
+            return False, f"ffmpeg indisponible : {e}"
+        size = out_path.stat().st_size if out_path.exists() else 0
+        if r.returncode == 0 and size >= 10000:
+            return True, ""
         err = (r.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
-        return False, ("ffmpeg : " + (err[-1] if err else "échec"))[:200]
-    return True, ""
+        # stderr vide arrive : on garde alors le code de sortie, sinon le
+        # message est « échec » tout court et le probleme est indiagnosticable.
+        last = (err[-1].strip() if err else f"code {r.returncode}, {size} octets écrits")
+        if essai == 1:
+            print(f"[noctus] assemblage {brute.name} : {last} — 2e essai", flush=True)
+            import time as _t
+            _t.sleep(0.8)
+    return False, f"ffmpeg : {last}"[:200]
 
 
 def purge_old_models(prefix: str, keep: int = 12):
@@ -654,13 +667,20 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
         _sh.copy(str(src), str(inp / src.name))
         return [src.name], None
     stem = (_re.sub(r"[^A-Za-z0-9_-]", "", src.stem) or "reel")[:40]
-    targets, fmap, pool = [], {}, []
+    # 1) on attribue d'abord une brute à chaque variante (tirage sans remise,
+    #    on ne repioche que quand toutes ont servi)
+    plan, pool = [], []
     for i, vf in enumerate(folders):
-        if not pool:                       # toutes utilisées -> nouveau tirage
+        if not pool:
             pool = list(brutes)
             _rnd.shuffle(pool)
-        brute = pool.pop()
-        name = f"asm{i + 1}_{stem}.mp4"
+        plan.append((f"asm{i + 1}_{stem}.mp4", pool.pop(), vf))
+
+    # 2) puis on assemble EN PARALLÈLE : cet appel est synchrone dans le thread
+    #    de la requête HTTP, et en série 10 variantes feraient patienter très
+    #    longtemps. ffmpeg est un sous-processus, les threads ne bloquent pas.
+    def _one(job):
+        name, brute, vf = job
         ok, err = assemble_brute_template(src, brute, cut, inp / name)
         if not ok:
             # Une brute abîmée ne doit pas faire disparaître une variante : on
@@ -671,9 +691,21 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
             try:
                 _sh.copy(str(src), str(inp / name))
             except Exception:
-                continue
-        targets.append(name)
-        fmap[name] = [vf]
+                return None
+        return name, vf
+
+    targets, fmap = [], {}
+    workers = max(1, min(3, (os.cpu_count() or 2), len(plan)))
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            done = list(ex.map(_one, plan))
+    else:
+        done = [_one(j) for j in plan]
+    for r in done:
+        if r:
+            targets.append(r[0])
+            fmap[r[0]] = [r[1]]
     if not targets:                        # aucun assemblage n'a abouti
         print("[noctus] aucun assemblage réussi -> template seul", flush=True)
         _sh.copy(str(src), str(inp / src.name))
