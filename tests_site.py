@@ -1172,6 +1172,49 @@ try:
     _ok, _err = _nw.assemble_brute_template(_bd / "a.mp4", TMP / "absent.mp4", 3.0, TMP / "o.mp4")
     check("assemblage : brute absente -> echec explicite", (not _ok) and "brute" in _err, _err)
 
+    # -- brute plus COURTE que la coupe : collee a droite, jamais rebouclee ----
+    # La derniere image de la brute doit tomber PILE sur le trait, sinon la
+    # bascule d image ne colle plus a la transition du son du montage.
+    if _nw.ffmpeg_available():
+        import subprocess as _spM
+        _vd = TMP / "vids"
+        _vd.mkdir(parents=True, exist_ok=True)
+        _spM.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                  "-i", "testsrc2=size=180x320:rate=15:duration=4",
+                  "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                  "-shortest", str(_vd / "tpl.mp4")], timeout=90)
+        _spM.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                  "-i", "testsrc=size=180x320:rate=15:duration=1",
+                  "-pix_fmt", "yuv420p", str(_vd / "courte.mp4")], timeout=90)
+        _okA, _errA = _nw.assemble_brute_template(
+            _vd / "tpl.mp4", _vd / "courte.mp4", 3.0, _vd / "out.mp4")
+        check("assemblage d'une brute plus courte que la coupe", _okA, _errA)
+        if _okA:
+            _dw, _dh, _df, _ddur = _nw.probe_video(_vd / "out.mp4")
+            check("la duree reste celle du template", abs(_ddur - 4.0) < 0.35, f"{_ddur:.2f}s")
+
+            def _frameM(_t):
+                _o = _vd / f"f{_t}.png"
+                _spM.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", str(_t),
+                          "-i", str(_vd / "out.mp4"), "-frames:v", "1",
+                          "-vf", "scale=48:-2", str(_o)], timeout=60)
+                from PIL import Image as _Im
+                return list(_Im.open(_o).convert("RGB").resize((10, 10)).getdata())
+
+            def _dM(_a, _b):
+                return sum(abs(x[0] - y[0]) + abs(x[1] - y[1]) + abs(x[2] - y[2])
+                           for x, y in zip(_a, _b)) / (len(_a) * 3)
+            # coupe 3 s, brute 1 s -> gel de 0 a 2 s, brute de 2 a 3 s
+            check("le debut est FIGE (pas de boucle)", _dM(_frameM(0.3), _frameM(1.5)) < 3,
+                  f"{_dM(_frameM(0.3), _frameM(1.5)):.1f}")
+            check("la brute joue juste avant le trait",
+                  _dM(_frameM(2.2), _frameM(2.9)) > 3, f"{_dM(_frameM(2.2), _frameM(2.9)):.1f}")
+            check("la bascule a bien lieu au trait",
+                  _dM(_frameM(2.9), _frameM(3.2)) > 15, f"{_dM(_frameM(2.9), _frameM(3.2)):.1f}")
+    else:
+        check("assemblage testable (ffmpeg absent -> ignore)", True)
+
     # -- videoFolderMap : sans lui, N videos x N variantes = N² exports --------
     import inspect as _insp
     _runsrc = _insp.getsource(_nw.run)

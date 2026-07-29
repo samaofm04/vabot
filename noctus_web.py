@@ -608,19 +608,31 @@ def assemble_brute_template(template, brute, cut_at, out_path):
     bw, bh, _bf, bdur = probe_video(brute)
     if not (bw and bh):
         return False, f"brute illisible : {brute.name}"
-    # Brute plus longue que nécessaire -> on part d'un instant au hasard pour
-    # varier d'une génération à l'autre. Plus courte -> -stream_loop la reboucle.
-    start = 0.0
+    # La brute doit finir PILE sur le trait de coupe : c'est là que le son du
+    # montage fait sa transition, et l'image doit basculer au même instant.
+    #
+    #  - brute plus LONGUE que la coupe : on prend une fenêtre au hasard (de la
+    #    variété d'une génération à l'autre), sa fin tombe sur le trait.
+    #  - brute plus COURTE : on la colle à DROITE (dernière image sur le trait)
+    #    et on FIGE sa première image pour combler le début. Surtout pas de
+    #    boucle : un motif qui se répète se voit, et surtout ça décalerait
+    #    l'image par rapport au son de la transition.
+    start, gap = 0.0, 0.0
     if bdur > cut + 0.30:
         import random as _rnd
         start = round(_rnd.uniform(0.0, bdur - cut - 0.10), 2)
+    elif bdur < cut - 0.02:
+        gap = round(cut - bdur, 3)
     fit = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
            f"crop={w}:{h},setsar=1,fps={fps:.4f}")
-    fc = (f"[0:v]{fit},trim=duration={cut:.3f},setpts=PTS-STARTPTS[a];"
+    # tpad start_mode=clone : rallonge le DÉBUT en répétant la 1re image.
+    hold = f",tpad=start_duration={gap:.3f}:start_mode=clone" if gap > 0 else ""
+    fc = (f"[0:v]{fit}{hold},trim=duration={cut:.3f},setpts=PTS-STARTPTS[a];"
           f"[1:v]{fit},trim=start={cut:.3f},setpts=PTS-STARTPTS[b];"
           f"[a][b]concat=n=2:v=1:a=0[v]")
+
     def _cmd(seek):
-        c = ["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1"]
+        c = ["ffmpeg", "-y", "-loglevel", "error"]
         if seek > 0:
             c += ["-ss", f"{seek:.2f}"]
         return c + ["-t", f"{cut:.3f}", "-i", str(brute),
