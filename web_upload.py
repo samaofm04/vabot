@@ -3507,6 +3507,47 @@ function nxMHistPaint(){
   if(u){ u.style.opacity=(nxMState.undoStack&&nxMState.undoStack.length)?'1':'0.35'; u.style.cursor=(nxMState.undoStack&&nxMState.undoStack.length)?'pointer':'default'; }
   if(r){ r.style.opacity=(nxMState.redoStack&&nxMState.redoStack.length)?'1':'0.35'; r.style.cursor=(nxMState.redoStack&&nxMState.redoStack.length)?'pointer':'default'; }
 }
+// 🪄 Claude regarde le template : il place le trait de coupe ✂ et recopie la
+// caption incrustee (texte + position + style). On pre-remplit, l utilisateur ajuste.
+function nxMAnalyze(){
+  if(!nxMState.fid) return;
+  var btn=document.getElementById('nx-m-ai'), orig='🪄 Analyser';
+  if(btn){ btn.textContent='⏳ Analyse…'; btn.disabled=true; }
+  function done(txt){ if(btn){ btn.textContent=txt; setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2500); } }
+  if(typeof showToast==='function') showToast('🪄 Claude regarde la video… (30 s a 1 min)','info',6000);
+  var fd=new FormData(); fd.set('file_id', nxMState.fid);
+  fetch('/noctus/montage_analyze',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j.ok){ done('❌ Erreur'); if(typeof showToast==='function') showToast('❌ '+(j.error||'analyse impossible'),'error',9000); return; }
+      if(j.cut_at!=null) nxMState.cut=Math.max(0,+j.cut_at||0);
+      var caps=j.captions||[];
+      if(caps.length){
+        nxMState.caps=caps.map(function(c){
+          return {text:String(c.text||''), x:c.x, y:c.y,
+                  start:(c.start==null?null:+c.start), end:(c.end==null?null:+c.end)};
+        });
+        if(!nxMState.style) nxMStyleInit();
+        if(j.style) nxMState.style=Object.assign(nxMState.style, j.style);
+        var s=nxMState.style||{};
+        var sz=document.getElementById('nx-m-size'); if(sz) sz.value=s.size||44;
+        var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=s.size||44;
+        var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
+        try{ nxMStylePaint(); }catch(e){}
+      }
+      nxMState.editIdx=-1;
+      var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
+      var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+      var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
+      try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+      nxMHistTouch();
+      done('✅ Analyse OK');
+      var msg='🪄 Coupe placee a '+(nxMState.cut||0).toFixed(2)+'s';
+      msg+=caps.length?(' · '+caps.length+' caption'+(caps.length>1?'s':'')+' recopiee'+(caps.length>1?'s':'')):' · aucune caption trouvee';
+      if(j.cut_reason) msg+=' — '+j.cut_reason;
+      if(typeof showToast==='function') showToast(msg+' · verifie et ajuste avant de generer','success',10000);
+    })
+    .catch(function(){ done('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
+}
 // 💾 Enregistre le brouillon (captions + police + style) pour ce reel
 function nxMontageSave(){
   if(!nxMState.fid) return;
@@ -5925,6 +5966,7 @@ body.light .action-icon{color:#666}
       <span class="ce-app-name">🎬 Montage</span>
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
+      <button class="ce-btn" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">🪄 Analyser</button>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
@@ -31141,6 +31183,373 @@ def _gemini_key_present() -> bool:
     return False
 
 
+# ==========================================================================
+# ANALYSE AUTOMATIQUE D'UN TEMPLATE DE MONTAGE (bouton « 🪄 Analyser »)
+# --------------------------------------------------------------------------
+# 1) ffmpeg trouve les changements de plan (gratuit, local, fiable)
+# 2) Claude regarde quelques images : il choisit LE changement qui sépare
+#    l'accroche du montage, et recopie la caption incrustée + sa position.
+# Le résultat pré-remplit l'éditeur ; l'utilisateur vérifie et ajuste.
+# ==========================================================================
+
+def _anthropic_key() -> str:
+    """Clé Claude : variable d'environnement, sinon le .env du bot."""
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if key:
+        return key
+    for line in _read_env_lines():
+        if line.strip().startswith("ANTHROPIC_API_KEY="):
+            return line.strip().split("=", 1)[1].strip()
+    return ""
+
+
+def _probe_video(src: Path):
+    """(durée en s, largeur, hauteur) d'une vidéo. (0, 0, 0) si illisible."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(src)],
+            capture_output=True, timeout=25, text=True)
+        vals = [v.strip() for v in (r.stdout or "").split() if v.strip()]
+        w = h = 0
+        dur = 0.0
+        for v in vals:
+            try:
+                f = float(v)
+            except ValueError:
+                continue
+            if "." in v:
+                dur = f
+            elif w == 0:
+                w = int(f)
+            elif h == 0:
+                h = int(f)
+        return dur, w, h
+    except Exception:
+        return 0.0, 0, 0
+
+
+def _scene_cuts(src: Path, threshold: float = 0.2):
+    """Instants où l'image change d'un coup (changement de plan), via ffmpeg.
+    Renvoie [(seconde, score), …] du plus tôt au plus tard."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-an",
+             "-filter:v", f"select='gt(scene,{threshold})',metadata=print:file=-",
+             "-f", "null", "-"],
+            capture_output=True, timeout=120)
+    except Exception:
+        return []
+    cuts, pending = [], None
+    for line in (r.stdout or b"").decode("utf-8", "ignore").splitlines():
+        m = re.search(r"pts_time:([0-9.]+)", line)
+        if m:
+            try:
+                pending = float(m.group(1))
+            except ValueError:
+                pending = None
+            continue
+        m = re.search(r"lavfi\.scene_score=([0-9.]+)", line)
+        if m and pending is not None:
+            try:
+                cuts.append((round(pending, 3), round(float(m.group(1)), 3)))
+            except ValueError:
+                pass
+            pending = None
+    return cuts
+
+
+def _grab_frames(src: Path, times, outdir: Path, height: int = 1280):
+    """Extrait une image JPEG à chaque instant demandé. [(seconde, chemin), …]."""
+    got = []
+    for i, t in enumerate(times):
+        dest = outdir / f"f{i:02d}.jpg"
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{max(0.0, t):.2f}",
+                 "-i", str(src), "-frames:v", "1", "-vf", f"scale=-2:{height}",
+                 "-q:v", "4", str(dest)],
+                capture_output=True, timeout=40)
+            if r.returncode == 0 and dest.exists() and dest.stat().st_size > 500:
+                got.append((t, dest))
+        except Exception:
+            pass
+    return got
+
+
+# Schéma imposé à Claude : la réponse est garantie parsable (structured outputs).
+_MONTAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "cut_at": {"type": "number"},
+        "cut_reason": {"type": "string"},
+        "captions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "x": {"type": "number"},
+                    "y": {"type": "number"},
+                    "line_height": {"type": "number"},
+                    "start": {"type": "number"},
+                    "end": {"type": "number"},
+                    "box": {"type": "boolean"},
+                    "color": {"type": "string"},
+                    "box_color": {"type": "string"},
+                    "align": {"type": "string", "enum": ["left", "center", "right"]},
+                    "upper": {"type": "boolean"},
+                },
+                "required": ["text", "x", "y", "line_height", "start", "end",
+                             "box", "color", "box_color", "align", "upper"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["cut_at", "cut_reason", "captions"],
+    "additionalProperties": False,
+}
+
+
+def _montage_prompt(duration: float, cuts) -> str:
+    if cuts:
+        liste = ", ".join(f"{t}s (force {s})" for t, s in cuts)
+    else:
+        liste = "aucun (l'image ne change jamais d'un coup)"
+    return (
+        "Tu analyses un TEMPLATE de montage vidéo vertical fait sur CapCut.\n"
+        f"Durée totale : {duration:.2f} s.\n\n"
+        "Ce template a deux parties :\n"
+        "  1) un DÉBUT d'accroche qui sera REMPLACÉ par une autre vidéo à la génération ;\n"
+        "  2) la SUITE (le montage), qu'on garde telle quelle avec son son.\n\n"
+        "DEUX choses à me donner.\n\n"
+        "A) cut_at — l'instant EXACT (en secondes) où la partie 1 s'arrête et où la "
+        "partie 2 commence.\n"
+        f"Changements de plan détectés automatiquement : {liste}\n"
+        "Choisis parmi ces instants celui qui sépare vraiment l'accroche du montage "
+        "(reprends sa valeur telle quelle). Si aucun ne convient, ou si toute la vidéo "
+        "est une seule séquence continue, réponds cut_at = 0.\n"
+        "Explique ton choix en une phrase courte dans cut_reason.\n\n"
+        "B) captions — les textes INCRUSTÉS sur la vidéo (ceux ajoutés au montage).\n"
+        "Recopie-les EXACTEMENT : mêmes mots, même ponctuation, mêmes emojis, mêmes "
+        "majuscules, et garde les retours à la ligne tels qu'ils s'affichent.\n"
+        "IGNORE : l'interface de l'appli (like, commentaires, partage), les watermarks, "
+        "les pseudos, les sous-titres automatiques.\n"
+        "Un même texte affiché sur plusieurs images = UNE SEULE caption (ne le répète pas).\n"
+        "Pour chaque caption :\n"
+        "  - text : le texte exact\n"
+        "  - x, y : le CENTRE du bloc de texte, en fraction de l'image "
+        "(x=0 bord gauche, x=1 bord droit, y=0 tout en haut, y=1 tout en bas)\n"
+        "  - line_height : hauteur d'UNE LETTRE MAJUSCULE divisée par la hauteur totale "
+        "de l'image (souvent entre 0.02 et 0.07)\n"
+        "  - start, end : secondes d'apparition et de disparition, d'après les instants "
+        "des images que je te donne\n"
+        "  - box : true s'il y a un rectangle / une bulle de couleur derrière le texte\n"
+        "  - color : couleur du texte en hexadécimal (ex. #ffffff)\n"
+        "  - box_color : couleur du fond si box vaut true, sinon #000000\n"
+        "  - align : left, center ou right\n"
+        "  - upper : true si le texte est écrit tout en MAJUSCULES\n"
+        "S'il n'y a aucun texte incrusté, renvoie une liste captions vide."
+    )
+
+
+def _claude_montage_analyze(frames, duration: float, cuts, key: str):
+    """Envoie les images à Claude et récupère la coupe + les captions.
+    Renvoie (données, message_d_erreur)."""
+    import base64
+    import requests
+    content = []
+    for t, fp in frames:
+        try:
+            data = base64.b64encode(fp.read_bytes()).decode()
+        except Exception:
+            continue
+        content.append({"type": "text", "text": f"Image prise à {t:.2f} s :"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": "image/jpeg", "data": data}})
+    if not content:
+        return None, "impossible d'extraire les images de la vidéo"
+    content.append({"type": "text", "text": _montage_prompt(duration, cuts)})
+
+    base = {"model": "claude-opus-5", "max_tokens": 8000,
+            "messages": [{"role": "user", "content": content}]}
+    hdr = {"x-api-key": key, "anthropic-version": "2023-06-01",
+           "content-type": "application/json"}
+    fmt = {"type": "json_schema", "schema": _MONTAGE_SCHEMA}
+
+    # Trois tentatives, de la plus riche à la plus simple : si le compte n'a pas
+    # une des options récentes, on retombe sur un appel basique au lieu d'échouer.
+    attempts = [
+        (dict(base, output_config={"effort": "medium", "format": fmt},
+              fallbacks="default"),
+         dict(hdr, **{"anthropic-beta": "server-side-fallback-2026-07-01"})),
+        (dict(base, output_config={"effort": "medium", "format": fmt}), dict(hdr)),
+        (dict(base), dict(hdr)),
+    ]
+
+    data, last_err = None, ""
+    for i, (body, headers) in enumerate(attempts):
+        if i == len(attempts) - 1:
+            # Dernier recours : plus de schéma imposé -> on le demande en toutes lettres.
+            body["messages"][0]["content"][-1] = {
+                "type": "text",
+                "text": content[-1]["text"] + "\n\nRéponds UNIQUEMENT avec un objet "
+                        "JSON valide {\"cut_at\":…, \"cut_reason\":…, \"captions\":[…]}, "
+                        "sans aucun texte autour.",
+            }
+        try:
+            rr = requests.post("https://api.anthropic.com/v1/messages",
+                               headers=headers, json=body, timeout=180)
+        except Exception as e:
+            return None, f"appel à Claude impossible : {e}"[:220]
+        if rr.status_code == 200:
+            data = rr.json()
+            break
+        try:
+            last_err = ((rr.json().get("error") or {}).get("message") or "")
+        except Exception:
+            last_err = ""
+        # 4xx = la requête déplaît -> on retente en plus simple. 5xx / 429 = côté
+        # serveur, réessayer en plus simple n'y changerait rien.
+        if not (400 <= rr.status_code < 500) or rr.status_code == 429:
+            return None, f"Claude indisponible ({rr.status_code}) {last_err}"[:220]
+        last_err = f"({rr.status_code}) {last_err}"
+    if data is None:
+        return None, f"Claude a refusé la requête {last_err}"[:220]
+
+    if data.get("stop_reason") == "refusal":
+        return None, "Claude a refusé d'analyser cette vidéo"
+    text = "".join(b.get("text", "") for b in (data.get("content") or [])
+                   if b.get("type") == "text").strip()
+    if not text:
+        if data.get("stop_reason") == "max_tokens":
+            return None, "réponse coupée par la limite de tokens — réessaie"
+        return None, "réponse vide de Claude"
+    try:
+        return json.loads(text), ""
+    except Exception:
+        pass
+    # Sans schéma imposé, Claude peut entourer le JSON de texte ou de ```json.
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            return json.loads(m.group(0)), ""
+        except Exception:
+            pass
+    return None, "réponse de Claude illisible"
+
+
+def _montage_to_editor(raw: dict, duration: float, cuts):
+    """Traduit la réponse de Claude vers ce que l'éditeur attend :
+    captions {text,x,y,start,end} + style global + point de coupe."""
+    def _num(v, lo, hi, default):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        if f != f:                      # NaN
+            return default
+        return max(lo, min(hi, f))
+
+    def _hex(v, default):
+        v = str(v or "").strip()
+        return v if re.fullmatch(r"#[0-9a-fA-F]{6}", v) else default
+
+    cut = _num(raw.get("cut_at"), 0.0, max(0.0, duration - 0.05), 0.0)
+    # Claude choisit PARMI les coupes détectées : on ré-aligne sur la plus proche
+    # (à 0.25 s près) pour tomber au frame exact plutôt qu'à côté.
+    if cut > 0.02 and cuts:
+        near = min(cuts, key=lambda c: abs(c[0] - cut))
+        if abs(near[0] - cut) <= 0.25:
+            cut = near[0]
+
+    caps, style, seen = [], None, set()
+    for c in (raw.get("captions") or [])[:12]:
+        text = str(c.get("text") or "").strip()
+        if not text:
+            continue
+        # Clé de comparaison sans accents ni ponctuation : le même texte relevé
+        # sur deux images ne compte qu'une fois même si Claude l'orthographie
+        # légèrement différemment ("ca" vs "ça").
+        import unicodedata
+        norm = unicodedata.normalize("NFKD", text.lower())
+        norm = re.sub(r"[^a-z0-9]+", "", "".join(
+            ch for ch in norm if not unicodedata.combining(ch)))
+        if norm and norm in seen:       # même texte revu sur une autre image
+            continue
+        seen.add(norm)
+        start = _num(c.get("start"), 0.0, duration, 0.0)
+        end = _num(c.get("end"), 0.0, duration, duration)
+        if end <= start:
+            end = duration
+        entry = {
+            "text": text,
+            "x": round(_num(c.get("x"), 0.03, 0.97, 0.5), 4),
+            "y": round(_num(c.get("y"), 0.03, 0.90, 0.61), 4),
+        }
+        # Visible quasiment tout du long -> caption « permanente » dans l'éditeur.
+        if start <= 0.15 and end >= duration - 0.15:
+            entry["start"] = None
+            entry["end"] = None
+        else:
+            entry["start"] = round(start, 2)
+            entry["end"] = round(end, 2)
+        caps.append(entry)
+        if style is None:
+            # line_height = hauteur d'une MAJUSCULE / hauteur image. Le moteur rend
+            # sur un cadre de 1920 px de haut, où une majuscule fait ~0.72 × la
+            # taille de police -> taille = fraction × 1920 / 0.72.
+            lh = _num(c.get("line_height"), 0.012, 0.20, 0.0)
+            size = int(round(lh * 1920 / 0.72)) if lh else 44
+            box = bool(c.get("box"))
+            style = {
+                "size": max(16, min(160, size)),
+                "color": _hex(c.get("color"), "#ffffff"),
+                "box": box,
+                "boxColor": _hex(c.get("box_color"), "#000000"),
+                "align": c.get("align") if c.get("align") in ("left", "center", "right") else "center",
+                "case": "upper" if c.get("upper") else "none",
+            }
+    return {
+        "cut_at": round(cut, 3),
+        "cut_reason": str(raw.get("cut_reason") or "")[:200],
+        "captions": caps,
+        "style": style,
+        "scenes": [t for t, _s in cuts],
+    }
+
+
+def _analyze_montage_template(src: Path):
+    """Analyse complète d'un template : (résultat, erreur)."""
+    key = _anthropic_key()
+    if not key:
+        return None, ("Clé IA manquante : ajoute ANTHROPIC_API_KEY=sk-ant-… dans "
+                      "Réglages → Clé IA (console.anthropic.com)")
+    duration, _w, h = _probe_video(src)
+    if duration <= 0:
+        return None, "vidéo illisible (ffmpeg/ffprobe absent ou fichier abîmé ?)"
+    cuts = _scene_cuts(src)
+    # Instants regardés : 7 images réparties sur toute la vidéo + juste après
+    # chaque changement de plan (c'est là que la caption apparaît).
+    times = [round(duration * (i + 0.5) / 7, 2) for i in range(7)]
+    for t, _s in cuts[:4]:
+        times.append(round(min(duration - 0.05, t + 0.35), 2))
+    times = sorted({t for t in times if 0 <= t < duration})[:10]
+    height = min(1280, h) if h else 1280
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="nxmanalyze_") as tmp:
+        frames = _grab_frames(src, times, Path(tmp), height=height)
+        if not frames:
+            return None, "impossible d'extraire des images de la vidéo"
+        raw, err = _claude_montage_analyze(frames, duration, cuts, key)
+    if err:
+        return None, err
+    out = _montage_to_editor(raw, duration, cuts)
+    out["duration"] = round(duration, 3)
+    return out, ""
+
+
 def _render_gemini_settings() -> str:
     """Clé Gemini (Google) — OCR GRATUIT qui lit le texte stylé + les emojis.
     Stockée dans le .env du VPS via /settings/gemini_key. Jamais renvoyée."""
@@ -34422,6 +34831,28 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
+
+    @app.route("/noctus/montage_analyze", methods=["POST"])
+    def noctus_montage_analyze():
+        """🪄 Analyse le template : ffmpeg repère les changements de plan, Claude
+        choisit celui qui sépare l'accroche du montage et recopie la caption
+        incrustée (texte + position). Pré-remplit l'éditeur, rien n'est écrit."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "vidéo introuvable"})
+        _target_dir, src = parsed
+        try:
+            out, err = _analyze_montage_template(src)
+        except Exception as e:
+            log.error(f"montage_analyze {src}: {e}")
+            return jsonify({"ok": False, "error": f"analyse échouée : {e}"[:200]})
+        if err:
+            return jsonify({"ok": False, "error": err})
+        out["ok"] = True
+        return jsonify(out)
 
     @app.route("/noctus/montage_load")
     def noctus_montage_load():
