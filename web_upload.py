@@ -3662,7 +3662,7 @@ function nxMBeginDrag(e,i,mode){
     nxMState.snap=null;
     nxMRenderCaps();
     // clic (sans glisser) sur le bloc "move" -> ouvre la caption pour l'éditer
-    if(mode==='move' && !moved){ try{ nxMEditCap(i); }catch(e){} }
+    if(mode==='move' && !moved){ try{ nxMEditCap(i,false); }catch(e){} }   // pas de focus -> Suppr efface
   }
   el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
 }
@@ -3687,6 +3687,13 @@ function nxMBuildThumbs(){
 function nxMRenderCaps(){
   var dur=nxMDur(), caps=nxMState.caps||[];
   var wrap=document.getElementById('nx-m-frise'), list=document.getElementById('nx-m-caplist');
+  // « 🗑 Supprimer » ne s affiche que si une caption est vraiment selectionnee.
+  // Ici parce que c est le seul endroit appele a CHAQUE changement d etat.
+  var _db=document.getElementById('nx-m-delcap');
+  if(_db){
+    var _si=nxMState.editIdx;
+    _db.style.display=(_si!=null && _si>=0 && caps[_si]) ? 'inline-block' : 'none';
+  }
   if(!wrap||!list) return;
   // --- LISTE (texte + supprimer + éditer le texte) ---
   var lh='';
@@ -3846,7 +3853,9 @@ function nxMRenderCaps(){
   }); }
   nxMSyncPlayhead(); nxMUpdatePreview();
 }
-function nxMEditCap(i){
+// focusText=false : on selectionne la caption SANS mettre le curseur dans le
+// champ texte -> la touche Suppr efface alors la caption au lieu d ecrire.
+function nxMEditCap(i, focusText){
   var c=nxMState.caps[i]; if(!c) return;
   document.getElementById('nx-m-caption').value=c.text;
   var rPerm=document.querySelector('input[name=nxmtime][value="perm"]');
@@ -3855,18 +3864,38 @@ function nxMEditCap(i){
   else { if(rRange) rRange.checked=true; document.getElementById('nx-m-start').value=c.start; document.getElementById('nx-m-end').value=c.end; }
   nxMTimeToggle();
   nxMState.editIdx=i;
-  document.getElementById('nx-m-editnote').textContent='✏️ modif caption '+(i+1)+' — clique « Mettre à jour »';
+  document.getElementById('nx-m-editnote').textContent='✏️ caption '+(i+1)+' — « Mettre à jour », ou touche Suppr pour l’effacer';
   document.getElementById('nx-m-addcap').textContent='✔ Mettre à jour';
+  var _db=document.getElementById('nx-m-delcap'); if(_db) _db.style.display='inline-block';
   try{ nxMRenderCaps(); }catch(e){}       // surbrillance de la caption sélectionnée
   try{ nxMUpdatePreview(); }catch(e){}    // + cadre + poignées sur la vidéo
-  try{ document.getElementById('nx-m-caption').focus(); }catch(e){}
+  if(focusText!==false){ try{ document.getElementById('nx-m-caption').focus(); }catch(e){} }
 }
 function nxMDelCap(i){
+  var c=nxMState.caps[i];
   nxMState.caps.splice(i,1);
-  if(nxMState.editIdx===i){ nxMState.editIdx=-1; document.getElementById('nx-m-editnote').textContent=''; document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption'; }
+  if(nxMState.editIdx===i){
+    nxMState.editIdx=-1;
+    document.getElementById('nx-m-editnote').textContent='';
+    document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+    var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
+  }
   else if(nxMState.editIdx>i){ nxMState.editIdx--; }
+  var db=document.getElementById('nx-m-delcap');
+  if(db && (nxMState.editIdx==null || nxMState.editIdx<0)) db.style.display='none';
   nxMRenderCaps();
+  try{ nxMUpdatePreview(); }catch(e){}    // enleve aussi le texte sur la video
   nxMHistTouch();
+  if(typeof showToast==='function'){
+    var t=((c&&c.text)||'').replace(/\s+/g,' ').slice(0,40);
+    showToast('🗑 Caption supprimee'+(t?' : « '+t+' »':'')+' — Ctrl+Z pour annuler','info',5000);
+  }
+}
+// Efface la caption actuellement selectionnee (touche Suppr / bouton corbeille)
+function nxMDelSelected(){
+  var i=nxMState.editIdx;
+  if(i==null || i<0 || !nxMState.caps || !nxMState.caps[i]) return;
+  nxMDelCap(i);
 }
 function nxMTimeToggle(){
   var sel=document.querySelector('input[name=nxmtime]:checked'); var range=sel&&sel.value==='range';
@@ -3898,6 +3927,20 @@ function nxMBindResize(){
     var k=(e.key||'').toLowerCase();
     if((e.ctrlKey||e.metaKey) && k==='z' && !e.shiftKey){ e.preventDefault(); nxMUndo(); }
     else if((e.ctrlKey||e.metaKey) && (k==='y' || (k==='z' && e.shiftKey))){ e.preventDefault(); nxMRedo(); }
+    else if(e.key==='Delete' || e.key==='Backspace'){
+      // Suppr efface la caption selectionnee — mais JAMAIS pendant qu on tape
+      // dans un champ (sinon on ne pourrait plus corriger une lettre).
+      var a=document.activeElement, t=(a&&a.tagName||'').toLowerCase();
+      if(t==='input' || t==='textarea' || t==='select' || (a&&a.isContentEditable)) return;
+      if(nxMState.editIdx==null || nxMState.editIdx<0) return;
+      e.preventDefault();
+      nxMDelSelected();
+    }
+    else if(e.key==='Escape'){
+      // sortir du champ texte -> la caption reste selectionnee et Suppr marche
+      var ae=document.activeElement;
+      if(ae && typeof ae.blur==='function' && ae.id==='nx-m-caption'){ e.preventDefault(); ae.blur(); }
+    }
   });
 }
 async function nxMontageOpen(fid, exampleUrl){
@@ -6153,6 +6196,7 @@ body.light .action-icon{color:#666}
             <span id="nx-m-timeinfo" style="color:#6b7280"></span>
           </div>
           <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">➕ Ajouter cette caption</button>
+          <button type="button" id="nx-m-delcap" onclick="nxMDelSelected()" style="display:none;margin-top:8px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption <span style="opacity:.7;font-weight:500">(Suppr)</span></button>
           <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24;display:block;margin-top:6px"></span>
         </div>
       </div>
