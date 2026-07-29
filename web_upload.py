@@ -3612,39 +3612,49 @@ function nxMApplyOpen(){
       var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
       var ov=document.createElement('div');
       ov.id='nxm-apply-ov';
-      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10050;display:flex;align-items:center;justify-content:center';
+      // z-index > 99999 : l editeur de montage est a 99999, la fenetre doit
+      // s ouvrir DEVANT lui (avant il fallait fermer l editeur pour la voir).
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100010;display:flex;align-items:center;justify-content:center';
       var box=document.createElement('div');
-      box.style.cssText='background:#17171b;border:1px solid #2c2c33;border-radius:14px;padding:18px;width:380px;max-height:76vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.55)';
-      box.innerHTML='<div style="font-weight:800;font-size:15px;color:#e6e6ea;margin-bottom:4px">📤 Appliquer ce montage à…</div>'
-        +'<div style="font-size:11.5px;color:#9a9aa6;margin-bottom:12px">La vidéo + les captions + le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera ses propres vidéos brutes.</div>'
-        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:90px;margin-bottom:10px"></div>'
-        +'<label style="display:flex;gap:8px;align-items:center;font-size:12px;color:#c4c4cc;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="nxm-apply-va" style="accent-color:#22d3ee"> Aussi « Dispo pour les VA » chez elles</label>'
-        +'<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="nxm-apply-cancel" class="ce-btn">Annuler</button><button type="button" id="nxm-apply-go" class="ce-btn accent">📤 Appliquer</button></div>';
+      box.style.cssText='background:#1a1a1f;border:1px solid #2c2c33;border-radius:12px;width:470px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 22px 70px rgba(0,0,0,.6);overflow:hidden';
+      box.innerHTML='<style>'
+        +'#nxm-apply-ov .nxcbx{appearance:none;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a64;background:transparent;cursor:pointer;flex:0 0 20px;position:relative;margin:0}'
+        +'#nxm-apply-ov .nxcbx:checked{background:#3467FF;border-color:#3467FF}'
+        +'#nxm-apply-ov .nxcbx:checked::after{content:"";position:absolute;left:5px;top:1.5px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}'
+        +'#nxm-apply-ov .nxrow{display:flex;gap:12px;align-items:center;justify-content:flex-start;width:100%;box-sizing:border-box;padding:10px 12px;background:#212127;border-radius:10px;margin-bottom:8px;cursor:pointer;color:#e6e6ea;font-size:13px}'
+        +'#nxm-apply-ov .nxrow:hover{background:#27272f}'
+        +'</style>'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #26262c">'
+        +'<div style="font-weight:800;font-size:15px;color:#f2f2f5">Appliquer ce montage à…</div>'
+        +'<button type="button" id="nxm-apply-x" style="background:none;border:0;color:#8b8b95;font-size:17px;cursor:pointer;padding:2px 6px">✕</button></div>'
+        +'<div style="display:flex;gap:8px;align-items:flex-start;padding:10px 18px;background:rgba(52,103,255,.10);border-bottom:1px solid #26262c;font-size:11.5px;color:#c9d4f5">'
+        +'<span style="color:#3467FF;font-weight:800">ⓘ</span><span>La vidéo, les captions et le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera <b>ses propres</b> vidéos brutes.</span></div>'
+        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:100px;padding:12px 14px 4px"></div>'
+        +'<label style="display:flex;gap:10px;align-items:center;font-size:12px;color:#c4c4cc;padding:2px 18px 10px;cursor:pointer"><input type="checkbox" id="nxm-apply-va" class="nxcbx" style="width:17px;height:17px;flex:0 0 17px"> Aussi « Dispo pour les VA » chez elles</label>'
+        +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid #26262c;background:#17171b">'
+        +'<div id="nxm-apply-count" style="flex:1;display:flex;align-items:center;gap:8px;background:#0c0c0f;border-radius:999px;padding:7px 14px;font-size:12.5px;color:#e6e6ea"><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#3467FF;color:#fff;align-items:center;justify-content:center;font-size:10px;font-weight:800">✕</span><span id="nxm-apply-n">0 sélectionnée</span></div>'
+        +'<button type="button" id="nxm-apply-cancel" style="background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">Annuler</button>'
+        +'<button type="button" id="nxm-apply-go" style="background:#3467FF;border:0;color:#fff;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer;opacity:.5">Confirmer</button></div>';
       ov.appendChild(box); document.body.appendChild(ov);
       var lw=box.querySelector('#nxm-apply-list');
-      var ROW='display:flex;gap:12px;align-items:center;padding:9px 10px;font-size:13px;color:#e6e6ea;cursor:pointer;border-radius:10px;border:1px solid transparent';
-      var AVA='width:36px;height:36px;border-radius:50%;flex:0 0 36px;object-fit:cover;background:#26262c';
-      var PALETTE=['#0ea5b7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626'];
-      function hover(el){
-        el.addEventListener('mouseenter',function(){ el.style.background='#202027'; });
-        el.addEventListener('mouseleave',function(){ el.style.background='transparent'; });
-      }
+      var AVA='width:40px;height:40px;border-radius:50%;flex:0 0 40px;object-fit:cover;background:#26262c';
+      var PALETTE=['#0ea5b7','#7c3aed','#db2777','#d97706','#059669','#3467FF','#dc2626'];
       // — ligne « All » façon Infloww : coche/decoche tout le monde —
-      var allRow=document.createElement('label'); allRow.style.cssText=ROW; hover(allRow);
-      var allCb=document.createElement('input'); allCb.type='checkbox'; allCb.style.accentColor='#22d3ee';
+      var allRow=document.createElement('label'); allRow.className='nxrow';
+      var allCb=document.createElement('input'); allCb.type='checkbox'; allCb.className='nxcbx';
       var allIc=document.createElement('div');
-      allIc.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;background:#2563eb;font-size:17px';
+      allIc.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;background:#3467FF;font-size:18px';
       allIc.textContent='👥';
       var allTx=document.createElement('div');
+      allTx.style.cssText='flex:1;text-align:left';
       allTx.innerHTML='<div style="font-weight:700">All</div><div style="font-size:11px;color:#8b8b95">toutes les models</div>';
       allRow.appendChild(allCb); allRow.appendChild(allIc); allRow.appendChild(allTx);
       lw.appendChild(allRow);
-      var sep=document.createElement('div'); sep.style.cssText='height:1px;background:#26262c;margin:4px 6px'; lw.appendChild(sep);
       // — une ligne par model : photo de profil + nom + nb de brutes —
       list.forEach(function(o,i){
-        var lab=document.createElement('label'); lab.style.cssText=ROW; hover(lab);
+        var lab=document.createElement('label'); lab.className='nxrow';
         var cb=document.createElement('input'); cb.type='checkbox'; cb.value=o.name;
-        cb.className='nxm-apply-cb'; cb.style.accentColor='#22d3ee';
+        cb.className='nxcbx nxm-apply-cb';
         var av;
         if(o.pp){
           av=document.createElement('img'); av.src=o.pp; av.loading='lazy'; av.style.cssText=AVA;
@@ -3660,6 +3670,7 @@ function nxMApplyOpen(){
           av.textContent=(o.name[0]||'?').toUpperCase();
         }
         var tx=document.createElement('div');
+        tx.style.cssText='flex:1;text-align:left';
         var sub=(o.brutes==null)?'':(o.brutes+' vidéo'+(o.brutes>1?'s':'')+' brute'+(o.brutes>1?'s':''));
         if(o.brutes===0) sub='⚠ aucune vidéo brute';
         tx.innerHTML='<div style="font-weight:700">'+nxMEsc(o.name)+'</div>'
@@ -3668,13 +3679,22 @@ function nxMApplyOpen(){
         lw.appendChild(lab);
       });
       function boxes(){ return Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb')); }
-      allCb.addEventListener('change',function(){ boxes().forEach(function(c){ c.checked=allCb.checked; }); });
+      function paintCount(){
+        var n=boxes().filter(function(c){ return c.checked; }).length;
+        var lab2=box.querySelector('#nxm-apply-n');
+        if(lab2) lab2.textContent=n+' sélectionnée'+(n>1?'s':'');
+        var go2=box.querySelector('#nxm-apply-go');
+        if(go2) go2.style.opacity=n?'1':'.5';
+      }
+      allCb.addEventListener('change',function(){ boxes().forEach(function(c){ c.checked=allCb.checked; }); paintCount(); });
       lw.addEventListener('change',function(e){
         if(e.target===allCb) return;
         allCb.checked=boxes().every(function(c){ return c.checked; });   // All suit l etat reel
+        paintCount();
       });
       var va=box.querySelector('#nxm-apply-va'); if(va) va.checked=!!nxMState.vaReady;
       box.querySelector('#nxm-apply-cancel').addEventListener('click',function(){ ov.remove(); });
+      box.querySelector('#nxm-apply-x').addEventListener('click',function(){ ov.remove(); });
       ov.addEventListener('click',function(e){ if(e.target===ov) ov.remove(); });
       box.querySelector('#nxm-apply-go').addEventListener('click',function(){
         var sel=Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb:checked')).map(function(c){ return c.value; });
@@ -35284,17 +35304,21 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
-        img_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+        # HEIC en dernier recours : le serveur ne sait pas le miniaturiser et le
+        # navigateur ne l'affiche pas -> on préfère toujours jpg/png/webp.
+        img_pref = {".jpg": 0, ".jpeg": 0, ".png": 1, ".webp": 2, ".gif": 3, ".heic": 9}
         out = []
         for ident in _list_content_identities():
             pp = None
             ppdir = IDENTITIES_DIR / ident / "profile_pics"
             if ppdir.exists():
-                for p in sorted(ppdir.iterdir()):
-                    if (p.is_file() and p.suffix.lower() in img_exts
-                            and ".example" not in p.name):
-                        pp = f"/cloud/thumb/{ident}/profile_pics/{p.name}"
-                        break
+                cands = sorted(
+                    (p for p in ppdir.iterdir()
+                     if p.is_file() and p.suffix.lower() in img_pref
+                     and ".example" not in p.name),
+                    key=lambda p: (img_pref[p.suffix.lower()], p.name))
+                if cands:
+                    pp = f"/cloud/thumb/{ident}/profile_pics/{cands[0].name}"
             nb = 0
             bdir = IDENTITIES_DIR / ident / "brutes"
             if bdir.exists():
