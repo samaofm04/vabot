@@ -3563,8 +3563,12 @@ function nxMAnalyze(){
       var caps=j.captions||[];
       if(caps.length){
         nxMState.caps=caps.map(function(c){
-          return {text:String(c.text||''), x:c.x, y:c.y,
-                  start:(c.start==null?null:+c.start), end:(c.end==null?null:+c.end)};
+          var o={text:String(c.text||''), x:c.x, y:c.y,
+                 start:(c.start==null?null:+c.start), end:(c.end==null?null:+c.end)};
+          // texte deja decoupe en lignes par l analyse -> largeur de wrap au max,
+          // le moteur garde alors les retours a la ligne tels quels.
+          if(c.wrapW!=null) o.wrapW=+c.wrapW;
+          return o;
         });
         if(!nxMState.style) nxMStyleInit();
         if(j.style) nxMState.style=Object.assign(nxMState.style, j.style);
@@ -31486,12 +31490,20 @@ def _montage_prompt(duration: float, cuts) -> str:
         "Explique ton choix en une phrase courte dans cut_reason.\n\n"
         "B) captions — les textes INCRUSTÉS sur la vidéo (ceux ajoutés au montage).\n"
         "Recopie-les EXACTEMENT : mêmes mots, même ponctuation, mêmes emojis, mêmes "
-        "majuscules, et garde les retours à la ligne tels qu'ils s'affichent.\n"
+        "majuscules.\n"
+        "RETOURS À LA LIGNE (règle absolue) : dans text, mets un saut de ligne à "
+        "CHAQUE endroit où le texte passe à la ligne À L'ÉCRAN. Le nombre de lignes "
+        "de ton text doit être EXACTEMENT le nombre de lignes affichées sur l'image. "
+        "Ne recolle jamais deux lignes affichées en une seule.\n"
         "IGNORE : l'interface de l'appli (like, commentaires, partage), les watermarks, "
         "les pseudos, les sous-titres automatiques.\n"
-        "Un même texte affiché sur plusieurs images = UNE SEULE caption (ne le répète pas).\n"
+        "ANTI-DOUBLON (règle absolue) : un même texte vu sur plusieurs images = UNE "
+        "SEULE caption (étends start/end). Un texte affiché en double sur la même "
+        "image (ombre, contour, dédoublement d'un effet) = UNE seule caption. Ta "
+        "liste ne doit JAMAIS contenir deux captions au texte identique ou "
+        "quasi-identique.\n"
         "Pour chaque caption :\n"
-        "  - text : le texte exact\n"
+        "  - text : le texte exact, avec ses sauts de ligne\n"
         "  - x, y : le CENTRE du bloc de texte, en fraction de l'image "
         "(x=0 bord gauche, x=1 bord droit, y=0 tout en haut, y=1 tout en bas)\n"
         "  - line_height : hauteur d'UNE LETTRE MAJUSCULE divisée par la hauteur totale "
@@ -31551,11 +31563,19 @@ def _claude_montage_analyze(frames, duration: float, cuts, key: str):
                         "JSON valide {\"cut_at\":…, \"cut_reason\":…, \"captions\":[…]}, "
                         "sans aucun texte autour.",
             }
-        try:
-            rr = requests.post("https://api.anthropic.com/v1/messages",
-                               headers=headers, json=body, timeout=180)
-        except Exception as e:
-            return None, f"appel à Claude impossible : {e}"[:220]
+        rr = None
+        # Surcharge passagère (529/429/5xx) : deux reprises espacées AVANT
+        # d'abandonner — un 529 dure souvent quelques secondes à peine.
+        for wait in (0, 6, 15):
+            if wait:
+                time.sleep(wait)
+            try:
+                rr = requests.post("https://api.anthropic.com/v1/messages",
+                                   headers=headers, json=body, timeout=180)
+            except Exception as e:
+                return None, f"appel à Claude impossible : {e}"[:220]
+            if rr.status_code not in (429, 500, 502, 503, 504, 529):
+                break
         if rr.status_code == 200:
             data = rr.json()
             break
@@ -31565,7 +31585,10 @@ def _claude_montage_analyze(frames, duration: float, cuts, key: str):
             last_err = ""
         # 4xx = la requête déplaît -> on retente en plus simple. 5xx / 429 = côté
         # serveur, réessayer en plus simple n'y changerait rien.
-        if not (400 <= rr.status_code < 500) or rr.status_code == 429:
+        if rr.status_code in (429, 503, 529):
+            return None, ("Claude est surchargé en ce moment "
+                          f"({rr.status_code}) — attends 1 min et re-clique")
+        if not (400 <= rr.status_code < 500):
             return None, f"Claude indisponible ({rr.status_code}) {last_err}"[:220]
         last_err = f"({rr.status_code}) {last_err}"
     if data is None:
@@ -31620,7 +31643,7 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
         if abs(near[0] - cut) <= 0.25:
             cut = near[0]
 
-    caps, style, seen = [], None, set()
+    caps, style = [], None
     for c in (raw.get("captions") or [])[:12]:
         if not isinstance(c, dict):
             continue
@@ -31631,29 +31654,53 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
             continue
         # Clé de comparaison sans accents ni ponctuation : le même texte relevé
         # sur deux images ne compte qu'une fois même si Claude l'orthographie
-        # légèrement différemment ("ca" vs "ça").
+        # légèrement différemment ("ca" vs "ça"). Les retours à la ligne ne
+        # comptent pas non plus : « ligne1\nligne2 » = « ligne1 ligne2 ».
         import unicodedata
         norm = unicodedata.normalize("NFKD", text.lower())
         norm = re.sub(r"[^a-z0-9]+", " ", "".join(
             ch for ch in norm if not unicodedata.combining(ch))).strip()
         # Emojis / ponctuation seule -> la clé serait vide : on retombe sur le
         # texte brut, sinon ces captions ne seraient jamais dédupliquées.
-        # On garde aussi l'instant d'apparition dans la clé : deux textes
-        # identiques affichés à des moments différents sont deux captions.
-        key = (norm or text.lower().strip(),
-               round(_num(c.get("start"), 0.0, duration, 0.0)))
-        if key in seen:                 # même texte revu sur une autre image
-            continue
-        seen.add(key)
+        kname = norm or text.lower().strip()
         start = _num(c.get("start"), 0.0, duration, 0.0)
         end = _num(c.get("end"), 0.0, duration, duration)
         if end <= start:
             end = duration
+        # Même texte avec une fenêtre qui CHEVAUCHE une caption déjà retenue ->
+        # doublon (le même texte relu sur une autre image, ou renvoyé deux fois
+        # avec des instants légèrement différents) : on fusionne les fenêtres au
+        # lieu d'empiler deux textes superposés sur la vidéo. Deux fenêtres
+        # disjointes restent deux captions (le texte revient plus tard).
+        dup = False
+        for prev in caps:
+            if prev.get("_k") != kname:
+                continue
+            ps = 0.0 if prev["start"] is None else prev["start"]
+            pe = duration if prev["end"] is None else prev["end"]
+            if start <= pe + 0.25 and end >= ps - 0.25:
+                ns, ne = min(ps, start), max(pe, end)
+                if ns <= 0.15 and ne >= duration - 0.15:
+                    prev["start"] = prev["end"] = None
+                else:
+                    prev["start"], prev["end"] = round(ns, 2), round(ne, 2)
+                # on garde le texte le plus riche (celui qui a des sauts de ligne)
+                if "\n" in text and "\n" not in prev["text"]:
+                    prev["text"] = text
+                dup = True
+                break
+        if dup:
+            continue
         entry = {
             "text": text,
+            "_k": kname,
             "x": round(_num(c.get("x"), 0.03, 0.97, 0.5), 4),
             "y": round(_num(c.get("y"), 0.03, 0.90, 0.61), 4),
         }
+        # Texte déjà découpé en lignes par l'analyse -> on écarte la largeur de
+        # wrap au maximum pour que le moteur ne re-coupe pas les lignes ailleurs.
+        if "\n" in text:
+            entry["wrapW"] = 0.97
         # Visible quasiment tout du long -> caption « permanente » dans l'éditeur.
         if start <= 0.15 and end >= duration - 0.15:
             entry["start"] = None
@@ -31677,6 +31724,8 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
                 "align": c.get("align") if c.get("align") in ("left", "center", "right") else "center",
                 "case": "upper" if c.get("upper") else "none",
             }
+    for e in caps:                      # clé interne de dédoublonnage
+        e.pop("_k", None)
     return {
         "cut_at": round(cut, 3),
         "cut_reason": str(raw.get("cut_reason") or "")[:200],
