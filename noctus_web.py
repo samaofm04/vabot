@@ -570,6 +570,12 @@ def assemble_brute_template(template, brute, cut_at, out_path):
         return False, "pas de point de coupe"
     if not fps or fps > 121:
         fps = 30.0
+    # libx264 + yuv420p refuse les dimensions impaires : on arrondit au pair
+    # inférieur (au pire on perd 1 px sur un template exotique).
+    w -= w % 2
+    h -= h % 2
+    if w < 2 or h < 2:
+        return False, "dimensions du template invalides"
     bw, bh, _bf, bdur = probe_video(brute)
     if not (bw and bh):
         return False, f"brute illisible : {brute.name}"
@@ -605,6 +611,24 @@ def assemble_brute_template(template, brute, cut_at, out_path):
         err = (r.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
         return False, ("ffmpeg : " + (err[-1] if err else "échec"))[:200]
     return True, ""
+
+
+def purge_old_models(prefix: str, keep: int = 12):
+    """Supprime les vieux dossiers de génération `<prefix>*` en gardant les
+    `keep` plus récents. Chacun contient les vidéos d'entrée ET les sorties :
+    avec l'assemblage il y a maintenant une entrée PAR VARIANTE, donc plusieurs
+    dizaines de Mo par génération — sans ça le disque du VPS se remplit."""
+    try:
+        olds = sorted((d for d in _models_dir().glob(prefix + "*") if d.is_dir()),
+                      key=lambda d: d.stat().st_mtime, reverse=True)[keep:]
+        for o in olds:
+            shutil.rmtree(str(o), ignore_errors=True)
+        if olds:
+            print(f"[noctus] purge : {len(olds)} dossier(s) {prefix}* supprimé(s)", flush=True)
+        return len(olds)
+    except Exception as e:
+        print(f"[noctus] purge {prefix}* : {e}", flush=True)
+        return 0
 
 
 def _prepare_inputs(src, inp, draft, folders, brutes_dir):
@@ -676,16 +700,7 @@ def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
     # PURGE des generations a la demande precedentes : chaque « Reel deja monte »
     # creait un dossier models/vam-... (video source + sorties) jamais supprime,
     # le disque du VPS se remplissait a l'infini. On garde les 12 plus recents.
-    try:
-        _mdir = _models_dir()
-        _olds = sorted((d for d in _mdir.glob("vam-*") if d.is_dir()),
-                       key=lambda d: d.stat().st_mtime, reverse=True)[12:]
-        for _o in _olds:
-            _sh.rmtree(str(_o), ignore_errors=True)
-        if _olds:
-            print(f"[noctus] purge : {len(_olds)} dossier(s) de generation supprime(s)", flush=True)
-    except Exception as _e_purge:
-        print(f"[noctus] purge : {_e_purge}", flush=True)
+    purge_old_models("vam-")
     inp = _models_dir() / model / "input"
     inp.mkdir(parents=True, exist_ok=True)
     for f in inp.glob("*"):

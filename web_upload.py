@@ -34952,6 +34952,9 @@ def create_app():
             return jsonify({"ok": False, "error": "identité invalide"})
         stem = _re.sub(r"[^a-zA-Z0-9_\-]", "", src.stem)[:28]
         model = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reel-{identity}-{stem}")[:40]
+        # Chaque reel généré laissait son dossier models/reel-… sur le disque
+        # pour toujours ; avec l'assemblage il contient une vidéo PAR VARIANTE.
+        noctus_web.purge_old_models("reel-")
         inp = noctus_web._models_dir() / model / "input"
         inp.mkdir(parents=True, exist_ok=True)
         for f in inp.glob("*"):
