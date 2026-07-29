@@ -1287,6 +1287,33 @@ try:
     except Exception as _eu:
         check("templates visibles par le bot : testable", False, repr(_eu)[:80])
 
+    # -- « Appliquer à d'autres models » ---------------------------------------
+    _srcT = _idM.parent / "templates"
+    _srcT.mkdir(parents=True, exist_ok=True)
+    (_srcT / "tp.mp4").write_bytes(b"\0" * 4000)
+    _t2 = pathlib.Path("data/identities/_tst_cible") / "templates"
+    shutil.rmtree(_t2.parent, ignore_errors=True)
+    _t2.mkdir(parents=True)
+    (_t2 / "tp.mp4").write_bytes(b"\1" * 9000)     # collision : AUTRE video, meme nom
+    _ja = _cM.post("/noctus/montage_apply", data={
+        "file_id": "_tst_montage|templates|tp.mp4",
+        "targets": "_tst_cible,_tst_montage,../..,inconnue",
+        "segments": "[]", "font": "Strong", "style": "{}",
+        "cut_at": "2.5", "va_ready": "1"}).get_json() or {}
+    check("appliquer : cibles invalides filtrees, la bonne passe",
+          _ja.get("done") == ["_tst_cible"], str(_ja))
+    check("appliquer : collision de nom -> suffixe, l existant intact",
+          (_t2 / "tp.mp4").stat().st_size == 9000 and (_t2 / "tp_2.mp4").exists())
+    _jd = json.loads((_t2 / "tp_2.montage.json").read_text(encoding="utf-8"))
+    check("appliquer : coupe + va_ready copies chez la cible",
+          _jd.get("cut_at") == 2.5 and _jd.get("va_ready") is True, str(_jd))
+    _ja2 = _cM.post("/noctus/montage_apply", data={
+        "file_id": "_tst_montage|templates|tp.mp4", "targets": "_tst_cible",
+        "segments": "[]", "font": "Strong", "style": "{}"}).get_json() or {}
+    _n_mp4 = len([p for p in _t2.glob("tp_2*.mp4")])
+    check("re-appliquer la meme video ne cree pas de doublon", _ja2.get("ok") and _n_mp4 == 1, str(_n_mp4))
+    shutil.rmtree(_t2.parent, ignore_errors=True)
+
     _wM._load_web_users = _savM          # rend le magasin d'utilisateurs intact
     shutil.rmtree(_idM.parent, ignore_errors=True)
 

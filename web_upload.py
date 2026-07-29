@@ -3592,6 +3592,73 @@ function nxMAnalyze(){
     })
     .catch(function(){ done('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
 }
+// 📤 Applique ce TEMPLATE a d autres models : copie la video + le brouillon
+// (captions, style, trait de coupe) dans identities/<model>/templates/.
+// Chaque model garde ses propres brutes -> memes montages, contenus differents.
+function nxMApplyOpen(){
+  var parts=(nxMState.fid||'').split('|');
+  if(parts[1]!=='templates'){
+    if(typeof showToast==='function') showToast('Disponible pour les templates (dossier « Template montage »)','warning',6000);
+    return;
+  }
+  fetch('/noctus/identities',{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      var list=(j.identities||[]).filter(function(x){ return x!==parts[0]; });
+      if(!list.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
+      var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
+      var ov=document.createElement('div');
+      ov.id='nxm-apply-ov';
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10050;display:flex;align-items:center;justify-content:center';
+      var box=document.createElement('div');
+      box.style.cssText='background:#1b1b1f;border:1px solid #34343a;border-radius:12px;padding:18px;width:340px;max-height:72vh;display:flex;flex-direction:column';
+      box.innerHTML='<div style="font-weight:800;font-size:14px;color:#e6e6ea;margin-bottom:4px">📤 Appliquer ce montage à…</div>'
+        +'<div style="font-size:11.5px;color:#9a9aa6;margin-bottom:10px">La vidéo + les captions + le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera ses propres vidéos brutes.</div>'
+        +'<div style="display:flex;gap:8px;margin-bottom:8px"><button type="button" id="nxm-apply-all" class="ce-btn" style="flex:1">Tout cocher</button><button type="button" id="nxm-apply-none" class="ce-btn" style="flex:1">Tout décocher</button></div>'
+        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:80px;border:1px solid #2a2a30;border-radius:8px;padding:8px;margin-bottom:10px"></div>'
+        +'<label style="display:flex;gap:8px;align-items:center;font-size:12px;color:#c4c4cc;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="nxm-apply-va"> Aussi « Dispo pour les VA » chez elles</label>'
+        +'<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="nxm-apply-cancel" class="ce-btn">Annuler</button><button type="button" id="nxm-apply-go" class="ce-btn accent">📤 Appliquer</button></div>';
+      ov.appendChild(box); document.body.appendChild(ov);
+      var lw=box.querySelector('#nxm-apply-list');
+      list.forEach(function(idn){
+        var lab=document.createElement('label');
+        lab.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 4px;font-size:12.5px;color:#e6e6ea;cursor:pointer';
+        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=idn;
+        lab.appendChild(cb); lab.appendChild(document.createTextNode(' '+idn));
+        lw.appendChild(lab);
+      });
+      var va=box.querySelector('#nxm-apply-va'); if(va) va.checked=!!nxMState.vaReady;
+      function setAll(on){ lw.querySelectorAll('input').forEach(function(c){ c.checked=on; }); }
+      box.querySelector('#nxm-apply-all').addEventListener('click',function(){ setAll(true); });
+      box.querySelector('#nxm-apply-none').addEventListener('click',function(){ setAll(false); });
+      box.querySelector('#nxm-apply-cancel').addEventListener('click',function(){ ov.remove(); });
+      ov.addEventListener('click',function(e){ if(e.target===ov) ov.remove(); });
+      box.querySelector('#nxm-apply-go').addEventListener('click',function(){
+        var sel=Array.prototype.slice.call(lw.querySelectorAll('input:checked')).map(function(c){ return c.value; });
+        if(!sel.length){ if(typeof showToast==='function') showToast('Coche au moins une model','warning'); return; }
+        // caption en cours de saisie mais pas ajoutee -> on l ajoute d abord
+        if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
+        var fd=new FormData();
+        fd.set('file_id', nxMState.fid);
+        fd.set('targets', sel.join(','));
+        fd.set('segments', JSON.stringify(nxMState.caps||[]));
+        fd.set('font', (document.getElementById('nx-m-font')||{}).value||'Strong');
+        fd.set('style', JSON.stringify(nxMState.style||{}));
+        if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
+        if(va && va.checked) fd.set('va_ready','1');
+        var go=box.querySelector('#nxm-apply-go'); go.disabled=true; go.textContent='⏳ Copie…';
+        fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'})
+          .then(function(r){return r.json();}).then(function(j){
+            ov.remove();
+            if(j.ok){
+              var n=(j.done||[]).length;
+              var msg='📤 Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j.done||[]).join(', ');
+              if(j.errors&&j.errors.length) msg+=' — échec : '+j.errors.join(' ; ');
+              if(typeof showToast==='function') showToast(msg,(j.errors&&j.errors.length)?'warning':'success',10000);
+            } else if(typeof showToast==='function') showToast('❌ '+(j.error||'échec'),'error',8000);
+          }).catch(function(){ ov.remove(); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+      });
+    }).catch(function(){ if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+}
 // 💾 Enregistre le brouillon (captions + police + style) pour ce reel
 function nxMontageSave(){
   if(!nxMState.fid) return;
@@ -3965,6 +4032,9 @@ async function nxMontageOpen(fid, exampleUrl){
   var _sub=parts[1]||'videos';   // BUG: '/videos/' etait code en dur -> un template
                                  // (dossier templates/) donnait un 404, donc video
                                  // noire, duree inconnue et timeline vide.
+  // « Appliquer a d autres models » n a de sens que pour un TEMPLATE
+  var _as=document.getElementById('nxm-apply-sec');
+  if(_as) _as.style.display=(_sub==='templates')?'block':'none';
   if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/'+encodeURIComponent(_sub)+'/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); nxMPlayBtn(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onplay=nxMPlayBtn; vid.onpause=nxMPlayBtn; vid.onended=nxMPlayBtn; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
@@ -6131,6 +6201,11 @@ body.light .action-icon{color:#666}
           <div style="font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 0">Il place le trait <b style="color:#22d3ee">✂</b> et recopie la caption à ta place. Tu vérifies, tu ajustes. <b>Ctrl+Z</b> annule.</div>
           <div class="nxm-plabel" style="margin-top:18px">Ajouter du texte à la main</div>
           <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
+          <div id="nxm-apply-sec" style="display:none">
+            <div class="nxm-plabel" style="margin-top:18px">Appliquer à d'autres models</div>
+            <div class="ce-card" style="height:46px;font-style:normal" onclick="nxMApplyOpen()">📤 Appliquer ce montage…</div>
+            <div style="font-size:11px;color:#75757f;line-height:1.5;margin-top:8px">Copie ce template (vidéo + captions + trait <b style="color:#22d3ee">✂</b>) chez les models que tu choisis. Chacune utilisera <b>ses propres</b> vidéos brutes.</div>
+          </div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#00d9c0">Télécharger</b>.</div>
           <div class="nxm-plabel" style="margin-top:16px">Tout faire automatiquement</div>
@@ -35153,6 +35228,83 @@ def create_app():
             return jsonify({"ok": False, "error": err})
         out["ok"] = True
         return jsonify(out)
+
+    @app.route("/noctus/identities")
+    def noctus_identities():
+        """Liste des models (pour la modale « Appliquer à d'autres models »)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        return jsonify({"ok": True, "identities": _list_content_identities()})
+
+    @app.route("/noctus/montage_apply", methods=["POST"])
+    def noctus_montage_apply():
+        """Applique un TEMPLATE à d'autres models : copie la vidéo (+ caption,
+        description, exemple s'ils existent) dans identities/<model>/templates/
+        et y écrit le MÊME brouillon de montage (captions + style + trait de
+        coupe). Chaque model garde ses propres brutes -> même montage, contenus
+        différents à la génération."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed:
+            return jsonify({"ok": False, "error": "vidéo introuvable"})
+        src_dir, src = parsed
+        src_ident = src_dir.parent.name
+        idents = set(_list_identities())
+        targets = [t.strip().lower() for t in (request.form.get("targets") or "").split(",")]
+        targets = [t for t in dict.fromkeys(targets)          # dédoublonné, ordre gardé
+                   if t and t in idents and t != src_ident][:40]
+        if not targets:
+            return jsonify({"ok": False, "error": "choisis au moins une model"})
+        import shutil as _sh
+        draft = {
+            "segments": request.form.get("segments") or "[]",
+            "font": (request.form.get("font") or "Strong").strip(),
+            "style": request.form.get("style") or "{}",
+        }
+        try:
+            _cut = float(request.form.get("cut_at") or 0)
+            if _cut > 0:
+                draft["cut_at"] = round(_cut, 3)
+        except (TypeError, ValueError):
+            pass
+        if (request.form.get("va_ready") or "") in ("1", "true"):
+            draft["va_ready"] = True
+        done, errs = [], []
+        src_size = src.stat().st_size
+        for t in targets:
+            try:
+                dstdir = IDENTITIES_DIR / t / "templates"
+                dstdir.mkdir(parents=True, exist_ok=True)
+                dst = dstdir / src.name
+                # Collision de nom : même taille = même vidéo (on met juste le
+                # brouillon à jour) ; taille différente = un AUTRE template
+                # porte ce nom chez la cible -> on suffixe au lieu d'écraser.
+                if dst.exists() and dst.stat().st_size != src_size:
+                    k = 2
+                    while True:
+                        cand = dstdir / f"{src.stem}_{k}{src.suffix}"
+                        if not cand.exists() or cand.stat().st_size == src_size:
+                            dst = cand
+                            break
+                        k += 1
+                if not (dst.exists() and dst.stat().st_size == src_size):
+                    _sh.copy2(str(src), str(dst))
+                # annexes : caption (.txt), description (.desc.txt), exemple
+                for suffix in (".txt", ".desc.txt"):
+                    sp = src_dir / (src.stem + suffix)
+                    if sp.exists():
+                        _sh.copy2(str(sp), str(dstdir / (dst.stem + suffix)))
+                for ex in src_dir.glob(src.stem + ".example.*"):
+                    _sh.copy2(str(ex), str(dstdir / (dst.stem + ex.name[len(src.stem):])))
+                if not safe_json.write(dstdir / f"{dst.stem}.montage.json", draft, indent=None):
+                    raise OSError("écriture du brouillon impossible")
+                done.append(t)
+            except Exception as e:
+                errs.append(f"{t} : {e}")
+        return jsonify({"ok": bool(done), "done": done, "errors": errs})
 
     @app.route("/noctus/montage_load")
     def noctus_montage_load():
