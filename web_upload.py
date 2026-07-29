@@ -35342,17 +35342,22 @@ def create_app():
 
         out = []
         for ident in _list_content_identities():
-            # Visage de la model : Photos profil d'abord, sinon une photo de sa
-            # Bibliothèque (post, story, CTA), sinon la miniature d'un reel ou
-            # d'un template. Le pool PARTAGÉ n'est rattaché à personne -> jamais
-            # utilisé ici. En tout dernier : pastille à initiale (côté client).
-            base = IDENTITIES_DIR / ident
+            # MÊME visage que la barre latérale de la Bibliothèque : avatar
+            # uploadé, sinon photo MyPuls de la créatrice. À défaut, une photo
+            # de sa Bibliothèque (Photos profil, post, story), sinon la
+            # miniature d'un reel. En tout dernier : pastille à initiale.
             pp = None
-            for sub in ("profile_pics", "posts", "stories", "storyctas"):
-                name = _first_img(base / sub)
-                if name:
-                    pp = f"/cloud/thumb/{ident}/{sub}/{name}"
-                    break
+            try:
+                pp = _identity_avatar_url(ident) or None
+            except Exception:
+                pp = None
+            base = IDENTITIES_DIR / ident
+            if not pp:
+                for sub in ("profile_pics", "posts", "stories", "storyctas"):
+                    name = _first_img(base / sub)
+                    if name:
+                        pp = f"/cloud/thumb/{ident}/{sub}/{name}"
+                        break
             if not pp:
                 for sub in ("videos", "templates", "brutes"):
                     name = _first_vid(base / sub)
