@@ -3631,7 +3631,7 @@ function nxMBeginDrag(e,i,mode){
   var startX=e.clientX, el=e.currentTarget, MINW=0.2, nxMDragLast=null, moved=false;
   try{ el.setPointerCapture(e.pointerId); }catch(_){}
   function mv(ev){
-    if(!moved && Math.abs(ev.clientX-startX)>4) moved=true;
+    if(!moved && Math.abs(ev.clientX-startX)>7) moved=true;   // 4 px = trop sensible, un clic normal deplacait le bloc
     var dt=(ev.clientX-startX)/pps, ns=os, ne=oe;
     if(mode==='move'){
       ns=os+dt; if(ns<0)ns=0; if(ns+len>dur)ns=dur-len;
@@ -3661,8 +3661,11 @@ function nxMBeginDrag(e,i,mode){
     if(nxMDragLast){ nxMState.caps[i].start=Math.round(nxMDragLast[0]*100)/100; nxMState.caps[i].end=Math.round(nxMDragLast[1]*100)/100; nxMDragLast=null; }
     nxMState.snap=null;
     nxMRenderCaps();
-    // clic (sans glisser) sur le bloc "move" -> ouvre la caption pour l'éditer
-    if(mode==='move' && !moved){ try{ nxMEditCap(i,false); }catch(e){} }   // pas de focus -> Suppr efface
+    // Toucher un bloc le SELECTIONNE, qu on l ait juste clique, deplace ou
+    // redimensionne : sinon un simple frolement deplacait le bloc sans le
+    // selectionner, et la touche Suppr n avait plus rien a effacer.
+    try{ nxMEditCap(i,false); }catch(e){}   // pas de focus -> Suppr efface la caption
+    if(moved) nxMHistTouch();
   }
   el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
 }
@@ -6034,7 +6037,9 @@ body.light .action-icon{color:#666}
 .ce-tlic{background:#2a2a30;border:1px solid #35353c;color:#9a9aa6;border-radius:6px;width:30px;height:28px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}
 .ce-tlic:hover{background:#35353c;color:#e6e6ea}
 /* Contrôles (réutilisés) */
-.nxm-ta{width:100%;min-height:60px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
+/* min-height genereux : les captions font souvent 2-3 lignes, le champ etait
+   trop bas pour les lire d un coup d oeil (reste redimensionnable a la main). */
+.nxm-ta{width:100%;min-height:135px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
 .nxm-ta:focus{border-color:#00d9c0}
 .nxm-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c4c4cc}
 .nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:82px}
