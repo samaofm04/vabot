@@ -6163,9 +6163,9 @@ body.light .action-icon{color:#666}
 .ce-btn{flex:0 0 auto;white-space:nowrap;background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .ce-btn:hover{background:#35353c}
 .ce-btn.accent{background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;font-weight:800}
-/* « Analyser » : couleur propre (cyan), pour ne pas se fondre dans les boutons gris. */
-.ce-btn-ai{background:linear-gradient(135deg,#22d3ee,#0ea5b7);border:0;color:#042028;font-weight:800}
-.ce-btn-ai:hover{background:linear-gradient(135deg,#3ddcf5,#12b8cc)}
+/* « Analyser » : bleu #3467FF (demande) pour ne pas se fondre dans les boutons gris. */
+.ce-btn-ai{background:linear-gradient(135deg,#4a7bff,#3467FF);border:0;color:#fff;font-weight:800}
+.ce-btn-ai:hover{background:linear-gradient(135deg,#5b88ff,#4272ff)}
 .ce-btn-ai:disabled{opacity:.55}
 .ce-btn.warn{background:#332a17;border-color:#5a4a25;color:#fbbf24}
 .ce-x{background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px;width:26px;height:24px;border-radius:5px}
@@ -6181,9 +6181,9 @@ body.light .action-icon{color:#666}
 .ce-libtab:hover{background:#2a2a30}
 .ce-libcontent{flex:1;overflow-y:auto;padding:12px}
 .ce-card{background:#2a2a30;border:1px dashed #454550;border-radius:8px;height:66px;display:flex;align-items:center;justify-content:center;color:#d4d4dc;font-style:italic;cursor:pointer;font-size:13px;font-weight:700}
-/* Bouton « Analyser » : couleur pleine, il doit sauter aux yeux dans le panneau. */
-.ce-card-ai{background:linear-gradient(135deg,#22d3ee,#0ea5b7);border:0;color:#042028;font-style:normal;font-weight:800;font-size:14px}
-.ce-card-ai:hover{filter:brightness(1.08)}
+/* Bouton « Analyser » : bleu #3467FF, il doit sauter aux yeux dans le panneau. */
+.ce-card-ai{background:linear-gradient(135deg,#4a7bff,#3467FF);border:0;color:#fff;font-style:normal;font-weight:800;font-size:14px}
+.ce-card-ai:hover{filter:brightness(1.1)}
 .ce-card-ai.busy{opacity:.6;cursor:default}
 .ce-card:hover{border-color:#00d9c0;color:#00d9c0}
 /* Centre lecteur */
