@@ -3524,8 +3524,8 @@ function nxMAnalyze(){
   if(!nxMState.fid) return;
   // deux boutons declenchent l analyse : celui de la barre du haut et le gros
   // du panneau de gauche. Les deux doivent montrer le meme etat.
-  var btn=document.getElementById('nx-m-ai'), orig='🪄 Analyser';
-  var btn2=document.getElementById('nx-m-ai2'), orig2='🪄 Analyser la vidéo';
+  var btn=document.getElementById('nx-m-ai'), orig='Analyser';
+  var btn2=document.getElementById('nx-m-ai2'), orig2='Analyser la vidéo';
   if(nxMState.aiBusy) return;               // deja en cours -> pas de 2e appel
   nxMState.aiBusy=true;
   // jeton : une analyse abandonnee ne doit pas remettre les boutons a zero
@@ -3541,7 +3541,7 @@ function nxMAnalyze(){
     if(btn2){ btn2.textContent=txt; btn2.classList.remove('busy');
               setTimeout(function(){ if(myRun===nxMState.aiRun) btn2.textContent=orig2; },2500); }
   }
-  if(typeof showToast==='function') showToast('🪄 Claude regarde la video… (30 s a 1 min)','info',6000);
+  if(typeof showToast==='function') showToast('Claude regarde la video… (30 s a 1 min)','info',6000);
   var askedFid=nxMState.fid;              // le reel sur lequel on a lance l analyse
   nxMCommit();                            // point de retour avant ecrasement (Ctrl+Z)
   var fd=new FormData(); fd.set('file_id', askedFid);
@@ -3585,7 +3585,7 @@ function nxMAnalyze(){
       try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
       nxMHistTouch();
       done('✅ Analyse OK');
-      var msg='🪄 Coupe placee a '+(nxMState.cut||0).toFixed(2)+'s';
+      var msg='Coupe placee a '+(nxMState.cut||0).toFixed(2)+'s';
       msg+=caps.length?(' · '+caps.length+' caption'+(caps.length>1?'s':'')+' recopiee'+(caps.length>1?'s':'')):' · aucune caption trouvee';
       if(j.cut_reason) msg+=' — '+j.cut_reason;
       if(typeof showToast==='function') showToast(msg+' · verifie et ajuste avant de generer','success',10000);
@@ -4104,8 +4104,8 @@ async function nxMontageOpen(fid, exampleUrl){
   // remet les boutons « Analyser » a neuf (une analyse laissee en cours sur un
   // autre reel les aurait laisses grises).
   nxMState.aiBusy=false; nxMState.aiRun=(nxMState.aiRun||0)+1;
-  var _a1=document.getElementById('nx-m-ai'); if(_a1){ _a1.textContent='🪄 Analyser'; _a1.disabled=false; }
-  var _a2=document.getElementById('nx-m-ai2'); if(_a2){ _a2.textContent='🪄 Analyser la vidéo'; _a2.classList.remove('busy'); }
+  var _a1=document.getElementById('nx-m-ai'); if(_a1){ _a1.textContent='Analyser'; _a1.disabled=false; }
+  var _a2=document.getElementById('nx-m-ai2'); if(_a2){ _a2.textContent='Analyser la vidéo'; _a2.classList.remove('busy'); }
   var _sub=parts[1]||'videos';   // BUG: '/videos/' etait code en dur -> un template
                                  // (dossier templates/) donnait un 404, donc video
                                  // noire, duree inconnue et timeline vide.
@@ -6261,7 +6261,7 @@ body.light .action-icon{color:#666}
       <span class="ce-app-name">🎬 Montage</span>
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
-      <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">🪄 Analyser</button>
+      <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">Analyser</button>
       <button class="ce-btn" id="nx-m-apply" onclick="nxMApplyOpen()" style="display:none" title="Copie ce template (vidéo + captions + trait ✂) chez les models que tu choisis. Chacune utilisera ses propres vidéos brutes.">📤 Appliquer aux autres</button>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
@@ -6277,7 +6277,7 @@ body.light .action-icon{color:#666}
         <div class="ce-libcontent">
           <div class="nxm-plabel">Faire le montage tout seul</div>
           <div class="ce-card ce-card-ai" id="nx-m-ai2" onclick="nxMAnalyze()"
-               title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée.">🪄 Analyser la vidéo</div>
+               title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée.">Analyser la vidéo</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 0">Il place le trait <b style="color:#22d3ee">✂</b> et recopie la caption à ta place. Tu vérifies, tu ajustes. <b>Ctrl+Z</b> annule.</div>
           <div class="nxm-plabel" style="margin-top:18px">Ajouter du texte à la main</div>
           <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
@@ -6289,7 +6289,7 @@ body.light .action-icon{color:#666}
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#3467FF">Télécharger</b>.</div>
           <div class="nxm-plabel" style="margin-top:16px">Tout faire automatiquement</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Le bouton <b style="color:#e6e6ea">🪄 Analyser</b>, tout en haut, regarde la vidéo à ta place : il place le trait de coupe <b style="color:#22d3ee">✂</b> et recopie la caption (texte, position, style). Tu n'as plus qu'à vérifier. <b>Ctrl+Z</b> annule si ça tombe à côté.</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Le bouton <b style="color:#e6e6ea">Analyser</b>, tout en haut, regarde la vidéo à ta place : il place le trait de coupe <b style="color:#22d3ee">✂</b> et recopie la caption (texte, position, style). Tu n'as plus qu'à vérifier. <b>Ctrl+Z</b> annule si ça tombe à côté.</div>
           <div class="nxm-plabel" style="margin-top:16px">Le trait ✂</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Tout ce qui est à <b>gauche</b> du trait est remplacé, à la génération, par une vidéo tirée au hasard dans le dossier <b>Vidéo brut</b> de la model. Le <b>son</b> du montage, lui, est gardé en entier. Trait à 0 = pas de remplacement.</div>
         </div>
