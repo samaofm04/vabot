@@ -35009,8 +35009,12 @@ def create_app():
         # lancées en même temps (double-clic, deux onglets) partageraient le
         # même dossier et la seconde effacerait input/ et output/ de la
         # première EN PLEIN RENDU, en tuant son process. On refuse plutôt.
+        # On regarde le PROCESS, pas _status.json : ce fichier est écrit par le
+        # runner Node avec un délai, donc deux clics rapprochés passeraient tous
+        # les deux au travers.
         try:
-            if noctus_web.status(model).get("state") == "running":
+            _busy = noctus_web._PROCS.get(noctus_web._safe(model))
+            if _busy is not None and _busy.poll() is None:
                 return jsonify({"ok": False, "error":
                                 "une génération est déjà en cours sur ce reel — "
                                 "attends qu'elle finisse (ou clique sur ✋ Stop)"})
