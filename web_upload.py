@@ -5874,8 +5874,10 @@ body.light .action-icon{color:#666}
 .ce-app-name{font-weight:800;color:#00d9c0;display:flex;align-items:center;gap:6px;font-size:13px}
 .ce-menu{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer}
 .ce-saved{color:#6d6d77;font-size:10.5px;display:flex;align-items:center;gap:5px}
-.ce-proj{flex:1;text-align:center;font-weight:700;color:#e6e6ea;font-size:12.5px}
-.ce-btn{background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
+.ce-proj{flex:1;min-width:0;text-align:center;font-weight:700;color:#e6e6ea;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* flex-shrink:0 : la barre a plusieurs boutons — c'est le nom du projet qui se
+   réduit, pas les libellés des boutons (sinon ils se coupent sur petit écran). */
+.ce-btn{flex:0 0 auto;white-space:nowrap;background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .ce-btn:hover{background:#35353c}
 .ce-btn.accent{background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;font-weight:800}
 .ce-btn.warn{background:#332a17;border-color:#5a4a25;color:#fbbf24}
