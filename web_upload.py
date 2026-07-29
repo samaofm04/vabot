@@ -6151,10 +6151,10 @@ body.light .action-icon{color:#666}
 
 <!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
-/* ===== Éditeur vidéo type CapCut ===== accent vert-cyan #00d9c0 ===== */
+/* ===== Éditeur vidéo type CapCut ===== accent bleu #3467FF ===== */
 .ce-app{background:#1a1a1e;border:0;border-radius:0;width:100vw;max-width:100vw;height:100vh;display:grid;grid-template-rows:38px minmax(0,1fr) auto;overflow:hidden}
 .ce-title{display:flex;align-items:center;gap:10px;padding:0 12px;background:#202024;border-bottom:1px solid #2a2a30;font-size:12px;color:#c4c4cc}
-.ce-app-name{font-weight:800;color:#00d9c0;display:flex;align-items:center;gap:6px;font-size:13px}
+.ce-app-name{font-weight:800;color:#3467FF;display:flex;align-items:center;gap:6px;font-size:13px}
 .ce-menu{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer}
 .ce-saved{color:#6d6d77;font-size:10.5px;display:flex;align-items:center;gap:5px}
 .ce-proj{flex:1;min-width:0;text-align:center;font-weight:700;color:#e6e6ea;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -6162,7 +6162,7 @@ body.light .action-icon{color:#666}
    réduit, pas les libellés des boutons (sinon ils se coupent sur petit écran). */
 .ce-btn{flex:0 0 auto;white-space:nowrap;background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .ce-btn:hover{background:#35353c}
-.ce-btn.accent{background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;font-weight:800}
+.ce-btn.accent{background:linear-gradient(135deg,#3467FF,#2b57d9);border:0;color:#fff;font-weight:800}
 /* « Analyser » : bleu #3467FF (demande) pour ne pas se fondre dans les boutons gris. */
 .ce-btn-ai{background:linear-gradient(135deg,#4a7bff,#3467FF);border:0;color:#fff;font-weight:800}
 .ce-btn-ai:hover{background:linear-gradient(135deg,#5b88ff,#4272ff)}
@@ -6177,7 +6177,7 @@ body.light .action-icon{color:#666}
 .ce-libtabs{display:flex;flex-wrap:wrap;gap:2px;padding:7px 6px;border-bottom:1px solid #2a2a30}
 .ce-libtab{display:flex;flex-direction:column;align-items:center;gap:3px;width:50px;padding:6px 2px;border-radius:7px;font-size:9px;color:#8b8b95;cursor:pointer;background:none;border:0}
 .ce-libtab svg{width:17px;height:17px}
-.ce-libtab.on{background:#2e2e34;color:#00d9c0}
+.ce-libtab.on{background:#2e2e34;color:#3467FF}
 .ce-libtab:hover{background:#2a2a30}
 .ce-libcontent{flex:1;overflow-y:auto;padding:12px}
 .ce-card{background:#2a2a30;border:1px dashed #454550;border-radius:8px;height:66px;display:flex;align-items:center;justify-content:center;color:#d4d4dc;font-style:italic;cursor:pointer;font-size:13px;font-weight:700}
@@ -6185,7 +6185,7 @@ body.light .action-icon{color:#666}
 .ce-card-ai{background:linear-gradient(135deg,#4a7bff,#3467FF);border:0;color:#fff;font-style:normal;font-weight:800;font-size:14px}
 .ce-card-ai:hover{filter:brightness(1.1)}
 .ce-card-ai.busy{opacity:.6;cursor:default}
-.ce-card:hover{border-color:#00d9c0;color:#00d9c0}
+.ce-card:hover{border-color:#3467FF;color:#3467FF}
 /* Centre lecteur */
 .ce-center{display:flex;flex-direction:column;min-height:0;background:#141416}
 .ce-chead{font-size:11.5px;color:#9a9aa6;padding:9px 14px;border-bottom:1px solid #2a2a30}
@@ -6227,7 +6227,7 @@ body.light .action-icon{color:#666}
 /* min-height genereux : les captions font souvent 2-3 lignes, le champ etait
    trop bas pour les lire d un coup d oeil (reste redimensionnable a la main). */
 .nxm-ta{width:100%;min-height:135px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:10px 12px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;outline:none;line-height:1.5}
-.nxm-ta:focus{border-color:#00d9c0}
+.nxm-ta:focus{border-color:#3467FF}
 .nxm-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:13px;font-size:12.5px;color:#c4c4cc}
 .nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:82px}
 .nxm-inp{flex:1;min-width:110px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
@@ -6238,18 +6238,18 @@ body.light .action-icon{color:#666}
 .nxm-chip:hover{background:#35353c}
 .nxm-tg{background:#2a2a30;border:1px solid #35353c;color:#c4c4cc;border-radius:6px;min-width:32px;height:30px;padding:0 9px;font-size:13px;cursor:pointer;line-height:1}
 .nxm-tg:hover{background:#35353c}
-.nxm-tg.on{background:#00d9c0;border-color:#00d9c0;color:#042925}
+.nxm-tg.on{background:#3467FF;border-color:#3467FF;color:#fff}
 .nxm-preset{background:#1c1c1e;border:1px solid #35353c;border-radius:7px;height:34px;min-width:44px;padding:0 8px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;justify-content:center}
 .nxm-preset:hover{border-color:#5a5a64}
-.nxm-preset.on{border-color:#00d9c0;box-shadow:0 0 0 1px #00d9c0}
+.nxm-preset.on{border-color:#3467FF;box-shadow:0 0 0 1px #3467FF}
 .nxm-sw{width:23px;height:23px;border-radius:6px;cursor:pointer;border:2px solid #3a3a42;display:inline-block;box-sizing:border-box}
-.nxm-sw.on{border-color:#00d9c0}
-.nxm-slider{flex:1;accent-color:#00d9c0;cursor:pointer}
-.nxm-add{margin-top:15px;width:100%;background:#2a2a30;border:1px solid #00d9c0;color:#00d9c0;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer}
+.nxm-sw.on{border-color:#3467FF}
+.nxm-slider{flex:1;accent-color:#3467FF;cursor:pointer}
+.nxm-add{margin-top:15px;width:100%;background:#2a2a30;border:1px solid #3467FF;color:#3467FF;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer}
 .nxm-add:hover{background:rgba(0,217,192,.12)}
 .nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
 .nxm-foot{display:flex;gap:14px;align-items:center;margin-top:12px}
-.nxm-gen{padding:11px 26px;background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px}
+.nxm-gen{padding:11px 26px;background:linear-gradient(135deg,#3467FF,#2b57d9);border:0;color:#fff;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px}
 .nxm-prog{font-size:12px;color:#8b8b95}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
@@ -6287,7 +6287,7 @@ body.light .action-icon{color:#666}
             <div style="font-size:11px;color:#75757f;line-height:1.5;margin-top:8px">Copie ce template (vidéo + captions + trait <b style="color:#22d3ee">✂</b>) chez les models que tu choisis. Chacune utilisera <b>ses propres</b> vidéos brutes.</div>
           </div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#00d9c0">Télécharger</b>.</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#3467FF">Télécharger</b>.</div>
           <div class="nxm-plabel" style="margin-top:16px">Tout faire automatiquement</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Le bouton <b style="color:#e6e6ea">🪄 Analyser</b>, tout en haut, regarde la vidéo à ta place : il place le trait de coupe <b style="color:#22d3ee">✂</b> et recopie la caption (texte, position, style). Tu n'as plus qu'à vérifier. <b>Ctrl+Z</b> annule si ça tombe à côté.</div>
           <div class="nxm-plabel" style="margin-top:16px">Le trait ✂</div>
@@ -6301,7 +6301,7 @@ body.light .action-icon{color:#666}
           <div class="ce-vwrap">
             <video id="nx-m-video" muted playsinline class="ce-video" onclick="nxMPlayPause()"></video>
             <div id="nx-m-overlay" class="ce-ovl"></div>
-            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#00d9c0;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">TON REEL</span>
+            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#3467FF;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">TON REEL</span>
           </div>
           <div id="nx-m-example-wrap" class="ce-vwrap" style="display:none;border:1px solid #fbbf24">
             <video id="nx-m-example" controls muted loop playsinline class="ce-video"></video>
@@ -6379,17 +6379,17 @@ body.light .action-icon{color:#666}
           <div style="height:1px;background:#2a2a30;margin:16px 0"></div>
           <div class="nxm-plabel">⏱ Quand afficher</div>
           <div class="nxm-row" style="margin-top:8px">
-            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> 📍 au curseur (2s)</label>
-            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> toute la vidéo</label>
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#3467FF"> 📍 au curseur (2s)</label>
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#3467FF"> toute la vidéo</label>
           </div>
           <div class="nxm-row">
-            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#00d9c0"> de</label>
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="range" onchange="nxMTimeToggle()" style="accent-color:#3467FF"> de</label>
             <input id="nx-m-start" type="number" min="0" step="0.01" value="0" disabled class="nxm-num">
             <span>à</span>
             <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled class="nxm-num"><span>s</span>
           </div>
           <div class="nxm-hint">
-            <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#00d9c0">📍 début ici</button>
+            <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#3467FF">📍 début ici</button>
             <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">📍 fin ici (cut)</button>
             <span id="nx-m-timeinfo" style="color:#6b7280"></span>
           </div>
