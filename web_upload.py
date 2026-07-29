@@ -4035,6 +4035,8 @@ async function nxMontageOpen(fid, exampleUrl){
   // « Appliquer a d autres models » n a de sens que pour un TEMPLATE
   var _as=document.getElementById('nxm-apply-sec');
   if(_as) _as.style.display=(_sub==='templates')?'block':'none';
+  var _ab=document.getElementById('nx-m-apply');
+  if(_ab) _ab.style.display=(_sub==='templates')?'inline-block':'none';
   if(vid){ vid.src='/cloud/file/'+encodeURIComponent(parts[0])+'/'+encodeURIComponent(_sub)+'/'+encodeURIComponent(name); vid.onloadedmetadata=function(){ nxMRenderCaps(); nxMBuildThumbs(); nxMPlayBtn(); }; vid.ontimeupdate=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onseeked=function(){ nxMSyncPlayhead(); nxMUpdatePreview(); }; vid.onplay=nxMPlayBtn; vid.onpause=nxMPlayBtn; vid.onended=nxMPlayBtn; }
   // Vidéo exemple à gauche (si dispo) — juste pour la regarder / la recopier
   var exWrap=document.getElementById('nx-m-example-wrap'), exV=document.getElementById('nx-m-example');
@@ -6183,6 +6185,7 @@ body.light .action-icon{color:#666}
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
       <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">🪄 Analyser</button>
+      <button class="ce-btn" id="nx-m-apply" onclick="nxMApplyOpen()" style="display:none" title="Copie ce template (vidéo + captions + trait ✂) chez les models que tu choisis. Chacune utilisera ses propres vidéos brutes.">📤 Appliquer aux autres</button>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
