@@ -1871,7 +1871,11 @@ class UserCog(commands.Cog):
         import asyncio
         import noctus_web
         try:
-            model = await asyncio.to_thread(noctus_web.gen_from_draft, str(video), draft, ["V1"])
+            # brutes_dir : si le brouillon a un point de coupe et que l'identité a
+            # des vidéos brutes, le début du template est remplacé par l'une d'elles.
+            _brutes = IDENTITIES_DIR / (identity or "").strip().lower() / "brutes"
+            model = await asyncio.to_thread(
+                noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes)
         except Exception:
             model = None
         if not model:

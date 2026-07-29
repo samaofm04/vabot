@@ -24,6 +24,8 @@ const userDir = args.userDir;
 const selectedFolders = args.selectedFolders || null;
 const selectedCaptions = args.selectedCaptions || null;
 const targetFiles = args.targetFiles || null;
+// {fichier: ['V3']} — epingle chaque video a SA variante (assemblage brute+template).
+const videoFolderMap = args.videoFolderMap || null;
 
 if (!modelId || !userDir) {
   console.error('modelId + userDir requis');
@@ -64,7 +66,7 @@ process.on('SIGINT', gracefulStop);
 
 (async () => {
   try {
-    await runPipeline(modelId, log, selectedFolders, notify, selectedCaptions, userDir, null, null, targetFiles);
+    await runPipeline(modelId, log, selectedFolders, notify, selectedCaptions, userDir, null, videoFolderMap, targetFiles);
     if (!stopping) { writeStatus({ state: 'done', pct: 100 }); emit({ type: 'done' }); }
     process.exit(0);
   } catch (e) {

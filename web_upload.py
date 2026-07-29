@@ -3917,6 +3917,8 @@ async function nxMontageGen(count){
   fd.set('folders', folders.join(','));
   fd.set('segments', JSON.stringify(nxMState.caps||[]));
   fd.set('style', JSON.stringify(nxMState.style||{}));   // réglages texte CapCut
+  // point de coupe : chaque variante remplacera [0..cut] par une vidéo brute
+  if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
   var gen=document.getElementById('nx-m-gen');
   nxMGenBtns(true); gen.textContent='⏳ '+(count>1?('×'+count+' '):'')+'Génération…';
   document.getElementById('nx-m-prog').textContent='⏳ génération de '+count+' variante(s)…';
@@ -34962,9 +34964,15 @@ def create_app():
                 _sh.rmtree(str(_outdir), ignore_errors=True)
         except Exception:
             pass
-        _sh.copy(str(src), str(inp / src.name))
         font = (request.form.get("font") or "Strong").strip() or "Strong"
         folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
+        # ASSEMBLAGE : si un point de coupe est demandé et que l'identité a des
+        # vidéos brutes, chaque variante part d'un montage (brute + template) au
+        # lieu du template seul. Sinon _prepare_inputs recopie la source.
+        _cut = request.form.get("cut_at")
+        _targets, _fmap = noctus_web._prepare_inputs(
+            src, inp, {"cut_at": _cut} if _cut else {}, folders,
+            IDENTITIES_DIR / identity / "brutes")
         label = ("m_" + model)[:40]
         caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
 
@@ -35087,10 +35095,11 @@ def create_app():
                     caps.append({"label": "sans_texte", "font": None, "captions": []})
                 sel = ["sans_texte"]
         noctus_web.write_captions(caps)
-        proc = noctus_web.run(model, folders, sel, targets=[src.name])
+        proc = noctus_web.run(model, folders, sel, targets=_targets, folder_map=_fmap)
         if not proc:
             return jsonify({"ok": False, "error": "lancement impossible"})
-        return jsonify({"ok": True, "model": model, "identity": identity})
+        return jsonify({"ok": True, "model": model, "identity": identity,
+                        "assembled": bool(_fmap)})
 
     @app.route("/noctus/montage_send", methods=["POST"])
     def noctus_montage_send():

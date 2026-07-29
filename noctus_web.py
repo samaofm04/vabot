@@ -284,7 +284,7 @@ def write_captions(data) -> bool:
 
 
 # ---------- run / stop ----------
-def run(model_id: str, folders=None, captions=None, targets=None):
+def run(model_id: str, folders=None, captions=None, targets=None, folder_map=None):
     mid = _safe(model_id)
     if not mid:
         return None
@@ -295,6 +295,9 @@ def run(model_id: str, folders=None, captions=None, targets=None):
         "selectedFolders": folders or None,
         "selectedCaptions": captions or None,
         "targetFiles": targets or None,
+        # {fichier: [variante]} — épingle chaque vidéo assemblée à SA variante,
+        # sinon le moteur croise toutes les vidéos avec toutes les variantes.
+        "videoFolderMap": folder_map or None,
     }
     old = _PROCS.get(mid)
     if old and old.poll() is None:
@@ -466,7 +469,188 @@ def build_montage_caps(draft, label):
     return None, font
 
 
-def gen_from_draft(src_path, draft, folders=None, model=None):
+# ==========================================================================
+# ASSEMBLAGE  brute + template
+# --------------------------------------------------------------------------
+# Un TEMPLATE est un export CapCut (~7 s) dont le DÉBUT est un plan d'accroche
+# jetable. À la génération on remplace ce début [0 .. cut_at] par une vidéo
+# BRUTE tirée au hasard, et on garde la piste sonore du template EN ENTIER
+# (elle couvre donc aussi la partie brute, comme dans CapCut).
+#
+# La durée finale reste celle du template et la partie d'après la coupe garde
+# ses timings d'origine -> les captions de l'éditeur restent valables telles
+# quelles, sans recalcul.
+# ==========================================================================
+
+def probe_video(path):
+    """(largeur, hauteur, fps, durée) d'une vidéo. (0, 0, 0.0, 0.0) si illisible."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, timeout=30, text=True)
+        vals = [v.strip() for v in (r.stdout or "").split() if v.strip()]
+        w = h = 0
+        fps = dur = 0.0
+        for v in vals:
+            if "/" in v and fps == 0.0:              # r_frame_rate, ex. "30/1"
+                a, _, b = v.partition("/")
+                try:
+                    fps = float(a) / float(b or 1)
+                except (ValueError, ZeroDivisionError):
+                    fps = 0.0
+            elif "." in v:                            # duration
+                try:
+                    dur = float(v)
+                except ValueError:
+                    pass
+            elif w == 0:
+                try:
+                    w = int(v)
+                except ValueError:
+                    pass
+            elif h == 0:
+                try:
+                    h = int(v)
+                except ValueError:
+                    pass
+        return w, h, fps, dur
+    except Exception:
+        return 0, 0, 0.0, 0.0
+
+
+def list_brutes(brutes_dir):
+    """Vidéos utilisables du dossier brutes/, triées par nom.
+    Les fichiers annexes (.txt, .desc.txt, .montage.json, miniatures, fichiers
+    cachés et restes d'upload) ne sont pas des vidéos et sont donc écartés par
+    le filtre d'extension."""
+    d = Path(brutes_dir)
+    if not d.exists() or not d.is_dir():
+        return []
+    out = []
+    for f in sorted(d.iterdir()):
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        if f.suffix.lower() not in VIDEO_EXTS:
+            continue
+        try:
+            # Seuil bas exprès : il ne sert qu'à jeter les fichiers vides ou les
+            # uploads interrompus. Une vidéo courte mais valide doit passer — un
+            # fichier réellement illisible sera écarté à l'assemblage (ffprobe).
+            if f.stat().st_size < 1024:
+                continue
+        except OSError:
+            continue
+        out.append(f)
+    return out
+
+
+def assemble_brute_template(template, brute, cut_at, out_path):
+    """Fabrique la vidéo assemblée : la BRUTE occupe [0 .. cut_at], le TEMPLATE
+    reprend de cut_at jusqu'à sa fin, et le son du TEMPLATE joue du début à la
+    fin. Renvoie (True, "") ou (False, raison).
+
+    La brute est recadrée au format du template (on remplit puis on rogne au
+    centre : jamais de bandes noires) et rebouclée si elle est plus courte que
+    la coupe."""
+    template, brute, out_path = Path(template), Path(brute), Path(out_path)
+    if not template.exists():
+        return False, "template introuvable"
+    if not brute.exists():
+        return False, "vidéo brute introuvable"
+    w, h, fps, dur = probe_video(template)
+    if not (w and h and dur > 0):
+        return False, "template illisible (ffprobe)"
+    cut = max(0.0, min(float(cut_at or 0), max(0.0, dur - 0.10)))
+    if cut < 0.05:
+        return False, "pas de point de coupe"
+    if not fps or fps > 121:
+        fps = 30.0
+    bw, bh, _bf, bdur = probe_video(brute)
+    if not (bw and bh):
+        return False, f"brute illisible : {brute.name}"
+    # Brute plus longue que nécessaire -> on part d'un instant au hasard pour
+    # varier d'une génération à l'autre. Plus courte -> -stream_loop la reboucle.
+    start = 0.0
+    if bdur > cut + 0.30:
+        import random as _rnd
+        start = round(_rnd.uniform(0.0, bdur - cut - 0.10), 2)
+    fit = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+           f"crop={w}:{h},setsar=1,fps={fps:.4f}")
+    fc = (f"[0:v]{fit},trim=duration={cut:.3f},setpts=PTS-STARTPTS[a];"
+          f"[1:v]{fit},trim=start={cut:.3f},setpts=PTS-STARTPTS[b];"
+          f"[a][b]concat=n=2:v=1:a=0[v]")
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-stream_loop", "-1"]
+    if start > 0:
+        cmd += ["-ss", f"{start:.2f}"]
+    cmd += ["-t", f"{cut:.3f}", "-i", str(brute),
+            "-i", str(template),
+            "-filter_complex", fc,
+            "-map", "[v]", "-map", "1:a?",     # « ? » : template sans son -> muet
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart", str(out_path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return False, "assemblage trop long (>5 min)"
+    except Exception as e:
+        return False, f"ffmpeg indisponible : {e}"
+    if r.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 10000:
+        err = (r.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+        return False, ("ffmpeg : " + (err[-1] if err else "échec"))[:200]
+    return True, ""
+
+
+def _prepare_inputs(src, inp, draft, folders, brutes_dir):
+    """Remplit le dossier input/ du modèle et renvoie (targets, videoFolderMap).
+
+    Avec un point de coupe ET des vidéos brutes disponibles : une vidéo
+    assemblée PAR VARIANTE, chacune avec une brute différente (on repioche
+    seulement quand toutes ont été utilisées). Chaque assemblage est épinglé à
+    sa variante via le videoFolderMap, sinon le moteur ferait le produit croisé
+    (N vidéos × N variantes = N² exports).
+
+    Sans coupe, sans brute, ou si tous les assemblages échouent : on retombe sur
+    la vidéo source telle quelle (comportement d'avant)."""
+    import shutil as _sh
+    import random as _rnd
+    import re as _re
+    try:
+        cut = float((draft or {}).get("cut_at") or 0)
+    except (TypeError, ValueError):
+        cut = 0.0
+    brutes = list_brutes(brutes_dir) if (brutes_dir and cut > 0.05) else []
+    if not brutes:
+        _sh.copy(str(src), str(inp / src.name))
+        return [src.name], None
+    stem = (_re.sub(r"[^A-Za-z0-9_-]", "", src.stem) or "reel")[:40]
+    targets, fmap, pool = [], {}, []
+    for i, vf in enumerate(folders):
+        if not pool:                       # toutes utilisées -> nouveau tirage
+            pool = list(brutes)
+            _rnd.shuffle(pool)
+        brute = pool.pop()
+        name = f"asm{i + 1}_{stem}.mp4"
+        ok, err = assemble_brute_template(src, brute, cut, inp / name)
+        if not ok:
+            print(f"[noctus] assemblage {brute.name} -> {vf} : {err}", flush=True)
+            continue
+        targets.append(name)
+        fmap[name] = [vf]
+    if not targets:                        # aucun assemblage n'a abouti
+        print("[noctus] aucun assemblage réussi -> template seul", flush=True)
+        _sh.copy(str(src), str(inp / src.name))
+        return [src.name], None
+    print(f"[noctus] {len(targets)} variante(s) assemblée(s) avec une brute "
+          f"(coupe à {cut:.2f}s, {len(brutes)} brute(s) dispo)", flush=True)
+    return targets, fmap
+
+
+def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
     """Génère une (ou N) variante MONTÉE d'un reel à partir d'un brouillon de montage
     {segments, font, style} — même moteur que l'éditeur web. À la demande (VA).
     Retourne le model_id (à poller via status()) ou None."""
@@ -506,8 +690,8 @@ def gen_from_draft(src_path, draft, folders=None, model=None):
             _sh.rmtree(str(outdir), ignore_errors=True)
     except Exception:
         pass
-    _sh.copy(str(src), str(inp / src.name))
     folders = folders or ["V1"]
+    targets, folder_map = _prepare_inputs(src, inp, draft, folders, brutes_dir)
     label = ("vam_" + model)[:40]
     entry, _font = build_montage_caps(draft, label)
     # captions.json est PARTAGÉ (le runner Node le lit au démarrage) : on sérialise
@@ -529,7 +713,7 @@ def gen_from_draft(src_path, draft, folders=None, model=None):
                 caps.append({"label": "sans_texte", "font": None, "captions": []})
             sel = ["sans_texte"]
         write_captions(caps)
-        proc = run(model, folders, sel, targets=[src.name])
+        proc = run(model, folders, sel, targets=targets, folder_map=folder_map)
     return model if proc else None
 
 
