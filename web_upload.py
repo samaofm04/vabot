@@ -3603,37 +3603,81 @@ function nxMApplyOpen(){
   }
   fetch('/noctus/identities',{credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
-      var list=(j.identities||[]).filter(function(x){ return x!==parts[0]; });
+      // compat : le serveur renvoie des objets {name, pp, brutes} (ou des
+      // chaines si une vieille version tourne encore)
+      var list=(j.identities||[]).map(function(x){
+        return (typeof x==='string')?{name:x, pp:null, brutes:null}:x;
+      }).filter(function(x){ return x && x.name && x.name!==parts[0]; });
       if(!list.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
       var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
       var ov=document.createElement('div');
       ov.id='nxm-apply-ov';
       ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10050;display:flex;align-items:center;justify-content:center';
       var box=document.createElement('div');
-      box.style.cssText='background:#1b1b1f;border:1px solid #34343a;border-radius:12px;padding:18px;width:340px;max-height:72vh;display:flex;flex-direction:column';
-      box.innerHTML='<div style="font-weight:800;font-size:14px;color:#e6e6ea;margin-bottom:4px">📤 Appliquer ce montage à…</div>'
-        +'<div style="font-size:11.5px;color:#9a9aa6;margin-bottom:10px">La vidéo + les captions + le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera ses propres vidéos brutes.</div>'
-        +'<div style="display:flex;gap:8px;margin-bottom:8px"><button type="button" id="nxm-apply-all" class="ce-btn" style="flex:1">Tout cocher</button><button type="button" id="nxm-apply-none" class="ce-btn" style="flex:1">Tout décocher</button></div>'
-        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:80px;border:1px solid #2a2a30;border-radius:8px;padding:8px;margin-bottom:10px"></div>'
-        +'<label style="display:flex;gap:8px;align-items:center;font-size:12px;color:#c4c4cc;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="nxm-apply-va"> Aussi « Dispo pour les VA » chez elles</label>'
+      box.style.cssText='background:#17171b;border:1px solid #2c2c33;border-radius:14px;padding:18px;width:380px;max-height:76vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.55)';
+      box.innerHTML='<div style="font-weight:800;font-size:15px;color:#e6e6ea;margin-bottom:4px">📤 Appliquer ce montage à…</div>'
+        +'<div style="font-size:11.5px;color:#9a9aa6;margin-bottom:12px">La vidéo + les captions + le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera ses propres vidéos brutes.</div>'
+        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:90px;margin-bottom:10px"></div>'
+        +'<label style="display:flex;gap:8px;align-items:center;font-size:12px;color:#c4c4cc;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="nxm-apply-va" style="accent-color:#22d3ee"> Aussi « Dispo pour les VA » chez elles</label>'
         +'<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="nxm-apply-cancel" class="ce-btn">Annuler</button><button type="button" id="nxm-apply-go" class="ce-btn accent">📤 Appliquer</button></div>';
       ov.appendChild(box); document.body.appendChild(ov);
       var lw=box.querySelector('#nxm-apply-list');
-      list.forEach(function(idn){
-        var lab=document.createElement('label');
-        lab.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 4px;font-size:12.5px;color:#e6e6ea;cursor:pointer';
-        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=idn;
-        lab.appendChild(cb); lab.appendChild(document.createTextNode(' '+idn));
+      var ROW='display:flex;gap:12px;align-items:center;padding:9px 10px;font-size:13px;color:#e6e6ea;cursor:pointer;border-radius:10px;border:1px solid transparent';
+      var AVA='width:36px;height:36px;border-radius:50%;flex:0 0 36px;object-fit:cover;background:#26262c';
+      var PALETTE=['#0ea5b7','#7c3aed','#db2777','#d97706','#059669','#2563eb','#dc2626'];
+      function hover(el){
+        el.addEventListener('mouseenter',function(){ el.style.background='#202027'; });
+        el.addEventListener('mouseleave',function(){ el.style.background='transparent'; });
+      }
+      // — ligne « All » façon Infloww : coche/decoche tout le monde —
+      var allRow=document.createElement('label'); allRow.style.cssText=ROW; hover(allRow);
+      var allCb=document.createElement('input'); allCb.type='checkbox'; allCb.style.accentColor='#22d3ee';
+      var allIc=document.createElement('div');
+      allIc.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;background:#2563eb;font-size:17px';
+      allIc.textContent='👥';
+      var allTx=document.createElement('div');
+      allTx.innerHTML='<div style="font-weight:700">All</div><div style="font-size:11px;color:#8b8b95">toutes les models</div>';
+      allRow.appendChild(allCb); allRow.appendChild(allIc); allRow.appendChild(allTx);
+      lw.appendChild(allRow);
+      var sep=document.createElement('div'); sep.style.cssText='height:1px;background:#26262c;margin:4px 6px'; lw.appendChild(sep);
+      // — une ligne par model : photo de profil + nom + nb de brutes —
+      list.forEach(function(o,i){
+        var lab=document.createElement('label'); lab.style.cssText=ROW; hover(lab);
+        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=o.name;
+        cb.className='nxm-apply-cb'; cb.style.accentColor='#22d3ee';
+        var av;
+        if(o.pp){
+          av=document.createElement('img'); av.src=o.pp; av.loading='lazy'; av.style.cssText=AVA;
+          av.addEventListener('error',function(){   // image morte -> pastille initiale
+            var d=document.createElement('div');
+            d.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
+            d.textContent=(o.name[0]||'?').toUpperCase();
+            av.replaceWith(d);
+          });
+        } else {
+          av=document.createElement('div');
+          av.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
+          av.textContent=(o.name[0]||'?').toUpperCase();
+        }
+        var tx=document.createElement('div');
+        var sub=(o.brutes==null)?'':(o.brutes+' vidéo'+(o.brutes>1?'s':'')+' brute'+(o.brutes>1?'s':''));
+        if(o.brutes===0) sub='⚠ aucune vidéo brute';
+        tx.innerHTML='<div style="font-weight:700">'+nxMEsc(o.name)+'</div>'
+          +(sub?('<div style="font-size:11px;color:'+(o.brutes===0?'#fbbf24':'#8b8b95')+'">'+sub+'</div>'):'');
+        lab.appendChild(cb); lab.appendChild(av); lab.appendChild(tx);
         lw.appendChild(lab);
       });
+      function boxes(){ return Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb')); }
+      allCb.addEventListener('change',function(){ boxes().forEach(function(c){ c.checked=allCb.checked; }); });
+      lw.addEventListener('change',function(e){
+        if(e.target===allCb) return;
+        allCb.checked=boxes().every(function(c){ return c.checked; });   // All suit l etat reel
+      });
       var va=box.querySelector('#nxm-apply-va'); if(va) va.checked=!!nxMState.vaReady;
-      function setAll(on){ lw.querySelectorAll('input').forEach(function(c){ c.checked=on; }); }
-      box.querySelector('#nxm-apply-all').addEventListener('click',function(){ setAll(true); });
-      box.querySelector('#nxm-apply-none').addEventListener('click',function(){ setAll(false); });
       box.querySelector('#nxm-apply-cancel').addEventListener('click',function(){ ov.remove(); });
       ov.addEventListener('click',function(e){ if(e.target===ov) ov.remove(); });
       box.querySelector('#nxm-apply-go').addEventListener('click',function(){
-        var sel=Array.prototype.slice.call(lw.querySelectorAll('input:checked')).map(function(c){ return c.value; });
+        var sel=Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb:checked')).map(function(c){ return c.value; });
         if(!sel.length){ if(typeof showToast==='function') showToast('Coche au moins une model','warning'); return; }
         // caption en cours de saisie mais pas ajoutee -> on l ajoute d abord
         if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
@@ -35234,11 +35278,31 @@ def create_app():
 
     @app.route("/noctus/identities")
     def noctus_identities():
-        """Liste des models (pour la modale « Appliquer à d'autres models »)."""
+        """Liste des models pour la modale « Appliquer à d'autres models » :
+        nom + photo de profil (1re image de profile_pics/) + nombre de vidéos
+        brutes (utile : 0 brute = le template partira sans remplacement)."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
-        return jsonify({"ok": True, "identities": _list_content_identities()})
+        img_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+        out = []
+        for ident in _list_content_identities():
+            pp = None
+            ppdir = IDENTITIES_DIR / ident / "profile_pics"
+            if ppdir.exists():
+                for p in sorted(ppdir.iterdir()):
+                    if (p.is_file() and p.suffix.lower() in img_exts
+                            and ".example" not in p.name):
+                        pp = f"/cloud/thumb/{ident}/profile_pics/{p.name}"
+                        break
+            nb = 0
+            bdir = IDENTITIES_DIR / ident / "brutes"
+            if bdir.exists():
+                nb = sum(1 for p in bdir.iterdir()
+                         if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                         and ".example" not in p.name)
+            out.append({"name": ident, "pp": pp, "brutes": nb})
+        return jsonify({"ok": True, "identities": out})
 
     @app.route("/noctus/montage_apply", methods=["POST"])
     def noctus_montage_apply():
