@@ -3002,7 +3002,7 @@ function nxMAddCap(){
   document.getElementById('nx-m-caption').value='';
   document.getElementById('nx-m-timeinfo').textContent='';
   document.getElementById('nx-m-editnote').textContent='';
-  document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+  document.getElementById('nx-m-addcap').textContent='Ajouter cette caption';
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   nxMRenderCaps();
   nxMHistTouch();
@@ -3015,7 +3015,7 @@ function nxMAddCap(){
 function nxMNewText(){
   nxMState.editIdx=-1;
   var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
-  var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+  var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='Ajouter cette caption';
   var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
   var ti=document.getElementById('nx-m-timeinfo'); if(ti) ti.textContent='';
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; try{ nxMTimeToggle(); }catch(e){} }
@@ -3491,7 +3491,7 @@ function nxMRestore(snapStr){
     var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=s.size||44;
     var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
     var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
-    var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+    var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='Ajouter cette caption';
     var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
     try{ nxMStylePaint(); }catch(e){}
     try{ nxMRenderCaps(); }catch(e){}
@@ -3580,7 +3580,7 @@ function nxMAnalyze(){
       }
       nxMState.editIdx=-1;
       var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
-      var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='➕ Ajouter cette caption';
+      var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='Ajouter cette caption';
       var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
       try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
       nxMHistTouch();
@@ -4028,7 +4028,7 @@ function nxMDelCap(i){
   if(nxMState.editIdx===i){
     nxMState.editIdx=-1;
     document.getElementById('nx-m-editnote').textContent='';
-    document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+    document.getElementById('nx-m-addcap').textContent='Ajouter cette caption';
     var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
   }
   else if(nxMState.editIdx>i){ nxMState.editIdx--; }
@@ -4126,7 +4126,7 @@ async function nxMontageOpen(fid, exampleUrl){
   document.getElementById('nx-m-caption').value='';
   document.getElementById('nx-m-editnote').textContent='';
   document.getElementById('nx-m-timeinfo').textContent='';
-  document.getElementById('nx-m-addcap').textContent='➕ Ajouter cette caption';
+  document.getElementById('nx-m-addcap').textContent='Ajouter cette caption';
   nxMSetApproveBtn(false);   // état « dispo VA » par défaut (nxMLoadDraft le corrige si le reel est déjà approuvé)
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
@@ -6275,23 +6275,13 @@ body.light .action-icon{color:#666}
       <!-- GAUCHE : bibliothèque -->
       <div class="ce-lib">
         <div class="ce-libcontent">
-          <div class="nxm-plabel">Faire le montage tout seul</div>
           <div class="ce-card ce-card-ai" id="nx-m-ai2" onclick="nxMAnalyze()"
-               title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée.">Analyser la vidéo</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 0">Il place le trait <b style="color:#22d3ee">✂</b> et recopie la caption à ta place. Tu vérifies, tu ajustes. <b>Ctrl+Z</b> annule.</div>
-          <div class="nxm-plabel" style="margin-top:18px">Ajouter du texte à la main</div>
-          <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
+               title="Place le trait ✂ et recopie la caption incrustée (texte, position, style) automatiquement.">Analyser la vidéo</div>
+          <div class="ce-card" style="margin-top:12px" onclick="nxMNewText()">Ajouter un texte</div>
           <div id="nxm-apply-sec" style="display:none">
-            <div class="nxm-plabel" style="margin-top:18px">Appliquer à d'autres models</div>
-            <div class="ce-card" style="height:46px;font-style:normal" onclick="nxMApplyOpen()">Appliquer ce montage…</div>
-            <div style="font-size:11px;color:#75757f;line-height:1.5;margin-top:8px">Copie ce template (vidéo + captions + trait <b style="color:#22d3ee">✂</b>) chez les models que tu choisis. Chacune utilisera <b>ses propres</b> vidéos brutes.</div>
+            <div class="ce-card" style="margin-top:12px;height:46px;font-style:normal" onclick="nxMApplyOpen()"
+                 title="Copie ce template (vidéo + captions + trait ✂) chez les models que tu choisis. Chacune utilisera ses propres vidéos brutes.">Appliquer ce montage…</div>
           </div>
-          <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#3467FF">Télécharger</b>.</div>
-          <div class="nxm-plabel" style="margin-top:16px">Tout faire automatiquement</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Le bouton <b style="color:#e6e6ea">Analyser</b>, tout en haut, regarde la vidéo à ta place : il place le trait de coupe <b style="color:#22d3ee">✂</b> et recopie la caption (texte, position, style). Tu n'as plus qu'à vérifier. <b>Ctrl+Z</b> annule si ça tombe à côté.</div>
-          <div class="nxm-plabel" style="margin-top:16px">Le trait ✂</div>
-          <div style="font-size:11px;color:#75757f;line-height:1.5">Tout ce qui est à <b>gauche</b> du trait est remplacé, à la génération, par une vidéo tirée au hasard dans le dossier <b>Vidéo brut</b> de la model. Le <b>son</b> du montage, lui, est gardé en entier. Trait à 0 = pas de remplacement.</div>
         </div>
       </div>
       <!-- CENTRE : lecteur -->
@@ -6377,9 +6367,9 @@ body.light .action-icon{color:#666}
             <button type="button" id="nxe-neon" class="nxm-tg" onclick="nxMStyleEffect('neon')">Néon</button>
           </div>
           <div style="height:1px;background:#2a2a30;margin:16px 0"></div>
-          <div class="nxm-plabel">⏱ Quand afficher</div>
+          <div class="nxm-plabel">Quand afficher</div>
           <div class="nxm-row" style="margin-top:8px">
-            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#3467FF"> 📍 au curseur (2s)</label>
+            <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="cursor" checked onchange="nxMTimeToggle()" style="accent-color:#3467FF"> au curseur (2s)</label>
             <label class="nxm-tlbl"><input type="radio" name="nxmtime" value="perm" onchange="nxMTimeToggle()" style="accent-color:#3467FF"> toute la vidéo</label>
           </div>
           <div class="nxm-row">
@@ -6389,11 +6379,11 @@ body.light .action-icon{color:#666}
             <input id="nx-m-end" type="number" min="0" step="0.01" value="3" disabled class="nxm-num"><span>s</span>
           </div>
           <div class="nxm-hint">
-            <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#3467FF">📍 début ici</button>
-            <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">📍 fin ici (cut)</button>
+            <button type="button" onclick="nxMSetTime('start')" class="nxm-chip" style="color:#3467FF">début ici</button>
+            <button type="button" onclick="nxMSetTime('end')" class="nxm-chip" style="color:#fbbf24">fin ici</button>
             <span id="nx-m-timeinfo" style="color:#6b7280"></span>
           </div>
-          <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">➕ Ajouter cette caption</button>
+          <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">Ajouter cette caption</button>
           <button type="button" id="nx-m-delcap" onclick="nxMDelSelected()" style="display:none;margin-top:8px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption <span style="opacity:.7;font-weight:500">(Suppr)</span></button>
           <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24;display:block;margin-top:6px"></span>
         </div>
