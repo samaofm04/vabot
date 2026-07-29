@@ -3522,9 +3522,25 @@ function nxMHistPaint(){
 // caption incrustee (texte + position + style). On pre-remplit, l utilisateur ajuste.
 function nxMAnalyze(){
   if(!nxMState.fid) return;
+  // deux boutons declenchent l analyse : celui de la barre du haut et le gros
+  // du panneau de gauche. Les deux doivent montrer le meme etat.
   var btn=document.getElementById('nx-m-ai'), orig='🪄 Analyser';
+  var btn2=document.getElementById('nx-m-ai2'), orig2='🪄 Analyser la vidéo';
+  if(nxMState.aiBusy) return;               // deja en cours -> pas de 2e appel
+  nxMState.aiBusy=true;
+  // jeton : une analyse abandonnee ne doit pas remettre les boutons a zero
+  // alors qu une nouvelle vient d etre lancee.
+  nxMState.aiRun=(nxMState.aiRun||0)+1;
+  var myRun=nxMState.aiRun;
   if(btn){ btn.textContent='⏳ Analyse…'; btn.disabled=true; }
-  function done(txt){ if(btn){ btn.textContent=txt; setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2500); } }
+  if(btn2){ btn2.textContent='⏳ Analyse en cours…'; btn2.classList.add('busy'); }
+  function done(txt){
+    if(myRun!==nxMState.aiRun) return;      // une autre analyse a pris la main
+    nxMState.aiBusy=false;
+    if(btn){ btn.textContent=txt; setTimeout(function(){ if(myRun===nxMState.aiRun) btn.textContent=orig; btn.disabled=false; },2500); }
+    if(btn2){ btn2.textContent=txt; btn2.classList.remove('busy');
+              setTimeout(function(){ if(myRun===nxMState.aiRun) btn2.textContent=orig2; },2500); }
+  }
   if(typeof showToast==='function') showToast('🪄 Claude regarde la video… (30 s a 1 min)','info',6000);
   var askedFid=nxMState.fid;              // le reel sur lequel on a lance l analyse
   nxMCommit();                            // point de retour avant ecrasement (Ctrl+Z)
@@ -3891,6 +3907,11 @@ async function nxMontageOpen(fid, exampleUrl){
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
   nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc=''; nxMState.cut=null; nxMState.zoom=1; nxMState.scrollLeft=0;
+  // remet les boutons « Analyser » a neuf (une analyse laissee en cours sur un
+  // autre reel les aurait laisses grises).
+  nxMState.aiBusy=false; nxMState.aiRun=(nxMState.aiRun||0)+1;
+  var _a1=document.getElementById('nx-m-ai'); if(_a1){ _a1.textContent='🪄 Analyser'; _a1.disabled=false; }
+  var _a2=document.getElementById('nx-m-ai2'); if(_a2){ _a2.textContent='🪄 Analyser la vidéo'; _a2.classList.remove('busy'); }
   var _sub=parts[1]||'videos';   // BUG: '/videos/' etait code en dur -> un template
                                  // (dossier templates/) donnait un 404, donc video
                                  // noire, duree inconnue et timeline vide.
@@ -5909,6 +5930,10 @@ body.light .action-icon{color:#666}
 .ce-btn{flex:0 0 auto;white-space:nowrap;background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .ce-btn:hover{background:#35353c}
 .ce-btn.accent{background:linear-gradient(135deg,#00d9c0,#02b6a2);border:0;color:#042925;font-weight:800}
+/* « Analyser » : couleur propre (cyan), pour ne pas se fondre dans les boutons gris. */
+.ce-btn-ai{background:linear-gradient(135deg,#22d3ee,#0ea5b7);border:0;color:#042028;font-weight:800}
+.ce-btn-ai:hover{background:linear-gradient(135deg,#3ddcf5,#12b8cc)}
+.ce-btn-ai:disabled{opacity:.55}
 .ce-btn.warn{background:#332a17;border-color:#5a4a25;color:#fbbf24}
 .ce-x{background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px;width:26px;height:24px;border-radius:5px}
 .ce-x:hover{background:#35353c;color:#fff}
@@ -5923,6 +5948,10 @@ body.light .action-icon{color:#666}
 .ce-libtab:hover{background:#2a2a30}
 .ce-libcontent{flex:1;overflow-y:auto;padding:12px}
 .ce-card{background:#2a2a30;border:1px dashed #454550;border-radius:8px;height:66px;display:flex;align-items:center;justify-content:center;color:#d4d4dc;font-style:italic;cursor:pointer;font-size:13px;font-weight:700}
+/* Bouton « Analyser » : couleur pleine, il doit sauter aux yeux dans le panneau. */
+.ce-card-ai{background:linear-gradient(135deg,#22d3ee,#0ea5b7);border:0;color:#042028;font-style:normal;font-weight:800;font-size:14px}
+.ce-card-ai:hover{filter:brightness(1.08)}
+.ce-card-ai.busy{opacity:.6;cursor:default}
 .ce-card:hover{border-color:#00d9c0;color:#00d9c0}
 /* Centre lecteur */
 .ce-center{display:flex;flex-direction:column;min-height:0;background:#141416}
@@ -5997,7 +6026,7 @@ body.light .action-icon{color:#666}
       <span class="ce-app-name">🎬 Montage</span>
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
-      <button class="ce-btn" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">🪄 Analyser</button>
+      <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">🪄 Analyser</button>
       <button class="ce-btn" id="nx-m-save" onclick="nxMontageSave()">💾 Enregistrer</button>
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
@@ -6010,7 +6039,11 @@ body.light .action-icon{color:#666}
       <!-- GAUCHE : bibliothèque -->
       <div class="ce-lib">
         <div class="ce-libcontent">
-          <div class="nxm-plabel">Ajouter du texte</div>
+          <div class="nxm-plabel">Faire le montage tout seul</div>
+          <div class="ce-card ce-card-ai" id="nx-m-ai2" onclick="nxMAnalyze()"
+               title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée.">🪄 Analyser la vidéo</div>
+          <div style="font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 0">Il place le trait <b style="color:#22d3ee">✂</b> et recopie la caption à ta place. Tu vérifies, tu ajustes. <b>Ctrl+Z</b> annule.</div>
+          <div class="nxm-plabel" style="margin-top:18px">Ajouter du texte à la main</div>
           <div class="ce-card" onclick="nxMNewText()">➕ Ajouter un texte</div>
           <div class="nxm-plabel" style="margin-top:16px">Astuce</div>
           <div style="font-size:11px;color:#75757f;line-height:1.5">Clique <b>➕ Ajouter un texte</b> → écris à droite → règle le style → « Ajouter cette caption ». Répète pour un 2e texte. Chaque texte = un bloc sur la timeline. Puis <b style="color:#00d9c0">Télécharger</b>.</div>
