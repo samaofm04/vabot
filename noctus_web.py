@@ -482,8 +482,32 @@ def build_montage_caps(draft, label):
 # quelles, sans recalcul.
 # ==========================================================================
 
+def _video_rotation(path) -> int:
+    """Rotation déclarée d'une vidéo, en degrés (0, 90, 180, 270).
+
+    Les vidéos filmées au téléphone sont stockées « couchées » avec une matrice
+    de rotation ; ffmpeg les redresse au décodage mais ffprobe annonce les
+    dimensions STOCKÉES. Sans ça un template filmé au téléphone donnerait un
+    montage en paysage."""
+    for args in (["-show_entries", "side_data=rotation"],
+                 ["-show_entries", "stream_tags=rotate"]):   # anciens fichiers
+        try:
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0"] + args
+                + ["-of", "default=nw=1:nk=1", str(path)],
+                capture_output=True, timeout=20, text=True)
+            for line in (r.stdout or "").splitlines():
+                line = line.strip()
+                if line and line != "N/A":
+                    return abs(int(float(line))) % 360
+        except Exception:
+            pass
+    return 0
+
+
 def probe_video(path):
-    """(largeur, hauteur, fps, durée) d'une vidéo. (0, 0, 0.0, 0.0) si illisible."""
+    """(largeur, hauteur, fps, durée) d'une vidéo, dimensions TELLES QUE
+    DÉCODÉES (rotation du téléphone appliquée). (0, 0, 0.0, 0.0) si illisible."""
     try:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -516,6 +540,11 @@ def probe_video(path):
                     h = int(v)
                 except ValueError:
                     pass
+        # Quart de tour -> ffmpeg décode en portrait ce qui est stocké en
+        # paysage : on renvoie les dimensions vues par le filtre, pas celles
+        # du conteneur.
+        if w and h and _video_rotation(path) in (90, 270):
+            w, h = h, w
         return w, h, fps, dur
     except Exception:
         return 0, 0, 0.0, 0.0

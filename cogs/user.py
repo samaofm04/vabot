@@ -952,7 +952,16 @@ def va_ready_montages_for(identity, n: int):
     Retourne n au hasard sans remise : [(video_path, draft_dict, description)]."""
     import json as _json
     ready = []
-    for v in _list_clean_videos(identity):
+    # videos/ ET templates/ : un template approuve est le cas NORMAL depuis
+    # l'assemblage brute+template — ne scanner que videos/ le rendait
+    # silencieusement invisible pour les VA.
+    sources = list(_list_clean_videos(identity))
+    _tpl = IDENTITIES_DIR / identity / "templates"
+    if _tpl.exists():
+        sources += [p for p in _tpl.iterdir()
+                    if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                    and not p.stem.lower().endswith(".example")]
+    for v in sources:
         mj = v.parent / f"{v.stem}.montage.json"
         if not mj.exists():
             continue

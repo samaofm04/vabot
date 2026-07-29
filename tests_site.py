@@ -1215,6 +1215,35 @@ try:
     _dM = json.loads(_pM.read_text())
     check("retirer du stock VA garde le point de coupe", _dM.get("cut_at") == 4.5)
     check("retirer du stock VA enleve va_ready", "va_ready" not in _dM)
+
+    # -- un enregistrement sans cut_at ne doit PAS effacer la coupe ------------
+    _cM.post("/noctus/montage_save", data=dict(_base, cut_at="2.5"))
+    _cM.post("/noctus/montage_save", data=dict(_base))          # sans cut_at
+    check("enregistrer sans toucher a la coupe ne l efface pas",
+          json.loads(_pM.read_text()).get("cut_at") == 2.5)
+
+    # -- traversee de chemin par le composant identite -------------------------
+    for _bad in ("../..|videos|r.mp4", "..|videos|r.mp4", "/etc|videos|passwd"):
+        _rb = _cM.post("/noctus/montage_save", data=dict(_base, file_id=_bad))
+        _jb = _rb.get_json() or {}
+        check(f"file_id refuse : {_bad}", _jb.get("ok") is not True, str(_jb)[:60])
+
+    # -- un TEMPLATE approuve doit parvenir aux VA -----------------------------
+    _tplD = _idM.parent / "templates"
+    _tplD.mkdir(parents=True, exist_ok=True)
+    (_tplD / "t.mp4").write_bytes(b"\0" * 3000)
+    _cM.post("/noctus/montage_approve",
+             data={"file_id": "_tst_montage|templates|t.mp4", "segments": "[]",
+                   "font": "Strong", "style": "{}", "cut_at": "3"})
+    try:
+        import cogs.user as _cuM
+        _readyM = _cuM.va_ready_montages_for("_tst_montage", 5)
+        check("un template « dispo VA » est bien propose aux VA",
+              any(p.parent.name == "templates" for p, _d, _x in _readyM),
+              f"{len(_readyM)} trouve(s)")
+    except Exception as _eu:
+        check("templates visibles par le bot : testable", False, repr(_eu)[:80])
+
     _wM._load_web_users = _savM          # rend le magasin d'utilisateurs intact
     shutil.rmtree(_idM.parent, ignore_errors=True)
 

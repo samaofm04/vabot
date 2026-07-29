@@ -1585,9 +1585,17 @@ function showToast(message, type, duration){
   var icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️';
   var toast = document.createElement('div');
   toast.className = 'toast ' + type;
-  toast.innerHTML = '<div class="toast-icon">' + icon + '</div>' +
-    '<div class="toast-msg">' + msgClean + '</div>' +
-    '<button class="toast-close" onclick="dismissToast(this.parentElement)">×</button>';
+  // textContent et PAS innerHTML : les messages contiennent des donnees venues
+  // du serveur (erreurs, noms de fichiers, texte lu dans une video par l IA).
+  // Aucun appelant ne passe de HTML, donc rien ne se perd a les traiter en texte.
+  var tIcon = document.createElement('div');
+  tIcon.className = 'toast-icon'; tIcon.textContent = icon;
+  var tMsg = document.createElement('div');
+  tMsg.className = 'toast-msg'; tMsg.textContent = msgClean;
+  var tClose = document.createElement('button');
+  tClose.className = 'toast-close'; tClose.textContent = '×';
+  tClose.addEventListener('click', function(){ dismissToast(toast); });
+  toast.appendChild(tIcon); toast.appendChild(tMsg); toast.appendChild(tClose);
   container.appendChild(toast);
   // Auto-dismiss
   setTimeout(function(){ dismissToast(toast); }, duration);
@@ -3455,7 +3463,9 @@ function nxMPlayPause(){ var v=document.getElementById('nx-m-video'); if(!v)retu
 // ── Annuler / Refaire (historique captions + style) ──
 // NB: PAS nxMSnap() -> ce nom est déjà pris par l'aimantation timeline (ligne ~2949).
 function nxMHistSnap(){
-  return JSON.stringify({caps:nxMState.caps||[], style:nxMState.style||{}, font:(document.getElementById('nx-m-font')||{}).value||'Strong'});
+  // le point de coupe fait partie de l etat annulable : sans lui, Ctrl+Z apres
+  // une analyse rendait les captions mais laissait le trait ✂ deplace.
+  return JSON.stringify({caps:nxMState.caps||[], style:nxMState.style||{}, cut:(nxMState.cut==null?null:nxMState.cut), font:(document.getElementById('nx-m-font')||{}).value||'Strong'});
 }
 function nxMHistInit(){ nxMState.undoStack=[]; nxMState.redoStack=[]; nxMState.histLast=nxMHistSnap(); nxMHistPaint(); }
 function nxMCommit(){
@@ -3473,6 +3483,7 @@ function nxMRestore(snapStr){
     var o=JSON.parse(snapStr);
     nxMState.caps=Array.isArray(o.caps)?o.caps:[];
     if(o.style) nxMState.style=Object.assign({}, o.style);
+    if(o.cut!==undefined) nxMState.cut=o.cut;   // remet le trait ✂ ou il etait
     var fsel=document.getElementById('nx-m-font'); if(fsel&&o.font) fsel.value=o.font;
     nxMState.editIdx=-1;
     var s=nxMState.style||{};
@@ -3515,11 +3526,24 @@ function nxMAnalyze(){
   if(btn){ btn.textContent='⏳ Analyse…'; btn.disabled=true; }
   function done(txt){ if(btn){ btn.textContent=txt; setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2500); } }
   if(typeof showToast==='function') showToast('🪄 Claude regarde la video… (30 s a 1 min)','info',6000);
-  var fd=new FormData(); fd.set('file_id', nxMState.fid);
+  var askedFid=nxMState.fid;              // le reel sur lequel on a lance l analyse
+  nxMCommit();                            // point de retour avant ecrasement (Ctrl+Z)
+  var fd=new FormData(); fd.set('file_id', askedFid);
   fetch('/noctus/montage_analyze',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){ return r.json(); }).then(function(j){
+      // l analyse est longue : si l utilisateur a change de reel entre-temps,
+      // appliquer la reponse ecraserait le travail sur un AUTRE montage.
+      if(nxMState.fid!==askedFid){
+        done('↩ Ignoree');   // sinon le bouton reste bloque sur « Analyse… »
+        if(typeof showToast==='function') showToast('Analyse ignoree : tu as change de reel entre-temps','warning',7000);
+        return;
+      }
       if(!j.ok){ done('❌ Erreur'); if(typeof showToast==='function') showToast('❌ '+(j.error||'analyse impossible'),'error',9000); return; }
-      if(j.cut_at!=null) nxMState.cut=Math.max(0,+j.cut_at||0);
+      // Claude renvoie cut_at=0 quand il ne trouve pas de coupe : ne JAMAIS
+      // effacer avec ca un trait place a la main.
+      var _nc=Math.max(0,+j.cut_at||0);
+      if(_nc>0.05) nxMState.cut=_nc;
+      else if(!(nxMState.cut>0.05)) nxMState.cut=0;
       var caps=j.captions||[];
       if(caps.length){
         nxMState.caps=caps.map(function(c){
@@ -11373,7 +11397,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
         _va_ready_stems = set()
-        if is_reels and folder.exists():
+        # templates/ compte aussi : un template approuve part chez les VA au
+        # meme titre qu'un reel (sinon le filigrane disparaissait au F5).
+        if (is_reels or subdir == "templates") and folder.exists():
             import json as _jvr
             for _mj in folder.glob("*.montage.json"):
                 try:
@@ -11404,7 +11430,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=(is_reels and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
@@ -31454,6 +31480,9 @@ def _claude_montage_analyze(frames, duration: float, cuts, key: str):
 def _montage_to_editor(raw: dict, duration: float, cuts):
     """Traduit la réponse de Claude vers ce que l'éditeur attend :
     captions {text,x,y,start,end} + style global + point de coupe."""
+    if not isinstance(raw, dict):      # Claude a répondu autre chose qu'un objet
+        raw = {}
+
     def _num(v, lo, hi, default):
         try:
             f = float(v)
@@ -31477,7 +31506,11 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
 
     caps, style, seen = [], None, set()
     for c in (raw.get("captions") or [])[:12]:
-        text = str(c.get("text") or "").strip()
+        if not isinstance(c, dict):
+            continue
+        # Seul champ libre de la réponse : on le borne comme les autres (une
+        # caption incrustée qui dépasse 400 caractères n'existe pas).
+        text = str(c.get("text") or "").strip()[:400]
         if not text:
             continue
         # Clé de comparaison sans accents ni ponctuation : le même texte relevé
@@ -31485,11 +31518,17 @@ def _montage_to_editor(raw: dict, duration: float, cuts):
         # légèrement différemment ("ca" vs "ça").
         import unicodedata
         norm = unicodedata.normalize("NFKD", text.lower())
-        norm = re.sub(r"[^a-z0-9]+", "", "".join(
-            ch for ch in norm if not unicodedata.combining(ch)))
-        if norm and norm in seen:       # même texte revu sur une autre image
+        norm = re.sub(r"[^a-z0-9]+", " ", "".join(
+            ch for ch in norm if not unicodedata.combining(ch))).strip()
+        # Emojis / ponctuation seule -> la clé serait vide : on retombe sur le
+        # texte brut, sinon ces captions ne seraient jamais dédupliquées.
+        # On garde aussi l'instant d'apparition dans la clé : deux textes
+        # identiques affichés à des moments différents sont deux captions.
+        key = (norm or text.lower().strip(),
+               round(_num(c.get("start"), 0.0, duration, 0.0)))
+        if key in seen:                 # même texte revu sur une autre image
             continue
-        seen.add(norm)
+        seen.add(key)
         start = _num(c.get("start"), 0.0, duration, 0.0)
         end = _num(c.get("end"), 0.0, duration, duration)
         if end <= start:
@@ -34588,6 +34627,10 @@ def create_app():
         ident, subdir, name = parts
         if ".." in name or "/" in name or "\\" in name:
             return None
+        # L'identité aussi : sans ça « ../.. » sortait de IDENTITIES_DIR (la
+        # docstring promettait une validation qui n'existait que pour le nom).
+        if ident not in _list_identities():
+            return None
         if subdir not in ("videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"):
             return None
         target_dir = IDENTITIES_DIR / ident / subdir
@@ -34833,8 +34876,14 @@ def create_app():
             pass
         try:                                    # préserve l'approbation VA existante
             old = _js.loads(p.read_text(encoding="utf-8"))
-            if isinstance(old, dict) and old.get("va_ready"):
-                draft["va_ready"] = True
+            if isinstance(old, dict):
+                if old.get("va_ready"):
+                    draft["va_ready"] = True
+                # Un enregistrement sans cut_at (ancienne page ouverte, coupe
+                # non touchée) ne doit pas EFFACER la coupe déjà posée : sinon
+                # l'assemblage brute+template s'arrête sans rien dire.
+                if "cut_at" not in draft and old.get("cut_at"):
+                    draft["cut_at"] = old["cut_at"]
         except Exception:
             pass
         try:
@@ -34956,6 +35005,17 @@ def create_app():
             return jsonify({"ok": False, "error": "identité invalide"})
         stem = _re.sub(r"[^a-zA-Z0-9_\-]", "", src.stem)[:28]
         model = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reel-{identity}-{stem}")[:40]
+        # L'identifiant du modèle ne dépend que du reel : deux générations
+        # lancées en même temps (double-clic, deux onglets) partageraient le
+        # même dossier et la seconde effacerait input/ et output/ de la
+        # première EN PLEIN RENDU, en tuant son process. On refuse plutôt.
+        try:
+            if noctus_web.status(model).get("state") == "running":
+                return jsonify({"ok": False, "error":
+                                "une génération est déjà en cours sur ce reel — "
+                                "attends qu'elle finisse (ou clique sur ✋ Stop)"})
+        except Exception:
+            pass
         # Chaque reel généré laissait son dossier models/reel-… sur le disque
         # pour toujours ; avec l'assemblage il contient une vidéo PAR VARIANTE.
         noctus_web.purge_old_models("reel-")
