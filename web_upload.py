@@ -3612,11 +3612,24 @@ function nxMApplyOpen(){
       var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
       var ov=document.createElement('div');
       ov.id='nxm-apply-ov';
-      // z-index > 99999 : l editeur de montage est a 99999, la fenetre doit
-      // s ouvrir DEVANT lui (avant il fallait fermer l editeur pour la voir).
-      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100010;display:flex;align-items:center;justify-content:center';
+      // z-index > 99999 : l editeur de montage est a 99999, le menu doit
+      // s ouvrir DEVANT lui. Fond transparent : c est un MENU ancre sous le
+      // bouton de la barre du haut, pas une fenetre au centre de l ecran
+      // (un clic a cote le referme).
+      ov.style.cssText='position:fixed;inset:0;background:transparent;z-index:100010';
       var box=document.createElement('div');
-      box.style.cssText='background:#1a1a1f;border:1px solid #2c2c33;border-radius:12px;width:470px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 22px 70px rgba(0,0,0,.6);overflow:hidden';
+      var css='background:#1a1a1f;border:1px solid #2c2c33;border-radius:12px;width:430px;max-width:92vw;display:flex;flex-direction:column;box-shadow:0 22px 70px rgba(0,0,0,.65);overflow:hidden;position:fixed';
+      var anc=document.getElementById('nx-m-apply');
+      var rct=(anc && anc.offsetParent!==null)?anc.getBoundingClientRect():null;
+      if(rct){
+        var top=Math.round(rct.bottom+8);
+        css+=';top:'+top+'px;right:'+Math.max(8,Math.round(window.innerWidth-rct.right))+'px'
+            +';max-height:'+Math.max(260,window.innerHeight-top-16)+'px';
+      } else {
+        // ouvert depuis le panneau de gauche (ou bouton cache) -> centre
+        css+=';top:50%;left:50%;transform:translate(-50%,-50%);max-height:80vh';
+      }
+      box.style.cssText=css;
       box.innerHTML='<style>'
         +'#nxm-apply-ov .nxcbx{appearance:none;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a64;background:transparent;cursor:pointer;flex:0 0 20px;position:relative;margin:0}'
         +'#nxm-apply-ov .nxcbx:checked{background:#3467FF;border-color:#3467FF}'
