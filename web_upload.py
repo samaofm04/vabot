@@ -35320,18 +35320,45 @@ def create_app():
         # HEIC en dernier recours : le serveur ne sait pas le miniaturiser et le
         # navigateur ne l'affiche pas -> on préfère toujours jpg/png/webp.
         img_pref = {".jpg": 0, ".jpeg": 0, ".png": 1, ".webp": 2, ".gif": 3, ".heic": 9}
+
+        def _first_img(d):
+            if not d.exists():
+                return None
+            cands = sorted(
+                (p for p in d.iterdir()
+                 if p.is_file() and p.suffix.lower() in img_pref
+                 and ".example" not in p.name),
+                key=lambda p: (img_pref[p.suffix.lower()], p.name))
+            return cands[0].name if cands else None
+
+        def _first_vid(d):
+            if not d.exists():
+                return None
+            for p in sorted(d.iterdir()):
+                if (p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                        and ".example" not in p.name):
+                    return p.name
+            return None
+
         out = []
         for ident in _list_content_identities():
+            # Visage de la model : Photos profil d'abord, sinon une photo de sa
+            # Bibliothèque (post, story, CTA), sinon la miniature d'un reel ou
+            # d'un template. Le pool PARTAGÉ n'est rattaché à personne -> jamais
+            # utilisé ici. En tout dernier : pastille à initiale (côté client).
+            base = IDENTITIES_DIR / ident
             pp = None
-            ppdir = IDENTITIES_DIR / ident / "profile_pics"
-            if ppdir.exists():
-                cands = sorted(
-                    (p for p in ppdir.iterdir()
-                     if p.is_file() and p.suffix.lower() in img_pref
-                     and ".example" not in p.name),
-                    key=lambda p: (img_pref[p.suffix.lower()], p.name))
-                if cands:
-                    pp = f"/cloud/thumb/{ident}/profile_pics/{cands[0].name}"
+            for sub in ("profile_pics", "posts", "stories", "storyctas"):
+                name = _first_img(base / sub)
+                if name:
+                    pp = f"/cloud/thumb/{ident}/{sub}/{name}"
+                    break
+            if not pp:
+                for sub in ("videos", "templates", "brutes"):
+                    name = _first_vid(base / sub)
+                    if name:
+                        pp = f"/cloud/thumb/{ident}/{sub}/{name}"
+                        break
             nb = 0
             bdir = IDENTITIES_DIR / ident / "brutes"
             if bdir.exists():
