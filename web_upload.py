@@ -15474,6 +15474,11 @@ def _render_home_dashboard_html() -> str:
         start = today.replace(day=1)
         end = today
         period_label = "Ce mois"
+    elif period == "trente":
+        # 30 jours GLISSANTS (aujourd'hui inclus) — pas le mois calendaire
+        start = today - _dt.timedelta(days=29)
+        end = today
+        period_label = "30 derniers jours"
     else:  # week
         start = today - _dt.timedelta(days=today.weekday())
         end = today
@@ -15532,6 +15537,7 @@ def _render_home_dashboard_html() -> str:
         + _btn("yesterday", "Hier")
         + _btn("week", "Cette semaine")
         + _btn("month", "Ce mois")
+        + _btn("trente", "30 jours")
         + "</div>"
     )
 
