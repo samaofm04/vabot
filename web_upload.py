@@ -1548,19 +1548,37 @@ function setTheme(theme){
   else arm();
 })();
 // === Wrapper fetch global : intercepte les 401 (session expirée) ===
+// Un 401 ISOLÉ ne suffit plus à éjecter : pendant l'éditeur de montage, le
+// site interroge le serveur toutes les 1,5 s — un seul raté passager
+// (redémarrage du serveur après un déploiement, micro-coupure) fermait toute
+// la page en plein travail. On REVÉRIFIE d'abord : si la session est vraiment
+// morte, le contrôle renvoie 401 aussi et là seulement on renvoie au login.
 (function(){
   var origFetch = window.fetch;
   var unauthHandled = false;
+  var verifying = false;
+  function kick(){
+    if(unauthHandled) return;
+    unauthHandled = true;
+    if(typeof showToast === 'function'){
+      showToast('🔒 Session expirée — reconnexion...', 'error', 2500);
+    }
+    setTimeout(function(){ window.location.href = '/'; }, 1800);
+  }
   window.fetch = function(){
     var args = arguments;
     var p = origFetch.apply(this, args);
     return p.then(function(r){
-      if(r && r.status === 401 && !unauthHandled){
-        unauthHandled = true;
-        if(typeof showToast === 'function'){
-          showToast('🔒 Session expirée — reconnexion...', 'error', 2500);
-        }
-        setTimeout(function(){ window.location.href = '/'; }, 1800);
+      if(r && r.status === 401 && !unauthHandled && !verifying){
+        verifying = true;
+        setTimeout(function(){
+          origFetch('/auth/ping', {credentials:'same-origin'})
+            .then(function(r2){
+              verifying = false;
+              if(r2 && r2.status === 401) kick();   // vraiment expirée
+            })
+            .catch(function(){ verifying = false; });   // reseau KO = pas une expiration
+        }, 1500);
       }
       return r;
     });
@@ -35298,6 +35316,16 @@ def create_app():
             return jsonify({"ok": False, "error": err})
         out["ok"] = True
         return jsonify(out)
+
+    @app.route("/auth/ping")
+    def auth_ping():
+        """Contrôle léger de session : le wrapper fetch du front l'appelle
+        avant d'éjecter l'utilisateur sur un 401 (évite qu'un raté passager
+        ferme la page en plein travail)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        return jsonify({"ok": True})
 
     @app.route("/noctus/identities")
     def noctus_identities():
