@@ -284,7 +284,8 @@ def write_captions(data) -> bool:
 
 
 # ---------- run / stop ----------
-def run(model_id: str, folders=None, captions=None, targets=None, folder_map=None):
+def run(model_id: str, folders=None, captions=None, targets=None, folder_map=None,
+        caption_map=None):
     mid = _safe(model_id)
     if not mid:
         return None
@@ -298,6 +299,9 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
         # {fichier: [variante]} — épingle chaque vidéo assemblée à SA variante,
         # sinon le moteur croise toutes les vidéos avec toutes les variantes.
         "videoFolderMap": folder_map or None,
+        # {fichier: [label]} — captions PAR VIDÉO : les variantes dont le début
+        # a été coupé (brute courte) utilisent une copie décalée des captions.
+        "captionMap": caption_map or None,
     }
     old = _PROCS.get(mid)
     if old and old.poll() is None:
@@ -589,14 +593,46 @@ def list_brutes(brutes_dir):
     return out
 
 
+def _has_audio(path) -> bool:
+    """La vidéo a-t-elle une piste audio ? (référencer [1:a] dans un filtre
+    ffmpeg plante si la piste n'existe pas — d'où ce contrôle)."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+            capture_output=True, timeout=20, text=True)
+        return bool((r.stdout or "").strip())
+    except Exception:
+        return False
+
+
+def brute_gap(template, brute, cut_at) -> float:
+    """De combien la vidéo finale sera RACCOURCIE au début si cette brute est
+    plus courte que la place à remplir (0.0 = pas de rognage). Les captions
+    minutées doivent être décalées d'autant."""
+    _w, _h, _f, dur = probe_video(template)
+    if dur <= 0:
+        return 0.0
+    cut = max(0.0, min(float(cut_at or 0), max(0.0, dur - 0.10)))
+    if cut < 0.05:
+        return 0.0
+    _bw, _bh, _bf, bdur = probe_video(brute)
+    if bdur <= 0.2 or bdur >= cut - 0.05:
+        return 0.0
+    return round(cut - bdur, 3)
+
+
 def assemble_brute_template(template, brute, cut_at, out_path):
-    """Fabrique la vidéo assemblée : la BRUTE occupe [0 .. cut_at], le TEMPLATE
-    reprend de cut_at jusqu'à sa fin, et le son du TEMPLATE joue du début à la
-    fin. Renvoie (True, "") ou (False, raison).
+    """Fabrique la vidéo assemblée : la BRUTE occupe le début jusqu'au trait de
+    coupe, le TEMPLATE reprend du trait jusqu'à sa fin, et le son du TEMPLATE
+    accompagne le tout. Renvoie (True, "") ou (False, raison).
 
     La brute est recadrée au format du template (on remplit puis on rogne au
-    centre : jamais de bandes noires) et rebouclée si elle est plus courte que
-    la coupe."""
+    centre : jamais de bandes noires). Si elle est plus courte que la place,
+    le DÉBUT de la vidéo finale est coupé, son compris : jamais de boucle ni
+    d'arrêt sur image — l'image bouge toujours, et la transition reste calée
+    sur le même instant de la musique (voir brute_gap pour le décalage des
+    captions)."""
     template, brute, out_path = Path(template), Path(brute), Path(out_path)
     if not template.exists():
         return False, "template introuvable"
@@ -619,28 +655,39 @@ def assemble_brute_template(template, brute, cut_at, out_path):
     bw, bh, _bf, bdur = probe_video(brute)
     if not (bw and bh):
         return False, f"brute illisible : {brute.name}"
+    if 0 < bdur <= 0.2:
+        # une "video" d'une poignee d'images : meme ralentie ca ne remplirait
+        # pas la place -> cette variante repartira du template seul.
+        return False, f"brute trop courte ({bdur:.2f}s) : {brute.name}"
     # La brute doit finir PILE sur le trait de coupe : c'est là que le son du
     # montage fait sa transition, et l'image doit basculer au même instant.
     #
     #  - brute plus LONGUE que la coupe : on prend une fenêtre au hasard (de la
     #    variété d'une génération à l'autre), sa fin tombe sur le trait.
-    #  - brute plus COURTE : on la colle à DROITE (dernière image sur le trait)
-    #    et on FIGE sa première image pour combler le début. Surtout pas de
-    #    boucle : un motif qui se répète se voit, et surtout ça décalerait
-    #    l'image par rapport au son de la transition.
+    #  - brute plus COURTE : on COUPE LE DÉBUT de la vidéo finale, son compris.
+    #    Elle démarre quand la brute démarre, la musique est raccourcie
+    #    d'autant au début, et la transition reste calée sur le même instant
+    #    de la musique. Jamais de boucle ni d'arrêt sur image.
     start, gap = 0.0, 0.0
     if bdur > cut + 0.30:
         import random as _rnd
         start = round(_rnd.uniform(0.0, bdur - cut - 0.10), 2)
-    elif bdur < cut - 0.02:
+    elif bdur < cut - 0.05:
         gap = round(cut - bdur, 3)
     fit = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
            f"crop={w}:{h},setsar=1,fps={fps:.4f}")
-    # tpad start_mode=clone : rallonge le DÉBUT en répétant la 1re image.
-    hold = f",tpad=start_duration={gap:.3f}:start_mode=clone" if gap > 0 else ""
-    fc = (f"[0:v]{fit}{hold},trim=duration={cut:.3f},setpts=PTS-STARTPTS[a];"
+    fc = (f"[0:v]{fit},trim=duration={cut - gap:.3f},setpts=PTS-STARTPTS[a];"
           f"[1:v]{fit},trim=start={cut:.3f},setpts=PTS-STARTPTS[b];"
           f"[a][b]concat=n=2:v=1:a=0[v]")
+    maps = ["-map", "[v]"]
+    if gap > 0:
+        if _has_audio(template):
+            # son du template raccourci du même « gap » : au moment où la brute
+            # finit, l'audio est exactement à l'instant du trait de coupe.
+            fc += f";[1:a]atrim=start={gap:.3f},asetpts=PTS-STARTPTS[aud]"
+            maps += ["-map", "[aud]"]
+    else:
+        maps += ["-map", "1:a?"]           # « ? » : template sans son -> muet
 
     def _cmd(seek):
         c = ["ffmpeg", "-y", "-loglevel", "error"]
@@ -648,8 +695,7 @@ def assemble_brute_template(template, brute, cut_at, out_path):
             c += ["-ss", f"{seek:.2f}"]
         return c + ["-t", f"{cut:.3f}", "-i", str(brute),
                     "-i", str(template),
-                    "-filter_complex", fc,
-                    "-map", "[v]", "-map", "1:a?",   # « ? » : template sans son -> muet
+                    "-filter_complex", fc] + maps + [
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
                     "-movflags", "+faststart", str(out_path)]
@@ -701,13 +747,18 @@ def purge_old_models(prefix: str, keep: int = 12):
 
 
 def _prepare_inputs(src, inp, draft, folders, brutes_dir):
-    """Remplit le dossier input/ du modèle et renvoie (targets, videoFolderMap).
+    """Remplit le dossier input/ du modèle et renvoie
+    (targets, videoFolderMap, gaps).
 
     Avec un point de coupe ET des vidéos brutes disponibles : une vidéo
     assemblée PAR VARIANTE, chacune avec une brute différente (on repioche
     seulement quand toutes ont été utilisées). Chaque assemblage est épinglé à
     sa variante via le videoFolderMap, sinon le moteur ferait le produit croisé
     (N vidéos × N variantes = N² exports).
+
+    gaps = {fichier: secondes} : de combien le DÉBUT de cette variante a été
+    coupé (brute plus courte que la place). Les captions minutées doivent être
+    décalées d'autant — voir shifted_caption_entry.
 
     Sans coupe, sans brute, ou si tous les assemblages échouent : on retombe sur
     la vidéo source telle quelle (comportement d'avant)."""
@@ -721,7 +772,7 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
     brutes = list_brutes(brutes_dir) if (brutes_dir and cut > 0.05) else []
     if not brutes:
         _sh.copy(str(src), str(inp / src.name))
-        return [src.name], None
+        return [src.name], None, {}
     stem = (_re.sub(r"[^A-Za-z0-9_-]", "", src.stem) or "reel")[:40]
     # 1) on attribue d'abord une brute à chaque variante (tirage sans remise,
     #    on ne repioche que quand toutes ont servi)
@@ -748,9 +799,12 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
                 _sh.copy(str(src), str(inp / name))
             except Exception:
                 return None
-        return name, vf
+            return name, vf, 0.0
+        # brute plus courte que la place -> le début (image + son) a été coupé
+        # de « gap » secondes : les captions minutées devront être décalées.
+        return name, vf, brute_gap(src, brute, cut)
 
-    targets, fmap = [], {}
+    targets, fmap, gaps = [], {}, {}
     workers = max(1, min(3, (os.cpu_count() or 2), len(plan)))
     if workers > 1:
         from concurrent.futures import ThreadPoolExecutor
@@ -762,13 +816,61 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
         if r:
             targets.append(r[0])
             fmap[r[0]] = [r[1]]
+            gaps[r[0]] = r[2]
     if not targets:                        # aucun assemblage n'a abouti
         print("[noctus] aucun assemblage réussi -> template seul", flush=True)
         _sh.copy(str(src), str(inp / src.name))
-        return [src.name], None
+        return [src.name], None, {}
     print(f"[noctus] {len(targets)} variante(s) assemblée(s) avec une brute "
           f"(coupe à {cut:.2f}s, {len(brutes)} brute(s) dispo)", flush=True)
-    return targets, fmap
+    return targets, fmap, gaps
+
+
+def _shift_time(ts, gap):
+    """Décale un temps 'HH:MM:SS(.mmm)' de -gap secondes (plancher 0).
+    Le sentinelle '99:99:99' (= toute la vidéo) n'est jamais touché."""
+    s = str(ts or "").strip()
+    if not s or s.startswith("99:"):
+        return s or "99:99:99"
+    try:
+        h, m, sec = s.split(":")
+        total = float(h) * 3600 + float(m) * 60 + float(sec)
+    except (ValueError, TypeError):
+        return s
+    return _hms_seconds(max(0.0, total - float(gap or 0)))
+
+
+def shifted_caption_entry(entry, gap, new_label):
+    """Copie d'une entrée captions avec tous les temps décalés de -gap.
+    Sert aux variantes dont le DÉBUT a été coupé (brute plus courte que la
+    place) : sans ce décalage, les captions minutées arriveraient en retard
+    d'autant sur la vidéo raccourcie."""
+    segs = []
+    for sg in entry.get("captions") or []:
+        c = dict(sg)
+        c["start"] = _shift_time(c.get("start"), gap)
+        c["end"] = _shift_time(c.get("end"), gap)
+        segs.append(c)
+    return {"label": new_label, "font": entry.get("font"), "captions": segs}
+
+
+def caption_map_for(entry, targets, gaps, caps):
+    """Construit le captionMap {fichier: [label]} d'une génération : les
+    variantes rognées au début reçoivent une copie DÉCALÉE des captions
+    (ajoutée à `caps`), les autres gardent l'entrée telle quelle.
+    Renvoie None si aucune variante n'est rognée (comportement historique)."""
+    if not entry or not any((gaps or {}).get(f, 0) > 0.01 for f in targets):
+        return None
+    cmap = {}
+    for i, fn in enumerate(targets):
+        g = (gaps or {}).get(fn, 0)
+        if g > 0.01:
+            lb = f"{entry['label']}_s{i + 1}"[:48]
+            caps.append(shifted_caption_entry(entry, g, lb))
+            cmap[fn] = [lb]
+        else:
+            cmap[fn] = [entry["label"]]
+    return cmap
 
 
 def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
@@ -803,7 +905,7 @@ def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
     except Exception:
         pass
     folders = folders or ["V1"]
-    targets, folder_map = _prepare_inputs(src, inp, draft, folders, brutes_dir)
+    targets, folder_map, gaps = _prepare_inputs(src, inp, draft, folders, brutes_dir)
     label = ("vam_" + model)[:40]
     entry, _font = build_montage_caps(draft, label)
     # captions.json est PARTAGÉ (le runner Node le lit au démarrage) : on sérialise
@@ -815,17 +917,22 @@ def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
                    if not (isinstance(c, dict) and str(c.get("label", "")).startswith("vam_"))]
         vam = [c for c in existing
                if isinstance(c, dict) and str(c.get("label", "")).startswith("vam_")
-               and c.get("label") != label][-200:]
+               and c.get("label") != label
+               and not str(c.get("label", "")).startswith(label + "_s")][-200:]
         caps = non_vam + vam
+        cmap = None
         if entry:
             caps.append(entry)
             sel = [label]
+            # variantes rognées au début (brute courte) -> captions décalées
+            cmap = caption_map_for(entry, targets, gaps, caps)
         else:
             if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
                 caps.append({"label": "sans_texte", "font": None, "captions": []})
             sel = ["sans_texte"]
         write_captions(caps)
-        proc = run(model, folders, sel, targets=targets, folder_map=folder_map)
+        proc = run(model, folders, sel, targets=targets, folder_map=folder_map,
+                   caption_map=cmap)
     return model if proc else None
 
 

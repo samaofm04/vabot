@@ -35562,11 +35562,14 @@ def create_app():
         # vidéos brutes, chaque variante part d'un montage (brute + template) au
         # lieu du template seul. Sinon _prepare_inputs recopie la source.
         _cut = request.form.get("cut_at")
-        _targets, _fmap = noctus_web._prepare_inputs(
+        _targets, _fmap, _gaps = noctus_web._prepare_inputs(
             src, inp, {"cut_at": _cut} if _cut else {}, folders,
             IDENTITIES_DIR / identity / "brutes")
         label = ("m_" + model)[:40]
-        caps = [c for c in noctus_web.read_captions() if not (isinstance(c, dict) and c.get("label") == label)]
+        caps = [c for c in noctus_web.read_captions()
+                if not (isinstance(c, dict)
+                        and (c.get("label") == label
+                             or str(c.get("label", "")).startswith(label + "_s")))]
 
         def _hms(v):
             # garde les décimales (millisecondes) -> timing précis au centième
@@ -35667,8 +35670,10 @@ def create_app():
                         pass
                     segments.append(seg)
 
+        _entry = None
         if segments:
-            caps.append({"label": label, "font": font, "captions": segments})
+            _entry = {"label": label, "font": font, "captions": segments}
+            caps.append(_entry)
             sel = [label]
         else:
             # rétro-compat : ancien champ 'caption' unique (+ start_s/end_s)
@@ -35680,14 +35685,19 @@ def create_app():
                     start, end = _hms(s_s), _hms(e_s)
                 else:
                     start, end = "00:00:00", "99:99:99"
-                caps.append({"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]})
+                _entry = {"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]}
+                caps.append(_entry)
                 sel = [label]
             else:
                 if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
                     caps.append({"label": "sans_texte", "font": None, "captions": []})
                 sel = ["sans_texte"]
+        # variantes dont le début a été coupé (brute plus courte que la place) :
+        # copie DÉCALÉE des captions pour chacune, sinon elles arrivent en retard.
+        _cmap = noctus_web.caption_map_for(_entry, _targets, _gaps, caps)
         noctus_web.write_captions(caps)
-        proc = noctus_web.run(model, folders, sel, targets=_targets, folder_map=_fmap)
+        proc = noctus_web.run(model, folders, sel, targets=_targets, folder_map=_fmap,
+                              caption_map=_cmap)
         if not proc:
             return jsonify({"ok": False, "error": "lancement impossible"})
         return jsonify({"ok": True, "model": model, "identity": identity,

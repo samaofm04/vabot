@@ -1172,9 +1172,11 @@ try:
     _ok, _err = _nw.assemble_brute_template(_bd / "a.mp4", TMP / "absent.mp4", 3.0, TMP / "o.mp4")
     check("assemblage : brute absente -> echec explicite", (not _ok) and "brute" in _err, _err)
 
-    # -- brute plus COURTE que la coupe : collee a droite, jamais rebouclee ----
-    # La derniere image de la brute doit tomber PILE sur le trait, sinon la
-    # bascule d image ne colle plus a la transition du son du montage.
+    # -- brute plus COURTE que la coupe : le DEBUT est coupe, son compris ------
+    # Jamais de boucle ni d'arret sur image : la video finale demarre quand la
+    # brute demarre (duree = template - manque) et la transition reste calee
+    # sur le meme instant de la musique. Les captions minutees sont decalees
+    # d'autant via caption_map_for.
     if _nw.ffmpeg_available():
         import subprocess as _spM
         _vd = TMP / "vids"
@@ -1187,12 +1189,15 @@ try:
         _spM.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
                   "-i", "testsrc=size=180x320:rate=15:duration=1",
                   "-pix_fmt", "yuv420p", str(_vd / "courte.mp4")], timeout=90)
+        check("brute_gap annonce le rognage (coupe 3, brute 1 -> 2)",
+              abs(_nw.brute_gap(_vd / "tpl.mp4", _vd / "courte.mp4", 3.0) - 2.0) < 0.15)
         _okA, _errA = _nw.assemble_brute_template(
             _vd / "tpl.mp4", _vd / "courte.mp4", 3.0, _vd / "out.mp4")
         check("assemblage d'une brute plus courte que la coupe", _okA, _errA)
         if _okA:
             _dw, _dh, _df, _ddur = _nw.probe_video(_vd / "out.mp4")
-            check("la duree reste celle du template", abs(_ddur - 4.0) < 0.35, f"{_ddur:.2f}s")
+            check("le debut est coupe (duree = template - manque)",
+                  abs(_ddur - 2.0) < 0.35, f"{_ddur:.2f}s")
 
             def _frameM(_t):
                 _o = _vd / f"f{_t}.png"
@@ -1205,13 +1210,27 @@ try:
             def _dM(_a, _b):
                 return sum(abs(x[0] - y[0]) + abs(x[1] - y[1]) + abs(x[2] - y[2])
                            for x, y in zip(_a, _b)) / (len(_a) * 3)
-            # coupe 3 s, brute 1 s -> gel de 0 a 2 s, brute de 2 a 3 s
-            check("le debut est FIGE (pas de boucle)", _dM(_frameM(0.3), _frameM(1.5)) < 3,
-                  f"{_dM(_frameM(0.3), _frameM(1.5)):.1f}")
-            check("la brute joue juste avant le trait",
-                  _dM(_frameM(2.2), _frameM(2.9)) > 3, f"{_dM(_frameM(2.2), _frameM(2.9)):.1f}")
-            check("la bascule a bien lieu au trait",
-                  _dM(_frameM(2.9), _frameM(3.2)) > 15, f"{_dM(_frameM(2.9), _frameM(3.2)):.1f}")
+            # brute de 0 a 1 s, template de 1 s a la fin : rien de fige
+            check("l image BOUGE des le debut (pas d arret sur image)",
+                  _dM(_frameM(0.2), _frameM(0.7)) > 3, f"{_dM(_frameM(0.2), _frameM(0.7)):.1f}")
+            check("la bascule a lieu quand la brute finit",
+                  _dM(_frameM(0.8), _frameM(1.2)) > 15, f"{_dM(_frameM(0.8), _frameM(1.2)):.1f}")
+
+        # decalage des captions minutees pour les variantes rognees
+        _ent = {"label": "tst_shift", "font": "Strong",
+                "captions": [{"start": "00:00:03.200", "end": "00:00:06.000", "text": "T"},
+                             {"start": "00:00:00", "end": "99:99:99", "text": "P"}]}
+        _capsL = []
+        _cm = _nw.caption_map_for(_ent, ["a.mp4", "b.mp4"], {"a.mp4": 1.5, "b.mp4": 0.0}, _capsL)
+        check("caption_map_for : la variante rognee recoit sa copie decalee",
+              _cm == {"a.mp4": ["tst_shift_s1"], "b.mp4": ["tst_shift"]}, str(_cm))
+        _sh = _capsL[0]["captions"][0] if _capsL else {}
+        check("les temps sont decales du rognage (3.2 -> 1.7)",
+              _sh.get("start") == "00:00:01.700" and _sh.get("end") == "00:00:04.500", str(_sh))
+        check("la caption permanente n est pas touchee",
+              _capsL and _capsL[0]["captions"][1]["end"] == "99:99:99")
+        check("aucune variante rognee -> pas de captionMap (comportement d avant)",
+              _nw.caption_map_for(_ent, ["a.mp4"], {"a.mp4": 0.0}, []) is None)
     else:
         check("assemblage testable (ffmpeg absent -> ignore)", True)
 
