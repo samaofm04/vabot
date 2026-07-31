@@ -11716,7 +11716,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
-            + "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px' id='vault-grid'>"
+            # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
+            # disponible (fenetre reduite, panneau ouvert a cote...). Avant :
+            # 3 colonnes FIGEES -> cartes minuscules sous des pastilles a
+            # taille fixe qui recouvraient tout.
+            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px' id='vault-grid'>"
             + "".join(cards_html)
             + "</div>"
         )
