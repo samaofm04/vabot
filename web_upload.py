@@ -5600,10 +5600,9 @@ document.addEventListener('click',function(e){
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
 
-<!-- Sub-tabs style Insta : Mes suivies / Explorer / Veille -->
+<!-- Sub-tabs style Insta : Mes suivies / Veille -->
 <div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
   <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #3b82f6;margin:0">👥 Mes suivies</button>
-  <button class="ig-feed-tab" onclick="showFeed(this,'explore')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔍 Explorer</button>
   <button class="ig-feed-tab" onclick="showFeed(this,'veille')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔖 Veille <span id="veille-count-badge" style="background:#3b82f6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;margin-left:4px;display:none"></span></button>
 </div>
 <script>
@@ -5712,14 +5711,6 @@ function showFeed(btn,name){
 {insta_trends_html_or_empty}
 
 </div><!-- /feed-suivies -->
-
-<div id="feed-explore" class="ig-feed-content" style="display:none">
-<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666">
-  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:14px"><circle cx="12" cy="12" r="10"/><polyline points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-  <h3 style="margin:0 0 8px;color:#888">Explorer — Coming soon</h3>
-  <p style="margin:0;font-size:14px">Découverte de comptes Instagram populaires que tu ne suis pas encore.<br>Nécessite l'endpoint <code>Explore Feed</code> de RapidAPI (à brancher).</p>
-</div>
-</div>
 
 <div id="feed-veille" class="ig-feed-content" style="display:none">
 {veille_feed_html}
@@ -22508,22 +22499,9 @@ def _render_veille_feed_html() -> str:
             "</div>"
         )
 
-    stats_html = (
-        "<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px'>"
-        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
-        f"<div style='font-size:22px;font-weight:800;color:#fff'>{s['total']}</div>"
-        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Reels</div></div>"
-        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
-        f"<div style='font-size:22px;font-weight:800;color:#22c55e'>{s['sent_count']}</div>"
-        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Envoyés</div></div>"
-        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
-        f"<div style='font-size:22px;font-weight:800;color:#3b82f6'>{s['unsent_count']}</div>"
-        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>A envoyer</div></div>"
-        f"<div style='background:#161616;border:1px solid #232323;border-radius:10px;padding:14px;text-align:center'>"
-        f"<div style='font-size:22px;font-weight:800;color:#a855f7'>{s['days_count']}</div>"
-        f"<div style='font-size:10px;color:#888;letter-spacing:1px;text-transform:uppercase'>Jours</div></div>"
-        "</div>"
-    )
+    # Rangée de stats (reels / envoyés / à envoyer / jours) retirée (demande) :
+    # elle prenait de la place sans servir.
+    stats_html = ""
 
     # Render par jour - format DD/MM
     import datetime as _dt_v
