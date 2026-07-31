@@ -3610,6 +3610,129 @@ function nxMAnalyze(){
     })
     .catch(function(){ done('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
 }
+// ── Sélecteur de models façon Infloww (réutilisable) ─────────────────────────
+// Utilisé par « Appliquer aux autres » (montage) ET par l envoi Veille.
+// opts = { title, info, confirmLabel, anchorEl, rows:[{name,pp,sub,warn}],
+//          preselected:[], allowEmpty:false, extra:{label,checked}|null,
+//          countWord:'sélectionnée', onConfirm(names, extraChecked, ui) }
+// ui = { close(), busy(txt) } : le caller décide quand fermer.
+function nxModelPicker(opts){
+  opts = opts || {};
+  var rows = opts.rows || [];
+  if(!rows.length){ if(typeof showToast==='function') showToast('Aucune model','warning'); return; }
+  var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.id='nxm-apply-ov';
+  // z-index > 99999 : doit s ouvrir DEVANT l editeur de montage. Fond
+  // transparent : menu ancre sous un bouton (un clic a cote referme).
+  ov.style.cssText='position:fixed;inset:0;background:transparent;z-index:100010';
+  var box=document.createElement('div');
+  var css='background:#1a1a1f;border:1px solid #2c2c33;border-radius:12px;width:430px;max-width:92vw;display:flex;flex-direction:column;box-shadow:0 22px 70px rgba(0,0,0,.65);overflow:hidden;position:fixed';
+  var anc=opts.anchorEl;
+  var rct=(anc && anc.offsetParent!==null)?anc.getBoundingClientRect():null;
+  if(rct){
+    var top=Math.round(rct.bottom+8);
+    css+=';top:'+top+'px;right:'+Math.max(8,Math.round(window.innerWidth-rct.right))+'px'
+        +';max-height:'+Math.max(260,window.innerHeight-top-16)+'px';
+  } else {
+    css+=';top:50%;left:50%;transform:translate(-50%,-50%);max-height:80vh';
+  }
+  box.style.cssText=css;
+  var cw=opts.countWord||'sélectionnée';
+  box.innerHTML='<style>'
+    +'#nxm-apply-ov .nxcbx{appearance:none;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a64;background:transparent;cursor:pointer;flex:0 0 20px;position:relative;margin:0}'
+    +'#nxm-apply-ov .nxcbx:checked{background:#3467FF;border-color:#3467FF}'
+    +'#nxm-apply-ov .nxcbx:checked::after{content:"";position:absolute;left:5px;top:1.5px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}'
+    +'#nxm-apply-ov .nxrow{display:flex;gap:12px;align-items:center;justify-content:flex-start;width:100%;box-sizing:border-box;padding:10px 12px;background:#212127;border-radius:10px;margin-bottom:8px;cursor:pointer;color:#e6e6ea;font-size:13px}'
+    +'#nxm-apply-ov .nxrow:hover{background:#27272f}'
+    +'</style>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #26262c">'
+    +'<div style="font-weight:800;font-size:15px;color:#f2f2f5">'+nxMEsc(opts.title||'Choisir les models')+'</div>'
+    +'<button type="button" id="nxm-apply-x" style="background:none;border:0;color:#8b8b95;font-size:17px;cursor:pointer;padding:2px 6px">✕</button></div>'
+    +(opts.info?('<div style="display:flex;gap:8px;align-items:flex-start;padding:10px 18px;background:rgba(52,103,255,.10);border-bottom:1px solid #26262c;font-size:11.5px;color:#c9d4f5">'
+      +'<span style="color:#3467FF;font-weight:800">&#9432;</span><span>'+opts.info+'</span></div>'):'')
+    +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:100px;padding:12px 14px 4px"></div>'
+    +(opts.extra?('<label style="display:flex;gap:10px;align-items:center;font-size:12px;color:#c4c4cc;padding:2px 18px 10px;cursor:pointer"><input type="checkbox" id="nxm-apply-va" class="nxcbx" style="width:17px;height:17px;flex:0 0 17px"> '+opts.extra.label+'</label>'):'')
+    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid #26262c;background:#17171b">'
+    +'<div id="nxm-apply-count" style="flex:1;display:flex;align-items:center;gap:8px;background:#0c0c0f;border-radius:999px;padding:7px 14px;font-size:12.5px;color:#e6e6ea"><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#3467FF;color:#fff;align-items:center;justify-content:center;font-size:10px;font-weight:800">&#10005;</span><span id="nxm-apply-n">0 '+cw+'</span></div>'
+    +'<button type="button" id="nxm-apply-cancel" style="background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">Annuler</button>'
+    +'<button type="button" id="nxm-apply-go" style="background:#3467FF;border:0;color:#fff;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer;opacity:'+(opts.allowEmpty?'1':'.5')+'">'+nxMEsc(opts.confirmLabel||'Confirmer')+'</button></div>';
+  ov.appendChild(box); document.body.appendChild(ov);
+  var lw=box.querySelector('#nxm-apply-list');
+  var AVA='width:40px;height:40px;border-radius:50%;flex:0 0 40px;object-fit:cover;background:#26262c';
+  var PALETTE=['#0ea5b7','#7c3aed','#db2777','#d97706','#059669','#3467FF','#dc2626'];
+  var pre={}; (opts.preselected||[]).forEach(function(n){ pre[n]=1; });
+  // — ligne « All » —
+  var allRow=document.createElement('label'); allRow.className='nxrow';
+  var allCb=document.createElement('input'); allCb.type='checkbox'; allCb.className='nxcbx';
+  var allIc=document.createElement('div');
+  allIc.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;background:#3467FF;font-size:18px';
+  allIc.textContent='👥';
+  var allTx=document.createElement('div');
+  allTx.style.cssText='flex:1;text-align:left';
+  allTx.innerHTML='<div style="font-weight:700">All</div><div style="font-size:11px;color:#8b8b95">toutes les models</div>';
+  allRow.appendChild(allCb); allRow.appendChild(allIc); allRow.appendChild(allTx);
+  lw.appendChild(allRow);
+  // — une ligne par model —
+  rows.forEach(function(o,i){
+    var lab=document.createElement('label'); lab.className='nxrow';
+    var cb=document.createElement('input'); cb.type='checkbox'; cb.value=o.name;
+    cb.className='nxcbx nxm-apply-cb';
+    if(pre[o.name]) cb.checked=true;
+    var av;
+    if(o.pp){
+      av=document.createElement('img'); av.src=o.pp; av.loading='lazy'; av.style.cssText=AVA;
+      av.addEventListener('error',function(){   // image morte -> pastille initiale
+        var d=document.createElement('div');
+        d.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
+        d.textContent=(o.name[0]||'?').toUpperCase();
+        av.replaceWith(d);
+      });
+    } else {
+      av=document.createElement('div');
+      av.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
+      av.textContent=(o.name[0]||'?').toUpperCase();
+    }
+    var tx=document.createElement('div');
+    tx.style.cssText='flex:1;text-align:left';
+    tx.innerHTML='<div style="font-weight:700">'+nxMEsc(o.name)+'</div>'
+      +(o.sub?('<div style="font-size:11px;color:'+(o.warn?'#fbbf24':'#8b8b95')+'">'+nxMEsc(o.sub)+'</div>'):'');
+    lab.appendChild(cb); lab.appendChild(av); lab.appendChild(tx);
+    lw.appendChild(lab);
+  });
+  function boxes(){ return Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb')); }
+  function paintCount(){
+    var n=boxes().filter(function(c){ return c.checked; }).length;
+    var lab2=box.querySelector('#nxm-apply-n');
+    if(lab2) lab2.textContent=n+' '+cw+(n>1?'s':'');
+    var go2=box.querySelector('#nxm-apply-go');
+    if(go2) go2.style.opacity=(n||opts.allowEmpty)?'1':'.5';
+  }
+  allCb.addEventListener('change',function(){ boxes().forEach(function(c){ c.checked=allCb.checked; }); paintCount(); });
+  lw.addEventListener('change',function(e){
+    if(e.target===allCb) return;
+    allCb.checked=boxes().every(function(c){ return c.checked; });   // All suit l etat reel
+    paintCount();
+  });
+  var va=box.querySelector('#nxm-apply-va');
+  if(va && opts.extra && opts.extra.checked) va.checked=true;
+  allCb.checked=boxes().length>0 && boxes().every(function(c){ return c.checked; });
+  paintCount();
+  function close(){ ov.remove(); }
+  box.querySelector('#nxm-apply-cancel').addEventListener('click',close);
+  box.querySelector('#nxm-apply-x').addEventListener('click',close);
+  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  box.querySelector('#nxm-apply-go').addEventListener('click',function(){
+    var sel=boxes().filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    if(!sel.length && !opts.allowEmpty){
+      if(typeof showToast==='function') showToast('Coche au moins une model','warning');
+      return;
+    }
+    var go=box.querySelector('#nxm-apply-go');
+    var ui={ close:close, busy:function(txt){ if(go){ go.disabled=true; go.textContent=txt; } } };
+    if(opts.onConfirm) opts.onConfirm(sel, !!(va && va.checked), ui);
+  });
+}
 // 📤 Applique ce TEMPLATE a d autres models : copie la video + le brouillon
 // (captions, style, trait de coupe) dans identities/<model>/templates/.
 // Chaque model garde ses propres brutes -> memes montages, contenus differents.
@@ -3621,136 +3744,43 @@ function nxMApplyOpen(){
   }
   fetch('/noctus/identities',{credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
-      // compat : le serveur renvoie des objets {name, pp, brutes} (ou des
-      // chaines si une vieille version tourne encore)
       var list=(j.identities||[]).map(function(x){
         return (typeof x==='string')?{name:x, pp:null, brutes:null}:x;
       }).filter(function(x){ return x && x.name && x.name!==parts[0]; });
       if(!list.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
-      var old=document.getElementById('nxm-apply-ov'); if(old) old.remove();
-      var ov=document.createElement('div');
-      ov.id='nxm-apply-ov';
-      // z-index > 99999 : l editeur de montage est a 99999, le menu doit
-      // s ouvrir DEVANT lui. Fond transparent : c est un MENU ancre sous le
-      // bouton de la barre du haut, pas une fenetre au centre de l ecran
-      // (un clic a cote le referme).
-      ov.style.cssText='position:fixed;inset:0;background:transparent;z-index:100010';
-      var box=document.createElement('div');
-      var css='background:#1a1a1f;border:1px solid #2c2c33;border-radius:12px;width:430px;max-width:92vw;display:flex;flex-direction:column;box-shadow:0 22px 70px rgba(0,0,0,.65);overflow:hidden;position:fixed';
-      var anc=document.getElementById('nx-m-apply');
-      var rct=(anc && anc.offsetParent!==null)?anc.getBoundingClientRect():null;
-      if(rct){
-        var top=Math.round(rct.bottom+8);
-        css+=';top:'+top+'px;right:'+Math.max(8,Math.round(window.innerWidth-rct.right))+'px'
-            +';max-height:'+Math.max(260,window.innerHeight-top-16)+'px';
-      } else {
-        // ouvert depuis le panneau de gauche (ou bouton cache) -> centre
-        css+=';top:50%;left:50%;transform:translate(-50%,-50%);max-height:80vh';
-      }
-      box.style.cssText=css;
-      box.innerHTML='<style>'
-        +'#nxm-apply-ov .nxcbx{appearance:none;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a64;background:transparent;cursor:pointer;flex:0 0 20px;position:relative;margin:0}'
-        +'#nxm-apply-ov .nxcbx:checked{background:#3467FF;border-color:#3467FF}'
-        +'#nxm-apply-ov .nxcbx:checked::after{content:"";position:absolute;left:5px;top:1.5px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}'
-        +'#nxm-apply-ov .nxrow{display:flex;gap:12px;align-items:center;justify-content:flex-start;width:100%;box-sizing:border-box;padding:10px 12px;background:#212127;border-radius:10px;margin-bottom:8px;cursor:pointer;color:#e6e6ea;font-size:13px}'
-        +'#nxm-apply-ov .nxrow:hover{background:#27272f}'
-        +'</style>'
-        +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #26262c">'
-        +'<div style="font-weight:800;font-size:15px;color:#f2f2f5">Appliquer ce montage à…</div>'
-        +'<button type="button" id="nxm-apply-x" style="background:none;border:0;color:#8b8b95;font-size:17px;cursor:pointer;padding:2px 6px">✕</button></div>'
-        +'<div style="display:flex;gap:8px;align-items:flex-start;padding:10px 18px;background:rgba(52,103,255,.10);border-bottom:1px solid #26262c;font-size:11.5px;color:#c9d4f5">'
-        +'<span style="color:#3467FF;font-weight:800">ⓘ</span><span>La vidéo, les captions et le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera <b>ses propres</b> vidéos brutes.</span></div>'
-        +'<div id="nxm-apply-list" style="overflow:auto;flex:1;min-height:100px;padding:12px 14px 4px"></div>'
-        +'<label style="display:flex;gap:10px;align-items:center;font-size:12px;color:#c4c4cc;padding:2px 18px 10px;cursor:pointer"><input type="checkbox" id="nxm-apply-va" class="nxcbx" style="width:17px;height:17px;flex:0 0 17px"> Aussi « Dispo pour les VA » chez elles</label>'
-        +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid #26262c;background:#17171b">'
-        +'<div id="nxm-apply-count" style="flex:1;display:flex;align-items:center;gap:8px;background:#0c0c0f;border-radius:999px;padding:7px 14px;font-size:12.5px;color:#e6e6ea"><span style="display:inline-flex;width:16px;height:16px;border-radius:50%;background:#3467FF;color:#fff;align-items:center;justify-content:center;font-size:10px;font-weight:800">✕</span><span id="nxm-apply-n">0 sélectionnée</span></div>'
-        +'<button type="button" id="nxm-apply-cancel" style="background:#2a2a30;border:1px solid #35353c;color:#d4d4dc;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">Annuler</button>'
-        +'<button type="button" id="nxm-apply-go" style="background:#3467FF;border:0;color:#fff;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer;opacity:.5">Confirmer</button></div>';
-      ov.appendChild(box); document.body.appendChild(ov);
-      var lw=box.querySelector('#nxm-apply-list');
-      var AVA='width:40px;height:40px;border-radius:50%;flex:0 0 40px;object-fit:cover;background:#26262c';
-      var PALETTE=['#0ea5b7','#7c3aed','#db2777','#d97706','#059669','#3467FF','#dc2626'];
-      // — ligne « All » façon Infloww : coche/decoche tout le monde —
-      var allRow=document.createElement('label'); allRow.className='nxrow';
-      var allCb=document.createElement('input'); allCb.type='checkbox'; allCb.className='nxcbx';
-      var allIc=document.createElement('div');
-      allIc.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;background:#3467FF;font-size:18px';
-      allIc.textContent='👥';
-      var allTx=document.createElement('div');
-      allTx.style.cssText='flex:1;text-align:left';
-      allTx.innerHTML='<div style="font-weight:700">All</div><div style="font-size:11px;color:#8b8b95">toutes les models</div>';
-      allRow.appendChild(allCb); allRow.appendChild(allIc); allRow.appendChild(allTx);
-      lw.appendChild(allRow);
-      // — une ligne par model : photo de profil + nom + nb de brutes —
-      list.forEach(function(o,i){
-        var lab=document.createElement('label'); lab.className='nxrow';
-        var cb=document.createElement('input'); cb.type='checkbox'; cb.value=o.name;
-        cb.className='nxcbx nxm-apply-cb';
-        var av;
-        if(o.pp){
-          av=document.createElement('img'); av.src=o.pp; av.loading='lazy'; av.style.cssText=AVA;
-          av.addEventListener('error',function(){   // image morte -> pastille initiale
-            var d=document.createElement('div');
-            d.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
-            d.textContent=(o.name[0]||'?').toUpperCase();
-            av.replaceWith(d);
-          });
-        } else {
-          av=document.createElement('div');
-          av.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
-          av.textContent=(o.name[0]||'?').toUpperCase();
+      nxModelPicker({
+        title:'Appliquer ce montage à…',
+        info:'La vidéo, les captions et le trait ✂ sont copiés chez chaque model cochée. Chacune utilisera <b>ses propres</b> vidéos brutes.',
+        anchorEl:document.getElementById('nx-m-apply'),
+        rows:list.map(function(o){
+          var sub=(o.brutes==null)?'':(o.brutes+' vidéo'+(o.brutes>1?'s':'')+' brute'+(o.brutes>1?'s':''));
+          if(o.brutes===0) sub='⚠ aucune vidéo brute';
+          return {name:o.name, pp:o.pp, sub:sub, warn:o.brutes===0};
+        }),
+        extra:{label:'Aussi « Dispo pour les VA » chez elles', checked:!!nxMState.vaReady},
+        onConfirm:function(sel, vaChecked, ui){
+          // caption en cours de saisie mais pas ajoutee -> on l ajoute d abord
+          if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
+          var fd=new FormData();
+          fd.set('file_id', nxMState.fid);
+          fd.set('targets', sel.join(','));
+          fd.set('segments', JSON.stringify(nxMState.caps||[]));
+          fd.set('font', (document.getElementById('nx-m-font')||{}).value||'Strong');
+          fd.set('style', JSON.stringify(nxMState.style||{}));
+          if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
+          if(vaChecked) fd.set('va_ready','1');
+          ui.busy('⏳ Copie…');
+          fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'})
+            .then(function(r){return r.json();}).then(function(j2){
+              ui.close();
+              if(j2.ok){
+                var n=(j2.done||[]).length;
+                var msg='Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j2.done||[]).join(', ');
+                if(j2.errors&&j2.errors.length) msg+=' — échec : '+j2.errors.join(' ; ');
+                if(typeof showToast==='function') showToast(msg,(j2.errors&&j2.errors.length)?'warning':'success',10000);
+              } else if(typeof showToast==='function') showToast('❌ '+(j2.error||'échec'),'error',8000);
+            }).catch(function(){ ui.close(); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
         }
-        var tx=document.createElement('div');
-        tx.style.cssText='flex:1;text-align:left';
-        var sub=(o.brutes==null)?'':(o.brutes+' vidéo'+(o.brutes>1?'s':'')+' brute'+(o.brutes>1?'s':''));
-        if(o.brutes===0) sub='⚠ aucune vidéo brute';
-        tx.innerHTML='<div style="font-weight:700">'+nxMEsc(o.name)+'</div>'
-          +(sub?('<div style="font-size:11px;color:'+(o.brutes===0?'#fbbf24':'#8b8b95')+'">'+sub+'</div>'):'');
-        lab.appendChild(cb); lab.appendChild(av); lab.appendChild(tx);
-        lw.appendChild(lab);
-      });
-      function boxes(){ return Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb')); }
-      function paintCount(){
-        var n=boxes().filter(function(c){ return c.checked; }).length;
-        var lab2=box.querySelector('#nxm-apply-n');
-        if(lab2) lab2.textContent=n+' sélectionnée'+(n>1?'s':'');
-        var go2=box.querySelector('#nxm-apply-go');
-        if(go2) go2.style.opacity=n?'1':'.5';
-      }
-      allCb.addEventListener('change',function(){ boxes().forEach(function(c){ c.checked=allCb.checked; }); paintCount(); });
-      lw.addEventListener('change',function(e){
-        if(e.target===allCb) return;
-        allCb.checked=boxes().every(function(c){ return c.checked; });   // All suit l etat reel
-        paintCount();
-      });
-      var va=box.querySelector('#nxm-apply-va'); if(va) va.checked=!!nxMState.vaReady;
-      box.querySelector('#nxm-apply-cancel').addEventListener('click',function(){ ov.remove(); });
-      box.querySelector('#nxm-apply-x').addEventListener('click',function(){ ov.remove(); });
-      ov.addEventListener('click',function(e){ if(e.target===ov) ov.remove(); });
-      box.querySelector('#nxm-apply-go').addEventListener('click',function(){
-        var sel=Array.prototype.slice.call(lw.querySelectorAll('.nxm-apply-cb:checked')).map(function(c){ return c.value; });
-        if(!sel.length){ if(typeof showToast==='function') showToast('Coche au moins une model','warning'); return; }
-        // caption en cours de saisie mais pas ajoutee -> on l ajoute d abord
-        if((document.getElementById('nx-m-caption').value||'').trim()){ if(!nxMAddCap()) return; }
-        var fd=new FormData();
-        fd.set('file_id', nxMState.fid);
-        fd.set('targets', sel.join(','));
-        fd.set('segments', JSON.stringify(nxMState.caps||[]));
-        fd.set('font', (document.getElementById('nx-m-font')||{}).value||'Strong');
-        fd.set('style', JSON.stringify(nxMState.style||{}));
-        if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
-        if(va && va.checked) fd.set('va_ready','1');
-        var go=box.querySelector('#nxm-apply-go'); go.disabled=true; go.textContent='⏳ Copie…';
-        fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'})
-          .then(function(r){return r.json();}).then(function(j){
-            ov.remove();
-            if(j.ok){
-              var n=(j.done||[]).length;
-              var msg='Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j.done||[]).join(', ');
-              if(j.errors&&j.errors.length) msg+=' — échec : '+j.errors.join(' ; ');
-              if(typeof showToast==='function') showToast(msg,(j.errors&&j.errors.length)?'warning':'success',10000);
-            } else if(typeof showToast==='function') showToast('❌ '+(j.error||'échec'),'error',8000);
-          }).catch(function(){ ov.remove(); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
       });
     }).catch(function(){ if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
@@ -22835,16 +22865,14 @@ function veilleJumpToDate(day){
   var card = document.querySelector('.veille-card[data-day="' + day + '"]');
   if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
 }
-// ===== 📲 Chips « Envoyer aussi aux modèles » (routeur Telegram) =====
+// ===== 📲 Envoi « aussi dans IG CONTENT » : choix des models AU MOMENT de
+// l envoi, via le selecteur facon Infloww (nxModelPicker) — la barre a chips
+// permanente est retiree. La derniere selection est memorisee (localStorage).
 function veilleModelsSelected(){
   try { return JSON.parse(localStorage.getItem('vabot_veille_models') || '[]'); } catch(e){ return []; }
 }
-async function veilleInitModelChips(){
-  const btn = document.getElementById('veille-send-selected-btn');
-  if(!btn || document.getElementById('veille-model-chips')) return;
-  if(window.__veilleChipsBusy) return;   // un init est deja en vol (fetch async)
-  window.__veilleChipsBusy = true;
-  let models = window.__veilleModels || [];   // cache : pas de re-fetch a chaque recreation
+async function veillePickModels(onOk){
+  let models = window.__veilleModels || [];
   if(!models.length){
     try {
       const r = await fetch('/veille/models');
@@ -22853,73 +22881,31 @@ async function veilleInitModelChips(){
     } catch(e){}
     if(models.length) window.__veilleModels = models;
   }
-  window.__veilleChipsBusy = false;
-  if(!models.length) return;
-  if(document.getElementById('veille-model-chips')) return;   // re-check apres l'await
-  let sel = veilleModelsSelected().filter(function(m){ return models.indexOf(m) !== -1; });
-  const bar = document.createElement('div');
-  bar.id = 'veille-model-chips';
-  bar.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;padding:8px 12px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.18);border-radius:10px';
-  const lbl = document.createElement('span');
-  lbl.textContent = '📲 Envoyer AUSSI dans IG CONTENT de :';
-  lbl.style.cssText = 'font-size:11.5px;color:#888;font-weight:700';
-  bar.appendChild(lbl);
-  models.forEach(function(m){
-    const c = document.createElement('button');
-    c.type = 'button';
-    c.textContent = m;
-    function paint(){
-      const on = sel.indexOf(m) !== -1;
-      c.style.cssText = 'padding:5px 13px;border-radius:999px;font-size:11.5px;font-weight:700;cursor:pointer;margin:0;border:1px solid ' +
-        (on ? 'rgba(34,197,94,.6)' : '#333') + ';background:' + (on ? 'rgba(34,197,94,.16)' : 'transparent') +
-        ';color:' + (on ? '#4ade80' : '#888');
-    }
-    paint();
-    c.addEventListener('click', function(){
-      const i = sel.indexOf(m);
-      if(i === -1) sel.push(m); else sel.splice(i, 1);
+  if(!models.length){ onOk([]); return; }   // pas de routeur configure -> envoi veille simple
+  // photos de profil : meme source que le reste du site
+  let idents = {};
+  try {
+    const r2 = await fetch('/noctus/identities', {credentials:'same-origin'});
+    const j2 = await r2.json();
+    (j2.identities||[]).forEach(function(o){ if(o && o.name) idents[o.name] = o.pp || null; });
+  } catch(e){}
+  const pre = veilleModelsSelected().filter(function(m){ return models.indexOf(m) !== -1; });
+  nxModelPicker({
+    title:'Envoyer aussi dans IG CONTENT de…',
+    info:'Les reels partent dans le sujet VEILLE. Chaque model cochée les reçoit AUSSI dans son IG CONTENT. Rien de coché = veille seulement.',
+    anchorEl:document.getElementById('veille-send-selected-btn'),
+    rows:models.map(function(m){ return {name:m, pp:idents[m]||null, sub:'', warn:false}; }),
+    preselected:pre,
+    allowEmpty:true,
+    countWord:'model',
+    confirmLabel:'Envoyer',
+    onConfirm:function(sel, _x, ui){
       try { localStorage.setItem('vabot_veille_models', JSON.stringify(sel)); } catch(e){}
-      paint();
-    });
-    bar.appendChild(c);
+      ui.close();
+      onOk(sel);
+    }
   });
-  const hint = document.createElement('span');
-  hint.textContent = '(la veille arrive chez la modèle + en attente dans son sujet VEILLE ID)';
-  hint.style.cssText = 'font-size:10.5px;color:#666';
-  bar.appendChild(hint);
-  const anchor = btn.closest('div');
-  if(anchor && anchor.parentElement) anchor.parentElement.insertBefore(bar, anchor);
 }
-// Gardien AUTO-RÉPARANT : la section Veille est re-rendue en AJAX
-// (refreshVeilleSection remplace tout le HTML -> la barre à chips était effacée
-// et ne revenait qu'au reload complet). Toutes les 2 s : si le bouton Envoyer
-// existe mais que la barre manque, on la recrée (models en cache, chips en
-// localStorage -> la sélection est conservée).
-document.addEventListener('DOMContentLoaded', function(){
-  // Gardien qui S'ARRÊTE : dès que la barre à chips est là (ou après ~30 s
-  // sans modèle configuré), on coupe le polling. Avant, c'était un setInterval
-  // permanent qui rappelait /veille/models 1 800 fois/heure/onglet.
-  var _tries = 0;
-  var _iv = setInterval(function(){
-    _tries++;
-    if(document.getElementById('veille-model-chips') || _tries > 15){
-      clearInterval(_iv);
-    }
-    veilleInitModelChips();
-  }, 2000);
-  setTimeout(veilleInitModelChips, 800);
-  // Recrée la barre à la demande quand la section Veille est ré-affichée.
-  document.addEventListener('click', function(e){
-    if(e.target && e.target.closest && e.target.closest('[data-nav-va],.item')){
-      setTimeout(function(){
-        if(document.getElementById('veille-send-selected-btn')
-           && !document.getElementById('veille-model-chips')){
-          veilleInitModelChips();
-        }
-      }, 400);
-    }
-  });
-});
 
 // ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
 window.__bangerIdentities = null;
@@ -23001,7 +22987,13 @@ async function sendReelToBanger(rid, identity, btn){
     setTimeout(function(){ if(btn.innerHTML === '✅') btn.innerHTML = orig; }, 3000);
   }
 }
-async function sendSelectedVeille(){
+function sendSelectedVeille(){
+  const cbs0 = document.querySelectorAll('.veille-cb:checked');
+  if(!cbs0.length){ alert('Aucun reel sélectionné'); return; }
+  // choix des models (IG CONTENT) au moment de l envoi, puis envoi reel par reel
+  veillePickModels(function(){ veilleDoSend(); });
+}
+async function veilleDoSend(){
   const cbs = document.querySelectorAll('.veille-cb:checked');
   const ids = Array.from(cbs).map(c => c.dataset.rid);
   if(!ids.length){ alert('Aucun reel sélectionné'); return; }
