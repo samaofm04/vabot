@@ -456,6 +456,46 @@ def fileid_drop(shortcode: str):
             _fileid_save()
 
 
+_WARM_GHOSTS: list = []   # (chat_id, message_id) fantômes dont le delete a raté
+
+
+def warm_cleanup():
+    """Retente la suppression des messages fantômes ratés (429, réseau...).
+    Appelé à chaque cycle du worker. « Message not found » = déjà parti."""
+    if not _WARM_GHOSTS:
+        return
+    cfg = load_config()
+    token = cfg.get("bot_token")
+    if not token:
+        return
+    rest = []
+    for chat, mid in _WARM_GHOSTS[:20]:
+        try:
+            r = _tg_post(f"{TG_API_BASE}/bot{token}/deleteMessage",
+                         data={"chat_id": chat, "message_id": mid}, timeout=15)
+            ok = (r.status_code == 200 and bool(r.json().get("ok")))
+            if not ok and "not found" not in str(r.text or "").lower():
+                rest.append((chat, mid))
+        except Exception:
+            rest.append((chat, mid))
+    _WARM_GHOSTS[:] = rest + _WARM_GHOSTS[20:]
+
+
+def warm_reel(reel: Dict[str, Any]) -> Dict[str, Any]:
+    """Pré-chauffe le file_id Telegram d'un reel de veille : même chaîne de
+    téléchargement que l'envoi, mais l'upload est silencieux et le message
+    supprimé aussitôt — seul le file_id est conservé. Le soir, « Envoyer »
+    part en file_id -> instantané. Ne poste jamais de lien en fallback."""
+    return send_video_from_url(
+        (reel.get("video_url") or ""),
+        caption="",
+        fallback_url=(reel.get("url") or ""),
+        owner=(reel.get("owner") or ""),
+        tg_file_id=(reel.get("tg_file_id") or ""),
+        warm_only=True,
+    )
+
+
 def _tg_post(url: str, *, data=None, json_payload=None, files=None, timeout=30):
     """requests.post vers l'API Telegram avec UNE relance sur 429 (retry_after).
     Sans ça, les envois par file_id (instantanés donc en rafale) perdaient des
@@ -477,7 +517,8 @@ def send_video_from_url(video_url: str, caption: str = "",
                         followup_text: str = "",
                         owner: str = "",
                         tg_file_id: str = "",
-                        followup_final: bool = False) -> Dict[str, Any]:
+                        followup_final: bool = False,
+                        warm_only: bool = False) -> Dict[str, Any]:
     """Telecharge une video IG et la poste sur Telegram via sendVideo.
 
     Comportement comme un bot downloader Discord/Telegram :
@@ -513,6 +554,13 @@ def send_video_from_url(video_url: str, caption: str = "",
     except Exception:
         import contextlib as _cl
         _order_lock = _cl.nullcontext()
+    # Pré-chauffage : PAS de verrou d'ordre. Le message fantôme est supprimé
+    # aussitôt et la description manuelle reste liée à sa vidéo (reply_to) —
+    # alors qu'un upload warm sous le verrou bloquait « Envoyer » jusqu'à
+    # plusieurs minutes (multipart 50 Mo + retries 429).
+    if warm_only:
+        import contextlib as _clw
+        _order_lock = _clw.nullcontext()
 
     # Shortcode extrait TOUT DE SUITE : sert au self-lookup file_id, au cache
     # disque et au stockage après upload.
@@ -528,6 +576,11 @@ def send_video_from_url(video_url: str, caption: str = "",
     # banger, modal Préparer...), le cache central par shortcode est consulté.
     if not tg_file_id and _sc:
         tg_file_id = fileid_get(_sc)
+    # warm_only : PRÉ-CHAUFFAGE (worker de journée). Un file_id existe déjà ->
+    # rien à faire ; sinon on télécharge + upload en silencieux plus bas, le
+    # message fantôme est supprimé aussitôt et SEUL le file_id est gardé.
+    if warm_only and tg_file_id:
+        return {"ok": True, "mode": "cached", "tg_file_id": tg_file_id}
     if tg_file_id:
         # fast-path SOUS le verrou d'ordre : sendVideo + followup d'un bloc
         # (c'est le cas COURANT — un reel déjà en cache -> renvoi instantané).
@@ -566,6 +619,10 @@ def send_video_from_url(video_url: str, caption: str = "",
             pass  # file_id invalide/expire -> on retombe sur le telechargement normal
 
     def _fallback(reason: str) -> Dict[str, Any]:
+        # pré-chauffage : on ne poste JAMAIS de lien à la place — on réessaiera
+        # au prochain cycle (ou l'envoi du soir fera son fallback normal)
+        if warm_only:
+            return {"ok": False, "error": reason}
         if not fallback_url:
             return {"ok": False, "error": reason}
         # POST lien + description SOUS le verrou d'ordre (RLock réentrant : ok même
@@ -713,13 +770,17 @@ def send_video_from_url(video_url: str, caption: str = "",
     with _order_lock:
         # 2) Upload via sendVideo (multipart, fichier en memoire)
         try:
+            _updata = {
+                "chat_id": chat_id,
+                "caption": "" if warm_only else (caption or "")[:1024],
+                "supports_streaming": "true",
+            }
+            if warm_only:
+                # upload fantôme : aucune notification aux membres du canal
+                _updata["disable_notification"] = "true"
             r = _tg_post(
                 f"{TG_API_BASE}/bot{token}/sendVideo",
-                data={
-                    "chat_id": chat_id,
-                    "caption": (caption or "")[:1024],
-                    "supports_streaming": "true",
-                },
+                data=_updata,
                 files={"video": ("reel.mp4", video_bytes, "video/mp4")},
                 timeout=60,  # 60s suffit pour un upload de <50MB
             )
@@ -748,6 +809,23 @@ def send_video_from_url(video_url: str, caption: str = "",
                 fileid_put(_sc, _new_fid)
         except Exception as e:
             return _fallback(f"Reponse invalide : {e}")
+
+        if warm_only:
+            # Telegram garde le fichier même une fois le message supprimé : le
+            # file_id reste valable — on efface juste le message fantôme. Un
+            # delete raté (429/réseau/droits) est MIS EN FILE et retenté à
+            # chaque cycle du worker (sinon la vidéo fantôme restait à vie).
+            _dok = False
+            try:
+                _rd = _tg_post(f"{TG_API_BASE}/bot{token}/deleteMessage",
+                               data={"chat_id": chat_id, "message_id": msg_id}, timeout=15)
+                _dok = (_rd.status_code == 200 and bool(_rd.json().get("ok")))
+            except Exception:
+                _dok = False
+            if not _dok and msg_id:
+                _WARM_GHOSTS.append((chat_id, msg_id))
+                del _WARM_GHOSTS[:-50]   # borne dure : jamais plus de 50 en attente
+            return {"ok": True, "mode": "warmed", "tg_file_id": _new_fid}
 
         # 3) Followup texte (la description IG) en message separe
         if followup_text and followup_text.strip():

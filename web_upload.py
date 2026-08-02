@@ -22641,6 +22641,18 @@ def _render_veille_feed_html() -> str:
                 ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:#22c55e;"
                           "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
                           "box-shadow:0 2px 10px rgba(34,197,94,.5)'>✓ PRÊT</div>")
+            # ⚡ vidéo déjà stockée sur Telegram (pré-chauffée en journée) : le
+            # « Envoyer » de ce reel partira en file_id, sans téléchargement
+            if not sent:
+                try:
+                    import veille_telegram as _vtw
+                    _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+                    if bool(r.get("tg_file_id")) or bool(_mw and _vtw.fileid_get(_mw.group(1))):
+                        ribbon += ("<div title='Vidéo déjà stockée sur Telegram — envoi instantané' "
+                                   "style='position:absolute;top:38px;left:46px;background:rgba(250,204,21,.95);color:#0d0d18;"
+                                   "font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6'>⚡</div>")
+                except Exception:
+                    pass
             # Interrupteur PRÊT sur la carte (uniquement si pas déjà envoyé) : le
             # mettre au vert marque le reel « prêt » sans ouvrir le modal.
             ready_toggle = ""
@@ -39725,6 +39737,67 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     _vsend_inflight: dict = {}   # rid -> timestamp : verrou anti double-envoi
     _vsend_lock = threading.Lock()   # protège la purge/check/set du dict (multi-thread)
+
+    # ---- Pré-chauffage Telegram de la veille -------------------------------
+    # Chaque reel NON envoyé est téléchargé + uploadé EN JOURNÉE en silencieux
+    # (message fantôme supprimé aussitôt, seul le file_id est gardé) : le soir,
+    # « Envoyer la sélection » part en file_id -> instantané. Un envoi manuel
+    # en cours suspend le cycle (il garde la priorité sur le verrou d'ordre).
+    def _veille_warm_loop():
+        import time as _t
+        _warm_fails: dict = {}   # rid -> nb d'échecs : 3 ratés = on n'insiste plus
+        _t.sleep(120)   # laisse le démarrage (scrape, thumbs...) respirer
+        while True:
+            try:
+                import veille
+                import veille_telegram
+                if veille_telegram.is_configured():
+                    # fantômes dont le delete a raté au cycle d'avant : retentés
+                    try:
+                        veille_telegram.warm_cleanup()
+                    except Exception:
+                        pass
+                    todo = []
+                    for r in veille.list_reels():
+                        if r.get("sent_to_telegram") or r.get("tg_file_id"):
+                            continue
+                        if _warm_fails.get(r.get("id"), 0) >= 3:
+                            continue   # vidéo introuvable : on ne brûle pas Apify dessus
+                        _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+                        if not _mw or veille_telegram.fileid_get(_mw.group(1)):
+                            continue
+                        todo.append(r)
+                    warmed = 0
+                    for r in todo[:3]:      # 3 max par cycle : doux avec IG et Telegram
+                        with _vsend_lock:
+                            _busy = bool(_vsend_inflight)
+                        if _busy:
+                            break           # envoi manuel en cours -> on s'efface
+                        try:
+                            res = veille_telegram.warm_reel(r)
+                            if res.get("ok") and res.get("tg_file_id"):
+                                warmed += 1
+                                _warm_fails.pop(r.get("id"), None)
+                                try:
+                                    veille.update_reel(r.get("id"), tg_file_id=res["tg_file_id"])
+                                except Exception:
+                                    pass
+                            else:
+                                _warm_fails[r.get("id")] = _warm_fails.get(r.get("id"), 0) + 1
+                        except Exception:
+                            _warm_fails[r.get("id")] = _warm_fails.get(r.get("id"), 0) + 1
+                        _t.sleep(8)
+                    if warmed:
+                        print(f"[veille-warm] {warmed} reel(s) pré-chauffé(s) -> envoi instantané")
+            except Exception as _e:
+                print(f"[veille-warm] cycle: {_e}")
+            _t.sleep(600)   # toutes les 10 min
+    # create_app tourne PLUSIEURS fois par process (run_web_app + boot-warmup,
+    # et 10x dans les tests) : un seul thread warm pour tout le monde, sinon le
+    # même reel serait téléchargé (Apify payant) et uploadé en double.
+    if not globals().get("_VEILLE_WARM_STARTED"):
+        globals()["_VEILLE_WARM_STARTED"] = True
+        threading.Thread(target=_veille_warm_loop, daemon=True, name="veille-warm").start()
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():

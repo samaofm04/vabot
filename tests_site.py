@@ -1484,6 +1484,43 @@ except Exception as _e:
 
 print()
 print("=" * 70)
+print("20) Veille : pre-chauffage Telegram (file_id warm)")
+print("=" * 70)
+# Le worker de journee telecharge + uploade les reels NON envoyes en silencieux
+# (message fantome supprime, seul le file_id garde) -> l envoi du soir est
+# instantane. Garde-fous : jamais de lien fallback, pas de notification, et le
+# warm s efface des qu un envoi manuel est en cours.
+try:
+    import inspect as _insp20
+    import pathlib as _pl20
+    import veille_telegram as _vt20
+    check("send_video_from_url a un mode warm_only",
+          "warm_only" in _insp20.signature(_vt20.send_video_from_url).parameters)
+    check("warm_reel existe et passe warm_only",
+          callable(getattr(_vt20, "warm_reel", None))
+          and "warm_only=True" in _insp20.getsource(_vt20.warm_reel))
+    _src20 = _insp20.getsource(_vt20.send_video_from_url)
+    check("le warm supprime le message fantome", "deleteMessage" in _src20)
+    check("le warm ne poste jamais de lien fallback",
+          0 <= _src20.find("if warm_only:") < _src20.find("if not fallback_url:"))
+    check("upload fantome sans notification", "disable_notification" in _src20)
+    check("le warm ne prend PAS le verrou d ordre (pas de blocage du soir)",
+          _src20.find("if warm_only:") < _src20.find("nullcontext()", _src20.find("if warm_only:")) < _src20.find("fileid_get"))
+    check("un fantome au delete rate est mis en file et retente",
+          "_WARM_GHOSTS" in _src20 and callable(getattr(_vt20, "warm_cleanup", None)))
+    _wsrc20 = (_pl20.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
+    check("worker veille-warm demarre avec l app",
+          "veille-warm" in _wsrc20 and "_veille_warm_loop" in _wsrc20)
+    check("UN SEUL thread warm par process (create_app tourne plusieurs fois)",
+          "_VEILLE_WARM_STARTED" in _wsrc20)
+    _wloop20 = _wsrc20.split("def _veille_warm_loop", 1)[1][:4200]
+    check("le warm s efface devant un envoi manuel", "_vsend_inflight" in _wloop20)
+    check("le worker retente les fantomes a chaque cycle", "warm_cleanup" in _wloop20)
+except Exception as _e:
+    check("veille warm : testable", False, repr(_e)[:120])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")
