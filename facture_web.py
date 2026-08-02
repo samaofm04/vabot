@@ -684,6 +684,57 @@ def compute_state(month: str) -> dict:
         bm["lead_pay"] = round(bm["lead"] + bm["reimb"], 2)
         reimb_total += bm["reimb"]
 
+    # Cartes « Part <associé> » : part du split + ses avances à lui rembourser.
+    # Garde-fous (revue adversariale) :
+    # - cumul de % > 100 (config legacy, la route le refuse désormais) : parts
+    #   ramenées au prorata -> lead + associés ne dépassent JAMAIS le net ;
+    # - homonymes (même nom sur 2 marchés) : l'avance n'est comptée qu'UNE fois ;
+    # - ventilation par marché d'un « tous » compensée au centime (le dernier
+    #   marché absorbe l'arrondi : la somme des marchés = la carte globale).
+    _sc_g = 100.0 / assoc_global if assoc_global > 100 else 1.0
+    _sc_mk = {mk: (100.0 / v if v > 100 else 1.0) for mk, v in assoc_by_mk.items()}
+    _mks = [mk for mk in MARKET_ORDER if mk in by_market] or list(by_market)
+
+    def _parts_for(a):
+        """({marché: part}, part_globale) — arrondis cohérents entre eux."""
+        pct = float(a.get("pct") or 0)
+        amk = a.get("market") if a.get("market") in MARKETS else "tous"
+        if amk != "tous":
+            p = round(max(0.0, by_market[amk]["net"]) * pct * _sc_mk[amk] / 100.0, 2)
+            return {mk: (p if mk == amk else 0.0) for mk in _mks}, p
+        raw = max(0.0, base) * pct * _sc_g / 100.0
+        total = round(raw, 2)
+        if base <= 0:
+            return {mk: 0.0 for mk in _mks}, total
+        parts = {mk: round(raw * stage[mk] / base, 2) for mk in _mks[:-1]}
+        parts[_mks[-1]] = round(total - sum(parts.values()), 2)
+        return parts, total
+
+    _acards = []
+    _seen_nm = set()
+    for a in settings["associates"]:
+        nm = (a.get("name") or "").strip()
+        if not nm:
+            continue
+        parts, total = _parts_for(a)
+        _acards.append((nm, a, parts, total, nm not in _seen_nm))
+        _seen_nm.add(nm)
+
+    def _assoc_cards(scope_mk=None):
+        cards = []
+        for nm, a, parts, total, first in _acards:
+            part = parts.get(scope_mk, 0.0) if scope_mk else total
+            _ra = by_market[scope_mk]["reimb_assoc"] if scope_mk else reimb_assoc_total
+            reimb = round(float(_ra.get(nm) or 0.0), 2) if first else 0.0
+            cards.append({"name": nm, "pct": float(a.get("pct") or 0),
+                          "market": a.get("market") if a.get("market") in MARKETS else "tous",
+                          "part": part, "reimb": reimb,
+                          "pay": round(part + reimb, 2)})
+        return cards
+
+    for mk, bm in by_market.items():
+        bm["assoc_parts"] = _assoc_cards(mk)
+
     return {
         "ok": True,
         "month": month,
@@ -698,6 +749,7 @@ def compute_state(month: str) -> dict:
             "lead": lead,
             "reimb": round(reimb_total, 2),
             "reimb_assoc": reimb_assoc_total,
+            "assoc_parts": _assoc_cards(),
             "lead_pay": round(lead + reimb_total, 2),
             "assoc_pct": round(assoc_pct, 2),
             "assoc_global": round(assoc_global, 2),
@@ -1346,6 +1398,12 @@ def register(app, is_auth):
                                   # 'tous' = % du net global ; 'fr'/'us' = % du
                                   # net de CE marché seulement
                                   "market": a.get("market") if a.get("market") in MARKETS else "tous"})
+            # jamais plus de 100 % au même étage : les cartes distribueraient
+            # plus d'argent que le net (le lead, lui, est clampé à 0)
+            _gs = sum(a["pct"] for a in clean if a["market"] == "tous")
+            _ms = {mk: sum(a["pct"] for a in clean if a["market"] == mk) for mk in MARKETS}
+            if _gs > 100 or any(v > 100 for v in _ms.values()):
+                return jsonify({"ok": False, "error": "Le total des % associés dépasse 100 (en global ou sur un même marché)"})
             st["associates"] = clean
         except Exception:
             pass

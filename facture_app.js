@@ -83,11 +83,13 @@
     var cur = line.paid_by || 'agence';
     var o = '<option value="agence"' + (cur === 'agence' ? ' selected' : '') + '>🏢 L&#39;agence</option>' +
       '<option value="lead"' + (cur === 'lead' ? ' selected' : '') + '>👑 ' + esc(leadName()) + ' (toi) — à me rembourser</option>';
-    var seen = false;
+    var seen = false, vals = [];
     (st.associates || []).forEach(function (a) {
       var nm = (a.name || '').trim();
       if (!nm) return;
       var v = 'assoc:' + nm;
+      if (vals.indexOf(v) !== -1) return;   // même nom sur 2 marchés = 1 option
+      vals.push(v);
       if (cur === v) seen = true;
       o += '<option value="' + esc(v) + '"' + (cur === v ? ' selected' : '') + '>👥 ' + esc(nm) + ' — à lui rembourser</option>';
     });
@@ -98,14 +100,25 @@
     return o;
   }
 
-  function leadSub(t, d) {
-    var pct;
-    if (t.assoc_pct != null) pct = 100 - t.assoc_pct;                 // vue marché
-    else pct = 100 - ((d.totals && d.totals.assoc_global) || 0);      // vue globale
-    var sub = pct + '% du net';
+  function leadSub(t, d, isGlobal) {
+    // Le calcul est en 2 étages ((1 − %marché) × (1 − %global)) : le % affiché
+    // doit être le MULTIPLICATEUR réel, pas 100 − la somme des %.
+    var g = (d.totals && d.totals.assoc_global) || 0;
     var byMk = (d.totals && d.totals.assoc_by_mk) || {};
     var hasMk = Object.keys(byMk).some(function (k) { return byMk[k] > 0; });
-    if (t.assoc_pct == null && hasMk) sub += ' (split par marché)';
+    var sub;
+    if (isGlobal && hasMk) {
+      // vue globale avec associés de marché : un % unique n'existe pas -> détail
+      var order = d.market_order || Object.keys(byMk);
+      sub = order.map(function (mk) {
+        var eff = Math.round((100 - (byMk[mk] || 0)) * (100 - g)) / 100;
+        return mk.toUpperCase() + ' ' + eff + '%';
+      }).join(' · ') + ' du net';
+    } else {
+      var mkPct = isGlobal ? 0 : ((t.assoc_pct || 0) - g);
+      var eff = Math.round((100 - mkPct) * (100 - g)) / 100;
+      sub = eff + '% du net';
+    }
     if (t.reimb) sub += ' + ' + moneyShort(t.reimb) + ' à te rembourser';
     return sub;
   }
@@ -119,9 +132,14 @@
       mkTag = S.market === 'us' ? ' 🇺🇸' : ' 🇫🇷';
     }
     // Avances des ASSOCIÉS (dépenses payées par eux) : l'agence leur doit ça.
-    // Suit le filtre marché actif (t = totaux globaux OU du marché affiché).
+    // Les associés des Paramètres ont leur CARTE (part + avances) — la bannière
+    // ne sert plus que pour un payeur retiré des Paramètres depuis.
+    // clés préfixées : un payeur nommé « constructor »/« toString » remonterait
+    // sinon Object.prototype et disparaîtrait de la bannière
+    var apNames = {};
+    (t.assoc_parts || []).forEach(function (a) { apNames['#' + a.name] = 1; });
     var ra = t.reimb_assoc || {};
-    var raKeys = Object.keys(ra).filter(function (k) { return ra[k] > 0; });
+    var raKeys = Object.keys(ra).filter(function (k) { return ra[k] > 0 && !apNames['#' + k]; });
     var raBar = raKeys.length
       ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da">💳 Avances à rembourser : ' +
         raKeys.map(function (k) { return '<b style="color:#a5b4fc">' + esc(k) + '</b> ' + moneyShort(ra[k]); }).join(' <span style="color:#55556a">·</span> ') + '</div>'
@@ -134,7 +152,18 @@
       kpi('📨 Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
       kpi('📩 Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
       kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
-      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d), 'linear-gradient(90deg,#facc15,#f97316)');
+      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
+
+    // une carte par associé : sa part du split + ses avances éventuelles.
+    // Un « tous » est servi APRÈS les associés de marché -> « du net restant ».
+    var byMkA = (d.totals && d.totals.assoc_by_mk) || {};
+    var hasMkA = Object.keys(byMkA).some(function (k) { return byMkA[k] > 0; });
+    (t.assoc_parts || []).forEach(function (a) {
+      if (S.market !== 'all' && !a.part && !a.reimb) return;   // hors de son marché
+      var sub = a.pct + '% du net' + (a.market === 'us' ? ' 🇺🇸' : a.market === 'fr' ? ' 🇫🇷' : (hasMkA ? ' restant' : ''));
+      if (a.reimb) sub += ' + ' + moneyShort(a.reimb) + ' à lui rembourser';
+      kpis += kpi('🤝 Part ' + esc(a.name) + mkTag, moneyShort(a.pay != null ? a.pay : a.part), '#a5b4fc', sub, 'linear-gradient(90deg,#818cf8,#a78bfa)');
+    });
 
     var mktChips = [['all', '🌍 Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
       .map(function (c) {

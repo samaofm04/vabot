@@ -1432,6 +1432,49 @@ try:
              "associates": json.dumps([])})
     check("nom du lead modifiable et conserve si champ absent",
           _cF.get("/facture/state?month=" + _MF).get_json()["settings"]["lead_name"] == "Youl")
+    # cartes « Part <associé> » : part du split + ses avances a lui rembourser
+    # (net US = 10100 - 2450 = 7650 -> 50% = 3825 ; + son avance de 450)
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "Laboule", "pct": 50, "market": "us"}])})
+    _dF = _cF.get("/facture/state?month=" + _MF).get_json()
+    _apF = {a["name"]: a for a in _dF["totals"]["assoc_parts"]}
+    check("carte associe : part = % du net positif de SON marche",
+          _apF["Laboule"]["part"] == 3825, str(_apF))
+    check("carte associe : verse = part + ses avances", _apF["Laboule"]["pay"] == 4275)
+    _apU = {a["name"]: a for a in _dF["by_market"]["us"]["assoc_parts"]}
+    check("vue marche : la part de l associe reste sur SON marche",
+          _apU["Laboule"]["part"] == 3825
+          and all(not a["part"] and not a["reimb"] for a in _dF["by_market"]["fr"]["assoc_parts"]))
+    # associe global : % de la base RESTANTE (7650 - 5300 = 2350 -> 20% = 470)
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "G", "pct": 20, "market": "tous"}])})
+    _dG = _cF.get("/facture/state?month=" + _MF).get_json()
+    check("carte associe global : % de la base restante",
+          {a["name"]: a["part"] for a in _dG["totals"]["assoc_parts"]} == {"G": 470.0})
+    _sG = round(sum(a["part"] for mk in ("fr", "us")
+                    for a in _dG["by_market"][mk]["assoc_parts"] if a["name"] == "G"), 2)
+    check("ventilation par marche d un global = sa carte globale (au centime)",
+          _sG == [a["part"] for a in _dG["totals"]["assoc_parts"] if a["name"] == "G"][0])
+    # garde-fous de la revue adversariale
+    _rj = _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "X", "pct": 60, "market": "us"},
+                                       {"name": "Y", "pct": 60, "market": "us"}])}).get_json()
+    check("settings refuse un cumul de % > 100 sur un marche", not _rj.get("ok"))
+    _dj = _fwF._load()   # config legacy deja stockee a 120% : passee au prorata
+    _dj["settings"]["associates"] = [{"name": "X", "pct": 60, "market": "us"},
+                                     {"name": "Y", "pct": 60, "market": "us"}]
+    _fwF._save(_dj)
+    _pX = {a["name"]: a["part"] for a in _cF.get("/facture/state?month=" + _MF)
+           .get_json()["by_market"]["us"]["assoc_parts"]}
+    check("legacy > 100% : parts au prorata, jamais plus que le net",
+          _pX == {"X": 3825.0, "Y": 3825.0}, str(_pX))
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "Laboule", "pct": 10, "market": "fr"},
+                                       {"name": "Laboule", "pct": 10, "market": "us"}])})
+    _apH = [a for a in _cF.get("/facture/state?month=" + _MF).get_json()["totals"]["assoc_parts"]
+            if a["name"] == "Laboule"]
+    check("homonyme sur 2 marches : l avance n est comptee qu une fois",
+          len(_apH) == 2 and round(sum(a["reimb"] for a in _apH), 2) == 450, str(_apH))
     _wF._load_web_users = _savUF
     _fwF.FACTURE_FILE = _savFF
 except Exception as _e:
