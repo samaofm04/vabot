@@ -1539,13 +1539,13 @@ try:
     check("le client re-verifie l etat reel d un reel apres une erreur d envoi",
           "/veille/reel_state" in _wsrc20 and "veilleVerifySent" in _wsrc20
           and "wasSent" in _wsrc20 and "veilleMarkSent" in _wsrc20)
-    _rS20 = _appW20.test_client().get("/veille/reel_state?rid=x")
-    check("reel_state exige l auth", _rS20.status_code in (301, 302, 401, 403))
     import web_upload as _wu20
     _appW20 = _wu20.create_app()
     _appW20.testing = True
     _rW20 = _appW20.test_client().get("/veille/warm_status")
     check("warm_status exige l auth", _rW20.status_code in (301, 302, 401, 403))
+    _rS20 = _appW20.test_client().get("/veille/reel_state?rid=x")
+    check("reel_state exige l auth", _rS20.status_code in (301, 302, 401, 403))
 except Exception as _e:
     check("veille warm : testable", False, repr(_e)[:120])
 
