@@ -70,6 +70,34 @@
   /* ─────────────────────────── rendu principal ─────────────────────────── */
   // Sous-titre de la carte « Part lead » : % applicable (par marché si des
   // associés sont rattachés à un marché) + avances remboursées s'il y en a.
+  // Nom du lead (réglable dans ⚙️ Paramètres) — menu « Payée par » + badges.
+  function leadName() {
+    var s = (S.data && S.data.settings) || {};
+    return s.lead_name || 'Sama';
+  }
+
+  // Options du menu « Payée par » : l'agence, le lead par son nom, puis chaque
+  // associé des Paramètres (avance à LUI rembourser, suivie dans les totaux).
+  function paidByOpts(line) {
+    var st = (S.data && S.data.settings) || {};
+    var cur = line.paid_by || 'agence';
+    var o = '<option value="agence"' + (cur === 'agence' ? ' selected' : '') + '>🏢 L&#39;agence</option>' +
+      '<option value="lead"' + (cur === 'lead' ? ' selected' : '') + '>👑 ' + esc(leadName()) + ' (toi) — à me rembourser</option>';
+    var seen = false;
+    (st.associates || []).forEach(function (a) {
+      var nm = (a.name || '').trim();
+      if (!nm) return;
+      var v = 'assoc:' + nm;
+      if (cur === v) seen = true;
+      o += '<option value="' + esc(v) + '"' + (cur === v ? ' selected' : '') + '>👥 ' + esc(nm) + ' — à lui rembourser</option>';
+    });
+    // associé supprimé des Paramètres depuis : on garde son option sélectionnée
+    if (cur.indexOf('assoc:') === 0 && !seen) {
+      o += '<option value="' + esc(cur) + '" selected>👥 ' + esc(cur.slice(6)) + ' — à lui rembourser</option>';
+    }
+    return o;
+  }
+
   function leadSub(t, d) {
     var pct;
     if (t.assoc_pct != null) pct = 100 - t.assoc_pct;                 // vue marché
@@ -90,6 +118,14 @@
       t = d.by_market[S.market];
       mkTag = S.market === 'us' ? ' 🇺🇸' : ' 🇫🇷';
     }
+    // Avances des ASSOCIÉS (dépenses payées par eux) : l'agence leur doit ça.
+    // Suit le filtre marché actif (t = totaux globaux OU du marché affiché).
+    var ra = t.reimb_assoc || {};
+    var raKeys = Object.keys(ra).filter(function (k) { return ra[k] > 0; });
+    var raBar = raKeys.length
+      ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da">💳 Avances à rembourser : ' +
+        raKeys.map(function (k) { return '<b style="color:#a5b4fc">' + esc(k) + '</b> ' + moneyShort(ra[k]); }).join(' <span style="color:#55556a">·</span> ') + '</div>'
+      : '';
     var monthOpts = d.months.map(function (m) {
       return '<option value="' + m + '"' + (m === S.month ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
     }).join('');
@@ -128,6 +164,7 @@
       '<button id="fx-next" class="fx-btn2" style="padding:10px 16px">🧾 Démarrer mois suivant</button>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">' + kpis + '</div>' +
+      raBar +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + mktChips +
       '<span style="width:1px;height:22px;background:#2a2a35;margin:0 4px"></span>' + chips +
       '<div style="flex:1"></div>' +
@@ -259,7 +296,9 @@
     var mb = monthBounds();
     badges += badge('📅', 'Période : ' + frDate(mb[0]) + ' → ' + frDate(mb[1]) + ' ' + S.month.slice(0, 4));
     if (!isRev && l.paid_by === 'lead') {
-      badges += '<span style="background:rgba(250,204,21,.10);border:1px solid rgba(250,204,21,.4);color:#facc15;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par toi — à te rembourser</span>';
+      badges += '<span style="background:rgba(250,204,21,.10);border:1px solid rgba(250,204,21,.4);color:#facc15;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par ' + esc(leadName()) + ' (toi) — à te rembourser</span>';
+    } else if (!isRev && String(l.paid_by || '').indexOf('assoc:') === 0) {
+      badges += '<span style="background:rgba(129,140,248,.10);border:1px solid rgba(129,140,248,.4);color:#a5b4fc;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par ' + esc(l.paid_by.slice(6)) + ' — à lui rembourser</span>';
     }
     if (isRev && l.next_pay) {
       var days = Math.ceil((new Date(l.next_pay + 'T12:00:00') - new Date()) / 86400000);
@@ -444,7 +483,7 @@
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
       fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '<div id="fxm-paidby-wrap" style="display:' + (line.type === 'rev' ? 'none' : 'block') + '">' +
-      fld('💳 Payée par', '<select id="fxm-paidby" style="' + INP + '"><option value="agence"' + (line.paid_by !== 'lead' ? ' selected' : '') + '>🏢 L&#39;agence</option><option value="lead"' + (line.paid_by === 'lead' ? ' selected' : '') + '>👑 Moi (lead) — à me rembourser</option></select>') +
+      fld('💳 Payée par', '<select id="fxm-paidby" style="' + INP + '">' + paidByOpts(line) + '</select>') +
       '</div>' +
       '</div>' +
       '<div id="fxm-mypuls-wrap" style="display:' + (line.form === 'mypuls' ? 'block' : 'none') + '">' +
@@ -647,6 +686,7 @@
       '<div style="font-size:17px;font-weight:800">⚙️ Paramètres de calcul</div>' +
       '<button class="fx-close" style="background:#1d1d28;border:0;color:#999;width:30px;height:30px;border-radius:8px;cursor:pointer;margin:0">✕</button></div>' +
       fld('💱 Taux EUR → USD', '<input id="fxs-rate" type="number" step="0.01" min="0.5" max="2" style="' + INP + '" value="' + ((st.eur_usd_raw ? st.eur_usd_raw : '')) + '" placeholder="auto (' + (st.eur_usd || '') + ')">') +
+      fld('👑 Ton nom (lead)', '<input id="fxs-lead" style="' + INP + '" value="' + esc(st.lead_name || 'Sama') + '" placeholder="Sama">') +
       fld('💸 Jour de coupure paie chatters', '<input id="fxs-cutoff" type="number" min="1" max="28" style="' + INP + '" value="' + st.cutoff + '">') +
       '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin-bottom:16px">Découpe le mois en 2 périodes de paie : <b style="color:#c0c0d5">1 → ce jour</b> et <b style="color:#c0c0d5">jour+1 → fin du mois</b>. Défaut : 15 (1-15 / 16-fin).</div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
@@ -683,6 +723,7 @@
       var fd = new FormData();
       fd.set('eur_usd', document.getElementById('fxs-rate').value);
       fd.set('cutoff', document.getElementById('fxs-cutoff').value);
+      fd.set('lead_name', document.getElementById('fxs-lead').value);
       fd.set('associates', JSON.stringify(assoc.filter(function (a) { return (a.name || '').trim(); })));
       fetch('/facture/settings', {method: 'POST', body: fd}).then(function (r) { return r.json(); })
         .then(function (j) {

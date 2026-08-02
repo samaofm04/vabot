@@ -530,6 +530,8 @@ def compute_state(month: str) -> dict:
         "eur_usd_raw": float(d["settings"].get("eur_usd") or 0),
         "cutoff": int(d["settings"].get("cutoff") or 15),
         "associates": d["settings"].get("associates") or [],
+        # nom affiché pour « payée par moi » (menu Payée par + badge des lignes)
+        "lead_name": str(d["settings"].get("lead_name") or "Sama").strip()[:40] or "Sama",
     }
     months = sorted(d["months"].keys())
     cur = _cur_month()
@@ -601,7 +603,7 @@ def compute_state(month: str) -> dict:
     out_lines = []
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0,
-                      "reimb": 0.0} for mk in MARKETS}
+                      "reimb": 0.0, "reimb_assoc": {}} for mk in MARKETS}
     for l in lines:
         extra = {}
         if l.get("id") in resolved_src:
@@ -638,6 +640,11 @@ def compute_state(month: str) -> dict:
             by_market[mk]["exp_count"] += 1
             if ll.get("paid_by") == "lead":
                 by_market[mk]["reimb"] += usd
+            elif str(ll.get("paid_by") or "").startswith("assoc:"):
+                # avancée par un associé : l'agence lui doit ce montant
+                _an = str(ll["paid_by"])[6:]
+                _ra = by_market[mk]["reimb_assoc"]
+                _ra[_an] = _ra.get(_an, 0.0) + usd
 
     # Associés en 2 étages : d'abord les % PAR MARCHÉ (un associé « US » ne
     # touche que le net positif du marché US), puis les % GLOBAUX sur ce qui
@@ -663,12 +670,16 @@ def compute_state(month: str) -> dict:
     # Répartition par marché au PRORATA de la base (linéaire -> la somme des
     # parts par marché redonne toujours la part globale, même en perte).
     reimb_total = 0.0
+    reimb_assoc_total = {}
     for mk, bm in by_market.items():
         if base:
             bm["lead"] = round(lead * stage[mk] / base, 2)
         else:
             bm["lead"] = 0.0
         bm["reimb"] = round(bm["reimb"], 2)
+        bm["reimb_assoc"] = {k: round(v, 2) for k, v in bm["reimb_assoc"].items()}
+        for _k, _v in bm["reimb_assoc"].items():
+            reimb_assoc_total[_k] = round(reimb_assoc_total.get(_k, 0.0) + _v, 2)
         # ce que le lead ENCAISSE sur ce marché : sa part + ses avances remboursées
         bm["lead_pay"] = round(bm["lead"] + bm["reimb"], 2)
         reimb_total += bm["reimb"]
@@ -686,6 +697,7 @@ def compute_state(month: str) -> dict:
             "net": net,
             "lead": lead,
             "reimb": round(reimb_total, 2),
+            "reimb_assoc": reimb_assoc_total,
             "lead_pay": round(lead + reimb_total, 2),
             "assoc_pct": round(assoc_pct, 2),
             "assoc_global": round(assoc_global, 2),
@@ -707,6 +719,18 @@ def compute_state(month: str) -> dict:
             if l.get("type") == "rev" and (l.get("form") or "fixed") in ("fixed", "mypuls") and l.get("id")
         ],
     }
+
+
+def _clean_paid_by(raw: dict) -> str:
+    """'agence' (défaut), 'lead', ou 'assoc:Nom' — jamais autre chose."""
+    pb = str(raw.get("paid_by") or "agence").strip()[:60]
+    if raw.get("type") == "rev":
+        return "agence"
+    if pb == "lead":
+        return "lead"
+    if pb.startswith("assoc:") and pb[6:].strip():
+        return "assoc:" + pb[6:].strip()[:40]
+    return "agence"
 
 
 def _sanitize_line(raw: dict) -> dict:
@@ -733,9 +757,9 @@ def _sanitize_line(raw: dict) -> dict:
         "next_pay": s("next_pay", 10),
         "paid": bool(raw.get("paid")),
         "paid_at": s("paid_at", 10),
-        # dépense AVANCÉE PAR LE LEAD en perso -> à lui rembourser (ajoutée à
-        # sa part dans les KPI). Sans objet sur un revenu (forcé 'agence').
-        "paid_by": "lead" if (raw.get("paid_by") == "lead" and raw.get("type") != "rev") else "agence",
+        # dépense AVANCÉE en perso : 'lead' (ajoutée à sa part dans les KPI) ou
+        # 'assoc:Nom' (l'agence doit rembourser cet associé). Revenu -> 'agence'.
+        "paid_by": _clean_paid_by(raw),
     }
     try:
         line["amount"] = round(float(raw.get("amount") or 0), 2)
@@ -1308,6 +1332,10 @@ def register(app, is_auth):
             st["cutoff"] = max(1, min(28, int(request.form.get("cutoff") or 15)))
         except Exception:
             pass
+        # champ absent (vieux client) ou vidé -> on ne touche pas au nom stocké
+        _ln = (request.form.get("lead_name") or "").strip()[:40]
+        if _ln:
+            st["lead_name"] = _ln
         try:
             assoc = json.loads(request.form.get("associates") or "[]")
             clean = []

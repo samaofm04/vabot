@@ -1410,6 +1410,28 @@ try:
           round(_bF["fr"]["lead"] + _bF["us"]["lead"], 2) == _tF["lead"])
     _rowF = [r for r in _fwF.compute_bilan()["rows"] if r["month"] == _MF][0]
     check("le bilan verse au lead part + avances", _rowF["lead"] == _tF["lead_pay"])
+    # depense avancee par un ASSOCIE ('assoc:Nom') : due a LUI, pas au lead
+    _addF("Pub payee par Laboule", "exp", 450, "us", "assoc:Laboule")
+    _addF("Rev paye par assoc ?", "rev", 100, "us", "assoc:Laboule")  # force 'agence'
+    _dF = _cF.get("/facture/state?month=" + _MF).get_json()
+    _tF = _dF["totals"]
+    check("avance d un associe suivie a son nom",
+          _tF.get("reimb_assoc", {}).get("Laboule") == 450, str(_tF.get("reimb_assoc")))
+    check("l avance d un associe ne gonfle pas la part du lead",
+          _tF["lead_pay"] == round(_tF["lead"] + _tF["reimb"], 2) and _tF["reimb"] == 300)
+    check("paid_by assoc refuse sur un revenu",
+          all(l["paid_by"] == "agence" for l in _dF["lines"] if l["type"] == "rev"))
+    check("l avance associe est rangee dans SON marche",
+          _dF["by_market"]["us"]["reimb_assoc"].get("Laboule") == 450
+          and not _dF["by_market"]["fr"]["reimb_assoc"])
+    # nom du lead : defaut 'Sama', modifiable, champ vide = inchange
+    check("nom du lead par defaut : Sama", _dF["settings"].get("lead_name") == "Sama")
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "lead_name": "Youl", "associates": json.dumps([])})
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([])})
+    check("nom du lead modifiable et conserve si champ absent",
+          _cF.get("/facture/state?month=" + _MF).get_json()["settings"]["lead_name"] == "Youl")
     _wF._load_web_users = _savUF
     _fwF.FACTURE_FILE = _savFF
 except Exception as _e:
