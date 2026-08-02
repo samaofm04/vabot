@@ -1516,6 +1516,24 @@ try:
     _wloop20 = _wsrc20.split("def _veille_warm_loop", 1)[1][:4200]
     check("le warm s efface devant un envoi manuel", "_vsend_inflight" in _wloop20)
     check("le worker retente les fantomes a chaque cycle", "warm_cleanup" in _wloop20)
+    check("barre Sur Telegram + passe forcee presentes",
+          "/veille/warm_status" in _wsrc20 and "/veille/warm_now" in _wsrc20
+          and "vl-warm-bar" in _wsrc20 and "vlWarmNow" in _wsrc20 and "_vwarm_force" in _wsrc20)
+    check("worker et passe forcee serialises (un upload warm a la fois)",
+          "_vwarm_lock" in _wsrc20 and "_vwarm_one" in _wsrc20)
+    check("passe forcee : claim atomique de running DANS la route (2 clics = 1 passe)",
+          "_vwarm_state_lock" in _wsrc20
+          and 0 <= _wsrc20.find('_VWARM_STATE.update({"running": True') < _wsrc20.find("veille-warm-force"))
+    check("la barre Sur Telegram n existe qu UNE fois (hors boucle des jours)",
+          _wsrc20.count("id='vl-warm-bar'") == 1
+          and "sections = [bulk_bar, warm_bar_html" in _wsrc20)
+    check("_WARM_GHOSTS protege par verrou (append vs purge concurrents)",
+          "_GHOST_LOCK" in _insp20.getsource(_vt20))
+    import web_upload as _wu20
+    _appW20 = _wu20.create_app()
+    _appW20.testing = True
+    _rW20 = _appW20.test_client().get("/veille/warm_status")
+    check("warm_status exige l auth", _rW20.status_code in (301, 302, 401, 403))
 except Exception as _e:
     check("veille warm : testable", False, repr(_e)[:120])
 

@@ -1900,6 +1900,51 @@ window.igDownloadNow = function(btn){
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loop);
   else loop();
 })();
+// Barre « Sur Telegram » (Veille) : X/Y reels non envoyes deja pre-chauffes
+// (file_id) -> leur envoi est instantane. Meme mecanique que ig-dl-bar.
+window.vlRefreshWarmBar = function(){
+  var bar = document.getElementById('vl-warm-bar'); if(!bar) return;
+  fetch('/veille/warm_status', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok) return;
+      var pct = d.total ? Math.round(d.ready / d.total * 100) : 100;
+      var fill = document.getElementById('vl-warm-fill'); if(fill) fill.style.width = pct + '%';
+      var txt = document.getElementById('vl-warm-txt');
+      if(txt){
+        var s = (d.ready||0) + ' / ' + (d.total||0) + ' sur Telegram';
+        if(d.running && d.queue){ s += ' · ⏳ ' + (d.done||0) + '/' + d.queue + ' en cours'; }
+        else if(pct >= 100 && d.total){ s += ' ✅'; }
+        txt.textContent = s;
+      }
+      window.__vlWarmLast = !!d.running;
+      var b = document.getElementById('vl-warm-now');
+      if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
+             b.textContent = d.running ? '⏳ En cours…' : '⚡ Précharger'; }
+    }).catch(function(){});
+};
+window.vlWarmNow = function(btn){
+  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '⏳ …'; }
+  fetch('/veille/warm_now', {method:'POST', credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(typeof showToast === 'function') showToast(
+        d && d.ok ? (d.already ? 'Préchargement déjà en cours…' : '⚡ Préchargement lancé') : ((d && d.error) || 'Erreur'),
+        d && d.ok ? 'success' : 'error');
+      vlRefreshWarmBar();
+    })
+    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='⚡ Précharger'; } });
+};
+(function(){
+  window.__vlWarmLast = false;
+  function loop(){
+    if(!document.getElementById('vl-warm-bar')) return;
+    vlRefreshWarmBar();
+    setTimeout(loop, window.__vlWarmLast ? 3000 : 20000);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loop);
+  else loop();
+})();
 // Arret automatique quand un reel en lecture sort de l'ecran (fini le son
 // fantome quand on scrolle). Un seul observer global, reutilise.
 window.__igReelObs = null;
@@ -22561,7 +22606,24 @@ def _render_veille_feed_html() -> str:
         )
     else:
         date_picker_html = ""
-    sections = [bulk_bar, date_picker_html]
+    # Barre « Sur Telegram » (même look que « Vidéos prêtes » de Trends), UNE
+    # SEULE fois en tête de page (compte GLOBAL, ids uniques) : combien de
+    # reels non envoyés sont déjà pré-chauffés (file_id) -> leur « Envoyer »
+    # est instantané. ⚡ Précharger = tout chauffer maintenant, en fond.
+    warm_bar_html = (
+        "<div id='vl-warm-bar' style='margin:0 0 14px;background:#12121a;border:1px solid #26263a;"
+        "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
+        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>✈️ Sur Telegram</span>"
+        "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
+        "<div id='vl-warm-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#facc15,#3467FF);"
+        "border-radius:5px;transition:width .4s'></div></div>"
+        "<span id='vl-warm-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
+        "<button type='button' id='vl-warm-now' onclick='vlWarmNow(this)' "
+        "title='Uploader maintenant sur Telegram toutes les vidéos non envoyées (en fond) : l&#39;envoi du soir sera instantané' "
+        "style='background:#3467FF;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;"
+        "font-size:11.5px;font-weight:700;white-space:nowrap'>⚡ Précharger</button>"
+        "</div>")
+    sections = [bulk_bar, warm_bar_html, date_picker_html]
     for day in all_days_sorted:
         reels = by_day[day]
         # Format date : "03/06" (DD/MM) + Aujourd'hui/Hier comme tooltip
@@ -39743,61 +39805,155 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     # (message fantôme supprimé aussitôt, seul le file_id est gardé) : le soir,
     # « Envoyer la sélection » part en file_id -> instantané. Un envoi manuel
     # en cours suspend le cycle (il garde la priorité sur le verrou d'ordre).
+    _vwarm_fails: dict = {}   # rid -> nb d'échecs : 3 ratés = on n'insiste plus (Apify payant)
+    _vwarm_lock = threading.Lock()   # 1 upload warm à la fois (worker + passe forcée)
+    _vwarm_state_lock = threading.Lock()   # claim ATOMIQUE de la passe forcée
+    _VWARM_STATE = {"running": False, "done": 0, "total": 0}   # passe forcée (bouton ⚡)
+
+    def _vwarm_candidates(veille, veille_telegram):
+        """Reels non envoyés, pas encore sur Telegram, pas condamnés (3 échecs)."""
+        out = []
+        for r in veille.list_reels():
+            if r.get("sent_to_telegram") or r.get("tg_file_id"):
+                continue
+            if _vwarm_fails.get(r.get("id"), 0) >= 3:
+                continue
+            _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+            if not _mw or veille_telegram.fileid_get(_mw.group(1)):
+                continue
+            out.append(r)
+        return out
+
+    def _vwarm_one(veille, veille_telegram, r) -> bool:
+        """Chauffe UN reel ; True si file_id obtenu. Sérialisé par _vwarm_lock —
+        si worker et passe forcée choisissent le même reel, le 2e appel tombe
+        sur le cache (mode 'cached') et n'uploade pas en double."""
+        try:
+            with _vwarm_lock:
+                res = veille_telegram.warm_reel(r)
+            if res.get("ok") and res.get("tg_file_id"):
+                _vwarm_fails.pop(r.get("id"), None)
+                try:
+                    veille.update_reel(r.get("id"), tg_file_id=res["tg_file_id"])
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            pass
+        _vwarm_fails[r.get("id")] = _vwarm_fails.get(r.get("id"), 0) + 1
+        return False
+
     def _veille_warm_loop():
         import time as _t
-        _warm_fails: dict = {}   # rid -> nb d'échecs : 3 ratés = on n'insiste plus
         _t.sleep(120)   # laisse le démarrage (scrape, thumbs...) respirer
         while True:
             try:
                 import veille
                 import veille_telegram
-                if veille_telegram.is_configured():
+                if veille_telegram.is_configured() and not _VWARM_STATE["running"]:
                     # fantômes dont le delete a raté au cycle d'avant : retentés
                     try:
                         veille_telegram.warm_cleanup()
                     except Exception:
                         pass
-                    todo = []
-                    for r in veille.list_reels():
-                        if r.get("sent_to_telegram") or r.get("tg_file_id"):
-                            continue
-                        if _warm_fails.get(r.get("id"), 0) >= 3:
-                            continue   # vidéo introuvable : on ne brûle pas Apify dessus
-                        _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
-                        if not _mw or veille_telegram.fileid_get(_mw.group(1)):
-                            continue
-                        todo.append(r)
                     warmed = 0
-                    for r in todo[:3]:      # 3 max par cycle : doux avec IG et Telegram
+                    for r in _vwarm_candidates(veille, veille_telegram)[:3]:
                         with _vsend_lock:
                             _busy = bool(_vsend_inflight)
                         if _busy:
                             break           # envoi manuel en cours -> on s'efface
-                        try:
-                            res = veille_telegram.warm_reel(r)
-                            if res.get("ok") and res.get("tg_file_id"):
-                                warmed += 1
-                                _warm_fails.pop(r.get("id"), None)
-                                try:
-                                    veille.update_reel(r.get("id"), tg_file_id=res["tg_file_id"])
-                                except Exception:
-                                    pass
-                            else:
-                                _warm_fails[r.get("id")] = _warm_fails.get(r.get("id"), 0) + 1
-                        except Exception:
-                            _warm_fails[r.get("id")] = _warm_fails.get(r.get("id"), 0) + 1
+                        if _vwarm_one(veille, veille_telegram, r):
+                            warmed += 1
                         _t.sleep(8)
                     if warmed:
                         print(f"[veille-warm] {warmed} reel(s) pré-chauffé(s) -> envoi instantané")
             except Exception as _e:
                 print(f"[veille-warm] cycle: {_e}")
             _t.sleep(600)   # toutes les 10 min
+
+    def _vwarm_force():
+        """Bouton ⚡ Précharger : chauffe TOUT le backlog d'un coup, en fond.
+        Un envoi manuel en cours garde la priorité (on attend qu'il finisse).
+        « running » est CLAMÉ par la route avant le spawn (claim atomique) —
+        ici on ne fait que remplir la file et le compteur."""
+        import time as _t
+        try:
+            import veille
+            import veille_telegram
+            if not veille_telegram.is_configured():
+                return
+            todo = _vwarm_candidates(veille, veille_telegram)
+            _VWARM_STATE.update({"done": 0, "total": len(todo)})
+            for r in todo:
+                for _ in range(60):
+                    with _vsend_lock:
+                        _busy = bool(_vsend_inflight)
+                    if not _busy:
+                        break
+                    _t.sleep(5)
+                _vwarm_one(veille, veille_telegram, r)
+                _VWARM_STATE["done"] += 1
+                _t.sleep(4)
+            try:
+                veille_telegram.warm_cleanup()
+            except Exception:
+                pass
+        except Exception as _e:
+            print(f"[veille-warm] force: {_e}")
+        finally:
+            _VWARM_STATE["running"] = False
     # create_app tourne PLUSIEURS fois par process (run_web_app + boot-warmup,
     # et 10x dans les tests) : un seul thread warm pour tout le monde, sinon le
     # même reel serait téléchargé (Apify payant) et uploadé en double.
     if not globals().get("_VEILLE_WARM_STARTED"):
         globals()["_VEILLE_WARM_STARTED"] = True
         threading.Thread(target=_veille_warm_loop, daemon=True, name="veille-warm").start()
+
+    @app.route("/veille/warm_status")
+    def veille_warm_status():
+        """Barre « Sur Telegram » : X reels non envoyés déjà pré-chauffés / Y."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import veille
+            import veille_telegram
+            ready = total = 0
+            for r in veille.list_reels():
+                if r.get("sent_to_telegram"):
+                    continue
+                _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
+                if not _mw:
+                    continue
+                total += 1
+                if r.get("tg_file_id") or veille_telegram.fileid_get(_mw.group(1)):
+                    ready += 1
+            return jsonify({"ok": True, "ready": ready, "total": total,
+                            "running": bool(_VWARM_STATE["running"]),
+                            "done": _VWARM_STATE["done"], "queue": _VWARM_STATE["total"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/veille/warm_now", methods=["POST"])
+    def veille_warm_now():
+        """Bouton ⚡ Précharger : uploade TOUT le backlog sur Telegram, en fond."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import veille_telegram
+            if not veille_telegram.is_configured():
+                return jsonify({"ok": False, "error": "Bot Telegram non configuré"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        # claim ATOMIQUE : running posé ICI, pas dans le thread — sinon deux
+        # clics rapides (ou le poll qui ré-active le bouton) lançaient 2 passes
+        with _vwarm_state_lock:
+            if _VWARM_STATE.get("running"):
+                return jsonify({"ok": True, "already": True})
+            _VWARM_STATE.update({"running": True, "done": 0, "total": 0})
+        threading.Thread(target=_vwarm_force, daemon=True, name="veille-warm-force").start()
+        return jsonify({"ok": True, "started": True})
 
     @app.route("/veille/send", methods=["POST"])
     def veille_send():

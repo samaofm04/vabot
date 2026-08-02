@@ -457,28 +457,33 @@ def fileid_drop(shortcode: str):
 
 
 _WARM_GHOSTS: list = []   # (chat_id, message_id) fantômes dont le delete a raté
+_GHOST_LOCK = _threading.Lock()   # append (warm) et purge (cleanup) concurrents
 
 
 def warm_cleanup():
     """Retente la suppression des messages fantômes ratés (429, réseau...).
     Appelé à chaque cycle du worker. « Message not found » = déjà parti."""
-    if not _WARM_GHOSTS:
+    with _GHOST_LOCK:
+        batch = _WARM_GHOSTS[:20]
+    if not batch:
         return
     cfg = load_config()
     token = cfg.get("bot_token")
     if not token:
         return
-    rest = []
-    for chat, mid in _WARM_GHOSTS[:20]:
+    gone = []
+    for chat, mid in batch:
         try:
             r = _tg_post(f"{TG_API_BASE}/bot{token}/deleteMessage",
                          data={"chat_id": chat, "message_id": mid}, timeout=15)
             ok = (r.status_code == 200 and bool(r.json().get("ok")))
-            if not ok and "not found" not in str(r.text or "").lower():
-                rest.append((chat, mid))
+            if ok or "not found" in str(r.text or "").lower():
+                gone.append((chat, mid))
         except Exception:
-            rest.append((chat, mid))
-    _WARM_GHOSTS[:] = rest + _WARM_GHOSTS[20:]
+            pass
+    if gone:
+        with _GHOST_LOCK:
+            _WARM_GHOSTS[:] = [g for g in _WARM_GHOSTS if g not in gone]
 
 
 def warm_reel(reel: Dict[str, Any]) -> Dict[str, Any]:
@@ -823,8 +828,9 @@ def send_video_from_url(video_url: str, caption: str = "",
             except Exception:
                 _dok = False
             if not _dok and msg_id:
-                _WARM_GHOSTS.append((chat_id, msg_id))
-                del _WARM_GHOSTS[:-50]   # borne dure : jamais plus de 50 en attente
+                with _GHOST_LOCK:
+                    _WARM_GHOSTS.append((chat_id, msg_id))
+                    del _WARM_GHOSTS[:-50]   # borne dure : jamais plus de 50 en attente
             return {"ok": True, "mode": "warmed", "tg_file_id": _new_fid}
 
         # 3) Followup texte (la description IG) en message separe
