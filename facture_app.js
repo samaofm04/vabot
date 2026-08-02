@@ -154,16 +154,74 @@
       kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
       kpi('👑 Part ' + esc(leadName()) + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
 
-    // une carte par associé : sa part du split + ses avances éventuelles.
-    // Un « tous » est servi APRÈS les associés de marché -> « du net restant ».
+    // Associés regroupés par PERSONNE (un même nom peut avoir une entrée par
+    // marché) : la carte KPI et la boîte du Règlement montrent le MÊME montant.
     var byMkA = (d.totals && d.totals.assoc_by_mk) || {};
     var hasMkA = Object.keys(byMkA).some(function (k) { return byMkA[k] > 0; });
+    var seenA = {}, people = [];
     (t.assoc_parts || []).forEach(function (a) {
-      if (S.market !== 'all' && !a.part && !a.reimb) return;   // hors de son marché
-      var sub = a.pct + '% du net' + (a.market === 'us' ? ' 🇺🇸' : a.market === 'fr' ? ' 🇫🇷' : (hasMkA ? ' restant' : ''));
-      if (a.reimb) sub += ' + ' + moneyShort(a.reimb) + ' à lui rembourser';
-      kpis += kpi('🤝 Part ' + esc(a.name) + mkTag, moneyShort(a.pay != null ? a.pay : a.part), '#a5b4fc', sub, 'linear-gradient(90deg,#818cf8,#a78bfa)');
+      var k = '#' + a.name;
+      if (!seenA[k]) { seenA[k] = {name: a.name, entries: [], part: 0, reimb: 0, pay: 0}; people.push(seenA[k]); }
+      var g = seenA[k];
+      g.entries.push(a);
+      g.part = Math.round((g.part + (a.part || 0)) * 100) / 100;
+      g.reimb = Math.round((g.reimb + (a.reimb || 0)) * 100) / 100;
+      g.pay = Math.round((g.pay + (a.pay != null ? a.pay : (a.part || 0))) * 100) / 100;
     });
+
+    // une carte par personne : sa part du split + ses avances éventuelles.
+    // Un « tous » est servi APRÈS les associés de marché -> « du net restant ».
+    people.forEach(function (g) {
+      if (S.market !== 'all' && !g.part && !g.reimb) return;   // hors de son marché
+      var sub;
+      if (g.entries.length === 1) {
+        var a0 = g.entries[0];
+        sub = a0.pct + '% du net' + (a0.market === 'us' ? ' 🇺🇸' : a0.market === 'fr' ? ' 🇫🇷' : (hasMkA ? ' restant' : ''));
+      } else {
+        sub = g.entries.map(function (a) {
+          return a.pct + '%' + (a.market === 'us' ? ' 🇺🇸' : a.market === 'fr' ? ' 🇫🇷' : ' global');
+        }).join(' + ') + ' du net';
+      }
+      if (g.reimb) sub += ' + ' + moneyShort(g.reimb) + ' à lui rembourser';
+      kpis += kpi('🤝 Part ' + esc(g.name) + mkTag, moneyShort(g.pay), '#a5b4fc', sub, 'linear-gradient(90deg,#818cf8,#a78bfa)');
+    });
+
+    // 🧾 Règlement du mois : pour chaque personne, la part du bénéf, chaque
+    // dépense avancée LIGNE PAR LIGNE, le total des avances, et le « À verser ».
+    var setLines = (d.lines || []).filter(function (l) {
+      return l.type !== 'rev' && (S.market === 'all' || (l.market || 'us') === S.market);
+    });
+    // un payeur retiré des Paramètres garde sa boîte (part 0, avances dues)
+    setLines.forEach(function (l) {
+      var pb = String(l.paid_by || '');
+      if (pb.indexOf('assoc:') !== 0) return;
+      var nm = pb.slice(6), k = '#' + nm;
+      if (seenA[k]) return;
+      var owed = Object.prototype.hasOwnProperty.call(ra, nm) ? ra[nm] : 0;
+      seenA[k] = {name: nm, entries: [], part: 0, reimb: Math.round(owed * 100) / 100, pay: Math.round(owed * 100) / 100};
+      people.push(seenA[k]);
+    });
+    var settleHtml = '';
+    var hasAdv = setLines.some(function (l) {
+      return l.paid_by === 'lead' || String(l.paid_by || '').indexOf('assoc:') === 0;
+    });
+    if (people.length || hasAdv) {
+      var leadAdv = setLines.filter(function (l) { return l.paid_by === 'lead'; });
+      var boxes = settleBox('👑 ' + esc(leadName()) + ' (toi)', t.lead || 0, leadAdv,
+        t.reimb || 0, t.lead_pay != null ? t.lead_pay : (t.lead || 0), '#facc15');
+      people.forEach(function (g) {
+        if (S.market !== 'all' && !g.part && !g.reimb) return;   // hors de son marché
+        var adv = setLines.filter(function (l) { return l.paid_by === 'assoc:' + g.name; });
+        boxes += settleBox('🤝 ' + esc(g.name), g.part, adv, g.reimb, g.pay, '#a5b4fc');
+      });
+      settleHtml =
+        '<div style="background:#0f0f17;border:1px solid #23232e;border-radius:14px;padding:14px 16px;margin-bottom:16px">' +
+        '<div style="font-size:13px;font-weight:800;margin-bottom:5px">🧾 Règlement du mois' + mkTag + '</div>' +
+        '<div style="font-size:11.5px;color:#8f8fa8;margin-bottom:10px">' + money(t.rev || 0) + ' revenus − ' + money(t.exp || 0) +
+        ' dépenses = <b style="color:' + (t.net >= 0 ? '#4ade80' : '#f87171') + '">' + money(t.net || 0) +
+        '</b> de bénéf à splitter · chacun récupère EN PLUS ce qu&#39;il a avancé de sa poche</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">' + boxes + '</div></div>';
+    }
 
     var mktChips = [['all', '🌍 Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
       .map(function (c) {
@@ -193,7 +251,7 @@
       '<button id="fx-next" class="fx-btn2" style="padding:10px 16px">🧾 Démarrer mois suivant</button>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">' + kpis + '</div>' +
-      raBar +
+      settleHtml + raBar +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + mktChips +
       '<span style="width:1px;height:22px;background:#2a2a35;margin:0 4px"></span>' + chips +
       '<div style="flex:1"></div>' +
@@ -216,6 +274,24 @@
       c.addEventListener('click', function () { S.market = c.dataset.m; render(); });
     });
     bindGroupEvents();
+  }
+
+  // Boîte du Règlement : part du bénéf + avances ligne par ligne + « À verser ».
+  // Montants en money() (2 décimales) : l'addition doit tomber juste à l'œil.
+  function settleBox(title, part, advLines, advTotal, payTotal, color) {
+    var rows = advLines.length ? advLines.map(function (l) {
+      return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:#9a9aa8;padding:2px 0">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">+ ' + esc(l.label || 'Sans nom') + '</span>' +
+        '<span style="color:#c0c0d5;flex-shrink:0">' + money(l.usd || 0) + '</span></div>';
+    }).join('') : '<div style="font-size:11.5px;color:#55556a;padding:2px 0">Aucune avance ce mois</div>';
+    return '<div style="background:#12121a;border:1px solid #23232e;border-radius:12px;padding:13px 15px">' +
+      '<div style="font-size:12.5px;font-weight:800;margin-bottom:8px">' + title + '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;color:#c0c0d5;padding:2px 0"><span>Part du bénéf</span><b>' + money(part) + '</b></div>' +
+      '<div style="font-size:10px;color:#8a8a98;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 3px">💳 Avancé de sa poche</div>' +
+      '<div style="max-height:150px;overflow:auto">' + rows + '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;color:#c0c0d5;border-top:1px dashed #2a2a35;margin-top:6px;padding-top:6px"><span>Total avances</span><b>' + money(advTotal) + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;border-top:1px solid #2a2a35;margin-top:8px;padding-top:8px"><span style="font-weight:800">= À verser</span><b style="color:' + color + ';font-size:16px">' + money(payTotal) + '</b></div>' +
+      '</div>';
   }
 
   function kpi(label, value, color, sub, grad) {
