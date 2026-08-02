@@ -68,6 +68,20 @@
   }
 
   /* ─────────────────────────── rendu principal ─────────────────────────── */
+  // Sous-titre de la carte « Part lead » : % applicable (par marché si des
+  // associés sont rattachés à un marché) + avances remboursées s'il y en a.
+  function leadSub(t, d) {
+    var pct;
+    if (t.assoc_pct != null) pct = 100 - t.assoc_pct;                 // vue marché
+    else pct = 100 - ((d.totals && d.totals.assoc_global) || 0);      // vue globale
+    var sub = pct + '% du net';
+    var byMk = (d.totals && d.totals.assoc_by_mk) || {};
+    var hasMk = Object.keys(byMk).some(function (k) { return byMk[k] > 0; });
+    if (t.assoc_pct == null && hasMk) sub += ' (split par marché)';
+    if (t.reimb) sub += ' + ' + moneyShort(t.reimb) + ' à te rembourser';
+    return sub;
+  }
+
   function render() {
     var d = S.data, t = d.totals;
     // Filtre marché actif -> les KPI basculent sur les totaux de CE marché
@@ -84,7 +98,7 @@
       kpi('📨 Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
       kpi('📩 Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
       kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
-      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead), '#facc15', (100 - d.totals.assoc_pct) + '% du net', 'linear-gradient(90deg,#facc15,#f97316)');
+      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d), 'linear-gradient(90deg,#facc15,#f97316)');
 
     var mktChips = [['all', '🌍 Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
       .map(function (c) {
@@ -244,6 +258,9 @@
     var badges = '';
     var mb = monthBounds();
     badges += badge('📅', 'Période : ' + frDate(mb[0]) + ' → ' + frDate(mb[1]) + ' ' + S.month.slice(0, 4));
+    if (!isRev && l.paid_by === 'lead') {
+      badges += '<span style="background:rgba(250,204,21,.10);border:1px solid rgba(250,204,21,.4);color:#facc15;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par toi — à te rembourser</span>';
+    }
     if (isRev && l.next_pay) {
       var days = Math.ceil((new Date(l.next_pay + 'T12:00:00') - new Date()) / 86400000);
       badges += badge('🎯', 'Prochain paiement : ' + frDate(l.next_pay) + ' ' + l.next_pay.slice(0, 4) + (days >= 0 ? ' (dans ' + days + 'j)' : ''));
@@ -426,6 +443,9 @@
       fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '>🔄 CA MyPuls (auto)</option><option value="mypuls_crm"' + (line.form === 'mypuls_crm' ? ' selected' : '') + '>🧾 Frais CRM MyPuls (auto)</option><option value="va_clicks"' + (line.form === 'va_clicks' ? ' selected' : '') + '>👆 Clics VA × 0.07$ (auto)</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
       fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
+      '<div id="fxm-paidby-wrap" style="display:' + (line.type === 'rev' ? 'none' : 'block') + '">' +
+      fld('💳 Payée par', '<select id="fxm-paidby" style="' + INP + '"><option value="agence"' + (line.paid_by !== 'lead' ? ' selected' : '') + '>🏢 L&#39;agence</option><option value="lead"' + (line.paid_by === 'lead' ? ' selected' : '') + '>👑 Moi (lead) — à me rembourser</option></select>') +
+      '</div>' +
       '</div>' +
       '<div id="fxm-mypuls-wrap" style="display:' + (line.form === 'mypuls' ? 'block' : 'none') + '">' +
       fld('🔄 Créatrice MyPuls <span style="color:#55556a;text-transform:none">(CA du mois récupéré automatiquement, converti en $)</span>',
@@ -530,6 +550,8 @@
     })();
     document.getElementById('fxm-type').addEventListener('change', function () {
       document.getElementById('fxm-nextpay-wrap').style.display = this.value === 'rev' ? 'block' : 'none';
+      var pw = document.getElementById('fxm-paidby-wrap');
+      if (pw) pw.style.display = this.value === 'rev' ? 'none' : 'block';
     });
     document.getElementById('fxm-genphases').addEventListener('click', function (e) {
       e.preventDefault();
@@ -560,6 +582,7 @@
         cat: document.getElementById('fxm-cat').value,
         form: document.getElementById('fxm-form').value,
         market: document.getElementById('fxm-market').value,
+        paid_by: (document.getElementById('fxm-paidby') || {value: 'agence'}).value,
         mypuls_model: (document.getElementById('fxm-mypulsmodel') || {value: ''}).value,
         mypuls_creator_id: (function () {
           var s = document.getElementById('fxm-mypulsmodel');
@@ -607,10 +630,15 @@
     function assocRows() {
       if (!assoc.length) return '<div style="color:#66667a;font-size:12px;padding:10px 0">Aucun associé. Clique <b>+ Ajouter</b> pour en créer un.</div>';
       return assoc.map(function (a, i) {
+        var mk = (a.market === 'fr' || a.market === 'us') ? a.market : 'tous';
         return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:7px">' +
           '<input data-ai="' + i + '" data-k="name" style="' + INP + ';flex:1" value="' + esc(a.name) + '" placeholder="Nom">' +
-          '<input data-ai="' + i + '" data-k="pct" type="number" min="0" max="100" step="0.5" style="' + INP + ';width:90px" value="' + a.pct + '">' +
+          '<input data-ai="' + i + '" data-k="pct" type="number" min="0" max="100" step="0.5" style="' + INP + ';width:80px" value="' + a.pct + '">' +
           '<span style="color:#77778a;font-size:12px">%</span>' +
+          '<select data-ai="' + i + '" data-k="market" style="' + INP + ';width:118px">' +
+          '<option value="tous"' + (mk === 'tous' ? ' selected' : '') + '>🌍 Tous</option>' +
+          '<option value="fr"' + (mk === 'fr' ? ' selected' : '') + '>🇫🇷 FR</option>' +
+          '<option value="us"' + (mk === 'us' ? ' selected' : '') + '>🇺🇸 US</option></select>' +
           '<button data-adel="' + i + '" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;margin:0">🗑</button></div>';
       }).join('');
     }
@@ -625,7 +653,7 @@
       '<div style="font-size:13.5px;font-weight:800">👥 Associés (% du net)</div>' +
       '<button id="fxs-addassoc" class="fx-btn2" style="padding:6px 13px">+ Ajouter associé</button></div>' +
       '<div id="fxs-assoc">' + assocRows() + '</div>' +
-      '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin:10px 0 18px">Le <b style="color:#c0c0d5">lead</b> récupère automatiquement <b style="color:#c0c0d5">100% − total associés</b>.</div>' +
+      '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin:10px 0 18px">Le <b style="color:#c0c0d5">lead</b> récupère <b style="color:#c0c0d5">100% − associés</b>. Un associé rattaché à <b style="color:#c0c0d5">🇺🇸 US</b> (ou 🇫🇷 FR) ne touche que le net de <b style="color:#c0c0d5">ce marché</b> ; « Tous » = % du net global.</div>' +
       '<div style="display:flex;gap:10px;justify-content:flex-end">' +
       '<button class="fx-close" class="fx-btn2" style="padding:10px 18px">Annuler</button>' +
       '<button id="fxs-save" style="padding:10px 22px;background:linear-gradient(135deg,#818cf8,#a78bfa);border:0;color:#0d0d18;border-radius:10px;font-weight:800;cursor:pointer;margin:0">💾 Sauvegarder</button>' +
@@ -633,11 +661,15 @@
     function rebind() {
       document.getElementById('fxs-assoc').innerHTML = assocRows();
       Array.prototype.forEach.call(document.querySelectorAll('#fxs-assoc [data-ai]'), function (inp) {
-        inp.addEventListener('input', function () {
+        var upd = function () {
           var a = assoc[parseInt(inp.dataset.ai, 10)];
           if (!a) return;
-          if (inp.dataset.k === 'pct') a.pct = parseFloat(inp.value) || 0; else a.name = inp.value;
-        });
+          if (inp.dataset.k === 'pct') a.pct = parseFloat(inp.value) || 0;
+          else if (inp.dataset.k === 'market') a.market = inp.value;
+          else a.name = inp.value;
+        };
+        inp.addEventListener('input', upd);
+        inp.addEventListener('change', upd);
       });
       Array.prototype.forEach.call(document.querySelectorAll('#fxs-assoc [data-adel]'), function (b) {
         b.addEventListener('click', function () { assoc.splice(parseInt(b.dataset.adel, 10), 1); rebind(); });
@@ -645,7 +677,7 @@
     }
     rebind();
     document.getElementById('fxs-addassoc').addEventListener('click', function () {
-      assoc.push({name: '', pct: 10}); rebind();
+      assoc.push({name: '', pct: 10, market: 'tous'}); rebind();
     });
     document.getElementById('fxs-save').addEventListener('click', function () {
       var fd = new FormData();

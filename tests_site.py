@@ -1355,6 +1355,70 @@ except Exception as _e:
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("=" * 70)
+print("19) Facture : associes PAR MARCHE + depenses avancees par le lead")
+print("=" * 70)
+# Le split par marche (US = lead + associe) et le remboursement des depenses
+# avancees par le lead touchent de l argent reel : verifies au dollar pres,
+# sur un fichier bac a sable (jamais le vrai data/facture.json).
+try:
+    import facture_web as _fwF
+    _savFF = _fwF.FACTURE_FILE
+    _fwF.FACTURE_FILE = TMP / "facture_test.json"
+    import web_upload as _wF
+    _appF = _wF.create_app()
+    _appF.testing = True
+    _cF = _appF.test_client()
+    _savUF = _wF._load_web_users
+    _wF._load_web_users = lambda: {"boss": {"role": "owner"}}
+    with _cF.session_transaction() as _sF:
+        _sF["auth"] = True
+        _sF["username"] = "boss"
+    _MF = "2026-07"
+
+    def _addF(label, typ, amount, market, paid_by="agence"):
+        _rF = _cF.post("/facture/line/save", data={"month": _MF, "line": json.dumps({
+            "label": label, "type": typ, "cat": "other", "form": "fixed",
+            "amount": amount, "currency": "USD", "market": market,
+            "freq": "monthly", "paid_by": paid_by})})
+        assert (_rF.get_json() or {}).get("ok")
+
+    _addF("Rev US", "rev", 10000, "us")
+    _addF("Rev FR", "rev", 4000, "fr")
+    _addF("Dep US", "exp", 2000, "us")
+    _addF("Outil paye par moi", "exp", 300, "fr", "lead")
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "A", "pct": 50, "market": "us"}])})
+    _dF = _cF.get("/facture/state?month=" + _MF).get_json()
+    _tF, _bF = _dF["totals"], _dF["by_market"]
+    check("associe US 50% : il ne touche QUE le net US",
+          _bF["us"]["lead"] == 4000 and _bF["fr"]["lead"] == 3700, str(_bF))
+    check("part lead globale = somme des marches", _tF["lead"] == 7700)
+    check("depense avancee par le lead comptee a rembourser", _tF["reimb"] == 300)
+    check("total a verser au lead = part + remboursements", _tF["lead_pay"] == 8000)
+    check("le marche de l associe est stocke",
+          _dF["settings"]["associates"][0].get("market") == "us")
+    # associe global seul -> calcul d avant inchange
+    _cF.post("/facture/settings", data={"eur_usd": "", "cutoff": "15",
+             "associates": json.dumps([{"name": "G", "pct": 20, "market": "tous"}])})
+    _tF = _cF.get("/facture/state?month=" + _MF).get_json()["totals"]
+    check("associe global seul : comportement d avant (net x 80%)", _tF["lead"] == 9360)
+    # marche en perte -> les sommes restent coherentes
+    _addF("Grosse dep FR", "exp", 9000, "fr")
+    _dF = _cF.get("/facture/state?month=" + _MF).get_json()
+    _tF, _bF = _dF["totals"], _dF["by_market"]
+    check("marche en perte : somme des parts = part globale",
+          round(_bF["fr"]["lead"] + _bF["us"]["lead"], 2) == _tF["lead"])
+    _rowF = [r for r in _fwF.compute_bilan()["rows"] if r["month"] == _MF][0]
+    check("le bilan verse au lead part + avances", _rowF["lead"] == _tF["lead_pay"])
+    _wF._load_web_users = _savUF
+    _fwF.FACTURE_FILE = _savFF
+except Exception as _e:
+    import traceback as _tbF
+    _tbF.print_exc()
+    check("facture : testable", False, repr(_e)[:120])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")

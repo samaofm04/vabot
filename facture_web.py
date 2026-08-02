@@ -600,7 +600,8 @@ def compute_state(month: str) -> dict:
 
     out_lines = []
     tot_rev = tot_exp = 0.0
-    by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0} for mk in MARKETS}
+    by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0,
+                      "reimb": 0.0} for mk in MARKETS}
     for l in lines:
         extra = {}
         if l.get("id") in resolved_src:
@@ -635,24 +636,42 @@ def compute_state(month: str) -> dict:
             tot_exp += usd
             by_market[mk]["exp"] += usd
             by_market[mk]["exp_count"] += 1
+            if ll.get("paid_by") == "lead":
+                by_market[mk]["reimb"] += usd
 
-    assoc_pct = sum(float(a.get("pct") or 0) for a in settings["associates"])
+    # Associés en 2 étages : d'abord les % PAR MARCHÉ (un associé « US » ne
+    # touche que le net positif du marché US), puis les % GLOBAUX sur ce qui
+    # reste. Sans associé de marché, le calcul est identique à l'ancien.
+    assoc_global = sum(float(a.get("pct") or 0) for a in settings["associates"]
+                       if a.get("market") not in MARKETS)
+    assoc_by_mk = {mk: sum(float(a.get("pct") or 0) for a in settings["associates"]
+                           if a.get("market") == mk) for mk in MARKETS}
+    assoc_pct = round(assoc_global + sum(assoc_by_mk.values()), 2)
     net = round(tot_rev - tot_exp, 2)
-    lead = round(net * max(0.0, (100.0 - assoc_pct)) / 100.0, 2) if net > 0 else net
-    for bm in by_market.values():
+    stage = {}
+    for mk, bm in by_market.items():
         bm["rev"] = round(bm["rev"], 2)
         bm["exp"] = round(bm["exp"], 2)
         bm["net"] = round(bm["rev"] - bm["exp"], 2)
-    # Part LEAD par marché = RÉPARTITION AU PRORATA du net de la part lead
-    # GLOBALE (et non le facteur associés ré-appliqué marché par marché). Sinon,
-    # dès qu'un marché était en perte, la somme des parts lead par marché ≠ la
-    # part lead globale et les deux vues du Bilan donnaient deux montants à payer.
-    if net > 0:
-        for bm in by_market.values():
-            bm["lead"] = round(lead * bm["net"] / net, 2)
-    else:
-        for bm in by_market.values():
-            bm["lead"] = bm["net"]   # pas de profit -> lead = net (somme = net global)
+        bm["assoc_pct"] = round(assoc_global + assoc_by_mk[mk], 2)
+        # marché en perte : la perte reste entière au lead (comme avant)
+        stage[mk] = (bm["net"] * max(0.0, 100.0 - assoc_by_mk[mk]) / 100.0
+                     if bm["net"] > 0 else bm["net"])
+    base = sum(stage.values())
+    kg = max(0.0, 100.0 - assoc_global) / 100.0
+    lead = round(base * kg, 2) if base > 0 else round(base, 2)
+    # Répartition par marché au PRORATA de la base (linéaire -> la somme des
+    # parts par marché redonne toujours la part globale, même en perte).
+    reimb_total = 0.0
+    for mk, bm in by_market.items():
+        if base:
+            bm["lead"] = round(lead * stage[mk] / base, 2)
+        else:
+            bm["lead"] = 0.0
+        bm["reimb"] = round(bm["reimb"], 2)
+        # ce que le lead ENCAISSE sur ce marché : sa part + ses avances remboursées
+        bm["lead_pay"] = round(bm["lead"] + bm["reimb"], 2)
+        reimb_total += bm["reimb"]
 
     return {
         "ok": True,
@@ -666,7 +685,11 @@ def compute_state(month: str) -> dict:
             "exp": round(tot_exp, 2),
             "net": net,
             "lead": lead,
+            "reimb": round(reimb_total, 2),
+            "lead_pay": round(lead + reimb_total, 2),
             "assoc_pct": round(assoc_pct, 2),
+            "assoc_global": round(assoc_global, 2),
+            "assoc_by_mk": {mk: round(v, 2) for mk, v in assoc_by_mk.items()},
             "rev_count": sum(1 for l in lines if l.get("type") == "rev"),
             "exp_count": sum(1 for l in lines if l.get("type") != "rev"),
         },
@@ -710,6 +733,9 @@ def _sanitize_line(raw: dict) -> dict:
         "next_pay": s("next_pay", 10),
         "paid": bool(raw.get("paid")),
         "paid_at": s("paid_at", 10),
+        # dépense AVANCÉE PAR LE LEAD en perso -> à lui rembourser (ajoutée à
+        # sa part dans les KPI). Sans objet sur un revenu (forcé 'agence').
+        "paid_by": "lead" if (raw.get("paid_by") == "lead" and raw.get("type") != "rev") else "agence",
     }
     try:
         line["amount"] = round(float(raw.get("amount") or 0), 2)
@@ -758,10 +784,11 @@ def compute_bilan() -> dict:
     for m in months:
         st = compute_state(m)
         t, bm = st["totals"], st["by_market"]
+        _lp = t.get("lead_pay", t["lead"])   # part lead + avances a rembourser
         rows.append({"month": m, "rev": t["rev"], "exp": t["exp"], "net": t["net"],
-                     "lead": t["lead"], "fr": bm["fr"], "us": bm["us"]})
+                     "lead": _lp, "fr": bm["fr"], "us": bm["us"]})
         tot["rev"] += t["rev"]; tot["exp"] += t["exp"]
-        tot["net"] += t["net"]; tot["lead"] += t["lead"]
+        tot["net"] += t["net"]; tot["lead"] += _lp
         tot["fr_rev"] += bm["fr"]["rev"]; tot["us_rev"] += bm["us"]["rev"]
         tot["fr_net"] += bm["fr"]["net"]; tot["us_net"] += bm["us"]["net"]
     for k in tot:
@@ -1287,7 +1314,10 @@ def register(app, is_auth):
             for a in assoc[:10]:
                 if isinstance(a, dict) and (a.get("name") or "").strip():
                     clean.append({"name": str(a["name"]).strip()[:40],
-                                  "pct": max(0.0, min(100.0, float(a.get("pct") or 0)))})
+                                  "pct": max(0.0, min(100.0, float(a.get("pct") or 0))),
+                                  # 'tous' = % du net global ; 'fr'/'us' = % du
+                                  # net de CE marché seulement
+                                  "market": a.get("market") if a.get("market") in MARKETS else "tous"})
             st["associates"] = clean
         except Exception:
             pass
