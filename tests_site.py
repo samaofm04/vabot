@@ -1529,6 +1529,12 @@ try:
           and "sections = [bulk_bar, warm_bar_html" in _wsrc20)
     check("_WARM_GHOSTS protege par verrou (append vs purge concurrents)",
           "_GHOST_LOCK" in _insp20.getsource(_vt20))
+    check("429 sur le fast-path file_id : erreur claire, pas de re-telechargement",
+          "_rf.status_code == 429" in _src20 and "patienter" in _src20)
+    check("le client tolere une reponse HTML (proxy timeout)",
+          "async function vjson" in _wsrc20 and _wsrc20.count("await vjson(r)") >= 3)
+    check("un 429 pendant le warm ne condamne pas le reel",
+          '"429" not in err' in _wsrc20)
     import web_upload as _wu20
     _appW20 = _wu20.create_app()
     _appW20.testing = True

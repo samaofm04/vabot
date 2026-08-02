@@ -23016,6 +23016,13 @@ async function starReelMenu(btn, rid){
     window.addEventListener('resize', cleanup, true);
   }, 0);
 }
+// Parse JSON tolerant : un proxy qui timeout (serveur occupe/redemarre) repond
+// une page HTML -> avant, r.json() jetait un "SyntaxError <!DOCTYPE" cryptique.
+async function vjson(r){
+  const t = await r.text();
+  try { return JSON.parse(t); }
+  catch(e){ return {ok:false, error:'Serveur occupé ou redémarré (HTTP '+r.status+') — attends ~1 min et réessaie'}; }
+}
 async function sendReelToBanger(rid, identity, btn){
   const orig = btn.innerHTML;
   btn.innerHTML = '⏳';
@@ -23023,7 +23030,7 @@ async function sendReelToBanger(rid, identity, btn){
   try {
     const fd = new FormData(); fd.set('reel_id', rid); fd.set('identity', identity);
     const r = await fetch('/veille/send_banger', { method:'POST', body: fd });
-    const j = await r.json();
+    const j = await vjson(r);
     if(j.ok){
       btn.innerHTML = '✅';
       btn.title = 'Envoyé dans ' + (j.channel || ('banger-' + identity));
@@ -23100,7 +23107,7 @@ async function veilleDoSend(){
     const _tm=veilleModelsSelected(); if(_tm.length) fd.set('to_models', _tm.join(','));
     try {
       const r=await fetch('/veille/send', {method:'POST', body:fd});
-      const j=await r.json();
+      const j=await vjson(r);
       if(j.ok){
         okv=true; done++; mode=j.mode; hasd=!!j.has_desc;
         if(j.mode==='video') videos++;
@@ -23167,7 +23174,7 @@ async function resendVeilleReel(rid, btn){
     if(_rc && _rc.dataset.caption && _rc.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _rc.dataset.caption);
     const _tm2=veilleModelsSelected(); if(_tm2.length) fd.set('to_models', _tm2.join(','));
     const r = await fetch('/veille/send', {method:'POST', body:fd});
-    const j = await r.json();
+    const j = await vjson(r);
     if(j.ok){
       btn.innerHTML = '✓';
       btn.style.background = 'rgba(34,197,94,.65)';
@@ -39828,6 +39835,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         """Chauffe UN reel ; True si file_id obtenu. Sérialisé par _vwarm_lock —
         si worker et passe forcée choisissent le même reel, le 2e appel tombe
         sur le cache (mode 'cached') et n'uploade pas en double."""
+        err = ""
         try:
             with _vwarm_lock:
                 res = veille_telegram.warm_reel(r)
@@ -39838,9 +39846,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 except Exception:
                     pass
                 return True
-        except Exception:
-            pass
-        _vwarm_fails[r.get("id")] = _vwarm_fails.get(r.get("id"), 0) + 1
+            err = str(res.get("error") or "")
+        except Exception as e:
+            err = str(e)
+        # 429/saturation Telegram : pas la faute du reel -> ne compte pas vers
+        # les 3 échecs qui le condamnent (il repassera au prochain cycle)
+        if "429" not in err and "patienter" not in err:
+            _vwarm_fails[r.get("id")] = _vwarm_fails.get(r.get("id"), 0) + 1
         return False
 
     def _veille_warm_loop():

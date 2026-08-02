@@ -614,6 +614,19 @@ def send_video_from_url(video_url: str, caption: str = "",
                             "chat_id": chat_id,   # canal Veille -> permet le forward vers les models
                             "has_desc": bool(followup_text and followup_text.strip()),
                             "description": (followup_text or "")}
+                # 429 même après le retry de _tg_post : Telegram sature (rafale,
+                # passe ⚡ en cours...). SURTOUT ne pas retomber sur le
+                # re-téléchargement complet — ça ajoutait un upload de plus à la
+                # rafale et la requête dépassait le timeout du proxy (page HTML
+                # -> « SyntaxError <!DOCTYPE » côté client). Le file_id reste
+                # valable : on demande juste de réessayer.
+                if _rf.status_code == 429:
+                    try:
+                        _ra = float(((_jf.get("parameters") or {}).get("retry_after")) or 30)
+                    except Exception:
+                        _ra = 30.0
+                    return {"ok": False,
+                            "error": f"Telegram fait patienter (trop de messages d'un coup) — réessaie dans ~{int(_ra) + 5}s"}
                 # Telegram a répondu mais a REFUSÉ le file_id (invalide/expiré) :
                 # on le purge pour ne plus le retenter, et on télécharge normalement
                 _desc_err = str(_jf.get("description") or "").lower()
