@@ -1546,6 +1546,18 @@ try:
     check("warm_status exige l auth", _rW20.status_code in (301, 302, 401, 403))
     _rS20 = _appW20.test_client().get("/veille/reel_state?rid=x")
     check("reel_state exige l auth", _rS20.status_code in (301, 302, 401, 403))
+    # suivi etape par etape du panneau Envoi X/Y
+    check("l envoi expose son etape en cours (poll client)",
+          "/veille/send_stage" in _wsrc20 and "_vsend_stage" in _wsrc20
+          and "send_stage?rid=" in _wsrc20 and "clearInterval(stIv)" in _wsrc20)
+    _rG20 = _appW20.test_client().get("/veille/send_stage?rid=x")
+    check("send_stage exige l auth", _rG20.status_code in (301, 302, 401, 403))
+    # le pre-chauffage stocke AUSSI la description (envoi du soir 100% local)
+    check("le warm remonte la description et le worker la persiste",
+          '"description": (followup_text or "")' in _src20
+          and 'res.get("description")' in _wsrc20)
+    check("fast-path : description relue du sidecar disque",
+          0 <= _src20.find("_sdf") < _src20.find("fast-path SOUS le verrou"))
 except Exception as _e:
     check("veille warm : testable", False, repr(_e)[:120])
 

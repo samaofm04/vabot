@@ -587,6 +587,18 @@ def send_video_from_url(video_url: str, caption: str = "",
     if warm_only and tg_file_id:
         return {"ok": True, "mode": "cached", "tg_file_id": tg_file_id}
     if tg_file_id:
+        # Description du SIDECAR (écrite au pré-chauffage / 1er download) : le
+        # fast-path ne télécharge rien, mais la description, elle, est déjà sur
+        # le disque — sans ça un reel pré-chauffé partait sans description.
+        if _sc and not followup_final and (not followup_text or not followup_text.strip()):
+            try:
+                _sdf = _Pv("data/insta/videos") / f"{_sc}.txt"
+                if _sdf.exists():
+                    _sdt = _sdf.read_text(encoding="utf-8").strip()
+                    if _sdt:
+                        followup_text = _sdt
+            except Exception:
+                pass
         # fast-path SOUS le verrou d'ordre : sendVideo + followup d'un bloc
         # (c'est le cas COURANT — un reel déjà en cache -> renvoi instantané).
         try:
@@ -844,7 +856,10 @@ def send_video_from_url(video_url: str, caption: str = "",
                 with _GHOST_LOCK:
                     _WARM_GHOSTS.append((chat_id, msg_id))
                     del _WARM_GHOSTS[:-50]   # borne dure : jamais plus de 50 en attente
-            return {"ok": True, "mode": "warmed", "tg_file_id": _new_fid}
+            # la description récupérée en chemin (sidecar/Apify/yt-dlp) remonte
+            # au worker -> persistée sur le reel = envoi du soir 100% complet
+            return {"ok": True, "mode": "warmed", "tg_file_id": _new_fid,
+                    "description": (followup_text or "")}
 
         # 3) Followup texte (la description IG) en message separe
         if followup_text and followup_text.strip():

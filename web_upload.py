@@ -23133,8 +23133,21 @@ async function veilleDoSend(){
     if(_c0 && _c0.dataset.caption && _c0.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _c0.dataset.caption);
     // Chips modèles cochées -> part aussi dans leur IG CONTENT (+ sujet VEILLE ID)
     const _tm=veilleModelsSelected(); if(_tm.length) fd.set('to_models', _tm.join(','));
+    // Suivi ÉTAPE PAR ÉTAPE pendant l envoi : le serveur expose ou il en est
+    // (envoi instantane / telechargement / copie vers chaque modele) -> plus
+    // de « En attente... » muet qui donne l impression que ca bug.
+    const stIv=setInterval(function(){
+      fetch('/veille/send_stage?rid='+encodeURIComponent(rid))
+        .then(function(rs){ return rs.json(); })
+        .then(function(js){
+          if(js && js.ok && js.stage){
+            vpStatus.innerHTML='<b style="color:#3b82f6">Reel '+(i+1)+'</b> — '+String(js.stage).replace(/</g,'&lt;');
+          }
+        }).catch(function(){});
+    }, 1200);
     try {
       const r=await fetch('/veille/send', {method:'POST', body:fd});
+      clearInterval(stIv);
       const j=await vjson(r);
       if(j.ok){
         okv=true; done++; mode=j.mode; hasd=!!j.has_desc;
@@ -23151,6 +23164,7 @@ async function veilleDoSend(){
         if(!wasSent) setTimeout(function(){ veilleVerifySent(rid); }, 10000);
       }
     } catch(e){
+      clearInterval(stIv);
       if(!wasSent && await veilleVerifySent(rid)){ okv=true; done++; mode='video'; videos++; }
       else {
         errs++; errmsg=String(e); if(!firstErr) firstErr=errmsg;
@@ -39838,6 +39852,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     _vsend_inflight: dict = {}   # rid -> timestamp : verrou anti double-envoi
     _vsend_lock = threading.Lock()   # protège la purge/check/set du dict (multi-thread)
+    _vsend_stage: dict = {}   # rid -> étape en cours (« ⚡ envoi… », « copie vers X (1/2) »)
 
     # ---- Pré-chauffage Telegram de la veille -------------------------------
     # Chaque reel NON envoyé est téléchargé + uploadé EN JOURNÉE en silencieux
@@ -39873,8 +39888,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 res = veille_telegram.warm_reel(r)
             if res.get("ok") and res.get("tg_file_id"):
                 _vwarm_fails.pop(r.get("id"), None)
+                _updw = {"tg_file_id": res["tg_file_id"]}
+                # description trouvée en chauffant -> stockée AUSSI : le soir,
+                # vidéo ET description partent sans aucun fetch
+                if res.get("description") and not (r.get("caption") or "").strip():
+                    _updw["caption"] = res["description"]
                 try:
-                    veille.update_reel(r.get("id"), tg_file_id=res["tg_file_id"])
+                    veille.update_reel(r.get("id"), **_updw)
                 except Exception:
                     pass
                 return True
@@ -40093,13 +40113,25 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             forward_only = bool(request.form.get("forward_only"))
             if forward_only and not reel.get("tg_file_id"):
                 return jsonify({"ok": False, "error": "Le 1er envoi est parti en LIEN (vidéo introuvable) — rien à re-forwarder. Récupère d'abord la vidéo (🔍 Analyser) puis renvoie."})
+            # ---- Étape en cours (lue par le client via /veille/send_stage) ----
+            _wrm = bool(reel.get("tg_file_id"))
+            if not _wrm:
+                try:
+                    _msc = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url)
+                    _wrm = bool(_msc and veille_telegram.fileid_get(_msc.group(1)))
+                except Exception:
+                    pass
             if forward_only:
+                _vsend_stage[rid] = "➡️ Re-copie vers les modèles (vidéo déjà dans le canal)…"
                 res = {"ok": True, "mode": "video",
                        "tg_file_id": reel.get("tg_file_id"),
                        "chat_id": reel.get("veille_chat_id"),
                        "message_id": reel.get("veille_msg_id"),
                        "description": description}
             else:
+                _vsend_stage[rid] = ("⚡ Envoi instantané dans le canal Veille (déjà sur Telegram)…"
+                                     if _wrm else
+                                     "⬇️ Téléchargement Instagram + upload Telegram (pas encore pré-chauffé)…")
                 # 1) Tente download + sendVideo, fallback sur lien si echec
                 #    + followup texte avec la description IG si elle existe
                 #    owner = @compte source -> permet de re-resoudre le video_url via
@@ -40149,6 +40181,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                     else:
                         try:
                             import tg_router
+                            _vsend_stage[rid] = f"➡️ Copie vers les modèles (0/{len(to_models)})…"
                             if _desc_explicit:
                                 desc_final = description   # le modal/draft fait foi, même vide
                             else:
@@ -40158,7 +40191,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                             # natif Telegram), la vidéo n'est jamais ré-uploadée.
                             _src_chat = res.get("chat_id")
                             _src_msg = res.get("message_id")
-                            for m in to_models:
+                            for _im, m in enumerate(to_models):
+                                _vsend_stage[rid] = f"➡️ Copie vers {m} ({_im + 1}/{len(to_models)})…"
                                 r2 = tg_router.send_veille_to_model(m, fid, link=url, desc=desc_final,
                                                                     overlay=overlay_val,
                                                                     src_chat_id=_src_chat,
@@ -40177,6 +40211,19 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         finally:
             with _vsend_lock:
                 _vsend_inflight.pop(rid, None)
+            _vsend_stage.pop(rid, None)
+
+    @app.route("/veille/send_stage")
+    def veille_send_stage():
+        """Étape en cours d'un envoi (poll du panneau « Envoi X/Y ») : le client
+        affiche « ⚡ envoi instantané… », « ➡️ copie vers carla (1/2)… » au lieu
+        d'un « En attente… » muet qui ressemble à un bug."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        _rid = (request.args.get("rid") or "").strip()
+        return jsonify({"ok": True, "stage": _vsend_stage.get(_rid) or "",
+                        "inflight": _rid in _vsend_inflight})
 
     @app.route("/veille/models", methods=["GET"])
     def veille_models():
