@@ -1558,6 +1558,12 @@ try:
           and 'res.get("description")' in _wsrc20)
     check("fast-path : description relue du sidecar disque",
           0 <= _src20.find("_sdf") < _src20.find("fast-path SOUS le verrou"))
+    # un reel ENVOYE peut etre RE-prepare : l etat PRET reste visible
+    check("PRET visible aussi sur une carte ENVOYEE (re-preparation d un renvoi)",
+          'bool(r.get("prepared")) and not sent' not in _wsrc20
+          and _wsrc20.count("top:38px;left:46px") >= 2)
+    check("l envoi nettoie le brouillon PRET et le badge eclair sur la carte",
+          "vl-warm-badge" in _wsrc20 and "veilleReadyVisual(card, false)" in _wsrc20)
 except Exception as _e:
     check("veille warm : testable", False, repr(_e)[:120])
 

@@ -22692,13 +22692,19 @@ def _render_veille_feed_html() -> str:
             avatar_v = ""
             if owner_pic:
                 avatar_v = f"<img src='{owner_pic}' loading='lazy' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
-            # Ribbon sent / prêt (mutuellement exclusifs : un reel envoyé n'est
-            # plus « à préparer »). PRÊT = brouillon caption+desc enregistré.
-            prepared = bool(r.get("prepared")) and not sent
+            # Ribbon sent / prêt. Un reel ENVOYÉ peut être RE-préparé (brouillon
+            # pour un renvoi) : son badge PRÊT s'affiche SOUS le ruban ENVOYÉ —
+            # avant, l'état prêt était invisible sur les cartes envoyées et
+            # marquer « prêt » ne montrait rien (ni filigrane ni badge).
+            prepared = bool(r.get("prepared"))
             ribbon = ""
             if sent:
                 ribbon = ("<div style='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;"
                           "padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'>✓ ENVOYÉ</div>")
+                if prepared:
+                    ribbon += ("<div class='vl-ready-badge' style='position:absolute;top:38px;left:46px;background:#22c55e;"
+                               "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
+                               "box-shadow:0 2px 10px rgba(34,197,94,.5)'>✓ PRÊT</div>")
             elif prepared:
                 ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:#22c55e;"
                           "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
@@ -22710,39 +22716,35 @@ def _render_veille_feed_html() -> str:
                     import veille_telegram as _vtw
                     _mw = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
                     if bool(r.get("tg_file_id")) or bool(_mw and _vtw.fileid_get(_mw.group(1))):
-                        ribbon += ("<div title='Vidéo déjà stockée sur Telegram — envoi instantané' "
+                        ribbon += ("<div class='vl-warm-badge' title='Vidéo déjà stockée sur Telegram — envoi instantané' "
                                    "style='position:absolute;top:38px;left:46px;background:rgba(250,204,21,.95);color:#0d0d18;"
                                    "font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6'>⚡</div>")
                 except Exception:
                     pass
-            # Interrupteur PRÊT sur la carte (uniquement si pas déjà envoyé) : le
-            # mettre au vert marque le reel « prêt » sans ouvrir le modal.
-            ready_toggle = ""
-            if not sent:
-                _on = prepared
-                ready_toggle = (
-                    f"<label class='vl-rdy' onclick='event.stopPropagation()' title='Marquer ce reel PRÊT (sans ouvrir)' "
-                    f"style='position:absolute;bottom:12px;left:12px;z-index:12;display:flex;align-items:center;gap:7px;cursor:pointer'>"
-                    f"<input type='checkbox' class='vl-rdy-cb' data-rid='{rid}' {'checked' if _on else ''} "
-                    f"onchange='veilleToggleReady(this)' style='position:absolute;opacity:0;width:0;height:0'>"
-                    f"<span class='vl-rdy-track' style='width:40px;height:23px;border-radius:999px;background:{'#22c55e' if _on else 'rgba(255,255,255,.28)'};"
-                    f"position:relative;transition:background .2s;box-shadow:inset 0 1px 3px rgba(0,0,0,.4)'>"
-                    f"<span class='vl-rdy-knob' style='position:absolute;top:2.5px;left:{'19px' if _on else '2.5px'};width:18px;height:18px;"
-                    f"border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.5)'></span></span>"
-                    f"<span class='vl-rdy-lbl' style='font-size:10px;font-weight:800;letter-spacing:.4px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)'>PRÊT</span>"
-                    f"</label>")
+            # Interrupteur PRÊT sur la carte (aussi sur les envoyés : re-préparer
+            # un renvoi) : le mettre au vert marque « prêt » sans ouvrir le modal.
+            _on = prepared
+            ready_toggle = (
+                f"<label class='vl-rdy' onclick='event.stopPropagation()' title='Marquer ce reel PRÊT (sans ouvrir)' "
+                f"style='position:absolute;bottom:12px;left:12px;z-index:12;display:flex;align-items:center;gap:7px;cursor:pointer'>"
+                f"<input type='checkbox' class='vl-rdy-cb' data-rid='{rid}' {'checked' if _on else ''} "
+                f"onchange='veilleToggleReady(this)' style='position:absolute;opacity:0;width:0;height:0'>"
+                f"<span class='vl-rdy-track' style='width:40px;height:23px;border-radius:999px;background:{'#22c55e' if _on else 'rgba(255,255,255,.28)'};"
+                f"position:relative;transition:background .2s;box-shadow:inset 0 1px 3px rgba(0,0,0,.4)'>"
+                f"<span class='vl-rdy-knob' style='position:absolute;top:2.5px;left:{'19px' if _on else '2.5px'};width:18px;height:18px;"
+                f"border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.5)'></span></span>"
+                f"<span class='vl-rdy-lbl' style='font-size:10px;font-weight:800;letter-spacing:.4px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)'>PRÊT</span>"
+                f"</label>")
             # Contour VERT quand le reel est prêt (« le reel devient vert »)
             card_edge = ("border:1px solid #22c55e;box-shadow:0 0 0 1px #22c55e,0 0 18px rgba(34,197,94,.22)"
                          if prepared else "border:1px solid #2a2a2a")
-            # Filigrane « PRÊT » sur la vignette (masqué si pas prêt ; visible quand prêt).
-            # Présent seulement sur les reels PAS envoyés (le toggle l'affiche/le cache).
-            ready_wm = ""
-            if not sent:
-                ready_wm = (
-                    f"<div class='vl-ready-wm' style=\"position:absolute;inset:0;z-index:3;pointer-events:none;"
-                    f"display:{'block' if prepared else 'none'};background-color:rgba(34,197,94,.10);"
-                    f"background-image:url('{READY_WM_URI}');background-repeat:repeat;"
-                    f"box-shadow:inset 0 0 0 2px rgba(34,197,94,.55)\"></div>")
+            # Filigrane « PRÊT » sur la vignette (masqué si pas prêt ; visible quand
+            # prêt) — sur TOUTES les cartes, envoyées comprises (re-préparation).
+            ready_wm = (
+                f"<div class='vl-ready-wm' style=\"position:absolute;inset:0;z-index:3;pointer-events:none;"
+                f"display:{'block' if prepared else 'none'};background-color:rgba(34,197,94,.10);"
+                f"background-image:url('{READY_WM_URI}');background-repeat:repeat;"
+                f"box-shadow:inset 0 0 0 2px rgba(34,197,94,.55)\"></div>")
             # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
             # pouvoir multi-selectionner et RENVOYER en lot.
             cb_html = (
@@ -23030,6 +23032,11 @@ function veilleMarkSent(rid){
   if(!card) return;
   card.classList.remove('is-picked');
   const cb=card.querySelector('.veille-cb'); if(cb) cb.checked=false;
+  // l envoi CONSOMME le brouillon « prêt » (clear_prepared cote serveur) et le
+  // ⚡ n a plus de sens : la carte reflete l etat reel sans recharger
+  const rcb=card.querySelector('.vl-rdy-cb'); if(rcb) rcb.checked=false;
+  if(typeof veilleReadyVisual==='function') veilleReadyVisual(card, false);
+  const wb=card.querySelector('.vl-warm-badge'); if(wb) wb.remove();
   if(card.getAttribute('data-sent')!=='1'){
     const media=card.querySelector('.reel-media');
     if(media){ const r2=document.createElement('div'); r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'; r2.textContent='✓ ENVOYÉ'; media.appendChild(r2); }
@@ -23265,10 +23272,12 @@ function veilleReadyVisual(card, on){
   const media = card.querySelector('.reel-media');
   if(media){
     let badge = media.querySelector('.vl-ready-badge');
-    if(on && !badge && card.getAttribute('data-sent') !== '1'){
+    if(on && !badge){
+      // carte deja ENVOYEE (re-preparation d un renvoi) : badge SOUS le ruban
       badge = document.createElement('div');
       badge.className = 'vl-ready-badge';
-      badge.style.cssText = 'position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(34,197,94,.5)';
+      const bt = card.getAttribute('data-sent') === '1' ? '38px' : '11px';
+      badge.style.cssText = 'position:absolute;top:'+bt+';left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;box-shadow:0 2px 10px rgba(34,197,94,.5)';
       badge.textContent = '✓ PRÊT';
       media.appendChild(badge);
     } else if(!on && badge){ badge.remove(); }
