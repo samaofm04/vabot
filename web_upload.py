@@ -23023,6 +23023,31 @@ async function vjson(r){
   try { return JSON.parse(t); }
   catch(e){ return {ok:false, error:'Serveur occupé ou redémarré (HTTP '+r.status+') — attends ~1 min et réessaie'}; }
 }
+// Marque une carte « envoyée » (ruban + décoche + compteur) — utilisé par le
+// bulk ET par la re-vérification ci-dessous.
+function veilleMarkSent(rid){
+  const card=document.querySelector('.veille-card[data-rid="'+rid+'"]');
+  if(!card) return;
+  card.classList.remove('is-picked');
+  const cb=card.querySelector('.veille-cb'); if(cb) cb.checked=false;
+  if(card.getAttribute('data-sent')!=='1'){
+    const media=card.querySelector('.reel-media');
+    if(media){ const r2=document.createElement('div'); r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'; r2.textContent='✓ ENVOYÉ'; media.appendChild(r2); }
+    card.setAttribute('data-sent','1');
+  }
+  if(typeof veilleOnSelect==='function') veilleOnSelect();
+}
+// Un envoi peut ABOUTIR côté serveur alors que le navigateur reçoit une erreur
+// (timeout proxy, verrou double-clic...) : la carte restait cochée et « non
+// envoyée » jusqu'au F5. On vérifie l'état réel et on la met à jour.
+async function veilleVerifySent(rid){
+  try{
+    const r=await fetch('/veille/reel_state?rid='+encodeURIComponent(rid));
+    const j=await vjson(r);
+    if(j.ok && j.sent){ veilleMarkSent(rid); return true; }
+  }catch(e){}
+  return false;
+}
 async function sendReelToBanger(rid, identity, btn){
   const orig = btn.innerHTML;
   btn.innerHTML = '⏳';
@@ -23100,6 +23125,9 @@ async function veilleDoSend(){
     btn.innerHTML='⏳ '+(i+1)+'/'+ids.length;
     let okv=false, mode='', hasd=false, errmsg='';
     const _c0=document.querySelector('.veille-card[data-rid="'+rid+'"]');
+    // déjà envoyé AVANT cet essai ? -> la re-vérification d'erreur ne doit pas
+    // le compter comme succès (reel_state dirait « sent » pour l'envoi d'avant)
+    const wasSent=!!(_c0 && _c0.getAttribute('data-sent')==='1');
     const fd=new FormData(); fd.set('reel_id', rid);
     // Envoie la caption AFFICHEE (data-caption) -> la description visible part bien
     if(_c0 && _c0.dataset.caption && _c0.dataset.caption.indexOf('Pas de caption')<0) fd.set('caption', _c0.dataset.caption);
@@ -23113,18 +23141,22 @@ async function veilleDoSend(){
         if(j.mode==='video') videos++;
         else if(j.mode==='link'){ links++; if(!firstLinkReason && j.fallback_reason) firstLinkReason=j.fallback_reason; }
         if(hasd) descs++;
-        const card=document.querySelector('.veille-card[data-rid="'+rid+'"]');
-        if(card){
-          card.classList.remove('is-picked');
-          const cb=card.querySelector('.veille-cb'); if(cb) cb.checked=false;
-          if(card.getAttribute('data-sent')!=='1'){
-            const media=card.querySelector('.reel-media');
-            if(media){ const r2=document.createElement('div'); r2.style.cssText='position:absolute;top:11px;left:46px;background:#22c55e;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px'; r2.textContent='✓ ENVOYÉ'; media.appendChild(r2); }
-            card.setAttribute('data-sent','1');
-          }
-        }
-      } else { errs++; errmsg=j.error||'?'; if(!firstErr) firstErr=errmsg; }
-    } catch(e){ errs++; errmsg=String(e); if(!firstErr) firstErr=errmsg; }
+        veilleMarkSent(rid);
+      } else if(!wasSent && await veilleVerifySent(rid)){
+        // l'envoi a abouti côté serveur malgré l'erreur reçue -> succès
+        okv=true; done++; mode='video'; videos++;
+      } else {
+        errs++; errmsg=j.error||'?'; if(!firstErr) firstErr=errmsg;
+        // il a pu aboutir APRÈS coup (requête encore en vol côté serveur)
+        if(!wasSent) setTimeout(function(){ veilleVerifySent(rid); }, 10000);
+      }
+    } catch(e){
+      if(!wasSent && await veilleVerifySent(rid)){ okv=true; done++; mode='video'; videos++; }
+      else {
+        errs++; errmsg=String(e); if(!firstErr) firstErr=errmsg;
+        if(!wasSent) setTimeout(function(){ veilleVerifySent(rid); }, 10000);
+      }
+    }
     // pastille FINALE selon le resultat
     dotEls[i].style.animation='';
     if(okv && mode==='video' && hasd){ dotEls[i].style.background='#16a34a'; dotEls[i].style.borderColor='#22c55e'; dotEls[i].style.color='#fff'; dotEls[i].textContent='✓'; }
@@ -39943,6 +39975,23 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": True, "ready": ready, "total": total,
                             "running": bool(_VWARM_STATE["running"]),
                             "done": _VWARM_STATE["done"], "queue": _VWARM_STATE["total"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/veille/reel_state")
+    def veille_reel_state():
+        """État réel d'un reel (envoyé ? pré-chauffé ?) — permet au client de
+        corriger une carte quand l'envoi a abouti malgré une erreur reçue."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import veille
+            r = veille.get_reel((request.args.get("rid") or "").strip())
+            if not r:
+                return jsonify({"ok": False, "error": "reel introuvable"})
+            return jsonify({"ok": True, "sent": bool(r.get("sent_to_telegram")),
+                            "warmed": bool(r.get("tg_file_id"))})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
