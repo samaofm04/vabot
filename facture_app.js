@@ -152,7 +152,7 @@
       kpi('📨 Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
       kpi('📩 Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
       kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
-      kpi('👑 Part lead (toi)' + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
+      kpi('👑 Part ' + esc(leadName()) + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
 
     // une carte par associé : sa part du split + ses avances éventuelles.
     // Un « tous » est servi APRÈS les associés de marché -> « du net restant ».
