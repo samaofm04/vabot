@@ -1569,6 +1569,154 @@ except Exception as _e:
 
 print()
 print("=" * 70)
+print("21) Captions : bibliotheque par identite + generation random")
+print("=" * 70)
+try:
+    import json as _jsCa
+    import pathlib as _plCa
+    import shutil as _shCa
+    import web_upload as _wCa
+    _aCa = _wCa.create_app(); _aCa.testing = True
+    _savCa = _wCa._load_web_users
+    _wCa._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cCa = _aCa.test_client()
+    with _cCa.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "CA1"
+    _idCa = _plCa.Path("data/identities/_tst_captions")
+    _shCa.rmtree(_idCa, ignore_errors=True)
+    (_idCa / "brutes").mkdir(parents=True)
+    (_idCa / "brutes" / "b.mp4").write_bytes(b"\x00" * 5000)
+
+    # -- CRUD ---------------------------------------------------------------
+    _blk = {"font": "Strong",
+            "style": {"size": 54, "color": "#ffffff", "bold": True},
+            "global_pos": {"enabled": False, "x": 0.5, "y": 0.2},
+            "items": [{"id": f"c{i}", "text": f"Cap {i}", "x": 0.5, "y": 0.2 + i / 100.0}
+                      for i in range(12)]}
+    _r = _cCa.post("/captions/save", data={"identity": "_tst_captions",
+                                           "data": _jsCa.dumps(_blk)})
+    check("captions : save ok", _r.status_code == 200 and (_r.get_json() or {}).get("ok"),
+          f"http {_r.status_code} {_r.get_data(as_text=True)[:80]}")
+    _fCa = _plCa.Path("data/captions.json")
+    check("captions : ecrit sur disque (atomique, pas de .tmp residuel)",
+          _fCa.exists() and not list(_fCa.parent.glob("captions.json*.tmp")))
+    _j = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    _items = ((_j.get("block") or {}).get("items")) or []
+    check("captions : relecture 12 entrees, x/y clampes 0-1",
+          len(_items) == 12 and all(0 <= c["x"] <= 1 and 0 <= c["y"] <= 1 for c in _items),
+          str(_j)[:100])
+    # update : editer un texte ne perd pas la position
+    _blk["items"][3]["text"] = "Edite"
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk)})
+    _j2 = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    check("captions : edition conserve la position",
+          abs(_j2["block"]["items"][3]["y"] - _blk["items"][3]["y"]) < 1e-6
+          and _j2["block"]["items"][3]["text"] == "Edite")
+    # bornes moteur : size clampe a 160, x/y clampes 0-1, wrapW hors bornes ignore
+    _blk2 = {"style": {"size": 999},
+             "items": [{"id": "w", "text": "W", "x": 2.0, "y": -1.0, "wrapW": 5.0}]}
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk2)})
+    _j3 = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    _it3 = (_j3["block"]["items"] or [{}])[0]
+    check("captions : clamps serveur (size 160, x/y 0-1, wrapW ignore)",
+          _j3["block"]["style"].get("size") == 160 and _it3.get("x") == 1.0
+          and _it3.get("y") == 0.0 and "wrapW" not in _it3, str(_j3)[:120])
+    # identites refusees (traversal / inconnues)
+    for _bad in ("../..", "..", "/etc", "_tst_nexiste_pas"):
+        _rb = _cCa.post("/captions/save", data={"identity": _bad, "data": "{}"})
+        check(f"captions : identite refusee {_bad}",
+              (_rb.get_json() or {}).get("ok") is not True)
+    # fichier corrompu -> pas de 500 (le loader retombe sur un bloc vide)
+    _fCa.write_text("{casse", encoding="utf-8")
+    _wCa._invalidate_json_cache(_fCa)
+    check("captions : fichier corrompu ne 500 pas",
+          _cCa.get("/captions/list?identity=_tst_captions").status_code == 200)
+    # re-sauvegarde propre pour la suite
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk)})
+
+    # -- RBAC : role restreint bloque (ecriture ET lecture) ------------------
+    _wCa._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _c403 = _aCa.test_client()
+    with _c403.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "chat"; _s["role"] = "chatter"; _s["sid"] = "CA2"
+    check("captions : chatter bloque en ecriture (403)",
+          _c403.post("/captions/save", data={"identity": "_tst_captions", "data": "{}"}).status_code == 403)
+    check("captions : chatter bloque en lecture (403)",
+          _c403.get("/captions/list?identity=_tst_captions").status_code == 403)
+    _wCa._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    check("RBAC : onglet cloudcaptions rattache a la cle montage",
+          "cloudcaptions" in (_wCa._PERM_KEY_TO_TABS.get("montage") or set()))
+
+    # -- generation : cablage complet SANS lancer node (gen_from_draft stubbe)
+    import noctus_web as _nwCa
+    _calls = []
+    _sav_gen = _nwCa.gen_from_draft
+    _sav_setup = _nwCa.setup_ok
+    _nwCa.setup_ok = lambda: True
+    def _fake_gen(src, draft, folders=None, model=None, brutes_dir=None):
+        _calls.append({"src": src, "draft": draft, "folders": folders,
+                       "brutes_dir": brutes_dir})
+        return "vam-test-123"
+    _nwCa.gen_from_draft = _fake_gen
+    try:
+        _rg = _cCa.post("/captions/gen", data={"identity": "_tst_captions"})
+        _jg = _rg.get_json() or {}
+        check("captions gen : ok + model renvoye",
+              _jg.get("ok") and _jg.get("model") == "vam-test-123", str(_jg)[:100])
+        check("captions gen : brute tiree dans <ident>/brutes/",
+              bool(_calls) and "_tst_captions" in _calls[0]["src"]
+              and _calls[0]["src"].endswith("b.mp4"))
+        _dseg = _jsCa.loads(_calls[0]["draft"]["segments"]) if _calls else []
+        check("captions gen : draft 1 segment, sans cut_at ni brutes_dir (brute seule)",
+              bool(_calls) and len(_dseg) == 1 and _dseg[0]["start"] is None
+              and "cut_at" not in _calls[0]["draft"] and _calls[0]["brutes_dir"] is None
+              and _calls[0]["folders"] == ["V1"], str(_calls)[:140])
+        # caption_id force la caption (bouton « tester »)
+        _calls.clear()
+        _cCa.post("/captions/gen", data={"identity": "_tst_captions", "caption_id": "c7"})
+        _dseg2 = _jsCa.loads(_calls[0]["draft"]["segments"]) if _calls else []
+        check("captions gen : caption_id force la caption choisie",
+              bool(_dseg2) and _dseg2[0]["text"] == "Cap 7")
+        # position globale activee -> ecrase la position par caption
+        _blkG = dict(_blk); _blkG["global_pos"] = {"enabled": True, "x": 0.9, "y": 0.1}
+        _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blkG)})
+        _calls.clear()
+        _cCa.post("/captions/gen", data={"identity": "_tst_captions", "caption_id": "c2"})
+        _dseg3 = _jsCa.loads(_calls[0]["draft"]["segments"]) if _calls else []
+        check("captions gen : position globale prioritaire quand activee",
+              bool(_dseg3) and _dseg3[0]["x"] == 0.9 and _dseg3[0]["y"] == 0.1)
+        # pool vide -> erreur propre
+        _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": "{}"})
+        _je = (_cCa.post("/captions/gen", data={"identity": "_tst_captions"}).get_json() or {})
+        check("captions gen : pool vide refuse proprement", _je.get("ok") is not True)
+    finally:
+        _nwCa.gen_from_draft = _sav_gen
+        _nwCa.setup_ok = _sav_setup
+
+    # tirage random verrouille par grep du source (pattern section 18)
+    _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
+    check("captions gen : tirage random.choice (caption ET brute)",
+          _wsCa.count("_rnd.choice(pool)") == 1 and _wsCa.count("_rnd.choice(brutes)") == 1)
+    check("captions : persistance via safe_json (jamais write_text brut)",
+          "safe_json.write(CAPTIONS_FILE" in _wsCa)
+
+    _wCa._load_web_users = _savCa
+    _shCa.rmtree(_idCa, ignore_errors=True)
+    # nettoie l entree de test de data/captions.json
+    try:
+        _lib = _jsCa.loads(_fCa.read_text(encoding="utf-8"))
+        if isinstance(_lib, dict) and _lib.pop("_tst_captions", None) is not None:
+            _wCa.safe_json.write(_fCa, _lib, indent=2)
+            _wCa._invalidate_json_cache(_fCa)
+    except Exception:
+        pass
+except Exception as _e:
+    import traceback as _tbCa
+    _tbCa.print_exc()
+    check("captions : testable", False, repr(_e)[:120])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")

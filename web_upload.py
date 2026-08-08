@@ -4430,6 +4430,374 @@ function nxMontageApprove(){
       }
     }).catch(function(e){ if(btn) btn.disabled=false; alert('Erreur: '+e); });
 }
+// ==================== Bibliothèque CAPTION (onglet Reel montage) ====================
+// Textes par identité, posés en RANDOM sur les vidéos brutes à la génération.
+// État chargé depuis le JSON embarqué #capLibData (ré-émis par le serveur à chaque
+// navigation d identité) ; toutes les actions passent par la délégation data-capact
+// (le contenu de la section est swappé par vaultGoTo -> les scripts inline ne
+// s exécutent pas, donc AUCUN handler ne doit vivre dans la section).
+var capLib={identity:'',block:null,brutes:[]};
+function capLibInit(){
+  var el=document.getElementById('capLibData'); if(!el) return false;
+  var j=null;
+  try{ j=JSON.parse(el.textContent||'{}'); }catch(e){ return false; }
+  if(!j||!j.identity) return false;
+  if(capLib.identity!==j.identity||!capLib.block){
+    capLib.identity=j.identity;
+    capLib.block=j.block||{font:'Strong',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
+    capLib.brutes=j.brutes||[];
+  }
+  return true;
+}
+function capRenderCards(){
+  var grid=document.getElementById('capCards'); if(!grid||!capLib.block) return;
+  var items=capLib.block.items||[], out=[];
+  if(!items.length){
+    out.push('<div style="grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px">Aucune caption — colle ta liste au-dessus (une par ligne) puis « ＋ Ajouter ».</div>');
+  }
+  for(var i=0;i<items.length;i++){
+    var it=items[i], on=(it.enabled!==false), cid=nxMEsc(String(it.id||''));
+    var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.61)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
+    out.push('<div class="cap-card'+(on?'':' cap-off')+'" data-cid="'+cid+'">'
+      +'<div class="cap-card-text">'+nxMEsc(String(it.text||''))+'</div>'
+      +'<div class="cap-card-meta">'+meta+'</div>'
+      +'<div class="cap-card-actions">'
+      +'<button type="button" data-capact="place" data-cid="'+cid+'" title="Placer le texte sur la vidéo (drag)">📍 Placer</button>'
+      +'<button type="button" data-capact="test" data-cid="'+cid+'" title="Générer une vidéo test avec CETTE caption">🎬</button>'
+      +'<label title="Active dans le tirage" style="display:inline-flex;align-items:center;cursor:pointer;margin-left:auto"><input type="checkbox" data-captoggle="'+cid+'"'+(on?' checked':'')+'></label>'
+      +'<button type="button" data-capact="del" data-cid="'+cid+'" title="Supprimer">🗑</button>'
+      +'</div></div>');
+  }
+  grid.innerHTML=out.join('');
+  var info=document.getElementById('capCountInfo');
+  if(info){ var n=items.length; info.textContent=n+' caption'+(n!==1?'s':'')+' · '+capLib.brutes.length+' brute'+(capLib.brutes.length!==1?'s':'')+' dispo'; }
+}
+var capSaveT=null;
+function capSave(){
+  if(!capLib.identity||!capLib.block) return;
+  clearTimeout(capSaveT);
+  capSaveT=setTimeout(function(){
+    var fd=new FormData(); fd.set('identity',capLib.identity); fd.set('data',JSON.stringify(capLib.block));
+    fetch('/captions/save',{method:'POST',body:fd,credentials:'same-origin'})
+      .then(function(r){return r.json();}).then(function(j){
+        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ Sauvegarde captions : '+((j&&j.error)||'?'),'error'); return; }
+        try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+        var el=document.getElementById('capLibData');
+        if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes});
+      }).catch(function(e){ if(typeof showToast==='function') showToast('❌ Sauvegarde captions : '+e,'error'); });
+  },250);
+}
+// ---- Actions (délégation : survit au swap vaultGoTo de la section) ----
+document.addEventListener('click', function(ev){
+  var pv=ev.target.closest?ev.target.closest('button[data-capstyle]'):null;
+  if(pv){
+    var vv=pv.getAttribute('data-capstyle')||'';
+    if(vv.indexOf('preset-')===0 && capLibInit()){
+      capEdPreset(vv.slice(7)); capSave();
+      if(typeof showToast==='function') showToast('🎨 Style appliqué à toutes les captions de @'+capLib.identity,'success');
+    }
+    return;
+  }
+  var b=ev.target.closest?ev.target.closest('[data-capact]'):null;
+  if(!b) return;
+  var act=b.getAttribute('data-capact'), cid=b.getAttribute('data-cid')||'';
+  if(!capLibInit()) return;
+  if(act==='add'){
+    var ta=document.getElementById('capAddTa'); if(!ta) return;
+    var lines=String(ta.value||'').split(/\\r?\\n/).map(function(t){return t.trim();}).filter(function(t){return t;});
+    if(!lines.length) return;
+    var now=Date.now();
+    for(var i=0;i<lines.length;i++){
+      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:lines[i].slice(0,300), x:0.5, y:0.61, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+    }
+    ta.value='';
+    capRenderCards(); capSave();
+    if(typeof showToast==='function') showToast('✅ '+lines.length+' caption'+(lines.length>1?'s ajoutées':' ajoutée'),'success');
+  }
+  else if(act==='del'){
+    var doDel=function(){ capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==cid;}); capRenderCards(); capSave(); };
+    if(typeof showConfirm==='function') showConfirm('Supprimer cette caption ?','Elle ne sera plus utilisée dans le tirage random.',doDel);
+    else if(confirm('Supprimer cette caption ?')) doDel();
+  }
+  else if(act==='place'){ capEdOpen('item',cid); }
+  else if(act==='place-global'){ capEdOpen('global',null); }
+  else if(act==='test'){ capGenerate(1,cid); }
+  else if(act==='gen'){ capGenerate(0,null); }
+});
+document.addEventListener('change', function(ev){
+  var t=ev.target; if(!t||!t.getAttribute) return;
+  if(t.getAttribute('data-captoggle')!=null){
+    if(!capLibInit()) return;
+    var cid=t.getAttribute('data-captoggle');
+    var it=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
+    if(it){ it.enabled=!!t.checked; capRenderCards(); capSave(); }
+    return;
+  }
+  if(t.getAttribute('data-capgp')!=null){
+    if(!capLibInit()) return;
+    capLib.block.global_pos=capLib.block.global_pos||{x:0.5,y:0.2};
+    capLib.block.global_pos.enabled=!!t.checked; capSave();
+    return;
+  }
+  var stl=t.getAttribute('data-capstyle');
+  if(stl && t.tagName!=='BUTTON'){
+    if(!capLibInit()) return;
+    var s=capLib.block.style=capLib.block.style||{};
+    if(stl==='font'){ capLib.block.font=t.value; }
+    else if(stl==='size'){ s.size=Math.max(16,Math.min(160,parseInt(t.value)||44)); }
+    else if(stl==='color'){ s.color=t.value; }
+    capSave();
+  }
+});
+document.addEventListener('input', function(ev){
+  var t=ev.target;
+  if(t&&t.getAttribute&&t.getAttribute('data-capstyle')==='size'){
+    var e=document.getElementById('capSizeVal'); if(e) e.textContent=String(parseInt(t.value)||44);
+  }
+});
+// ---- Éditeur de placement (drag sur une brute, aperçu = vrai moteur) ----
+var capEdState={mode:'item',cid:null,text:'',x:0.5,y:0.61,wrapW:0.88,img:null,pend:null,cache:{}};
+var capEdRerenderT=null;
+function capEdOpen(mode,cid){
+  if(!capLibInit()) return;
+  var st=capEdState, b=capLib.block, it=null;
+  st.mode=mode; st.cid=cid||null; st.img=null;
+  if(mode==='item'){
+    it=(b.items||[]).filter(function(c){return c.id===cid;})[0];
+    if(!it) return;
+  }
+  var gp=b.global_pos||{};
+  st.text = it ? String(it.text||'') : String(((b.items||[])[0]||{}).text||'Exemple de caption');
+  st.x = (mode==='global') ? (gp.x!=null?gp.x:0.5) : (it.x!=null?it.x:0.5);
+  st.y = (mode==='global') ? (gp.y!=null?gp.y:0.2) : (it.y!=null?it.y:0.61);
+  st.wrapW = (it&&it.wrapW!=null) ? it.wrapW : 0.88;
+  var ta=document.getElementById('cap-ed-text'); if(ta){ ta.value=st.text; ta.disabled=(mode==='global'); }
+  var sz=document.getElementById('cap-ed-size'); if(sz) sz.value=(b.style&&b.style.size)||44;
+  var szv=document.getElementById('cap-ed-size-val'); if(szv) szv.textContent=String((b.style&&b.style.size)||44);
+  var wr=document.getElementById('cap-ed-wrap'); if(wr) wr.value=Math.round(st.wrapW*100);
+  var ttl=document.getElementById('cap-ed-title');
+  if(ttl) ttl.textContent=(mode==='global')?'📍 Position globale (toutes les captions)':'📍 Placer cette caption';
+  var v=document.getElementById('cap-ed-video');
+  if(v){
+    if(capLib.brutes.length){
+      var bn=capLib.brutes[Math.floor(Math.random()*capLib.brutes.length)];
+      v.src='/cloud/file/'+encodeURIComponent(capLib.identity)+'/brutes/'+encodeURIComponent(bn);
+      var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){});
+    } else { v.removeAttribute('src'); try{ v.load(); }catch(e){} }
+  }
+  document.getElementById('cap-ed-modal').style.display='flex';
+  capEdRender();
+}
+function capEdClose(){
+  var v=document.getElementById('cap-ed-video'); if(v){ try{ v.pause(); }catch(e){} v.removeAttribute('src'); try{ v.load(); }catch(e){} }
+  var m=document.getElementById('cap-ed-modal'); if(m) m.style.display='none';
+}
+function capEdKey(){
+  var b=capLib.block||{}, s=b.style||{};
+  return [capEdState.text,b.font||'Strong',s.size||44,s.color||'#ffffff',s.align||'center',s['case']||'none',
+          (s.bold===false?0:1),(s.italic?1:0),(s.underline?1:0),(s.box?1:0),s.boxColor||'#000000',s.effect||'none',
+          (+capEdState.wrapW).toFixed(3)].join('|');
+}
+function capEdRender(){
+  var m=document.getElementById('cap-ed-modal'); if(!m||m.style.display==='none') return;
+  var st=capEdState, b=capLib.block||{}, s=b.style||{};
+  var ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var text=String(st.text||'').trim();
+  if(!text){ ov.innerHTML=''; return; }
+  var key=capEdKey(), rec=st.cache[key];
+  if(rec&&rec.url){ st.img=rec; capEdPlace(); return; }
+  capEdCssFallback();
+  if(st.pend===key) return;
+  st.pend=key;
+  var fd=new FormData(); fd.set('text',text); fd.set('font',b.font||'Strong');
+  fd.set('size',s.size||44); fd.set('color',s.color||'#ffffff');
+  fd.set('align',s.align||'center'); fd.set('case',s['case']||'none');
+  fd.set('bold',(s.bold===false)?'0':'1'); fd.set('italic',s.italic?'1':'0'); fd.set('underline',s.underline?'1':'0');
+  fd.set('box',s.box?'1':'0'); fd.set('boxColor',s.boxColor||'#000000'); fd.set('effect',s.effect||'none');
+  fd.set('wrapW',(+st.wrapW).toFixed(4));
+  var bbox=null;
+  fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
+    if(!r.ok) throw 0;
+    try{ var h=r.headers.get('X-BBox'); if(h) bbox=JSON.parse(h); }catch(e){}
+    return r.blob();
+  }).then(function(bl){
+    if(st.pend===key) st.pend=null;
+    if(bl&&bl.size>200&&bbox){
+      st.cache[key]={url:URL.createObjectURL(bl),bbox:bbox};
+      if(capEdKey()===key){ st.img=st.cache[key]; capEdPlace(); }
+    }
+  }).catch(function(){ if(st.pend===key) st.pend=null; });
+}
+function capEdPlace(){
+  var st=capEdState, ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var rec=st.img;
+  if(!(rec&&rec.url&&rec.bbox)){ capEdCssFallback(); return; }
+  var bb=rec.bbox, W=bb.W||1080, H=bb.H||1920;
+  var wpc=Math.max(1,(bb.w||1)/W*100), hpc=Math.max(1,(bb.h||1)/H*100);
+  var left=(st.x*100-wpc/2), top=(st.y*100-hpc/2);
+  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;touch-action:none;z-index:4;outline:1.5px dashed rgba(59,130,246,.85);outline-offset:4px">'
+    +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
+    +'</div>';
+  var el=document.getElementById('cap-ed-drag');
+  if(el) el.addEventListener('pointerdown',capEdBeginDrag);
+}
+function capEdCssFallback(){
+  var st=capEdState, ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var b=capLib.block||{}, s=b.style||{}, ow=ov.clientWidth||270;
+  var fpx=Math.max(9,(s.size||44)*ow/1080);
+  var col=(s.color&&s.color.length)?s.color:'#ffffff';
+  var inner=nxMEsc(String(st.text||'')).split(String.fromCharCode(10)).join('<br>');
+  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+(st.x*100).toFixed(2)+'%;top:'+(st.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:'+Math.round(st.wrapW*100)+'%;text-align:center;color:'+col+';font-family:Poppins,Arial;font-weight:700;font-style:italic;font-size:'+fpx.toFixed(1)+'px;-webkit-text-stroke:'+Math.max(1,fpx*0.095).toFixed(1)+'px #000;paint-order:stroke fill;cursor:move;touch-action:none;z-index:4;white-space:pre-wrap;word-break:break-word">'+inner+'</div>';
+  var el=document.getElementById('cap-ed-drag');
+  if(el) el.addEventListener('pointerdown',capEdBeginDrag);
+}
+function capEdBeginDrag(e){
+  e.preventDefault();
+  var ov=document.getElementById('cap-ed-overlay'), el=document.getElementById('cap-ed-drag');
+  if(!ov||!el) return;
+  var rect=ov.getBoundingClientRect(), pid=e.pointerId;
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev2){
+    if(ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    if(ev2.buttons===0){ up(ev2); return; }
+    var fx=(ev2.clientX-rect.left)/rect.width, fy=(ev2.clientY-rect.top)/rect.height;
+    fx=Math.max(0.03,Math.min(0.97,fx)); fy=Math.max(0.03,Math.min(0.96,fy));
+    if(Math.abs(fx-0.5)<0.02) fx=0.5;
+    capEdState.x=fx; capEdState.y=fy;
+    if(el.style.transform){ el.style.left=(fx*100).toFixed(2)+'%'; el.style.top=(fy*100).toFixed(2)+'%'; }
+    else{
+      var w=el.offsetWidth/rect.width*100, h=el.offsetHeight/rect.height*100;
+      el.style.left=(fx*100-w/2).toFixed(3)+'%'; el.style.top=(fy*100-h/2).toFixed(3)+'%';
+    }
+    var gx=document.getElementById('cap-ed-gx'); if(gx) gx.style.display=(fx===0.5)?'block':'none';
+  }
+  function up(ev2){
+    if(ev2&&ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    var gx=document.getElementById('cap-ed-gx'); if(gx) gx.style.display='none';
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
+}
+function capEdSize(v){
+  if(!capLib.block) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.size=Math.max(16,Math.min(160,parseInt(v)||44));
+  var e=document.getElementById('cap-ed-size-val'); if(e) e.textContent=String(s.size);
+  var e2=document.getElementById('capSizeVal'); if(e2) e2.textContent=String(s.size);
+  var e3=document.querySelector('input[data-capstyle=size]'); if(e3) e3.value=s.size;
+  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,220);
+}
+function capEdWrap(v){
+  capEdState.wrapW=Math.max(0.25,Math.min(0.97,(parseInt(v)||88)/100));
+  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,220);
+}
+function capEdTextChanged(){
+  var ta=document.getElementById('cap-ed-text'); if(!ta) return;
+  capEdState.text=ta.value;
+  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,350);
+}
+function capEdPreset(name){
+  if(!capLib.block) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
+  else if(name==='blackbox'){ s.box=true; s.boxColor='#010101'; s.color='#ffffff'; s.effect='none'; }
+  else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#000000'; s.effect='none'; }
+  var cp=document.querySelector('input[data-capstyle=color]'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
+  capEdState.img=null; capEdRender();
+}
+function capEdSaveBtn(){
+  if(!capLib.block){ capEdClose(); return; }
+  var st=capEdState, b=capLib.block;
+  if(st.mode==='global'){
+    b.global_pos=b.global_pos||{};
+    b.global_pos.x=st.x; b.global_pos.y=st.y; b.global_pos.enabled=true;
+    var cb=document.querySelector('input[data-capgp]'); if(cb) cb.checked=true;
+  } else {
+    var it=(b.items||[]).filter(function(c){return c.id===st.cid;})[0];
+    if(it){
+      var ta=document.getElementById('cap-ed-text');
+      if(ta&&String(ta.value||'').trim()) it.text=String(ta.value).trim().slice(0,300);
+      it.x=st.x; it.y=st.y; it.wrapW=st.wrapW;
+    }
+  }
+  capEdClose(); capRenderCards(); capSave();
+}
+// ---- Génération : N vidéos, chacune = 1 brute random + 1 caption random ----
+var capGenBusy=false;
+async function capGenerate(count,cid){
+  if(!capLibInit()) return;
+  if(capGenBusy){ if(typeof showToast==='function') showToast('Une génération est déjà en cours…','warning'); return; }
+  var items=(capLib.block.items||[]).filter(function(c){return c.enabled!==false&&String(c.text||'').trim();});
+  if(!items.length){ if(typeof showToast==='function') showToast('Ajoute au moins une caption active','warning'); return; }
+  if(!capLib.brutes.length){ if(typeof showToast==='function') showToast('Aucune vidéo brute pour cette identité — ajoute des rushs dans « Vidéo brut »','warning',7000); return; }
+  var n=(count>0)?count:Math.max(1,Math.min(10,parseInt((document.getElementById('capGenN')||{}).value)||1));
+  capGenBusy=true;
+  var btn=document.querySelector('button[data-capact=gen]'); if(btn) btn.disabled=true;
+  var stat=document.getElementById('capGenStatus'), res=document.getElementById('capGenResults');
+  var okN=0;
+  for(var i=0;i<n;i++){
+    if(stat) stat.textContent='⏳ Vidéo '+(i+1)+'/'+n+' — tirage + rendu en cours…';
+    try{
+      var fd=new FormData(); fd.set('identity',capLib.identity); if(cid) fd.set('caption_id',cid);
+      var r=await fetch('/captions/gen',{method:'POST',body:fd,credentials:'same-origin'});
+      var j=await r.json();
+      if(!(j&&j.ok)){ if(stat) stat.textContent='❌ '+((j&&j.error)||'?'); break; }
+      var out=await capPollModel(j.model,stat,i+1,n);
+      if(!out){ if(stat) stat.textContent='❌ Rendu échoué — vidéo '+(i+1)+'/'+n; continue; }
+      okN++; capResultRow(res,j,out);
+    }catch(e){ if(stat) stat.textContent='❌ '+e; break; }
+  }
+  if(stat&&okN) stat.textContent='✅ '+okN+' vidéo'+(okN>1?'s prêtes':' prête')+' ci-dessous';
+  if(btn) btn.disabled=false;
+  capGenBusy=false;
+}
+async function capPollModel(model,stat,idx,total){
+  var t0=Date.now();
+  while(Date.now()-t0<600000){
+    await new Promise(function(rs){ setTimeout(rs,1500); });
+    try{
+      var r=await fetch('/noctus/status?model='+encodeURIComponent(model)); var s=await r.json();
+      if(s.state==='running'){ if(stat) stat.textContent='⏳ Vidéo '+idx+'/'+total+' — '+(s.pct||0)+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); }
+      else if(s.state==='done'){
+        if(Date.now()-t0<2500) continue;   // « done » fantôme de la génération précédente
+        var ro=await fetch('/noctus/outputs?model='+encodeURIComponent(model)); var jo=await ro.json();
+        var o=(jo&&jo.outputs)||{}, ks=Object.keys(o);
+        for(var k=0;k<ks.length;k++){ if((o[ks[k]]||[]).length) return {vf:ks[k],file:o[ks[k]][0]}; }
+        return null;
+      }
+      else if(s.state==='error'||s.state==='stopped') return null;
+    }catch(e){}
+  }
+  return null;
+}
+function capResultRow(res,j,out){
+  if(!res) return;
+  var url='/noctus/file/'+encodeURIComponent(j.model)+'/'+out.vf+'/'+encodeURIComponent(out.file);
+  var row=document.createElement('div');
+  row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 12px;background:#101013;border:1px solid #232327;border-radius:10px';
+  row.innerHTML='<span style="font-size:16px">🎬</span>'
+    +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nxMEsc(String(j.caption||''))+'</div>'
+    +'<div style="font-size:11px;color:#888">brute : '+nxMEsc(String(j.brute||''))+'</div></div>'
+    +'<a href="'+url+'" target="_blank" style="text-decoration:none;font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px">▶ Voir</a>'
+    +'<button type="button" class="cap-dl" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">⬇ Télécharger</button>'
+    +'<button type="button" class="cap-dc" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">📤 Discord</button>';
+  var dl=row.querySelector('.cap-dl'); if(dl) dl.addEventListener('click',function(){ nxMDownloadOne(url+'?dl=1'); dl.textContent='✅'; });
+  var dc=row.querySelector('.cap-dc'); if(dc) dc.addEventListener('click',function(){ capSendDiscord(j,out,dc); });
+  res.appendChild(row);
+}
+async function capSendDiscord(j,out,btn){
+  btn.disabled=true; btn.textContent='⏳';
+  var fd=new FormData(); fd.set('identity',j.identity||capLib.identity); fd.set('model',j.model); fd.set('vf',out.vf); fd.set('file',out.file);
+  try{
+    var r=await fetch('/noctus/montage_send',{method:'POST',body:fd,credentials:'same-origin'}); var jj=await r.json();
+    if(jj&&jj.ok){ btn.textContent='✅ envoyé'; }
+    else{ btn.disabled=false; btn.textContent='📤 Discord'; if(typeof showToast==='function') showToast('❌ '+((jj&&jj.error)||'?'),'error'); }
+  }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
+}
+// ==================== fin bibliothèque CAPTION ====================
 function deleteSelected(){
   if(selectedFiles.size === 0) return;
   showConfirm(
@@ -5080,6 +5448,10 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       Template montage
     </button>
+    <button class="item" id="tab-cloudcaptions" onclick="showTab('montage','cloudcaptions','Caption','Tes textes par identité — posés en random sur les vidéos brutes')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>
+      Caption
+    </button>
   </div>
 </div>
 
@@ -5609,6 +5981,11 @@ document.addEventListener('click',function(e){
 <!-- REEL MONTAGE : modeles CapCut -->
 <div class="form-section" id="form-cloudtemplates" style="display:none">
 {cloud_templates_html}
+</div>
+
+<!-- REEL MONTAGE : captions (textes poses en RANDOM sur les brutes) -->
+<div class="form-section" id="form-cloudcaptions" style="display:none">
+{cloud_captions_html}
 </div>
 
 <!-- CLOUD : posts -->
@@ -6338,6 +6715,39 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
+<!-- ===== Editeur CAPTION : placer un texte sur une video brute (drag) ===== -->
+<div id="cap-ed-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);align-items:center;justify-content:center;padding:20px" onclick="capEdClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:16px;display:flex;gap:16px;max-width:94vw;max-height:94vh;box-sizing:border-box">
+    <div style="position:relative;height:min(76vh,620px);aspect-ratio:9/16;background:#000;border-radius:10px;overflow:hidden;flex-shrink:0">
+      <video id="cap-ed-video" muted loop playsinline style="width:100%;height:100%;object-fit:cover"></video>
+      <div id="cap-ed-overlay" style="position:absolute;inset:0"></div>
+      <div id="cap-ed-gx" style="display:none;position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(59,130,246,.9);z-index:6;pointer-events:none"></div>
+      <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#a855f7;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">BRUTE (exemple)</span>
+    </div>
+    <div style="width:262px;display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div id="cap-ed-title" style="font-weight:800;font-size:14px">📍 Placer cette caption</div>
+      <textarea id="cap-ed-text" rows="3" oninput="capEdTextChanged()" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#c4c4cc">Taille
+        <input id="cap-ed-size" type="range" min="16" max="160" value="44" oninput="capEdSize(this.value)" style="flex:1">
+        <span id="cap-ed-size-val" style="min-width:26px;text-align:right">44</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#c4c4cc">Largeur
+        <input id="cap-ed-wrap" type="range" min="25" max="97" value="88" oninput="capEdWrap(this.value)" style="flex:1">
+      </label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="cap-preset" onclick="capEdPreset('outline')">Contour</button>
+        <button type="button" class="cap-preset" onclick="capEdPreset('blackbox')">Boîte noire</button>
+        <button type="button" class="cap-preset" onclick="capEdPreset('whitebox')">Boîte blanche</button>
+      </div>
+      <div style="font-size:11px;color:#888;line-height:1.5">Glisse le texte sur la vidéo pour le placer. Taille et style s’appliquent à toutes les captions de la model ; la position est propre à chaque caption.</div>
+      <div style="margin-top:auto;display:flex;gap:8px">
+        <button type="button" onclick="capEdClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+        <button type="button" onclick="capEdSaveBtn()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">✅ Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="nx-montage-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:#000;align-items:center;justify-content:center;padding:0">
   <div onclick="event.stopPropagation()" class="ce-app">
     <!-- 1) BARRE DE TITRE -->
@@ -6667,9 +7077,110 @@ def _list_content_identities():
 WEB_USERS_FILE = DATA_DIR / "web_admin_users.json"
 
 
-def _hash_password(password: str) -> str:
+# --- Hachage des mots de passe -------------------------------------------------
+# AVANT : sha256(password) nu, sans sel et sans coût de calcul. Un vol de
+# web_admin_users.json cassait TOUS les mots de passe en quelques minutes — une
+# carte graphique fait des milliards de sha256 par seconde, et sans sel une seule
+# table arc-en-ciel sert pour tous les comptes à la fois. Acceptable pour cinq
+# employés sur un outil interne, plus du tout dès que le site accepte des
+# inscriptions publiques.
+#
+# MAINTENANT : scrypt, qui est lent ET gourmand en mémoire — c'est la mémoire qui
+# ruine les attaques par GPU, là où PBKDF2 (lent mais léger) se parallélise très
+# bien. Sel aléatoire par compte, donc deux personnes avec le même mot de passe
+# ont deux empreintes différentes et une table pré-calculée ne sert à rien.
+#
+# Les anciennes empreintes restent acceptées et sont remplacées silencieusement
+# au prochain login réussi (voir _check_web_login). Personne ne perd son accès et
+# il n'y a aucune migration à lancer à la main.
+_SCRYPT_N = 2 ** 14      # 16 Mo de mémoire par vérification, ~50-100 ms
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_PBKDF2_ROUNDS = 480_000
+_HASH_LEN = 32
+
+
+def _kdf_available() -> str:
+    """scrypt si l'OpenSSL du VPS le fournit, sinon PBKDF2. Les deux sont stdlib.
+
+    scrypt dépend d'OpenSSL 1.1+ et peut manquer sur une machine ancienne. Tester
+    une fois ici plutôt que de laisser la première tentative de login exploser :
+    un site qui refuse toutes les connexions après un déploiement est bien pire
+    qu'un site qui hache un cran moins bien.
+    """
     import hashlib
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    try:
+        hashlib.scrypt(b"x", salt=b"y", n=1024, r=8, p=1, dklen=16)
+        return "scrypt"
+    except Exception:
+        return "pbkdf2"
+
+
+_KDF = _kdf_available()
+
+
+def _hash_password(password: str) -> str:
+    """Empreinte salée au format `<algo>$<params>$<sel_hex>$<empreinte_hex>`.
+
+    Le format porte ses propres paramètres, donc augmenter le coût plus tard
+    n'invalide pas les empreintes existantes : elles restent vérifiables avec les
+    paramètres sous lesquels elles ont été créées.
+    """
+    import hashlib
+    import os as _os_hp
+    salt = _os_hp.urandom(16)
+    raw = (password or "").encode("utf-8")
+    if _KDF == "scrypt":
+        dk = hashlib.scrypt(raw, salt=salt, n=_SCRYPT_N, r=_SCRYPT_R,
+                            p=_SCRYPT_P, dklen=_HASH_LEN)
+        return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${dk.hex()}"
+    dk = hashlib.pbkdf2_hmac("sha256", raw, salt, _PBKDF2_ROUNDS, dklen=_HASH_LEN)
+    return f"pbkdf2${_PBKDF2_ROUNDS}${salt.hex()}${dk.hex()}"
+
+
+def _verify_password(stored: str, password: str) -> bool:
+    """Vérifie un mot de passe contre une empreinte, ancienne ou nouvelle.
+
+    Comparaison à temps constant partout : `==` sur des chaînes s'arrête au
+    premier caractère différent, ce qui laisse fuir l'empreinte octet par octet à
+    qui sait mesurer. Le coût est nul, l'omission est difficile à rattraper.
+    """
+    import hashlib
+    import hmac as _hmac_vp
+    stored = (stored or "").strip()
+    raw = (password or "").encode("utf-8")
+    if not stored or not password:
+        return False
+
+    parts = stored.split("$")
+    try:
+        if parts[0] == "scrypt" and len(parts) == 6:
+            n, r, p = int(parts[1]), int(parts[2]), int(parts[3])
+            salt, expected = bytes.fromhex(parts[4]), bytes.fromhex(parts[5])
+            dk = hashlib.scrypt(raw, salt=salt, n=n, r=r, p=p, dklen=len(expected))
+            return _hmac_vp.compare_digest(dk, expected)
+        if parts[0] == "pbkdf2" and len(parts) == 4:
+            rounds = int(parts[1])
+            salt, expected = bytes.fromhex(parts[2]), bytes.fromhex(parts[3])
+            dk = hashlib.pbkdf2_hmac("sha256", raw, salt, rounds, dklen=len(expected))
+            return _hmac_vp.compare_digest(dk, expected)
+    except (ValueError, TypeError, MemoryError):
+        # Empreinte illisible : refuser. Une empreinte corrompue ne doit jamais
+        # ouvrir une session, et surtout pas retomber sur le chemin legacy.
+        return False
+
+    # Legacy : sha256 nu, 64 caractères hexa. Toujours accepté pour ne verrouiller
+    # personne dehors, mais remplacé dès le prochain login (voir _check_web_login).
+    if len(stored) == 64:
+        legacy = hashlib.sha256(raw).hexdigest()
+        return _hmac_vp.compare_digest(legacy, stored.lower())
+    return False
+
+
+def _needs_rehash(stored: str) -> bool:
+    """Vrai si l'empreinte est au vieux format et mérite d'être remplacée."""
+    stored = (stored or "").strip()
+    return bool(stored) and "$" not in stored
 
 
 def _load_web_users() -> dict:
@@ -6698,10 +7209,49 @@ def _bootstrap_web_users():
         _save_web_users(users)
 
 
+def _upgrade_password_hash(username: str, password: str):
+    """Remplace une vieille empreinte sha256 par une empreinte salée.
+
+    Appelé uniquement après une vérification réussie — c'est le seul moment où le
+    mot de passe en clair est disponible pour être re-haché. L'écriture touche les
+    DEUX fichiers parce qu'ils se recopient l'empreinte l'un l'autre
+    (_reactivate_web_user relit celle de role_users.json) : n'en migrer qu'un
+    ferait ressusciter l'ancienne empreinte à la première réactivation de compte.
+
+    Un échec ici ne doit pas faire échouer la connexion : l'ancienne empreinte
+    reste valide, la migration retentera au login suivant.
+    """
+    uname = (username or "").lower().strip()
+    if not uname:
+        return
+    try:
+        fresh = _hash_password(password)
+        wu = _load_web_users()
+        if uname in wu and _needs_rehash(wu[uname].get("password_hash", "")):
+            wu[uname]["password_hash"] = fresh
+            _save_web_users(wu)
+        ru = _load_role_users()
+        touched = False
+        for u in ru:
+            if (u.get("username") or "").lower() == uname and _needs_rehash(
+                    u.get("password_hash", "")):
+                u["password_hash"] = fresh
+                touched = True
+        if touched:
+            _save_role_users(ru)
+        log.info("mot de passe de %s re-haché au format salé", uname)
+    except Exception as e:
+        log.warning("re-hachage du mot de passe de %s impossible : %s", uname, e)
+
+
 def _check_web_login(username: str, password: str) -> bool:
     """Accepte 2 façons :
     1. username + password matchant un user enregistré dans web_admin_users.json
     2. password seul matchant WEB_PASSWORD (legacy, pour compat)
+
+    Les empreintes au vieux format sha256 sont toujours acceptées, puis remplacées
+    silencieusement — c'est ce qui permet de changer d'algorithme sans déconnecter
+    personne ni demander à qui que ce soit de refaire son mot de passe.
     """
     if not password:
         return False
@@ -6710,12 +7260,33 @@ def _check_web_login(username: str, password: str) -> bool:
     if username:
         users = _load_web_users()
         u = users.get(username.lower().strip())
-        if u and u.get("password_hash") == _hash_password(password):
+        stored = (u or {}).get("password_hash", "")
+        if u and _verify_password(stored, password):
+            if _needs_rehash(stored):
+                _upgrade_password_hash(username, password)
             return True
-    # Fallback : password seul matchant WEB_PASSWORD
-    if password == WEB_PASSWORD:
+    # Fallback : password seul matchant WEB_PASSWORD.
+    #
+    # ATTENTION — n'importe quel nom d'utilisateur accompagné de ce mot de passe
+    # ouvre une session ADMIN complète (voir _web_user_role, qui retourne "admin"
+    # dès que le nom saisi ne correspond à aucun compte). Tant que le formulaire
+    # de login n'est pas public, c'est un raccourci de dépannage. Le jour où le
+    # site accepte des inscriptions, c'est un seul mot de passe deviné entre un
+    # inconnu et l'administration entière : ce chemin doit disparaître AVANT
+    # d'ouvrir /signup, pas après.
+    import hmac as _hmac_cw
+    if hmac_compare_str(_hmac_cw, password, WEB_PASSWORD):
         return True
     return False
+
+
+def hmac_compare_str(_hmac_mod, a: str, b: str) -> bool:
+    """compare_digest sur deux chaînes, en encodant d'abord.
+
+    compare_digest refuse les `str` contenant des caractères non-ASCII ; un mot de
+    passe avec un accent ferait donc lever une exception au lieu de renvoyer False.
+    """
+    return _hmac_mod.compare_digest((a or "").encode("utf-8"), (b or "").encode("utf-8"))
 
 
 def _web_user_role(username: str, password: str) -> str:
@@ -6727,7 +7298,7 @@ def _web_user_role(username: str, password: str) -> str:
     uname = (username or "").lower().strip()
     if uname:
         u = _load_web_users().get(uname)
-        if u and u.get("password_hash") == _hash_password(password or ""):
+        if u and _verify_password(u.get("password_hash", ""), password or ""):
             return (u.get("role") or "admin").lower()
     return "admin"
 
@@ -12725,6 +13296,299 @@ document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(fu
         + "<div class='vault-layout'>"
         + vault_sidebar
         + f"<div class='vault-gallery'>{gallery}</div>"
+        + "</div>"
+    )
+
+
+# ====================================================================
+#  CAPTION (Reel montage) : bibliothèque de TEXTES par identité, posés
+#  en RANDOM sur les vidéos brutes à la génération (moteur montage,
+#  brute seule : pas de template ni de coupe — le son de la brute reste).
+#  Stockage : data/captions.json — un bloc par identité :
+#  {"<ident>": {"font", "style" (global), "global_pos" {enabled,x,y},
+#               "items": [{"id","text","x","y","wrapW"?,"enabled","created"}]}}
+#  x/y = fractions 0-1 du CENTRE du texte (cadre 1080x1920), mêmes bornes
+#  que le moteur (cf. _clean_style de montage_gen).
+# ====================================================================
+CAPTIONS_FILE = DATA_DIR / "captions.json"
+CAPTION_FONTS = ("Strong", "TikTokSans", "Inter", "Poppins", "Montserrat",
+                 "BebasNeue", "Anton")
+
+
+def _load_captions_lib() -> dict:
+    d = _cached_json_load(CAPTIONS_FILE)
+    return d if isinstance(d, dict) else {}
+
+
+def _save_captions_lib(lib: dict) -> bool:
+    CAPTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ok = bool(safe_json.write(CAPTIONS_FILE, lib, indent=2))
+    _invalidate_json_cache(CAPTIONS_FILE)
+    return ok
+
+
+def _clean_caption_block(raw) -> dict:
+    """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur)."""
+    out = {"font": "Strong", "style": {},
+           "global_pos": {"enabled": False, "x": 0.5, "y": 0.2}, "items": []}
+    if not isinstance(raw, dict):
+        return out
+    f = raw.get("font")
+    if isinstance(f, str) and f in CAPTION_FONTS:
+        out["font"] = f
+    st = raw.get("style") if isinstance(raw.get("style"), dict) else {}
+    s2 = {}
+    try:
+        if st.get("size") is not None:
+            s2["size"] = max(16, min(160, int(float(st["size"]))))
+    except Exception:
+        pass
+    for k in ("color", "boxColor"):
+        v = st.get(k)
+        if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", v):
+            s2[k] = v
+    if st.get("align") in ("left", "center", "right"):
+        s2["align"] = st["align"]
+    if st.get("case") in ("upper", "lower", "title", "none"):
+        s2["case"] = st["case"]
+    for k in ("bold", "italic", "underline", "box"):
+        if k in st:
+            s2[k] = bool(st[k])
+    if st.get("effect") in ("shadow", "neon"):
+        s2["effect"] = st["effect"]
+    out["style"] = s2
+
+    def _clampf(v, lo, hi, dflt):
+        try:
+            fv = float(v)
+        except Exception:
+            return dflt
+        return round(min(hi, max(lo, fv)), 4)
+
+    gp = raw.get("global_pos") if isinstance(raw.get("global_pos"), dict) else {}
+    out["global_pos"] = {"enabled": bool(gp.get("enabled")),
+                         "x": _clampf(gp.get("x"), 0.0, 1.0, 0.5),
+                         "y": _clampf(gp.get("y"), 0.0, 1.0, 0.2)}
+    items = raw.get("items") if isinstance(raw.get("items"), list) else []
+    import time as _t
+    for it in items[:80]:                          # garde-fou
+        if not isinstance(it, dict):
+            continue
+        txt = str(it.get("text") or "").strip()
+        if not txt:
+            continue
+        entry = {"id": str(it.get("id") or f"c{int(_t.time() * 1000)}")[:48],
+                 "text": txt[:300],
+                 "x": _clampf(it.get("x"), 0.0, 1.0, 0.5),
+                 "y": _clampf(it.get("y"), 0.0, 1.0, 0.61),
+                 "enabled": it.get("enabled") is not False}
+        try:
+            wf = float(it.get("wrapW"))
+            if 0.2 <= wf <= 0.97:
+                entry["wrapW"] = round(wf, 4)
+        except Exception:
+            pass
+        try:
+            lf = float(it.get("lineSpacing"))
+            if 0.9 <= lf <= 3.0:
+                entry["lineSpacing"] = round(lf, 3)
+        except Exception:
+            pass
+        try:
+            entry["created"] = int(it.get("created"))
+        except Exception:
+            pass
+        out["items"].append(entry)
+    return out
+
+
+def _render_cloud_captions_html() -> str:
+    """Onglet « Caption » (groupe Reel montage) : par identité, une liste de
+    textes avec chacun SA position (posée par drag dans l'éditeur — option
+    position globale). À la génération, UNE brute + UNE caption sont tirées au
+    hasard et le texte est incrusté par le moteur montage (routes /captions/)."""
+    import html as _h
+    import json as _js
+    from flask import request as _req
+
+    identities = _list_content_identities()
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+    lib = _load_captions_lib()
+
+    def _n_caps(ident):
+        b = lib.get(ident)
+        items = b.get("items") if isinstance(b, dict) else None
+        return len(items) if isinstance(items, list) else 0
+
+    selected = ""
+    try:
+        selected = (_req.args.get("cloud_captions_ident", "") or "").lower().strip()
+    except Exception:
+        pass
+    if not selected or selected not in identities:
+        selected = next((i for i in identities if _n_caps(i) > 0), identities[0])
+
+    block = _clean_caption_block(lib.get(selected))
+
+    # Brutes de l'identité : fond de l'éditeur + matière première du tirage
+    bdir = IDENTITIES_DIR / selected / "brutes"
+    brutes = []
+    if bdir.exists():
+        brutes = sorted(p.name for p in bdir.iterdir()
+                        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                        and ".example" not in p.name)
+
+    # ---- Sidebar identités (même vault que brutes/templates) ----
+    vault_items = []
+    for ident in identities:
+        n = _n_caps(ident)
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            if avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+        )
+        status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
+        count_badge = ""
+        if n > 0:
+            count_badge = (
+                f"<span class='vault-count' style='background:rgba(168,85,247,.15);color:#a855f7;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px'>{n}</span>"
+            )
+        active_class = "vault-item-active" if ident == selected else ""
+        vault_items.append(
+            f"<a href='?tab=cloudcaptions&cloud_captions_ident={ident}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
+            f"</div>{count_badge}</a>"
+        )
+    vault_sidebar = (
+        "<div class='vault-sidebar'>"
+        "<div class='vault-search'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        "<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-captions'>"
+        "</div>"
+        "<div class='vault-filter-row'>"
+        "<div style='color:#a855f7;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</div></div>"
+        "<div class='vault-list' id='vault-list-captions'>"
+        + "".join(vault_items)
+        + "</div></div>"
+    )
+
+    # ---- Galerie (droite) ----
+    sel_avatar_url = _identity_avatar_url(selected)
+    sel_avatar_html = (
+        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        if sel_avatar_url else
+        f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
+    )
+    n_sel = len(block["items"])
+    header = (
+        "<div class='vault-gallery-header' style='justify-content:space-between'>"
+        "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
+        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
+        "<div style='flex:1;min-width:0'>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
+        "</div></div>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        "<input id='capGenN' type='number' min='1' max='10' value='3' title='Nombre de vidéos à générer (brute + caption au hasard à chaque fois)' "
+        "style='width:52px;height:36px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;text-align:center;font-size:13px;box-sizing:border-box'>"
+        "<button type='button' data-capact='gen' style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>🎲 Générer</button>"
+        "</div></div>"
+    )
+
+    st = block["style"]
+    gp = block["global_pos"]
+    _size = st.get("size", 44)
+    _color = st.get("color") if re.match(r"^#[0-9a-fA-F]{6}$", str(st.get("color") or "")) else "#ffffff"
+    font_opts = "".join(
+        f"<option{' selected' if f == block['font'] else ''}>{f}</option>"
+        for f in CAPTION_FONTS)
+    conf_row = (
+        "<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
+        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Police "
+        f"<select data-capstyle='font' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12px;font-family:inherit'>{font_opts}</select></label>"
+        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Taille "
+        f"<input data-capstyle='size' type='range' min='16' max='160' value='{_size}' style='width:110px'>"
+        f"<span id='capSizeVal' style='min-width:24px;text-align:right'>{_size}</span></label>"
+        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Couleur "
+        f"<input data-capstyle='color' type='color' value='{_color}' style='width:34px;height:26px;background:none;border:1px solid #34343a;border-radius:6px;padding:1px'></label>"
+        "<div style='display:flex;gap:6px'>"
+        "<button type='button' data-capstyle='preset-outline' class='cap-preset'>Contour</button>"
+        "<button type='button' data-capstyle='preset-blackbox' class='cap-preset'>Boîte noire</button>"
+        "<button type='button' data-capstyle='preset-whitebox' class='cap-preset'>Boîte blanche</button>"
+        "</div>"
+        "<span style='flex:1'></span>"
+        "<label title='Toutes les captions au même endroit (au lieu de la position propre à chacune)' "
+        f"style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc;cursor:pointer'><input type='checkbox' data-capgp='1'{' checked' if gp.get('enabled') else ''}> Position globale</label>"
+        "<button type='button' data-capact='place-global' class='cap-preset' title='Régler la position globale par drag'>📍 Régler</button>"
+        "</div>"
+    )
+
+    add_zone = (
+        "<div style='display:flex;gap:10px;align-items:stretch;margin-bottom:16px'>"
+        "<textarea id='capAddTa' rows='3' placeholder='Une caption par ligne — colle ta liste ici (10-15 d un coup, pas de souci)…' "
+        "style='flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box'></textarea>"
+        "<button type='button' data-capact='add' style='padding:0 22px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>＋ Ajouter</button>"
+        "</div>"
+    )
+
+    cards = []
+    if not block["items"]:
+        cards.append("<div style='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px'>Aucune caption — colle ta liste au-dessus (une par ligne) puis « ＋ Ajouter ».</div>")
+    for it in block["items"]:
+        cid = _h.escape(str(it["id"]), quote=True)
+        on = it.get("enabled", True)
+        meta = f"📍 {round(it.get('x', 0.5) * 100)}·{round(it.get('y', 0.61) * 100)}%"
+        if it.get("wrapW"):
+            meta += f" · ↔ {round(it['wrapW'] * 100)}%"
+        cards.append(
+            f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
+            f"<div class='cap-card-text'>{_h.escape(it['text'], quote=True)}</div>"
+            f"<div class='cap-card-meta'>{meta}</div>"
+            "<div class='cap-card-actions'>"
+            f"<button type='button' data-capact='place' data-cid='{cid}' title='Placer le texte sur la vidéo (drag)'>📍 Placer</button>"
+            f"<button type='button' data-capact='test' data-cid='{cid}' title='Générer une vidéo test avec CETTE caption'>🎬</button>"
+            f"<label title='Active dans le tirage' style='display:inline-flex;align-items:center;cursor:pointer;margin-left:auto'><input type='checkbox' data-captoggle='{cid}'{' checked' if on else ''}></label>"
+            f"<button type='button' data-capact='del' data-cid='{cid}' title='Supprimer'>🗑</button>"
+            "</div></div>"
+        )
+    grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px'>"
+            + "".join(cards) + "</div>")
+
+    results = ("<div id='capGenStatus' style='margin-top:16px;font-size:12.5px;color:#9a9aa6'></div>"
+               "<div id='capGenResults' style='margin-top:8px;display:flex;flex-direction:column;gap:8px'></div>")
+
+    payload = _js.dumps({"identity": selected, "block": block, "brutes": brutes[:80]},
+                        ensure_ascii=False).replace("</", "<\\/")
+    state = f"<script type='application/json' id='capLibData'>{payload}</script>"
+
+    css = """
+<style>
+.cap-card{background:#101013;border:1px solid #232327;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.cap-card.cap-off{opacity:.45}
+.cap-card-text{font-size:13.5px;font-weight:600;line-height:1.35;white-space:pre-wrap;word-break:break-word}
+.cap-card-meta{font-size:11px;color:#888}
+.cap-card-actions{display:flex;align-items:center;gap:6px;margin-top:auto}
+.cap-card-actions button{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit}
+.cap-card-actions button:hover{background:#232329;color:#fff}
+.cap-preset{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+.cap-preset:hover{background:#232329;color:#fff}
+</style>
+"""
+    return (
+        css
+        + "<div class='vault-layout'>"
+        + vault_sidebar
+        + f"<div class='vault-gallery'>{header}{conf_row}{add_zone}{grid}{results}{state}</div>"
         + "</div>"
     )
 
@@ -32643,7 +33507,7 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Création", "items": [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
         {"key": "svideo", "name": "Métadonnées vidéo (uniquification)", "perms": ["view", "edit"]},
-        {"key": "montage", "name": "Reel montage (rushs bruts + templates)", "perms": ["view", "create"]},
+        {"key": "montage", "name": "Reel montage (rushs bruts + templates + captions)", "perms": ["view", "create"]},
     ]},
     {"section": "Liens", "items": [
         {"key": "gmsdash", "name": "Dashboard clics (GMS)", "perms": ["view"]},
@@ -32704,8 +33568,8 @@ _PERM_KEY_TO_TABS = {
     # demande de l'user : elle ne doit plus apparaître dans les mappings, sinon
     # une case pointerait sur une page inatteignable.
     "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
-    # Reel montage = ses 2 bibliotheques (rushs bruts + modeles CapCut)
-    "montage": {"cloudbrutes", "cloudtemplates"},
+    # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
+    "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
     # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
     # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
@@ -33703,6 +34567,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_reels_html}", _g("cloudreels", lambda: _render_cloud_content_html("videos", VIDEO_EXTS)))
         .replace("{cloud_brutes_html}", _g("cloudbrutes", lambda: _render_cloud_content_html("brutes", VIDEO_EXTS)))
         .replace("{cloud_templates_html}", _g("cloudtemplates", lambda: _render_cloud_content_html("templates", VIDEO_EXTS)))
+        .replace("{cloud_captions_html}", _g("cloudcaptions", _render_cloud_captions_html))
         .replace("{cloud_posts_html}", _g("cloudposts", lambda: _render_cloud_content_html("posts", IMAGE_EXTS)))
         .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
         .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
@@ -34407,6 +35272,9 @@ def create_app():
         # car aucun préfixe ne les couvrait. « /jbactivity » (orthographe -y) ne
         # commence pas par « /jbactivite/ » (-e), d'où le trou.
         "/jbactivity", "/jbimport",
+        # Bibliothèque de captions (onglet Caption du Reel montage) : la lecture
+        # est réservée aux rôles qui ont l'onglet (mapping ci-dessous).
+        "/captions/",
     )
     # Prefixe de lecture -> onglet (showTab) qui le sert. Un rôle restreint à qui
     # on a EXPLICITEMENT accordé cet onglet peut lire ses données ; les autres
@@ -34427,6 +35295,9 @@ def create_app():
         # Planning. On le mappe donc à l'onglet "sfs" (sinon un rôle SFS légitime
         # se prenait un 403 en cliquant). Un chatter reste bloqué (pas d'onglet sfs).
         "/mypuls/refresh_pushs_now": "sfs",
+        # Bibliothèque captions : lisible par un rôle qui a l'onglet Caption
+        # (permission « montage ») ; l'écriture reste admin-only (deny par défaut).
+        "/captions/": "cloudcaptions",
     }
 
     @app.before_request
@@ -36086,6 +36957,98 @@ def create_app():
         except Exception:
             pass
         return jsonify({"ok": True})
+
+    # ================= CAPTIONS (onglet Caption du Reel montage) =============
+    # Bibliothèque de textes par identité (data/captions.json). La génération
+    # tire UNE brute + UNE caption au hasard et réutilise le moteur montage
+    # (noctus_web.gen_from_draft, brute seule : pas de template ni de cut_at,
+    # le son de la brute est conservé). Écriture admin-only via le deny-par-
+    # défaut du before_request ; lecture gatée sur l'onglet cloudcaptions.
+    @app.route("/captions/list", methods=["GET"])
+    def captions_list():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.args.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        return jsonify({"ok": True, "identity": ident,
+                        "block": _clean_caption_block(_load_captions_lib().get(ident))})
+
+    @app.route("/captions/save", methods=["POST"])
+    def captions_save():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        import json as _js
+        try:
+            raw = _js.loads(request.form.get("data") or "{}")
+        except Exception:
+            return jsonify({"ok": False, "error": "JSON invalide"})
+        block = _clean_caption_block(raw)
+        lib = _load_captions_lib()
+        lib[ident] = block
+        if not _save_captions_lib(lib):
+            return jsonify({"ok": False, "error": "écriture impossible"})
+        # Route AJAX : pas de _success() -> on invalide les caches ttl à la main
+        # (compteurs de la sidebar vault, page pleine éventuellement cachée).
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "count": len(block["items"])})
+
+    @app.route("/captions/gen", methods=["POST"])
+    def captions_gen():
+        """UNE vidéo : brute au hasard + caption au hasard (caption_id la force,
+        pour le bouton « tester »). Renvoie le model à poller via /noctus/status."""
+        from flask import jsonify
+        import noctus_web
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if not noctus_web.setup_ok():
+            return jsonify({"ok": False, "error": "moteur vidéo absent (node/ffmpeg)"})
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        block = _clean_caption_block(_load_captions_lib().get(ident))
+        pool = [c for c in block["items"] if c.get("enabled", True)]
+        if not pool:
+            return jsonify({"ok": False, "error": "aucune caption active pour cette identité"})
+        bdir = IDENTITIES_DIR / ident / "brutes"
+        brutes = []
+        if bdir.exists():
+            brutes = [p for p in bdir.iterdir()
+                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                      and ".example" not in p.name]
+        if not brutes:
+            return jsonify({"ok": False, "error": "aucune vidéo brute pour cette identité"})
+        import random as _rnd
+        want = (request.form.get("caption_id") or "").strip()
+        cap = None
+        if want:
+            cap = next((c for c in pool if c.get("id") == want), None)
+        if cap is None:
+            cap = _rnd.choice(pool)
+        brute = _rnd.choice(brutes)
+        gp = block["global_pos"]
+        seg = {"text": cap["text"], "start": None, "end": None,
+               "x": gp["x"] if gp.get("enabled") else cap.get("x", 0.5),
+               "y": gp["y"] if gp.get("enabled") else cap.get("y", 0.61)}
+        if cap.get("wrapW") is not None:
+            seg["wrapW"] = cap["wrapW"]
+        if cap.get("lineSpacing") is not None:
+            seg["lineSpacing"] = cap["lineSpacing"]
+        import json as _js
+        # draft au format .montage.json (segments/style = CHAÎNES JSON) ; PAS de
+        # cut_at et brutes_dir=None -> _prepare_inputs copie la brute telle quelle.
+        draft = {"segments": _js.dumps([seg]), "font": block["font"],
+                 "style": _js.dumps(block["style"])}
+        model = noctus_web.gen_from_draft(str(brute), draft, ["V1"], None, None)
+        if not model:
+            return jsonify({"ok": False, "error": "lancement du rendu impossible"})
+        return jsonify({"ok": True, "model": model, "identity": ident,
+                        "caption": cap["text"], "brute": brute.name})
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
@@ -43182,6 +44145,32 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         facture_web.register(app, is_auth)
     except Exception as _fx_e:
         log.error(f"facture_web register échoué: {_fx_e}")
+
+    # Inscription publique + file d'attente de validation (signup_public.py).
+    #
+    # Le module reçoit ses dépendances au lieu d'importer ce fichier : c'est ce qui
+    # évite l'import circulaire, et surtout ce qui rend visible ici — en une seule
+    # liste — tout ce qu'il peut toucher du reste du site. Il ne peut pas créer un
+    # compte autrement qu'à travers ces fonctions.
+    #
+    # Il ne remplace rien : `/` reste le formulaire de connexion, et l'écran
+    # d'accueil à deux portes vit sur `/bienvenue`. Détourner `/` est un choix
+    # d'exploitation, pas un effet de bord d'un import.
+    try:
+        import signup_public
+        signup_public.register(app, {
+            "hash_password": _hash_password,
+            "load_web_users": _load_web_users,
+            "save_web_users": _save_web_users,
+            "load_role_users": _load_role_users,
+            "save_role_users": _save_role_users,
+            "is_auth": is_auth,
+            "live_role": _live_role,
+        })
+    except Exception as _sg_e:
+        # Comme pour facture_web : une inscription cassée ne doit pas emporter le
+        # dashboard, dont dépend toute l'équipe. On perd /signup, pas le reste.
+        log.error(f"signup_public register échoué: {_sg_e}")
 
     return app
 
