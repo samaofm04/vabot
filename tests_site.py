@@ -1643,6 +1643,8 @@ try:
           _c403.post("/captions/save", data={"identity": "_tst_captions", "data": "{}"}).status_code == 403)
     check("captions : chatter bloque en lecture (403)",
           _c403.get("/captions/list?identity=_tst_captions").status_code == 403)
+    check("identite : chatter bloque (403)",
+          _c403.post("/identity/create", data={"identity_name": "hackette"}).status_code == 403)
     _wCa._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
     check("RBAC : onglet cloudcaptions rattache a la cle montage",
           "cloudcaptions" in (_wCa._PERM_KEY_TO_TABS.get("montage") or set()))
@@ -1692,6 +1694,19 @@ try:
     finally:
         _nwCa.gen_from_draft = _sav_gen
         _nwCa.setup_ok = _sav_setup
+
+    # -- creation d identite depuis la Bibliotheque (bouton +) ---------------
+    _dNi = _plCa.Path("data/identities/_tst_capident")
+    _shCa.rmtree(_dNi, ignore_errors=True)
+    _jNi = (_cCa.post("/identity/create", data={"identity_name": "_TST_capident"}).get_json() or {})
+    check("identite : creation ok (nom normalise) + dossiers standards",
+          _jNi.get("ok") and _jNi.get("identity") == "_tst_capident"
+          and (_dNi / "videos").exists() and (_dNi / "brutes").exists(), str(_jNi)[:90])
+    check("identite : doublon refuse",
+          ((_cCa.post("/identity/create", data={"identity_name": "_tst_capident"}).get_json() or {}).get("ok")) is not True)
+    check("identite : nom invalide refuse",
+          ((_cCa.post("/identity/create", data={"identity_name": "@@@ !!"}).get_json() or {}).get("ok")) is not True)
+    _shCa.rmtree(_dNi, ignore_errors=True)
 
     # tirage random verrouille par grep du source (pattern section 18)
     _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")

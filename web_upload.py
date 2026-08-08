@@ -4449,6 +4449,32 @@ function capLibInit(){
   }
   return true;
 }
+// CSS inline du texte d une carte aperçu (MIROIR du builder Python : fond blanc
+// 9:16, texte à sa position x/y, taille en cqw = proportionnelle à la carte).
+function capPrevCss(it){
+  var b=capLib.block||{}, s=b.style||{}, gp=b.global_pos||{};
+  var x=gp.enabled?(gp.x!=null?gp.x:0.5):(it.x!=null?it.x:0.5);
+  var y=gp.enabled?(gp.y!=null?gp.y:0.2):(it.y!=null?it.y:0.61);
+  var size=s.size||44, wrap=(it.wrapW!=null?it.wrapW:0.88), ls=(it.lineSpacing!=null?it.lineSpacing:1.45);
+  var fam=b.font||'Strong', ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
+  if(fam==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
+  if((b.font==='BebasNeue'||b.font==='Anton')&&s.bold!==false) wt='400';
+  var col=(/^#[0-9a-fA-F]{3,8}$/.test(s.color||''))?s.color:'#ffffff';
+  var al=(s.align==='left'||s.align==='right')?s.align:'center';
+  var cs=(s['case']==='upper'?'uppercase':(s['case']==='lower'?'lowercase':(s['case']==='title'?'capitalize':'none')));
+  var fs=size/10.8, stk=Math.max(0.06,size*0.0088);
+  var css='left:'+(x*100).toFixed(2)+'%;top:'+(y*100).toFixed(2)+'%;transform:translate(-50%,-50%);width:'+Math.round(wrap*100)+'%;text-align:'+al+';color:'+col+';font-family:'+fam+',Arial,sans-serif;font-weight:'+wt+';'+ital+'text-transform:'+cs+';font-size:'+fs.toFixed(2)+'cqw;line-height:'+ls+';'+(s.underline?'text-decoration:underline;':'');
+  if(s.box){
+    var bc=(/^#[0-9a-fA-F]{3,8}$/.test(s.boxColor||''))?s.boxColor:'#010101';
+    if(bc.toLowerCase()==='#000000') bc='rgba(0,0,0,.72)';
+    css+='background:'+bc+';border-radius:'+(fs*0.3).toFixed(2)+'cqw;padding:'+(fs*0.28).toFixed(2)+'cqw '+(fs*0.5).toFixed(2)+'cqw;box-decoration-break:clone;';
+  } else {
+    css+='-webkit-text-stroke:max(.8px,'+stk.toFixed(3)+'cqw) #000;paint-order:stroke fill;';
+  }
+  if(s.effect==='shadow') css+='text-shadow:0 .4cqw 1.6cqw rgba(0,0,0,.55);';
+  else if(s.effect==='neon') css+='text-shadow:0 0 1.2cqw '+col+',0 0 3cqw '+col+';';
+  return css;
+}
 function capRenderCards(){
   var grid=document.getElementById('capCards'); if(!grid||!capLib.block) return;
   var items=capLib.block.items||[], out=[];
@@ -4459,14 +4485,17 @@ function capRenderCards(){
     var it=items[i], on=(it.enabled!==false), cid=nxMEsc(String(it.id||''));
     var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.61)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
     out.push('<div class="cap-card'+(on?'':' cap-off')+'" data-cid="'+cid+'">'
-      +'<div class="cap-card-text">'+nxMEsc(String(it.text||''))+'</div>'
-      +'<div class="cap-card-meta">'+meta+'</div>'
-      +'<div class="cap-card-actions">'
-      +'<button type="button" data-capact="place" data-cid="'+cid+'" title="Placer le texte sur la vidéo (drag)">📍 Placer</button>'
-      +'<button type="button" data-capact="test" data-cid="'+cid+'" title="Générer une vidéo test avec CETTE caption">🎬</button>'
-      +'<label title="Active dans le tirage" style="display:inline-flex;align-items:center;cursor:pointer;margin-left:auto"><input type="checkbox" data-captoggle="'+cid+'"'+(on?' checked':'')+'></label>'
+      +'<div class="cap-prev" data-capact="place" data-cid="'+cid+'" title="Clique pour placer le texte (drag)">'
+      +'<div class="cap-prev-txt" style="'+capPrevCss(it)+'">'+nxMEsc(String(it.text||''))+'</div>'
+      +'<div class="cap-prev-acts">'
+      +'<button type="button" data-capact="place" data-cid="'+cid+'" title="Placer (drag)">📍</button>'
+      +'<button type="button" data-capact="test" data-cid="'+cid+'" title="Vidéo test avec cette caption">🎬</button>'
+      +'<button type="button" data-capact="toggle" data-cid="'+cid+'" title="'+(on?'Retirer du tirage':'Remettre dans le tirage')+'">'+(on?'🚫':'↩')+'</button>'
       +'<button type="button" data-capact="del" data-cid="'+cid+'" title="Supprimer">🗑</button>'
-      +'</div></div>');
+      +'</div>'
+      +(on?'':'<div class="cap-prev-off">hors tirage</div>')
+      +'</div>'
+      +'<div class="cap-card-meta">'+meta+'</div></div>');
   }
   grid.innerHTML=out.join('');
   var info=document.getElementById('capCountInfo');
@@ -4493,7 +4522,7 @@ document.addEventListener('click', function(ev){
   if(pv){
     var vv=pv.getAttribute('data-capstyle')||'';
     if(vv.indexOf('preset-')===0 && capLibInit()){
-      capEdPreset(vv.slice(7)); capSave();
+      capEdPreset(vv.slice(7)); capRenderCards(); capSave();
       if(typeof showToast==='function') showToast('🎨 Style appliqué à toutes les captions de @'+capLib.identity,'success');
     }
     return;
@@ -4521,6 +4550,10 @@ document.addEventListener('click', function(ev){
   }
   else if(act==='place'){ capEdOpen('item',cid); }
   else if(act==='place-global'){ capEdOpen('global',null); }
+  else if(act==='toggle'){
+    var itT=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
+    if(itT){ itT.enabled=(itT.enabled===false); capRenderCards(); capSave(); }
+  }
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
 });
@@ -4536,7 +4569,7 @@ document.addEventListener('change', function(ev){
   if(t.getAttribute('data-capgp')!=null){
     if(!capLibInit()) return;
     capLib.block.global_pos=capLib.block.global_pos||{x:0.5,y:0.2};
-    capLib.block.global_pos.enabled=!!t.checked; capSave();
+    capLib.block.global_pos.enabled=!!t.checked; capRenderCards(); capSave();
     return;
   }
   var stl=t.getAttribute('data-capstyle');
@@ -4546,7 +4579,7 @@ document.addEventListener('change', function(ev){
     if(stl==='font'){ capLib.block.font=t.value; }
     else if(stl==='size'){ s.size=Math.max(16,Math.min(160,parseInt(t.value)||44)); }
     else if(stl==='color'){ s.color=t.value; }
-    capSave();
+    capRenderCards(); capSave();
   }
 });
 document.addEventListener('input', function(ev){
@@ -4796,6 +4829,46 @@ async function capSendDiscord(j,out,btn){
     if(jj&&jj.ok){ btn.textContent='✅ envoyé'; }
     else{ btn.disabled=false; btn.textContent='📤 Discord'; if(typeof showToast==='function') showToast('❌ '+((jj&&jj.error)||'?'),'error'); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
+}
+// ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
+var identNewCtx={vtab:'',ikey:''};
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[data-newident]'):null;
+  if(!b) return;
+  identNewCtx.vtab=b.getAttribute('data-vtab')||'';
+  identNewCtx.ikey=b.getAttribute('data-ikey')||'';
+  var n=document.getElementById('ident-new-name'); if(n) n.value='';
+  var a=document.getElementById('ident-new-avatar'); if(a) a.value='';
+  var e=document.getElementById('ident-new-err'); if(e) e.textContent='';
+  var g=document.getElementById('ident-new-go'); if(g){ g.disabled=false; g.textContent='Créer'; }
+  var m=document.getElementById('ident-new-modal'); if(m) m.style.display='flex';
+  if(n) setTimeout(function(){ n.focus(); },60);
+});
+function identNewClose(){ var m=document.getElementById('ident-new-modal'); if(m) m.style.display='none'; }
+async function identNewCreate(){
+  var n=document.getElementById('ident-new-name'), err=document.getElementById('ident-new-err'), go=document.getElementById('ident-new-go');
+  var name=String((n&&n.value)||'').trim().toLowerCase();
+  if(!name){ if(err) err.textContent='Donne un nom.'; return; }
+  var fd=new FormData(); fd.set('identity_name',name);
+  var a=document.getElementById('ident-new-avatar');
+  if(a&&a.files&&a.files[0]) fd.set('avatar',a.files[0]);
+  if(go){ go.disabled=true; go.textContent='⏳'; }
+  try{
+    var r=await fetch('/identity/create',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    if(!(j&&j.ok)){
+      if(err) err.textContent=(j&&j.error)||('Erreur '+r.status);
+      if(go){ go.disabled=false; go.textContent='Créer'; }
+      return;
+    }
+    if(typeof showToast==='function') showToast('✅ Identité @'+j.identity+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
+    var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
+    // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
+    window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
+  }catch(e){
+    if(err) err.textContent=String(e);
+    if(go){ go.disabled=false; go.textContent='Créer'; }
+  }
 }
 // ==================== fin bibliothèque CAPTION ====================
 function deleteSelected(){
@@ -6715,6 +6788,24 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
+<!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
+<div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="font-weight:800;font-size:15px">＋ Nouvelle identité</div>
+    <input id="ident-new-name" type="text" placeholder="nom (lettres, chiffres, _ ou -)" autocomplete="off"
+           style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil (optionnel)
+      <input id="ident-new-avatar" type="file" accept="image/png,image/jpeg,image/webp" style="font-size:12px;color:#9a9aa6">
+    </label>
+    <div style="font-size:11px;color:#888;line-height:1.5">Crée le dossier de la model avec ses bibliothèques (reels, posts, stories, brutes, templates…). Elle apparaît partout dans la Bibliothèque.</div>
+    <div id="ident-new-err" style="font-size:12px;color:#f87171"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" onclick="identNewClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+      <button type="button" id="ident-new-go" onclick="identNewCreate()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Créer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Editeur CAPTION : placer un texte sur une video brute (drag) ===== -->
 <div id="cap-ed-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);align-items:center;justify-content:center;padding:20px" onclick="capEdClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:16px;display:flex;gap:16px;max-width:94vw;max-height:94vh;box-sizing:border-box">
@@ -12102,6 +12193,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<div class='vault-list' id='vault-list-{subdir}'>"
         + "".join(vault_items)
         + "</div>"
+        # ＋ Nouvelle identité : ouvre la modale statique #ident-new-modal
+        # (délégation [data-newident] — survit aux swaps vaultGoTo).
+        + f"<button type='button' data-newident='1' data-vtab='{tab_name}' data-ikey='{subdir_key}' "
+        + "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
         "</div>"
     )
 
@@ -13479,7 +13574,10 @@ def _render_cloud_captions_html() -> str:
         "</div></div>"
         "<div class='vault-list' id='vault-list-captions'>"
         + "".join(vault_items)
-        + "</div></div>"
+        + "</div>"
+        "<button type='button' data-newident='1' data-vtab='cloudcaptions' data-ikey='cloud_captions_ident' "
+        "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
+        "</div>"
     )
 
     # ---- Galerie (droite) ----
@@ -13541,6 +13639,46 @@ def _render_cloud_captions_html() -> str:
         "</div>"
     )
 
+    # ---- Cartes aperçu : fond BLANC 9:16 avec le texte écrit à sa position ----
+    # (façon cartes vidéo de Template montage — MIROIR exact du builder JS
+    # capPrevCss/capRenderCards ; taille de police en cqw = suit la carte).
+    def _cap_css(it):
+        x = gp["x"] if gp.get("enabled") else it.get("x", 0.5)
+        y = gp["y"] if gp.get("enabled") else it.get("y", 0.61)
+        size = st.get("size", 44)
+        wrap = it.get("wrapW", 0.88)
+        ls = it.get("lineSpacing", 1.45)
+        fam = block["font"]
+        ital = "font-style:italic;" if st.get("italic") else ""
+        wt = "400" if st.get("bold") is False else "700"
+        if fam == "Strong":
+            fam, ital = "Poppins", "font-style:italic;"
+        if block["font"] in ("BebasNeue", "Anton") and st.get("bold") is not False:
+            wt = "400"
+        col = st.get("color") if re.match(r"^#[0-9a-fA-F]{3,8}$", str(st.get("color") or "")) else "#ffffff"
+        al = st.get("align") if st.get("align") in ("left", "right") else "center"
+        cs = {"upper": "uppercase", "lower": "lowercase", "title": "capitalize"}.get(st.get("case"), "none")
+        fs = size / 10.8
+        stk = max(0.06, size * 0.0088)
+        css = (f"left:{x * 100:.2f}%;top:{y * 100:.2f}%;transform:translate(-50%,-50%);"
+               f"width:{round(wrap * 100)}%;text-align:{al};color:{col};"
+               f"font-family:{fam},Arial,sans-serif;font-weight:{wt};{ital}"
+               f"text-transform:{cs};font-size:{fs:.2f}cqw;line-height:{ls};"
+               f"{'text-decoration:underline;' if st.get('underline') else ''}")
+        if st.get("box"):
+            bc = st.get("boxColor") if re.match(r"^#[0-9a-fA-F]{3,8}$", str(st.get("boxColor") or "")) else "#010101"
+            if bc.lower() == "#000000":
+                bc = "rgba(0,0,0,.72)"
+            css += f"background:{bc};border-radius:{fs * 0.3:.2f}cqw;padding:{fs * 0.28:.2f}cqw {fs * 0.5:.2f}cqw;box-decoration-break:clone;"
+        else:
+            css += f"-webkit-text-stroke:max(.8px,{stk:.3f}cqw) #000;paint-order:stroke fill;"
+        eff = st.get("effect")
+        if eff == "shadow":
+            css += "text-shadow:0 .4cqw 1.6cqw rgba(0,0,0,.55);"
+        elif eff == "neon":
+            css += f"text-shadow:0 0 1.2cqw {col},0 0 3cqw {col};"
+        return css
+
     cards = []
     if not block["items"]:
         cards.append("<div style='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px'>Aucune caption — colle ta liste au-dessus (une par ligne) puis « ＋ Ajouter ».</div>")
@@ -13552,16 +13690,20 @@ def _render_cloud_captions_html() -> str:
             meta += f" · ↔ {round(it['wrapW'] * 100)}%"
         cards.append(
             f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
-            f"<div class='cap-card-text'>{_h.escape(it['text'], quote=True)}</div>"
-            f"<div class='cap-card-meta'>{meta}</div>"
-            "<div class='cap-card-actions'>"
-            f"<button type='button' data-capact='place' data-cid='{cid}' title='Placer le texte sur la vidéo (drag)'>📍 Placer</button>"
-            f"<button type='button' data-capact='test' data-cid='{cid}' title='Générer une vidéo test avec CETTE caption'>🎬</button>"
-            f"<label title='Active dans le tirage' style='display:inline-flex;align-items:center;cursor:pointer;margin-left:auto'><input type='checkbox' data-captoggle='{cid}'{' checked' if on else ''}></label>"
+            f"<div class='cap-prev' data-capact='place' data-cid='{cid}' title='Clique pour placer le texte (drag)'>"
+            f"<div class='cap-prev-txt' style='{_cap_css(it)}'>{_h.escape(it['text'], quote=True)}</div>"
+            "<div class='cap-prev-acts'>"
+            f"<button type='button' data-capact='place' data-cid='{cid}' title='Placer (drag)'>📍</button>"
+            f"<button type='button' data-capact='test' data-cid='{cid}' title='Vidéo test avec cette caption'>🎬</button>"
+            f"<button type='button' data-capact='toggle' data-cid='{cid}' title='{'Retirer du tirage' if on else 'Remettre dans le tirage'}'>{'🚫' if on else '↩'}</button>"
             f"<button type='button' data-capact='del' data-cid='{cid}' title='Supprimer'>🗑</button>"
-            "</div></div>"
+            "</div>"
+            + ("" if on else "<div class='cap-prev-off'>hors tirage</div>")
+            + "</div>"
+            f"<div class='cap-card-meta'>{meta}</div>"
+            "</div>"
         )
-    grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px'>"
+    grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px'>"
             + "".join(cards) + "</div>")
 
     results = ("<div id='capGenStatus' style='margin-top:16px;font-size:12.5px;color:#9a9aa6'></div>"
@@ -13572,14 +13714,17 @@ def _render_cloud_captions_html() -> str:
     state = f"<script type='application/json' id='capLibData'>{payload}</script>"
 
     css = """
+<link rel='stylesheet' href='/noctus/fonts.css?v=5'>
 <style>
-.cap-card{background:#101013;border:1px solid #232327;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
-.cap-card.cap-off{opacity:.45}
-.cap-card-text{font-size:13.5px;font-weight:600;line-height:1.35;white-space:pre-wrap;word-break:break-word}
-.cap-card-meta{font-size:11px;color:#888}
-.cap-card-actions{display:flex;align-items:center;gap:6px;margin-top:auto}
-.cap-card-actions button{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit}
-.cap-card-actions button:hover{background:#232329;color:#fff}
+.cap-card{display:flex;flex-direction:column;gap:6px}
+.cap-prev{position:relative;aspect-ratio:9/16;background:#fff;border-radius:12px;overflow:hidden;container-type:inline-size;border:1px solid #2a2a30;cursor:pointer}
+.cap-prev-txt{position:absolute;white-space:pre-wrap;word-break:break-word;pointer-events:none}
+.cap-prev-acts{position:absolute;top:6px;right:6px;display:flex;gap:4px;z-index:3}
+.cap-prev-acts button{width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:rgba(10,10,12,.72);border:0;border-radius:8px;font-size:12px;cursor:pointer;color:#fff;padding:0}
+.cap-prev-acts button:hover{background:rgba(10,10,12,.92)}
+.cap-card.cap-off .cap-prev{opacity:.4}
+.cap-prev-off{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);background:rgba(10,10,12,.8);color:#fbbf24;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.04em;white-space:nowrap}
+.cap-card-meta{font-size:11px;color:#888;padding:0 2px}
 .cap-preset{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
 .cap-preset:hover{background:#232329;color:#fff}
 </style>
@@ -36964,6 +37109,46 @@ def create_app():
     # (noctus_web.gen_from_draft, brute seule : pas de template ni de cut_at,
     # le son de la brute est conservé). Écriture admin-only via le deny-par-
     # défaut du before_request ; lecture gatée sur l'onglet cloudcaptions.
+    @app.route("/identity/create", methods=["POST"])
+    def identity_create():
+        """Crée une identité depuis la Bibliothèque (bouton ＋ des sidebars vault).
+        Même structure que la création côté Jailbreak, mais réponse JSON (AJAX,
+        pas de redirect). Écriture admin-only via le préfixe /identity/."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        raw_name = (request.form.get("identity_name") or "").strip()
+        import re as _re
+        safe = _re.sub(r"[^a-z0-9_\-]", "", raw_name.lower())[:30]
+        if not safe:
+            return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
+        if safe in _list_identities():
+            return jsonify({"ok": False, "error": f"L'identité {safe} existe déjà"})
+        target_dir = IDENTITIES_DIR / safe
+        try:
+            target_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            return jsonify({"ok": False, "error": f"L'identité {safe} existe déjà"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Création échouée : {e}"})
+        # Sous-dossiers standards + ceux du Reel montage (créés d'office ici :
+        # l'identité est immédiatement utilisable dans toutes les bibliothèques).
+        for sub in ("videos", "posts", "stories", "storyctas", "brutes", "templates"):
+            (target_dir / sub).mkdir(exist_ok=True)
+        warn = ""
+        avatar_file = request.files.get("avatar")
+        if avatar_file and avatar_file.filename:
+            ext = os.path.splitext(avatar_file.filename)[1].lower().lstrip(".")
+            if ext in ("png", "jpg", "jpeg", "webp"):
+                try:
+                    avatar_file.save(str(target_dir / f"avatar.{ext}"))
+                except Exception as e:
+                    warn = f"avatar non sauvé : {e}"
+            else:
+                warn = f"avatar refusé (format {ext})"
+        _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
+        return jsonify({"ok": True, "identity": safe, "warn": warn})
+
     @app.route("/captions/list", methods=["GET"])
     def captions_list():
         from flask import jsonify
