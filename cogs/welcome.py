@@ -492,6 +492,7 @@ def _us_norm(nm):
     nm = _ud.normalize("NFKC", (nm or "")).strip().lower()
     nm = _re.sub(r"[​‌‍﻿]", "", nm)          # zéro-largeur
     nm = _re.sub(r"[‐‑‒–—―−]", "-", nm)  # tirets
+    nm = nm.replace(".", "")             # Discord strippe les points des salons
     # homoglyphes cyrilliques/grecs (un « а » russe est INVISIBLE à l'œil)
     nm = nm.translate(_US_CONFUSABLES)
     return nm
@@ -508,11 +509,13 @@ _US_CONFUSABLES = str.maketrans({
 
 def _us_base(member):
     """Base des salons/dossiers d'un membre = son username Discord sanitisé.
-    ⚠️ Si le membre CHANGE de pseudo, la base change : ses anciens salons
-    deviennent des orphelins (nettoyés par /ticketsall) et un nouveau set est
-    créé — c'est l'origine des « doublons » laboule8."""
+    ⚠️ PAS de point dans la base : Discord SUPPRIME les points des noms de
+    salons ('laboule.8-menu' devient 'laboule8-menu') -> avec un point, le bot
+    ne retrouvait jamais le salon créé et le recréait en boucle (cause RÉELLE
+    de la saga laboule8). ⚠️ Si le membre CHANGE de pseudo, la base change :
+    ses anciens salons deviennent des orphelins (nettoyés par /ticketsall)."""
     import re as _re
-    return _re.sub(r"[^a-z0-9_.-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
+    return _re.sub(r"[^a-z0-9_-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
 
 
 def _us_ticket_name(member, suffix):
