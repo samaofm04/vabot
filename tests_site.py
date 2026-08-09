@@ -1715,6 +1715,8 @@ try:
     check("captions : defaut = centre (x 0.5 / y 0.5)",
           _jc["block"]["items"][0]["x"] == 0.5 and _jc["block"]["items"][0]["y"] == 0.5,
           str(_jc)[:80])
+    check("captions : police par defaut = TikTokSans",
+          _jc["block"].get("font") == "TikTokSans", str(_jc["block"].get("font")))
 
     # -- reordonner les identites (glisser-deposer sidebar, ordre partage) ----
     _fOrd = _plCa.Path("data/identity_order.json")

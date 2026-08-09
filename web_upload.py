@@ -4445,7 +4445,7 @@ function capLibInit(){
   if(capLib.identity!==j.identity||!capLib.block){
     if(capLib.identity!==j.identity) capSelSet={};   // sélection liée à UNE identité
     capLib.identity=j.identity;
-    capLib.block=j.block||{font:'Strong',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
+    capLib.block=j.block||{font:'TikTokSans',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
     capLib.brutes=j.brutes||[];
   }
   return true;
@@ -4464,7 +4464,7 @@ function capPrevCss(it){
   var x=gp.enabled?(gp.x!=null?gp.x:0.5):(it.x!=null?it.x:0.5);
   var y=gp.enabled?(gp.y!=null?gp.y:0.2):(it.y!=null?it.y:0.5);
   var size=s.size||44, wrap=(it.wrapW!=null?it.wrapW:0.88), ls=(it.lineSpacing!=null?it.lineSpacing:1.45);
-  var fam=b.font||'Strong', ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
+  var fam=b.font||'TikTokSans', ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
   if(fam==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
   if((b.font==='BebasNeue'||b.font==='Anton')&&s.bold!==false) wt='400';
   var col=(/^#[0-9a-fA-F]{3,8}$/.test(s.color||''))?s.color:'#ffffff';
@@ -4827,7 +4827,7 @@ function capEdSync(){
   var b=capLib.block||{}, s=b.style||{}, it=capEdCur();
   var ta=document.getElementById('cap-ed-text');
   if(ta){ ta.value=it?String(it.text||''):capEdText(); ta.disabled=(capEdState.mode==='global'); }
-  var f=document.getElementById('cap-ed-font'); if(f) f.value=b.font||'Strong';
+  var f=document.getElementById('cap-ed-font'); if(f) f.value=b.font||'TikTokSans';
   var sz=document.getElementById('cap-ed-size'); if(sz) sz.value=s.size||44;
   var sv=document.getElementById('cap-ed-size-val'); if(sv) sv.textContent=String(s.size||44);
   var wr=document.getElementById('cap-ed-wrap'); if(wr) wr.value=Math.round(capEdWrapVal()*100);
@@ -4954,7 +4954,7 @@ function capEdTextChanged(){
 // ---- Rendu de l aperçu (vrai moteur via /noctus/caption_preview) ----
 function capEdKey(){
   var b=capLib.block||{}, s=b.style||{};
-  return [capEdText(),b.font||'Strong',s.size||44,s.color||'#ffffff',s.align||'center',s['case']||'none',
+  return [capEdText(),b.font||'TikTokSans',s.size||44,s.color||'#ffffff',s.align||'center',s['case']||'none',
           (s.bold===false?0:1),(s.italic?1:0),(s.underline?1:0),(s.box?1:0),s.boxColor||'#000000',s.effect||'none',
           (+capEdWrapVal()).toFixed(3),(+capEdLsVal()).toFixed(2)].join('|');
 }
@@ -4969,7 +4969,7 @@ function capEdRender(){
   capEdCssFallback();
   if(st.pend===key) return;
   st.pend=key;
-  var fd=new FormData(); fd.set('text',text); fd.set('font',b.font||'Strong');
+  var fd=new FormData(); fd.set('text',text); fd.set('font',b.font||'TikTokSans');
   fd.set('size',s.size||44); fd.set('color',s.color||'#ffffff');
   fd.set('align',s.align||'center'); fd.set('case',s['case']||'none');
   fd.set('bold',(s.bold===false)?'0':'1'); fd.set('italic',s.italic?'1':'0'); fd.set('underline',s.underline?'1':'0');
@@ -5021,8 +5021,11 @@ function capEdCssFallback(){
   var b=capLib.block||{}, s=b.style||{}, ow=ov.clientWidth||270, p=capEdPos();
   var fpx=Math.max(9,(s.size||44)*ow/1080);
   var col=(s.color&&s.color.length)?s.color:'#ffffff';
+  var fam=b.font||'TikTokSans', ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
+  if(fam==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
+  if((b.font==='BebasNeue'||b.font==='Anton')&&s.bold!==false) wt='400';
   var inner=nxMEsc(String(capEdText()||'')).split(String.fromCharCode(10)).join('<br>');
-  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:'+Math.round(capEdWrapVal()*100)+'%;text-align:center;color:'+col+';font-family:Poppins,Arial;font-weight:700;font-style:italic;font-size:'+fpx.toFixed(1)+'px;-webkit-text-stroke:'+Math.max(1,fpx*0.095).toFixed(1)+'px #000;paint-order:stroke fill;cursor:move;touch-action:none;z-index:4;white-space:pre-wrap;word-break:break-word;pointer-events:auto">'+inner+'</div>';
+  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:'+Math.round(capEdWrapVal()*100)+'%;text-align:center;color:'+col+';font-family:'+fam+',Arial;font-weight:'+wt+';'+ital+'font-size:'+fpx.toFixed(1)+'px;-webkit-text-stroke:'+Math.max(1,fpx*0.095).toFixed(1)+'px #000;paint-order:stroke fill;cursor:move;touch-action:none;z-index:4;white-space:pre-wrap;word-break:break-word;pointer-events:auto">'+inner+'</div>';
   var el=document.getElementById('cap-ed-drag');
   if(el) el.addEventListener('pointerdown',capEdBeginDrag);
 }
@@ -7271,7 +7274,7 @@ body.light .action-icon{color:#666}
           </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Police</span>
-            <select id="cap-ed-font" onchange="capEdFont(this.value)" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+            <select id="cap-ed-font" onchange="capEdFont(this.value)" class="nxm-inp"><option selected>TikTokSans</option><option>Strong</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
           </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Taille de la police</span>
@@ -7408,7 +7411,7 @@ body.light .action-icon{color:#666}
           </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Police</span>
-            <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+            <select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>TikTokSans</option><option>Strong</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
           </div>
           <div class="nxm-row">
             <span class="nxm-lbl">Taille de la police</span>
@@ -13963,8 +13966,9 @@ def _apply_identity_order(identities):
 
 
 def _clean_caption_block(raw) -> dict:
-    """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur)."""
-    out = {"font": "Strong", "style": {},
+    """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur).
+    Police par défaut = TikTokSans (demande user : l'écriture TikTok partout)."""
+    out = {"font": "TikTokSans", "style": {},
            "global_pos": {"enabled": False, "x": 0.5, "y": 0.2}, "items": []}
     if not isinstance(raw, dict):
         return out
