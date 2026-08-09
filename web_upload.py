@@ -979,8 +979,8 @@ button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px
 .ig-period{transition:background .18s ease,color .18s ease!important}
 
 /* Action bar - slide up */
-#action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
-#action-bar[style*="flex"]{animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
+#action-bar,#cap-action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
+#action-bar[style*="flex"],#cap-action-bar[style*="flex"]{animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
 
 /* Page title - subtle transition */
 #page-title,#page-subtitle{transition:opacity .2s}
@@ -4594,6 +4594,59 @@ function ppApplyOpen(){
     }
   });
 }
+// 📤 Partage des TEMPLATES sélectionnés à d autres models (galerie Template
+// montage) — même modale, copie video + montage + description + exemple via
+// /noctus/montage_apply (le serveur reprend le brouillon enregistré).
+function tplShareOpen(){
+  var files=[];
+  try{ selectedFiles.forEach(function(f){ if(String(f).indexOf("|templates|")>0) files.push(String(f)); }); }catch(e){}
+  if(!files.length){
+    if(typeof showToast==='function') showToast("Sélectionne d'abord des templates (cercle ⚪ sur les cartes — « ☑ Tout » pour tout prendre)",'warning',6000);
+    return;
+  }
+  var sec=null;
+  document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  var items=sec?sec.querySelectorAll('.vault-item'):[];
+  var act=sec?sec.querySelector('.vault-item-active'):null;
+  var cur=act?(act.getAttribute('data-ident')||''):'';
+  var rows=[];
+  items.forEach(function(a){
+    var n=a.getAttribute('data-ident'); if(!n||n===cur) return;
+    var subEl=a.querySelector('div[style*="color:#888"]');
+    var m=subEl?String(subEl.textContent||'').trim().match(/^(\\d+)/):null;
+    var nb=m?parseInt(m[1]):null;
+    var img=a.querySelector('img');
+    rows.push({name:n, pp:img?img.getAttribute('src'):null,
+               sub:(nb==null)?'':(nb+' template'+(nb>1?'s':'')), warn:false});
+  });
+  if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
+  nxModelPicker({
+    title:'Partager ces templates à…',
+    info:files.length+' template'+(files.length>1?'s':'')+' — <b>copiés</b> chez chaque model cochée avec le montage, la description et l&#39;exemple. Les originaux restent en place.',
+    rows:rows,
+    onConfirm:function(sel,_x,ui){
+      ui.busy('⏳ Copie…');
+      (async function(){
+        var okN=0, errs=[];
+        for(var i=0;i<files.length;i++){
+          try{
+            var fd=new FormData(); fd.set('file_id',files[i]); fd.set('targets',sel.join(','));
+            var r=await fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'});
+            var j=await r.json();
+            if(j&&j.ok) okN++; else errs.push((j&&j.error)||'?');
+          }catch(e){ errs.push(String(e)); }
+        }
+        ui.close();
+        if(typeof clearSelection==='function') clearSelection();
+        try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+        if(typeof showToast==='function') showToast(
+          okN?('✅ '+okN+' template'+(okN>1?'s copiés':' copié')+' vers '+sel.length+' model'+(sel.length>1?'s':'')
+               +(errs.length?(' · '+errs.length+' échec(s)'):'')):('❌ '+(errs[0]||'échec')),
+          errs.length?'warning':'success',7000);
+      })();
+    }
+  });
+}
 // ==================== Bibliothèque CAPTION (onglet Reel montage) ====================
 // Textes par identité, posés en RANDOM sur les vidéos brutes à la génération.
 // État chargé depuis le JSON embarqué #capLibData (ré-émis par le serveur à chaque
@@ -4614,12 +4667,38 @@ function capLibInit(){
   }
   return true;
 }
-// Sélection (cercles ⚪ des cartes) -> barre « Supprimer la sélection »
+// Sélection (cercles ⚪ des cartes) -> barre flottante #cap-action-bar (même
+// pilule que la galerie ; élément GLOBAL, survit au swap vaultGoTo)
 var capSelSet={};
 function capSelUpdateBar(){
   var n=0; for(var k in capSelSet){ if(capSelSet[k]) n++; }
-  var bar=document.getElementById('capSelBar'); if(bar) bar.style.display=n?'flex':'none';
-  var ct=document.getElementById('capSelCount'); if(ct) ct.textContent=n+' sélectionnée'+(n>1?'s':'');
+  var bar=document.getElementById('cap-action-bar');
+  if(bar) bar.style.display=(n&&document.getElementById('capCards'))?'flex':'none';
+  var ct=document.getElementById('cap-sel-count'); if(ct) ct.textContent=String(n);
+}
+function capSelClear(){
+  capSelSet={};
+  document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=false; });
+  capSelUpdateBar();
+}
+function capSelAll(){
+  if(!capLibInit()) return;
+  var items=(capLib.block.items||[]);
+  var n=0; for(var k in capSelSet){ if(capSelSet[k]) n++; }
+  var all=(n<items.length);          // pas tout coché -> tout cocher, sinon tout vider
+  capSelSet={};
+  if(all) items.forEach(function(c){ capSelSet[c.id]=true; });
+  document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=all; });
+  capSelUpdateBar();
+}
+function capSelDelete(){
+  if(!capLibInit()) return;
+  var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
+  if(!ids.length) return;
+  if(!confirm('Supprimer '+ids.length+' caption'+(ids.length>1?'s':'')+' ?')) return;
+  capLib.block.items=(capLib.block.items||[]).filter(function(c){ return !capSelSet[c.id]; });
+  capSelSet={};
+  capRenderCards(); capSave();
 }
 // CSS inline du texte d une carte aperçu (MIROIR du builder Python : fond blanc
 // 9:16, texte à sa position x/y, taille en cqw = proportionnelle à la carte).
@@ -4739,19 +4818,14 @@ document.addEventListener('click', function(ev){
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
   else if(act==='share'){ capShareOpen(); }
-  else if(act==='delsel'){
-    var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
-    if(!ids.length) return;
-    if(!confirm('Supprimer '+ids.length+' caption'+(ids.length>1?'s':'')+' ?')) return;
-    capLib.block.items=(capLib.block.items||[]).filter(function(c){ return !capSelSet[c.id]; });
-    capSelSet={};
-    capRenderCards(); capSave();
-  }
-  else if(act==='selclear'){
-    capSelSet={};
-    document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=false; });
-    capSelUpdateBar();
-  }
+  else if(act==='delsel'){ capSelDelete(); }
+  else if(act==='selclear'){ capSelClear(); }
+});
+// Sécurité : si on a quitté l onglet Caption (plus de #capCards), la barre
+// flottante globale se cache au prochain clic n importe où.
+document.addEventListener('click', function(){
+  var b=document.getElementById('cap-action-bar');
+  if(b&&b.style.display!=='none'&&!document.getElementById('capCards')) b.style.display='none';
 });
 // ---- Détection « déjà utilisée » : normalisation + similarité par mots ----
 function capNorm(s){
@@ -7644,8 +7718,26 @@ document.addEventListener('keydown', function(e){
     </button>
   </div>
 </div>
+
+<!-- Même barre flottante pour la sélection des CAPTIONS (onglet Caption) -->
+<div id="cap-action-bar" style="display:none">
+  <div class="action-bar-inner">
+    <button class="action-close" onclick="capSelClear()" title="Annuler la sélection">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="action-count"><span id="cap-sel-count">0</span> Sélectionnée</div>
+    <div style="flex:1"></div>
+    <button class="action-icon" onclick="capSelAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
+    <button class="action-icon" onclick="capShareOpen()" title="Partager la sélection à d'autres models" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700;color:#c084fc;display:inline-flex;align-items:center;gap:6px">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>Partager
+    </button>
+    <button class="action-icon" onclick="capSelDelete()" title="Supprimer la sélection">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+    </button>
+  </div>
+</div>
 <style>
-#action-bar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;animation:slideUp .3s ease}
+#action-bar,#cap-action-bar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;animation:slideUp .3s ease}
 @keyframes slideUp{from{transform:translate(-50%,40px);opacity:0}to{transform:translateX(-50%);opacity:1}}
 .action-bar-inner{display:flex;align-items:center;gap:14px;background:#0a0a0a;border:1px solid #222;border-radius:14px;padding:10px 16px 10px 12px;box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04) inset;min-width:300px}
 .action-close{background:transparent;border:0;color:#888;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;transition:all .15s}
@@ -13476,6 +13568,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
             f"{_btn_lbl}</button>"
         )
+        if subdir == "templates":
+            # 📤 Partage des templates sélectionnés (cercles ⚪) à d'autres models
+            # — même modale que « Appliquer ce montage à… », montage compris.
+            add_media_btn = (
+                "<button type='button' onclick='tplShareOpen()' "
+                "title='Copier les templates sélectionnés (cercle ⚪) chez les autres models — montage, description et exemple compris' "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
+                "border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;"
+                "cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(168,85,247,.12);margin-right:8px'>"
+                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' "
+                "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
+                "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
+                "Partager</button>"
+            ) + add_media_btn
         if subdir in ("brutes", "templates"):
             # Import par lien : le champ vit DANS le formulaire d'upload
             # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
@@ -15019,15 +15125,10 @@ def _render_cloud_captions_html() -> str:
     grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px'>"
             + "".join(cards) + "</div>")
 
-    # Barre de sélection (cercles ⚪ des cartes) : suppression groupée
-    sel_bar = (
-        "<div id='capSelBar' style='display:none;align-items:center;gap:12px;margin-bottom:12px;padding:10px 14px;background:#101013;border:1px solid #7f2d35;border-radius:10px'>"
-        "<span id='capSelCount' style='font-size:12.5px;font-weight:700'>0 sélectionnée</span>"
-        "<span style='flex:1'></span>"
-        "<button type='button' data-capact='delsel' style='background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'>🗑 Supprimer la sélection</button>"
-        "<button type='button' data-capact='selclear' style='background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;font-family:inherit'>Annuler</button>"
-        "</div>"
-    )
+    # Sélection : la barre est la PILULE FLOTTANTE globale #cap-action-bar
+    # (même style que la galerie), pilotée par capSelUpdateBar — plus de barre
+    # rouge dans la section.
+    sel_bar = ""
 
     results = ("<div id='capGenStatus' style='margin-top:16px;font-size:12.5px;color:#9a9aa6'></div>"
                "<div id='capGenResults' style='margin-top:8px;display:flex;flex-direction:column;gap:8px'></div>")
@@ -38355,6 +38456,16 @@ def create_app():
             pass
         if (request.form.get("va_ready") or "") in ("1", "true"):
             draft["va_ready"] = True
+        # Partage depuis la GALERIE (bouton Partager, pas d'éditeur ouvert) :
+        # aucun état posté -> on reprend le brouillon ENREGISTRÉ tel quel.
+        if request.form.get("segments") is None:
+            try:
+                import json as _js2
+                _saved = _js2.loads((src_dir / f"{src.stem}.montage.json").read_text(encoding="utf-8"))
+                if isinstance(_saved, dict) and _saved.get("segments") is not None:
+                    draft = _saved
+            except Exception:
+                pass
         done, errs = [], []
         src_size = src.stat().st_size
         for t in targets:
