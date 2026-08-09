@@ -4468,7 +4468,14 @@ function ppApplyOpen(){
   var out=[];
   items.forEach(function(a){
     var n=a.getAttribute('data-ident'); if(!n||n===cur) return;
-    out.push('<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#131316;border:1px solid #2a2a30;border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="'+nxMEsc(n)+'"> '+nxMEsc(n)+'</label>');
+    // avatar : on RÉUTILISE celui de la sidebar (img ou pastille initiale, fallback géré)
+    var avWrap=a.querySelector('div[style*="position:relative"]');
+    var avHtml=(avWrap&&avWrap.children[0])?avWrap.children[0].outerHTML:'';
+    out.push('<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#131316;border:1px solid #2a2a30;border-radius:10px;cursor:pointer;font-size:13px">'
+      +'<span style="display:inline-flex;flex-shrink:0;transform:scale(.72);transform-origin:center;width:32px;height:32px;align-items:center;justify-content:center">'+avHtml+'</span>'
+      +'<span style="flex:1;font-weight:600;text-transform:capitalize">'+nxMEsc(n)+'</span>'
+      +'<input type="checkbox" value="'+nxMEsc(n)+'" style="width:16px;height:16px;accent-color:#3b82f6;cursor:pointer">'
+      +'</label>');
   });
   var list=document.getElementById('pp-apply-list');
   if(list) list.innerHTML=out.join('')||'<div style="font-size:12px;color:#888">Aucune autre identité</div>';
@@ -4486,14 +4493,14 @@ async function ppApplyGo(){
   try{
     var r=await fetch('/cloud/pp_apply',{method:'POST',body:fd,credentials:'same-origin'});
     var j=await r.json();
-    if(go){ go.disabled=false; go.textContent='Appliquer'; }
+    if(go){ go.disabled=false; go.textContent='Partager'; }
     if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
     ppApplyClose();
     if(typeof clearSelection==='function') clearSelection();
     try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
     if(typeof showToast==='function') showToast('✅ '+j.copied+' PP copiée(s) vers '+targets.length+' identité(s) — les originaux restent en place','success',6500);
   }catch(e){
-    if(go){ go.disabled=false; go.textContent='Appliquer'; }
+    if(go){ go.disabled=false; go.textContent='Partager'; }
     if(typeof showToast==='function') showToast('❌ '+e,'error');
   }
 }
@@ -7261,12 +7268,15 @@ body.light .action-icon{color:#666}
 <!-- ===== PP : Appliquer aux autres (COPIE des PP selectionnees vers d autres identites) ===== -->
 <div id="pp-apply-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="ppApplyClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:360px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="font-weight:800;font-size:15px">🖼️ Appliquer aux autres</div>
+    <div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+      Partager
+    </div>
     <div style="font-size:12px;color:#888;line-height:1.5"><span id="pp-apply-count">0</span> PP sélectionnée(s) seront <b style="color:#c4c4cc">copiées</b> chez les identités cochées — les originaux restent en place.</div>
     <div id="pp-apply-list" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:0"></div>
     <div style="display:flex;gap:8px">
       <button type="button" onclick="ppApplyClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
-      <button type="button" id="pp-apply-go" onclick="ppApplyGo()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Appliquer</button>
+      <button type="button" id="pp-apply-go" onclick="ppApplyGo()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Partager</button>
     </div>
   </div>
 </div>
@@ -12964,16 +12974,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"{_btn_lbl}</button>"
         )
         if subdir == "profile_pics":
-            # « Appliquer aux autres » (façon éditeur montage) : COPIE les PP
-            # sélectionnées (cercles ⚪) vers d'autres identités — copie pure,
-            # les originaux restent chez l'identité source.
+            # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
+            # (cercles ⚪) vers d'autres identités — les originaux restent.
             add_media_btn += (
                 "<button type='button' onclick='ppApplyOpen()' "
                 "title='Copier les PP sélectionnées (⚪) vers d autres identités' "
                 "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
-                "background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;"
-                "font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px'>"
-                "🖼️ Appliquer aux autres</button>"
+                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
+                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
+                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7'/><polyline points='16 6 12 2 8 6'/><line x1='12' y1='2' x2='12' y2='15'/></svg>"
+                "Partager</button>"
             )
 
     gallery_header = (

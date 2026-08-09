@@ -66,9 +66,17 @@ def sa_email() -> str:
         return ""
 
 
+# Dossier Drive du user (collé dans le chat le 09/08/2026) — sert de valeur
+# par défaut tant qu'aucun dossier n'a été enregistré depuis la page Drive.
+DEFAULT_FOLDER_ID = "1qtkfg3ghV55DkXeWWruFUPQjkxHO6qL1"
+
+
 def load_config() -> dict:
     d = safe_json.load(CONFIG_FILE, default={}) or {}
-    return d if isinstance(d, dict) else {}
+    d = d if isinstance(d, dict) else {}
+    if not d.get("folder"):
+        d["folder"] = DEFAULT_FOLDER_ID
+    return d
 
 
 def save_config(cfg: dict) -> bool:
