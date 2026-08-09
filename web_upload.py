@@ -3841,6 +3841,8 @@ function nxMontageSave(){
   fd.set('style',JSON.stringify(nxMState.style||{}));
   // point de coupe : ou le template s arrete et ou la brute prend le relais
   if(nxMState.cut!=null) fd.set('cut_at',String(nxMState.cut));
+  // description du post (sidecar .desc.txt) : envoyee avec la video partout
+  fd.set('desc',String((document.getElementById('nx-m-desc')||{}).value||'').trim().slice(0,1000));
   fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
     reset(j.ok?'✅ Enregistré !':'❌ Erreur');
     if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ta caption + le style sont gardés':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
@@ -3849,7 +3851,10 @@ function nxMontageSave(){
 // Recharge le brouillon enregistré (captions + style) à l'ouverture
 function nxMLoadDraft(fid){
   fetch('/noctus/montage_load?file_id='+encodeURIComponent(fid),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
-    if(!(j.ok && j.draft)) return;
+    if(!j.ok) return;
+    // description (sidecar, hors brouillon) : posee meme si aucun brouillon
+    try{ var dta=document.getElementById('nx-m-desc'); if(dta) dta.value=String(j.desc||''); }catch(e){}
+    if(!j.draft) return;
     try{ var segs=JSON.parse(j.draft.segments||'[]'); if(Array.isArray(segs)&&segs.length) nxMState.caps=segs; }catch(e){}
     try{ var stl=JSON.parse(j.draft.style||'{}'); if(stl&&typeof stl==='object'){ if(!nxMState.style)nxMStyleInit(); nxMState.style=Object.assign(nxMState.style,stl); } }catch(e){}
     if(j.draft.font){ var fsel=document.getElementById('nx-m-font'); if(fsel) fsel.value=j.draft.font; }
@@ -4379,6 +4384,8 @@ function nxMDownloadAll(list){
 async function nxMontageSend(vf,file,btn){
   btn.disabled=true; btn.textContent='⏳';
   var fd=new FormData(); fd.set('identity',nxMState.identity); fd.set('model',nxMState.model); fd.set('vf',vf); fd.set('file',file);
+  var _mdsc=String((document.getElementById('nx-m-desc')||{}).value||'').trim();
+  if(_mdsc) fd.set('desc',_mdsc);   // la description part en message apres la video
   try{ var r=await fetch('/noctus/montage_send',{method:'POST',body:fd}); var j=await r.json();
     if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
@@ -7939,6 +7946,8 @@ body.light .action-icon{color:#666}
         </div>
         <div class="ce-inspect">
           <textarea id="nx-m-caption" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="nxMCaptionLive()"></textarea>
+          <div style="font-size:10px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-top:8px">📄 DESCRIPTION DU POST (OPTIONNEL — PART AVEC LA VIDÉO)</div>
+          <textarea id="nx-m-desc" placeholder="Vide = pas de description" class="nxm-ta" style="min-height:44px"></textarea>
           <div class="nxm-row">
             <span class="nxm-lbl">Préréglage</span>
             <button type="button" id="nxp-outline" class="nxm-preset" onclick="nxMStylePreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
@@ -38126,6 +38135,21 @@ def create_app():
                     draft["cut_at"] = old["cut_at"]
         except Exception:
             pass
+        # Description du post -> sidecar <stem>.desc.txt (même convention que les
+        # reels : /reelmonte du bot et l'envoi banger la lisent DÉJÀ, et le
+        # « Appliquer à d'autres models » la copie déjà). Champ absent = vieille
+        # page ouverte, on ne touche pas ; vide = on retire ; rempli = on écrit.
+        _dsc = request.form.get("desc")
+        if _dsc is not None:
+            _dp = target_dir / f"{src.stem}.desc.txt"
+            _dsc = _dsc.strip()[:1000]
+            try:
+                if _dsc:
+                    _dp.write_text(_dsc, encoding="utf-8")
+                elif _dp.exists():
+                    _dp.unlink()
+            except Exception:
+                pass
         try:
             p.write_text(_js.dumps(draft), encoding="utf-8")
         except Exception as e:
@@ -38308,13 +38332,21 @@ def create_app():
             return jsonify({"ok": False})
         target_dir, src = parsed
         p = target_dir / f"{src.stem}.montage.json"
+        dsc = ""
+        try:
+            _dp = target_dir / f"{src.stem}.desc.txt"
+            if _dp.exists():
+                dsc = _dp.read_text(encoding="utf-8").strip()
+        except Exception:
+            dsc = ""
         if not p.exists():
-            return jsonify({"ok": True, "draft": None})
+            return jsonify({"ok": True, "draft": None, "desc": dsc})
         import json as _js
         try:
-            return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8"))})
+            return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8")),
+                            "desc": dsc})
         except Exception:
-            return jsonify({"ok": True, "draft": None})
+            return jsonify({"ok": True, "draft": None, "desc": dsc})
 
     @app.route("/noctus/montage_log")
     def noctus_montage_log():
