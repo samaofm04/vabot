@@ -4579,10 +4579,9 @@ function capAddOpen(){
   var ta=document.querySelector('#capAddList .capadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
 }
 function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.style.display='none'; }
-(function(){
-  var more=document.getElementById('capAddMore');
-  if(more) more.addEventListener('click', function(){ capAddField(true); });
-})();
+// NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
+// les modales (plus bas dans la page) existent ; le bouton « + Ajouter une
+// autre caption » est câblé en onclick inline dans le HTML de la modale.
 // Un nouveau champ vide apparaît tout seul dès qu on tape dans le dernier
 document.addEventListener('input', function(ev){
   var t=ev.target;
@@ -7168,7 +7167,7 @@ body.light .action-icon{color:#666}
       <button type="button" onclick="capAddClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
     </div>
     <div id="capAddList" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0"></div>
-    <button type="button" id="capAddMore" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter une autre caption</button>
+    <button type="button" id="capAddMore" onclick="capAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter une autre caption</button>
     <button type="button" data-capact="add" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter toutes les captions</button>
   </div>
 </div>
