@@ -2116,6 +2116,7 @@ class UserCog(commands.Cog):
             self.bot.add_view(JailbreakMenuView(self, us=True))  # variante US (custom_id distinct)
             self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
             self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
+            self.bot.add_dynamic_items(JBModelButton)  # 1 bouton par model (menu US)
         except Exception:
             pass
         if not self.daily_menu.is_running():
@@ -2162,14 +2163,15 @@ class UserCog(commands.Cog):
             pass
 
     async def jailbreak_us_menu_async(self, guild):
-        """(embed, view) avec les PP des models dans le select (emojis serveur)."""
+        """(embed, view) : UN BOUTON PAR MODEL avec sa PP — 1 clic = choisi."""
         emb, _v = self.jailbreak_us_menu()
+        models = _jb_us_models()
         emojis = {}
         try:
-            emojis = await ensure_identity_emojis(guild, _jb_us_models())
+            emojis = await ensure_identity_emojis(guild, models)
         except Exception:
             emojis = {}
-        return emb, JailbreakMenuView(self, us=True, emojis=emojis)
+        return emb, JailbreakModelsView(models, emojis=emojis)
 
     def jailbreak_us_menu(self):
         """(embed, view) du menu Jailbreak US — utilisé par /menujailbreakus et
@@ -2178,8 +2180,8 @@ class UserCog(commands.Cog):
         emb = discord.Embed(
             title="🔓 Menu Jailbreak US — models US",
             description=(
-                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
-                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                "Clique **directement sur la model** 👇 puis choisis l'action "
+                "(reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
                 "✅ Ouvert à tout le monde sur ce serveur."
             ),
             color=discord.Color.dark_red(),
@@ -4516,6 +4518,49 @@ class JailbreakMenuView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
         self.add_item(_JailbreakModelSelect(cog, us=us, emojis=emojis))
+
+
+class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
+                    template=r"jbus:m:(?P<ident>[a-z0-9_.\-]+)"):
+    """UN bouton = UNE model (sa PP + son nom), clic = actions direct.
+    custom_id porte l'identité -> persistant même si la liste des models change."""
+
+    def __init__(self, ident, emoji=None):
+        self.ident = (ident or "").lower()
+        super().__init__(
+            discord.ui.Button(
+                label=self.ident.capitalize(), emoji=emoji,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"jbus:m:{self.ident}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        cog = interaction.client.get_cog("UserCog")
+        if cog is None:
+            await interaction.response.send_message("Indisponible.", ephemeral=True)
+            return
+        view = JailbreakActionsView(cog, self.ident)
+        await interaction.response.send_message(
+            embed=view._embed(), view=view, ephemeral=True)
+
+
+class JailbreakModelsView(discord.ui.View):
+    """Grille de boutons : une model par bouton (PP + nom), 1 clic = choisi.
+    Remplace le menu déroulant (demande user)."""
+    def __init__(self, models, emojis=None):
+        super().__init__(timeout=None)
+        emojis = emojis or {}
+        for m in list(models)[:25]:          # 5 lignes × 5 boutons max
+            self.add_item(JBModelButton(m, emoji=emojis.get(m)))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):
