@@ -1799,6 +1799,38 @@ try:
     check("pp apply : file_id traversant ignore (0 copie)", _jTr.get("copied", -1) == 0)
     _shCa.rmtree(_id2, ignore_errors=True)
 
+    # -- Bios / CTA scindes (vaults par identite, meme stockage text_pool) ----
+    import text_pool as _tpCa
+    _fTp = _plCa.Path("data/text_pool.json")
+    _savTp = _fTp.read_text(encoding="utf-8") if _fTp.exists() else None
+    try:
+        _jv = (_cCa.post("/textpool/vault_add", data={
+            "category": "bios", "identity": "_tst_captions",
+            "texts": _jsCa.dumps(["bio test A\nligne 2", "bio test B", "bio test A\nligne 2"])}).get_json() or {})
+        check("textvault : ajout par identite (multi-ligne garde, doublon filtre)",
+              _jv.get("ok") and _jv.get("added") == 2 and _jv.get("duplicates") == 1, str(_jv)[:90])
+        _lst = _tpCa.list_entries("bios", identity="_tst_captions")
+        check("textvault : filtrage par identite dans text_pool",
+              len(_lst) == 2 and chr(10) in _lst[0]["text"])
+        check("textvault : entrees bien assignees a l identite",
+              all((e.get("identity") or "") == "_tst_captions" for e in _lst))
+        _hB = _cCa.get("/?tab=cloudbios&cloud_bios_ident=_tst_captions").get_data(as_text=True)
+        check("textvault : onglet Bios rendu (carte + pool commun en sidebar)",
+              "data-txtroot" in _hB and "bio test B" in _hB and "Pool commun" in _hB)
+        check("textvault : identite inconnue refusee",
+              ((_cCa.post("/textpool/vault_add", data={"category": "bios", "identity": "zz_inconnue",
+                          "texts": _jsCa.dumps(["x"])}).get_json() or {}).get("ok")) is not True)
+        check("RBAC : cloudbios/cloudctas rattaches a la cle textpool",
+              {"cloudbios", "cloudctas"} <= (_wCa._PERM_KEY_TO_TABS.get("textpool") or set()))
+    finally:
+        if _savTp is not None:
+            _wCa.safe_json.write_text(_fTp, _savTp)
+        else:
+            try:
+                _fTp.unlink()
+            except Exception:
+                pass
+
     # -- Google Drive sync (copie seule) --------------------------------------
     import gdrive_sync as _gdCa
     check("gdrive : module importable sans google-auth (available -> bool)",

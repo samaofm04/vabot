@@ -82,17 +82,27 @@ def _save(data: Dict[str, Any]):
     safe_json.write_text(POOL_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def list_entries(category: str, only_available: bool = False) -> List[Dict[str, Any]]:
+def list_entries(category: str, only_available: bool = False,
+                 identity: Optional[str] = None) -> List[Dict[str, Any]]:
+    """identity : None = tout ; "" = entrées SANS identité (pool commun) ;
+    "<ident>" = entrées assignées à cette identité (onglets Bios/CTA du site)."""
     if category not in CATEGORIES:
         return []
     items = _load().get(category, [])
     if only_available:
         items = [x for x in items if not x.get("used_by")]
+    if identity is not None:
+        ident = (identity or "").strip().lower()
+        if ident:
+            items = [x for x in items if (x.get("identity") or "").lower() == ident]
+        else:
+            items = [x for x in items if not x.get("identity")]
     return items
 
 
-def add_entry(category: str, text: str) -> Dict[str, Any]:
-    """Ajoute une entree au pool. Retourne l entry ou None si invalide."""
+def add_entry(category: str, text: str, identity: str = "") -> Dict[str, Any]:
+    """Ajoute une entree au pool (identity optionnelle : onglets par identité
+    du site ; vide = pool commun, comme avant). Retourne l entry ou l erreur."""
     if category not in CATEGORIES:
         return {"ok": False, "error": "categorie invalide"}
     text = (text or "").strip()
@@ -101,10 +111,12 @@ def add_entry(category: str, text: str) -> Dict[str, Any]:
     max_len = CATEGORY_META[category]["max_len"]
     if len(text) > max_len:
         text = text[:max_len]
+    identity = (identity or "").strip().lower()
     data = _load()
-    # Dedupe : skip si meme texte deja present
+    # Dedupe : skip si meme texte deja present POUR LA MEME identite
+    # (deux models peuvent volontairement avoir le meme CTA).
     for e in data[category]:
-        if e.get("text") == text:
+        if e.get("text") == text and (e.get("identity") or "").lower() == identity:
             return {"ok": False, "error": "already_exists", "entry": e}
     entry = {
         "id": uuid.uuid4().hex[:12],
@@ -112,12 +124,14 @@ def add_entry(category: str, text: str) -> Dict[str, Any]:
         "used_by": None,
         "added_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
+    if identity:
+        entry["identity"] = identity
     data[category].append(entry)
     _save(data)
     return {"ok": True, "entry": entry}
 
 
-def add_bulk(category: str, raw_text: str) -> Dict[str, Any]:
+def add_bulk(category: str, raw_text: str, identity: str = "") -> Dict[str, Any]:
     """Bulk add : prend du texte multi-ligne et ajoute chaque ligne non vide."""
     if category not in CATEGORIES:
         return {"ok": False, "error": "categorie invalide"}
@@ -127,7 +141,7 @@ def add_bulk(category: str, raw_text: str) -> Dict[str, Any]:
     for line in lines:
         if not line:
             continue
-        res = add_entry(category, line)
+        res = add_entry(category, line, identity=identity)
         if res.get("ok"):
             added += 1
         elif res.get("error") == "already_exists":

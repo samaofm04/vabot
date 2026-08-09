@@ -4452,6 +4452,95 @@ function vaultSelectAll(){
   });
   if(typeof showToast==='function') showToast(allOn?'Sélection vidée':('☑ '+cbs.length+' élément'+(cbs.length>1?'s':'')+' sélectionné'+(cbs.length>1?'s':'')),'info',2500);
 }
+// ==================== Bios / CTA (Bibliothèque texte scindée, vaults par identité) ====================
+// Contexte lu depuis le marqueur [data-txtroot] de la SECTION VISIBLE (les 2
+// onglets coexistent dans le DOM -> pas de getElementById global).
+function txtCtx(){
+  var sec=null;
+  document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  var root=sec?sec.querySelector('[data-txtroot]'):null;
+  if(!root) return null;
+  return {cat:root.getAttribute('data-cat')||'', ident:root.getAttribute('data-ident')||'',
+          tab:root.getAttribute('data-tab')||'', ikey:root.getAttribute('data-ikey')||''};
+}
+function txtRefresh(){
+  var c=txtCtx(); if(!c) return;
+  try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+  vaultGoTo({preventDefault:function(){}}, '/?tab='+c.tab+'&'+c.ikey+'='+encodeURIComponent(c.ident));
+}
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[data-txtact]'):null;
+  if(!b) return;
+  var act=b.getAttribute('data-txtact');
+  var c=txtCtx(); if(!c) return;
+  if(act==='copy'){
+    var t=b.getAttribute('data-txt')||'';
+    var done=function(){ if(typeof showToast==='function') showToast('📋 Copié','success',2000); };
+    try{ navigator.clipboard.writeText(t).then(done).catch(function(){ done(); }); }catch(e){ done(); }
+  }
+  else if(act==='del'){
+    if(!confirm('Supprimer ce texte ?')) return;
+    var fd=new FormData(); fd.set('category',c.cat); fd.set('entry_id',b.getAttribute('data-eid')||'');
+    fetch('/textpool/delete',{method:'POST',body:fd,credentials:'same-origin'})
+      .then(function(r){return r.json();}).then(function(j){
+        if(j&&j.ok){ var card=b.closest('.txt-card'); if(card) card.remove(); }
+        else if(typeof showToast==='function') showToast('❌ suppression impossible','error');
+      }).catch(function(){});
+  }
+  else if(act==='add'){ txtAddOpen(); }
+  else if(act==='ai'){
+    var age=(document.getElementById('txtAiAge')||{}).value||'22';
+    var nb=(document.getElementById('txtAiCount')||{}).value||'6';
+    b.disabled=true; var old=b.textContent; b.textContent='⏳ IA…';
+    var fd2=new FormData(); fd2.set('identity',c.ident); fd2.set('age',age); fd2.set('count',nb);
+    fetch('/textpool/ai_bios',{method:'POST',body:fd2,credentials:'same-origin'})
+      .then(function(r){return r.json();}).then(function(j){
+        b.disabled=false; b.textContent=old;
+        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error',9000); return; }
+        if(typeof showToast==='function') showToast('✨ '+j.added+' bio(s) générées pour @'+c.ident,'success');
+        txtRefresh();
+      }).catch(function(e){ b.disabled=false; b.textContent=old; });
+  }
+});
+// Modale d ajout : boutons en onclick INLINE (piège stopPropagation des modales)
+function txtAddField(focus){
+  var list=document.getElementById('txtAddList'); if(!list) return null;
+  var n=list.querySelectorAll('.txtadd-ta').length+1;
+  var wrap=document.createElement('div');
+  wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">TEXTE '+n+'</div>'
+    +'<textarea rows="2" class="txtadd-ta" autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
+  list.appendChild(wrap);
+  var ta=wrap.querySelector('textarea');
+  if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
+  return ta;
+}
+function txtAddOpen(){
+  var c=txtCtx(); if(!c) return;
+  var m=document.getElementById('txt-add-modal'); if(!m) return;
+  var t=document.getElementById('txtAddTitle');
+  if(t) t.textContent=(c.cat==='ctas'?'CTA':'Bios')+' — '+(c.ident==='_pool_'?'Pool commun':'@'+c.ident);
+  var list=document.getElementById('txtAddList'); if(list) list.innerHTML='';
+  txtAddField(false);
+  m.style.display='flex';
+  var ta=document.querySelector('#txtAddList .txtadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
+}
+function txtAddClose(){ var m=document.getElementById('txt-add-modal'); if(m) m.style.display='none'; }
+function txtAddSubmit(){
+  var c=txtCtx(); if(!c) return;
+  var vals=[];
+  document.querySelectorAll('#txtAddList .txtadd-ta').forEach(function(t){
+    var v=String(t.value||'').trim(); if(v) vals.push(v);
+  });
+  if(!vals.length){ if(typeof showToast==='function') showToast('Écris au moins un texte','warning'); return; }
+  var fd=new FormData(); fd.set('category',c.cat); fd.set('identity',c.ident); fd.set('texts',JSON.stringify(vals));
+  fetch('/textpool/vault_add',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+      txtAddClose();
+      if(typeof showToast==='function') showToast('✅ '+j.added+' ajouté(s)'+(j.duplicates?(' · '+j.duplicates+' doublon(s) ignoré(s)'):''),'success');
+      txtRefresh();
+    }).catch(function(){});
+}
 // ==================== PP : Partager (copie, jamais de suppression) ====================
 // MÊME modale que « Appliquer ce montage à… » (nxModelPicker) : bandeau info,
 // rangée All, coches rondes, compteur + Confirmer.
@@ -5946,9 +6035,15 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
-    <button class="item" id="tab-textpool" onclick="showTab('cloud','textpool','Bibliothèque texte','Bios générées par IA + CTAs')">
+    <!-- Bibliothèque texte SCINDÉE en 2 vaults (Bios / CTA) — même stockage
+         text_pool.json ; l'ancienne page reste accessible via ?tab=textpool -->
+    <button class="item" id="tab-cloudbios" onclick="showTab('cloud','cloudbios','Bios','Tes bios par identité — ajout en liste + génération IA')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-      Bibliothèque texte
+      Bios
+    </button>
+    <button class="item" id="tab-cloudctas" onclick="showTab('cloud','cloudctas','CTA','Tes call-to-action par identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+      CTA
     </button>
     <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','PP par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
@@ -5962,18 +6057,21 @@ document.addEventListener('click',function(e){
 </div>
 
 <div class="section-label">Création</div>
-<button class="item solo-item" id="tab-videocrea" onclick="showTab('cloud','videocrea','Création de vidéos','Génère V1 → V10 avec captions + anti-fingerprint')">
+<!-- Création de vidéos : MASQUÉ du menu à la demande de l'user (09/08/2026) —
+     page/routes/pipeline Noctus conservés ; réactivation = retirer le
+     display:none. Deep-link ?tab=videocrea toujours fonctionnel. -->
+<button class="item solo-item" id="tab-videocrea" style="display:none" onclick="showTab('cloud','videocrea','Création de vidéos','Génère V1 → V10 avec captions + anti-fingerprint')">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
   Création de vidéos
 </button>
 <button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','Rendre chaque vidéo unique — iPhone + GPS + filtres (façon TikFusion)')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z" fill="currentColor"/></svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 6.5 14l4-4 4 4L21 7.5"/><polyline points="16.5 7.5 21 7.5 21 12"/><path d="M21 13.5 17.5 10l-4 4-4-4L3 16.5"/><polyline points="7.5 16.5 3 16.5 3 12"/></svg>
   Métadonnées vidéo
 </button>
 
 <div class="group" id="grp-montage">
   <button class="group-head" onclick="toggleGroup('montage')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5.5H7A2.5 2.5 0 0 0 4.5 8"/><path d="M12.5 18.5H7A2.5 2.5 0 0 1 4.5 16"/><line x1="21" y1="4" x2="4.5" y2="13"/><line x1="21" y1="20" x2="4.5" y2="11"/></svg>
     <span class="label">Reel montage</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
@@ -6794,6 +6892,16 @@ document.addEventListener('keydown', function(e){
 {textpool_html}
 </div>
 
+<!-- BIBLIOTHEQUE TEXTE scindee : Bios (vault par identite) -->
+<div class="form-section" id="form-cloudbios" style="display:none">
+{cloud_bios_html}
+</div>
+
+<!-- BIBLIOTHEQUE TEXTE scindee : CTA (vault par identite) -->
+<div class="form-section" id="form-cloudctas" style="display:none">
+{cloud_ctas_html}
+</div>
+
 <!-- GEELARK -->
 <div class="form-section" id="form-geelark" style="display:none">
 {geelark_html}
@@ -7262,6 +7370,21 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
+<!-- ===== Bios / CTA : ajout en liste (un champ par texte, facon Upload Reel) ===== -->
+<div id="txt-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="txtAddClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#8b9cf7;display:inline-block"></span>
+      <span id="txtAddTitle" style="font-weight:800;font-size:15px">Bios</span>
+      <span style="flex:1"></span>
+      <button type="button" onclick="txtAddClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
+    </div>
+    <div id="txtAddList" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0"></div>
+    <button type="button" onclick="txtAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter un autre texte</button>
+    <button type="button" onclick="txtAddSubmit()" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Tout ajouter</button>
+  </div>
+</div>
+
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
@@ -14590,6 +14713,186 @@ def _render_cloud_drive_html() -> str:
         "<div class='vault-layout'>"
         + vault_sidebar
         + f"<div class='vault-gallery'>{header}{sync_box}{''.join(blocks)}</div>"
+        + "</div>"
+    )
+
+
+_TEXTVAULT_META = {
+    "bios": {"tab": "cloudbios", "label": "Bios", "unit": "bio"},
+    "ctas": {"tab": "cloudctas", "label": "CTA", "unit": "CTA"},
+}
+
+
+def _render_textvault_html(cat: str) -> str:
+    """Onglets « Bios » / « CTA » : la Bibliothèque texte scindée en 2 vaults
+    par identité (cartes texte, ajout en liste façon Upload Reel). MÊME
+    stockage qu'avant (text_pool.py / data/text_pool.json) : les entrées
+    gagnent un champ identity ; les anciennes (sans identité) restent dans la
+    rangée « 🗃️ Pool commun » en haut de la sidebar."""
+    import html as _h
+    from flask import request as _req
+    try:
+        import text_pool as tp
+    except Exception as e:
+        return f"<p style='color:#f87171'>Bibliothèque texte indisponible : {e}</p>"
+    meta = _TEXTVAULT_META[cat]
+    tab, unit = meta["tab"], meta["unit"]
+    ikey = f"cloud_{cat}_ident"
+    identities = _apply_identity_order(_list_content_identities())
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+
+    entries = tp.list_entries(cat)
+    by_ident, pool = {}, []
+    for e in entries:
+        idn = (e.get("identity") or "").lower()
+        (by_ident.setdefault(idn, []) if idn else pool).append(e)
+
+    selected = ""
+    try:
+        selected = (_req.args.get(ikey, "") or "").lower().strip()
+    except Exception:
+        pass
+    if selected != "_pool_" and (not selected or selected not in identities):
+        selected = next((i for i in identities if by_ident.get(i)), identities[0])
+
+    # ---- Sidebar (pool commun en tête + identités, même vault que partout) ----
+    def _count_label(n):
+        return f"{n} {unit}{'s' if n != 1 and unit != 'CTA' else ''}"
+
+    vault_items = []
+    _pool_active = "vault-item-active" if selected == "_pool_" else ""
+    vault_items.append(
+        f"<a href='?tab={tab}&{ikey}=_pool_' onclick='return vaultGoTo(event,this.href)' "
+        f"data-no-loader='1' class='vault-item {_pool_active}' data-ident='_pool_'>"
+        "<div style='width:42px;height:42px;border-radius:50%;background:#26262c;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0'>🗃️</div>"
+        "<div style='flex:1;min-width:0'>"
+        "<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>Pool commun</div>"
+        f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(len(pool))} non assigné{'s' if len(pool) != 1 else ''}</div>"
+        "</div></a>"
+    )
+    for ident in identities:
+        n = len(by_ident.get(ident, []))
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            if avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+        )
+        status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
+        active_class = "vault-item-active" if ident == selected else ""
+        vault_items.append(
+            f"<a href='?tab={tab}&{ikey}={ident}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(n)}</div>"
+            f"</div></a>"
+        )
+    vault_sidebar = (
+        "<div class='vault-sidebar'>"
+        "<div class='vault-search'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        f"<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{cat}'>"
+        "</div>"
+        "<div class='vault-filter-row'>"
+        "<div style='color:#f59e0b;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</div></div>"
+        f"<div class='vault-list' id='vault-list-{cat}'>"
+        + "".join(vault_items)
+        + "</div>"
+        + _VAULT_DND_CSS
+        + f"<button type='button' data-newident='1' data-vtab='{tab}' data-ikey='{ikey}' "
+        "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
+        "</div>"
+    )
+
+    # ---- Galerie ----
+    if selected == "_pool_":
+        cur = pool
+        head_avatar = "<div style='width:42px;height:42px;border-radius:50%;background:#26262c;display:flex;align-items:center;justify-content:center;font-size:17px'>🗃️</div>"
+        head_name = "Pool commun"
+    else:
+        cur = by_ident.get(selected, [])
+        sel_avatar_url = _identity_avatar_url(selected)
+        head_avatar = (
+            f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+            if sel_avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
+        )
+        head_name = f"@{selected}"
+    header = (
+        f"<div data-txtroot='1' data-cat='{cat}' data-ident='{selected}' data-tab='{tab}' data-ikey='{ikey}'></div>"
+        "<div class='vault-gallery-header' style='justify-content:space-between'>"
+        "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
+        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{head_avatar}</span>"
+        "<div style='flex:1;min-width:0'>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>{head_name}</div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{_count_label(len(cur))}</div>"
+        "</div></div>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        f"<button type='button' data-txtact='add' title='Ajoute tes {meta['label']} (un champ par texte)' "
+        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>"
+        "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
+        f"Add {meta['label']}</button>"
+        "</div></div>"
+    )
+
+    ai_box = ""
+    if cat == "bios" and selected != "_pool_":
+        ai_box = (
+            "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
+            "<span style='font-size:12.5px;font-weight:700'>✨ Générer avec l'IA</span>"
+            "<label style='font-size:12px;color:#c4c4cc;display:flex;align-items:center;gap:6px'>Âge "
+            "<input id='txtAiAge' type='number' min='18' max='40' value='22' style='width:56px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:12.5px;box-sizing:border-box'></label>"
+            "<select id='txtAiCount' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12.5px;font-family:inherit'><option>6</option><option>10</option><option>15</option></select>"
+            "<button type='button' data-txtact='ai' class='txtv-btn' style='font-weight:700'>✨ Générer</button>"
+            f"<span style='font-size:11px;color:#75757f'>ajoutées directement chez @{selected}</span>"
+            "</div>"
+        )
+
+    cards = []
+    if not cur:
+        cards.append(
+            f"<div style='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px'>"
+            f"Aucun texte ici — clique « ＋ Add {meta['label']} ».</div>")
+    for e in cur:
+        txt = _h.escape(str(e.get("text") or ""), quote=True)
+        eid = _h.escape(str(e.get("id") or ""), quote=True)
+        date = str(e.get("added_at") or "")[:10]
+        used = str(e.get("used_by") or "")
+        used_html = (f"<span style='background:rgba(34,197,94,.14);color:#22c55e;padding:1px 7px;border-radius:8px;font-size:10.5px;font-weight:700'>@{_h.escape(used, quote=True)}</span>"
+                     if used else "")
+        cards.append(
+            f"<div class='txt-card'>"
+            f"<div class='txt-card-text'>{txt}</div>"
+            f"<div class='txt-card-meta'><span>{date}</span>{used_html}"
+            "<span style='flex:1'></span>"
+            f"<button type='button' data-txtact='copy' data-txt='{txt}' title='Copier'>📋</button>"
+            f"<button type='button' data-txtact='del' data-eid='{eid}' title='Supprimer'>🗑</button>"
+            "</div></div>"
+        )
+    grid = ("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px'>"
+            + "".join(cards) + "</div>")
+
+    css = """
+<style>
+.txt-card{background:#101013;border:1px solid #232327;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.txt-card-text{font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.txt-card-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:#75757f}
+.txt-card-meta button,.txtv-btn{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit}
+.txt-card-meta button:hover,.txtv-btn:hover{background:#232329;color:#fff}
+</style>
+"""
+    return (
+        css
+        + "<div class='vault-layout'>"
+        + vault_sidebar
+        + f"<div class='vault-gallery'>{header}{ai_box}{grid}</div>"
         + "</div>"
     )
 
@@ -34519,7 +34822,7 @@ ROLE_MENU_STRUCTURE = [
         {"key": "upload", "name": "Upload (Reel/Post/Story/CTA/PP)", "perms": ["view", "create"]},
         {"key": "cloud", "name": "Cloud (stockage par type)", "perms": ["view", "delete"]},
         {"key": "clouddrive", "name": "Drive (tout le contenu par identité, lecture seule)", "perms": ["view"]},
-        {"key": "textpool", "name": "Bibliothèque texte (Names/Bios/CTAs)", "perms": ["view", "edit"]},
+        {"key": "textpool", "name": "Bibliothèque texte (Bios + CTA)", "perms": ["view", "edit"]},
     ]},
     {"section": "Création", "items": [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
@@ -34605,7 +34908,10 @@ _PERM_KEY_TO_TABS = {
     # « Activité VA » ont désormais leur propre case (une case = une page).
     "jailbreak": {"jailbreak"},
     # La Bibliothèque texte gère Names/Bios/CTAs sur la même page.
-    "textpool": {"textpool"},
+    # Bibliothèque texte scindée : la clé RBAC historique « textpool » ouvre
+    # les 2 nouveaux onglets (rétro-compat des rôles déjà cochés) + l'ancienne
+    # page (deep-link ?tab=textpool).
+    "textpool": {"cloudbios", "cloudctas", "textpool"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -35606,6 +35912,8 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{biolinks_html}", _lazy("biolinks"))
         .replace("{onboarding_html}", _lazy("onboarding"))
         .replace("{textpool_html}", _lazy("textpool"))
+        .replace("{cloud_bios_html}", _g("cloudbios", lambda: _render_textvault_html("bios")))
+        .replace("{cloud_ctas_html}", _g("cloudctas", lambda: _render_textvault_html("ctas")))
         .replace("{geelark_html}", _lazy("geelark"))
         .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
         .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
@@ -41121,7 +41429,8 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         cat = (request.form.get("category") or "").strip()
         text = (request.form.get("text") or "").strip()
-        return jsonify(tp.add_entry(cat, text))
+        ident = (request.form.get("identity") or "").strip().lower()
+        return jsonify(tp.add_entry(cat, text, identity=ident))
 
     @app.route("/textpool/ai_bios", methods=["POST"])
     def textpool_ai_bios():
@@ -41181,7 +41490,8 @@ def create_app():
             if not (5 <= len(line) <= 150):
                 continue
             try:
-                if tp.add_entry("bios", line).get("ok"):
+                # bios générées ASSIGNÉES à la model (onglet Bios par identité)
+                if tp.add_entry("bios", line, identity=identity.lower()).get("ok"):
                     added += 1
             except Exception:
                 pass
@@ -41203,7 +41513,43 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         cat = (request.form.get("category") or "").strip()
         text = request.form.get("text") or ""
-        return jsonify(tp.add_bulk(cat, text))
+        ident = (request.form.get("identity") or "").strip().lower()
+        return jsonify(tp.add_bulk(cat, text, identity=ident))
+
+    @app.route("/textpool/vault_add", methods=["POST"])
+    def textpool_vault_add():
+        """Ajout depuis les onglets Bios/CTA : liste de textes (un champ par
+        texte, multi-ligne autorisé DANS un texte), assignés à une identité
+        (« _pool_ » ou vide = pool commun)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        import json as _js
+        cat = (request.form.get("category") or "").strip()
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident == "_pool_":
+            ident = ""
+        if ident and ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        try:
+            texts = _js.loads(request.form.get("texts") or "[]")
+        except Exception:
+            return jsonify({"ok": False, "error": "JSON invalide"})
+        if not isinstance(texts, list) or not texts:
+            return jsonify({"ok": False, "error": "aucun texte"})
+        added = dupes = 0
+        for t in texts[:100]:
+            res = tp.add_entry(cat, str(t), identity=ident)
+            if res.get("ok"):
+                added += 1
+            elif res.get("error") == "already_exists":
+                dupes += 1
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "added": added, "duplicates": dupes})
 
     @app.route("/textpool/delete", methods=["POST"])
     def textpool_delete():
