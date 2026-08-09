@@ -6145,7 +6145,10 @@ document.addEventListener('click',function(e){
 <!-- Auto-Post retiré du menu (les pages restent accessibles par URL, cookies MyPuls déplacés dans Settings) -->
 
 <!-- GeeLark : groupe separe (extrait de Auto-Post pour le mettre en avant) -->
-<div class="group" id="grp-geelark">
+<!-- GeeLark : MASQUÉ du menu à la demande de l'user (09/08/2026) — le code,
+     les routes et la page restent en place ; pour le réactiver, retirer le
+     display:none ci-dessous. Deep-link ?tab=geelark toujours fonctionnel. -->
+<div class="group" id="grp-geelark" style="display:none">
   <button class="group-head" onclick="toggleGroup('geelark')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
     <span class="label">GeeLark</span>
