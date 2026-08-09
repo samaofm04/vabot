@@ -53,19 +53,48 @@ class _ServiceView(discord.ui.View):
 
 
 class _ActivationView(discord.ui.View):
-    """🔄 Redemander un code · ❌ Annuler, pour UNE activation."""
+    """Boutons d'UNE activation : Voir le code · Redemander · Autre · Annuler
+    (mêmes boutons/couleurs que le serveur de référence de l'user)."""
     def __init__(self, cog, kind, act_id, value, provider="getatext", stale=""):
         super().__init__(timeout=1800)
         self.cog, self.kind = cog, kind
         self.act_id, self.value = act_id, value
         self.provider, self.stale = provider, stale
         self.owner_id = None
+        self.service = "ig"
+        self.code = None            # rempli par le poll dès qu'il arrive
+        lbl = "Voir le code SMS" if kind == "sms" else "Voir le code mail"
+        self.children[0].label = lbl
+        self.children[2].label = "Autre numéro" if kind == "sms" else "Autre mail"
 
     async def interaction_check(self, itx):
         if self.owner_id and itx.user.id != self.owner_id:
             await itx.response.send_message("Pas pour toi.", ephemeral=True)
             return False
         return True
+
+    @discord.ui.button(label="Voir le code", emoji="📨",
+                       style=discord.ButtonStyle.success)
+    async def see(self, itx: discord.Interaction, btn: discord.ui.Button):
+        await itx.response.defer(ephemeral=True, thinking=True)
+        if self.code:
+            await itx.followup.send(f"🔑 **CODE : `{self.code}`**", ephemeral=True)
+            return
+        # pas encore vu par le poll : on redemande tout de suite au fournisseur
+        if self.kind == "sms":
+            state, val = await asyncio.to_thread(
+                numgen.get_code, self.act_id, self.provider)
+        else:
+            state, val = await asyncio.to_thread(
+                numgen.get_mail_code, self.act_id, self.stale)
+        if state == "code" and val:
+            self.code = val
+            await itx.followup.send(f"🔑 **CODE : `{val}`**", ephemeral=True)
+            await self.cog.show_code(itx, self, val)
+            return
+        await itx.followup.send(
+            "⏳ **Pas encore reçu.** Demande l'envoi du code depuis l'app — "
+            "il s'affichera **tout seul** dans le message au-dessus.", ephemeral=True)
 
     @discord.ui.button(label="Redemander un code", emoji="🔄",
                        style=discord.ButtonStyle.primary)
@@ -76,13 +105,30 @@ class _ActivationView(discord.ui.View):
             if not ok:
                 await itx.followup.send(f"❌ {msg}", ephemeral=True)
                 return
-        # mail : rien à demander côté API, on relance juste l'écoute
+        else:
+            self.stale = self.code or self.stale   # le prochain doit être DIFFÉRENT
+        self.code = None
         await itx.followup.send(
-            f"🔄 Nouveau code demandé — renvoie le SMS/mail depuis l'app, "
+            f"🔄 Nouveau code demandé — relance l'envoi depuis l'app, "
             f"j'écoute **{self.value}** pendant {POLL_MAX // 60} min.", ephemeral=True)
         await self.cog.watch(itx, self, first=False)
 
-    @discord.ui.button(label="Annuler", emoji="❌", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Autre numéro", emoji="🔁",
+                       style=discord.ButtonStyle.secondary)
+    async def other_one(self, itx: discord.Interaction, btn: discord.ui.Button):
+        await itx.response.defer(ephemeral=True, thinking=True)
+        # on rend l'actuel (remboursé si aucun code) puis on en reprend un
+        if self.kind == "sms":
+            await asyncio.to_thread(numgen.cancel, self.act_id, self.provider)
+        else:
+            await asyncio.to_thread(numgen.mail_cancel, self.act_id)
+        self.stop()
+        if self.kind == "sms":
+            await self.cog.start_sms(itx, self.service)
+        else:
+            await self.cog.start_mail(itx, self.service)
+
+    @discord.ui.button(label="Annuler", emoji="❌", style=discord.ButtonStyle.danger)
     async def stop_it(self, itx: discord.Interaction, btn: discord.ui.Button):
         await itx.response.defer(ephemeral=True, thinking=True)
         if self.kind == "sms":
@@ -172,8 +218,8 @@ class NumerosCog(commands.Cog):
         view.service = service
         solde = (await asyncio.to_thread(numgen.balances)).get("sms")
         msg = await interaction.followup.send(
-            self._embed_txt("📱", res["phone"], service,
-                            user=interaction.user.id, solde=solde),
+            embed=self._embed_txt("📱", res["phone"], service,
+                                  user=interaction.user.id, solde=solde),
             view=view, ephemeral=True, wait=True)
         view.message = msg
         await self.watch(interaction, view, first=True)
@@ -189,40 +235,49 @@ class NumerosCog(commands.Cog):
         view.service = service
         solde = (await asyncio.to_thread(numgen.balances)).get("mail")
         msg = await interaction.followup.send(
-            self._embed_txt("📧", res["mail"], service,
-                            user=interaction.user.id, solde=solde),
+            embed=self._embed_txt("📧", res["mail"], service,
+                                  user=interaction.user.id, solde=solde),
             view=view, ephemeral=True, wait=True)
         view.message = msg
         await self.watch(interaction, view, first=True)
 
     def _embed_txt(self, icon, value, service, waiting=True, code=None, err=None,
                    user=None, solde=None):
-        """Message d'activation, calqué sur le panneau de l'autre serveur :
-        valeur en gros, avertissement anti-ban, mode d'emploi, solde."""
+        """EMBED d'activation, calqué sur le serveur de référence de l'user :
+        barre verte, valeur en gros, ⚠️ anti-ban, mode d'emploi, solde en pied."""
         kind_lbl = "numéro" if icon == "📱" else "mail"
-        head = (f"{icon} **Ton {kind_lbl} {_svc_label(service)}**\n"
-                f"{'📞' if icon == '📱' else '✉️'} `{value}`\n")
+        app = _svc_label(service)
+        emb = discord.Embed(
+            title=f"{icon} Ton {kind_lbl} {app}",
+            color=(discord.Color.green() if not err else discord.Color.orange()),
+        )
+        emb.description = f"{'📞' if icon == '📱' else '✉️'} `{value}`"
         if code:
-            body = (f"\n🔑 **CODE : `{code}`**\n\n"
-                    "_Besoin d'un autre code ? → **🔄 Redemander un code**_")
+            emb.add_field(name="🔑 Code reçu", value=f"# {code}", inline=False)
+            emb.add_field(
+                name="​",
+                value="_Besoin d'un autre code ? → **🔄 Redemander un code**_",
+                inline=False)
         elif err:
-            body = f"\n⚠️ {err}\n_Tu peux réessayer avec **🔄**._"
+            emb.add_field(name="⚠️ Souci", value=str(err)[:900], inline=False)
         else:
-            warn = ("\n⚠️ **À lire absolument**\n"
-                    f"Entre ce {kind_lbl} **à la main** — ne le copie-colle **JAMAIS** "
-                    "(risque de ban de la plateforme).\n\n"
-                    "**Comment faire**\n"
-                    f"1. Saisis le {kind_lbl} à la main sur l'app\n"
-                    f"2. Demande l'envoi du code\n"
-                    f"3. ⏳ Le code arrive **automatiquement ici** (j'écoute "
-                    f"{POLL_MAX // 60} min)")
-            body = warn
-        foot = ""
+            emb.add_field(
+                name="⚠️ À lire absolument",
+                value=(f"Entre ce {kind_lbl} **à la main** sur {app} — "
+                       "**ne le copie-colle JAMAIS** (risque de ban de la plateforme)."),
+                inline=False)
+            emb.add_field(
+                name="Comment faire",
+                value=(f"**1.** Saisis le {kind_lbl} à la main sur **{app}**\n"
+                       f"**2.** Demande l'envoi du code\n"
+                       f"**3.** ⏳ Le code arrive **automatiquement ici** "
+                       f"(j'écoute {POLL_MAX // 60} min)"),
+                inline=False)
         if user is not None:
-            foot += f"\n\nLié à toi <@{user}>"
+            emb.add_field(name="Lié à toi", value=f"<@{user}>", inline=False)
         if solde:
-            foot += f"\n_solde : {solde}_"
-        return head + body + foot
+            emb.set_footer(text=f"Youl4b · solde : {solde}")
+        return emb
 
     # --------------------------------------------------------------- polling
     async def watch(self, interaction, view, first=True):
@@ -239,33 +294,41 @@ class NumerosCog(commands.Cog):
                 state, val = await asyncio.to_thread(
                     numgen.get_mail_code, view.act_id, view.stale)
             if state == "code" and val:
-                if view.kind == "sms":
-                    await asyncio.to_thread(numgen.finish, view.act_id, view.provider)
-                else:
-                    view.stale = val      # le prochain code doit être DIFFÉRENT
-                txt = self._embed_txt("📱" if view.kind == "sms" else "📧",
-                                      view.value, service, code=val)
-                await self._edit(interaction, view, txt)
+                await self.show_code(interaction, view, val)
                 return
             if state in ("cancel", "error"):
-                txt = self._embed_txt("📱" if view.kind == "sms" else "📧",
+                emb = self._embed_txt("📱" if view.kind == "sms" else "📧",
                                       view.value, service,
-                                      err=val or "activation annulée")
-                await self._edit(interaction, view, txt)
+                                      err=val or "activation annulée",
+                                      user=view.owner_id)
+                await self._edit(interaction, view, emb)
                 return
-        txt = self._embed_txt("📱" if view.kind == "sms" else "📧", view.value,
-                              service, err="Aucun code reçu dans le délai.")
-        await self._edit(interaction, view, txt)
+        emb = self._embed_txt("📱" if view.kind == "sms" else "📧", view.value,
+                              service, err="Aucun code reçu dans le délai.",
+                              user=view.owner_id)
+        await self._edit(interaction, view, emb)
 
-    async def _edit(self, interaction, view, content):
+    async def show_code(self, interaction, view, code):
+        """Code reçu : on clôture l'activation et on l'affiche dans l'embed."""
+        view.code = code
+        if view.kind == "sms":
+            await asyncio.to_thread(numgen.finish, view.act_id, view.provider)
+        else:
+            view.stale = code          # le prochain code doit être DIFFÉRENT
+        emb = self._embed_txt("📱" if view.kind == "sms" else "📧", view.value,
+                              getattr(view, "service", "ig"), code=code,
+                              user=view.owner_id)
+        await self._edit(interaction, view, emb)
+
+    async def _edit(self, interaction, view, embed):
         try:
             if getattr(view, "message", None) is not None:
-                await view.message.edit(content=content, view=view)
+                await view.message.edit(embed=embed, view=view)
                 return
         except Exception:
             pass
         try:
-            await interaction.followup.send(content, view=view, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         except Exception:
             pass
 
