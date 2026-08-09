@@ -39062,7 +39062,10 @@ def create_app():
             import time as _t
             if st.get("state") == "running":
                 budget = max(1, int(st.get("total") or 1)) * 170 + 60
-                if _t.time() - int(st.get("run_ts") or _t.time()) > budget:
+                _rts = st.get("run_ts")
+                if _rts is None:          # PAS « or » : 0 est un ts valide (vieux)
+                    _rts = _t.time()
+                if _t.time() - int(_rts) > budget:
                     st["state"] = "error"
                     st["err"] = "import interrompu (trop long) — relance-le"
         except Exception:
