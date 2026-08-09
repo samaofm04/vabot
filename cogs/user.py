@@ -4318,7 +4318,8 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 # Marché FR — exclu du menu Jailbreak US (/menujailbreakus). Le menu US montre
 # toutes les identités actives SAUF celles-ci (jessye/jailbreak-only INCLUSES,
 # contrairement au menu classique qui les exclut).
-_JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
+_JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia",
+                     "jessye"}   # jessye n'est PAS une identité du marché US
 
 
 def _jb_us_models():
