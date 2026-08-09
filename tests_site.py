@@ -1716,18 +1716,24 @@ try:
           _jc["block"]["items"][0]["x"] == 0.5 and _jc["block"]["items"][0]["y"] == 0.5,
           str(_jc)[:80])
 
-    # -- ranger/sortir une identite (toggle 📦, liste partagee) ---------------
-    _fHid = _plCa.Path("data/hidden_identities.json")
-    _jh1 = (_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_captions"}).get_json() or {})
-    check("rangees : toggle -> hidden=True + fichier partage ecrit",
-          _jh1.get("ok") and _jh1.get("hidden") is True and _fHid.exists()
-          and "_tst_captions" in _jsCa.loads(_fHid.read_text(encoding="utf-8")), str(_jh1)[:80])
-    _jh2 = (_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_captions"}).get_json() or {})
-    check("rangees : re-toggle -> hidden=False (sortie des rangees)",
-          _jh2.get("ok") and _jh2.get("hidden") is False
-          and "_tst_captions" not in _jsCa.loads(_fHid.read_text(encoding="utf-8")))
-    check("rangees : identite inconnue refusee",
-          ((_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_nexiste_pas"}).get_json() or {}).get("ok")) is not True)
+    # -- reordonner les identites (glisser-deposer sidebar, ordre partage) ----
+    _fOrd = _plCa.Path("data/identity_order.json")
+    _savOrd = _fOrd.read_text(encoding="utf-8") if _fOrd.exists() else None
+    _jo = (_cCa.post("/identity/reorder",
+                     data={"order": _jsCa.dumps(["_tst_captions", "zz_inconnue", "_tst_captions"])}).get_json() or {})
+    check("ordre : sauvegarde + inconnues et doublons filtres",
+          _jo.get("ok") and _jo.get("count") == 1
+          and _jsCa.loads(_fOrd.read_text(encoding="utf-8")) == ["_tst_captions"], str(_jo)[:80])
+    check("ordre : identite ordonnee rendue en premier",
+          _wCa._apply_identity_order(["aaa", "_tst_captions"]) == ["_tst_captions", "aaa"])
+    check("ordre : JSON invalide refuse",
+          ((_cCa.post("/identity/reorder", data={"order": "pas du json"}).get_json() or {}).get("ok")) is not True)
+    # restaure l ordre d origine (fichier reel de l utilisateur)
+    if _savOrd is not None:
+        _wCa.safe_json.write_text(_fOrd, _savOrd)
+    else:
+        _cCa.post("/identity/reorder", data={"order": "[]"})
+    _wCa._invalidate_json_cache(_fOrd)
 
     # tirage random verrouille par grep du source (pattern section 18)
     _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")

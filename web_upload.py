@@ -4532,17 +4532,18 @@ document.addEventListener('click', function(ev){
   var act=b.getAttribute('data-capact'), cid=b.getAttribute('data-cid')||'';
   if(!capLibInit()) return;
   if(act==='add'){
-    var ta=document.getElementById('capAddTa'); if(!ta) return;
-    var lines=String(ta.value||'').split(/\\r?\\n/).map(function(t){return t.trim();}).filter(function(t){return t;});
-    if(!lines.length) return;
+    var vals=[];
+    document.querySelectorAll('#capAddList .capadd-ta').forEach(function(t){
+      var v=String(t.value||'').trim(); if(v) vals.push(v.slice(0,300));
+    });
+    if(!vals.length){ if(typeof showToast==='function') showToast('Écris au moins une caption','warning'); return; }
     var now=Date.now();
-    for(var i=0;i<lines.length;i++){
-      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:lines[i].slice(0,300), x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+    for(var i=0;i<vals.length;i++){
+      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i], x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
     }
-    ta.value='';
     capAddClose();
     capRenderCards(); capSave();
-    if(typeof showToast==='function') showToast('✅ '+lines.length+' caption'+(lines.length>1?'s ajoutées au centre':' ajoutée au centre'),'success');
+    if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre'),'success');
   }
   else if(act==='del'){
     var doDel=function(){ capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==cid;}); capRenderCards(); capSave(); };
@@ -4559,56 +4560,91 @@ document.addEventListener('click', function(ev){
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
 });
+function capAddField(focus){
+  var list=document.getElementById('capAddList'); if(!list) return null;
+  var n=list.querySelectorAll('.capadd-ta').length+1;
+  var wrap=document.createElement('div');
+  wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">CAPTION '+n+' (OVERLAY SUR LA VIDÉO)</div>'
+    +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
+  list.appendChild(wrap);
+  var ta=wrap.querySelector('textarea');
+  if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
+  return ta;
+}
 function capAddOpen(){
   var m=document.getElementById('cap-add-modal'); if(!m) return;
-  var ta=document.getElementById('capAddTa'); if(ta) ta.value='';
+  var list=document.getElementById('capAddList'); if(list) list.innerHTML='';
+  capAddField(false);
   m.style.display='flex';
-  if(ta) setTimeout(function(){ ta.focus(); },60);
+  var ta=document.querySelector('#capAddList .capadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
 }
 function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.style.display='none'; }
-// ---- Ranger des identités (toggle 📦, synchro entre TOUS les onglets vault) ----
-// Délégation en phase CAPTURE : le bouton vit DANS le <a> de la sidebar dont le
-// onclick inline (vaultGoTo) partirait sinon en premier au bubble.
-document.addEventListener('click', function(ev){
-  var b=ev.target.closest?ev.target.closest('[data-identhide]'):null;
-  if(!b) return;
-  ev.preventDefault(); ev.stopPropagation();
-  var ident=b.getAttribute('data-identhide')||'';
-  if(!ident) return;
-  var fd=new FormData(); fd.set('identity',ident);
-  fetch('/identity/toggle_hidden',{method:'POST',body:fd,credentials:'same-origin'})
-    .then(function(r){return r.json();}).then(function(j){
-      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
-      identHideApply(j.identity, j.hidden);
-      try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
-      if(typeof showToast==='function') showToast(j.hidden?('📦 @'+j.identity+' rangée — retrouve-la en bas dans « Rangées »'):('↩ @'+j.identity+' remise dans la liste'),'success');
-    }).catch(function(e){ if(typeof showToast==='function') showToast('❌ '+e,'error'); });
-}, true);
-document.addEventListener('click', function(ev){
-  var h=ev.target.closest?ev.target.closest('[data-vhtoggle]'):null;
-  if(!h) return;
-  var wrap=h.parentElement, list=wrap?wrap.querySelector('.vault-hidden-list'):null;
-  if(list) list.style.display=(list.style.display==='none')?'block':'none';
+(function(){
+  var more=document.getElementById('capAddMore');
+  if(more) more.addEventListener('click', function(){ capAddField(true); });
+})();
+// Un nouveau champ vide apparaît tout seul dès qu on tape dans le dernier
+document.addEventListener('input', function(ev){
+  var t=ev.target;
+  if(!t||!t.classList||!t.classList.contains('capadd-ta')) return;
+  var list=document.getElementById('capAddList'); if(!list) return;
+  var tas=list.querySelectorAll('.capadd-ta');
+  if(tas.length&&tas[tas.length-1]===t&&String(t.value||'').trim()) capAddField(false);
 });
-// Déplace l identité entre liste visible et « Rangées » dans TOUTES les sidebars
-// pré-rendues de la page (chaque onglet vault a la sienne) -> synchro instantanée.
-function identHideApply(ident,hidden){
-  document.querySelectorAll('.vault-sidebar').forEach(function(sb){
-    var item=sb.querySelector('.vault-item[data-ident="'+ident+'"]');
-    var vis=sb.querySelector('.vault-list');
-    var wrap=sb.querySelector('.vault-hidden-wrap');
-    var hid=wrap?wrap.querySelector('.vault-hidden-list'):null;
-    if(!item||!vis||!hid) return;
-    if(hidden){ hid.appendChild(item); item.classList.add('vault-item-hidden'); }
-    else{ vis.appendChild(item); item.classList.remove('vault-item-hidden'); }
-    var btn=item.querySelector('[data-identhide]');
-    if(btn){ btn.textContent=hidden?'↩':'📦'; btn.title=hidden?'Sortir des rangées':'Ranger (masquer de la liste — synchro brut/template/caption)'; }
-    var n=hid.querySelectorAll('.vault-item').length;
-    var head=wrap?wrap.querySelector('[data-vhtoggle]'):null;
-    if(head) head.textContent='📦 Rangées ('+n+')';
-    if(wrap) wrap.style.display=n?'block':'none';
+// ---- Réordonner les identités par GLISSER-DÉPOSER (sidebars vault) ----
+// On attrape le drag natif des <a> de la sidebar : déplacement libre dans la
+// liste, ordre sauvé serveur (/identity/reorder) => synchro entre Vidéo brut /
+// Template / Caption (les autres sidebars pré-rendues sont réordonnées aussi).
+var __identDrag=null;
+document.addEventListener('dragstart', function(ev){
+  var it=ev.target&&ev.target.closest?ev.target.closest('.vault-item'):null;
+  if(!it||!it.parentElement||!it.parentElement.classList.contains('vault-list')) return;
+  __identDrag=it;
+  it.classList.add('vault-dragging');
+  try{ ev.dataTransfer.effectAllowed='move'; ev.dataTransfer.setData('text/plain', it.getAttribute('data-ident')||''); }catch(e){}
+});
+document.addEventListener('dragover', function(ev){
+  if(!__identDrag) return;
+  var list=ev.target&&ev.target.closest?ev.target.closest('.vault-list'):null;
+  if(!list||list!==__identDrag.parentElement) return;
+  ev.preventDefault();
+  try{ ev.dataTransfer.dropEffect='move'; }catch(e){}
+  var over=ev.target.closest('.vault-item');
+  if(!over||over===__identDrag) return;
+  var r=over.getBoundingClientRect();
+  if(ev.clientY < r.top+r.height/2) list.insertBefore(__identDrag, over);
+  else list.insertBefore(__identDrag, over.nextSibling);
+});
+document.addEventListener('drop', function(ev){
+  if(!__identDrag) return;
+  var list=ev.target&&ev.target.closest?ev.target.closest('.vault-list'):null;
+  if(list) ev.preventDefault();   // sinon le navigateur « ouvre » le lien déposé
+});
+document.addEventListener('dragend', function(ev){
+  if(!__identDrag) return;
+  var it=__identDrag; __identDrag=null;
+  it.classList.remove('vault-dragging');
+  var list=it.parentElement;
+  if(!list||!list.classList.contains('vault-list')) return;
+  var order=[];
+  list.querySelectorAll('.vault-item').forEach(function(a){
+    var n=a.getAttribute('data-ident'); if(n) order.push(n);
   });
-}
+  // même ordre appliqué aux sidebars des AUTRES onglets déjà rendues
+  document.querySelectorAll('.vault-list').forEach(function(l){
+    if(l===list) return;
+    order.forEach(function(n){
+      var el=l.querySelector('.vault-item[data-ident="'+n+'"]');
+      if(el) l.appendChild(el);
+    });
+  });
+  var fd=new FormData(); fd.set('order', JSON.stringify(order));
+  fetch('/identity/reorder',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ Ordre non sauvé : '+((j&&j.error)||'?'),'error'); return; }
+      try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+    }).catch(function(){});
+});
 document.addEventListener('change', function(ev){
   var t=ev.target; if(!t||!t.getAttribute) return;
   if(t.getAttribute('data-captoggle')!=null){
@@ -7119,16 +7155,21 @@ body.light .action-icon{color:#666}
   </div>
 </div>
 
-<!-- ===== Add captions : colle ta liste (une par ligne), ecrites au CENTRE par defaut ===== -->
-<div id="cap-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="capAddClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:460px;max-width:92vw;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="font-weight:800;font-size:15px">＋ Add captions</div>
-    <div style="font-size:12px;color:#888;line-height:1.5">Une caption par ligne. Elles seront écrites au <b style="color:#c4c4cc">CENTRE</b> de la vidéo par défaut — clique une carte ensuite pour ajuster la position/le style dans l'éditeur.</div>
-    <textarea id="capAddTa" rows="8" placeholder="POV : quand elle répond enfin&#10;regarde jusqu'au bout 😳&#10;…" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
-    <div style="display:flex;gap:8px">
-      <button type="button" onclick="capAddClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
-      <button type="button" data-capact="add" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">＋ Ajouter</button>
+<!-- ===== Add captions : formulaire facon Upload Reel (un champ par caption,
+     « + Ajouter une autre caption », gros bouton d envoi). Ecrites au CENTRE
+     par defaut ; un nouveau champ vide s ajoute tout seul quand on tape dans
+     le dernier. ===== -->
+<div id="cap-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capAddClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#8b9cf7;display:inline-block"></span>
+      <span style="font-weight:800;font-size:15px">Captions</span>
+      <span style="flex:1"></span>
+      <button type="button" onclick="capAddClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
     </div>
+    <div id="capAddList" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0"></div>
+    <button type="button" id="capAddMore" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter une autre caption</button>
+    <button type="button" data-capact="add" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter toutes les captions</button>
   </div>
 </div>
 
@@ -12518,6 +12559,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 identities.append(_jb)
     if not identities:
         return "<p style='color:#888'>Aucune identité créée.</p>"
+    identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     # Rendu : vignette + badge lecture pour tout dossier video.
     is_video = subdir in ("videos", "brutes", "templates")
     # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
@@ -12538,9 +12580,6 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
     except Exception:
         pass
-    # Identités « rangées » (toggle 📦 sidebar) : masquées de la liste (repliées
-    # en bas), jamais choisies par défaut — mais consultables via ?ident explicite.
-    hidden_idents = set(_load_hidden_identities())
     if not selected or selected not in identities:
         last_up = ""
         try:
@@ -12552,12 +12591,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             selected = last_up
         else:
             for ident in identities:
-                if ident not in hidden_idents and ident_stats[ident]["n_files"] > 0:
+                if ident_stats[ident]["n_files"] > 0:
                     selected = ident
                     break
             if not selected:
-                _vis = [i for i in identities if i not in hidden_idents]
-                selected = (_vis or identities)[0]
+                selected = identities[0]
 
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
                 "stories": "cloudstories", "storyctas": "cloudstoryctas",
@@ -12569,7 +12607,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
-    def _vitem(ident, is_hidden):
+    def _vitem(ident):
         stats = ident_stats[ident]
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
@@ -12588,38 +12626,23 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 f"{stats['n_files']}</span>"
             )
         active_class = "vault-item-active" if ident == selected else ""
-        hidden_class = " vault-item-hidden" if is_hidden else ""
-        # Toggle 📦 « ranger » : synchro entre TOUS les onglets vault (JS identHideApply)
-        hide_btn = (
-            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Sortir des rangées'>↩</span>"
-            if is_hidden else
-            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Ranger (masquer de la liste — synchro brut/template/caption)'>📦</span>"
-        )
         return (
             f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}{hidden_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
             f"</div>"
-            f"{count_badge}{hide_btn}"
+            f"{count_badge}"
             f"</a>"
         )
 
-    vault_items = [_vitem(i, False) for i in identities if i not in hidden_idents]
-    hidden_items = [_vitem(i, True) for i in identities if i in hidden_idents]
-    _vh_disp = "" if hidden_items else " style='display:none'"
-    hidden_wrap = (
-        _VAULT_HIDE_CSS
-        + f"<div class='vault-hidden-wrap'{_vh_disp}>"
-        + f"<button type='button' class='vault-hidden-head' data-vhtoggle='1'>📦 Rangées ({len(hidden_items)})</button>"
-        + "<div class='vault-hidden-list' style='display:none'>"
-        + "".join(hidden_items)
-        + "</div></div>"
-    )
+    # Glisser-déposer une identité = la déplacer où on veut (ordre partagé
+    # entre tous les onglets vault, sauvegardé via /identity/reorder).
+    vault_items = [_vitem(i) for i in identities]
 
     vault_sidebar = (
         "<div class='vault-sidebar'>"
@@ -12635,7 +12658,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<div class='vault-list' id='vault-list-{subdir}'>"
         + "".join(vault_items)
         + "</div>"
-        + hidden_wrap
+        + _VAULT_DND_CSS
         # ＋ Nouvelle identité : ouvre la modale statique #ident-new-modal
         # (délégation [data-newident] — survit aux swaps vaultGoTo).
         + f"<button type='button' data-newident='1' data-vtab='{tab_name}' data-ikey='{subdir_key}' "
@@ -13865,35 +13888,37 @@ def _save_captions_lib(lib: dict) -> bool:
     return ok
 
 
-# Identités « rangées » : masquées des sidebars vault de TOUTE la Bibliothèque
-# (Reels/Posts/Stories/CTAs/PP/brutes/templates/captions — liste PARTAGÉE,
-# stockée serveur => synchro entre les onglets ET entre les appareils).
-# Purement visuel : aucune influence sur la génération ou le service des médias.
-HIDDEN_IDENTITIES_FILE = DATA_DIR / "hidden_identities.json"
+# Ordre CUSTOM des identités dans les sidebars vault : réordonnées par GLISSER-
+# DÉPOSER, liste PARTAGÉE entre tous les onglets Bibliothèque (Vidéo brut/
+# Template/Caption/Reels/…), stockée serveur => synchro entre onglets ET
+# appareils. Les identités absentes de la liste vont à la fin, en alphabétique.
+IDENTITY_ORDER_FILE = DATA_DIR / "identity_order.json"
 
-_VAULT_HIDE_CSS = """
-<style>
-.vault-hide-btn{opacity:.4;flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-size:12px;cursor:pointer;transition:opacity .12s;color:#9a9aa6}
-.vault-item:hover .vault-hide-btn{opacity:1}
-.vault-hide-btn:hover{background:rgba(255,255,255,.1);color:#e6e6ea}
-.vault-hidden-wrap{margin-top:10px;border-top:1px solid #232323;padding-top:6px}
-.vault-hidden-head{width:100%;background:none;border:0;color:#75757f;font-size:11.5px;font-weight:700;cursor:pointer;text-align:left;padding:6px 12px;font-family:inherit}
-.vault-hidden-head:hover{color:#c4c4cc}
-.vault-item-hidden{opacity:.55}
-</style>
-"""
+_VAULT_DND_CSS = "<style>.vault-dragging{opacity:.35}</style>"
 
 
-def _load_hidden_identities() -> list:
-    d = _cached_json_load(HIDDEN_IDENTITIES_FILE)
+def _load_identity_order() -> list:
+    d = _cached_json_load(IDENTITY_ORDER_FILE)
     return [str(x).lower() for x in d] if isinstance(d, list) else []
 
 
-def _save_hidden_identities(lst) -> bool:
-    HIDDEN_IDENTITIES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ok = bool(safe_json.write(HIDDEN_IDENTITIES_FILE, sorted(set(lst)), indent=2))
-    _invalidate_json_cache(HIDDEN_IDENTITIES_FILE)
+def _save_identity_order(lst) -> bool:
+    IDENTITY_ORDER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    seen, order = set(), []
+    for x in lst:                      # l'ORDRE compte : pas de sorted(set())
+        n = str(x).lower()
+        if n not in seen:
+            seen.add(n)
+            order.append(n)
+    ok = bool(safe_json.write(IDENTITY_ORDER_FILE, order, indent=2))
+    _invalidate_json_cache(IDENTITY_ORDER_FILE)
     return ok
+
+
+def _apply_identity_order(identities):
+    """Trie selon l'ordre custom ; les non-listées après, en alphabétique."""
+    pos = {n: i for i, n in enumerate(_load_identity_order())}
+    return sorted(identities, key=lambda n: (pos.get(n, len(pos) + 1), n))
 
 
 def _clean_caption_block(raw) -> dict:
@@ -13992,15 +14017,14 @@ def _render_cloud_captions_html() -> str:
         items = b.get("items") if isinstance(b, dict) else None
         return len(items) if isinstance(items, list) else 0
 
+    identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     selected = ""
     try:
         selected = (_req.args.get("cloud_captions_ident", "") or "").lower().strip()
     except Exception:
         pass
-    hidden_idents = set(_load_hidden_identities())
     if not selected or selected not in identities:
-        selected = next((i for i in identities if i not in hidden_idents and _n_caps(i) > 0),
-                        next((i for i in identities if i not in hidden_idents), identities[0]))
+        selected = next((i for i in identities if _n_caps(i) > 0), identities[0])
 
     block = _clean_caption_block(lib.get(selected))
 
@@ -14013,7 +14037,7 @@ def _render_cloud_captions_html() -> str:
                         and ".example" not in p.name)
 
     # ---- Sidebar identités (même vault que brutes/templates) ----
-    def _vitem(ident, is_hidden):
+    def _vitem(ident):
         n = _n_caps(ident)
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
@@ -14028,35 +14052,19 @@ def _render_cloud_captions_html() -> str:
                 f"<span class='vault-count' style='background:rgba(168,85,247,.15);color:#a855f7;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px'>{n}</span>"
             )
         active_class = "vault-item-active" if ident == selected else ""
-        hidden_class = " vault-item-hidden" if is_hidden else ""
-        hide_btn = (
-            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Sortir des rangées'>↩</span>"
-            if is_hidden else
-            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Ranger (masquer de la liste — synchro brut/template/caption)'>📦</span>"
-        )
         return (
             f"<a href='?tab=cloudcaptions&cloud_captions_ident={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}{hidden_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
-            f"</div>{count_badge}{hide_btn}</a>"
+            f"</div>{count_badge}</a>"
         )
 
-    vault_items = [_vitem(i, False) for i in identities if i not in hidden_idents]
-    hidden_items = [_vitem(i, True) for i in identities if i in hidden_idents]
-    _vh_disp = "" if hidden_items else " style='display:none'"
-    hidden_wrap = (
-        _VAULT_HIDE_CSS
-        + f"<div class='vault-hidden-wrap'{_vh_disp}>"
-        + f"<button type='button' class='vault-hidden-head' data-vhtoggle='1'>📦 Rangées ({len(hidden_items)})</button>"
-        + "<div class='vault-hidden-list' style='display:none'>"
-        + "".join(hidden_items)
-        + "</div></div>"
-    )
+    vault_items = [_vitem(i) for i in identities]
     vault_sidebar = (
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
@@ -14070,7 +14078,7 @@ def _render_cloud_captions_html() -> str:
         "<div class='vault-list' id='vault-list-captions'>"
         + "".join(vault_items)
         + "</div>"
-        + hidden_wrap
+        + _VAULT_DND_CSS
         + "<button type='button' data-newident='1' data-vtab='cloudcaptions' data-ikey='cloud_captions_ident' "
         "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
         "</div>"
@@ -14094,14 +14102,11 @@ def _render_cloud_captions_html() -> str:
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         # ＋ Add captions = même bouton phare que « Add template » sur l'onglet
-        # Template montage (gradient) : ouvre la fenêtre « colle ta liste ».
-        "<button type='button' data-capact='addcap' title='Colle ta liste de captions (une par ligne) — écrites au CENTRE par défaut' "
+        # Template montage (gradient) : ouvre le formulaire façon Upload Reel.
+        "<button type='button' data-capact='addcap' title='Ajoute tes captions — écrites au CENTRE par défaut' "
         "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>"
         "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
         "Add captions</button>"
-        "<input id='capGenN' type='number' min='1' max='10' value='3' title='Nombre de vidéos à générer (brute + caption au hasard à chaque fois)' "
-        "style='width:52px;height:36px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;text-align:center;font-size:13px;box-sizing:border-box'>"
-        "<button type='button' data-capact='gen' style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:#1a1a1f;border:1px solid #3467FF;color:#3467FF;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>🎲 Générer</button>"
         "</div></div>"
     )
 
@@ -37624,28 +37629,31 @@ def create_app():
         _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
         return jsonify({"ok": True, "identity": safe, "warn": warn})
 
-    @app.route("/identity/toggle_hidden", methods=["POST"])
-    def identity_toggle_hidden():
-        """Range/sort une identité des sidebars Bibliothèque (toggle 📦).
-        Liste PARTAGÉE data/hidden_identities.json -> synchro entre Vidéo brut /
-        Template / Caption (et tous les onglets vault). Purement visuel."""
+    @app.route("/identity/reorder", methods=["POST"])
+    def identity_reorder():
+        """Ordre custom des identités dans les sidebars Bibliothèque (glisser-
+        déposer). Liste PARTAGÉE data/identity_order.json -> synchro entre
+        Vidéo brut / Template / Caption (et tous les onglets vault)."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
-        ident = (request.form.get("identity") or "").strip().lower()
-        if ident not in _list_identities():
-            return jsonify({"ok": False, "error": "identité inconnue"})
-        hidden = set(_load_hidden_identities())
-        if ident in hidden:
-            hidden.discard(ident)
-            now_hidden = False
-        else:
-            hidden.add(ident)
-            now_hidden = True
-        if not _save_hidden_identities(hidden):
+        import json as _js
+        try:
+            arr = _js.loads(request.form.get("order") or "[]")
+        except Exception:
+            return jsonify({"ok": False, "error": "JSON invalide"})
+        if not isinstance(arr, list):
+            return jsonify({"ok": False, "error": "liste attendue"})
+        known = set(_list_identities())
+        order = []
+        for x in arr[:300]:
+            n = str(x).strip().lower()
+            if n in known and n not in order:
+                order.append(n)
+        if not _save_identity_order(order):
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "identity": ident, "hidden": now_hidden})
+        return jsonify({"ok": True, "count": len(order)})
 
     @app.route("/captions/list", methods=["GET"])
     def captions_list():
