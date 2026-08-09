@@ -2186,8 +2186,7 @@ class UserCog(commands.Cog):
             ),
             color=discord.Color.dark_red(),
         )
-        if models:
-            emb.set_footer(text=f"{len(models)} models : " + ", ".join(m.capitalize() for m in models))
+        # pas de « N models : … » en pied : les boutons portent déjà les noms
         return emb, JailbreakMenuView(self, us=True)
 
     async def _post_menu(self, channel, identity, mention_user_id=None):
