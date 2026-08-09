@@ -4430,6 +4430,28 @@ function nxMontageApprove(){
       }
     }).catch(function(e){ if(btn) btn.disabled=false; alert('Erreur: '+e); });
 }
+// ==================== Tout sélectionner (galeries vault + captions) ====================
+// Coche/décoche TOUTES les cartes de l onglet visible. Fonctionne pour les
+// galeries média (checkboxes toggleSelect -> barre 🗑 globale) ET les cartes
+// caption (data-capsel -> barre de l onglet Caption) : on déclenche un vrai
+// événement change pour passer par les handlers existants.
+function vaultSelectAll(){
+  var sec=null;
+  document.querySelectorAll('.form-section').forEach(function(s){
+    if(!sec && s.offsetParent!==null) sec=s;
+  });
+  if(!sec) return;
+  var cbs=sec.querySelectorAll('#vault-grid .sel-cb, #capCards .sel-cb');
+  if(!cbs.length) return;
+  var allOn=true;
+  cbs.forEach(function(cb){ if(!cb.checked) allOn=false; });
+  cbs.forEach(function(cb){
+    if(cb.checked===!allOn) return;
+    cb.checked=!allOn;
+    try{ cb.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
+  });
+  if(typeof showToast==='function') showToast(allOn?'Sélection vidée':('☑ '+cbs.length+' élément'+(cbs.length>1?'s':'')+' sélectionné'+(cbs.length>1?'s':'')),'info',2500);
+}
 // ==================== Bibliothèque CAPTION (onglet Reel montage) ====================
 // Textes par identité, posés en RANDOM sur les vidéos brutes à la génération.
 // État chargé depuis le JSON embarqué #capLibData (ré-émis par le serveur à chaque
@@ -7064,6 +7086,7 @@ document.addEventListener('keydown', function(e){
     </button>
     <div class="action-count"><span id="sel-count">0</span> Sélectionné</div>
     <div style="flex:1"></div>
+    <button class="action-icon" onclick="vaultSelectAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
     <button class="action-icon" onclick="deleteSelected()" title="Supprimer">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
     </button>
