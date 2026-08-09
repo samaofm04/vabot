@@ -5381,17 +5381,6 @@ async function capSendDiscord(j,out,btn){
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
 }
 // ---- Import par lien (Vidéo brut / Template montage) ----
-document.addEventListener('click', function(ev){
-  var b=ev.target.closest?ev.target.closest('[data-linkimp]'):null;
-  if(!b) return;
-  var ident=b.getAttribute('data-ident')||'', sub=b.getAttribute('data-subdir')||'';
-  var fi=document.getElementById('linkImpIdent'); if(fi) fi.value=ident;
-  var fs=document.getElementById('linkImpSubdir'); if(fs) fs.value=sub;
-  var d=document.getElementById('linkImpDest');
-  if(d) d.textContent='Destination : @'+ident+' → '+(sub==='templates'?'Template montage':'Vidéo brut');
-  var m=document.getElementById('link-import-modal'); if(m) m.style.display='flex';
-});
-function linkImpClose(){ var m=document.getElementById('link-import-modal'); if(m) m.style.display='none'; }
 // Champ lien INLINE dans les formulaires d upload (vidéo en haut, lien en
 // bas) : identité lue dans le select du formulaire, envoi AJAX direct.
 document.addEventListener('click', function(ev){
@@ -7481,29 +7470,6 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
-<!-- ===== Import par lien (Video brut / Template montage) : IG + TikTok via yt-dlp ===== -->
-<div id="link-import-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="linkImpClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:520px;max-width:94vw;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-weight:800;font-size:15px">🔗 Import par lien</span>
-      <span style="flex:1"></span>
-      <button type="button" onclick="linkImpClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
-    </div>
-    <div id="linkImpDest" style="font-size:12px;color:#888"></div>
-    <form method="POST" action="/cloud/import_link" style="display:flex;flex-direction:column;gap:12px;margin:0">
-      <input type="hidden" name="identity" id="linkImpIdent">
-      <input type="hidden" name="subdir" id="linkImpSubdir">
-      <textarea name="urls" rows="5" required placeholder="https://www.instagram.com/reel/…&#10;https://www.tiktok.com/@…/video/…&#10;(un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true"
-        style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
-      <div style="font-size:11px;color:#75757f;line-height:1.5">Instagram (avec tes cookies du site) et TikTok. Téléchargement en arrière-plan (~30 s par vidéo, 50 Mo max chacune) — recharge l'onglet pour voir arriver les fichiers.</div>
-      <div style="display:flex;gap:8px">
-        <button type="button" onclick="linkImpClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:10px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
-        <button type="submit" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">⬇ Importer</button>
-      </div>
-    </form>
-  </div>
-</div>
-
 <!-- ===== Bios / CTA : ajout en liste (un champ par texte, facon Upload Reel) ===== -->
 <div id="txt-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="txtAddClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
@@ -13212,16 +13178,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"{_btn_lbl}</button>"
         )
         if subdir in ("brutes", "templates"):
-            # 🔗 Import par lien : colle des liens IG/TikTok, le site télécharge
-            # (yt-dlp de la Veille) et ajoute comme un upload normal.
-            add_media_btn += (
-                f"<button type='button' data-linkimp='1' data-ident='{selected}' data-subdir='{subdir}' "
-                "title='Colle des liens Instagram / TikTok — le site télécharge et ajoute tout seul' "
-                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
-                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
-                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
-                "🔗 Import par lien</button>"
-            )
+            # Import par lien : le champ vit DANS le formulaire d'upload
+            # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
             _ls = _LINKIMP_STATUS
             if _ls.get("subdir") == subdir:
                 if _ls.get("state") == "running":
