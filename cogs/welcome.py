@@ -506,10 +506,36 @@ _US_CONFUSABLES = str.maketrans({
 })
 
 
-def _us_ticket_name(member, suffix):
+def _us_base(member):
+    """Base des salons/dossiers d'un membre = son username Discord sanitisé.
+    ⚠️ Si le membre CHANGE de pseudo, la base change : ses anciens salons
+    deviennent des orphelins (nettoyés par /ticketsall) et un nouveau set est
+    créé — c'est l'origine des « doublons » laboule8."""
     import re as _re
-    base = _re.sub(r"[^a-z0-9_.-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
-    return f"{base}-{suffix}"
+    return _re.sub(r"[^a-z0-9_.-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
+
+
+def _us_ticket_name(member, suffix):
+    return f"{_us_base(member)}-{suffix}"
+
+
+async def _us_member_category(guild, member):
+    """Dossier (catégorie) personnel du membre — créé au besoin. Visible par
+    LUI seul (+ staff/admin), ses 3 salons vivent dedans."""
+    base = _us_base(member)
+    cat = discord.utils.find(
+        lambda c: _us_norm(c.name) == base, guild.categories)
+    if cat is None:
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            member: discord.PermissionOverwrite(view_channel=True),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True,
+                manage_channels=True, manage_messages=True),
+        }
+        cat = await guild.create_category(
+            base, overwrites=overwrites, reason="Dossier tickets US du membre")
+    return cat
 
 
 async def _ensure_us_menu(bot, channel):
@@ -542,12 +568,15 @@ async def _ensure_us_menu(bot, channel):
 
 
 async def create_us_tickets(guild, member, bot=None):
-    """Crée les 3 salons US d'un membre s'ils n'existent pas déjà (idempotent),
-    place -menu juste au-dessus de -content, et garantit que le menu Jailbreak US
-    est épinglé dans -menu (lecture seule). Retourne (créés, erreurs)."""
+    """Garantit l'état cible d'un membre : UN dossier (catégorie) à son pseudo
+    contenant ses 3 salons dans l'ordre menu → content → numero-mail, le menu
+    Jailbreak US épinglé dans -menu (lecture seule). Idempotent.
+    Retourne (créés, erreurs)."""
     created, errors = [], []
-    cat = discord.utils.find(
-        lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
+    try:
+        cat = await _us_member_category(guild, member)
+    except Exception as e:
+        return created, [f"dossier {_us_base(member)}: {e}"]
     chans = {}
     for suffix in US_TICKET_SUFFIXES:
         name = _us_ticket_name(member, suffix)
@@ -566,24 +595,28 @@ async def create_us_tickets(guild, member, bot=None):
                 view_channel=True, send_messages=True, manage_channels=True,
                 manage_messages=True),
         }
-        target_cat = cat if (cat and len(cat.channels) < 49) else None  # 50 max/catégorie
         try:
             ch = await guild.create_text_channel(
-                name, category=target_cat, overwrites=overwrites,
+                name, category=cat, overwrites=overwrites,
                 reason="Ticket US (menu / content / numero-mail)")
             created.append(ch)
             chans[suffix] = ch
         except Exception as e:
             errors.append(f"{name}: {e}")
+    # Dossier + ordre : move() (endpoint bulk, fiable) SEULEMENT si nécessaire.
+    in_cat = [chans[s] for s in US_TICKET_SUFFIXES if chans.get(s) is not None]
+    ok_cat = all(c.category_id == cat.id for c in in_cat)
+    ok_order = all(in_cat[i].position <= in_cat[i + 1].position
+                   for i in range(len(in_cat) - 1))
+    if in_cat and not (ok_cat and ok_order):
+        for idx, ch in enumerate(in_cat):
+            try:
+                await ch.move(beginning=True, offset=idx, category=cat,
+                              reason="rangement dossier US")
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
     menu_ch, content_ch = chans.get("menu"), chans.get("content")
-    # -menu juste AU-DESSUS de -content (utile quand content existait déjà et
-    # que menu vient d'être créé en bas de la catégorie).
-    if menu_ch is not None and content_ch is not None:
-        try:
-            if menu_ch.position > content_ch.position:
-                await menu_ch.edit(position=content_ch.position)
-        except Exception:
-            pass
     # Le menu Jailbreak US vit dans -menu, en permanence.
     if menu_ch is not None:
         await _ensure_us_menu(bot, menu_ch)
@@ -1632,20 +1665,18 @@ class Welcome(commands.Cog):
 
         cog = self
         inv_id = interaction.user.id
-        cat = discord.utils.find(
-            lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
+        # Suppressions dédupliquées par id (un doublon peut aussi être orphelin)
+        to_del = list({c.id: c for c in del_dups + del_orph}.values())
         plan = []
         if n_create:
             plan.append(f"➕ **{n_create}** salon(s) manquant(s) à créer")
-        if del_dups:
-            _nd = ", ".join("#" + c.name for c in del_dups[:8]) + ("…" if len(del_dups) > 8 else "")
-            plan.append(f"🗑 **{len(del_dups)}** doublon(s) à supprimer ({_nd})")
-        if del_orph:
-            _names = ", ".join("#" + c.name for c in del_orph[:8]) + ("…" if len(del_orph) > 8 else "")
-            plan.append(f"🗑 **{len(del_orph)}** orphelin(s) à supprimer ({_names})")
-        if not del_dups and not del_orph:
+        if to_del:
+            _nd = ", ".join("#" + c.name for c in to_del[:8]) + ("…" if len(to_del) > 8 else "")
+            plan.append(f"🗑 **{len(to_del)}** salon(s) à supprimer — doublons/orphelins ({_nd})")
+        else:
             plan.append("🗑 rien à supprimer (aucun doublon ni orphelin détecté)")
-        plan.append("📐 remise en ordre : par personne, `menu` → `content` → `numero-mail`")
+        plan.append("📁 un **dossier par personne** (catégorie à son pseudo) avec ses 3 salons "
+                    "dans l'ordre `menu` → `content` → `numero-mail`")
         warn_txt = ("\n⚠️ " + "\n⚠️ ".join(warn[:5])) if warn else ""
 
         class _ConfirmAll(discord.ui.View):
@@ -1676,20 +1707,37 @@ class Welcome(commands.Cog):
                 self.stop()
                 try:
                     await itx.response.edit_message(
-                        content="🔄 Rangement lancé (suppressions → créations → ordre) — je préviens ici à la fin.",
+                        content="🔄 Rangement lancé (suppressions → dossiers → ordre) — je préviens ici à la fin.",
                         view=None)
-                    # 1) Suppressions (doublons + orphelins)
+                    # 1) Suppressions (doublons + orphelins, dédupliqués)
                     removed = 0
-                    for c in del_dups + del_orph:
+                    for c in to_del:
                         try:
                             await c.delete(reason="ticketsall : doublon/orphelin")
                             removed += 1
                         except Exception as e:
                             log.error(f"ticketsall delete {c.id}: {e}")
                         await asyncio.sleep(0.8)
-                    # 2) Créations manquantes + menu épinglé dans chaque -menu
+                    # 1b) Dossiers orphelins VIDES (ex: ancien pseudo) -> supprimés
+                    orph_bases = set()
+                    for c in to_del:
+                        nn = _us_norm(c.name)
+                        m2 = pat.search(nn)
+                        if m2:
+                            orph_bases.add(nn[:m2.start()])
+                    member_bases = {_us_base(m) for m in members}
+                    for cat2 in list(guild.categories):
+                        nn = _us_norm(cat2.name)
+                        if nn in orph_bases and nn not in member_bases and not cat2.channels:
+                            try:
+                                await cat2.delete(reason="ticketsall : dossier orphelin vide")
+                                removed += 1
+                            except Exception:
+                                pass
+                            await asyncio.sleep(0.5)
+                    # 2) Dossier + 3 salons + ordre + menu, membre par membre
                     ok = failed = 0
-                    for m in members:
+                    for m in sorted(members, key=_us_base):
                         if guild.get_member(m.id) is None:
                             continue  # parti entre-temps
                         try:
@@ -1702,52 +1750,33 @@ class Welcome(commands.Cog):
                             failed += 1
                             log.error(f"ticketsall exception: {e} (member={m.id})")
                         await asyncio.sleep(0.5)
-                    # 3) Ordre : par personne (alphabétique), menu → content → numero-mail
-                    moved = 0
-                    tidy = []
-                    for m in sorted(members, key=lambda x: _us_ticket_name(x, "menu")):
-                        for s in US_TICKET_SUFFIXES:
-                            cch = discord.utils.find(
-                                lambda cc, n=_us_ticket_name(m, s): _us_norm(cc.name) == n
-                                and (cat is None or cc.category_id == getattr(cat, "id", None)),
-                                guild.text_channels)
-                            if cch:
-                                tidy.append(cch)
-                    # move() (endpoint bulk) et pas edit(position=) : les positions
-                    # brutes entrent en collision (Discord départage par id -> les
-                    # salons récents coulaient en bas). move() re-range proprement
-                    # et RAPATRIE dans TAFF un salon resté hors catégorie.
-                    for idx, cch in enumerate(tidy):
-                        try:
-                            if cat is not None:
-                                await cch.move(beginning=True, offset=idx, category=cat,
-                                               reason="ticketsall : rangement")
-                            else:
-                                await cch.move(beginning=True, offset=idx,
-                                               reason="ticketsall : rangement")
-                            moved += 1
-                        except Exception as e:
-                            log.warning(f"ticketsall move {cch.id}: {e}")
-                        await asyncio.sleep(0.5)
+                    # 3) Récap par personne : « lui c'est good, lui aussi »
+                    lines = []
+                    for m in sorted(members, key=_us_base):
+                        have = sum(1 for s in US_TICKET_SUFFIXES
+                                   if discord.utils.find(
+                                       lambda c, n=_us_ticket_name(m, s): _us_norm(c.name) == n,
+                                       guild.text_channels))
+                        lines.append(("✅" if have == 3 else "🛠") + f" `{_us_base(m)}` — {have}/3")
                     msg = (f"✅ <@{inv_id}> Rangement terminé : {removed} supprimé(s), "
-                           f"{ok} créé(s), {moved} déplacé(s)"
-                           + (f", {failed} échec(s) (voir logs)" if failed else "") + ".")
+                           f"{ok} créé(s)"
+                           + (f", {failed} échec(s) (voir logs)" if failed else "") + "\n"
+                           + "\n".join(lines))
                     try:
-                        await itx.followup.send(msg, ephemeral=True)
+                        await itx.followup.send(msg[:1990], ephemeral=True)
                     except Exception:
                         # followup expiré (gros serveur) -> message public dans le salon
                         try:
-                            await itx.channel.send(msg)
+                            await itx.channel.send(msg[:1990])
                         except Exception:
                             pass
                 finally:
                     _TICKETSALL_RUNNING.discard(guild.id)
 
         await interaction.response.send_message(
-            f"⚠️ **{guild.name}** — rangement des tickets ({len(members)} membre(s), toi et les bots exclus) :\n"
-            + "\n".join("• " + p for p in plan)
-            + ("" if cat else "\n⚠️ Pas de catégorie **TAFF** — les nouveaux salons iront hors catégorie.")
-            + warn_txt + "\nConfirme 👇",
+            (f"⚠️ **{guild.name}** — rangement des tickets ({len(members)} membre(s), toi et les bots exclus) :\n"
+             + "\n".join("• " + p for p in plan)
+             + warn_txt + "\nConfirme 👇")[:1990],
             view=_ConfirmAll(), ephemeral=True)
 
     @app_commands.command(
