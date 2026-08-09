@@ -405,6 +405,67 @@ class NumerosCog(commands.Cog):
             + f" (sur {len(targets)} salons `-numero-mail`).{warn}", ephemeral=True)
 
     @app_commands.command(
+        name="resetpanels",
+        description="[ADMIN] RESET : repose les panneaux (menu Jailbreak + numéro/mail) dans TOUS les salons")
+    async def resetpanels(self, interaction: discord.Interaction):
+        from cogs.user import _is_staff_member
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux admins.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        from cogs.welcome import _ensure_num_panel, _ensure_us_menu, _us_norm
+        menus = [c for c in guild.text_channels if _us_norm(c.name).endswith("-menu")]
+        nums = [c for c in guild.text_channels if _us_norm(c.name).endswith("-numero-mail")]
+        if not menus and not nums:
+            await interaction.response.send_message(
+                "Aucun salon `…-menu` ni `…-numero-mail` ici.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        me = getattr(self.bot.user, "id", 0)
+
+        async def _wipe(ch, titles):
+            """Supprime les anciens panneaux du bot (épinglés) de ce salon."""
+            try:
+                for p in await ch.pins():
+                    t = (p.embeds[0].title or "") if p.embeds else ""
+                    if p.author.id == me and any(k in t for k in titles):
+                        try:
+                            await p.delete()
+                        except Exception:
+                            try:
+                                await p.unpin()
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+        n_menu = n_num = 0
+        for ch in menus:
+            await _wipe(ch, ("Jailbreak US", "Menu Jailbreak"))
+            if await _ensure_us_menu(self.bot, ch):
+                n_menu += 1
+            await asyncio.sleep(0.6)
+        for ch in nums:
+            await _wipe(ch, ("Numéro & Mail", "Numéros & Mails"))
+            if await _ensure_num_panel(self.bot, ch):
+                n_num += 1
+            await asyncio.sleep(0.6)
+        s = numgen.status()
+        warn = "" if (s["sms_ok"] and s["mail_ok"]) else (
+            "\n⚠️ Clé "
+            + ("SMSBower (mails) " if not s["mail_ok"] else "")
+            + ("GetAText (numéros) " if not s["sms_ok"] else "")
+            + "manquante — fais `/smskey`.")
+        await interaction.followup.send(
+            f"♻️ **Reset des panneaux terminé**\n"
+            f"• 🔓 Menu Jailbreak US : **{n_menu}**/{len(menus)} salon(s) `-menu`\n"
+            f"• 📱 Numéro & Mail : **{n_num}**/{len(nums)} salon(s) `-numero-mail`{warn}",
+            ephemeral=True)
+
+    @app_commands.command(
         name="smskey",
         description="[OWNER] Clés des générateurs (formulaire privé) + soldes")
     async def smskey(self, interaction: discord.Interaction):
