@@ -1153,6 +1153,18 @@ def _has_jailbreak_role(member):
         return False
 
 
+def _jb_can_use(interaction):
+    """Accès aux menus Jailbreak : rôle « Jailbreak » — OU serveur US, où le menu
+    est ouvert à TOUT LE MONDE (demande explicite : pas de rôle à gérer là-bas)."""
+    try:
+        import guild_features as gf
+        if gf.is_us_guild(getattr(interaction, "guild", None)):
+            return True
+    except Exception:
+        pass
+    return _has_jailbreak_role(interaction.user)
+
+
 class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
     """Bouton « Générer le lien » sur une demande de lien. L'ID du VA est dans le
     custom_id -> persistant (marche même après un redémarrage du bot). Réservé staff.
@@ -2106,6 +2118,23 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
+    def jailbreak_us_menu(self):
+        """(embed, view) du menu Jailbreak US — utilisé par /menujailbreakus et
+        posté automatiquement dans les salons -content du serveur US."""
+        models = _jb_us_models()
+        emb = discord.Embed(
+            title="🔓 Menu Jailbreak US — models US",
+            description=(
+                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
+                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                "✅ Ouvert à tout le monde sur ce serveur."
+            ),
+            color=discord.Color.dark_red(),
+        )
+        if models:
+            emb.set_footer(text=f"{len(models)} models : " + ", ".join(m.capitalize() for m in models))
+        return emb, JailbreakMenuView(self, us=True)
+
     async def _post_menu(self, channel, identity, mention_user_id=None):
         """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni.
         Filtre les boutons/champs selon les fonctions activées sur le serveur."""
@@ -2802,38 +2831,12 @@ class UserCog(commands.Cog):
                 "⚠️ Aucune model US à afficher (toutes les identités actives sont FR ?).",
                 ephemeral=True)
             return
-        # S'assurer que le role 'Jailbreak' existe (auto-creation best-effort)
-        role = discord.utils.find(
-            lambda r: (getattr(r, "name", "") or "").strip().lower() == "jailbreak", guild.roles)
-        created = False
-        if role is None:
-            try:
-                role = await guild.create_role(
-                    name="Jailbreak", colour=discord.Color.dark_red(),
-                    reason="Menu Jailbreak US — accès aux models US")
-                created = True
-            except Exception:
-                role = None
-        role_txt = f"@{role.name}" if role else "Jailbreak"
-        emb = discord.Embed(
-            title="🔓 Menu Jailbreak US — models US",
-            description=(
-                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
-                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
-                f"🔒 Réservé aux membres avec le rôle **{role_txt}**."
-            ),
-            color=discord.Color.dark_red(),
-        )
-        emb.set_footer(text=f"{len(models)} models : " + ", ".join(m.capitalize() for m in models))
-        await interaction.response.send_message(embed=emb, view=JailbreakMenuView(self, us=True))
-        note = ""
-        if created:
-            note = f"\n✅ Rôle **{role.name}** créé — donne-le aux membres qui utiliseront le menu."
-        elif role is None:
-            note = ("\n⚠️ Je n'ai pas pu créer le rôle « Jailbreak » (permissions manquantes) "
-                    "— crée-le à la main et donne-le aux membres concernés.")
+        emb, view = self.jailbreak_us_menu()
+        await interaction.response.send_message(embed=emb, view=view)
         try:
-            await interaction.followup.send(f"✅ Menu Jailbreak US posté ici.{note}", ephemeral=True)
+            await interaction.followup.send(
+                "✅ Menu Jailbreak US posté ici — ouvert à tout le monde sur ce serveur "
+                "(pas de rôle à donner).", ephemeral=True)
         except Exception:
             pass
 
@@ -4268,7 +4271,7 @@ class _JailbreakQtySelect(discord.ui.Select):
             min_values=1, max_values=1, options=opts, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        if not _has_jailbreak_role(interaction.user):
+        if not _jb_can_use(interaction):
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
@@ -4292,7 +4295,7 @@ class _JailbreakActionButton(discord.ui.Button):
         self.supports_count = supports_count
 
     async def callback(self, interaction: discord.Interaction):
-        if not _has_jailbreak_role(interaction.user):
+        if not _jb_can_use(interaction):
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
@@ -4361,7 +4364,7 @@ class _JailbreakModelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        if not _has_jailbreak_role(interaction.user):
+        if not _jb_can_use(interaction):
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return

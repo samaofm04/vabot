@@ -484,15 +484,49 @@ def _us_ticket_name(member, suffix):
     return f"{base}-{suffix}"
 
 
-async def create_us_tickets(guild, member):
-    """Crée les 2 salons US d'un membre s'ils n'existent pas déjà (idempotent).
+async def _ensure_us_menu(bot, channel):
+    """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
+    pas déjà (détection via les messages épinglés du bot). Idempotent."""
+    if bot is None or channel is None:
+        return False
+    try:
+        ucog = bot.get_cog("UserCog")
+        if ucog is None or not hasattr(ucog, "jailbreak_us_menu"):
+            return False
+        try:
+            pins = await channel.pins()
+        except Exception:
+            pins = []
+        for p in pins:
+            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
+                    and "Jailbreak US" in (p.embeds[0].title or "")):
+                return True  # déjà en place
+        emb, view = ucog.jailbreak_us_menu()
+        msg = await channel.send(embed=emb, view=view)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning(f"_ensure_us_menu: {e}")
+        return False
+
+
+async def create_us_tickets(guild, member, bot=None):
+    """Crée les 2 salons US d'un membre s'ils n'existent pas déjà (idempotent),
+    et garantit que le menu Jailbreak US est épinglé dans son salon -content.
     Retourne (liste_salons_créés, liste_erreurs)."""
     created, errors = [], []
     cat = discord.utils.find(
         lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
+    content_ch = None
     for suffix in US_TICKET_SUFFIXES:
         name = _us_ticket_name(member, suffix)
-        if discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels):
+        existing = discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels)
+        if existing:
+            if suffix == "content":
+                content_ch = existing
             continue  # déjà là (commande re-lançable sans doublons)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -508,8 +542,13 @@ async def create_us_tickets(guild, member):
                 name, category=target_cat, overwrites=overwrites,
                 reason="Ticket US (content / numero-mail)")
             created.append(ch)
+            if suffix == "content":
+                content_ch = ch
         except Exception as e:
             errors.append(f"{name}: {e}")
+    # Le salon content a TOUJOURS le menu Jailbreak US épinglé (demande explicite).
+    if content_ch is not None:
+        await _ensure_us_menu(bot, content_ch)
     return created, errors
 
 
@@ -777,7 +816,7 @@ class Welcome(commands.Cog):
         # (content / numero-mail), PAS le parcours VA classique.
         if gf.is_us_guild(member.guild):
             try:
-                created, errors = await create_us_tickets(member.guild, member)
+                created, errors = await create_us_tickets(member.guild, member, bot=self.bot)
                 if errors:
                     log.error(f"on_member_join US tickets: {errors} (member={member.id})")
                 else:
@@ -1522,6 +1561,7 @@ class Welcome(commands.Cog):
                 ephemeral=True)
             return
 
+        cog = self
         inv_id = interaction.user.id
         cat = discord.utils.find(
             lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
@@ -1565,7 +1605,7 @@ class Welcome(commands.Cog):
                             partis += 1  # a quitté entre la confirmation et son tour
                             continue
                         try:
-                            created, errors = await create_us_tickets(guild, m)
+                            created, errors = await create_us_tickets(guild, m, bot=cog.bot)
                             ok += len(created)
                             if errors:
                                 failed += len(errors)
