@@ -1548,7 +1548,7 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="ticketsall",
-        description="[ADMIN] Serveur US : crée les 3 salons (menu + content + numero-mail) de chaque membre",
+        description="[ADMIN] Serveur US : RANGE les tickets — crée les manquants, vire les doublons, remet l'ordre",
     )
     async def ticketsall(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
@@ -1562,35 +1562,67 @@ class Welcome(commands.Cog):
             await interaction.response.send_message(
                 "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
             return
-        # 3 salons par membre : @pseudo-menu + @pseudo-content + @pseudo-numero-mail (idempotent).
-        todo, deja = [], []
-        for m in guild.members:
-            if m.bot or m.id == interaction.user.id:
+        # RÉCONCILIATEUR : l'objectif est « 3 salons par personne, c'est tout » —
+        # menu → content → numero-mail, groupés par personne, sans doublon ni orphelin.
+        import re as _re
+        pat = _re.compile(r"-(menu|content|numero-mail)$")
+        members = [m for m in guild.members if not m.bot and m.id != interaction.user.id]
+        expected = {}
+        for m in members:
+            for s in US_TICKET_SUFFIXES:
+                expected[_us_ticket_name(m, s)] = m
+        by_name = {}
+        for c in guild.text_channels:
+            if pat.search(c.name or ""):
+                by_name.setdefault(c.name, []).append(c)
+        n_create = sum(1 for n in expected if n not in by_name)
+        # Doublons de nom : on garde UN exemplaire (celui qui a des messages,
+        # sinon le plus ancien). Les -menu en trop partent direct (le menu se
+        # reposte tout seul dans celui qu'on garde).
+        del_dups, warn = [], []
+        for n, chans in sorted(by_name.items()):
+            if len(chans) < 2:
                 continue
-            manquants = [s for s in US_TICKET_SUFFIXES
-                         if not discord.utils.find(
-                             lambda c, n=_us_ticket_name(m, s): c.name == n,
-                             guild.text_channels)]
-            if manquants:
-                todo.append(m)
-            else:
-                deja.append(m)
-        n_salons = sum(
-            1 for m in todo for s in US_TICKET_SUFFIXES
-            if not discord.utils.find(
-                lambda c, n=_us_ticket_name(m, s): c.name == n, guild.text_channels))
-        if not todo:
-            await interaction.response.send_message(
-                f"Rien à faire : les {len(deja)} membre(s) ont déjà leurs salons.",
-                ephemeral=True)
-            return
+            chans = sorted(chans, key=lambda c: c.id)  # plus ancien d'abord
+            if n.endswith("-menu"):
+                del_dups += chans[1:]
+                continue
+            with_msgs = [c for c in chans if c.last_message_id]
+            if len(with_msgs) > 1:
+                warn.append(f"#{n} : {len(chans)} exemplaires AVEC messages — à trier à la main")
+                continue
+            keep = with_msgs[0] if with_msgs else chans[0]
+            del_dups += [c for c in chans if c.id != keep.id]
+        # Orphelins : le nom ne correspond à aucun membre actuel (membre parti,
+        # salon créé à la main avec un autre pseudo…). Supprimés seulement si
+        # sans messages (les -menu ne contiennent que le menu du bot -> partent).
+        del_orph = []
+        for n, chans in sorted(by_name.items()):
+            if n in expected:
+                continue
+            for c in chans:
+                if n.endswith("-menu") or not c.last_message_id:
+                    del_orph.append(c)
+                else:
+                    warn.append(f"#{n} : orphelin avec messages — je n'y touche pas")
 
         cog = self
         inv_id = interaction.user.id
         cat = discord.utils.find(
             lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
-        cat_txt = ("📁 Catégorie **TAFF** trouvée — les salons y seront rangés." if cat else
-                   "⚠️ Pas de catégorie **TAFF** — les salons seront créés hors catégorie.")
+        plan = []
+        if n_create:
+            plan.append(f"➕ **{n_create}** salon(s) manquant(s) à créer")
+        if del_dups:
+            _nd = ", ".join("#" + c.name for c in del_dups[:8]) + ("…" if len(del_dups) > 8 else "")
+            plan.append(f"🗑 **{len(del_dups)}** doublon(s) à supprimer ({_nd})")
+        if del_orph:
+            _names = ", ".join("#" + c.name for c in del_orph[:8]) + ("…" if len(del_orph) > 8 else "")
+            plan.append(f"🗑 **{len(del_orph)}** orphelin(s) à supprimer ({_names})")
+        if not del_dups and not del_orph:
+            plan.append("🗑 rien à supprimer (aucun doublon ni orphelin détecté)")
+        plan.append("📐 remise en ordre : par personne, `menu` → `content` → `numero-mail`")
+        warn_txt = ("\n⚠️ " + "\n⚠️ ".join(warn[:5])) if warn else ""
 
         class _ConfirmAll(discord.ui.View):
             def __init__(self):
@@ -1605,8 +1637,7 @@ class Welcome(commands.Cog):
                 except Exception:
                     pass
 
-            @discord.ui.button(label=f"✅ Créer {n_salons} salon(s)",
-                               style=discord.ButtonStyle.danger)
+            @discord.ui.button(label="✅ Ranger tout ça", style=discord.ButtonStyle.danger)
             async def go(self, itx: discord.Interaction, button: discord.ui.Button):
                 if itx.user.id != inv_id:
                     await itx.response.send_message("Pas pour toi.", ephemeral=True)
@@ -1621,13 +1652,22 @@ class Welcome(commands.Cog):
                 self.stop()
                 try:
                     await itx.response.edit_message(
-                        content=f"🔄 Création de **{n_salons}** salon(s) lancée — je préviens ici à la fin.",
+                        content="🔄 Rangement lancé (suppressions → créations → ordre) — je préviens ici à la fin.",
                         view=None)
-                    ok = failed = partis = 0
-                    for m in todo:
+                    # 1) Suppressions (doublons + orphelins)
+                    removed = 0
+                    for c in del_dups + del_orph:
+                        try:
+                            await c.delete(reason="ticketsall : doublon/orphelin")
+                            removed += 1
+                        except Exception as e:
+                            log.error(f"ticketsall delete {c.id}: {e}")
+                        await asyncio.sleep(0.8)
+                    # 2) Créations manquantes + menu épinglé dans chaque -menu
+                    ok = failed = 0
+                    for m in members:
                         if guild.get_member(m.id) is None:
-                            partis += 1  # a quitté entre la confirmation et son tour
-                            continue
+                            continue  # parti entre-temps
                         try:
                             created, errors = await create_us_tickets(guild, m, bot=cog.bot)
                             ok += len(created)
@@ -1637,10 +1677,32 @@ class Welcome(commands.Cog):
                         except Exception as e:
                             failed += 1
                             log.error(f"ticketsall exception: {e} (member={m.id})")
-                        await asyncio.sleep(1.5)  # Discord limite la création de salons
-                    msg = (f"✅ <@{inv_id}> Salons créés : **{ok}**"
-                           + (f", {failed} échec(s) (voir logs)" if failed else "")
-                           + (f", {partis} membre(s) parti(s) entre-temps" if partis else "") + ".")
+                        await asyncio.sleep(0.5)
+                    # 3) Ordre : par personne (alphabétique), menu → content → numero-mail
+                    moved = 0
+                    tidy = []
+                    for m in sorted(members, key=lambda x: _us_ticket_name(x, "menu")):
+                        for s in US_TICKET_SUFFIXES:
+                            cch = discord.utils.find(
+                                lambda cc, n=_us_ticket_name(m, s): cc.name == n
+                                and (cat is None or cc.category_id == getattr(cat, "id", None)),
+                                guild.text_channels)
+                            if cch:
+                                tidy.append(cch)
+                    if tidy:
+                        posv = min(c.position for c in tidy)
+                        for cch in tidy:
+                            if cch.position != posv:
+                                try:
+                                    await cch.edit(position=posv, reason="ticketsall : rangement")
+                                    moved += 1
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(0.6)
+                            posv += 1
+                    msg = (f"✅ <@{inv_id}> Rangement terminé : {removed} supprimé(s), "
+                           f"{ok} créé(s), {moved} déplacé(s)"
+                           + (f", {failed} échec(s) (voir logs)" if failed else "") + ".")
                     try:
                         await itx.followup.send(msg, ephemeral=True)
                     except Exception:
@@ -1653,10 +1715,10 @@ class Welcome(commands.Cog):
                     _TICKETSALL_RUNNING.discard(guild.id)
 
         await interaction.response.send_message(
-            f"⚠️ **{guild.name}** — je vais créer **{n_salons}** salon(s) privé(s) pour "
-            f"**{len(todo)}** membre(s) : `@pseudo-menu` (menu Jailbreak US épinglé, lecture seule) "
-            f"+ `@pseudo-content` (le contenu généré arrive là) + `@pseudo-numero-mail` "
-            f"({len(deja)} déjà équipé(s), toi et les bots exclus).\n{cat_txt}\nConfirme 👇",
+            f"⚠️ **{guild.name}** — rangement des tickets ({len(members)} membre(s), toi et les bots exclus) :\n"
+            + "\n".join("• " + p for p in plan)
+            + ("" if cat else "\n⚠️ Pas de catégorie **TAFF** — les nouveaux salons iront hors catégorie.")
+            + warn_txt + "\nConfirme 👇",
             view=_ConfirmAll(), ephemeral=True)
 
     @app_commands.command(
