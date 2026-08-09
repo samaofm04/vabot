@@ -482,13 +482,16 @@ US_TICKET_SUFFIXES = ("menu", "content", "numero-mail")
 
 
 def _us_norm(nm):
-    """Normalise un nom de salon pour comparaison : minuscules + tirets sosies
-    (– — −) ramenés au tiret ASCII. Sans ça, un salon créé À LA MAIN avec un
-    tiret spécial ressemble au nôtre à l'écran mais ne matche jamais par == ,
+    """Normalise un nom de salon pour comparaison : minuscules, NFKC, TOUS les
+    tirets sosies unicode ramenés au '-' ASCII, caractères invisibles retirés.
+    Sans ça, un salon créé À LA MAIN avec un tiret spécial (‑ – — etc., fréquent
+    depuis iPhone) ressemble au nôtre à l'écran mais ne matche jamais par == ,
     et le bot recrée un doublon à chaque run."""
-    nm = (nm or "").strip().lower()
-    for d in ("–", "—", "−"):
-        nm = nm.replace(d, "-")
+    import re as _re
+    import unicodedata as _ud
+    nm = _ud.normalize("NFKC", (nm or "")).strip().lower()
+    nm = _re.sub(r"[​‌‍﻿]", "", nm)          # zéro-largeur
+    nm = _re.sub(r"[‐‑‒–—―−]", "-", nm)  # tirets
     return nm
 
 
@@ -1702,17 +1705,22 @@ class Welcome(commands.Cog):
                                 guild.text_channels)
                             if cch:
                                 tidy.append(cch)
-                    if tidy:
-                        posv = min(c.position for c in tidy)
-                        for cch in tidy:
-                            if cch.position != posv:
-                                try:
-                                    await cch.edit(position=posv, reason="ticketsall : rangement")
-                                    moved += 1
-                                except Exception:
-                                    pass
-                                await asyncio.sleep(0.6)
-                            posv += 1
+                    # move() (endpoint bulk) et pas edit(position=) : les positions
+                    # brutes entrent en collision (Discord départage par id -> les
+                    # salons récents coulaient en bas). move() re-range proprement
+                    # et RAPATRIE dans TAFF un salon resté hors catégorie.
+                    for idx, cch in enumerate(tidy):
+                        try:
+                            if cat is not None:
+                                await cch.move(beginning=True, offset=idx, category=cat,
+                                               reason="ticketsall : rangement")
+                            else:
+                                await cch.move(beginning=True, offset=idx,
+                                               reason="ticketsall : rangement")
+                            moved += 1
+                        except Exception as e:
+                            log.warning(f"ticketsall move {cch.id}: {e}")
+                        await asyncio.sleep(0.5)
                     msg = (f"✅ <@{inv_id}> Rangement terminé : {removed} supprimé(s), "
                            f"{ok} créé(s), {moved} déplacé(s)"
                            + (f", {failed} échec(s) (voir logs)" if failed else "") + ".")
