@@ -5882,9 +5882,13 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
       Bibliothèque texte
     </button>
-    <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','Pool partagé des PPs')">
+    <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','PP par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       Photos profil
+    </button>
+    <button class="item" id="tab-clouddrive" onclick="showTab('cloud','clouddrive','Drive','Tout le contenu d’une identité — lecture seule, rien ne peut être supprimé ici')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Drive
     </button>
   </div>
 </div>
@@ -6432,6 +6436,11 @@ document.addEventListener('click',function(e){
 <h4 style="margin-top:0">Répartition par identité</h4>
 {identity_stats_html}
 </div>
+</div>
+
+<!-- CLOUD : Drive (tout le contenu d une identite, LECTURE SEULE) -->
+<div class="form-section" id="form-clouddrive" style="display:none">
+{cloud_drive_html}
 </div>
 
 <!-- CLOUD : reels -->
@@ -14280,17 +14289,192 @@ def _render_cloud_captions_html() -> str:
     )
 
 
-def _render_cloud_pps_page() -> str:
-    """Page Photos de profil : vault PAR IDENTITÉ (avec jessye, PP-only) en haut,
-    puis le pool partagé (commun, marché FR) en dessous."""
-    vault = _render_cloud_content_html("profile_pics", IMAGE_EXTS, include_jb=True)
-    divider = (
-        "<div style='margin:28px 0 12px;padding-top:18px;border-top:1px solid #232323'>"
-        "<div style='font-weight:700;font-size:15px'>📁 Pool partagé (commun)</div>"
-        "<div style='font-size:12px;color:#888;margin-top:2px'>"
-        "PP communes, utilisées par les identités qui n'ont pas leurs propres PP (marché FR).</div></div>"
+# Les 7 bibliothèques d'une identité, dans l'ordre d'affichage du Drive.
+_DRIVE_SECTIONS = (
+    ("profile_pics", "🖼️ Photos de profil", IMAGE_EXTS, False),
+    ("videos", "🎬 Reels", VIDEO_EXTS, True),
+    ("posts", "📷 Posts", IMAGE_EXTS, False),
+    ("stories", "📱 Stories", IMAGE_EXTS, False),
+    ("storyctas", "🔗 Story CTA", IMAGE_EXTS, False),
+    ("brutes", "🎞️ Rushs bruts", VIDEO_EXTS, True),
+    ("templates", "🎵 Templates montage", VIDEO_EXTS, True),
+)
+
+
+def _render_cloud_drive_html() -> str:
+    """Onglet « Drive » : TOUT le contenu d'une identité (PP, reels, posts,
+    stories, CTA, brutes, templates) sur UNE page, façon drive. LECTURE SEULE
+    voulue : aucun bouton de suppression/désactivation ici — si la feature
+    flop, rien ne peut être perdu. Visionnage via la lightbox (file_id vide =>
+    pas de crayon d'édition), navigation identités façon vault (vaultGoTo).
+    C'est une VUE sur data/identities/<ident>/ : déjà synchro avec le site."""
+    from flask import request as _req
+    identities = _apply_identity_order(_list_content_identities())
+    if not identities:
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+
+    idents_t = tuple(identities)
+    stats_by_subdir = {sd: _cloud_ident_stats_cached(sd, tuple(sorted(exts)), idents_t)
+                       for sd, _l, exts, _v in _DRIVE_SECTIONS}
+
+    def _total(ident):
+        return sum(stats_by_subdir[sd][ident]["n_files"] for sd, _l, _e, _v in _DRIVE_SECTIONS)
+
+    selected = ""
+    try:
+        selected = (_req.args.get("cloud_drive_ident", "") or "").lower().strip()
+    except Exception:
+        pass
+    if not selected or selected not in identities:
+        selected = next((i for i in identities if _total(i) > 0), identities[0])
+
+    # ---- Sidebar identités (même vault que les autres bibliothèques) ----
+    vault_items = []
+    for ident in identities:
+        n = _total(ident)
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            if avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+        )
+        status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
+        active_class = "vault-item-active" if ident == selected else ""
+        vault_items.append(
+            f"<a href='?tab=clouddrive&cloud_drive_ident={ident}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} fichier{'s' if n != 1 else ''}</div>"
+            f"</div></a>"
+        )
+    vault_sidebar = (
+        "<div class='vault-sidebar'>"
+        "<div class='vault-search'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        "<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-drive'>"
+        "</div>"
+        "<div class='vault-filter-row'>"
+        "<div style='color:#22c55e;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</div></div>"
+        "<div class='vault-list' id='vault-list-drive'>"
+        + "".join(vault_items)
+        + "</div>"
+        + _VAULT_DND_CSS
+        + "<button type='button' data-newident='1' data-vtab='clouddrive' data-ikey='cloud_drive_ident' "
+        "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
+        "</div>"
     )
-    return vault + divider + _render_cloud_pps_html()
+
+    # ---- Galerie (droite) : une section par bibliothèque ----
+    sel_avatar_url = _identity_avatar_url(selected)
+    sel_avatar_html = (
+        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        if sel_avatar_url else
+        f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
+    )
+    n_sel = _total(selected)
+    header = (
+        "<div class='vault-gallery-header' style='justify-content:space-between'>"
+        "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
+        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
+        "<div style='flex:1;min-width:0'>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_sel} fichier{'s' if n_sel != 1 else ''} au total</div>"
+        "</div></div>"
+        "<span title='Aucune suppression possible depuis le Drive' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(34,197,94,.12);color:#22c55e;border-radius:8px;font-size:12px;font-weight:700;flex-shrink:0'>🔒 Lecture seule</span>"
+        "</div>"
+    )
+
+    play_badge = (
+        "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
+        "width:34px;height:34px;background:rgba(0,0,0,.65);border-radius:50%;"
+        "display:flex;align-items:center;justify-content:center;pointer-events:none'>"
+        "<svg viewBox='0 0 24 24' width='16' height='16' fill='#fff'><polygon points='5 3 19 12 5 21'/></svg>"
+        "</div>"
+    )
+    blocks = []
+    for sd, label, exts, is_video in _DRIVE_SECTIONS:
+        folder = IDENTITIES_DIR / selected / sd
+        files = []
+        if folder.exists():
+            files = sorted(
+                (p for p in folder.iterdir()
+                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name),
+                key=lambda p: p.stat().st_mtime, reverse=True)
+        if not files:
+            continue
+        is_video_js = "true" if is_video else "false"
+        cards = []
+        for p in files:
+            url = f"/cloud/file/{selected}/{sd}/{p.name}"
+            thumb = f"/cloud/thumb/{selected}/{sd}/{p.name}"
+            # file_id VIDE : lightbox en pur visionnage (pas de crayon/étoile).
+            cards.append(
+                "<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
+                f"<div onclick='openLightbox(\"{url}\",{is_video_js},\"{p.name}\",\"\",\"\")' "
+                f"title='{p.name}' class='vault-card-bg' "
+                "style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden'>"
+                f"<img src='{thumb}' loading='lazy' style='width:100%;height:100%;object-fit:cover;display:block'>"
+                + (play_badge if is_video else "")
+                + "</div></div>"
+            )
+        blocks.append(
+            "<div style='margin-top:22px'>"
+            f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
+            f"<span style='font-weight:700;font-size:14px'>{label}</span>"
+            f"<span style='background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px'>{len(files)}</span>"
+            "</div>"
+            "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px'>"
+            + "".join(cards)
+            + "</div></div>"
+        )
+    if not blocks:
+        blocks.append(
+            "<div style='padding:60px 20px;text-align:center;color:#666'>"
+            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{selected} — uploade depuis les pages Bibliothèque.</p>"
+            "</div>"
+        )
+
+    return (
+        "<div class='vault-layout'>"
+        + vault_sidebar
+        + f"<div class='vault-gallery'>{header}{''.join(blocks)}</div>"
+        + "</div>"
+    )
+
+
+def _render_cloud_pps_page() -> str:
+    """Page Photos de profil : PP PAR IDENTITÉ uniquement (le pool partagé est
+    retiré de l'UI — demande user). Tant que le pool contient encore des
+    fichiers, un bloc admin permet de TOUT déplacer vers une identité choisie
+    (pur déplacement de fichiers — AUCUNE suppression)."""
+    vault = _render_cloud_content_html("profile_pics", IMAGE_EXTS, include_jb=True)
+    pool_files = []
+    if PROFILE_PICS_DIR.exists():
+        pool_files = [p for p in PROFILE_PICS_DIR.iterdir() if p.is_file()]
+    if not pool_files:
+        return vault
+    idents = list(_list_content_identities())
+    for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+        if _jb not in idents:
+            idents.append(_jb)
+    opts = "".join(f"<option value='{i}'>{i}</option>" for i in idents)
+    mover = (
+        "<div style='margin:28px 0 12px;padding:16px;background:#101013;border:1px solid #232327;border-radius:12px'>"
+        f"<div style='font-weight:700;font-size:14px'>📦 Ancien pool partagé : {len(pool_files)} PP restante{'s' if len(pool_files) != 1 else ''}</div>"
+        "<div style='font-size:12px;color:#888;margin:4px 0 12px'>Les PP sont maintenant PAR identité. Déplace tout le pool vers une identité — simple déplacement de fichiers, rien n'est supprimé.</div>"
+        "<form method='POST' action='/cloud/pp_pool_move' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
+        f"<select name='identity' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;height:34px;font-size:13px;font-family:inherit'>{opts}</select>"
+        "<button type='submit' style='padding:8px 16px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>→ Tout déplacer vers cette identité</button>"
+        "</form></div>"
+    )
+    return vault + mover
 
 
 def _render_cloud_pps_html() -> str:
@@ -34189,6 +34373,7 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Contenu — Bibliothèque", "items": [
         {"key": "upload", "name": "Upload (Reel/Post/Story/CTA/PP)", "perms": ["view", "create"]},
         {"key": "cloud", "name": "Cloud (stockage par type)", "perms": ["view", "delete"]},
+        {"key": "clouddrive", "name": "Drive (tout le contenu par identité, lecture seule)", "perms": ["view"]},
         {"key": "textpool", "name": "Bibliothèque texte (Names/Bios/CTAs)", "perms": ["view", "edit"]},
     ]},
     {"section": "Création", "items": [
@@ -34255,6 +34440,8 @@ _PERM_KEY_TO_TABS = {
     # demande de l'user : elle ne doit plus apparaître dans les mappings, sinon
     # une case pointerait sur une page inatteignable.
     "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
+    # Drive lecture seule : sa propre case (clé == nom d'onglet).
+    "clouddrive": {"clouddrive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
     "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
@@ -35156,13 +35343,13 @@ def _render_upload_inner(msg=None, error=None):
     opts = "".join(f'<option value="{i}">{i}</option>' for i in identities)
     if not opts:
         opts = '<option value="">(aucune identité - crée-en sur Discord)</option>'
-    # Options du sélecteur PP : Partagé (pool commun) + identités + jessye (PP-only, marché US)
+    # Options du sélecteur PP : identités + jessye (PP-only, marché US).
+    # Le pool partagé est RETIRÉ (les PP sont par identité désormais).
     _pp_idents = list(identities)
     for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
         if _jb not in _pp_idents:
             _pp_idents.append(_jb)
-    pp_opts = ('<option value="">📁 Partagé (pool commun)</option>'
-               + "".join(f'<option value="{i}">{i}</option>' for i in _pp_idents))
+    pp_opts = "".join(f'<option value="{i}">{i}</option>' for i in _pp_idents)
     msg_html = ""
     if msg:
         # Stocker comme attribut data-* sur un élément invisible, le JS l'animera comme toast
@@ -35177,10 +35364,15 @@ def _render_upload_inner(msg=None, error=None):
     stat_posts = sum(_identity_stats(i)["posts"] for i in identities_list)
     stat_stories = sum(_identity_stats(i)["stories"] for i in identities_list)
     stat_storyctas = sum(_identity_stats(i)["storyctas"] for i in identities_list)
-    # PPs partagées
+    # PPs : total PAR IDENTITÉ (+ reliquat éventuel de l'ancien pool partagé)
     stat_pps = 0
     if PROFILE_PICS_DIR.exists():
         stat_pps = sum(1 for p in PROFILE_PICS_DIR.iterdir() if p.is_file())
+    for _i in identities_list:
+        _ppd = IDENTITIES_DIR / _i / "profile_pics"
+        if _ppd.exists():
+            stat_pps += sum(1 for p in _ppd.iterdir()
+                            if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
     # ===== Acces par role : un role restreint ne recoit QUE ses onglets =====
     # owner/admin -> allowed=None -> rendu identique a avant (aucun gating).
     role = ""
@@ -35259,6 +35451,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
         .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
         .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
+        .replace("{cloud_drive_html}", _lazy("clouddrive"))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
         .replace("{gmsdash_html}", _g("gmsdash", _render_gmsdash_html))
@@ -36240,6 +36433,14 @@ def create_app():
                             f"{_render_cloud_pps_page()}</div>", 200)
                 except Exception:
                     return ("", 200)
+            if _tab == "clouddrive":
+                # Drive : fragment léger pour vaultGoTo (sinon fallback pleine
+                # page dont la section drive est un placeholder lazy -> vide).
+                try:
+                    return (f"<div class='form-section' id='form-clouddrive' style='display:block'>"
+                            f"{_render_cloud_drive_html()}</div>", 200)
+                except Exception:
+                    return ("", 200)
             _cfg = _cloud.get(_tab)
             if _cfg:
                 _sub, _exts, _jb = _cfg
@@ -36270,6 +36471,9 @@ def create_app():
                 # rafale SAFE_LAZY (audit vitesse) : scripts sans init
                 # DOMContentLoaded -> injectables tels quels
                 "vastats": _render_identity_stats_html,
+                # Drive lecture seule : scan disque x7 subdirs -> lazy ; HTML
+                # sans <script> (compatible ré-injection AJAX).
+                "clouddrive": _render_cloud_drive_html,
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
                 "sfssetupof": lambda: _render_sfssetup_html("of"),
@@ -37818,15 +38022,14 @@ def create_app():
         photos = [p for p in request.files.getlist("photo") if p and p.filename]
         if not photos:
             return _error("Photo manquante")
-        # Cible : une identité (PP propres, ex: jessye) ou le pool partagé (Partagé / vide).
+        # Cible : une identité OBLIGATOIRE (le pool partagé est retiré — sinon
+        # il se re-remplirait en silence alors que plus aucune UI ne le liste).
         ident = (request.form.get("identity") or "").strip().lower()
         valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-        if ident and ident in valid:
-            target_dir = IDENTITIES_DIR / ident / "profile_pics"
-            label = ident
-        else:
-            target_dir = PROFILE_PICS_DIR  # pool partagé / commun
-            label, ident = "Partagé", ""
+        if not ident or ident not in valid:
+            return _error("Choisis une identité pour les PP (le pool partagé n'existe plus)")
+        target_dir = IDENTITIES_DIR / ident / "profile_pics"
+        label = ident
         target_dir.mkdir(parents=True, exist_ok=True)
         saved = 0
         for photo in photos:
@@ -37848,6 +38051,40 @@ def create_app():
         except Exception:
             pass
         return _success(f"✅ {saved} photo(s) de profil ajoutée(s) → {label}")
+
+    @app.route("/cloud/pp_pool_move", methods=["POST"])
+    def cloud_pp_pool_move():
+        """Déplace TOUT l'ancien pool partagé de PP vers une identité choisie
+        (les PP sont désormais PAR identité). Pur déplacement de fichiers avec
+        nommage anti-collision — AUCUNE suppression possible ici."""
+        if not is_auth():
+            return redirect("/")
+        ident = (request.form.get("identity") or "").strip().lower()
+        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        if ident not in valid:
+            return _error("Identité inconnue", tab="cloudpps")
+        if not PROFILE_PICS_DIR.exists():
+            return _success("Pool déjà vide — 0 PP déplacée", tab="cloudpps")
+        import shutil as _sh
+        target_dir = IDENTITIES_DIR / ident / "profile_pics"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        for p in sorted(PROFILE_PICS_DIR.iterdir()):
+            if not p.is_file():
+                continue
+            ext = p.suffix.lower()
+            # nom unique anti-écrasement (même boucle que /upload/pp)
+            n = len(list(target_dir.glob("*"))) + 1
+            target = target_dir / f"pp_{n}{ext}"
+            while target.exists():
+                n += 1
+                target = target_dir / f"pp_{n}{ext}"
+            try:
+                _sh.move(str(p), str(target))
+                moved += 1
+            except Exception:
+                continue
+        return _success(f"📦 {moved} PP déplacée(s) vers {ident} — rien n'a été supprimé", tab="cloudpps")
 
     # ============ BUSINESS ROUTES ============
     @app.route("/business/sfs/add", methods=["POST"])

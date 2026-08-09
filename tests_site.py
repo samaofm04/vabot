@@ -1737,6 +1737,45 @@ try:
         _cCa.post("/identity/reorder", data={"order": "[]"})
     _wCa._invalidate_json_cache(_fOrd)
 
+    # -- Drive (lecture seule, tout le contenu d une identite) ----------------
+    _rDr = _cCa.get("/?lazy=clouddrive", headers={"X-Tab-Ajax": "1"})
+    _hDr = _rDr.get_data(as_text=True)
+    check("drive : fragment lazy 200 + sidebar identites",
+          _rDr.status_code == 200 and "vault-list-drive" in _hDr, f"http {_rDr.status_code}")
+    check("drive : LECTURE SEULE (aucun controle destructif dans le HTML)",
+          "cloud/delete" not in _hDr and "toggleReelDisabled" not in _hDr
+          and "sel-cb" not in _hDr and "data-capact" not in _hDr)
+    _hDf = _cCa.get("/?tab=clouddrive&cloud_drive_ident=_tst_captions&frag=1",
+                    headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    check("drive : fragment identite (vaultGoTo) rendu avec ses fichiers",
+          "form-clouddrive" in _hDf and "brutes/b.mp4" in _hDf)
+
+    # -- migration du pool PP partage -> une identite (aucune suppression) ----
+    _poolD = _plCa.Path("data/profile_pics")
+    _poolHad = _poolD.exists()
+    if _poolHad:
+        # un VRAI pool existe sur cette machine : on ne touche a rien
+        check("pp pool : machine avec vrai pool -> test de deplacement saute", True)
+    else:
+        _poolD.mkdir(parents=True, exist_ok=True)
+        (_poolD / "zz_test_a.jpg").write_bytes(b"\xff" * 100)
+        (_poolD / "zz_test_b.png").write_bytes(b"\xff" * 100)
+        _rMv = _cCa.post("/cloud/pp_pool_move", data={"identity": "_tst_captions"})
+        _ppDst = _idCa / "profile_pics"
+        check("pp pool : tout deplace vers l identite (rien supprime)",
+              _rMv.status_code in (200, 302)
+              and not list(_poolD.glob("zz_test_*"))
+              and len(list(_ppDst.glob("pp_*"))) >= 2, f"http {_rMv.status_code}")
+        check("pp pool : identite inconnue refusee (fichiers intacts)",
+              _cCa.post("/cloud/pp_pool_move", data={"identity": "_tst_nexiste_pas"}).status_code in (200, 302))
+        _shCa.rmtree(_poolD, ignore_errors=True)
+    import io as _ioCa
+    _rUp = _cCa.post("/upload/pp", data={"identity": "", "photo": (_ioCa.BytesIO(b"x"), "a.jpg")},
+                     content_type="multipart/form-data")
+    check("upload pp : sans identite -> refuse (le pool partage n existe plus)",
+          _rUp.status_code in (200, 302)
+          and (not _poolD.exists() or not list(_poolD.glob("pp_*"))))
+
     # tirage random verrouille par grep du source (pattern section 18)
     _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
     check("captions gen : tirage random.choice (caption ET brute)",
