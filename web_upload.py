@@ -6065,13 +6065,13 @@ document.addEventListener('click',function(e){
   Création de vidéos
 </button>
 <button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','Rendre chaque vidéo unique — iPhone + GPS + filtres (façon TikFusion)')">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 6.5 14l4-4 4 4L21 7.5"/><polyline points="16.5 7.5 21 7.5 21 12"/><path d="M21 13.5 17.5 10l-4 4-4-4L3 16.5"/><polyline points="7.5 16.5 3 16.5 3 12"/></svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2.6 12.6 8 7.2l4 4 5.4-5.4 4 4"/><path d="M21.4 11.4 16 16.8l-4-4-5.4 5.4-4-4"/></svg>
   Métadonnées vidéo
 </button>
 
 <div class="group" id="grp-montage">
   <button class="group-head" onclick="toggleGroup('montage')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5.5H7A2.5 2.5 0 0 0 4.5 8"/><path d="M12.5 18.5H7A2.5 2.5 0 0 1 4.5 16"/><line x1="21" y1="4" x2="4.5" y2="13"/><line x1="21" y1="20" x2="4.5" y2="11"/></svg>
+    <svg class="lead" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path fill-rule="evenodd" d="M24.189 6.442V2.671l-4.535 2.383V4.91c.002-1.505-1.078-2.411-2.638-2.411H2.64C.993 2.5 0 3.407 0 4.91v3.81L6.354 12L0 15.316v3.8C0 20.595 1 21.5 2.64 21.5h14.373c1.56 0 2.639-.907 2.639-2.382v-.197l4.536 2.409v-3.828L13.64 12l10.55-5.557zM9.982 13.873l7.797 4.083H2.157zm7.741-7.828l-7.742 4.057l-7.825-4.057z"/></svg>
     <span class="label">Reel montage</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
