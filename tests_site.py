@@ -1835,6 +1835,9 @@ try:
     import veille_telegram as _vtCa
     _sav_dl = _vtCa.download_via_ytdlp
     _vtCa.download_via_ytdlp = lambda url, timeout=25, info=None, use_cookies=True: b"\x00" * 2000
+    # la chaine IG (Apify/scrape) ferait de VRAIS appels reseau -> stub complet
+    _sav_fetch = _wCa._linkimp_fetch
+    _wCa._linkimp_fetch = lambda u, inf: b"\x00" * 2000
     try:
         _rLi = _cCa.post("/cloud/import_link", data={
             "identity": "_tst_captions", "subdir": "templates",
@@ -1857,6 +1860,10 @@ try:
                         "urls": "https://x.com/v"}).status_code in (200, 302))
     finally:
         _vtCa.download_via_ytdlp = _sav_dl
+        _wCa._linkimp_fetch = _sav_fetch
+    check("import lien : chaine Veille pour Instagram (Apify -> scrape -> yt-dlp public)",
+          "apify_reels" in _plCa.Path("web_upload.py").read_text(encoding="utf-8")
+          and "use_cookies=False" in _plCa.Path("web_upload.py").read_text(encoding="utf-8"))
 
     # -- Google Drive sync (copie seule) --------------------------------------
     import gdrive_sync as _gdCa

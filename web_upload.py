@@ -14456,23 +14456,64 @@ _LINKIMP_STATUS: dict = {"state": "idle"}
 
 def _linkimp_thumb(u: str) -> str:
     """FRAME de la vidéo en cours d'import (avant même le téléchargement) :
-    oEmbed TikTok (instantané) ou miniature yt-dlp pour Instagram. Best-effort."""
+    oEmbed TikTok (instantané). Pour Instagram on n'appelle RIEN ici — chaque
+    requête yt-dlp de plus aggrave le 429 ; la vraie frame locale s'affiche
+    dès que la vidéo est téléchargée."""
     try:
         if "tiktok.com" in u:
             import requests as _rq
             r = _rq.get("https://www.tiktok.com/oembed", params={"url": u}, timeout=8)
             return str((r.json() or {}).get("thumbnail_url") or "")
-        import yt_dlp
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "socket_timeout": 10}
-        ck = DATA_DIR / "insta" / "cookies.txt"
-        if "instagram.com" in u and ck.exists():
-            opts["cookiefile"] = str(ck)
-        with yt_dlp.YoutubeDL(opts) as y:
-            inf = y.extract_info(u, download=False)
-        return str((inf or {}).get("thumbnail") or "")
     except Exception:
-        return ""
+        pass
+    return ""
+
+
+def _linkimp_fetch(u: str, inf: dict):
+    """Téléchargement d'UN lien avec la CHAÎNE DE LA VEILLE pour Instagram
+    (la seule qui ne se prend pas de 429) : cache disque partagé Trends ->
+    Apify (zéro cookie) -> scrape page publique -> yt-dlp PUBLIC en dernier.
+    TikTok et le reste : yt-dlp direct. Retourne les bytes ou None."""
+    import re as _re
+    import veille_telegram as _vt
+    if "instagram.com" not in u:
+        return _vt.download_via_ytdlp(u, timeout=45, info=inf, use_cookies=False)
+    m = _re.search(r"/(?:reels?|p|tv)/([A-Za-z0-9_\-]+)", u)
+    sc = m.group(1) if m else ""
+    cache = (DATA_DIR / "insta" / "videos" / f"{sc}.mp4") if sc else None
+    if cache and cache.exists() and 1024 < cache.stat().st_size <= 50 * 1024 * 1024:
+        return cache.read_bytes()
+    vb = None
+    # 1) Apify : LA source fiable de la Veille (zéro cookie, pas de 429)
+    try:
+        import apify_reels as _ap
+        if _ap.configured():
+            _ar = _ap.fetch_video_urls([u], timeout=90) or {}
+            _ad = _ar.get(sc) or (list(_ar.values())[0] if _ar else None)
+            if _ad and _ad.get("video_url"):
+                vb = _vt.download_video_bytes(_ad["video_url"])
+            if not vb:
+                inf["reason"] = "apify_sans_video"
+    except Exception as e:
+        inf["reason"] = f"apify:{str(e)[:80]}"
+    # 2) scrape page publique -> URL CDN fraîche
+    if not vb:
+        try:
+            fresh = (_vt.refresh_post_data(u) or {}).get("video_url") or ""
+            if fresh:
+                vb = _vt.download_video_bytes(fresh)
+        except Exception:
+            pass
+    # 3) dernier recours : yt-dlp PUBLIC (le cookie AGGRAVE le 429)
+    if not vb:
+        vb = _vt.download_via_ytdlp(u, timeout=45, info=inf, use_cookies=False)
+    if vb and cache:
+        try:  # cache partagé avec Trends/Veille : le prochain besoin est instantané
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_bytes(vb)
+        except Exception:
+            pass
+    return vb
 
 
 def _linkimp_run(ident: str, subdir: str, urls: list):
@@ -14500,12 +14541,12 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
             _LINKIMP_STATUS["thumb_url"] = ""
         inf = {}
         vb = None
+        # IG passe par la chaîne Apify (jusqu'à ~90s) -> mur plus large
+        _wall = 150 if "instagram.com" in u else 75
         try:
-            # cookies IG uniquement pour les liens Instagram ; TikTok = public
-            vb = _ex.submit(_vt.download_via_ytdlp, u, 45, inf,
-                            ("instagram.com" in u)).result(timeout=75)
+            vb = _ex.submit(_linkimp_fetch, u, inf).result(timeout=_wall)
         except _FTimeout:
-            inf["reason"] = "trop long (>75s) — lien abandonné"
+            inf["reason"] = f"trop long (>{_wall}s) — lien abandonné"
         except Exception as e:
             inf["reason"] = str(e)[:120]
         finally:
