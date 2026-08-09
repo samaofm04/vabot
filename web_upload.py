@@ -4738,6 +4738,7 @@ document.addEventListener('click', function(ev){
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
+  else if(act==='share'){ capShareOpen(); }
   else if(act==='delsel'){
     var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
     if(!ids.length) return;
@@ -4790,6 +4791,50 @@ function capAddWarnCheck(ta,wd){
   }else{
     wd.style.display='none';
   }
+}
+// 📤 Partage des captions à d autres models — même modale que « Appliquer ce
+// montage à… » (nxModelPicker). Sélection ⚪ si présente, sinon TOUTES.
+function capShareOpen(){
+  if(!capLibInit()) return;
+  var items=(capLib.block.items||[]);
+  if(!items.length){ if(typeof showToast==='function') showToast('Aucune caption à partager','warning'); return; }
+  var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
+  var nSel=ids.length||items.length;
+  var sec=null;
+  document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  var act2=sec?sec.querySelector('.vault-item-active'):null;
+  var cur=act2?(act2.getAttribute('data-ident')||''):capLib.identity;
+  var rows=[];
+  (sec?sec.querySelectorAll('.vault-item'):[]).forEach(function(a){
+    var n=a.getAttribute('data-ident'); if(!n||n===cur) return;
+    var subEl=a.querySelector('div[style*="color:#888"]');
+    var m=subEl?String(subEl.textContent||'').trim().match(/^(\\d+)/):null;
+    var nb=m?parseInt(m[1]):null;
+    var img=a.querySelector('img');
+    rows.push({name:n, pp:img?img.getAttribute('src'):null,
+               sub:(nb==null)?'':(nb+' caption'+(nb>1?'s':'')), warn:false});
+  });
+  if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
+  nxModelPicker({
+    title:'Partager ces captions à…',
+    info:nSel+' caption'+(nSel>1?'s':'')+(ids.length?' sélectionnée'+(nSel>1?'s':''):' (toutes)')
+      +' — <b>copiées</b> chez chaque model cochée (positions et descriptions comprises, doublons ignorés). Les originales restent en place.',
+    rows:rows,
+    onConfirm:function(sel,_x,ui){
+      ui.busy('⏳ Copie…');
+      var fd=new FormData(); fd.set('identity',capLib.identity);
+      fd.set('ids',JSON.stringify(ids)); fd.set('targets',JSON.stringify(sel));
+      fetch('/captions/apply',{method:'POST',body:fd,credentials:'same-origin'})
+        .then(function(r){return r.json();}).then(function(j){
+          ui.close();
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+          if(typeof showToast==='function') showToast('✅ '+j.added+' caption'+(j.added>1?'s copiées':' copiée')
+            +' vers '+((j.targets||[]).length)+' model'+(((j.targets||[]).length>1)?'s':'')
+            +(j.skipped?(' · '+j.skipped+' doublon'+(j.skipped>1?'s ignorés':' ignoré')):''),'success',7000);
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+    }
+  });
 }
 function capAddField(focus){
   var list=document.getElementById('capAddList'); if(!list) return null;
@@ -14863,6 +14908,11 @@ def _render_cloud_captions_html() -> str:
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        # 📤 Partager = même modale que « Appliquer ce montage à… » (nxModelPicker) :
+        # copie la sélection ⚪ (sinon TOUTES les captions) chez les models cochées.
+        "<button type='button' data-capact='share' title='Copier ces captions chez les autres models (sélection ⚪, sinon toutes)' "
+        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>"
+        "📤 Partager</button>"
         # ＋ Add captions = même bouton phare que « Add template » sur l'onglet
         # Template montage (gradient) : ouvre le formulaire façon Upload Reel.
         "<button type='button' data-capact='addcap' title='Ajoute tes captions — écrites au CENTRE par défaut' "
@@ -38953,6 +39003,77 @@ def create_app():
         # (compteurs de la sidebar vault, page pleine éventuellement cachée).
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "count": len(block["items"])})
+
+    @app.route("/captions/apply", methods=["POST"])
+    def captions_apply():
+        """📤 Partage : copie des captions (ids, sinon toutes) de `identity` vers
+        d'autres models — positions/desc comprises, doublons (texte normalisé)
+        ignorés. Une cible VIDE hérite aussi de la police + du style source."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import json as _js
+        import time as _t
+        import unicodedata as _ud
+        idents = _list_identities()
+        src = (request.form.get("identity") or "").strip().lower()
+        if src not in idents:
+            return jsonify({"ok": False, "error": "identité source inconnue"})
+        try:
+            ids = _js.loads(request.form.get("ids") or "[]")
+            targets = _js.loads(request.form.get("targets") or "[]")
+        except Exception:
+            return jsonify({"ok": False, "error": "payload invalide"})
+        targets = [str(t).strip().lower() for t in (targets if isinstance(targets, list) else [])]
+        targets = [t for t in targets if t in idents and t != src]
+        if not targets:
+            return jsonify({"ok": False, "error": "aucune model cible valide"})
+        lib = _load_captions_lib()
+        sblock = _clean_caption_block(lib.get(src))
+        items = sblock["items"]
+        if isinstance(ids, list) and ids:
+            idset = {str(x) for x in ids}
+            items = [it for it in items if it.get("id") in idset]
+        if not items:
+            return jsonify({"ok": False, "error": "aucune caption à partager"})
+
+        def _tnorm(s):
+            s = _ud.normalize("NFKC", str(s or "")).lower()
+            s = re.sub(r"[^a-z0-9à-ɏ\s]", " ", s)
+            return re.sub(r"\s+", " ", s).strip()
+
+        added = skipped = 0
+        done = []
+        for t in targets:
+            tblock = _clean_caption_block(lib.get(t))
+            have = {_tnorm(c.get("text")) for c in tblock["items"]}
+            n0 = len(tblock["items"])
+            for i, it in enumerate(items):
+                if len(tblock["items"]) >= 80:      # même garde-fou que le save
+                    skipped += 1
+                    continue
+                key = _tnorm(it.get("text"))
+                if key in have:
+                    skipped += 1
+                    continue
+                have.add(key)
+                cp = dict(it)
+                cp["id"] = f"c{int(_t.time() * 1000)}_{i}_{t[:6]}"
+                cp["created"] = int(_t.time())
+                tblock["items"].append(cp)
+                added += 1
+            if len(tblock["items"]) != n0:
+                if n0 == 0:                          # cible vierge : hérite du look
+                    tblock["font"] = sblock["font"]
+                    tblock["style"] = sblock["style"]
+                    tblock["global_pos"] = sblock["global_pos"]
+                lib[t] = tblock
+                done.append(t)
+        if done:
+            if not _save_captions_lib(lib):
+                return jsonify({"ok": False, "error": "écriture impossible"})
+            _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "added": added, "skipped": skipped, "targets": done})
 
     @app.route("/captions/gen", methods=["POST"])
     def captions_gen():

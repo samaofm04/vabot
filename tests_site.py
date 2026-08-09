@@ -1622,6 +1622,29 @@ try:
           _itd[2].get("desc", "").startswith("Lien en bio")
           and len(_itd[2].get("desc", "")) <= 1000
           and "desc" not in _itd[4] and "desc" not in _itd[0], str(_itd[2])[:90])
+    # partage vers une autre model : copie (desc comprise) + dédupe normalisée
+    _idCb = _plCa.Path("data/identities/_tst_captions2")
+    _shCa.rmtree(_idCb, ignore_errors=True)
+    (_idCb / "brutes").mkdir(parents=True)
+    _ja = (_cCa.post("/captions/apply", data={
+        "identity": "_tst_captions", "ids": "[]",
+        "targets": _jsCa.dumps(["_tst_captions2"])}).get_json() or {})
+    _jt = (_cCa.get("/captions/list?identity=_tst_captions2").get_json() or {})
+    _titems = (_jt.get("block") or {}).get("items") or []
+    check("captions : partage copie tout (desc comprise) chez la cible",
+          _ja.get("ok") and _ja.get("added") == 12 and len(_titems) == 12
+          and any(c.get("desc") for c in _titems), str(_ja)[:100])
+    _ja2 = (_cCa.post("/captions/apply", data={
+        "identity": "_tst_captions", "ids": "[]",
+        "targets": _jsCa.dumps(["_tst_captions2"])}).get_json() or {})
+    check("captions : re-partage = 0 ajout (doublons normalisés ignorés)",
+          _ja2.get("ok") and _ja2.get("added") == 0 and _ja2.get("skipped") == 12,
+          str(_ja2)[:100])
+    _rbadT = (_cCa.post("/captions/apply", data={
+        "identity": "_tst_captions", "ids": "[]",
+        "targets": _jsCa.dumps(["_tst_captions"])}).get_json() or {})
+    check("captions : partage vers soi-même refusé", _rbadT.get("ok") is not True)
+    _shCa.rmtree(_idCb, ignore_errors=True)
     # bornes moteur : size clampe a 160, x/y clampes 0-1, wrapW hors bornes ignore
     _blk2 = {"style": {"size": 999},
              "items": [{"id": "w", "text": "W", "x": 2.0, "y": -1.0, "wrapW": 5.0}]}

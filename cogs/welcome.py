@@ -492,7 +492,18 @@ def _us_norm(nm):
     nm = _ud.normalize("NFKC", (nm or "")).strip().lower()
     nm = _re.sub(r"[​‌‍﻿]", "", nm)          # zéro-largeur
     nm = _re.sub(r"[‐‑‒–—―−]", "-", nm)  # tirets
+    # homoglyphes cyrilliques/grecs (un « а » russe est INVISIBLE à l'œil)
+    nm = nm.translate(_US_CONFUSABLES)
     return nm
+
+
+_US_CONFUSABLES = str.maketrans({
+    "а": "a", "е": "e", "о": "o", "с": "c", "р": "p", "х": "x", "у": "y",
+    "і": "i", "ѕ": "s", "ј": "j", "ԁ": "d", "ь": "b", "к": "k", "м": "m",
+    "т": "t", "н": "h", "в": "b",
+    "α": "a", "ο": "o", "ε": "e", "ι": "i", "κ": "k", "ν": "v", "ρ": "p",
+    "τ": "t", "υ": "u", "β": "b",
+})
 
 
 def _us_ticket_name(member, suffix):
@@ -1609,18 +1620,15 @@ class Welcome(commands.Cog):
             with_msgs = [c for c in chans if c.last_message_id]
             keep = with_msgs[0] if with_msgs else chans[0]
             del_dups += [c for c in chans if c.id != keep.id]
-        # Orphelins : le nom ne correspond à aucun membre actuel (membre parti,
-        # salon créé à la main avec un autre pseudo…). Supprimés seulement si
-        # sans messages (les -menu ne contiennent que le menu du bot -> partent).
+        # Orphelins : le nom (même normalisé) ne correspond à aucun membre actuel
+        # (membre parti, salon créé à la main avec des lettres sosies…). Demande
+        # user : on SUPPRIME tout ce qui est au format ticket sans propriétaire —
+        # la liste complète est affichée avant confirmation.
         del_orph = []
         for n, chans in sorted(by_name.items()):
             if n in expected:
                 continue
-            for c in chans:
-                if n.endswith("-menu") or not c.last_message_id:
-                    del_orph.append(c)
-                else:
-                    warn.append(f"#{n} : orphelin avec messages — je n'y touche pas")
+            del_orph.extend(chans)
 
         cog = self
         inv_id = interaction.user.id
