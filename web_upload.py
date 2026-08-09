@@ -4540,8 +4540,9 @@ document.addEventListener('click', function(ev){
       capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:lines[i].slice(0,300), x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
     }
     ta.value='';
+    capAddClose();
     capRenderCards(); capSave();
-    if(typeof showToast==='function') showToast('✅ '+lines.length+' caption'+(lines.length>1?'s ajoutées':' ajoutée'),'success');
+    if(typeof showToast==='function') showToast('✅ '+lines.length+' caption'+(lines.length>1?'s ajoutées au centre':' ajoutée au centre'),'success');
   }
   else if(act==='del'){
     var doDel=function(){ capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==cid;}); capRenderCards(); capSave(); };
@@ -4556,11 +4557,15 @@ document.addEventListener('click', function(ev){
   }
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
-  else if(act==='addfocus'){
-    var ta2=document.getElementById('capAddTa');
-    if(ta2){ try{ ta2.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} setTimeout(function(){ ta2.focus(); },250); }
-  }
+  else if(act==='addcap'){ capAddOpen(); }
 });
+function capAddOpen(){
+  var m=document.getElementById('cap-add-modal'); if(!m) return;
+  var ta=document.getElementById('capAddTa'); if(ta) ta.value='';
+  m.style.display='flex';
+  if(ta) setTimeout(function(){ ta.focus(); },60);
+}
+function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.style.display='none'; }
 // ---- Ranger des identités (toggle 📦, synchro entre TOUS les onglets vault) ----
 // Délégation en phase CAPTURE : le bouton vit DANS le <a> de la sidebar dont le
 // onclick inline (vaultGoTo) partirait sinon en premier au bubble.
@@ -4756,9 +4761,20 @@ function capEdSync(){
   var del=document.getElementById('cap-ed-del'); if(del) del.style.display=(capEdState.mode==='item'&&it)?'block':'none';
   var wrRow=document.getElementById('cap-ed-wrap-row'); if(wrRow) wrRow.style.display=(capEdState.mode==='item')?'flex':'none';
   var lsRow=document.getElementById('cap-ed-ls-row'); if(lsRow) lsRow.style.display=(capEdState.mode==='item')?'flex':'none';
+  var gpRow=document.getElementById('cap-ed-gprow'); if(gpRow) gpRow.style.display=(capEdState.mode==='global')?'flex':'none';
+  var gpe=!!((b.global_pos||{}).enabled);
+  var gpb=document.getElementById('cap-ed-gpbtn');
+  if(gpb){ gpb.classList.toggle('on',gpe); gpb.textContent=gpe?'ACTIVE':'Inactive'; }
   var note=document.getElementById('cap-ed-mode-note');
-  if(note) note.textContent=(capEdState.mode==='global')?'📍 Position GLOBALE — toutes les captions seront posées ici':'';
+  if(note) note.textContent=(capEdState.mode==='global')?(gpe?'📍 Position GLOBALE active — toutes les captions seront posées ici':'📍 Position globale (inactive) — glisse le texte pour l activer'):'';
   capEdPaint();
+}
+function capEdGpToggle(){
+  if(!capLibInit()) return;
+  var gp=capLib.block.global_pos=capLib.block.global_pos||{x:0.5,y:0.2};
+  gp.enabled=!gp.enabled;
+  capEdSync(); capRenderCards(); capSave();
+  if(typeof showToast==='function') showToast(gp.enabled?'📍 Position globale ACTIVÉE — toutes les captions seront posées là':'📍 Position globale désactivée — chaque caption garde SA position','success',5000);
 }
 // Reflète le style global sur les toggles (mêmes états .on que l éditeur montage)
 function capEdPaint(){
@@ -4960,6 +4976,7 @@ function capEdBeginDrag(e){
     document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
     var gx=document.getElementById('cap-ed-gx'); if(gx) gx.style.display='none';
+    if(capEdState.mode==='global') capEdSync();   // le drag active la pos. globale -> bouton à jour
     capRenderCards(); capSave();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
@@ -7102,6 +7119,19 @@ body.light .action-icon{color:#666}
   </div>
 </div>
 
+<!-- ===== Add captions : colle ta liste (une par ligne), ecrites au CENTRE par defaut ===== -->
+<div id="cap-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="capAddClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:460px;max-width:92vw;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="font-weight:800;font-size:15px">＋ Add captions</div>
+    <div style="font-size:12px;color:#888;line-height:1.5">Une caption par ligne. Elles seront écrites au <b style="color:#c4c4cc">CENTRE</b> de la vidéo par défaut — clique une carte ensuite pour ajuster la position/le style dans l'éditeur.</div>
+    <textarea id="capAddTa" rows="8" placeholder="POV : quand elle répond enfin&#10;regarde jusqu'au bout 😳&#10;…" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
+    <div style="display:flex;gap:8px">
+      <button type="button" onclick="capAddClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+      <button type="button" data-capact="add" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">＋ Ajouter</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Editeur CAPTION : meme app CapCut que le montage (ce-app), sans timeline.
      Colonne gauche = liste des captions de la model ; centre = apercu sur une brute ;
      droite = inspecteur Texte complet. Le style est GLOBAL a la model, la position/
@@ -7215,6 +7245,11 @@ body.light .action-icon{color:#666}
             <span class="nxm-lbl">Interligne</span>
             <input id="cap-ed-ls" type="range" min="90" max="300" value="145" oninput="capEdLS(this.value)" class="nxm-slider">
             <span id="cap-ed-ls-val" style="min-width:34px;text-align:right;color:#c4c4cc;font-size:12px">1.45</span>
+          </div>
+          <div class="nxm-row" id="cap-ed-gprow" style="display:none">
+            <span class="nxm-lbl">Pos. globale</span>
+            <button type="button" id="cap-ed-gpbtn" class="nxm-tg" onclick="capEdGpToggle()">Inactive</button>
+            <span style="font-size:11px;color:#75757f">quand ACTIVE, toutes les captions sont posées ici</span>
           </div>
           <div class="nxm-hint">Glisse le texte sur la vidéo · coins = taille · poignées ↔ = largeur · ↕ = interligne. Le style (police, taille, couleur…) s'applique à TOUTES les captions de la model ; position, largeur et interligne sont propres à chaque caption.</div>
           <button type="button" id="cap-ed-del" onclick="capEdDelete()" style="display:none;margin-top:14px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption</button>
@@ -13838,7 +13873,7 @@ HIDDEN_IDENTITIES_FILE = DATA_DIR / "hidden_identities.json"
 
 _VAULT_HIDE_CSS = """
 <style>
-.vault-hide-btn{opacity:0;flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-size:12px;cursor:pointer;transition:opacity .12s;color:#9a9aa6}
+.vault-hide-btn{opacity:.4;flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-size:12px;cursor:pointer;transition:opacity .12s;color:#9a9aa6}
 .vault-item:hover .vault-hide-btn{opacity:1}
 .vault-hide-btn:hover{background:rgba(255,255,255,.1);color:#e6e6ea}
 .vault-hidden-wrap{margin-top:10px;border-top:1px solid #232323;padding-top:6px}
@@ -14058,49 +14093,22 @@ def _render_cloud_captions_html() -> str:
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        "<button type='button' data-capact='addfocus' title='Colle ta liste de captions (une par ligne) — écrites au CENTRE par défaut' "
-        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>＋ Add captions</button>"
+        # ＋ Add captions = même bouton phare que « Add template » sur l'onglet
+        # Template montage (gradient) : ouvre la fenêtre « colle ta liste ».
+        "<button type='button' data-capact='addcap' title='Colle ta liste de captions (une par ligne) — écrites au CENTRE par défaut' "
+        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>"
+        "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
+        "Add captions</button>"
         "<input id='capGenN' type='number' min='1' max='10' value='3' title='Nombre de vidéos à générer (brute + caption au hasard à chaque fois)' "
         "style='width:52px;height:36px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;text-align:center;font-size:13px;box-sizing:border-box'>"
-        "<button type='button' data-capact='gen' style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>🎲 Générer</button>"
+        "<button type='button' data-capact='gen' style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:#1a1a1f;border:1px solid #3467FF;color:#3467FF;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>🎲 Générer</button>"
         "</div></div>"
     )
 
+    # Style et position globale se règlent DANS l'éditeur (comme Template
+    # montage) — la page reste sobre : header + grille de cartes, rien d'autre.
     st = block["style"]
     gp = block["global_pos"]
-    _size = st.get("size", 44)
-    _color = st.get("color") if re.match(r"^#[0-9a-fA-F]{6}$", str(st.get("color") or "")) else "#ffffff"
-    font_opts = "".join(
-        f"<option{' selected' if f == block['font'] else ''}>{f}</option>"
-        for f in CAPTION_FONTS)
-    conf_row = (
-        "<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
-        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Police "
-        f"<select data-capstyle='font' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12px;font-family:inherit'>{font_opts}</select></label>"
-        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Taille "
-        f"<input data-capstyle='size' type='range' min='16' max='160' value='{_size}' style='width:110px'>"
-        f"<span id='capSizeVal' style='min-width:24px;text-align:right'>{_size}</span></label>"
-        "<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Couleur "
-        f"<input data-capstyle='color' type='color' value='{_color}' style='width:34px;height:26px;background:none;border:1px solid #34343a;border-radius:6px;padding:1px'></label>"
-        "<div style='display:flex;gap:6px'>"
-        "<button type='button' data-capstyle='preset-outline' class='cap-preset'>Contour</button>"
-        "<button type='button' data-capstyle='preset-blackbox' class='cap-preset'>Boîte noire</button>"
-        "<button type='button' data-capstyle='preset-whitebox' class='cap-preset'>Boîte blanche</button>"
-        "</div>"
-        "<span style='flex:1'></span>"
-        "<label title='Toutes les captions au même endroit (au lieu de la position propre à chacune)' "
-        f"style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc;cursor:pointer'><input type='checkbox' data-capgp='1'{' checked' if gp.get('enabled') else ''}> Position globale</label>"
-        "<button type='button' data-capact='place-global' class='cap-preset' title='Régler la position globale par drag'>📍 Régler</button>"
-        "</div>"
-    )
-
-    add_zone = (
-        "<div style='display:flex;gap:10px;align-items:stretch;margin-bottom:16px'>"
-        "<textarea id='capAddTa' rows='3' placeholder='Une caption par ligne — colle ta liste ici. Chaque caption sera écrite au CENTRE de la vidéo par défaut (📍 Placer pour ajuster).' "
-        "style='flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box'></textarea>"
-        "<button type='button' data-capact='add' style='padding:0 22px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>＋ Ajouter</button>"
-        "</div>"
-    )
 
     # ---- Cartes aperçu : fond BLANC 9:16 avec le texte écrit à sa position ----
     # (façon cartes vidéo de Template montage — MIROIR exact du builder JS
@@ -14144,7 +14152,7 @@ def _render_cloud_captions_html() -> str:
 
     cards = []
     if not block["items"]:
-        cards.append("<div style='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px'>Aucune caption — colle ta liste au-dessus (une par ligne) puis « ＋ Ajouter ».</div>")
+        cards.append("<div style='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px'>Aucune caption — clique « ＋ Add captions » et colle ta liste (une par ligne).</div>")
     for it in block["items"]:
         cid = _h.escape(str(it["id"]), quote=True)
         on = it.get("enabled", True)
@@ -14200,7 +14208,7 @@ def _render_cloud_captions_html() -> str:
         css
         + "<div class='vault-layout'>"
         + vault_sidebar
-        + f"<div class='vault-gallery'>{header}{conf_row}{add_zone}{grid}{results}{state}</div>"
+        + f"<div class='vault-gallery'>{header}{grid}{results}{state}</div>"
         + "</div>"
     )
 
