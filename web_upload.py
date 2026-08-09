@@ -6064,7 +6064,7 @@ document.addEventListener('click',function(e){
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
   Création de vidéos
 </button>
-<button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','Rendre chaque vidéo unique — iPhone + GPS + filtres (façon TikFusion)')">
+<button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','')">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2.6 12.6 8 7.2l4 4 5.4-5.4 4 4"/><path d="M21.4 11.4 16 16.8l-4-4-5.4 5.4-4-4"/></svg>
   Métadonnées vidéo
 </button>
@@ -7196,12 +7196,11 @@ document.addEventListener('keydown', function(e){
 </div>
 </div>
 
-<!-- SETTINGS - UNIQUIFICATION VIDÉO (ton TikFusion) -->
+<!-- SETTINGS - UNIQUIFICATION VIDÉO (ton TikFusion) — titre/description retirés
+     à la demande de l'user : la page va droit aux cartes, comme TikFusion -->
 <div class="form-section" id="form-svideo" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">🎬 Uniquification vidéo</h3>
-<small>Ton « TikFusion » intégré : rend chaque copie d'une vidéo unique (métadonnées iPhone + GPS + filtres image/audio) pour que Meta ne détecte pas de doublon. S'applique quand une VA fait <b>/reel</b> sur Discord.</small>
-<div style="margin-top:14px">{video_manager_html}</div>
+{video_manager_html}
 </div>
 </div>
 
@@ -34421,34 +34420,35 @@ def _render_apify_settings() -> str:
 
 # ===== Gestionnaire vidéo (uniquification style TikFusion) =====
 # Options « plage » (case + Min/Max). L'ORDRE = celui affiché dans la grille.
+# Libellés EN ANGLAIS comme TikFusion (demande user) — descriptions FR.
 _VT_RANGE_OPTS = [
-    ("framerate",          "Framerate (img/s)"),
-    ("video_bitrate_kbps", "Bitrate vidéo (kbps)"),
-    ("audio_bitrate_kbps", "Bitrate audio (kbps)"),
+    ("framerate",          "Framerate"),
+    ("video_bitrate_kbps", "Video Bitrate"),
+    ("audio_bitrate_kbps", "Audio Bitrate"),
     ("saturation",         "Saturation"),
-    ("contrast",           "Contraste"),
-    ("brightness",         "Luminosité"),
+    ("contrast",           "Contrast"),
+    ("brightness",         "Brightness"),
     ("gamma",              "Gamma"),
     ("vignette_angle",     "Vignette"),
-    ("speed",              "Vitesse"),
+    ("speed",              "Speed"),
     ("zoom",               "Zoom"),
-    ("noise_strength",     "Grain (noise)"),
-    ("rotation_degrees",   "Rotation (°)"),
-    ("cut_start_seconds",  "Couper début (s)"),
-    ("cut_end_seconds",    "Couper fin (s)"),
-    ("volume",             "Volume audio"),
-    ("waveform_shift",     "Décalage audio (ms)"),
-    ("pixel_shift",        "Pixel shift (px)"),
-    ("lens_correction",    "Correction objectif"),
+    ("noise_strength",     "Noise"),
+    ("rotation_degrees",   "Rotation"),
+    ("cut_start_seconds",  "Cut Video"),
+    ("cut_end_seconds",    "Cut End Video"),
+    ("volume",             "Volume"),
+    ("waveform_shift",     "Waveform Shift"),
+    ("pixel_shift",        "Pixel Shift"),
+    ("lens_correction",    "Lens Correction"),
 ]
 # Options « interrupteur seul » (case, pas de Min/Max)
 _VT_BOOL_OPTS = [
-    ("random_us_metadata",     "Métadonnées iPhone + GPS",
+    ("random_us_metadata",     "iPhone Metadata + GPS",
      "Faux iPhone + ville française + coordonnées GPS réelles + date récente"),
-    ("random_9_16_dimensions", "Résolution 9:16 aléatoire",
-     "Choisit une résolution parmi des formats de téléphone courants"),
-    ("hflip",                  "Miroir horizontal",
-     "Retourne la vidéo — ⚠️ inverse aussi le texte à l'écran"),
+    ("random_9_16_dimensions", "Random Pixel Size",
+     "Résolution 9:16 aléatoire parmi des formats de téléphone courants"),
+    ("hflip",                  "Flip",
+     "Miroir horizontal — ⚠️ inverse aussi le texte à l'écran"),
 ]
 
 
@@ -34493,8 +34493,8 @@ def _vt_card_dims(cfg):
     return (
         "<div class='" + cls + "'>"
         "<label class='vt-h'><input type='checkbox' name='dimensions__en' " + chk +
-        " onchange='vtCard(this)'> Dimensions fixes</label>"
-        "<div class='vt-mm'><span>L</span><input name='dimensions__width' value='" + str(w) + "'>"
+        " onchange='vtCard(this)'> Dimensions</label>"
+        "<div class='vt-mm'><span>W</span><input name='dimensions__width' value='" + str(w) + "'>"
         "<span>H</span><input name='dimensions__height' value='" + str(h) + "'></div>"
         "</div>"
     )
@@ -34510,7 +34510,7 @@ _VT_HEAD = """
 .vt-h{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;user-select:none}
 .vt-h input{appearance:none;-webkit-appearance:none;width:18px;height:18px;border-radius:50%;border:2px solid #3c4454;background:transparent;position:relative;flex-shrink:0;cursor:pointer;margin:0}
 .vt-h input:checked{background:#2563eb;border-color:#2563eb}
-.vt-h input:checked::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.vt-h input:checked::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:translate(-50%,-62%) rotate(45deg)}
 .vt-mm{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;color:#9aa3b5;font-weight:600}
 .vt-mm input{width:100%;min-width:0;padding:6px 9px;background:#0d1117;border:1px solid #2b3240;color:#fff;border-radius:8px;font-size:12.5px;box-sizing:border-box}
 .vt-mm input:focus{border-color:#2f6fed;outline:none}
@@ -34553,10 +34553,8 @@ def _render_video_manager() -> str:
     meta_only = bool(cfg.get("metadata_only", True))
     del_src = bool(cfg.get("delete_source_after_use"))
 
-    ff_line = (
-        "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;"
-        "background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);color:#34d399'>✅ ffmpeg présent</div>"
-        if ff_ok else
+    # Bandeau ffmpeg UNIQUEMENT s'il manque (le « présent » n'apportait rien).
+    ff_line = "" if ff_ok else (
         "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;"
         "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
         "❌ ffmpeg absent sur le VPS — les transformations ne s'appliqueront pas tant qu'il n'est pas installé.</div>"
