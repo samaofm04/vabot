@@ -349,7 +349,10 @@ class NumerosCog(commands.Cog):
     @app_commands.command(
         name="panelnumeroall",
         description="[ADMIN] Pose le panneau Numéro & Mail dans TOUS les salons -numero-mail")
-    async def panelnumeroall(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        remplacer="true = supprime l'ancien panneau et repose le nouveau (mise à jour du design)")
+    async def panelnumeroall(self, interaction: discord.Interaction,
+                             remplacer: bool = False):
         from cogs.user import _is_staff_member
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux admins.", ephemeral=True)
@@ -368,15 +371,26 @@ class NumerosCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         ok = skipped = 0
         for ch in targets:
+            olds = []
             try:
-                had = any(p.author.id == getattr(self.bot.user, "id", 0) and p.embeds
-                          and "Numéro & Mail" in (p.embeds[0].title or "")
-                          for p in await ch.pins())
+                for p in await ch.pins():
+                    t = (p.embeds[0].title or "") if p.embeds else ""
+                    if p.author.id == getattr(self.bot.user, "id", 0) and (
+                            "Numéro & Mail" in t or "Numéros & Mails" in t):
+                        olds.append(p)
             except Exception:
-                had = False
-            if had:
+                pass
+            if olds and not remplacer:
                 skipped += 1
                 continue
+            for p in olds:                    # remplacer : on vire l'ancien
+                try:
+                    await p.delete()
+                except Exception:
+                    try:
+                        await p.unpin()
+                    except Exception:
+                        pass
             if await _ensure_num_panel(self.bot, ch):
                 ok += 1
             await asyncio.sleep(0.6)
@@ -386,7 +400,8 @@ class NumerosCog(commands.Cog):
             "sinon les boutons refuseront.")
         await interaction.followup.send(
             f"✅ Panneau posé dans **{ok}** salon(s)"
-            + (f", {skipped} l'avaient déjà" if skipped else "")
+            + (f", {skipped} l'avaient déjà (`remplacer:true` pour les mettre à jour)"
+               if skipped else "")
             + f" (sur {len(targets)} salons `-numero-mail`).{warn}", ephemeral=True)
 
     @app_commands.command(
