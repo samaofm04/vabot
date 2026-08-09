@@ -5111,6 +5111,8 @@ function capEdSync(){
   var b=capLib.block||{}, s=b.style||{}, it=capEdCur();
   var ta=document.getElementById('cap-ed-text');
   if(ta){ ta.value=it?String(it.text||''):capEdText(); ta.disabled=(capEdState.mode==='global'); }
+  var dta=document.getElementById('cap-ed-desc');
+  if(dta){ dta.value=(it&&it.desc)?String(it.desc):''; dta.disabled=(capEdState.mode==='global'||!it); }
   var f=document.getElementById('cap-ed-font'); if(f) f.value=b.font||'TikTokSans';
   var sz=document.getElementById('cap-ed-size'); if(sz) sz.value=s.size||44;
   var sv=document.getElementById('cap-ed-size-val'); if(sv) sv.textContent=String(s.size||44);
@@ -5129,6 +5131,15 @@ function capEdSync(){
   var note=document.getElementById('cap-ed-mode-note');
   if(note) note.textContent=(capEdState.mode==='global')?(gpe?'📍 Position GLOBALE active — toutes les captions seront posées ici':'📍 Position globale (inactive) — glisse le texte pour l activer'):'';
   capEdPaint();
+}
+// Description du post de LA caption sélectionnée (vide = retirée) — auto-save
+var capEdDescT=null;
+function capEdDescChanged(){
+  var it=capEdCur(), dta=document.getElementById('cap-ed-desc'); if(!it||!dta) return;
+  var v=String(dta.value||'').trim().slice(0,1000);
+  if(v) it.desc=v; else delete it.desc;
+  clearTimeout(capEdDescT);
+  capEdDescT=setTimeout(function(){ capRenderCards(); capSave(); },350);
 }
 function capEdGpToggle(){
   if(!capLibInit()) return;
@@ -7854,6 +7865,8 @@ body.light .action-icon{color:#666}
         </div>
         <div class="ce-inspect">
           <textarea id="cap-ed-text" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="capEdTextChanged()"></textarea>
+          <div style="font-size:10px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-top:8px">📄 DESCRIPTION DU POST (OPTIONNEL — PART AVEC LA VIDÉO)</div>
+          <textarea id="cap-ed-desc" placeholder="Vide = pas de description" class="nxm-ta" style="min-height:44px" oninput="capEdDescChanged()"></textarea>
           <div class="nxm-row">
             <span class="nxm-lbl">Préréglage</span>
             <button type="button" class="nxm-preset" onclick="capEdPreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
