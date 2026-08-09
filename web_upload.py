@@ -5964,17 +5964,17 @@ document.addEventListener('click',function(e){
 <div class="section-label">Création</div>
 <button class="item solo-item" id="tab-videocrea" onclick="showTab('cloud','videocrea','Création de vidéos','Génère V1 → V10 avec captions + anti-fingerprint')">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-  🎞️ Création de vidéos
+  Création de vidéos
 </button>
 <button class="item solo-item" id="tab-svideo" onclick="showTab('cloud','svideo','Métadonnées vidéo','Rendre chaque vidéo unique — iPhone + GPS + filtres (façon TikFusion)')">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z" fill="currentColor"/></svg>
-  🎬 Métadonnées vidéo
+  Métadonnées vidéo
 </button>
 
 <div class="group" id="grp-montage">
   <button class="group-head" onclick="toggleGroup('montage')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
-    <span class="label">✂️ Reel montage</span>
+    <span class="label">Reel montage</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
