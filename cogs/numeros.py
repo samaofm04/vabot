@@ -233,6 +233,49 @@ class NumerosCog(commands.Cog):
             embed=panel_embed(), view=NumPanelView(self))
 
     @app_commands.command(
+        name="panelnumeroall",
+        description="[ADMIN] Pose le panneau Numéro & Mail dans TOUS les salons -numero-mail")
+    async def panelnumeroall(self, interaction: discord.Interaction):
+        from cogs.user import _is_staff_member
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux admins.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        from cogs.welcome import _ensure_num_panel, _us_norm
+        targets = [c for c in guild.text_channels
+                   if _us_norm(c.name).endswith("-numero-mail")]
+        if not targets:
+            await interaction.response.send_message(
+                "Aucun salon `…-numero-mail` sur ce serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ok = skipped = 0
+        for ch in targets:
+            try:
+                had = any(p.author.id == getattr(self.bot.user, "id", 0) and p.embeds
+                          and "Numéro & Mail" in (p.embeds[0].title or "")
+                          for p in await ch.pins())
+            except Exception:
+                had = False
+            if had:
+                skipped += 1
+                continue
+            if await _ensure_num_panel(self.bot, ch):
+                ok += 1
+            await asyncio.sleep(0.6)
+        s = numgen.status()
+        warn = "" if (s["sms_ok"] and s["mail_ok"]) else (
+            "\n⚠️ **Clés manquantes** — fais `/smskey getatext:… smsbower:…` "
+            "sinon les boutons refuseront.")
+        await interaction.followup.send(
+            f"✅ Panneau posé dans **{ok}** salon(s)"
+            + (f", {skipped} l'avaient déjà" if skipped else "")
+            + f" (sur {len(targets)} salons `-numero-mail`).{warn}", ephemeral=True)
+
+    @app_commands.command(
         name="smskey",
         description="[OWNER] Clés des générateurs (GetAText SMS / SMSBower mail)")
     @app_commands.describe(
