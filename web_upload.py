@@ -4499,7 +4499,9 @@ document.addEventListener('click', function(ev){
     var age=(document.getElementById('txtAiAge')||{}).value||'22';
     var nb=(document.getElementById('txtAiCount')||{}).value||'6';
     b.disabled=true; var old=b.textContent; b.textContent='⏳ IA…';
+    var seed=String((document.getElementById('txtAiSeed')||{}).value||'').trim();
     var fd2=new FormData(); fd2.set('identity',c.ident); fd2.set('age',age); fd2.set('count',nb);
+    if(seed) fd2.set('seed',seed);   // bios d exemple fournies par l user
     fetch('/textpool/ai_bios',{method:'POST',body:fd2,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
         b.disabled=false; b.textContent=old;
@@ -15521,7 +15523,19 @@ def _render_textvault_html(cat: str) -> str:
             "<input id='txtAiAge' type='number' min='18' max='40' value='22' style='width:56px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:12.5px;box-sizing:border-box'></label>"
             "<select id='txtAiCount' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12.5px;font-family:inherit'><option>6</option><option>10</option><option>15</option></select>"
             "<button type='button' data-txtact='ai' class='txtv-btn' style='font-weight:700'>✨ Générer</button>"
-            f"<span style='font-size:11px;color:#75757f'>s'inspire des bios déjà présentes chez @{selected} — même style, jamais deux fois la même</span>"
+            # Exemples FOURNIS par l'user : l'IA s'en sert comme modèle de style
+            # (prioritaires sur les bios déjà en base, utile quand la model n'en
+            # a encore aucune).
+            "<div style='flex-basis:100%;height:0'></div>"
+            "<div style='flex:1;min-width:260px'>"
+            "<div style='font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin:2px 0 6px'>"
+            "TES BIOS D'EXEMPLE (OPTIONNEL — UNE PAR LIGNE)</div>"
+            "<textarea id='txtAiSeed' rows='3' placeholder=\"Colle ici des bios qui te plaisent, une par ligne — l'IA s'en inspire\" "
+            "autocomplete='off' spellcheck='false' data-lpignore='true' "
+            "style='width:100%;background:#131316;border:1px dashed #34343a;color:#e6e6ea;border-radius:10px;padding:9px 12px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none'></textarea>"
+            "</div>"
+            "<div style='flex-basis:100%;height:0'></div>"
+            f"<span style='font-size:11px;color:#75757f'>si tu laisses vide, l'IA s'inspire des bios déjà présentes chez @{selected} — même style, jamais deux fois la même</span>"
             "</div>"
         )
 
@@ -42321,11 +42335,18 @@ def create_app():
                          if str(e.get("text") or "").strip()][-15:]
         except Exception:
             _examples = []
+        # Exemples FOURNIS dans le formulaire : ils PRIMENT sur les bios en base
+        # (cas d'une model qui n'en a encore aucune).
+        _seed = [l.strip() for l in (request.form.get("seed") or "").splitlines()
+                 if l.strip()][:20]
+        if _seed:
+            _examples = _seed + [t for t in _examples if t not in _seed]
         _ex_block = ""
         if _examples:
+            _src = ("que TU as fournies — c'est EXACTEMENT ce style qu'il faut"
+                    if _seed else "EXISTANTES de cette model — c'est LE style à imiter")
             _ex_block = (
-                "Voici des bios EXISTANTES de cette model — c'est LE style à imiter "
-                "(ton, longueur, emojis, vibe) :\n"
+                f"Voici des bios {_src} (ton, longueur, emojis, vibe) :\n"
                 + "\n".join("- " + t for t in _examples)
                 + "\nGénère de NOUVELLES bios dans ce MÊME style, mais JAMAIS identiques "
                 "ni quasi identiques à celles ci-dessus.\n"
