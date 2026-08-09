@@ -5506,9 +5506,12 @@ function limpCard(j){
   }
   var done=j.done||0, total=Math.max(1,j.total||1);
   if(j.state==='running'){
-    // plancher = jalons réels ; cible = fin du lien en cours (~99% max)
+    // plancher = jalons réels ; l'estimation du lien en cours plafonne à ~85%
+    // de son segment (le 100% n'arrive QUE quand le serveur confirme)
+    if(done!==(window.__limpDone||0)){ window.__limpDone=done; window.__limpT0=Date.now(); }
+    if(!window.__limpT0) window.__limpT0=Date.now();
     __limpPct=Math.max(__limpPct, done*100/total);
-    __limpTarget=Math.min(99.2, (done+0.97)*100/total);
+    __limpTarget=Math.min(97, (done+0.85)*100/total);
   } else {
     __limpTarget=100;
     setTimeout(function(){
@@ -5531,13 +5534,16 @@ function limpCard(j){
 function limpTick(){
   var fill=document.getElementById('limpCardFill'), pt=document.getElementById('limpCardPct'), txt=document.getElementById('limpCardTxt');
   if(!fill){ clearInterval(__limpAnim); __limpAnim=null; return; }
-  // avance douce vers la cible (jamais bloqué, jamais au-delà)
-  __limpPct=Math.min(__limpTarget, __limpPct+Math.max(0.08,(__limpTarget-__limpPct)*0.045));
+  // avance douce vers la cible (lente : ~30-60s pour un download normal)
+  __limpPct=Math.min(__limpTarget, __limpPct+Math.max(0.035,(__limpTarget-__limpPct)*0.02));
   fill.style.width=__limpPct.toFixed(1)+'%';
   if(pt) pt.textContent=Math.floor(__limpPct)+'%';
   var j=__limpInfo||{};
   if(txt){
-    if(j.state==='running') txt.textContent='🔗 @'+(j.identity||'')+' — '+(j.done||0)+'/'+Math.max(1,j.total||1)+' lien(s)';
+    if(j.state==='running'){
+      var el=window.__limpT0?Math.floor((Date.now()-window.__limpT0)/1000):0;
+      txt.textContent='🔗 @'+(j.identity||'')+' — '+(j.done||0)+'/'+Math.max(1,j.total||1)+' lien(s) · '+el+'s';
+    }
     else txt.textContent=(j.ok?('✅ '+j.ok+' vidéo(s) importée(s)'):'❌ import échoué');
   }
 }
@@ -14479,21 +14485,31 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
     ok = fail = 0
     total = len(urls)
     last_err = ""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as _FTimeout
     for i, u in enumerate(urls, 1):
         _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
                                 "done": i - 1, "total": total, "ok": ok, "fail": fail})
-        # frame du reel affichée dans la carte de progression, AVANT le download
-        _LINKIMP_STATUS["thumb_url"] = _linkimp_thumb(u)
+        # Exécuteur JETABLE par lien : garde-fou MUR de 75s — un lien qui
+        # traîne (challenge IG, réseau) est ABANDONNÉ et on passe au suivant,
+        # plus jamais de carte bloquée à 97%.
+        _ex = ThreadPoolExecutor(max_workers=2)
+        try:
+            _LINKIMP_STATUS["thumb_url"] = _ex.submit(_linkimp_thumb, u).result(timeout=15)
+        except Exception:
+            _LINKIMP_STATUS["thumb_url"] = ""
         inf = {}
         vb = None
         try:
-            # cookies IG uniquement pour les liens Instagram ; TikTok = public.
-            # 45s max par lien : un download normal prend 10-30s, au-delà on
-            # passe au suivant plutôt que de « rester bloqué ».
-            vb = _vt.download_via_ytdlp(u, timeout=45, info=inf,
-                                        use_cookies=("instagram.com" in u))
+            # cookies IG uniquement pour les liens Instagram ; TikTok = public
+            vb = _ex.submit(_vt.download_via_ytdlp, u, 45, inf,
+                            ("instagram.com" in u)).result(timeout=75)
+        except _FTimeout:
+            inf["reason"] = "trop long (>75s) — lien abandonné"
         except Exception as e:
             inf["reason"] = str(e)[:120]
+        finally:
+            _ex.shutdown(wait=False)
         if vb:
             try:
                 tdir = IDENTITIES_DIR / ident / subdir
@@ -15184,7 +15200,7 @@ def _render_textvault_html(cat: str) -> str:
             "<input id='txtAiAge' type='number' min='18' max='40' value='22' style='width:56px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:12.5px;box-sizing:border-box'></label>"
             "<select id='txtAiCount' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12.5px;font-family:inherit'><option>6</option><option>10</option><option>15</option></select>"
             "<button type='button' data-txtact='ai' class='txtv-btn' style='font-weight:700'>✨ Générer</button>"
-            f"<span style='font-size:11px;color:#75757f'>ajoutées directement chez @{selected}</span>"
+            f"<span style='font-size:11px;color:#75757f'>s'inspire des bios déjà présentes chez @{selected} — même style, jamais deux fois la même</span>"
             "</div>"
         )
 
@@ -41844,9 +41860,29 @@ def create_app():
                     break
         if not key:
             return jsonify({"ok": False, "error": "Clé IA manquante : ajoute ANTHROPIC_API_KEY=sk-ant-... dans le .env du VPS (console.anthropic.com)"})
+        # Les bios EXISTANTES de la model servent de référence de style : l'IA
+        # génère « du même style, jamais la même » (demande user).
+        _examples = []
+        try:
+            import text_pool as _tpx
+            _examples = [str(e.get("text") or "").strip()
+                         for e in _tpx.list_entries("bios", identity=identity.lower())
+                         if str(e.get("text") or "").strip()][-15:]
+        except Exception:
+            _examples = []
+        _ex_block = ""
+        if _examples:
+            _ex_block = (
+                "Voici des bios EXISTANTES de cette model — c'est LE style à imiter "
+                "(ton, longueur, emojis, vibe) :\n"
+                + "\n".join("- " + t for t in _examples)
+                + "\nGénère de NOUVELLES bios dans ce MÊME style, mais JAMAIS identiques "
+                "ni quasi identiques à celles ci-dessus.\n"
+            )
         prompt = (
             f"Tu écris des bios Instagram pour le compte d'une créatrice/modèle.\n"
             f"Identité : {identity or 'une jeune femme française'} — Âge : {age} ans.\n"
+            + _ex_block +
             f"Génère exactement {count} bios DIFFÉRENTES, une par ligne, sans numérotation, sans tirets, sans guillemets.\n"
             "Contraintes STRICTES :\n"
             "- max 140 caractères chacune\n"
@@ -41876,9 +41912,12 @@ def create_app():
             return jsonify({"ok": False, "error": f"Appel IA échoué : {e}"})
         import text_pool as tp
         added = 0
+        _seen = {t.lower() for t in _examples}
         for line in text.splitlines():
             line = line.strip().strip("\"'").lstrip("-•*0123456789. ").strip()
             if not (5 <= len(line) <= 150):
+                continue
+            if line.lower() in _seen:      # jamais deux fois la même
                 continue
             try:
                 # bios générées ASSIGNÉES à la model (onglet Bios par identité)
