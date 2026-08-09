@@ -5381,29 +5381,131 @@ async function capSendDiscord(j,out,btn){
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
 }
 // ---- Import par lien (Vidéo brut / Template montage) ----
+// Poll du statut : la ligne « ⏳ Import lien X/Y » se met à jour toute seule
+// toutes les 3s, et la galerie se recharge automatiquement quand c est fini.
+var __limpLast='';
+setInterval(function(){
+  var sp=null;
+  document.querySelectorAll('[data-limpstat]').forEach(function(s){
+    if(!sp && s.offsetParent!==null) sp=s;
+  });
+  var hasRun=(__limpLast==='running');
+  if(!sp && !hasRun) return;
+  fetch('/cloud/import_link_status',{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      if(!(j&&j.ok)) return;
+      var st=j.state||'idle';
+      if(sp){
+        if(st==='running'){
+          sp.textContent='⏳ Import lien '+(j.done||0)+'/'+(j.total||0)+' pour @'+(j.identity||'')+'…';
+          sp.style.color='#fbbf24';
+        } else if(st==='done'){
+          sp.textContent='✅ Import : '+(j.ok||0)+' ajouté(s)'+(j.fail?(', '+j.fail+' échec(s) ('+(j.err||'')+')'):'');
+          sp.style.color=j.fail&&!j.ok?'#f87171':'#22c55e';
+        } else if(st==='error'){
+          sp.textContent='❌ Import : '+(j.err||'erreur');
+          sp.style.color='#f87171';
+        }
+      }
+      if(st==='running'||(hasRun&&st!=='running')) limpCard(j);
+      // fin d import -> recharge la galerie UNE fois pour montrer les vidéos
+      if(hasRun && st!=='running'){
+        try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+        var tab=(j.subdir==='templates')?'cloudtemplates':'cloudbrutes';
+        var key=(j.subdir==='templates')?'cloud_templates_ident':'cloud_brutes_ident';
+        var sec=document.getElementById('form-'+tab);
+        if(sec && sec.offsetParent!==null && typeof vaultGoTo==='function'){
+          vaultGoTo({preventDefault:function(){}}, '/?tab='+tab+'&'+key+'='+encodeURIComponent(j.identity||''));
+        }
+        if(typeof showToast==='function' && st==='done'){
+          showToast((j.ok?('✅ '+j.ok+' vidéo(s) importée(s) chez @'+(j.identity||'')):'❌ Import terminé sans succès')+(j.fail?(' · '+j.fail+' échec(s) : '+(j.err||'')):''), j.ok?'success':'error', 8000);
+        }
+      }
+      __limpLast=st;
+    }).catch(function(){});
+}, 3000);
 // Champ lien INLINE dans les formulaires d upload (vidéo en haut, lien en
 // bas) : identité lue dans le select du formulaire, envoi AJAX direct.
-document.addEventListener('click', function(ev){
-  var b2=ev.target.closest?ev.target.closest('[data-linkgo]'):null;
-  if(!b2) return;
-  var sub=b2.getAttribute('data-linkgo')||'brutes';
-  var f=b2.closest('form');
-  var sel=f?f.querySelector('select[name=identity]'):null;
-  var ta=f?f.querySelector('.up-links'):null;
+function linkGoFromForm(f){
+  if(!f) return;
+  var btn=f.querySelector('[data-linkgo]');
+  var sub=btn?(btn.getAttribute('data-linkgo')||'brutes'):'brutes';
+  var sel=f.querySelector('select[name=identity]');
+  var ta=f.querySelector('.up-links');
   var ident=sel?sel.value:'';
   var urls=ta?String(ta.value||'').trim():'';
   if(!ident){ if(typeof showToast==='function') showToast('Choisis une identité au-dessus','warning'); return; }
   if(!urls){ if(typeof showToast==='function') showToast('Colle au moins un lien Instagram ou TikTok','warning'); return; }
-  b2.disabled=true; var old=b2.textContent; b2.textContent='⏳ Lancement…';
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Lancement…'; }
   var fd=new FormData(); fd.set('identity',ident); fd.set('subdir',sub); fd.set('urls',urls); fd.set('ajax','1');
   fetch('/cloud/import_link',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
-      b2.disabled=false; b2.textContent=old;
+      if(btn){ btn.disabled=false; btn.textContent='⬇ Importer les liens'; }
       if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error',7000); return; }
-      if(ta) ta.value='';
-      if(typeof showToast==='function') showToast('🔗 Import lancé : '+j.count+' lien(s) → @'+ident+' — les vidéos arrivent dans la galerie (~30 s par lien)','success',8000);
-    }).catch(function(e){ b2.disabled=false; b2.textContent=old; if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+      if(ta){ ta.value=''; }
+      var fi=f.querySelector('.up-file-main'); if(fi) fi.required=true;
+      __limpLast='running';
+      limpCard({state:'running',done:0,total:j.count,identity:ident,subdir:sub});
+      if(typeof showToast==='function') showToast('🔗 Import lancé : '+j.count+' lien(s) → @'+ident,'success',5000);
+    }).catch(function(e){
+      if(btn){ btn.disabled=false; btn.textContent='⬇ Importer les liens'; }
+      if(typeof showToast==='function') showToast('❌ '+e,'error');
+    });
+}
+document.addEventListener('click', function(ev){
+  var b2=ev.target.closest?ev.target.closest('[data-linkgo]'):null;
+  if(!b2) return;
+  linkGoFromForm(b2.closest('form'));
 });
+// Des liens collés => le fichier n est plus obligatoire (sinon le navigateur
+// bloque avec « Please select one or more files »)
+document.addEventListener('input', function(ev){
+  var t=ev.target;
+  if(!t||!t.classList||!t.classList.contains('up-links')) return;
+  var f=t.closest('form'); var fi=f?f.querySelector('.up-file-main'):null;
+  if(fi) fi.required=!String(t.value||'').trim();
+});
+// « Uploader » avec SEULEMENT des liens (aucun fichier) => on lance l import
+// à la place (capture : passe avant le handler d upload XHR du site)
+document.addEventListener('submit', function(ev){
+  var f=ev.target;
+  if(!f||!f.classList||!f.classList.contains('up-form')) return;
+  var ta=f.querySelector('.up-links');
+  if(!ta||!String(ta.value||'').trim()) return;
+  var fi=f.querySelector('.up-file-main');
+  if(fi&&fi.files&&fi.files.length) return;   // fichiers présents -> upload normal
+  ev.preventDefault(); ev.stopPropagation();
+  linkGoFromForm(f);
+}, true);
+// Carte de progression en haut à droite (comme un upload de photos) : compteur,
+// barre, et MINIATURE de la dernière vidéo arrivée.
+function limpCard(j){
+  var c=document.getElementById('limpCard');
+  if(!c){
+    if(!j||j.state!=='running') return;
+    c=document.createElement('div'); c.id='limpCard';
+    c.style.cssText='position:fixed;top:16px;right:16px;z-index:100050;background:#0f0f12;border:1px solid #2a2a30;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);min-width:240px';
+    c.innerHTML='<img id="limpCardImg" style="width:38px;height:38px;border-radius:8px;object-fit:cover;background:#1a1a1f;display:none">'
+      +'<div style="flex:1;min-width:0"><div id="limpCardTxt" style="font-size:12.5px;font-weight:700;color:#fff"></div>'
+      +'<div style="height:4px;background:#26262c;border-radius:99px;margin-top:6px;overflow:hidden"><div id="limpCardFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#a855f7);transition:width .4s"></div></div></div>';
+    document.body.appendChild(c);
+  }
+  var txt=document.getElementById('limpCardTxt'), fill=document.getElementById('limpCardFill'), img=document.getElementById('limpCardImg');
+  var done=j.done||0, total=Math.max(1,j.total||1);
+  if(j.state==='running'){
+    if(txt) txt.textContent='🔗 @'+(j.identity||'')+' — '+done+'/'+total+' lien(s)…';
+    if(fill) fill.style.width=Math.round(done*100/total)+'%';
+  } else {
+    if(txt) txt.textContent=(j.ok?('✅ '+j.ok+' vidéo(s) importée(s)'):'❌ import échoué');
+    if(fill) fill.style.width='100%';
+    setTimeout(function(){ var cc=document.getElementById('limpCard'); if(cc) cc.remove(); }, 6000);
+  }
+  if(img&&j.last_file&&j.identity&&j.subdir){
+    var u='/cloud/thumb/'+encodeURIComponent(j.identity)+'/'+j.subdir+'/'+encodeURIComponent(j.last_file);
+    if(img.getAttribute('src')!==u) img.src=u;
+    img.style.display='block';
+  }
+}
 // ---- Selects d identité avec PP (avatars) dans les formulaires d upload ----
 // Monté au DOMContentLoaded : les formulaires sont PLUS BAS que ce script
 // dans la page (même piège que les modales). Le vrai <select> reste dans le
@@ -13181,19 +13283,23 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             # Import par lien : le champ vit DANS le formulaire d'upload
             # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
             _ls = _LINKIMP_STATUS
-            if _ls.get("subdir") == subdir:
+            if _ls.get("subdir") == subdir and _ls.get("state") in ("running", "done", "error"):
                 if _ls.get("state") == "running":
-                    add_media_btn += (
-                        f"<span style='font-size:11.5px;color:#fbbf24;margin-left:10px'>⏳ Import lien "
-                        f"{_ls.get('done', 0)}/{_ls.get('total', 0)} pour @{_ls.get('identity', '')}…</span>"
-                    )
-                elif _ls.get("state") == "done":
-                    add_media_btn += (
-                        f"<span style='font-size:11.5px;color:#22c55e;margin-left:10px'>✅ Import : "
-                        f"{_ls.get('ok', 0)} ajouté(s)"
-                        + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else "")
-                        + "</span>"
-                    )
+                    _txt = (f"⏳ Import lien {_ls.get('done', 0)}/{_ls.get('total', 0)} "
+                            f"pour @{_ls.get('identity', '')}…")
+                    _col = "#fbbf24"
+                elif _ls.get("state") == "error":
+                    _txt = f"❌ Import : {_ls.get('err', 'erreur')}"
+                    _col = "#f87171"
+                else:
+                    _txt = (f"✅ Import : {_ls.get('ok', 0)} ajouté(s)"
+                            + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else ""))
+                    _col = "#22c55e"
+                # data-limpstat : le JS le met à jour tout seul toutes les 3s
+                add_media_btn += (
+                    f"<span data-limpstat='1' data-state='{_ls.get('state')}' "
+                    f"style='font-size:11.5px;color:{_col};margin-left:10px'>{_txt}</span>"
+                )
         if subdir == "profile_pics":
             # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
             # (cercles ⚪) vers d'autres identités — les originaux restent.
@@ -14323,8 +14429,10 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
         inf = {}
         vb = None
         try:
-            # cookies IG uniquement pour les liens Instagram ; TikTok = public
-            vb = _vt.download_via_ytdlp(u, timeout=120, info=inf,
+            # cookies IG uniquement pour les liens Instagram ; TikTok = public.
+            # 45s max par lien : un download normal prend 10-30s, au-delà on
+            # passe au suivant plutôt que de « rester bloqué ».
+            vb = _vt.download_via_ytdlp(u, timeout=45, info=inf,
                                         use_cookies=("instagram.com" in u))
         except Exception as e:
             inf["reason"] = str(e)[:120]
@@ -14332,7 +14440,9 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
             try:
                 tdir = IDENTITIES_DIR / ident / subdir
                 tdir.mkdir(parents=True, exist_ok=True)
-                (tdir / f"import_{int(_t.time())}_{i}.mp4").write_bytes(vb)
+                _fname = f"import_{int(_t.time())}_{i}.mp4"
+                (tdir / _fname).write_bytes(vb)
+                _LINKIMP_STATUS["last_file"] = _fname   # miniature de la carte de progression
                 ok += 1
             except Exception as e:
                 fail += 1
@@ -38782,8 +38892,15 @@ def create_app():
             return _fail("Destination invalide", "cloudbrutes")
         if ident not in _list_identities():
             return _fail("Identité inconnue", tab)
-        urls = [u.strip() for u in (request.form.get("urls") or "").splitlines()
-                if u.strip().lower().startswith(("http://", "https://"))][:10]
+        # Nettoyage : on ne garde que l'URL utile — les ?utm_source=…&igsh=…
+        # (tracking) ne servent à rien et polluent yt-dlp.
+        urls = []
+        for line in (request.form.get("urls") or "").splitlines():
+            u = line.strip()
+            if not u.lower().startswith(("http://", "https://")):
+                continue
+            urls.append(u.split("#")[0].split("?")[0])
+        urls = urls[:10]
         if not urls:
             return _fail("Colle au moins un lien (Instagram ou TikTok)", tab)
         import threading as _th
@@ -38797,6 +38914,14 @@ def create_app():
             return jsonify({"ok": True, "count": len(urls)})
         return _success(f"🔗 Import lancé : {len(urls)} lien(s) → @{ident} — "
                         "recharge l'onglet dans ~1 min pour voir les vidéos", tab=tab)
+
+    @app.route("/cloud/import_link_status", methods=["GET"])
+    def cloud_import_link_status():
+        """Statut live de l'import par lien (poll 3s côté client)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        return jsonify({"ok": True, **_LINKIMP_STATUS})
 
     # ============ GOOGLE DRIVE (copie seule — jamais de suppression) =========
     @app.route("/gdrive/config", methods=["POST"])
