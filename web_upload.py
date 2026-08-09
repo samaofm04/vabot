@@ -5380,6 +5380,101 @@ async function capSendDiscord(j,out,btn){
     else{ btn.disabled=false; btn.textContent='📤 Discord'; if(typeof showToast==='function') showToast('❌ '+((jj&&jj.error)||'?'),'error'); }
   }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
 }
+// ---- Import par lien (Vidéo brut / Template montage) ----
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[data-linkimp]'):null;
+  if(!b) return;
+  var ident=b.getAttribute('data-ident')||'', sub=b.getAttribute('data-subdir')||'';
+  var fi=document.getElementById('linkImpIdent'); if(fi) fi.value=ident;
+  var fs=document.getElementById('linkImpSubdir'); if(fs) fs.value=sub;
+  var d=document.getElementById('linkImpDest');
+  if(d) d.textContent='Destination : @'+ident+' → '+(sub==='templates'?'Template montage':'Vidéo brut');
+  var m=document.getElementById('link-import-modal'); if(m) m.style.display='flex';
+});
+function linkImpClose(){ var m=document.getElementById('link-import-modal'); if(m) m.style.display='none'; }
+// Variante depuis les FORMULAIRES d upload (média OU lien) : identité lue
+// dans le select du formulaire, destination selon le bouton.
+document.addEventListener('click', function(ev){
+  var b2=ev.target.closest?ev.target.closest('[data-linkimp2]'):null;
+  if(!b2) return;
+  var sub=b2.getAttribute('data-linkimp2')||'brutes';
+  var f=b2.closest('form');
+  var sel=f?f.querySelector('select[name=identity]'):null;
+  var ident=sel?sel.value:'';
+  if(!ident){ if(typeof showToast==='function') showToast('Choisis une identité au-dessus','warning'); return; }
+  var fi=document.getElementById('linkImpIdent'); if(fi) fi.value=ident;
+  var fs=document.getElementById('linkImpSubdir'); if(fs) fs.value=sub;
+  var d=document.getElementById('linkImpDest');
+  if(d) d.textContent='Destination : @'+ident+' → '+(sub==='templates'?'Template montage':'Vidéo brut');
+  var m=document.getElementById('link-import-modal'); if(m) m.style.display='flex';
+});
+// ---- Selects d identité avec PP (avatars) dans les formulaires d upload ----
+// Monté au DOMContentLoaded : les formulaires sont PLUS BAS que ce script
+// dans la page (même piège que les modales). Le vrai <select> reste dans le
+// DOM (caché) : le formulaire poste exactement comme avant.
+document.addEventListener('DOMContentLoaded', function(){
+  var st=document.createElement('style');
+  st.textContent='.isel{position:relative}'
+    +'.isel-btn{display:flex;align-items:center;gap:10px;width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:8px 12px;font-size:13.5px;font-family:inherit;cursor:pointer;box-sizing:border-box}'
+    +'.isel-btn:hover{border-color:#4a4a52}'
+    +'.isel-pan{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:60;background:#131316;border:1px solid #34343a;border-radius:10px;max-height:280px;overflow-y:auto;display:none;box-shadow:0 18px 50px rgba(0,0,0,.55)}'
+    +'.isel-it{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;font-size:13.5px;color:#e6e6ea}'
+    +'.isel-it:hover{background:#1c1c22}'
+    +'.isel-av{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#26262c}'
+    +'.isel-avf{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:12px;background:linear-gradient(135deg,#3b82f6,#a855f7)}';
+  document.head.appendChild(st);
+  function mkAv(name){
+    var img=document.createElement('img'); img.className='isel-av';
+    img.src='/identity/avatar/'+encodeURIComponent(name); img.loading='lazy';
+    img.addEventListener('error',function(){
+      var d=document.createElement('div'); d.className='isel-avf';
+      d.textContent=(name.charAt(0)||'?').toUpperCase();
+      img.replaceWith(d);
+    });
+    return img;
+  }
+  function enhance(sel){
+    if(sel.dataset.isel) return; sel.dataset.isel='1';
+    sel.style.display='none';
+    var wrap=document.createElement('div'); wrap.className='isel';
+    var btn=document.createElement('button'); btn.type='button'; btn.className='isel-btn';
+    var pan=document.createElement('div'); pan.className='isel-pan';
+    function label(){
+      btn.innerHTML='';
+      var v=sel.value||'';
+      if(v) btn.appendChild(mkAv(v));
+      var sp=document.createElement('span'); sp.style.cssText='flex:1;text-align:left;text-transform:capitalize';
+      sp.textContent=v||'Choisir…';
+      btn.appendChild(sp);
+      var car=document.createElement('span'); car.textContent='▾'; car.style.color='#8b8b95';
+      btn.appendChild(car);
+    }
+    Array.prototype.forEach.call(sel.options,function(o){
+      if(!o.value) return;
+      var it=document.createElement('div'); it.className='isel-it';
+      it.appendChild(mkAv(o.value));
+      var sp=document.createElement('span'); sp.style.textTransform='capitalize'; sp.textContent=o.value;
+      it.appendChild(sp);
+      it.addEventListener('click',function(){
+        sel.value=o.value;
+        try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
+        pan.style.display='none'; label();
+      });
+      pan.appendChild(it);
+    });
+    btn.addEventListener('click',function(e){
+      e.stopPropagation();
+      label();   // resynchronise si sel.value a bougé (upPrefillIdentity)
+      pan.style.display=(pan.style.display==='block')?'none':'block';
+    });
+    document.addEventListener('click',function(){ pan.style.display='none'; });
+    sel.addEventListener('change',label);
+    wrap.appendChild(btn); wrap.appendChild(pan);
+    sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    label();
+  }
+  document.querySelectorAll('.up-form select[name=identity]').forEach(enhance);
+});
 // ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
 var identNewCtx={vtab:'',ikey:''};
 document.addEventListener('click', function(ev){
@@ -5834,7 +5929,7 @@ window.upPrefillIdentity = function(utab, ident){
     var form = document.getElementById('form-' + utab);
     if(!form) return;
     var sel = form.querySelector('select[name=identity]');
-    if(sel){ sel.value = ident; }
+    if(sel){ sel.value = ident; try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} }
     // S'assure que la card identite est bien VISIBLE (au cas ou un ancien etat l'aurait cachee)
     form.querySelectorAll('.up-card').forEach(function(c){
       if(c.querySelector('select[name=identity]')) c.style.display = '';
@@ -6407,6 +6502,8 @@ document.addEventListener('click',function(e){
 <div class="up-drop-hint">Drag and drop the video here — plusieurs videos possibles</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
+<div style="text-align:center;margin:10px 0 2px;font-size:11.5px;color:#75757f">— ou —</div>
+<button type="button" data-linkimp2="brutes" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔗 Importer par lien (Instagram / TikTok)</button>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
@@ -6430,6 +6527,8 @@ document.addEventListener('click',function(e){
 <div class="up-drop-hint">Drag and drop the template here — il apporte SON son</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
+<div style="text-align:center;margin:10px 0 2px;font-size:11.5px;color:#75757f">— ou —</div>
+<button type="button" data-linkimp2="templates" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔗 Importer par lien (Instagram / TikTok)</button>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
@@ -6571,7 +6670,7 @@ document.addEventListener('click',function(e){
 <form method="POST" action="/upload/pp" enctype="multipart/form-data" class="up-form" data-utype="pp" data-accept="image/*">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Photo de profil</h3></div>
-<small style="color:#888;margin-bottom:10px;display:block">Choisis l'identité (ou « Partagé » = pool commun à toutes)</small>
+<small style="color:#888;margin-bottom:10px;display:block">Choisis l'identité (chaque model a ses propres PP)</small>
 <select name="identity" class="up-input" style="margin-bottom:12px">{pp_ident_opts}</select>
 <label class="up-drop">
 <input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
@@ -7369,6 +7468,29 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
+<!-- ===== Import par lien (Video brut / Template montage) : IG + TikTok via yt-dlp ===== -->
+<div id="link-import-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="linkImpClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:520px;max-width:94vw;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-weight:800;font-size:15px">🔗 Import par lien</span>
+      <span style="flex:1"></span>
+      <button type="button" onclick="linkImpClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
+    </div>
+    <div id="linkImpDest" style="font-size:12px;color:#888"></div>
+    <form method="POST" action="/cloud/import_link" style="display:flex;flex-direction:column;gap:12px;margin:0">
+      <input type="hidden" name="identity" id="linkImpIdent">
+      <input type="hidden" name="subdir" id="linkImpSubdir">
+      <textarea name="urls" rows="5" required placeholder="https://www.instagram.com/reel/…&#10;https://www.tiktok.com/@…/video/…&#10;(un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true"
+        style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
+      <div style="font-size:11px;color:#75757f;line-height:1.5">Instagram (avec tes cookies du site) et TikTok. Téléchargement en arrière-plan (~30 s par vidéo, 50 Mo max chacune) — recharge l'onglet pour voir arriver les fichiers.</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" onclick="linkImpClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:10px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+        <button type="submit" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">⬇ Importer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ===== Bios / CTA : ajout en liste (un champ par texte, facon Upload Reel) ===== -->
 <div id="txt-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="txtAddClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
@@ -13076,6 +13198,31 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
             f"{_btn_lbl}</button>"
         )
+        if subdir in ("brutes", "templates"):
+            # 🔗 Import par lien : colle des liens IG/TikTok, le site télécharge
+            # (yt-dlp de la Veille) et ajoute comme un upload normal.
+            add_media_btn += (
+                f"<button type='button' data-linkimp='1' data-ident='{selected}' data-subdir='{subdir}' "
+                "title='Colle des liens Instagram / TikTok — le site télécharge et ajoute tout seul' "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
+                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
+                "🔗 Import par lien</button>"
+            )
+            _ls = _LINKIMP_STATUS
+            if _ls.get("subdir") == subdir:
+                if _ls.get("state") == "running":
+                    add_media_btn += (
+                        f"<span style='font-size:11.5px;color:#fbbf24;margin-left:10px'>⏳ Import lien "
+                        f"{_ls.get('done', 0)}/{_ls.get('total', 0)} pour @{_ls.get('identity', '')}…</span>"
+                    )
+                elif _ls.get("state") == "done":
+                    add_media_btn += (
+                        f"<span style='font-size:11.5px;color:#22c55e;margin-left:10px'>✅ Import : "
+                        f"{_ls.get('ok', 0)} ajouté(s)"
+                        + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else "")
+                        + "</span>"
+                    )
         if subdir == "profile_pics":
             # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
             # (cercles ⚪) vers d'autres identités — les originaux restent.
@@ -14178,6 +14325,54 @@ def _apply_identity_order(identities):
     """Trie selon l'ordre custom ; les non-listées après, en alphabétique."""
     pos = {n: i for i, n in enumerate(_load_identity_order())}
     return sorted(identities, key=lambda n: (pos.get(n, len(pos) + 1), n))
+
+
+# ====================================================================
+#  IMPORT PAR LIEN (Vidéo brut / Template montage) : l'user colle des
+#  liens Instagram / TikTok, le site télécharge via yt-dlp (le même
+#  téléchargeur que la Veille, cookies IG inclus) et range les mp4 dans
+#  identities/<ident>/<subdir>/ comme un upload normal. Arrière-plan.
+# ====================================================================
+_LINKIMP_STATUS: dict = {"state": "idle"}
+
+
+def _linkimp_run(ident: str, subdir: str, urls: list):
+    import time as _t
+    try:
+        import veille_telegram as _vt
+    except Exception as e:
+        _LINKIMP_STATUS.update({"state": "error", "err": f"module veille indispo: {e}"})
+        return
+    ok = fail = 0
+    total = len(urls)
+    last_err = ""
+    for i, u in enumerate(urls, 1):
+        _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
+                                "done": i - 1, "total": total, "ok": ok, "fail": fail})
+        inf = {}
+        vb = None
+        try:
+            # cookies IG uniquement pour les liens Instagram ; TikTok = public
+            vb = _vt.download_via_ytdlp(u, timeout=120, info=inf,
+                                        use_cookies=("instagram.com" in u))
+        except Exception as e:
+            inf["reason"] = str(e)[:120]
+        if vb:
+            try:
+                tdir = IDENTITIES_DIR / ident / subdir
+                tdir.mkdir(parents=True, exist_ok=True)
+                (tdir / f"import_{int(_t.time())}_{i}.mp4").write_bytes(vb)
+                ok += 1
+            except Exception as e:
+                fail += 1
+                last_err = str(e)[:120]
+        else:
+            fail += 1
+            last_err = inf.get("reason") or "échec téléchargement"
+    _LINKIMP_STATUS.update({"state": "done", "identity": ident, "subdir": subdir,
+                            "done": total, "total": total, "ok": ok, "fail": fail,
+                            "err": last_err, "ts": int(_t.time())})
+    _invalidate_all_ttl_cache()   # compteurs/galeries à jour au prochain rendu
 
 
 def _clean_caption_block(raw) -> dict:
@@ -38595,6 +38790,34 @@ def create_app():
                     continue
         _invalidate_all_ttl_cache()   # compteurs sidebars à jour
         return jsonify({"ok": True, "copied": copied})
+
+    @app.route("/cloud/import_link", methods=["POST"])
+    def cloud_import_link():
+        """Import par lien (IG/TikTok) vers brutes/ ou templates/ d'une identité.
+        Téléchargement en ARRIÈRE-PLAN via le yt-dlp de la Veille (cookies IG
+        pour les liens Instagram) ; les mp4 arrivent comme un upload normal."""
+        if not is_auth():
+            return redirect("/")
+        ident = (request.form.get("identity") or "").strip().lower()
+        subdir = (request.form.get("subdir") or "").strip().lower()
+        tab = "cloudtemplates" if subdir == "templates" else "cloudbrutes"
+        if subdir not in ("brutes", "templates"):
+            return _error("Destination invalide", tab="cloudbrutes")
+        if ident not in _list_identities():
+            return _error("Identité inconnue", tab=tab)
+        urls = [u.strip() for u in (request.form.get("urls") or "").splitlines()
+                if u.strip().lower().startswith(("http://", "https://"))][:10]
+        if not urls:
+            return _error("Colle au moins un lien (Instagram ou TikTok)", tab=tab)
+        import threading as _th
+        if _LINKIMP_STATUS.get("state") == "running":
+            return _error("Un import par lien tourne déjà — attends qu'il finisse", tab=tab)
+        _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
+                                "done": 0, "total": len(urls), "ok": 0, "fail": 0, "err": ""})
+        _th.Thread(target=_linkimp_run, args=(ident, subdir, urls),
+                   name="link-import", daemon=True).start()
+        return _success(f"🔗 Import lancé : {len(urls)} lien(s) → @{ident} — "
+                        "recharge l'onglet dans ~1 min pour voir les vidéos", tab=tab)
 
     # ============ GOOGLE DRIVE (copie seule — jamais de suppression) =========
     @app.route("/gdrive/config", methods=["POST"])

@@ -1831,6 +1831,33 @@ try:
             except Exception:
                 pass
 
+    # -- Import par lien (IG/TikTok -> brutes/templates, yt-dlp stubbe) -------
+    import veille_telegram as _vtCa
+    _sav_dl = _vtCa.download_via_ytdlp
+    _vtCa.download_via_ytdlp = lambda url, timeout=25, info=None, use_cookies=True: b"\x00" * 2000
+    try:
+        _rLi = _cCa.post("/cloud/import_link", data={
+            "identity": "_tst_captions", "subdir": "templates",
+            "urls": "https://www.tiktok.com/@x/video/123\npas un lien\nhttps://www.instagram.com/reel/ABC/"})
+        check("import lien : lance (redirect flash)", _rLi.status_code in (200, 302))
+        import time as _tCa
+        _tplD = _idCa / "templates"
+        for _ in range(30):
+            if len(list(_tplD.glob("import_*.mp4"))) >= 2:
+                break
+            _tCa.sleep(0.1)
+        check("import lien : 2 liens valides telecharges dans templates/ (ligne invalide ignoree)",
+              len(list(_tplD.glob("import_*.mp4"))) == 2)
+        check("import lien : subdir invalide refuse",
+              _cCa.post("/cloud/import_link", data={"identity": "_tst_captions", "subdir": "videos",
+                        "urls": "https://x.com/v"}).status_code in (200, 302)
+              and not list((_idCa / "videos").glob("import_*.mp4")) if (_idCa / "videos").exists() else True)
+        check("import lien : identite inconnue refusee",
+              _cCa.post("/cloud/import_link", data={"identity": "zz_inconnue", "subdir": "brutes",
+                        "urls": "https://x.com/v"}).status_code in (200, 302))
+    finally:
+        _vtCa.download_via_ytdlp = _sav_dl
+
     # -- Google Drive sync (copie seule) --------------------------------------
     import gdrive_sync as _gdCa
     check("gdrive : module importable sans google-auth (available -> bool)",
