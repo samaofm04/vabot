@@ -1776,6 +1776,68 @@ try:
           _rUp.status_code in (200, 302)
           and (not _poolD.exists() or not list(_poolD.glob("pp_*"))))
 
+    # -- PP « Appliquer aux autres » : COPIE vers d autres identites ----------
+    _ppSrcD = _idCa / "profile_pics"; _ppSrcD.mkdir(parents=True, exist_ok=True)
+    (_ppSrcD / "src_apply.jpg").write_bytes(b"\xd8" * 500)
+    _id2 = _plCa.Path("data/identities/_tst_cap2")
+    _shCa.rmtree(_id2, ignore_errors=True)
+    (_id2 / "profile_pics").mkdir(parents=True)
+    _jAp = (_cCa.post("/cloud/pp_apply", data={
+        "files": _jsCa.dumps(["_tst_captions|profile_pics|src_apply.jpg"]),
+        "targets": _jsCa.dumps(["_tst_cap2", "zz_inconnue"])}).get_json() or {})
+    check("pp apply : copie vers la cible (original intact)",
+          _jAp.get("ok") and _jAp.get("copied") == 1
+          and (_ppSrcD / "src_apply.jpg").exists()
+          and len(list((_id2 / "profile_pics").glob("pp_*.jpg"))) == 1, str(_jAp)[:90])
+    check("pp apply : cibles toutes invalides refusees",
+          ((_cCa.post("/cloud/pp_apply", data={
+              "files": _jsCa.dumps(["_tst_captions|profile_pics|src_apply.jpg"]),
+              "targets": _jsCa.dumps(["zz_inconnue"])}).get_json() or {}).get("ok")) is not True)
+    _jTr = (_cCa.post("/cloud/pp_apply", data={
+        "files": _jsCa.dumps(["../..|profile_pics|x.jpg", "_tst_captions|videos|../x.jpg"]),
+        "targets": _jsCa.dumps(["_tst_cap2"])}).get_json() or {})
+    check("pp apply : file_id traversant ignore (0 copie)", _jTr.get("copied", -1) == 0)
+    _shCa.rmtree(_id2, ignore_errors=True)
+
+    # -- Google Drive sync (copie seule) --------------------------------------
+    import gdrive_sync as _gdCa
+    check("gdrive : module importable sans google-auth (available -> bool)",
+          isinstance(_gdCa.available(), bool))
+    check("gdrive : parse lien dossier",
+          _gdCa.folder_id_from("https://drive.google.com/drive/folders/1AbC_dEf-234567890xyz?usp=sharing") == "1AbC_dEf-234567890xyz"
+          and _gdCa.folder_id_from("1AbC_dEf-234567890xyz") == "1AbC_dEf-234567890xyz"
+          and _gdCa.folder_id_from("n importe quoi !") == "")
+    _gdSrc = _plCa.Path("gdrive_sync.py").read_text(encoding="utf-8")
+    check("gdrive : AUCUN appel de suppression dans le module (copie seule)",
+          "sess.delete" not in _gdSrc and ".unlink(" not in _gdSrc
+          and "rmtree" not in _gdSrc and '"trashed": true' not in _gdSrc.lower())
+    _fGd = _plCa.Path("data/gdrive_sync.json")
+    _savGd = _fGd.read_text(encoding="utf-8") if _fGd.exists() else None
+    _rGc = _cCa.post("/gdrive/config", data={"folder": "https://drive.google.com/drive/folders/1AbC_dEf-234567890xyz"})
+    check("gdrive : config enregistree (id extrait du lien)",
+          _rGc.status_code in (200, 302)
+          and (_gdCa.load_config().get("folder") == "1AbC_dEf-234567890xyz"))
+    check("gdrive : lien invalide refuse",
+          _cCa.post("/gdrive/config", data={"folder": "zzz"}).status_code in (200, 302)
+          and _gdCa.load_config().get("folder") == "1AbC_dEf-234567890xyz")
+    if not _gdCa.available():
+        _rGs = _cCa.post("/gdrive/sync", data={})
+        check("gdrive : sync sans compte de service -> refus propre (pas de crash)",
+              _rGs.status_code in (200, 302))
+    else:
+        check("gdrive : compte de service present en local -> test sync saute (pas d appel reseau)", True)
+    _wCa._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    check("gdrive : chatter bloque (403)",
+          _c403.post("/gdrive/sync", data={}).status_code == 403)
+    _wCa._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    if _savGd is not None:
+        _wCa.safe_json.write_text(_fGd, _savGd)
+    else:
+        try:
+            _fGd.unlink()
+        except Exception:
+            pass
+
     # tirage random verrouille par grep du source (pattern section 18)
     _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
     check("captions gen : tirage random.choice (caption ET brute)",

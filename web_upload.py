@@ -4452,6 +4452,51 @@ function vaultSelectAll(){
   });
   if(typeof showToast==='function') showToast(allOn?'Sélection vidée':('☑ '+cbs.length+' élément'+(cbs.length>1?'s':'')+' sélectionné'+(cbs.length>1?'s':'')),'info',2500);
 }
+// ==================== PP : Appliquer aux autres (copie, jamais de suppression) ====================
+function ppApplyOpen(){
+  var files=[];
+  try{ selectedFiles.forEach(function(f){ if(String(f).indexOf("|profile_pics|")>0) files.push(String(f)); }); }catch(e){}
+  if(!files.length){
+    if(typeof showToast==='function') showToast("Sélectionne d'abord des PP (cercle ⚪ sur les cartes — « ☑ Tout » pour tout prendre)",'warning',6000);
+    return;
+  }
+  var sec=null;
+  document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  var items=sec?sec.querySelectorAll('.vault-item'):[];
+  var act=sec?sec.querySelector('.vault-item-active'):null;
+  var cur=act?(act.getAttribute('data-ident')||''):'';
+  var out=[];
+  items.forEach(function(a){
+    var n=a.getAttribute('data-ident'); if(!n||n===cur) return;
+    out.push('<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#131316;border:1px solid #2a2a30;border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="'+nxMEsc(n)+'"> '+nxMEsc(n)+'</label>');
+  });
+  var list=document.getElementById('pp-apply-list');
+  if(list) list.innerHTML=out.join('')||'<div style="font-size:12px;color:#888">Aucune autre identité</div>';
+  var cnt=document.getElementById('pp-apply-count'); if(cnt) cnt.textContent=String(files.length);
+  window.__ppApplyFiles=files;
+  var m=document.getElementById('pp-apply-modal'); if(m) m.style.display='flex';
+}
+function ppApplyClose(){ var m=document.getElementById('pp-apply-modal'); if(m) m.style.display='none'; }
+async function ppApplyGo(){
+  var files=window.__ppApplyFiles||[], targets=[];
+  document.querySelectorAll('#pp-apply-list input:checked').forEach(function(cb){ targets.push(cb.value); });
+  if(!targets.length){ if(typeof showToast==='function') showToast('Coche au moins une identité','warning'); return; }
+  var fd=new FormData(); fd.set('files',JSON.stringify(files)); fd.set('targets',JSON.stringify(targets));
+  var go=document.getElementById('pp-apply-go'); if(go){ go.disabled=true; go.textContent='⏳'; }
+  try{
+    var r=await fetch('/cloud/pp_apply',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    if(go){ go.disabled=false; go.textContent='Appliquer'; }
+    if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+    ppApplyClose();
+    if(typeof clearSelection==='function') clearSelection();
+    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+    if(typeof showToast==='function') showToast('✅ '+j.copied+' PP copiée(s) vers '+targets.length+' identité(s) — les originaux restent en place','success',6500);
+  }catch(e){
+    if(go){ go.disabled=false; go.textContent='Appliquer'; }
+    if(typeof showToast==='function') showToast('❌ '+e,'error');
+  }
+}
 // ==================== Bibliothèque CAPTION (onglet Reel montage) ====================
 // Textes par identité, posés en RANDOM sur les vidéos brutes à la génération.
 // État chargé depuis le JSON embarqué #capLibData (ré-émis par le serveur à chaque
@@ -7213,6 +7258,19 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
+<!-- ===== PP : Appliquer aux autres (COPIE des PP selectionnees vers d autres identites) ===== -->
+<div id="pp-apply-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="ppApplyClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:360px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="font-weight:800;font-size:15px">🖼️ Appliquer aux autres</div>
+    <div style="font-size:12px;color:#888;line-height:1.5"><span id="pp-apply-count">0</span> PP sélectionnée(s) seront <b style="color:#c4c4cc">copiées</b> chez les identités cochées — les originaux restent en place.</div>
+    <div id="pp-apply-list" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:0"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" onclick="ppApplyClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+      <button type="button" id="pp-apply-go" onclick="ppApplyGo()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Appliquer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
@@ -12905,6 +12963,18 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
             f"{_btn_lbl}</button>"
         )
+        if subdir == "profile_pics":
+            # « Appliquer aux autres » (façon éditeur montage) : COPIE les PP
+            # sélectionnées (cercles ⚪) vers d'autres identités — copie pure,
+            # les originaux restent chez l'identité source.
+            add_media_btn += (
+                "<button type='button' onclick='ppApplyOpen()' "
+                "title='Copier les PP sélectionnées (⚪) vers d autres identités' "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+                "background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;"
+                "font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px'>"
+                "🖼️ Appliquer aux autres</button>"
+            )
 
     gallery_header = (
         # === Row 1 : identite a gauche + Add media a droite ===
@@ -14414,6 +14484,67 @@ def _render_cloud_drive_html() -> str:
         "</div>"
     )
 
+    # ---- Boîte admin « ☁️ Google Drive » (copie seule, jamais de suppression) ----
+    sync_box = ""
+    try:
+        _is_full = False
+        try:
+            from flask import session as _s_dr
+            _u = _load_web_users().get((_s_dr.get("username") or "").lower())
+            _role = (str(_u.get("role")).lower() if isinstance(_u, dict) and _u.get("role")
+                     else (_s_dr.get("role") or "").lower())
+            _is_full = _role_allowed_tabs(_role) is None
+        except Exception:
+            _is_full = False
+        if _is_full:
+            import gdrive_sync as _gd
+            _cfg = _gd.load_config()
+            _st = _gd.status()
+            _fol = _cfg.get("folder") or ""
+            _lr = _cfg.get("last_run") or {}
+            if not _gd.available():
+                _stat = "⚠️ Compte de service Google absent — uploade data/google_service_account.json (le même que la synchro Sheets Jailbreak)."
+            elif _st.get("state") == "running":
+                _stat = (f"⏳ Synchro en cours : {_st.get('done', 0)}/{_st.get('total', 0)} — "
+                         f"{_st.get('uploaded', 0)} envoyé(s), {_st.get('skipped', 0)} déjà à jour"
+                         + (f", {_st.get('errors', 0)} erreur(s)" if _st.get('errors') else "")
+                         + " · recharge l'onglet pour actualiser")
+            elif _st.get("state") == "error":
+                _stat = f"❌ Dernière synchro en erreur : {_st.get('err', '?')}"
+            elif _lr:
+                import datetime as _dts
+                _when = _dts.datetime.fromtimestamp(_lr.get("ts", 0)).strftime("%d/%m %H:%M")
+                _stat = (f"✅ Dernière synchro {_when} : {_lr.get('uploaded', 0)} envoyé(s), "
+                         f"{_lr.get('skipped', 0)} déjà à jour"
+                         + (f", {_lr.get('errors', 0)} erreur(s)" if _lr.get("errors") else ""))
+            else:
+                _stat = "Pas encore synchronisé."
+            _email = _gd.sa_email() or "(email du compte de service inconnu)"
+            _iv = " checked" if _cfg.get("include_videos") else ""
+            sync_box = (
+                "<div style='margin:16px 0;padding:16px;background:#101013;border:1px solid #232327;border-radius:12px'>"
+                "<div style='font-weight:700;font-size:14px'>☁️ Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
+                "<div style='font-size:12px;color:#888;margin:6px 0 12px;line-height:1.6'>"
+                "1) Dans TON Google Drive, crée un dossier (ex : « VA DRIVE ») et partage-le en <b>Éditeur</b> avec : "
+                f"<code style='background:#1a1a1f;padding:2px 6px;border-radius:5px;user-select:all'>{_email}</code><br>"
+                "2) Colle le lien du dossier ci-dessous, enregistre, puis lance la synchro. "
+                "Chaque identité aura son dossier (PP, Posts, Stories…). Relancer n'envoie que le nouveau.</div>"
+                "<form method='POST' action='/gdrive/config' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px'>"
+                f"<input type='text' name='folder' value='{_fol}' placeholder='Lien ou ID du dossier Drive partagé' "
+                "style='flex:1;min-width:260px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;height:34px;padding:0 10px;font-size:12.5px;font-family:inherit'>"
+                f"<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc;cursor:pointer'><input type='checkbox' name='include_videos' value='1'{_iv}> inclure les vidéos (reels/brutes/templates)</label>"
+                "<button type='submit' style='padding:8px 14px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>💾 Enregistrer</button>"
+                "</form>"
+                "<form method='POST' action='/gdrive/sync' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
+                "<button type='submit' style='padding:8px 16px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>☁️ Synchroniser maintenant</button>"
+                f"<span style='font-size:12px;color:#9a9aa6'>{_stat}</span>"
+                "</form>"
+                "<div style='font-size:11px;color:#75757f;margin-top:8px'>Par défaut les vidéos ne partent pas (quota ~15 Go du compte de service) — coche la case si tu veux tout envoyer.</div>"
+                "</div>"
+            )
+    except Exception:
+        sync_box = ""
+
     play_badge = (
         "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
         "width:34px;height:34px;background:rgba(0,0,0,.65);border-radius:50%;"
@@ -14467,7 +14598,7 @@ def _render_cloud_drive_html() -> str:
     return (
         "<div class='vault-layout'>"
         + vault_sidebar
-        + f"<div class='vault-gallery'>{header}{''.join(blocks)}</div>"
+        + f"<div class='vault-gallery'>{header}{sync_box}{''.join(blocks)}</div>"
         + "</div>"
     )
 
@@ -38108,6 +38239,87 @@ def create_app():
             except Exception:
                 continue
         return _success(f"📦 {moved} PP déplacée(s) vers {ident} — rien n'a été supprimé", tab="cloudpps")
+
+    @app.route("/cloud/pp_apply", methods=["POST"])
+    def cloud_pp_apply():
+        """« Appliquer aux autres » (page PP) : COPIE les PP sélectionnées vers
+        d'autres identités. Copie pure — les originaux restent en place."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import json as _js
+        import shutil as _sh
+        try:
+            files = _js.loads(request.form.get("files") or "[]")
+            targets = _js.loads(request.form.get("targets") or "[]")
+        except Exception:
+            return jsonify({"ok": False, "error": "JSON invalide"})
+        if not isinstance(files, list) or not isinstance(targets, list) or not files or not targets:
+            return jsonify({"ok": False, "error": "sélection ou cibles manquantes"})
+        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        tgts = [t for t in (str(x).strip().lower() for x in targets[:50]) if t in valid]
+        if not tgts:
+            return jsonify({"ok": False, "error": "aucune identité cible valide"})
+        copied = 0
+        for fid in files[:300]:
+            fid = str(fid)
+            if "|profile_pics|" not in fid:
+                continue
+            parsed = _parse_file_id(fid)
+            if not parsed:
+                continue
+            _dir, src = parsed
+            if not src.exists():
+                continue
+            src_ident = fid.split("|", 1)[0].lower()
+            ext = src.suffix.lower()
+            for t in tgts:
+                if t == src_ident:
+                    continue
+                tdir = IDENTITIES_DIR / t / "profile_pics"
+                tdir.mkdir(parents=True, exist_ok=True)
+                # nom unique anti-écrasement (même boucle que /upload/pp)
+                n = len(list(tdir.glob("*"))) + 1
+                target = tdir / f"pp_{n}{ext}"
+                while target.exists():
+                    n += 1
+                    target = tdir / f"pp_{n}{ext}"
+                try:
+                    _sh.copy2(str(src), str(target))
+                    copied += 1
+                except Exception:
+                    continue
+        _invalidate_all_ttl_cache()   # compteurs sidebars à jour
+        return jsonify({"ok": True, "copied": copied})
+
+    # ============ GOOGLE DRIVE (copie seule — jamais de suppression) =========
+    @app.route("/gdrive/config", methods=["POST"])
+    def gdrive_config():
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        cfg = _gd.load_config()
+        raw = (request.form.get("folder") or "").strip()
+        fid = _gd.folder_id_from(raw)
+        if raw and not fid:
+            return _error("Lien/ID de dossier Drive invalide", tab="clouddrive")
+        cfg["folder"] = fid
+        cfg["include_videos"] = bool(request.form.get("include_videos"))
+        _gd.save_config(cfg)
+        return _success("☁️ Config Google Drive enregistrée", tab="clouddrive")
+
+    @app.route("/gdrive/sync", methods=["POST"])
+    def gdrive_sync_now():
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        if not _gd.available():
+            return _error("Compte de service Google absent (data/google_service_account.json)", tab="clouddrive")
+        if not _gd.folder_id_from(_gd.load_config().get("folder") or ""):
+            return _error("Renseigne d'abord le dossier Drive partagé", tab="clouddrive")
+        if not _gd.start_background():
+            return _error("Une synchro tourne déjà — recharge l'onglet pour suivre", tab="clouddrive")
+        return _success("☁️ Synchro Google Drive lancée en arrière-plan — recharge l'onglet Drive pour suivre l'avancement", tab="clouddrive")
 
     # ============ BUSINESS ROUTES ============
     @app.route("/business/sfs/add", methods=["POST"])
