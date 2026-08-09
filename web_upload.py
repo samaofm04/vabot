@@ -34443,7 +34443,7 @@ _VT_RANGE_OPTS = [
 ]
 # Options « interrupteur seul » (case, pas de Min/Max)
 _VT_BOOL_OPTS = [
-    ("random_us_metadata",     "📍 Métadonnées iPhone + GPS",
+    ("random_us_metadata",     "Métadonnées iPhone + GPS",
      "Faux iPhone + ville française + coordonnées GPS réelles + date récente"),
     ("random_9_16_dimensions", "Résolution 9:16 aléatoire",
      "Choisit une résolution parmi des formats de téléphone courants"),
@@ -34572,28 +34572,30 @@ def _render_video_manager() -> str:
         "Interrupteur instantané — s'applique au prochain /reel. Les réglages ci-dessous se règlent séparément (bouton Enregistrer).</div>"
     )
 
-    # Mode metadata-only vs complet
-    meta_chk = "checked" if meta_only else ""
-    full_chk = "" if meta_only else "checked"
-    mode_html = (
-        "<div style='font-size:11px;color:#8a91a8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Mode</div>"
-        "<div style='display:flex;flex-direction:column;gap:8px;margin-bottom:8px'>"
-        "<label style='display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#e8eaf2;cursor:pointer'>"
-        "<input type='radio' name='mode' value='meta' " + meta_chk + " style='margin-top:2px;accent-color:#3b82f6'>"
-        "<span><b>Métadonnées seules</b> — rapide, aucune perte de qualité. Change juste l'identité du fichier "
-        "(iPhone + GPS + date). <b>Les options image/audio ci-dessous sont ignorées.</b></span></label>"
-        "<label style='display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#e8eaf2;cursor:pointer'>"
-        "<input type='radio' name='mode' value='full' " + full_chk + " style='margin-top:2px;accent-color:#3b82f6'>"
-        "<span><b>Transformation complète</b> — ré-encode et applique TOUTES les options cochées (comme TikFusion). "
-        "Plus lent.</span></label>"
-        "</div>"
-    )
-
+    # Mode en BARRE DU BAS façon « Instagram Preset » de TikFusion (demande
+    # user) : un select sombre bordé + la case « supprimer la source » à côté.
+    # Même champ name='mode' (meta/full) qu'avant -> handler POST inchangé.
+    meta_sel = "selected" if meta_only else ""
+    full_sel = "" if meta_only else "selected"
     del_chk = "checked" if del_src else ""
-    del_html = (
-        "<label style='display:flex;gap:9px;align-items:center;font-size:12.5px;color:#c9cede;cursor:pointer;margin-bottom:6px'>"
-        "<input type='checkbox' name='delete_source' " + del_chk + " style='accent-color:#3b82f6'>"
-        "Supprimer la vidéo source après le /reel</label>"
+    bottom_bar = (
+        "<div style='display:flex;gap:10px;margin:4px 0 12px;flex-wrap:wrap;align-items:stretch'>"
+        "<label style='flex:1;min-width:260px;display:flex;align-items:center;gap:10px;padding:10px 14px;"
+        "background:#07090d;border:1.5px solid #2b3240;border-radius:8px;cursor:pointer'>"
+        "<span style='font-size:13px;font-weight:700;color:#fff;white-space:nowrap'>Mode</span>"
+        "<select name='mode' style='flex:1;background:transparent;border:0;color:#9aa3b5;font-size:13px;"
+        "font-family:inherit;outline:none;cursor:pointer'>"
+        "<option value='meta' " + meta_sel + " style='background:#0d1117'>Métadonnées seules — rapide, aucune perte</option>"
+        "<option value='full' " + full_sel + " style='background:#0d1117'>Transformation complète — ré-encode tout (comme TikFusion)</option>"
+        "</select></label>"
+        "<label class='vt-h' style='min-width:240px;display:flex;align-items:center;gap:10px;padding:10px 14px;"
+        "background:#07090d;border:1.5px solid #2b3240;border-radius:8px;font-size:13px'>"
+        "<input type='checkbox' name='delete_source' " + del_chk + ">"
+        "Supprimer la source après le /reel</label>"
+        "</div>"
+        "<div style='font-size:11px;color:#6b7280;margin-bottom:12px'>"
+        "« Métadonnées seules » change juste l'identité du fichier (iPhone + GPS + date), les cartes image/audio "
+        "ci-dessus sont ignorées · « Complète » ré-encode et applique toutes les cartes cochées (plus lent).</div>"
     )
 
     cards = "".join(_vt_card_range(cfg, k, lbl) for k, lbl in _VT_RANGE_OPTS)
@@ -34602,8 +34604,8 @@ def _render_video_manager() -> str:
 
     form = (
         "<form method='POST' action='/settings/video_transform'>"
-        + mode_html + del_html
-        + "<div class='vt-grid'>" + cards + "</div>"
+        "<div class='vt-grid'>" + cards + "</div>"
+        + bottom_bar
         + "<button type='submit' style='width:100%;padding:14px;font-size:14px;font-weight:700;border:0;"
           "border-radius:8px;background:#1d4ed8;color:#dbe4ff;cursor:pointer;letter-spacing:.01em'>"
           "Enregistrer les réglages</button>"
