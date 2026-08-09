@@ -2161,6 +2161,16 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
+    async def jailbreak_us_menu_async(self, guild):
+        """(embed, view) avec les PP des models dans le select (emojis serveur)."""
+        emb, _v = self.jailbreak_us_menu()
+        emojis = {}
+        try:
+            emojis = await ensure_identity_emojis(guild, _jb_us_models())
+        except Exception:
+            emojis = {}
+        return emb, JailbreakMenuView(self, us=True, emojis=emojis)
+
     def jailbreak_us_menu(self):
         """(embed, view) du menu Jailbreak US — utilisé par /menujailbreakus et
         posté automatiquement dans les salons -content du serveur US."""
@@ -2892,8 +2902,9 @@ class UserCog(commands.Cog):
                 "⚠️ Aucune model US à afficher (toutes les identités actives sont FR ?).",
                 ephemeral=True)
             return
-        emb, view = self.jailbreak_us_menu()
-        await interaction.response.send_message(embed=emb, view=view)
+        await interaction.response.defer(thinking=True)
+        emb, view = await self.jailbreak_us_menu_async(guild)
+        await interaction.followup.send(embed=emb, view=view)
         try:
             await interaction.followup.send(
                 "✅ Menu Jailbreak US posté ici — ouvert à tout le monde sur ce serveur "
@@ -4400,11 +4411,66 @@ class JailbreakActionsView(discord.ui.View):
         )
 
 
+def _identity_pp_file(ident):
+    """Fichier image de la PP d'une identité : avatar.* sinon 1re profile_pic."""
+    base = IDENTITIES_DIR / (ident or "").lower().strip()
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        p = base / f"avatar.{ext}"
+        if p.exists():
+            return p
+    pdir = base / "profile_pics"
+    if pdir.exists():
+        for p in sorted(pdir.iterdir()):
+            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                return p
+    return None
+
+
+def _identity_emoji_name(ident):
+    import re as _re
+    return ("id" + _re.sub(r"[^a-z0-9_]", "", (ident or "").lower()))[:32]
+
+
+async def ensure_identity_emojis(guild, models):
+    """Crée (une seule fois) un emoji serveur par model à partir de sa PP, pour
+    l'afficher dans le select. -> {identité: PartialEmoji}. Best-effort : une
+    model sans PP (ou serveur plein) garde simplement son option sans image."""
+    out = {}
+    if guild is None:
+        return out
+    have = {e.name: e for e in getattr(guild, "emojis", [])}
+    for m in models:
+        name = _identity_emoji_name(m)
+        if name in have:
+            out[m] = have[name]
+            continue
+        src = _identity_pp_file(m)
+        if not src:
+            continue
+        try:
+            from PIL import Image
+            import io as _io
+            im = Image.open(src).convert("RGBA")
+            im.thumbnail((128, 128))
+            buf = _io.BytesIO()
+            im.save(buf, format="PNG", optimize=True)
+            data = buf.getvalue()
+            if len(data) > 256000:            # limite Discord
+                continue
+            out[m] = await guild.create_custom_emoji(
+                name=name, image=data, reason="PP de la model dans le menu")
+        except Exception as e:
+            log.warning(f"emoji PP {m}: {e}")
+    return out
+
+
 class _JailbreakModelSelect(discord.ui.Select):
     """Select des models. custom_id stable -> persistant apres redemarrage.
-    us=True -> variante /menujailbreakus : models hors marché FR, custom_id distinct."""
-    def __init__(self, cog, us=False):
+    us=True -> variante /menujailbreakus : models hors marché FR, custom_id distinct.
+    `emojis` = {identité: emoji} pour afficher la PP de chaque model."""
+    def __init__(self, cog, us=False, emojis=None):
         self.cog = cog
+        emojis = emojis or {}
         opts = []
         try:
             if us:
@@ -4415,7 +4481,9 @@ class _JailbreakModelSelect(discord.ui.Select):
         except Exception:
             models = []
         for m in models[:25]:
-            opts.append(discord.SelectOption(label=str(m).capitalize(), value=str(m).lower()))
+            opts.append(discord.SelectOption(
+                label=str(m).capitalize(), value=str(m).lower(),
+                emoji=emojis.get(m)))
         if not opts:
             opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
         super().__init__(
@@ -4440,11 +4508,13 @@ class _JailbreakModelSelect(discord.ui.Select):
 
 
 class JailbreakMenuView(discord.ui.View):
-    """Vue persistante : le select des models du menu Jailbreak (us=True -> variante US)."""
-    def __init__(self, cog, us=False):
+    """Vue persistante : le select des models du menu Jailbreak (us=True -> variante US).
+    `emojis` = PP des models (posées au moment du post ; la vue persistante
+    enregistrée au démarrage n'en a pas besoin, elle ne fait que router)."""
+    def __init__(self, cog, us=False, emojis=None):
         super().__init__(timeout=None)
         self.cog = cog
-        self.add_item(_JailbreakModelSelect(cog, us=us))
+        self.add_item(_JailbreakModelSelect(cog, us=us, emojis=emojis))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):

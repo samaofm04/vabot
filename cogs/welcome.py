@@ -558,7 +558,11 @@ async def _ensure_us_menu(bot, channel):
             if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
                     and "Jailbreak US" in (p.embeds[0].title or "")):
                 return True  # déjà en place
-        emb, view = ucog.jailbreak_us_menu()
+        # PP des models dans le select (emojis serveur, créés une seule fois)
+        try:
+            emb, view = await ucog.jailbreak_us_menu_async(channel.guild)
+        except Exception:
+            emb, view = ucog.jailbreak_us_menu()
         msg = await channel.send(embed=emb, view=view)
         try:
             await msg.pin()
