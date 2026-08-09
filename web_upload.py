@@ -5392,21 +5392,28 @@ document.addEventListener('click', function(ev){
   var m=document.getElementById('link-import-modal'); if(m) m.style.display='flex';
 });
 function linkImpClose(){ var m=document.getElementById('link-import-modal'); if(m) m.style.display='none'; }
-// Variante depuis les FORMULAIRES d upload (média OU lien) : identité lue
-// dans le select du formulaire, destination selon le bouton.
+// Champ lien INLINE dans les formulaires d upload (vidéo en haut, lien en
+// bas) : identité lue dans le select du formulaire, envoi AJAX direct.
 document.addEventListener('click', function(ev){
-  var b2=ev.target.closest?ev.target.closest('[data-linkimp2]'):null;
+  var b2=ev.target.closest?ev.target.closest('[data-linkgo]'):null;
   if(!b2) return;
-  var sub=b2.getAttribute('data-linkimp2')||'brutes';
+  var sub=b2.getAttribute('data-linkgo')||'brutes';
   var f=b2.closest('form');
   var sel=f?f.querySelector('select[name=identity]'):null;
+  var ta=f?f.querySelector('.up-links'):null;
   var ident=sel?sel.value:'';
+  var urls=ta?String(ta.value||'').trim():'';
   if(!ident){ if(typeof showToast==='function') showToast('Choisis une identité au-dessus','warning'); return; }
-  var fi=document.getElementById('linkImpIdent'); if(fi) fi.value=ident;
-  var fs=document.getElementById('linkImpSubdir'); if(fs) fs.value=sub;
-  var d=document.getElementById('linkImpDest');
-  if(d) d.textContent='Destination : @'+ident+' → '+(sub==='templates'?'Template montage':'Vidéo brut');
-  var m=document.getElementById('link-import-modal'); if(m) m.style.display='flex';
+  if(!urls){ if(typeof showToast==='function') showToast('Colle au moins un lien Instagram ou TikTok','warning'); return; }
+  b2.disabled=true; var old=b2.textContent; b2.textContent='⏳ Lancement…';
+  var fd=new FormData(); fd.set('identity',ident); fd.set('subdir',sub); fd.set('urls',urls); fd.set('ajax','1');
+  fetch('/cloud/import_link',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      b2.disabled=false; b2.textContent=old;
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error',7000); return; }
+      if(ta) ta.value='';
+      if(typeof showToast==='function') showToast('🔗 Import lancé : '+j.count+' lien(s) → @'+ident+' — les vidéos arrivent dans la galerie (~30 s par lien)','success',8000);
+    }).catch(function(e){ b2.disabled=false; b2.textContent=old; if(typeof showToast==='function') showToast('❌ '+e,'error'); });
 });
 // ---- Selects d identité avec PP (avatars) dans les formulaires d upload ----
 // Monté au DOMContentLoaded : les formulaires sont PLUS BAS que ce script
@@ -6502,8 +6509,11 @@ document.addEventListener('click',function(e){
 <div class="up-drop-hint">Drag and drop the video here — plusieurs videos possibles</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
-<div style="text-align:center;margin:10px 0 2px;font-size:11.5px;color:#75757f">— ou —</div>
-<button type="button" data-linkimp2="brutes" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔗 Importer par lien (Instagram / TikTok)</button>
+<div style="margin-top:14px">
+<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">🔗 OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
+<textarea class="up-links" rows="2" placeholder="https://www.instagram.com/reel/…   (un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:9px 11px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
+<button type="button" data-linkgo="brutes" style="width:100%;margin-top:8px;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">⬇ Importer les liens</button>
+</div>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
@@ -6527,8 +6537,11 @@ document.addEventListener('click',function(e){
 <div class="up-drop-hint">Drag and drop the template here — il apporte SON son</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
-<div style="text-align:center;margin:10px 0 2px;font-size:11.5px;color:#75757f">— ou —</div>
-<button type="button" data-linkimp2="templates" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔗 Importer par lien (Instagram / TikTok)</button>
+<div style="margin-top:14px">
+<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">🔗 OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
+<textarea class="up-links" rows="2" placeholder="https://www.instagram.com/reel/…   (un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:9px 11px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
+<button type="button" data-linkgo="templates" style="width:100%;margin-top:8px;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">⬇ Importer les liens</button>
+</div>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
@@ -38796,26 +38809,34 @@ def create_app():
         """Import par lien (IG/TikTok) vers brutes/ ou templates/ d'une identité.
         Téléchargement en ARRIÈRE-PLAN via le yt-dlp de la Veille (cookies IG
         pour les liens Instagram) ; les mp4 arrivent comme un upload normal."""
+        from flask import jsonify
+        ajax = (request.form.get("ajax") == "1")
         if not is_auth():
-            return redirect("/")
+            return (jsonify({"ok": False, "error": "unauth"}), 401) if ajax else redirect("/")
+
+        def _fail(msg, tab):
+            return jsonify({"ok": False, "error": msg}) if ajax else _error(msg, tab=tab)
+
         ident = (request.form.get("identity") or "").strip().lower()
         subdir = (request.form.get("subdir") or "").strip().lower()
         tab = "cloudtemplates" if subdir == "templates" else "cloudbrutes"
         if subdir not in ("brutes", "templates"):
-            return _error("Destination invalide", tab="cloudbrutes")
+            return _fail("Destination invalide", "cloudbrutes")
         if ident not in _list_identities():
-            return _error("Identité inconnue", tab=tab)
+            return _fail("Identité inconnue", tab)
         urls = [u.strip() for u in (request.form.get("urls") or "").splitlines()
                 if u.strip().lower().startswith(("http://", "https://"))][:10]
         if not urls:
-            return _error("Colle au moins un lien (Instagram ou TikTok)", tab=tab)
+            return _fail("Colle au moins un lien (Instagram ou TikTok)", tab)
         import threading as _th
         if _LINKIMP_STATUS.get("state") == "running":
-            return _error("Un import par lien tourne déjà — attends qu'il finisse", tab=tab)
+            return _fail("Un import par lien tourne déjà — attends qu'il finisse", tab)
         _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
                                 "done": 0, "total": len(urls), "ok": 0, "fail": 0, "err": ""})
         _th.Thread(target=_linkimp_run, args=(ident, subdir, urls),
                    name="link-import", daemon=True).start()
+        if ajax:
+            return jsonify({"ok": True, "count": len(urls)})
         return _success(f"🔗 Import lancé : {len(urls)} lien(s) → @{ident} — "
                         "recharge l'onglet dans ~1 min pour voir les vidéos", tab=tab)
 
