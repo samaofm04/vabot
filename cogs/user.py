@@ -2058,6 +2058,7 @@ class UserCog(commands.Cog):
             self.bot.add_view(ContentMenuView(self))
             self.bot.add_view(CentralMenuView(self))
             self.bot.add_view(JailbreakMenuView(self))  # menu jailbreak (select des models)
+            self.bot.add_view(JailbreakMenuView(self, us=True))  # variante US (custom_id distinct)
             self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
             self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
         except Exception:
@@ -2760,7 +2761,7 @@ class UserCog(commands.Cog):
             title="🔓 Menu Jailbreak — toutes les models",
             description=(
                 "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
-                "voulue (reel, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
                 f"🔒 Réservé aux membres avec le rôle **{role_txt}**."
             ),
             color=discord.Color.dark_red(),
@@ -2775,6 +2776,64 @@ class UserCog(commands.Cog):
                     "— crée-le à la main et donne-le aux VA concernés.")
         try:
             await interaction.followup.send(f"✅ Menu Jailbreak posté ici.{note}", ephemeral=True)
+        except Exception:
+            pass
+
+    @app_commands.command(
+        name="menujailbreakus",
+        description="[ADMIN] Poste ICI le menu Jailbreak US (toutes les models SAUF le marché FR)",
+    )
+    async def menujailbreakus(self, interaction: discord.Interaction):
+        if not _is_staff_member(interaction.user):
+            await interaction.response.send_message("Réservé aux managers/admins.", ephemeral=True)
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+        if not gf.is_us_guild(guild):
+            await interaction.response.send_message(
+                "🔒 Réservé au serveur US (Youl4b) — rien ne change sur ce serveur.", ephemeral=True)
+            return
+        models = _jb_us_models()
+        if not models:
+            await interaction.response.send_message(
+                "⚠️ Aucune model US à afficher (toutes les identités actives sont FR ?).",
+                ephemeral=True)
+            return
+        # S'assurer que le role 'Jailbreak' existe (auto-creation best-effort)
+        role = discord.utils.find(
+            lambda r: (getattr(r, "name", "") or "").strip().lower() == "jailbreak", guild.roles)
+        created = False
+        if role is None:
+            try:
+                role = await guild.create_role(
+                    name="Jailbreak", colour=discord.Color.dark_red(),
+                    reason="Menu Jailbreak US — accès aux models US")
+                created = True
+            except Exception:
+                role = None
+        role_txt = f"@{role.name}" if role else "Jailbreak"
+        emb = discord.Embed(
+            title="🔓 Menu Jailbreak US — models US",
+            description=(
+                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
+                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                f"🔒 Réservé aux membres avec le rôle **{role_txt}**."
+            ),
+            color=discord.Color.dark_red(),
+        )
+        emb.set_footer(text=f"{len(models)} models : " + ", ".join(m.capitalize() for m in models))
+        await interaction.response.send_message(embed=emb, view=JailbreakMenuView(self, us=True))
+        note = ""
+        if created:
+            note = f"\n✅ Rôle **{role.name}** créé — donne-le aux membres qui utiliseront le menu."
+        elif role is None:
+            note = ("\n⚠️ Je n'ai pas pu créer le rôle « Jailbreak » (permissions manquantes) "
+                    "— crée-le à la main et donne-le aux membres concernés.")
+        try:
+            await interaction.followup.send(f"✅ Menu Jailbreak US posté ici.{note}", ephemeral=True)
         except Exception:
             pass
 
@@ -4181,6 +4240,20 @@ _JB_ACTIONS = [
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 
+# Marché FR — exclu du menu Jailbreak US (/menujailbreakus). Le menu US montre
+# toutes les identités actives SAUF celles-ci (jessye/jailbreak-only INCLUSES,
+# contrairement au menu classique qui les exclut).
+_JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
+
+
+def _jb_us_models():
+    try:
+        from cogs.welcome import list_identities, is_identity_active
+        return [n for n in list_identities()
+                if is_identity_active(n) and n.strip().lower() not in _JB_FR_IDENTITIES]
+    except Exception:
+        return []
+
 
 class _JailbreakQtySelect(discord.ui.Select):
     """Choix de la quantite de media par action (multiplicateur jailbreak)."""
@@ -4264,13 +4337,17 @@ class JailbreakActionsView(discord.ui.View):
 
 
 class _JailbreakModelSelect(discord.ui.Select):
-    """Select des models. custom_id stable -> persistant apres redemarrage."""
-    def __init__(self, cog):
+    """Select des models. custom_id stable -> persistant apres redemarrage.
+    us=True -> variante /menujailbreakus : models hors marché FR, custom_id distinct."""
+    def __init__(self, cog, us=False):
         self.cog = cog
         opts = []
         try:
-            from cogs.welcome import list_active_identities
-            models = list_active_identities()
+            if us:
+                models = _jb_us_models()
+            else:
+                from cogs.welcome import list_active_identities
+                models = list_active_identities()
         except Exception:
             models = []
         for m in models[:25]:
@@ -4280,7 +4357,7 @@ class _JailbreakModelSelect(discord.ui.Select):
         super().__init__(
             placeholder="Choisis une model…",
             min_values=1, max_values=1, options=opts,
-            custom_id="jbmenu:model",
+            custom_id="jbmenuus:model" if us else "jbmenu:model",
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -4299,11 +4376,11 @@ class _JailbreakModelSelect(discord.ui.Select):
 
 
 class JailbreakMenuView(discord.ui.View):
-    """Vue persistante : le select des models du menu Jailbreak."""
-    def __init__(self, cog):
+    """Vue persistante : le select des models du menu Jailbreak (us=True -> variante US)."""
+    def __init__(self, cog, us=False):
         super().__init__(timeout=None)
         self.cog = cog
-        self.add_item(_JailbreakModelSelect(cog))
+        self.add_item(_JailbreakModelSelect(cog, us=us))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):

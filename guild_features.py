@@ -83,6 +83,18 @@ def is_restricted(guild_or_id) -> bool:
     return gid is not None and gid in _load()
 
 
+# ---- Serveur(s) US (Youl4b) ----
+# Les commandes dédiées US (/menujailbreakus, /ticketsall) ne marchent QUE sur
+# ces serveurs : partout ailleurs elles refusent — le serveur principal ne peut
+# pas être impacté, même par erreur.
+US_GUILD_IDS = {"1535758943324999711"}  # Youl4b
+
+
+def is_us_guild(guild_or_id) -> bool:
+    """True si ce serveur est un serveur US (Youl4b)."""
+    return _gid(guild_or_id) in US_GUILD_IDS
+
+
 def set_features(guild_or_id, features) -> set:
     """Définit la liste des fonctions d'un serveur (le bride). Retourne le set."""
     gid = _gid(guild_or_id)

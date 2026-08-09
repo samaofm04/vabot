@@ -27,6 +27,9 @@ USERS_FILE = DATA_DIR / "users.json"
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 WELCOME_CONFIG_FILE = DATA_DIR / "welcome_config.json"
 
+# /ticketsall : serveurs où un run est déjà en cours (anti double-clic / double-run).
+_TICKETSALL_RUNNING = set()
+
 
 def _write_env_var(key: str, value: str) -> bool:
     """Ecrit/remplace une variable dans .env. Retourne True si OK."""
@@ -469,6 +472,47 @@ async def _push_content_menu(bot, channel, identity, member):
         log.warning(f"_push_content_menu: {e}")
 
 
+# ---- Tickets du serveur US (Youl4b) : 2 salons simples par membre ----
+# Pas de parcours VA (identité, onboarding, isolation, users.json) : juste
+# @pseudo-content et @pseudo-numero-mail, privés, dans la catégorie TAFF.
+US_TICKET_SUFFIXES = ("content", "numero-mail")
+
+
+def _us_ticket_name(member, suffix):
+    import re as _re
+    base = _re.sub(r"[^a-z0-9_.-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
+    return f"{base}-{suffix}"
+
+
+async def create_us_tickets(guild, member):
+    """Crée les 2 salons US d'un membre s'ils n'existent pas déjà (idempotent).
+    Retourne (liste_salons_créés, liste_erreurs)."""
+    created, errors = [], []
+    cat = discord.utils.find(
+        lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
+    for suffix in US_TICKET_SUFFIXES:
+        name = _us_ticket_name(member, suffix)
+        if discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels):
+            continue  # déjà là (commande re-lançable sans doublons)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            member: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True,
+                read_message_history=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_channels=True),
+        }
+        target_cat = cat if (cat and len(cat.channels) < 49) else None  # 50 max/catégorie
+        try:
+            ch = await guild.create_text_channel(
+                name, category=target_cat, overwrites=overwrites,
+                reason="Ticket US (content / numero-mail)")
+            created.append(ch)
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+    return created, errors
+
+
 async def setup_va_ticket(guild, member, bot=None):
     """Cree le ticket d'un VA: assignation identite + salon + intro.
 
@@ -505,6 +549,15 @@ async def setup_va_ticket(guild, member, bot=None):
             except Exception:
                 pass
             return existing_channel, None
+        # Introuvable ICI ≠ supprimé : si le salon vit sur un AUTRE serveur du bot
+        # (VA du serveur principal invité sur le serveur US, par ex.), on ne touche
+        # PAS à sa fiche — sinon elle serait re-pointée ici et son vrai salon
+        # deviendrait orphelin.
+        if bot is not None:
+            for g in bot.guilds:
+                if g.id != guild.id and g.get_channel(existing["channel_id"]):
+                    return None, (f"{member.mention} est déjà VA sur **{g.name}** "
+                                  "(fiche protégée, aucun ticket créé ici).")
         # Salon supprimé -> on oublie SEULEMENT le channel mort, on conserve le
         # reste de la fiche (moyen de paiement, comptes Insta, identité).
         if isinstance(users.get(str(member.id)), dict):
@@ -556,8 +609,10 @@ async def setup_va_ticket(guild, member, bot=None):
             except Exception as e:
                 log.error(f"setup_va_ticket: menu Threads échoué: {e}")
         if not posted:
+            # Pas de menu à montrer (fonction contenu bridée, ou envoi raté) :
+            # accueil neutre, sans promettre un menu qui n'arrivera pas.
             try:
-                await channel.send(f"{member.mention} 👋 Bienvenue ! Ton menu arrive ici.")
+                await channel.send(f"{member.mention} 👋 Bienvenue !")
             except Exception:
                 pass
     else:
@@ -718,6 +773,19 @@ class Welcome(commands.Cog):
         if not gf.enabled(member.guild, "tickets"):
             return
 
+        # Serveur US (Youl4b) : les tickets sont 2 salons simples par membre
+        # (content / numero-mail), PAS le parcours VA classique.
+        if gf.is_us_guild(member.guild):
+            try:
+                created, errors = await create_us_tickets(member.guild, member)
+                if errors:
+                    log.error(f"on_member_join US tickets: {errors} (member={member.id})")
+                else:
+                    log.info(f"on_member_join US: {len(created)} salon(s) crees pour {member.id}")
+            except Exception as e:
+                log.error(f"on_member_join US tickets exception: {e}")
+            return
+
         # Mode auto-ticket: cree direct le salon, sans passer par le welcome public
         if cfg.get("auto_create_ticket_on_join", True):
             try:
@@ -763,6 +831,14 @@ class Welcome(commands.Cog):
         data = users.get(str(member.id))
         if not isinstance(data, dict) or not data.get("channel_id"):
             return
+        # Multi-serveurs : ne planifier QUE si le salon de la fiche appartient au
+        # serveur QUITTÉ. Sinon (VA du serveur principal qui quitte le serveur US,
+        # par ex.), la purge à J+7 effacerait toute sa fiche (identité, paiement,
+        # comptes) alors que son salon vit ailleurs.
+        if not member.guild.get_channel(data["channel_id"]):
+            log.info(f"on_member_remove: {member.id} quitte {member.guild.id} mais son salon "
+                     "est sur un autre serveur -> pas de suppression planifiee")
+            return
         cfg = load_welcome_config()
         days = cfg.get("cleanup_days_after_leave", 7)
         delete_at = datetime.now(timezone.utc) + timedelta(days=days)
@@ -802,9 +878,14 @@ class Welcome(commands.Cog):
                         log.info(f"Salon {channel.id} supprime (VA {user_id} parti)")
                     except Exception as e:
                         log.error(f"Erreur suppression salon {data.get('channel_id')}: {e}")
-            # Nettoyer users.json
+            # Nettoyer users.json — SAUF si la fiche a été re-pointée sur un AUTRE
+            # salon entre-temps (VA recréé ailleurs, ex: /ticketsall serveur US) :
+            # dans ce cas on garde la fiche, on retire juste l'entrée pending.
             users = load_users()
-            if user_id in users:
+            u = users.get(user_id)
+            repointe = (isinstance(u, dict) and u.get("channel_id")
+                        and u.get("channel_id") != data.get("channel_id"))
+            if user_id in users and not repointe:
                 del users[user_id]
                 save_users(users)
             to_remove.append(user_id)
@@ -1401,6 +1482,117 @@ class Welcome(commands.Cog):
         await interaction.response.send_message(
             f"✅ Welcome simulé pour {target.mention}", ephemeral=True
         )
+
+    @app_commands.command(
+        name="ticketsall",
+        description="[ADMIN] Serveur US : crée les 2 salons (content + numero-mail) de chaque membre",
+    )
+    async def ticketsall(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+        if not gf.is_us_guild(guild):
+            await interaction.response.send_message(
+                "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
+            return
+        # 2 salons par membre : @pseudo-content + @pseudo-numero-mail (idempotent).
+        todo, deja = [], []
+        for m in guild.members:
+            if m.bot or m.id == interaction.user.id:
+                continue
+            manquants = [s for s in US_TICKET_SUFFIXES
+                         if not discord.utils.find(
+                             lambda c, n=_us_ticket_name(m, s): c.name == n,
+                             guild.text_channels)]
+            if manquants:
+                todo.append(m)
+            else:
+                deja.append(m)
+        n_salons = sum(
+            1 for m in todo for s in US_TICKET_SUFFIXES
+            if not discord.utils.find(
+                lambda c, n=_us_ticket_name(m, s): c.name == n, guild.text_channels))
+        if not todo:
+            await interaction.response.send_message(
+                f"Rien à faire : les {len(deja)} membre(s) ont déjà leurs 2 salons.",
+                ephemeral=True)
+            return
+
+        inv_id = interaction.user.id
+        cat = discord.utils.find(
+            lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
+        cat_txt = ("📁 Catégorie **TAFF** trouvée — les salons y seront rangés." if cat else
+                   "⚠️ Pas de catégorie **TAFF** — les salons seront créés hors catégorie.")
+
+        class _ConfirmAll(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=300)
+                self._started = False
+
+            async def on_timeout(self):
+                try:
+                    await interaction.edit_original_response(
+                        content="⏱️ Confirmation expirée — relance `/ticketsall` si tu veux toujours le faire.",
+                        view=None)
+                except Exception:
+                    pass
+
+            @discord.ui.button(label=f"✅ Créer {n_salons} salon(s)",
+                               style=discord.ButtonStyle.danger)
+            async def go(self, itx: discord.Interaction, button: discord.ui.Button):
+                if itx.user.id != inv_id:
+                    await itx.response.send_message("Pas pour toi.", ephemeral=True)
+                    return
+                # Anti double-clic / double-run : section SYNCHRONE (aucun await
+                # avant), sinon 2 interactions en rafale lancent 2 boucles.
+                if self._started or guild.id in _TICKETSALL_RUNNING:
+                    await itx.response.send_message("Déjà en cours.", ephemeral=True)
+                    return
+                self._started = True
+                _TICKETSALL_RUNNING.add(guild.id)
+                self.stop()
+                try:
+                    await itx.response.edit_message(
+                        content=f"🔄 Création de **{n_salons}** salon(s) lancée — je préviens ici à la fin.",
+                        view=None)
+                    ok = failed = partis = 0
+                    for m in todo:
+                        if guild.get_member(m.id) is None:
+                            partis += 1  # a quitté entre la confirmation et son tour
+                            continue
+                        try:
+                            created, errors = await create_us_tickets(guild, m)
+                            ok += len(created)
+                            if errors:
+                                failed += len(errors)
+                                log.error(f"ticketsall: {errors} (member={m.id})")
+                        except Exception as e:
+                            failed += 1
+                            log.error(f"ticketsall exception: {e} (member={m.id})")
+                        await asyncio.sleep(1.5)  # Discord limite la création de salons
+                    msg = (f"✅ <@{inv_id}> Salons créés : **{ok}**"
+                           + (f", {failed} échec(s) (voir logs)" if failed else "")
+                           + (f", {partis} membre(s) parti(s) entre-temps" if partis else "") + ".")
+                    try:
+                        await itx.followup.send(msg, ephemeral=True)
+                    except Exception:
+                        # followup expiré (gros serveur) -> message public dans le salon
+                        try:
+                            await itx.channel.send(msg)
+                        except Exception:
+                            pass
+                finally:
+                    _TICKETSALL_RUNNING.discard(guild.id)
+
+        await interaction.response.send_message(
+            f"⚠️ **{guild.name}** — je vais créer **{n_salons}** salon(s) privé(s) pour "
+            f"**{len(todo)}** membre(s) : `@pseudo-content` + `@pseudo-numero-mail` "
+            f"({len(deja)} déjà équipé(s), toi et les bots exclus).\n{cat_txt}\nConfirme 👇",
+            view=_ConfirmAll(), ephemeral=True)
 
     @app_commands.command(
         name="intropics",
