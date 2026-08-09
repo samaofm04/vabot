@@ -5445,6 +5445,7 @@ function linkGoFromForm(f){
       if(ta){ ta.value=''; }
       var fi=f.querySelector('.up-file-main'); if(fi) fi.required=true;
       __limpLast='running';
+      __limpPct=0; __limpTarget=0;   // nouveau % à chaque import
       limpCard({state:'running',done:0,total:j.count,identity:ident,subdir:sub});
       if(typeof showToast==='function') showToast('🔗 Import lancé : '+j.count+' lien(s) → @'+ident,'success',5000);
     }).catch(function(e){
@@ -5479,31 +5480,65 @@ document.addEventListener('submit', function(ev){
 }, true);
 // Carte de progression en haut à droite (comme un upload de photos) : compteur,
 // barre, et MINIATURE de la dernière vidéo arrivée.
+// Carte façon Infloww : image DÈS le lancement (photo de la model, puis
+// miniature de chaque vidéo arrivée) + POURCENTAGE qui avance en continu
+// (progression estimée pendant chaque téléchargement, calée sur les jalons
+// réels X/Y renvoyés par le serveur).
+var __limpInfo=null, __limpPct=0, __limpTarget=0, __limpAnim=null;
 function limpCard(j){
+  __limpInfo=j;
   var c=document.getElementById('limpCard');
   if(!c){
     if(!j||j.state!=='running') return;
     c=document.createElement('div'); c.id='limpCard';
-    c.style.cssText='position:fixed;top:16px;right:16px;z-index:100050;background:#0f0f12;border:1px solid #2a2a30;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);min-width:240px';
-    c.innerHTML='<img id="limpCardImg" style="width:38px;height:38px;border-radius:8px;object-fit:cover;background:#1a1a1f;display:none">'
-      +'<div style="flex:1;min-width:0"><div id="limpCardTxt" style="font-size:12.5px;font-weight:700;color:#fff"></div>'
-      +'<div style="height:4px;background:#26262c;border-radius:99px;margin-top:6px;overflow:hidden"><div id="limpCardFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#a855f7);transition:width .4s"></div></div></div>';
+    c.style.cssText='position:fixed;top:16px;right:16px;z-index:100050;background:#0f0f12;border:1px solid #2a2a30;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);min-width:260px';
+    c.innerHTML='<img id="limpCardImg" style="width:40px;height:40px;border-radius:8px;object-fit:cover;background:#1a1a1f">'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:8px"><div id="limpCardTxt" style="flex:1;font-size:12.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>'
+      +'<div id="limpCardPct" style="font-size:12.5px;font-weight:800;color:#3b82f6">0%</div></div>'
+      +'<div style="height:4px;background:#26262c;border-radius:99px;margin-top:6px;overflow:hidden"><div id="limpCardFill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#a855f7)"></div></div></div>';
     document.body.appendChild(c);
+    var im0=document.getElementById('limpCardImg');
+    if(im0&&j.identity){
+      im0.src='/identity/avatar/'+encodeURIComponent(j.identity);
+      im0.addEventListener('error',function(){ im0.style.visibility='hidden'; });
+    }
   }
-  var txt=document.getElementById('limpCardTxt'), fill=document.getElementById('limpCardFill'), img=document.getElementById('limpCardImg');
   var done=j.done||0, total=Math.max(1,j.total||1);
   if(j.state==='running'){
-    if(txt) txt.textContent='🔗 @'+(j.identity||'')+' — '+done+'/'+total+' lien(s)…';
-    if(fill) fill.style.width=Math.round(done*100/total)+'%';
+    // plancher = jalons réels ; cible = fin du lien en cours (~99% max)
+    __limpPct=Math.max(__limpPct, done*100/total);
+    __limpTarget=Math.min(99.2, (done+0.97)*100/total);
   } else {
-    if(txt) txt.textContent=(j.ok?('✅ '+j.ok+' vidéo(s) importée(s)'):'❌ import échoué');
-    if(fill) fill.style.width='100%';
-    setTimeout(function(){ var cc=document.getElementById('limpCard'); if(cc) cc.remove(); }, 6000);
+    __limpTarget=100;
+    setTimeout(function(){
+      var cc=document.getElementById('limpCard'); if(cc) cc.remove();
+      clearInterval(__limpAnim); __limpAnim=null; __limpPct=0;
+    }, 6000);
   }
-  if(img&&j.last_file&&j.identity&&j.subdir){
-    var u='/cloud/thumb/'+encodeURIComponent(j.identity)+'/'+j.subdir+'/'+encodeURIComponent(j.last_file);
-    if(img.getAttribute('src')!==u) img.src=u;
-    img.style.display='block';
+  if(!__limpAnim) __limpAnim=setInterval(limpTick, 200);
+  var img=document.getElementById('limpCardImg');
+  if(img&&j.identity){
+    // priorité : FRAME du reel en cours (thumb_url source) pendant le run,
+    // puis vraie frame locale (ffmpeg) de la dernière vidéo arrivée.
+    var u='';
+    if(j.state==='running'&&j.thumb_url) u=j.thumb_url;
+    else if(j.last_file&&j.subdir) u='/cloud/thumb/'+encodeURIComponent(j.identity)+'/'+j.subdir+'/'+encodeURIComponent(j.last_file);
+    else if(j.thumb_url) u=j.thumb_url;
+    if(u&&img.getAttribute('src')!==u){ img.src=u; img.style.visibility='visible'; }
+  }
+}
+function limpTick(){
+  var fill=document.getElementById('limpCardFill'), pt=document.getElementById('limpCardPct'), txt=document.getElementById('limpCardTxt');
+  if(!fill){ clearInterval(__limpAnim); __limpAnim=null; return; }
+  // avance douce vers la cible (jamais bloqué, jamais au-delà)
+  __limpPct=Math.min(__limpTarget, __limpPct+Math.max(0.08,(__limpTarget-__limpPct)*0.045));
+  fill.style.width=__limpPct.toFixed(1)+'%';
+  if(pt) pt.textContent=Math.floor(__limpPct)+'%';
+  var j=__limpInfo||{};
+  if(txt){
+    if(j.state==='running') txt.textContent='🔗 @'+(j.identity||'')+' — '+(j.done||0)+'/'+Math.max(1,j.total||1)+' lien(s)';
+    else txt.textContent=(j.ok?('✅ '+j.ok+' vidéo(s) importée(s)'):'❌ import échoué');
   }
 }
 // ---- Selects d identité avec PP (avatars) dans les formulaires d upload ----
@@ -14413,6 +14448,27 @@ def _apply_identity_order(identities):
 _LINKIMP_STATUS: dict = {"state": "idle"}
 
 
+def _linkimp_thumb(u: str) -> str:
+    """FRAME de la vidéo en cours d'import (avant même le téléchargement) :
+    oEmbed TikTok (instantané) ou miniature yt-dlp pour Instagram. Best-effort."""
+    try:
+        if "tiktok.com" in u:
+            import requests as _rq
+            r = _rq.get("https://www.tiktok.com/oembed", params={"url": u}, timeout=8)
+            return str((r.json() or {}).get("thumbnail_url") or "")
+        import yt_dlp
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "socket_timeout": 10}
+        ck = DATA_DIR / "insta" / "cookies.txt"
+        if "instagram.com" in u and ck.exists():
+            opts["cookiefile"] = str(ck)
+        with yt_dlp.YoutubeDL(opts) as y:
+            inf = y.extract_info(u, download=False)
+        return str((inf or {}).get("thumbnail") or "")
+    except Exception:
+        return ""
+
+
 def _linkimp_run(ident: str, subdir: str, urls: list):
     import time as _t
     try:
@@ -14426,6 +14482,8 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
     for i, u in enumerate(urls, 1):
         _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
                                 "done": i - 1, "total": total, "ok": ok, "fail": fail})
+        # frame du reel affichée dans la carte de progression, AVANT le download
+        _LINKIMP_STATUS["thumb_url"] = _linkimp_thumb(u)
         inf = {}
         vb = None
         try:
@@ -38907,7 +38965,8 @@ def create_app():
         if _LINKIMP_STATUS.get("state") == "running":
             return _fail("Un import par lien tourne déjà — attends qu'il finisse", tab)
         _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
-                                "done": 0, "total": len(urls), "ok": 0, "fail": 0, "err": ""})
+                                "done": 0, "total": len(urls), "ok": 0, "fail": 0,
+                                "err": "", "thumb_url": "", "last_file": ""})
         _th.Thread(target=_linkimp_run, args=(ident, subdir, urls),
                    name="link-import", daemon=True).start()
         if ajax:
