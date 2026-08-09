@@ -100,7 +100,10 @@ class NumPanelView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
-    @discord.ui.button(label="Générer un numéro", emoji="📱",
+    # Boutons DIRECTS en Instagram/Threads (demande user : pas de menu de
+    # service, c'est Insta dans 100 % des cas). Le select reste dispo via
+    # « Autre service » pour les cas rares.
+    @discord.ui.button(label="Numéro Instagram / Threads", emoji="📱",
                        style=discord.ButtonStyle.success, custom_id="numgen:sms")
     async def sms(self, itx: discord.Interaction, btn: discord.ui.Button):
         if not numgen.status()["sms_ok"]:
@@ -108,11 +111,10 @@ class NumPanelView(discord.ui.View):
                 "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.",
                 ephemeral=True)
             return
-        await itx.response.send_message(
-            "📱 **Nouveau numéro** — choisis le service 👇",
-            view=_ServiceView("sms", self.cog), ephemeral=True)
+        await itx.response.defer(ephemeral=True, thinking=True)
+        await self.cog.start_sms(itx, "ig")
 
-    @discord.ui.button(label="Générer un mail", emoji="📧",
+    @discord.ui.button(label="Mail Instagram", emoji="📧",
                        style=discord.ButtonStyle.primary, custom_id="numgen:mail")
     async def mail(self, itx: discord.Interaction, btn: discord.ui.Button):
         if not numgen.status()["mail_ok"]:
@@ -120,9 +122,33 @@ class NumPanelView(discord.ui.View):
                 "⚠️ Aucune clé SMSBower configurée — un admin doit faire `/smskey`.",
                 ephemeral=True)
             return
+        await itx.response.defer(ephemeral=True, thinking=True)
+        await self.cog.start_mail(itx, "ig")
+
+    @discord.ui.button(label="Autre service", emoji="⚙️",
+                       style=discord.ButtonStyle.secondary, row=1,
+                       custom_id="numgen:other")
+    async def other(self, itx: discord.Interaction, btn: discord.ui.Button):
         await itx.response.send_message(
-            "📧 **Nouvelle adresse mail** — choisis le service 👇",
-            view=_ServiceView("mail", self.cog), ephemeral=True)
+            "⚙️ **Autre service** — numéro OU mail, choisis 👇",
+            view=_OtherView(self.cog), ephemeral=True)
+
+
+class _OtherView(discord.ui.View):
+    """Numéro/mail pour un service autre qu'Instagram."""
+    def __init__(self, cog):
+        super().__init__(timeout=120)
+        self.cog = cog
+
+    @discord.ui.button(label="📱 Numéro", style=discord.ButtonStyle.success)
+    async def n(self, itx: discord.Interaction, b: discord.ui.Button):
+        await itx.response.send_message("Service 👇", view=_ServiceView("sms", self.cog),
+                                        ephemeral=True)
+
+    @discord.ui.button(label="📧 Mail", style=discord.ButtonStyle.primary)
+    async def m(self, itx: discord.Interaction, b: discord.ui.Button):
+        await itx.response.send_message("Service 👇", view=_ServiceView("mail", self.cog),
+                                        ephemeral=True)
 
 
 class NumerosCog(commands.Cog):
@@ -143,8 +169,11 @@ class NumerosCog(commands.Cog):
             return
         view = _ActivationView(self, "sms", res["id"], res["phone"], res["provider"])
         view.owner_id = interaction.user.id
+        view.service = service
+        solde = (await asyncio.to_thread(numgen.balances)).get("sms")
         msg = await interaction.followup.send(
-            self._embed_txt("📱", res["phone"], service, waiting=True),
+            self._embed_txt("📱", res["phone"], service,
+                            user=interaction.user.id, solde=solde),
             view=view, ephemeral=True, wait=True)
         view.message = msg
         await self.watch(interaction, view, first=True)
@@ -157,26 +186,48 @@ class NumerosCog(commands.Cog):
         view = _ActivationView(self, "mail", res["id"], res["mail"],
                                stale=res.get("stale", ""))
         view.owner_id = interaction.user.id
+        view.service = service
+        solde = (await asyncio.to_thread(numgen.balances)).get("mail")
         msg = await interaction.followup.send(
-            self._embed_txt("📧", res["mail"], service, waiting=True),
+            self._embed_txt("📧", res["mail"], service,
+                            user=interaction.user.id, solde=solde),
             view=view, ephemeral=True, wait=True)
         view.message = msg
         await self.watch(interaction, view, first=True)
 
-    def _embed_txt(self, icon, value, service, waiting=True, code=None, err=None):
-        head = f"{icon} **`{value}`**  ·  {_svc_label(service)}"
+    def _embed_txt(self, icon, value, service, waiting=True, code=None, err=None,
+                   user=None, solde=None):
+        """Message d'activation, calqué sur le panneau de l'autre serveur :
+        valeur en gros, avertissement anti-ban, mode d'emploi, solde."""
+        kind_lbl = "numéro" if icon == "📱" else "mail"
+        head = (f"{icon} **Ton {kind_lbl} {_svc_label(service)}**\n"
+                f"{'📞' if icon == '📱' else '✉️'} `{value}`\n")
         if code:
-            return (f"{head}\n\n🔑 **CODE : `{code}`**\n"
-                    "_Besoin d'un autre code ? → 🔄 Redemander un code_")
-        if err:
-            return f"{head}\n\n⚠️ {err}\n_Tu peux réessayer avec 🔄._"
-        return (f"{head}\n\n⏳ **En attente du code…** "
-                f"(j'écoute pendant {POLL_MAX // 60} min, le code s'affiche ici tout seul)")
+            body = (f"\n🔑 **CODE : `{code}`**\n\n"
+                    "_Besoin d'un autre code ? → **🔄 Redemander un code**_")
+        elif err:
+            body = f"\n⚠️ {err}\n_Tu peux réessayer avec **🔄**._"
+        else:
+            warn = ("\n⚠️ **À lire absolument**\n"
+                    f"Entre ce {kind_lbl} **à la main** — ne le copie-colle **JAMAIS** "
+                    "(risque de ban de la plateforme).\n\n"
+                    "**Comment faire**\n"
+                    f"1. Saisis le {kind_lbl} à la main sur l'app\n"
+                    f"2. Demande l'envoi du code\n"
+                    f"3. ⏳ Le code arrive **automatiquement ici** (j'écoute "
+                    f"{POLL_MAX // 60} min)")
+            body = warn
+        foot = ""
+        if user is not None:
+            foot += f"\n\nLié à toi <@{user}>"
+        if solde:
+            foot += f"\n_solde : {solde}_"
+        return head + body + foot
 
     # --------------------------------------------------------------- polling
     async def watch(self, interaction, view, first=True):
         """Poll le code et ÉDITE le message d'origine dès qu'il arrive."""
-        service = "ig"
+        service = getattr(view, "service", "ig")
         for _ in range(POLL_MAX // POLL_SECONDS):
             await asyncio.sleep(POLL_SECONDS)
             if view.is_finished():
@@ -277,48 +328,73 @@ class NumerosCog(commands.Cog):
 
     @app_commands.command(
         name="smskey",
-        description="[OWNER] Clés des générateurs (GetAText SMS / SMSBower mail)")
-    @app_commands.describe(
-        getatext="Clé API GetAText (numéros)",
-        smsbower="Clé API SMSBower (mails + fallback numéros)",
-        pays="Code pays par défaut (0 = Russie, 187 = USA…)",
-    )
-    async def smskey(self, interaction: discord.Interaction,
-                     getatext: str = None, smsbower: str = None, pays: str = None):
+        description="[OWNER] Clés des générateurs (formulaire privé) + soldes")
+    async def smskey(self, interaction: discord.Interaction):
         app = await interaction.client.application_info()
         if interaction.user.id != app.owner.id:
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
-        if getatext is None and smsbower is None and pays is None:
-            s = numgen.status()
-            await interaction.response.send_message(
-                f"🔑 **Générateurs**\n"
-                f"• GetAText (numéros) : {s['getatext'] or '❌ absente'}\n"
-                f"• SMSBower (mails) : {s['smsbower'] or '❌ absente'}\n"
-                f"• Pays par défaut : `{s['country']}`\n\n"
-                "_Pose-les : `/smskey getatext:… smsbower:… pays:187`_",
-                ephemeral=True)
-            return
-        s = await asyncio.to_thread(numgen.set_keys, getatext, smsbower, pays)
-        await interaction.response.send_message(
-            f"✅ Enregistré — GetAText : {s['getatext'] or '❌'} · "
-            f"SMSBower : {s['smsbower'] or '❌'} · pays `{s['country']}`",
-            ephemeral=True)
+        # FORMULAIRE (modal) et pas des options de slash : une option se voit
+        # dans la zone de saisie et peut partir en clair dans le salon.
+        await interaction.response.send_modal(_KeysModal())
+
+    @app_commands.command(
+        name="soldes",
+        description="Solde des générateurs (numéros GetAText + mails SMSBower)")
+    async def soldes(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        b = await asyncio.to_thread(numgen.balances)
+        await interaction.followup.send(
+            "💰 **Soldes**\n"
+            f"• 📱 Numéros (GetAText) : **{b['sms']}**\n"
+            f"• 📧 Mails (SMSBower) : **{b['mail']}**", ephemeral=True)
+
+
+class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
+    getatext = discord.ui.TextInput(
+        label="Clé GetAText (numéros)", required=False, max_length=120,
+        placeholder="laisse vide pour ne pas changer")
+    smsbower = discord.ui.TextInput(
+        label="Clé SMSBower (mails)", required=False, max_length=120,
+        placeholder="laisse vide pour ne pas changer")
+    pays = discord.ui.TextInput(
+        label="Pays par défaut (0 = RU, 187 = USA)", required=False, max_length=6,
+        placeholder="187")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        s = await asyncio.to_thread(
+            numgen.set_keys,
+            str(self.getatext.value).strip() or None,
+            str(self.smsbower.value).strip() or None,
+            str(self.pays.value).strip() or None)
+        b = await asyncio.to_thread(numgen.balances)
+        await interaction.followup.send(
+            f"✅ **Enregistré**\n"
+            f"• 📱 GetAText : {s['getatext'] or '❌ absente'} — solde **{b['sms']}**\n"
+            f"• 📧 SMSBower : {s['smsbower'] or '❌ absente'} — solde **{b['mail']}**\n"
+            f"• 🌍 Pays par défaut : `{s['country']}`", ephemeral=True)
 
 
 def panel_embed():
+    """Panneau calqué sur celui de l'autre serveur de l'user (avertissement
+    coût + confidentialité), avec les soldes des DEUX fournisseurs."""
+    try:
+        b = numgen.balances()
+    except Exception:
+        b = {"sms": "—", "mail": "—"}
     return discord.Embed(
-        title="📱 Numéro & Mail",
+        title="📱 Numéros & Mails Instagram",
         description=(
-            "**📱 Générer un numéro** — un numéro dispo tout de suite. "
-            "Le code arrive **ici tout seul** dès que le SMS est reçu.\n"
-            "**📧 Générer un mail** — une adresse jetable, même principe.\n\n"
-            "Sur chaque demande : **🔄 Redemander un code** (même numéro/mail) "
-            "et **❌ Annuler**.\n"
-            "_Tout ce que tu génères n'est visible que par toi._"
+            "Clique sur un bouton pour obtenir un **numéro** ou un **mail** "
+            "et vérifier un compte Instagram.\n\n"
+            "Le numéro/mail **et le code** ne sont visibles que **par toi** "
+            "(message éphémère). Le code arrive **tout seul** ici.\n\n"
+            "⚠️ Chaque numéro/mail **coûte de l'argent** — n'en prends que si "
+            "tu en as vraiment besoin."
         ),
         color=discord.Color.blurple(),
-    )
+    ).set_footer(text=f"Solde · 📱 numéros : {b['sms']}   |   📧 mails : {b['mail']}")
 
 
 async def setup(bot):

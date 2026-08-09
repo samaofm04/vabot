@@ -94,6 +94,24 @@ def default_country() -> str:
     return str(_cfg().get("country") or "0")
 
 
+def balances() -> dict:
+    """Soldes des 2 fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
+    out = {"sms": "—", "mail": "—"}
+    if getatext_key():
+        t = _get(GETATEXT_URL, {"api_key": getatext_key(), "action": "getBalance"})
+        if t.startswith("ACCESS_BALANCE:"):
+            out["sms"] = t.split(":", 1)[1].strip() + " $"
+        else:
+            out["sms"] = _human(t)
+    if smsbower_key():
+        t = _get(SMSBOWER_STUBS_URL, {"api_key": smsbower_key(), "action": "getBalance"})
+        if t.startswith("ACCESS_BALANCE:"):
+            out["mail"] = t.split(":", 1)[1].strip() + " $"
+        else:
+            out["mail"] = _human(t)
+    return out
+
+
 def _get(url, params, timeout=20):
     try:
         r = requests.get(url, params=params, timeout=timeout)
