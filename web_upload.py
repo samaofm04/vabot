@@ -4532,18 +4532,28 @@ document.addEventListener('click', function(ev){
   var act=b.getAttribute('data-capact'), cid=b.getAttribute('data-cid')||'';
   if(!capLibInit()) return;
   if(act==='add'){
+    // doublons filtrés : entre les champs ET contre la bibliothèque existante
+    // (une extension d autofill peut recopier le même texte partout)
+    var seen={}, dropped=0;
+    (capLib.block.items||[]).forEach(function(c){ seen[String(c.text||'').trim()]=1; });
     var vals=[];
     document.querySelectorAll('#capAddList .capadd-ta').forEach(function(t){
-      var v=String(t.value||'').trim(); if(v) vals.push(v.slice(0,300));
+      var v=String(t.value||'').trim(); if(!v) return;
+      v=v.slice(0,300);
+      if(seen[v]){ dropped++; return; }
+      seen[v]=1; vals.push(v);
     });
-    if(!vals.length){ if(typeof showToast==='function') showToast('Écris au moins une caption','warning'); return; }
+    if(!vals.length){
+      if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
+      return;
+    }
     var now=Date.now();
     for(var i=0;i<vals.length;i++){
       capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i], x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
     }
     capAddClose();
     capRenderCards(); capSave();
-    if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre'),'success');
+    if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')+(dropped?(' · '+dropped+' doublon'+(dropped>1?'s ignorés':' ignoré')):''),'success');
   }
   else if(act==='del'){
     var doDel=function(){ capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==cid;}); capRenderCards(); capSave(); };
@@ -4565,7 +4575,7 @@ function capAddField(focus){
   var n=list.querySelectorAll('.capadd-ta').length+1;
   var wrap=document.createElement('div');
   wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">CAPTION '+n+' (OVERLAY SUR LA VIDÉO)</div>'
-    +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
+    +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
   list.appendChild(wrap);
   var ta=wrap.querySelector('textarea');
   if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
@@ -4582,14 +4592,9 @@ function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.
 // NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
 // les modales (plus bas dans la page) existent ; le bouton « + Ajouter une
 // autre caption » est câblé en onclick inline dans le HTML de la modale.
-// Un nouveau champ vide apparaît tout seul dès qu on tape dans le dernier
-document.addEventListener('input', function(ev){
-  var t=ev.target;
-  if(!t||!t.classList||!t.classList.contains('capadd-ta')) return;
-  var list=document.getElementById('capAddList'); if(!list) return;
-  var tas=list.querySelectorAll('.capadd-ta');
-  if(tas.length&&tas[tas.length-1]===t&&String(t.value||'').trim()) capAddField(false);
-});
+// (L auto-ajout de champ « quand on tape dans le dernier » a été RETIRÉ : les
+// extensions d autofill remplissaient chaque nouveau champ -> cascade de
+// doublons. On ajoute un champ UNIQUEMENT via le bouton.)
 // ---- Réordonner les identités par GLISSER-DÉPOSER (sidebars vault) ----
 // On attrape le drag natif des <a> de la sidebar : déplacement libre dans la
 // liste, ordre sauvé serveur (/identity/reorder) => synchro entre Vidéo brut /
