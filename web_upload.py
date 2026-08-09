@@ -4656,6 +4656,8 @@ function capRenderCards(){
       +'<div class="card-actions" style="position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5">'
       +'<button class="card-edit-btn" data-capact="place" data-cid="'+cid+'" title="Gérer la caption (éditeur)" style="color:#a855f7">'
       +'<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>'
+      +'<button class="card-edit-btn" data-capact="desc" data-cid="'+cid+'" title="Description du post (légende) — vide = pas de description" style="color:'+(it.desc?'#8b9cf7':'#9aa0a6')+'">'
+      +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></button>'
       +'<button class="card-edit-btn'+(on?'':' is-off')+'" data-capact="toggle" data-cid="'+cid+'" title="Désactiver / réactiver cette caption (sort du tirage random)" style="color:'+onoffCol+'">'
       +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg></button>'
       +'<label class="sel-circle-wrap" onclick="event.stopPropagation()" style="cursor:pointer;display:block">'
@@ -4664,7 +4666,9 @@ function capRenderCards(){
       +'</div>'
       +(on?'':'<div class="cap-prev-off">hors tirage</div>')
       +'</div>'
-      +'<div class="cap-card-meta">'+meta+'</div></div>');
+      +'<div class="cap-card-meta">'+meta+'</div>'
+      +(it.desc?('<div class="cap-card-meta" style="color:#8b9cf7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+nxMEsc(String(it.desc))+'">📄 '+nxMEsc(String(it.desc))+'</div>'):'')
+      +'</div>');
   }
   grid.innerHTML=out.join('');
   capSelUpdateBar();
@@ -4713,6 +4717,17 @@ document.addEventListener('click', function(ev){
     var itT=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
     if(itT){ itT.enabled=(itT.enabled===false); capRenderCards(); capSave(); }
   }
+  else if(act==='desc'){
+    var itD=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
+    if(itD){
+      var nv=window.prompt('Description du post (légende) — laisse vide pour aucune :', String(itD.desc||''));
+      if(nv===null) return;
+      nv=String(nv).trim().slice(0,1000);
+      if(nv) itD.desc=nv; else delete itD.desc;
+      capRenderCards(); capSave();
+      if(typeof showToast==='function') showToast(nv?'📄 Description enregistrée':'📄 Description retirée','success');
+    }
+  }
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
@@ -4732,12 +4747,15 @@ document.addEventListener('click', function(ev){
 });
 function capAddField(focus){
   var list=document.getElementById('capAddList'); if(!list) return null;
-  var n=list.querySelectorAll('.capadd-ta').length+1;
+  var n=list.querySelectorAll('.capadd-wrap').length+1;
   var wrap=document.createElement('div');
+  wrap.className='capadd-wrap';
   wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">CAPTION '+n+' (OVERLAY SUR LA VIDÉO)</div>'
-    +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
+    +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>'
+    +'<div style="font-size:10.5px;font-weight:700;color:#6b6b75;letter-spacing:.08em;margin:8px 0 6px">DESCRIPTION (OPTIONNEL — LÉGENDE DU POST)</div>'
+    +'<textarea rows="1" class="capadd-desc" placeholder="Vide = pas de description" autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#101014;border:1px dashed #2c2c33;color:#c9c9d2;border-radius:10px;padding:8px 12px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
   list.appendChild(wrap);
-  var ta=wrap.querySelector('textarea');
+  var ta=wrap.querySelector('.capadd-ta');
   if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
   return ta;
 }
@@ -4760,11 +4778,13 @@ function capAddSubmit(){
   var seen={}, dropped=0;
   (capLib.block.items||[]).forEach(function(c){ seen[String(c.text||'').trim()]=1; });
   var vals=[];
-  document.querySelectorAll('#capAddList .capadd-ta').forEach(function(t){
-    var v=String(t.value||'').trim(); if(!v) return;
+  document.querySelectorAll('#capAddList .capadd-wrap').forEach(function(w){
+    var t=w.querySelector('.capadd-ta'), d=w.querySelector('.capadd-desc');
+    var v=String(t&&t.value||'').trim(); if(!v) return;
     v=v.slice(0,300);
     if(seen[v]){ dropped++; return; }
-    seen[v]=1; vals.push(v);
+    seen[v]=1;
+    vals.push({text:v, desc:String(d&&d.value||'').trim().slice(0,1000)});
   });
   if(!vals.length){
     if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
@@ -4772,7 +4792,9 @@ function capAddSubmit(){
   }
   var now=Date.now();
   for(var i=0;i<vals.length;i++){
-    capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i], x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+    var itN={id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i].text, x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)};
+    if(vals[i].desc) itN.desc=vals[i].desc;   // vide = pas de description
+    capLib.block.items.push(itN);
   }
   capAddClose();
   capRenderCards(); capSave();
@@ -5363,10 +5385,16 @@ function capResultRow(res,j,out){
   row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 12px;background:#101013;border:1px solid #232327;border-radius:10px';
   row.innerHTML='<span style="font-size:16px">🎬</span>'
     +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nxMEsc(String(j.caption||''))+'</div>'
-    +'<div style="font-size:11px;color:#888">brute : '+nxMEsc(String(j.brute||''))+'</div></div>'
+    +'<div style="font-size:11px;color:#888">brute : '+nxMEsc(String(j.brute||''))+'</div>'
+    +(j.desc?('<div style="font-size:11px;color:#8b9cf7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+nxMEsc(String(j.desc))+'">📄 '+nxMEsc(String(j.desc))+'</div>'):'')
+    +'</div>'
+    +(j.desc?('<button type="button" class="cap-cpd" title="Copier la description" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">📋 Desc</button>'):'')
     +'<a href="'+url+'" target="_blank" style="text-decoration:none;font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px">▶ Voir</a>'
     +'<button type="button" class="cap-dl" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">⬇ Télécharger</button>'
     +'<button type="button" class="cap-dc" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">📤 Discord</button>';
+  var cpd=row.querySelector('.cap-cpd'); if(cpd) cpd.addEventListener('click',function(){
+    try{ navigator.clipboard.writeText(String(j.desc||'')); cpd.textContent='✅'; setTimeout(function(){ cpd.textContent='📋 Desc'; },1200); }catch(e){}
+  });
   var dl=row.querySelector('.cap-dl'); if(dl) dl.addEventListener('click',function(){ nxMDownloadOne(url+'?dl=1'); dl.textContent='✅'; });
   var dc=row.querySelector('.cap-dc'); if(dc) dc.addEventListener('click',function(){ capSendDiscord(j,out,dc); });
   res.appendChild(row);
@@ -5374,6 +5402,7 @@ function capResultRow(res,j,out){
 async function capSendDiscord(j,out,btn){
   btn.disabled=true; btn.textContent='⏳';
   var fd=new FormData(); fd.set('identity',j.identity||capLib.identity); fd.set('model',j.model); fd.set('vf',out.vf); fd.set('file',out.file);
+  if(j.desc) fd.set('desc',j.desc);   // la description part avec la vidéo (message après)
   try{
     var r=await fetch('/noctus/montage_send',{method:'POST',body:fd,credentials:'same-origin'}); var jj=await r.json();
     if(jj&&jj.ok){ btn.textContent='✅ envoyé'; }
@@ -14640,6 +14669,10 @@ def _clean_caption_block(raw) -> dict:
             continue
         entry = {"id": str(it.get("id") or f"c{int(_t.time() * 1000)}")[:48],
                  "text": txt[:300],
+                 # description OPTIONNELLE (légende du post) : vide = pas de
+                 # description ; envoyée avec la vidéo au partage Discord
+                 **({"desc": str(it.get("desc") or "").strip()[:1000]}
+                    if str(it.get("desc") or "").strip() else {}),
                  "x": _clampf(it.get("x"), 0.0, 1.0, 0.5),
                  # défaut = CENTRE de la vidéo (demande user : la caption est
                  # « écrite au centre juste comme ça » tant qu'on ne la place pas)
@@ -38501,6 +38534,14 @@ def create_app():
         p = (base / name).resolve()
         if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
             return jsonify({"ok": False, "error": "fichier introuvable"})
+        # Description optionnelle (captions) : posée en sidecar <stem>.desc.txt,
+        # le format d'envoi banger la lit déjà (message DESCRIPTION après la vidéo).
+        desc_txt = (request.form.get("desc") or "").strip()[:1000]
+        if desc_txt:
+            try:
+                p.with_suffix(".desc.txt").write_text(desc_txt, encoding="utf-8")
+            except Exception:
+                pass
         ok, msg, _meta = _send_reel_to_banger_channel(identity, p)
         if ok:
             return jsonify({"ok": True, "channel": msg})
@@ -38878,7 +38919,8 @@ def create_app():
         if not model:
             return jsonify({"ok": False, "error": "lancement du rendu impossible"})
         return jsonify({"ok": True, "model": model, "identity": ident,
-                        "caption": cap["text"], "brute": brute.name})
+                        "caption": cap["text"], "desc": cap.get("desc") or "",
+                        "brute": brute.name})
 
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():

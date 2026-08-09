@@ -1612,6 +1612,16 @@ try:
     check("captions : edition conserve la position",
           abs(_j2["block"]["items"][3]["y"] - _blk["items"][3]["y"]) < 1e-6
           and _j2["block"]["items"][3]["text"] == "Edite")
+    # description optionnelle : vide/espaces = absente ; remplie = trim + cap 1000
+    _blk["items"][2]["desc"] = "Lien en bio 😏 " + "x" * 1200
+    _blk["items"][4]["desc"] = "   "
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk)})
+    _jd = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    _itd = _jd["block"]["items"]
+    check("captions : desc optionnelle (trim + cap 1000, vide = absente)",
+          _itd[2].get("desc", "").startswith("Lien en bio")
+          and len(_itd[2].get("desc", "")) <= 1000
+          and "desc" not in _itd[4] and "desc" not in _itd[0], str(_itd[2])[:90])
     # bornes moteur : size clampe a 160, x/y clampes 0-1, wrapW hors bornes ignore
     _blk2 = {"style": {"size": 999},
              "items": [{"id": "w", "text": "W", "x": 2.0, "y": -1.0, "wrapW": 5.0}]}
