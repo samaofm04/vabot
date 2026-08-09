@@ -4454,7 +4454,7 @@ function capLibInit(){
 function capPrevCss(it){
   var b=capLib.block||{}, s=b.style||{}, gp=b.global_pos||{};
   var x=gp.enabled?(gp.x!=null?gp.x:0.5):(it.x!=null?it.x:0.5);
-  var y=gp.enabled?(gp.y!=null?gp.y:0.2):(it.y!=null?it.y:0.61);
+  var y=gp.enabled?(gp.y!=null?gp.y:0.2):(it.y!=null?it.y:0.5);
   var size=s.size||44, wrap=(it.wrapW!=null?it.wrapW:0.88), ls=(it.lineSpacing!=null?it.lineSpacing:1.45);
   var fam=b.font||'Strong', ital=(s.italic?'font-style:italic;':''), wt=(s.bold===false?'400':'700');
   if(fam==='Strong'){ fam='Poppins'; ital='font-style:italic;'; }
@@ -4483,7 +4483,7 @@ function capRenderCards(){
   }
   for(var i=0;i<items.length;i++){
     var it=items[i], on=(it.enabled!==false), cid=nxMEsc(String(it.id||''));
-    var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.61)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
+    var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.5)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
     out.push('<div class="cap-card'+(on?'':' cap-off')+'" data-cid="'+cid+'">'
       +'<div class="cap-prev" data-capact="place" data-cid="'+cid+'" title="Clique pour placer le texte (drag)">'
       +'<div class="cap-prev-txt" style="'+capPrevCss(it)+'">'+nxMEsc(String(it.text||''))+'</div>'
@@ -4537,7 +4537,7 @@ document.addEventListener('click', function(ev){
     if(!lines.length) return;
     var now=Date.now();
     for(var i=0;i<lines.length;i++){
-      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:lines[i].slice(0,300), x:0.5, y:0.61, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:lines[i].slice(0,300), x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
     }
     ta.value='';
     capRenderCards(); capSave();
@@ -4556,7 +4556,54 @@ document.addEventListener('click', function(ev){
   }
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
+  else if(act==='addfocus'){
+    var ta2=document.getElementById('capAddTa');
+    if(ta2){ try{ ta2.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} setTimeout(function(){ ta2.focus(); },250); }
+  }
 });
+// ---- Ranger des identités (toggle 📦, synchro entre TOUS les onglets vault) ----
+// Délégation en phase CAPTURE : le bouton vit DANS le <a> de la sidebar dont le
+// onclick inline (vaultGoTo) partirait sinon en premier au bubble.
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[data-identhide]'):null;
+  if(!b) return;
+  ev.preventDefault(); ev.stopPropagation();
+  var ident=b.getAttribute('data-identhide')||'';
+  if(!ident) return;
+  var fd=new FormData(); fd.set('identity',ident);
+  fetch('/identity/toggle_hidden',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(j){
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+      identHideApply(j.identity, j.hidden);
+      try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+      if(typeof showToast==='function') showToast(j.hidden?('📦 @'+j.identity+' rangée — retrouve-la en bas dans « Rangées »'):('↩ @'+j.identity+' remise dans la liste'),'success');
+    }).catch(function(e){ if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+}, true);
+document.addEventListener('click', function(ev){
+  var h=ev.target.closest?ev.target.closest('[data-vhtoggle]'):null;
+  if(!h) return;
+  var wrap=h.parentElement, list=wrap?wrap.querySelector('.vault-hidden-list'):null;
+  if(list) list.style.display=(list.style.display==='none')?'block':'none';
+});
+// Déplace l identité entre liste visible et « Rangées » dans TOUTES les sidebars
+// pré-rendues de la page (chaque onglet vault a la sienne) -> synchro instantanée.
+function identHideApply(ident,hidden){
+  document.querySelectorAll('.vault-sidebar').forEach(function(sb){
+    var item=sb.querySelector('.vault-item[data-ident="'+ident+'"]');
+    var vis=sb.querySelector('.vault-list');
+    var wrap=sb.querySelector('.vault-hidden-wrap');
+    var hid=wrap?wrap.querySelector('.vault-hidden-list'):null;
+    if(!item||!vis||!hid) return;
+    if(hidden){ hid.appendChild(item); item.classList.add('vault-item-hidden'); }
+    else{ vis.appendChild(item); item.classList.remove('vault-item-hidden'); }
+    var btn=item.querySelector('[data-identhide]');
+    if(btn){ btn.textContent=hidden?'↩':'📦'; btn.title=hidden?'Sortir des rangées':'Ranger (masquer de la liste — synchro brut/template/caption)'; }
+    var n=hid.querySelectorAll('.vault-item').length;
+    var head=wrap?wrap.querySelector('[data-vhtoggle]'):null;
+    if(head) head.textContent='📦 Rangées ('+n+')';
+    if(wrap) wrap.style.display=n?'block':'none';
+  });
+}
 document.addEventListener('change', function(ev){
   var t=ev.target; if(!t||!t.getAttribute) return;
   if(t.getAttribute('data-captoggle')!=null){
@@ -4588,54 +4635,241 @@ document.addEventListener('input', function(ev){
     var e=document.getElementById('capSizeVal'); if(e) e.textContent=String(parseInt(t.value)||44);
   }
 });
-// ---- Éditeur de placement (drag sur une brute, aperçu = vrai moteur) ----
-var capEdState={mode:'item',cid:null,text:'',x:0.5,y:0.61,wrapW:0.88,img:null,pend:null,cache:{}};
-var capEdRerenderT=null;
+// ---- Éditeur CAPTION plein écran (même app CapCut que le montage) ----
+// Style GLOBAL à la model (police/taille/couleur/casse/bulle/effet) ; position,
+// largeur (wrapW) et interligne PAR caption. Les modifs écrivent DIRECTEMENT
+// dans capLib.block et s enregistrent en auto (capSave, débounce 250ms).
+var capEdState={mode:'item',cid:null,img:null,pend:null,cache:{}};
+var capEdRerenderT=null, capEdBruteIdx=-1, capEdVideoIdent='';
+function capEdCur(){
+  if(capEdState.mode!=='item') return null;
+  return ((capLib.block||{}).items||[]).filter(function(c){return c.id===capEdState.cid;})[0]||null;
+}
+function capEdText(){
+  var it=capEdCur(); if(it) return String(it.text||'');
+  var f=((capLib.block||{}).items||[]).filter(function(c){return c.enabled!==false&&String(c.text||'').trim();})[0];
+  return f?String(f.text):'Exemple de caption';
+}
+function capEdPos(){
+  var b=capLib.block||{};
+  if(capEdState.mode==='global'){ var gp=b.global_pos||{}; return {x:(gp.x!=null?gp.x:0.5), y:(gp.y!=null?gp.y:0.2)}; }
+  var it=capEdCur()||{}; return {x:(it.x!=null?it.x:0.5), y:(it.y!=null?it.y:0.5)};
+}
+function capEdSetPos(x,y){
+  var b=capLib.block||{};
+  if(capEdState.mode==='global'){
+    b.global_pos=b.global_pos||{}; b.global_pos.x=x; b.global_pos.y=y; b.global_pos.enabled=true;
+    var cb=document.querySelector('input[data-capgp]'); if(cb) cb.checked=true;
+  } else { var it=capEdCur(); if(it){ it.x=x; it.y=y; } }
+}
+function capEdWrapVal(){ var it=capEdCur(); return (it&&it.wrapW!=null)?it.wrapW:0.88; }
+function capEdLsVal(){ var it=capEdCur(); return (it&&it.lineSpacing!=null)?it.lineSpacing:1.45; }
 function capEdOpen(mode,cid){
   if(!capLibInit()) return;
-  var st=capEdState, b=capLib.block, it=null;
-  st.mode=mode; st.cid=cid||null; st.img=null;
-  if(mode==='item'){
-    it=(b.items||[]).filter(function(c){return c.id===cid;})[0];
-    if(!it) return;
+  var st=capEdState;
+  st.mode=mode||'item'; st.cid=cid||null; st.img=null;
+  if(st.mode==='item'&&!capEdCur()){
+    var first=((capLib.block||{}).items||[])[0];
+    if(first) st.cid=first.id; else st.mode='global';
   }
-  var gp=b.global_pos||{};
-  st.text = it ? String(it.text||'') : String(((b.items||[])[0]||{}).text||'Exemple de caption');
-  st.x = (mode==='global') ? (gp.x!=null?gp.x:0.5) : (it.x!=null?it.x:0.5);
-  st.y = (mode==='global') ? (gp.y!=null?gp.y:0.2) : (it.y!=null?it.y:0.61);
-  st.wrapW = (it&&it.wrapW!=null) ? it.wrapW : 0.88;
-  var ta=document.getElementById('cap-ed-text'); if(ta){ ta.value=st.text; ta.disabled=(mode==='global'); }
-  var sz=document.getElementById('cap-ed-size'); if(sz) sz.value=(b.style&&b.style.size)||44;
-  var szv=document.getElementById('cap-ed-size-val'); if(szv) szv.textContent=String((b.style&&b.style.size)||44);
-  var wr=document.getElementById('cap-ed-wrap'); if(wr) wr.value=Math.round(st.wrapW*100);
-  var ttl=document.getElementById('cap-ed-title');
-  if(ttl) ttl.textContent=(mode==='global')?'📍 Position globale (toutes les captions)':'📍 Placer cette caption';
-  var v=document.getElementById('cap-ed-video');
-  if(v){
-    if(capLib.brutes.length){
-      var bn=capLib.brutes[Math.floor(Math.random()*capLib.brutes.length)];
-      v.src='/cloud/file/'+encodeURIComponent(capLib.identity)+'/brutes/'+encodeURIComponent(bn);
-      var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){});
-    } else { v.removeAttribute('src'); try{ v.load(); }catch(e){} }
-  }
+  capEdVideoLoad(false);
   document.getElementById('cap-ed-modal').style.display='flex';
-  capEdRender();
+  capEdLibRender(); capEdSync(); capEdRender();
 }
 function capEdClose(){
   var v=document.getElementById('cap-ed-video'); if(v){ try{ v.pause(); }catch(e){} v.removeAttribute('src'); try{ v.load(); }catch(e){} }
+  capEdVideoIdent='';
   var m=document.getElementById('cap-ed-modal'); if(m) m.style.display='none';
+  capRenderCards(); capSave();
 }
+function capEdSaveBtn(){
+  capRenderCards(); capSave();
+  if(typeof showToast==='function') showToast('💾 Captions enregistrées','success');
+}
+function capEdVideoLoad(next){
+  var v=document.getElementById('cap-ed-video'); if(!v) return;
+  var n=capLib.brutes.length;
+  if(!n){ v.removeAttribute('src'); try{ v.load(); }catch(e){} return; }
+  if(capEdVideoIdent!==capLib.identity){ capEdVideoIdent=capLib.identity; capEdBruteIdx=Math.floor(Math.random()*n); }
+  else if(next) capEdBruteIdx=(capEdBruteIdx+1)%n;
+  else if(capEdBruteIdx<0) capEdBruteIdx=Math.floor(Math.random()*n);
+  capEdBruteIdx=((capEdBruteIdx%n)+n)%n;
+  var want='/cloud/file/'+encodeURIComponent(capLib.identity)+'/brutes/'+encodeURIComponent(capLib.brutes[capEdBruteIdx]);
+  if(v.getAttribute('src')!==want) v.src=want;
+  var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){});
+}
+function capEdSwapBrute(){ capEdVideoLoad(true); }
+function capEdPlayPause(){
+  var v=document.getElementById('cap-ed-video'); if(!v) return;
+  if(v.paused){ var p=v.play(); if(p&&p.catch) p.catch(function(){}); } else v.pause();
+}
+// Liste des captions dans la colonne de gauche (clic = éditer celle-là)
+function capEdLibRender(){
+  var el=document.getElementById('cap-ed-list'); if(!el) return;
+  var items=(capLib.block||{}).items||[], out=[];
+  for(var i=0;i<items.length;i++){
+    var it=items[i], on=(it.enabled!==false), act=(capEdState.mode==='item'&&capEdState.cid===it.id);
+    out.push('<div class="cap-ed-li'+(act?' on':'')+(on?'':' off')+'" data-capedli="'+nxMEsc(String(it.id))+'">'
+      +nxMEsc(String(it.text||'').slice(0,64))+'</div>');
+  }
+  el.innerHTML=out.join('')||'<div style="font-size:11px;color:#75757f;line-height:1.5">Aucune caption — clique « Ajouter un texte »</div>';
+  var pj=document.getElementById('cap-ed-proj');
+  if(pj) pj.textContent='@'+capLib.identity+' · '+items.length+' caption'+(items.length!==1?'s':'');
+}
+document.addEventListener('click', function(ev){
+  var li=ev.target.closest?ev.target.closest('[data-capedli]'):null;
+  if(!li) return;
+  capEdState.mode='item'; capEdState.cid=li.getAttribute('data-capedli'); capEdState.img=null;
+  capEdLibRender(); capEdSync(); capEdRender();
+});
+function capEdAddText(){
+  if(!capLibInit()) return;
+  var now=Date.now();
+  var it={id:'c'+now+'_'+Math.floor(Math.random()*1000), text:'Nouveau texte', x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)};
+  capLib.block.items.push(it);
+  capEdState.mode='item'; capEdState.cid=it.id; capEdState.img=null;
+  capEdLibRender(); capEdSync(); capEdRender(); capRenderCards(); capSave();
+  var ta=document.getElementById('cap-ed-text'); if(ta){ ta.focus(); ta.select(); }
+}
+function capEdDelete(){
+  var it=capEdCur(); if(!it) return;
+  if(!confirm('Supprimer cette caption ?')) return;
+  capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==it.id;});
+  var nxt=(capLib.block.items[0]||null);
+  capEdState.cid=nxt?nxt.id:null; if(!nxt) capEdState.mode='global';
+  capEdState.img=null;
+  capEdLibRender(); capEdSync(); capEdRender(); capRenderCards(); capSave();
+}
+// Synchronise l inspecteur droite avec l état courant
+function capEdSync(){
+  var b=capLib.block||{}, s=b.style||{}, it=capEdCur();
+  var ta=document.getElementById('cap-ed-text');
+  if(ta){ ta.value=it?String(it.text||''):capEdText(); ta.disabled=(capEdState.mode==='global'); }
+  var f=document.getElementById('cap-ed-font'); if(f) f.value=b.font||'Strong';
+  var sz=document.getElementById('cap-ed-size'); if(sz) sz.value=s.size||44;
+  var sv=document.getElementById('cap-ed-size-val'); if(sv) sv.textContent=String(s.size||44);
+  var wr=document.getElementById('cap-ed-wrap'); if(wr) wr.value=Math.round(capEdWrapVal()*100);
+  var wv=document.getElementById('cap-ed-wrap-val'); if(wv) wv.textContent=Math.round(capEdWrapVal()*100)+'%';
+  var ls=document.getElementById('cap-ed-ls'); if(ls) ls.value=Math.round(capEdLsVal()*100);
+  var lv=document.getElementById('cap-ed-ls-val'); if(lv) lv.textContent=capEdLsVal().toFixed(2);
+  var cp=document.getElementById('cap-ed-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
+  var del=document.getElementById('cap-ed-del'); if(del) del.style.display=(capEdState.mode==='item'&&it)?'block':'none';
+  var wrRow=document.getElementById('cap-ed-wrap-row'); if(wrRow) wrRow.style.display=(capEdState.mode==='item')?'flex':'none';
+  var lsRow=document.getElementById('cap-ed-ls-row'); if(lsRow) lsRow.style.display=(capEdState.mode==='item')?'flex':'none';
+  var note=document.getElementById('cap-ed-mode-note');
+  if(note) note.textContent=(capEdState.mode==='global')?'📍 Position GLOBALE — toutes les captions seront posées ici':'';
+  capEdPaint();
+}
+// Reflète le style global sur les toggles (mêmes états .on que l éditeur montage)
+function capEdPaint(){
+  var s=(capLib.block||{}).style||{};
+  function T(id,on){ var e=document.getElementById(id); if(e) e.classList.toggle('on',!!on); }
+  T('caps-bold', s.bold!==false); T('caps-italic', !!s.italic); T('caps-underline', !!s.underline);
+  T('capc-upper', s['case']==='upper'); T('capc-lower', s['case']==='lower'); T('capc-title', s['case']==='title');
+  T('capa-left', s.align==='left'); T('capa-center', !s.align||s.align==='center'); T('capa-right', s.align==='right');
+  T('cape-none', !s.effect||s.effect==='none'); T('cape-shadow', s.effect==='shadow'); T('cape-neon', s.effect==='neon');
+  var bx=document.getElementById('capb-box');
+  if(bx){ bx.classList.toggle('on',!!s.box); bx.textContent=s.box?(((s.boxColor||'').toLowerCase()==='#ffffff')?'Blanc':'Noir'):'Aucun'; }
+}
+// Pipeline commun après un changement de STYLE global
+function capEdStyleChanged(){
+  capEdState.img=null;
+  capEdPaint();
+  var sv=document.getElementById('capSizeVal'), s=(capLib.block||{}).style||{};
+  if(sv) sv.textContent=String(s.size||44);
+  var e3=document.querySelector('input[data-capstyle=size]'); if(e3) e3.value=s.size||44;
+  var e4=document.querySelector('input[data-capstyle=color]'); if(e4&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) e4.value=s.color;
+  clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,200);
+  capRenderCards(); capSave();
+}
+function capEdFont(v){ if(!capLibInit()) return; capLib.block.font=v; capEdStyleChanged(); }
+function capEdSize(v){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.size=Math.max(16,Math.min(160,parseInt(v)||44));
+  var e=document.getElementById('cap-ed-size-val'); if(e) e.textContent=String(s.size);
+  capEdStyleChanged();
+}
+function capEdToggle(k){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  if(k==='bold') s.bold=(s.bold===false); else s[k]=!s[k];
+  capEdStyleChanged();
+}
+function capEdCase(c){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s['case']=(s['case']===c)?'none':c;
+  capEdStyleChanged();
+}
+function capEdColor(c){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.color=c;
+  var cp=document.getElementById('cap-ed-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(c)) cp.value=c;
+  capEdStyleChanged();
+}
+function capEdAlign(a){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.align=a;
+  capEdStyleChanged();
+}
+function capEdBox(){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.box=!s.box; if(s.box&&!s.boxColor) s.boxColor='#010101';
+  capEdStyleChanged();
+}
+function capEdEffect(e2){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  s.effect=(s.effect===e2)?'none':e2;
+  capEdStyleChanged();
+}
+function capEdPreset(name){
+  if(!capLibInit()) return;
+  var s=capLib.block.style=capLib.block.style||{};
+  if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
+  else if(name==='blackbox'){ s.box=true; s.boxColor='#010101'; s.color='#ffffff'; s.effect='none'; }
+  else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#111111'; s.effect='none'; }
+  var cp=document.getElementById('cap-ed-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
+  capEdStyleChanged();
+}
+function capEdWrap(v){
+  var it=capEdCur(); if(!it) return;
+  it.wrapW=Math.max(0.25,Math.min(0.97,(parseInt(v)||88)/100));
+  var e=document.getElementById('cap-ed-wrap-val'); if(e) e.textContent=Math.round(it.wrapW*100)+'%';
+  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,200);
+  capRenderCards(); capSave();
+}
+function capEdLS(v){
+  var it=capEdCur(); if(!it) return;
+  it.lineSpacing=Math.max(0.9,Math.min(3,(parseInt(v)||145)/100));
+  var e=document.getElementById('cap-ed-ls-val'); if(e) e.textContent=it.lineSpacing.toFixed(2);
+  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,200);
+  capRenderCards(); capSave();
+}
+function capEdTextChanged(){
+  var it=capEdCur(), ta=document.getElementById('cap-ed-text'); if(!it||!ta) return;
+  it.text=String(ta.value).slice(0,300);
+  capEdState.img=null;
+  clearTimeout(capEdRerenderT);
+  capEdRerenderT=setTimeout(function(){ capEdRender(); capEdLibRender(); capRenderCards(); },350);
+  capSave();
+}
+// ---- Rendu de l aperçu (vrai moteur via /noctus/caption_preview) ----
 function capEdKey(){
   var b=capLib.block||{}, s=b.style||{};
-  return [capEdState.text,b.font||'Strong',s.size||44,s.color||'#ffffff',s.align||'center',s['case']||'none',
+  return [capEdText(),b.font||'Strong',s.size||44,s.color||'#ffffff',s.align||'center',s['case']||'none',
           (s.bold===false?0:1),(s.italic?1:0),(s.underline?1:0),(s.box?1:0),s.boxColor||'#000000',s.effect||'none',
-          (+capEdState.wrapW).toFixed(3)].join('|');
+          (+capEdWrapVal()).toFixed(3),(+capEdLsVal()).toFixed(2)].join('|');
 }
 function capEdRender(){
   var m=document.getElementById('cap-ed-modal'); if(!m||m.style.display==='none') return;
   var st=capEdState, b=capLib.block||{}, s=b.style||{};
   var ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
-  var text=String(st.text||'').trim();
+  var text=String(capEdText()||'').trim();
   if(!text){ ov.innerHTML=''; return; }
   var key=capEdKey(), rec=st.cache[key];
   if(rec&&rec.url){ st.img=rec; capEdPlace(); return; }
@@ -4647,7 +4881,8 @@ function capEdRender(){
   fd.set('align',s.align||'center'); fd.set('case',s['case']||'none');
   fd.set('bold',(s.bold===false)?'0':'1'); fd.set('italic',s.italic?'1':'0'); fd.set('underline',s.underline?'1':'0');
   fd.set('box',s.box?'1':'0'); fd.set('boxColor',s.boxColor||'#000000'); fd.set('effect',s.effect||'none');
-  fd.set('wrapW',(+st.wrapW).toFixed(4));
+  fd.set('wrapW',(+capEdWrapVal()).toFixed(4));
+  fd.set('lineSpacing',(+capEdLsVal()).toFixed(3));
   var bbox=null;
   fetch('/noctus/caption_preview',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){
     if(!r.ok) throw 0;
@@ -4665,25 +4900,40 @@ function capEdPlace(){
   var st=capEdState, ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
   var rec=st.img;
   if(!(rec&&rec.url&&rec.bbox)){ capEdCssFallback(); return; }
-  var bb=rec.bbox, W=bb.W||1080, H=bb.H||1920;
+  var p=capEdPos(), bb=rec.bbox, W=bb.W||1080, H=bb.H||1920;
   var wpc=Math.max(1,(bb.w||1)/W*100), hpc=Math.max(1,(bb.h||1)/H*100);
-  var left=(st.x*100-wpc/2), top=(st.y*100-hpc/2);
-  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;touch-action:none;z-index:4;outline:1.5px dashed rgba(59,130,246,.85);outline-offset:4px">'
+  var left=(p.x*100-wpc/2), top=(p.y*100-hpc/2);
+  var handles='';
+  if(st.mode==='item'){
+    handles='<span class="nxm-cnr tl"></span><span class="nxm-cnr tr"></span><span class="nxm-cnr bl"></span><span class="nxm-cnr br"></span>'
+           +'<span class="nxm-ew l"></span><span class="nxm-ew r"></span>'
+           +'<span class="nxm-ns t"></span><span class="nxm-ns b"></span>';
+  }
+  ov.innerHTML='<div id="cap-ed-drag" class="nxm-drag sel" style="position:absolute;left:'+left.toFixed(3)+'%;top:'+top.toFixed(3)+'%;width:'+wpc.toFixed(3)+'%;height:'+hpc.toFixed(3)+'%;cursor:move;pointer-events:auto;touch-action:none;z-index:4;box-sizing:border-box">'
     +'<img src="'+rec.url+'" draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;-webkit-user-select:none;user-select:none">'
-    +'</div>';
+    +handles+'</div>';
   var el=document.getElementById('cap-ed-drag');
-  if(el) el.addEventListener('pointerdown',capEdBeginDrag);
+  if(el){
+    el.addEventListener('pointerdown', function(e){
+      var t=e.target;
+      if(t.classList&&t.classList.contains('nxm-cnr')) capEdBeginSize(e);
+      else if(t.classList&&t.classList.contains('nxm-ew')) capEdBeginW(e);
+      else if(t.classList&&t.classList.contains('nxm-ns')) capEdBeginLS(e);
+      else capEdBeginDrag(e);
+    });
+  }
 }
 function capEdCssFallback(){
-  var st=capEdState, ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
-  var b=capLib.block||{}, s=b.style||{}, ow=ov.clientWidth||270;
+  var ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var b=capLib.block||{}, s=b.style||{}, ow=ov.clientWidth||270, p=capEdPos();
   var fpx=Math.max(9,(s.size||44)*ow/1080);
   var col=(s.color&&s.color.length)?s.color:'#ffffff';
-  var inner=nxMEsc(String(st.text||'')).split(String.fromCharCode(10)).join('<br>');
-  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+(st.x*100).toFixed(2)+'%;top:'+(st.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:'+Math.round(st.wrapW*100)+'%;text-align:center;color:'+col+';font-family:Poppins,Arial;font-weight:700;font-style:italic;font-size:'+fpx.toFixed(1)+'px;-webkit-text-stroke:'+Math.max(1,fpx*0.095).toFixed(1)+'px #000;paint-order:stroke fill;cursor:move;touch-action:none;z-index:4;white-space:pre-wrap;word-break:break-word">'+inner+'</div>';
+  var inner=nxMEsc(String(capEdText()||'')).split(String.fromCharCode(10)).join('<br>');
+  ov.innerHTML='<div id="cap-ed-drag" style="position:absolute;left:'+(p.x*100).toFixed(2)+'%;top:'+(p.y*100).toFixed(2)+'%;transform:translate(-50%,-50%);max-width:'+Math.round(capEdWrapVal()*100)+'%;text-align:center;color:'+col+';font-family:Poppins,Arial;font-weight:700;font-style:italic;font-size:'+fpx.toFixed(1)+'px;-webkit-text-stroke:'+Math.max(1,fpx*0.095).toFixed(1)+'px #000;paint-order:stroke fill;cursor:move;touch-action:none;z-index:4;white-space:pre-wrap;word-break:break-word;pointer-events:auto">'+inner+'</div>';
   var el=document.getElementById('cap-ed-drag');
   if(el) el.addEventListener('pointerdown',capEdBeginDrag);
 }
+// Déplacement (façon CapCut : on bouge l élément, pas de re-rendu)
 function capEdBeginDrag(e){
   e.preventDefault();
   var ov=document.getElementById('cap-ed-overlay'), el=document.getElementById('cap-ed-drag');
@@ -4696,7 +4946,7 @@ function capEdBeginDrag(e){
     var fx=(ev2.clientX-rect.left)/rect.width, fy=(ev2.clientY-rect.top)/rect.height;
     fx=Math.max(0.03,Math.min(0.97,fx)); fy=Math.max(0.03,Math.min(0.96,fy));
     if(Math.abs(fx-0.5)<0.02) fx=0.5;
-    capEdState.x=fx; capEdState.y=fy;
+    capEdSetPos(fx,fy);
     if(el.style.transform){ el.style.left=(fx*100).toFixed(2)+'%'; el.style.top=(fy*100).toFixed(2)+'%'; }
     else{
       var w=el.offsetWidth/rect.width*100, h=el.offsetHeight/rect.height*100;
@@ -4710,53 +4960,99 @@ function capEdBeginDrag(e){
     document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
     try{ ov.releasePointerCapture(pid); }catch(_){}
     var gx=document.getElementById('cap-ed-gx'); if(gx) gx.style.display='none';
+    capRenderCards(); capSave();
   }
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
   document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
-function capEdSize(v){
-  if(!capLib.block) return;
+// Coins = taille de police (scale visuel pendant le drag, re-rendu net au lâcher)
+function capEdBeginSize(e){
+  e.preventDefault(); e.stopPropagation();
+  if(!capLibInit()) return;
+  var ov=document.getElementById('cap-ed-overlay'), el=document.getElementById('cap-ed-drag'); if(!ov||!el) return;
   var s=capLib.block.style=capLib.block.style||{};
-  s.size=Math.max(16,Math.min(160,parseInt(v)||44));
-  var e=document.getElementById('cap-ed-size-val'); if(e) e.textContent=String(s.size);
-  var e2=document.getElementById('capSizeVal'); if(e2) e2.textContent=String(s.size);
-  var e3=document.querySelector('input[data-capstyle=size]'); if(e3) e3.value=s.size;
-  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,220);
-}
-function capEdWrap(v){
-  capEdState.wrapW=Math.max(0.25,Math.min(0.97,(parseInt(v)||88)/100));
-  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,220);
-}
-function capEdTextChanged(){
-  var ta=document.getElementById('cap-ed-text'); if(!ta) return;
-  capEdState.text=ta.value;
-  capEdState.img=null; clearTimeout(capEdRerenderT); capEdRerenderT=setTimeout(capEdRender,350);
-}
-function capEdPreset(name){
-  if(!capLib.block) return;
-  var s=capLib.block.style=capLib.block.style||{};
-  if(name==='outline'){ s.box=false; s.color='#ffffff'; s.boxColor='#000000'; s.effect='none'; }
-  else if(name==='blackbox'){ s.box=true; s.boxColor='#010101'; s.color='#ffffff'; s.effect='none'; }
-  else if(name==='whitebox'){ s.box=true; s.boxColor='#ffffff'; s.color='#000000'; s.effect='none'; }
-  var cp=document.querySelector('input[data-capstyle=color]'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color)) cp.value=s.color;
-  capEdState.img=null; capEdRender();
-}
-function capEdSaveBtn(){
-  if(!capLib.block){ capEdClose(); return; }
-  var st=capEdState, b=capLib.block;
-  if(st.mode==='global'){
-    b.global_pos=b.global_pos||{};
-    b.global_pos.x=st.x; b.global_pos.y=st.y; b.global_pos.enabled=true;
-    var cb=document.querySelector('input[data-capgp]'); if(cb) cb.checked=true;
-  } else {
-    var it=(b.items||[]).filter(function(c){return c.id===st.cid;})[0];
-    if(it){
-      var ta=document.getElementById('cap-ed-text');
-      if(ta&&String(ta.value||'').trim()) it.text=String(ta.value).trim().slice(0,300);
-      it.x=st.x; it.y=st.y; it.wrapW=st.wrapW;
+  var pid=e.pointerId, p=capEdPos(), rect=ov.getBoundingClientRect();
+  var cx=rect.left+p.x*rect.width, cy=rect.top+p.y*rect.height;
+  var d0=Math.max(20,Math.hypot(e.clientX-cx,e.clientY-cy)), s0=s.size||44, last=s0;
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev2){
+    if(ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    if(ev2.buttons===0){ up(ev2); return; }
+    var d=Math.max(20,Math.hypot(ev2.clientX-cx,ev2.clientY-cy));
+    var ns=Math.max(16,Math.min(160,Math.round(s0*d/d0)));
+    if(ns!==last){
+      last=ns; s.size=ns;
+      var sl=document.getElementById('cap-ed-size'); if(sl) sl.value=ns;
+      var sv=document.getElementById('cap-ed-size-val'); if(sv) sv.textContent=String(ns);
+      el.style.transformOrigin='center center'; el.style.transform='scale('+(ns/s0)+')';
     }
   }
-  capEdClose(); capRenderCards(); capSave();
+  function up(ev2){
+    if(ev2&&ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    el.style.transform='';
+    capEdStyleChanged();
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
+}
+// Poignées ↔ = largeur de wrap (re-rendu throttlé pendant le drag)
+function capEdBeginW(e){
+  e.preventDefault(); e.stopPropagation();
+  var it=capEdCur(); if(!it) return;
+  var ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var pid=e.pointerId, rect=ov.getBoundingClientRect(), p=capEdPos();
+  var cx=rect.left+p.x*rect.width, lastT=0;
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev2){
+    if(ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    if(ev2.buttons===0){ up(ev2); return; }
+    var w=Math.max(0.25,Math.min(0.97,(Math.abs(ev2.clientX-cx)*2)/rect.width));
+    it.wrapW=Math.round(w*1000)/1000;
+    var wr=document.getElementById('cap-ed-wrap'); if(wr) wr.value=Math.round(w*100);
+    var wv=document.getElementById('cap-ed-wrap-val'); if(wv) wv.textContent=Math.round(w*100)+'%';
+    var now=Date.now();
+    if(now-lastT>170){ lastT=now; capEdState.img=null; capEdRender(); }
+  }
+  function up(ev2){
+    if(ev2&&ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    capEdState.img=null; capEdRender(); capRenderCards(); capSave();
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
+}
+// Poignées ↕ = interligne
+function capEdBeginLS(e){
+  e.preventDefault(); e.stopPropagation();
+  var it=capEdCur(); if(!it) return;
+  var ov=document.getElementById('cap-ed-overlay'); if(!ov) return;
+  var pid=e.pointerId, rect=ov.getBoundingClientRect();
+  var ls0=(it.lineSpacing!=null?it.lineSpacing:1.45), y0=e.clientY, lastT=0;
+  try{ ov.setPointerCapture(pid); }catch(_){}
+  function move(ev2){
+    if(ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    if(ev2.buttons===0){ up(ev2); return; }
+    var ls=Math.max(0.9,Math.min(3, ls0+(ev2.clientY-y0)/rect.height*3));
+    it.lineSpacing=Math.round(ls*100)/100;
+    var sl=document.getElementById('cap-ed-ls'); if(sl) sl.value=Math.round(it.lineSpacing*100);
+    var lv=document.getElementById('cap-ed-ls-val'); if(lv) lv.textContent=it.lineSpacing.toFixed(2);
+    var now=Date.now();
+    if(now-lastT>170){ lastT=now; capEdState.img=null; capEdRender(); }
+  }
+  function up(ev2){
+    if(ev2&&ev2.pointerId!=null&&ev2.pointerId!==pid) return;
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up); window.removeEventListener('blur',up);
+    try{ ov.releasePointerCapture(pid); }catch(_){}
+    capEdState.img=null; capEdRender(); capRenderCards(); capSave();
+  }
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up); window.addEventListener('blur',up);
 }
 // ---- Génération : N vidéos, chacune = 1 brute random + 1 caption random ----
 var capGenBusy=false;
@@ -6806,34 +7102,123 @@ body.light .action-icon{color:#666}
   </div>
 </div>
 
-<!-- ===== Editeur CAPTION : placer un texte sur une video brute (drag) ===== -->
-<div id="cap-ed-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);align-items:center;justify-content:center;padding:20px" onclick="capEdClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:16px;display:flex;gap:16px;max-width:94vw;max-height:94vh;box-sizing:border-box">
-    <div style="position:relative;height:min(76vh,620px);aspect-ratio:9/16;background:#000;border-radius:10px;overflow:hidden;flex-shrink:0">
-      <video id="cap-ed-video" muted loop playsinline style="width:100%;height:100%;object-fit:cover"></video>
-      <div id="cap-ed-overlay" style="position:absolute;inset:0"></div>
-      <div id="cap-ed-gx" style="display:none;position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(59,130,246,.9);z-index:6;pointer-events:none"></div>
-      <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#a855f7;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">BRUTE (exemple)</span>
+<!-- ===== Editeur CAPTION : meme app CapCut que le montage (ce-app), sans timeline.
+     Colonne gauche = liste des captions de la model ; centre = apercu sur une brute ;
+     droite = inspecteur Texte complet. Le style est GLOBAL a la model, la position/
+     largeur/interligne sont PAR caption. Tout s enregistre en auto (capSave). ===== -->
+<div id="cap-ed-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:#000;align-items:center;justify-content:center;padding:0">
+  <div onclick="event.stopPropagation()" class="ce-app" style="grid-template-rows:38px minmax(0,1fr)">
+    <!-- 1) BARRE DE TITRE -->
+    <div class="ce-title">
+      <span class="ce-app-name">🅰️ Caption</span>
+      <div class="ce-proj" id="cap-ed-proj">Mes captions</div>
+      <button class="ce-btn" id="cap-ed-swap" onclick="capEdSwapBrute()" title="Changer la video brute d apercu (n influe pas sur le tirage)">🔀 Autre brute</button>
+      <button class="ce-btn accent" onclick="capEdSaveBtn()">💾 Enregistrer</button>
+      <button class="ce-x" onclick="capEdClose()">✕</button>
     </div>
-    <div style="width:262px;display:flex;flex-direction:column;gap:12px;min-width:0">
-      <div id="cap-ed-title" style="font-weight:800;font-size:14px">📍 Placer cette caption</div>
-      <textarea id="cap-ed-text" rows="3" oninput="capEdTextChanged()" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#c4c4cc">Taille
-        <input id="cap-ed-size" type="range" min="16" max="160" value="44" oninput="capEdSize(this.value)" style="flex:1">
-        <span id="cap-ed-size-val" style="min-width:26px;text-align:right">44</span>
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#c4c4cc">Largeur
-        <input id="cap-ed-wrap" type="range" min="25" max="97" value="88" oninput="capEdWrap(this.value)" style="flex:1">
-      </label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button type="button" class="cap-preset" onclick="capEdPreset('outline')">Contour</button>
-        <button type="button" class="cap-preset" onclick="capEdPreset('blackbox')">Boîte noire</button>
-        <button type="button" class="cap-preset" onclick="capEdPreset('whitebox')">Boîte blanche</button>
+    <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
+    <div class="ce-main">
+      <!-- GAUCHE : liste des captions -->
+      <div class="ce-lib">
+        <div class="ce-libcontent">
+          <div class="ce-card" onclick="capEdAddText()">Ajouter un texte</div>
+          <div class="ce-card" style="margin-top:12px;height:46px;font-style:normal" onclick="capEdOpen('global',null)"
+               title="Toutes les captions posées au même endroit (au lieu de la position propre à chacune)">📍 Position globale</div>
+          <div id="cap-ed-list" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
+        </div>
       </div>
-      <div style="font-size:11px;color:#888;line-height:1.5">Glisse le texte sur la vidéo pour le placer. Taille et style s’appliquent à toutes les captions de la model ; la position est propre à chaque caption.</div>
-      <div style="margin-top:auto;display:flex;gap:8px">
-        <button type="button" onclick="capEdClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
-        <button type="button" onclick="capEdSaveBtn()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">✅ Enregistrer</button>
+      <!-- CENTRE : lecteur -->
+      <div class="ce-center">
+        <div class="ce-chead">Aperçu sur une brute de la model — le texte sera incrusté pareil à la génération</div>
+        <div class="ce-stage">
+          <div class="ce-vwrap">
+            <video id="cap-ed-video" muted loop playsinline class="ce-video" onclick="capEdPlayPause()"></video>
+            <div id="cap-ed-overlay" class="ce-ovl"></div>
+            <div id="cap-ed-gx" style="display:none;position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(52,103,255,.9);z-index:6;pointer-events:none"></div>
+            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#a855f7;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">BRUTE (exemple)</span>
+          </div>
+        </div>
+        <div class="ce-ctrl">
+          <span id="cap-ed-mode-note" style="color:#fbbf24"></span>
+          <div style="flex:1"></div>
+          <span>9:16 · 1080×1920</span>
+        </div>
+      </div>
+      <!-- DROITE : inspecteur Texte (mêmes contrôles que l éditeur montage) -->
+      <div class="ce-right">
+        <div class="ce-rtabs">
+          <button class="ce-rtab on">Texte</button>
+        </div>
+        <div class="ce-inspect">
+          <textarea id="cap-ed-text" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="capEdTextChanged()"></textarea>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Préréglage</span>
+            <button type="button" class="nxm-preset" onclick="capEdPreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
+            <button type="button" class="nxm-preset" onclick="capEdPreset('whitebox')" title="Fond blanc, texte noir"><span style="background:#fff;color:#111;font-weight:800;font-style:italic;border-radius:5px;padding:1px 6px">Aa</span></button>
+            <button type="button" class="nxm-preset" onclick="capEdPreset('blackbox')" title="Fond noir, texte blanc"><span style="background:#111;color:#fff;font-weight:800;font-style:italic;border-radius:5px;padding:1px 6px">Aa</span></button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Police</span>
+            <select id="cap-ed-font" onchange="capEdFont(this.value)" class="nxm-inp"><option selected>Strong</option><option>TikTokSans</option><option>Inter</option><option>Poppins</option><option>Montserrat</option><option>BebasNeue</option><option>Anton</option></select>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Taille de la police</span>
+            <input id="cap-ed-size" type="range" min="16" max="160" value="44" oninput="capEdSize(this.value)" class="nxm-slider">
+            <span id="cap-ed-size-val" style="min-width:28px;text-align:right;color:#c4c4cc;font-size:12px">44</span>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Motif</span>
+            <button type="button" id="caps-bold" class="nxm-tg on" onclick="capEdToggle('bold')" style="font-weight:800">B</button>
+            <button type="button" id="caps-italic" class="nxm-tg" onclick="capEdToggle('italic')" style="font-style:italic">I</button>
+            <button type="button" id="caps-underline" class="nxm-tg" onclick="capEdToggle('underline')" style="text-decoration:underline">U</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Casse</span>
+            <button type="button" id="capc-upper" class="nxm-tg" onclick="capEdCase('upper')" title="MAJUSCULES">TT</button>
+            <button type="button" id="capc-lower" class="nxm-tg" onclick="capEdCase('lower')" title="minuscules">tt</button>
+            <button type="button" id="capc-title" class="nxm-tg" onclick="capEdCase('title')" title="Majuscule Par Mot">Tt</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Couleur</span>
+            <span class="nxm-sw" style="background:#ffffff" onclick="capEdColor('#ffffff')"></span>
+            <span class="nxm-sw" style="background:#111111" onclick="capEdColor('#111111')"></span>
+            <span class="nxm-sw" style="background:#ffe14d" onclick="capEdColor('#ffe14d')"></span>
+            <span class="nxm-sw" style="background:#ff4d6d" onclick="capEdColor('#ff4d6d')"></span>
+            <span class="nxm-sw" style="background:#4dd2ff" onclick="capEdColor('#4dd2ff')"></span>
+            <span class="nxm-sw" style="background:#7cfc4d" onclick="capEdColor('#7cfc4d')"></span>
+            <input type="color" id="cap-ed-color" value="#ffffff" oninput="capEdColor(this.value)" style="width:28px;height:24px;border:0;background:none;cursor:pointer;padding:0" title="Couleur perso">
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Alignement</span>
+            <button type="button" id="capa-left" class="nxm-tg" onclick="capEdAlign('left')" title="Gauche">⟵</button>
+            <button type="button" id="capa-center" class="nxm-tg on" onclick="capEdAlign('center')" title="Centre">≡</button>
+            <button type="button" id="capa-right" class="nxm-tg" onclick="capEdAlign('right')" title="Droite">⟶</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Fond (bulle)</span>
+            <button type="button" id="capb-box" class="nxm-tg" onclick="capEdBox()">Aucun</button>
+          </div>
+          <div class="nxm-row">
+            <span class="nxm-lbl">Effet</span>
+            <button type="button" id="cape-none" class="nxm-tg on" onclick="capEdEffect('none')">Aucun</button>
+            <button type="button" id="cape-shadow" class="nxm-tg" onclick="capEdEffect('shadow')">Ombre</button>
+            <button type="button" id="cape-neon" class="nxm-tg" onclick="capEdEffect('neon')">Néon</button>
+          </div>
+          <div style="height:1px;background:#2a2a30;margin:16px 0"></div>
+          <div class="nxm-plabel">Bloc de texte</div>
+          <div class="nxm-row" id="cap-ed-wrap-row">
+            <span class="nxm-lbl">Largeur</span>
+            <input id="cap-ed-wrap" type="range" min="25" max="97" value="88" oninput="capEdWrap(this.value)" class="nxm-slider">
+            <span id="cap-ed-wrap-val" style="min-width:34px;text-align:right;color:#c4c4cc;font-size:12px">88%</span>
+          </div>
+          <div class="nxm-row" id="cap-ed-ls-row">
+            <span class="nxm-lbl">Interligne</span>
+            <input id="cap-ed-ls" type="range" min="90" max="300" value="145" oninput="capEdLS(this.value)" class="nxm-slider">
+            <span id="cap-ed-ls-val" style="min-width:34px;text-align:right;color:#c4c4cc;font-size:12px">1.45</span>
+          </div>
+          <div class="nxm-hint">Glisse le texte sur la vidéo · coins = taille · poignées ↔ = largeur · ↕ = interligne. Le style (police, taille, couleur…) s'applique à TOUTES les captions de la model ; position, largeur et interligne sont propres à chaque caption.</div>
+          <button type="button" id="cap-ed-del" onclick="capEdDelete()" style="display:none;margin-top:14px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption</button>
+        </div>
       </div>
     </div>
   </div>
@@ -12118,6 +12503,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
     except Exception:
         pass
+    # Identités « rangées » (toggle 📦 sidebar) : masquées de la liste (repliées
+    # en bas), jamais choisies par défaut — mais consultables via ?ident explicite.
+    hidden_idents = set(_load_hidden_identities())
     if not selected or selected not in identities:
         last_up = ""
         try:
@@ -12129,11 +12517,12 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             selected = last_up
         else:
             for ident in identities:
-                if ident_stats[ident]["n_files"] > 0:
+                if ident not in hidden_idents and ident_stats[ident]["n_files"] > 0:
                     selected = ident
                     break
             if not selected:
-                selected = identities[0]
+                _vis = [i for i in identities if i not in hidden_idents]
+                selected = (_vis or identities)[0]
 
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
                 "stories": "cloudstories", "storyctas": "cloudstoryctas",
@@ -12145,8 +12534,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
-    vault_items = []
-    for ident in identities:
+    def _vitem(ident, is_hidden):
         stats = ident_stats[ident]
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
@@ -12165,19 +12553,38 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 f"{stats['n_files']}</span>"
             )
         active_class = "vault-item-active" if ident == selected else ""
-        vault_items.append(
+        hidden_class = " vault-item-hidden" if is_hidden else ""
+        # Toggle 📦 « ranger » : synchro entre TOUS les onglets vault (JS identHideApply)
+        hide_btn = (
+            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Sortir des rangées'>↩</span>"
+            if is_hidden else
+            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Ranger (masquer de la liste — synchro brut/template/caption)'>📦</span>"
+        )
+        return (
             f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}{hidden_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
             f"</div>"
-            f"{count_badge}"
+            f"{count_badge}{hide_btn}"
             f"</a>"
         )
+
+    vault_items = [_vitem(i, False) for i in identities if i not in hidden_idents]
+    hidden_items = [_vitem(i, True) for i in identities if i in hidden_idents]
+    _vh_disp = "" if hidden_items else " style='display:none'"
+    hidden_wrap = (
+        _VAULT_HIDE_CSS
+        + f"<div class='vault-hidden-wrap'{_vh_disp}>"
+        + f"<button type='button' class='vault-hidden-head' data-vhtoggle='1'>📦 Rangées ({len(hidden_items)})</button>"
+        + "<div class='vault-hidden-list' style='display:none'>"
+        + "".join(hidden_items)
+        + "</div></div>"
+    )
 
     vault_sidebar = (
         "<div class='vault-sidebar'>"
@@ -12193,6 +12600,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<div class='vault-list' id='vault-list-{subdir}'>"
         + "".join(vault_items)
         + "</div>"
+        + hidden_wrap
         # ＋ Nouvelle identité : ouvre la modale statique #ident-new-modal
         # (délégation [data-newident] — survit aux swaps vaultGoTo).
         + f"<button type='button' data-newident='1' data-vtab='{tab_name}' data-ikey='{subdir_key}' "
@@ -13422,6 +13830,37 @@ def _save_captions_lib(lib: dict) -> bool:
     return ok
 
 
+# Identités « rangées » : masquées des sidebars vault de TOUTE la Bibliothèque
+# (Reels/Posts/Stories/CTAs/PP/brutes/templates/captions — liste PARTAGÉE,
+# stockée serveur => synchro entre les onglets ET entre les appareils).
+# Purement visuel : aucune influence sur la génération ou le service des médias.
+HIDDEN_IDENTITIES_FILE = DATA_DIR / "hidden_identities.json"
+
+_VAULT_HIDE_CSS = """
+<style>
+.vault-hide-btn{opacity:0;flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-size:12px;cursor:pointer;transition:opacity .12s;color:#9a9aa6}
+.vault-item:hover .vault-hide-btn{opacity:1}
+.vault-hide-btn:hover{background:rgba(255,255,255,.1);color:#e6e6ea}
+.vault-hidden-wrap{margin-top:10px;border-top:1px solid #232323;padding-top:6px}
+.vault-hidden-head{width:100%;background:none;border:0;color:#75757f;font-size:11.5px;font-weight:700;cursor:pointer;text-align:left;padding:6px 12px;font-family:inherit}
+.vault-hidden-head:hover{color:#c4c4cc}
+.vault-item-hidden{opacity:.55}
+</style>
+"""
+
+
+def _load_hidden_identities() -> list:
+    d = _cached_json_load(HIDDEN_IDENTITIES_FILE)
+    return [str(x).lower() for x in d] if isinstance(d, list) else []
+
+
+def _save_hidden_identities(lst) -> bool:
+    HIDDEN_IDENTITIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ok = bool(safe_json.write(HIDDEN_IDENTITIES_FILE, sorted(set(lst)), indent=2))
+    _invalidate_json_cache(HIDDEN_IDENTITIES_FILE)
+    return ok
+
+
 def _clean_caption_block(raw) -> dict:
     """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur)."""
     out = {"font": "Strong", "style": {},
@@ -13475,7 +13914,9 @@ def _clean_caption_block(raw) -> dict:
         entry = {"id": str(it.get("id") or f"c{int(_t.time() * 1000)}")[:48],
                  "text": txt[:300],
                  "x": _clampf(it.get("x"), 0.0, 1.0, 0.5),
-                 "y": _clampf(it.get("y"), 0.0, 1.0, 0.61),
+                 # défaut = CENTRE de la vidéo (demande user : la caption est
+                 # « écrite au centre juste comme ça » tant qu'on ne la place pas)
+                 "y": _clampf(it.get("y"), 0.0, 1.0, 0.5),
                  "enabled": it.get("enabled") is not False}
         try:
             wf = float(it.get("wrapW"))
@@ -13521,8 +13962,10 @@ def _render_cloud_captions_html() -> str:
         selected = (_req.args.get("cloud_captions_ident", "") or "").lower().strip()
     except Exception:
         pass
+    hidden_idents = set(_load_hidden_identities())
     if not selected or selected not in identities:
-        selected = next((i for i in identities if _n_caps(i) > 0), identities[0])
+        selected = next((i for i in identities if i not in hidden_idents and _n_caps(i) > 0),
+                        next((i for i in identities if i not in hidden_idents), identities[0]))
 
     block = _clean_caption_block(lib.get(selected))
 
@@ -13535,8 +13978,7 @@ def _render_cloud_captions_html() -> str:
                         and ".example" not in p.name)
 
     # ---- Sidebar identités (même vault que brutes/templates) ----
-    vault_items = []
-    for ident in identities:
+    def _vitem(ident, is_hidden):
         n = _n_caps(ident)
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
@@ -13551,17 +13993,35 @@ def _render_cloud_captions_html() -> str:
                 f"<span class='vault-count' style='background:rgba(168,85,247,.15);color:#a855f7;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px'>{n}</span>"
             )
         active_class = "vault-item-active" if ident == selected else ""
-        vault_items.append(
+        hidden_class = " vault-item-hidden" if is_hidden else ""
+        hide_btn = (
+            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Sortir des rangées'>↩</span>"
+            if is_hidden else
+            f"<span class='vault-hide-btn' data-identhide='{ident}' title='Ranger (masquer de la liste — synchro brut/template/caption)'>📦</span>"
+        )
+        return (
             f"<a href='?tab=cloudcaptions&cloud_captions_ident={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}{hidden_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
-            f"</div>{count_badge}</a>"
+            f"</div>{count_badge}{hide_btn}</a>"
         )
+
+    vault_items = [_vitem(i, False) for i in identities if i not in hidden_idents]
+    hidden_items = [_vitem(i, True) for i in identities if i in hidden_idents]
+    _vh_disp = "" if hidden_items else " style='display:none'"
+    hidden_wrap = (
+        _VAULT_HIDE_CSS
+        + f"<div class='vault-hidden-wrap'{_vh_disp}>"
+        + f"<button type='button' class='vault-hidden-head' data-vhtoggle='1'>📦 Rangées ({len(hidden_items)})</button>"
+        + "<div class='vault-hidden-list' style='display:none'>"
+        + "".join(hidden_items)
+        + "</div></div>"
+    )
     vault_sidebar = (
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
@@ -13575,7 +14035,8 @@ def _render_cloud_captions_html() -> str:
         "<div class='vault-list' id='vault-list-captions'>"
         + "".join(vault_items)
         + "</div>"
-        "<button type='button' data-newident='1' data-vtab='cloudcaptions' data-ikey='cloud_captions_ident' "
+        + hidden_wrap
+        + "<button type='button' data-newident='1' data-vtab='cloudcaptions' data-ikey='cloud_captions_ident' "
         "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
         "</div>"
     )
@@ -13597,6 +14058,8 @@ def _render_cloud_captions_html() -> str:
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        "<button type='button' data-capact='addfocus' title='Colle ta liste de captions (une par ligne) — écrites au CENTRE par défaut' "
+        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>＋ Add captions</button>"
         "<input id='capGenN' type='number' min='1' max='10' value='3' title='Nombre de vidéos à générer (brute + caption au hasard à chaque fois)' "
         "style='width:52px;height:36px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;text-align:center;font-size:13px;box-sizing:border-box'>"
         "<button type='button' data-capact='gen' style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(59,130,246,.25)'>🎲 Générer</button>"
@@ -13633,7 +14096,7 @@ def _render_cloud_captions_html() -> str:
 
     add_zone = (
         "<div style='display:flex;gap:10px;align-items:stretch;margin-bottom:16px'>"
-        "<textarea id='capAddTa' rows='3' placeholder='Une caption par ligne — colle ta liste ici (10-15 d un coup, pas de souci)…' "
+        "<textarea id='capAddTa' rows='3' placeholder='Une caption par ligne — colle ta liste ici. Chaque caption sera écrite au CENTRE de la vidéo par défaut (📍 Placer pour ajuster).' "
         "style='flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box'></textarea>"
         "<button type='button' data-capact='add' style='padding:0 22px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit'>＋ Ajouter</button>"
         "</div>"
@@ -13644,7 +14107,7 @@ def _render_cloud_captions_html() -> str:
     # capPrevCss/capRenderCards ; taille de police en cqw = suit la carte).
     def _cap_css(it):
         x = gp["x"] if gp.get("enabled") else it.get("x", 0.5)
-        y = gp["y"] if gp.get("enabled") else it.get("y", 0.61)
+        y = gp["y"] if gp.get("enabled") else it.get("y", 0.5)
         size = st.get("size", 44)
         wrap = it.get("wrapW", 0.88)
         ls = it.get("lineSpacing", 1.45)
@@ -13685,7 +14148,7 @@ def _render_cloud_captions_html() -> str:
     for it in block["items"]:
         cid = _h.escape(str(it["id"]), quote=True)
         on = it.get("enabled", True)
-        meta = f"📍 {round(it.get('x', 0.5) * 100)}·{round(it.get('y', 0.61) * 100)}%"
+        meta = f"📍 {round(it.get('x', 0.5) * 100)}·{round(it.get('y', 0.5) * 100)}%"
         if it.get("wrapW"):
             meta += f" · ↔ {round(it['wrapW'] * 100)}%"
         cards.append(
@@ -13727,6 +14190,10 @@ def _render_cloud_captions_html() -> str:
 .cap-card-meta{font-size:11px;color:#888;padding:0 2px}
 .cap-preset{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
 .cap-preset:hover{background:#232329;color:#fff}
+.cap-ed-li{background:#131316;border:1px solid #2a2a30;border-radius:8px;padding:9px 10px;font-size:11.5px;color:#c4c4cc;cursor:pointer;line-height:1.4;word-break:break-word}
+.cap-ed-li:hover{border-color:#4a4a52}
+.cap-ed-li.on{border-color:#3467FF;color:#fff;background:#16161c}
+.cap-ed-li.off{opacity:.45}
 </style>
 """
     return (
@@ -37149,6 +37616,29 @@ def create_app():
         _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
         return jsonify({"ok": True, "identity": safe, "warn": warn})
 
+    @app.route("/identity/toggle_hidden", methods=["POST"])
+    def identity_toggle_hidden():
+        """Range/sort une identité des sidebars Bibliothèque (toggle 📦).
+        Liste PARTAGÉE data/hidden_identities.json -> synchro entre Vidéo brut /
+        Template / Caption (et tous les onglets vault). Purement visuel."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        hidden = set(_load_hidden_identities())
+        if ident in hidden:
+            hidden.discard(ident)
+            now_hidden = False
+        else:
+            hidden.add(ident)
+            now_hidden = True
+        if not _save_hidden_identities(hidden):
+            return jsonify({"ok": False, "error": "écriture impossible"})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "identity": ident, "hidden": now_hidden})
+
     @app.route("/captions/list", methods=["GET"])
     def captions_list():
         from flask import jsonify
@@ -37219,7 +37709,7 @@ def create_app():
         gp = block["global_pos"]
         seg = {"text": cap["text"], "start": None, "end": None,
                "x": gp["x"] if gp.get("enabled") else cap.get("x", 0.5),
-               "y": gp["y"] if gp.get("enabled") else cap.get("y", 0.61)}
+               "y": gp["y"] if gp.get("enabled") else cap.get("y", 0.5)}
         if cap.get("wrapW") is not None:
             seg["wrapW"] = cap["wrapW"]
         if cap.get("lineSpacing") is not None:

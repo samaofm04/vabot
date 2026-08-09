@@ -1708,6 +1708,27 @@ try:
           ((_cCa.post("/identity/create", data={"identity_name": "@@@ !!"}).get_json() or {}).get("ok")) is not True)
     _shCa.rmtree(_dNi, ignore_errors=True)
 
+    # -- defaut = CENTRE : une caption sans x/y est posee au milieu ----------
+    _cCa.post("/captions/save", data={"identity": "_tst_captions",
+                                      "data": _jsCa.dumps({"items": [{"id": "ctr", "text": "Centre"}]})})
+    _jc = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    check("captions : defaut = centre (x 0.5 / y 0.5)",
+          _jc["block"]["items"][0]["x"] == 0.5 and _jc["block"]["items"][0]["y"] == 0.5,
+          str(_jc)[:80])
+
+    # -- ranger/sortir une identite (toggle 📦, liste partagee) ---------------
+    _fHid = _plCa.Path("data/hidden_identities.json")
+    _jh1 = (_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_captions"}).get_json() or {})
+    check("rangees : toggle -> hidden=True + fichier partage ecrit",
+          _jh1.get("ok") and _jh1.get("hidden") is True and _fHid.exists()
+          and "_tst_captions" in _jsCa.loads(_fHid.read_text(encoding="utf-8")), str(_jh1)[:80])
+    _jh2 = (_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_captions"}).get_json() or {})
+    check("rangees : re-toggle -> hidden=False (sortie des rangees)",
+          _jh2.get("ok") and _jh2.get("hidden") is False
+          and "_tst_captions" not in _jsCa.loads(_fHid.read_text(encoding="utf-8")))
+    check("rangees : identite inconnue refusee",
+          ((_cCa.post("/identity/toggle_hidden", data={"identity": "_tst_nexiste_pas"}).get_json() or {}).get("ok")) is not True)
+
     # tirage random verrouille par grep du source (pattern section 18)
     _wsCa = (_plCa.Path(__file__).parent / "web_upload.py").read_text(encoding="utf-8")
     check("captions gen : tirage random.choice (caption ET brute)",
