@@ -4531,30 +4531,7 @@ document.addEventListener('click', function(ev){
   if(!b) return;
   var act=b.getAttribute('data-capact'), cid=b.getAttribute('data-cid')||'';
   if(!capLibInit()) return;
-  if(act==='add'){
-    // doublons filtrés : entre les champs ET contre la bibliothèque existante
-    // (une extension d autofill peut recopier le même texte partout)
-    var seen={}, dropped=0;
-    (capLib.block.items||[]).forEach(function(c){ seen[String(c.text||'').trim()]=1; });
-    var vals=[];
-    document.querySelectorAll('#capAddList .capadd-ta').forEach(function(t){
-      var v=String(t.value||'').trim(); if(!v) return;
-      v=v.slice(0,300);
-      if(seen[v]){ dropped++; return; }
-      seen[v]=1; vals.push(v);
-    });
-    if(!vals.length){
-      if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
-      return;
-    }
-    var now=Date.now();
-    for(var i=0;i<vals.length;i++){
-      capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i], x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
-    }
-    capAddClose();
-    capRenderCards(); capSave();
-    if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')+(dropped?(' · '+dropped+' doublon'+(dropped>1?'s ignorés':' ignoré')):''),'success');
-  }
+  if(act==='add'){ capAddSubmit(); }
   else if(act==='del'){
     var doDel=function(){ capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==cid;}); capRenderCards(); capSave(); };
     if(typeof showConfirm==='function') showConfirm('Supprimer cette caption ?','Elle ne sera plus utilisée dans le tirage random.',doDel);
@@ -4589,9 +4566,38 @@ function capAddOpen(){
   var ta=document.querySelector('#capAddList .capadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
 }
 function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.style.display='none'; }
+// SOUMISSION en fonction directe (onclick inline) : la modale porte un
+// event.stopPropagation() sur son conteneur (anti fermeture au clic), donc un
+// clic DANS la modale n atteint JAMAIS le document -> la délégation
+// [data-capact] n y fonctionne pas. Piège idem pour tout futur bouton de modale.
+function capAddSubmit(){
+  if(!capLibInit()) return;
+  // doublons filtrés : entre les champs ET contre la bibliothèque existante
+  // (une extension d autofill peut recopier le même texte partout)
+  var seen={}, dropped=0;
+  (capLib.block.items||[]).forEach(function(c){ seen[String(c.text||'').trim()]=1; });
+  var vals=[];
+  document.querySelectorAll('#capAddList .capadd-ta').forEach(function(t){
+    var v=String(t.value||'').trim(); if(!v) return;
+    v=v.slice(0,300);
+    if(seen[v]){ dropped++; return; }
+    seen[v]=1; vals.push(v);
+  });
+  if(!vals.length){
+    if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
+    return;
+  }
+  var now=Date.now();
+  for(var i=0;i<vals.length;i++){
+    capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i], x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+  }
+  capAddClose();
+  capRenderCards(); capSave();
+  if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')+(dropped?(' · '+dropped+' doublon'+(dropped>1?'s ignorés':' ignoré')):''),'success');
+}
 // NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
-// les modales (plus bas dans la page) existent ; le bouton « + Ajouter une
-// autre caption » est câblé en onclick inline dans le HTML de la modale.
+// les modales (plus bas dans la page) existent ; les boutons de la modale sont
+// câblés en onclick inline dans son HTML.
 // (L auto-ajout de champ « quand on tape dans le dernier » a été RETIRÉ : les
 // extensions d autofill remplissaient chaque nouveau champ -> cascade de
 // doublons. On ajoute un champ UNIQUEMENT via le bouton.)
@@ -7173,7 +7179,7 @@ body.light .action-icon{color:#666}
     </div>
     <div id="capAddList" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0"></div>
     <button type="button" id="capAddMore" onclick="capAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter une autre caption</button>
-    <button type="button" data-capact="add" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter toutes les captions</button>
+    <button type="button" onclick="capAddSubmit()" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter toutes les captions</button>
   </div>
 </div>
 
