@@ -481,6 +481,17 @@ async def _push_content_menu(bot, channel, identity, member):
 US_TICKET_SUFFIXES = ("menu", "content", "numero-mail")
 
 
+def _us_norm(nm):
+    """Normalise un nom de salon pour comparaison : minuscules + tirets sosies
+    (– — −) ramenés au tiret ASCII. Sans ça, un salon créé À LA MAIN avec un
+    tiret spécial ressemble au nôtre à l'écran mais ne matche jamais par == ,
+    et le bot recrée un doublon à chaque run."""
+    nm = (nm or "").strip().lower()
+    for d in ("–", "—", "−"):
+        nm = nm.replace(d, "-")
+    return nm
+
+
 def _us_ticket_name(member, suffix):
     import re as _re
     base = _re.sub(r"[^a-z0-9_.-]", "", (member.name or "").lower()) or f"user{member.id % 100000}"
@@ -526,7 +537,8 @@ async def create_us_tickets(guild, member, bot=None):
     chans = {}
     for suffix in US_TICKET_SUFFIXES:
         name = _us_ticket_name(member, suffix)
-        existing = discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels)
+        existing = discord.utils.find(
+            lambda c, n=name: _us_norm(c.name) == n, guild.text_channels)
         if existing:
             chans[suffix] = existing
             continue  # déjà là (commande re-lançable sans doublons)
@@ -1571,14 +1583,18 @@ class Welcome(commands.Cog):
         for m in members:
             for s in US_TICKET_SUFFIXES:
                 expected[_us_ticket_name(m, s)] = m
+        # Clé = nom NORMALISÉ (tirets sosies inclus) : les salons créés à la main
+        # qui RESSEMBLENT aux nôtres comptent comme le même salon.
         by_name = {}
         for c in guild.text_channels:
-            if pat.search(c.name or ""):
-                by_name.setdefault(c.name, []).append(c)
+            nn = _us_norm(c.name)
+            if pat.search(nn):
+                by_name.setdefault(nn, []).append(c)
         n_create = sum(1 for n in expected if n not in by_name)
-        # Doublons de nom : on garde UN exemplaire (celui qui a des messages,
-        # sinon le plus ancien). Les -menu en trop partent direct (le menu se
-        # reposte tout seul dans celui qu'on garde).
+        # Doublons : MÊME pseudo+type -> ON N'EN GARDE QU'UN (demande user :
+        # « même pseudo direct sup »). On garde le plus ancien AVEC messages
+        # (le contenu généré vit dans -content), sinon le plus ancien tout court.
+        # Les -menu en trop partent direct (le menu se reposte tout seul).
         del_dups, warn = [], []
         for n, chans in sorted(by_name.items()):
             if len(chans) < 2:
@@ -1588,9 +1604,6 @@ class Welcome(commands.Cog):
                 del_dups += chans[1:]
                 continue
             with_msgs = [c for c in chans if c.last_message_id]
-            if len(with_msgs) > 1:
-                warn.append(f"#{n} : {len(chans)} exemplaires AVEC messages — à trier à la main")
-                continue
             keep = with_msgs[0] if with_msgs else chans[0]
             del_dups += [c for c in chans if c.id != keep.id]
         # Orphelins : le nom ne correspond à aucun membre actuel (membre parti,
@@ -1684,7 +1697,7 @@ class Welcome(commands.Cog):
                     for m in sorted(members, key=lambda x: _us_ticket_name(x, "menu")):
                         for s in US_TICKET_SUFFIXES:
                             cch = discord.utils.find(
-                                lambda cc, n=_us_ticket_name(m, s): cc.name == n
+                                lambda cc, n=_us_ticket_name(m, s): _us_norm(cc.name) == n
                                 and (cat is None or cc.category_id == getattr(cat, "id", None)),
                                 guild.text_channels)
                             if cch:

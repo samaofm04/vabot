@@ -1168,9 +1168,10 @@ def _jb_can_use(interaction):
 def _us_content_channel_for(guild, member):
     """Salon @pseudo-content du membre sur le serveur US, ou None."""
     try:
-        from cogs.welcome import _us_ticket_name
+        from cogs.welcome import _us_ticket_name, _us_norm
         name = _us_ticket_name(member, "content")
-        return discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels)
+        return discord.utils.find(
+            lambda c, n=name: _us_norm(c.name) == n, guild.text_channels)
     except Exception:
         return None
 
