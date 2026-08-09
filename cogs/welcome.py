@@ -472,10 +472,13 @@ async def _push_content_menu(bot, channel, identity, member):
         log.warning(f"_push_content_menu: {e}")
 
 
-# ---- Tickets du serveur US (Youl4b) : 2 salons simples par membre ----
+# ---- Tickets du serveur US (Youl4b) : 3 salons simples par membre ----
 # Pas de parcours VA (identité, onboarding, isolation, users.json) : juste
-# @pseudo-content et @pseudo-numero-mail, privés, dans la catégorie TAFF.
-US_TICKET_SUFFIXES = ("content", "numero-mail")
+# @pseudo-menu (lecture seule, menu Jailbreak US épinglé en permanence),
+# @pseudo-content (le contenu généré arrive là) et @pseudo-numero-mail,
+# privés, dans la catégorie TAFF. L'ordre du tuple = ordre de création
+# (menu juste au-dessus de content).
+US_TICKET_SUFFIXES = ("menu", "content", "numero-mail")
 
 
 def _us_ticket_name(member, suffix):
@@ -514,41 +517,62 @@ async def _ensure_us_menu(bot, channel):
 
 
 async def create_us_tickets(guild, member, bot=None):
-    """Crée les 2 salons US d'un membre s'ils n'existent pas déjà (idempotent),
-    et garantit que le menu Jailbreak US est épinglé dans son salon -content.
-    Retourne (liste_salons_créés, liste_erreurs)."""
+    """Crée les 3 salons US d'un membre s'ils n'existent pas déjà (idempotent),
+    place -menu juste au-dessus de -content, et garantit que le menu Jailbreak US
+    est épinglé dans -menu (lecture seule). Retourne (créés, erreurs)."""
     created, errors = [], []
     cat = discord.utils.find(
         lambda c: (c.name or "").strip().lower() == "taff", guild.categories)
-    content_ch = None
+    chans = {}
     for suffix in US_TICKET_SUFFIXES:
         name = _us_ticket_name(member, suffix)
         existing = discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels)
         if existing:
-            if suffix == "content":
-                content_ch = existing
+            chans[suffix] = existing
             continue  # déjà là (commande re-lançable sans doublons)
+        writable = suffix != "menu"  # -menu : lecture seule, rien n'y est écrit
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True,
-                read_message_history=True, attach_files=True),
+                view_channel=True, send_messages=writable,
+                read_message_history=True, attach_files=writable),
             guild.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_channels=True),
+                view_channel=True, send_messages=True, manage_channels=True,
+                manage_messages=True),
         }
         target_cat = cat if (cat and len(cat.channels) < 49) else None  # 50 max/catégorie
         try:
             ch = await guild.create_text_channel(
                 name, category=target_cat, overwrites=overwrites,
-                reason="Ticket US (content / numero-mail)")
+                reason="Ticket US (menu / content / numero-mail)")
             created.append(ch)
-            if suffix == "content":
-                content_ch = ch
+            chans[suffix] = ch
         except Exception as e:
             errors.append(f"{name}: {e}")
-    # Le salon content a TOUJOURS le menu Jailbreak US épinglé (demande explicite).
-    if content_ch is not None:
-        await _ensure_us_menu(bot, content_ch)
+    menu_ch, content_ch = chans.get("menu"), chans.get("content")
+    # -menu juste AU-DESSUS de -content (utile quand content existait déjà et
+    # que menu vient d'être créé en bas de la catégorie).
+    if menu_ch is not None and content_ch is not None:
+        try:
+            if menu_ch.position > content_ch.position:
+                await menu_ch.edit(position=content_ch.position)
+        except Exception:
+            pass
+    # Le menu Jailbreak US vit dans -menu, en permanence.
+    if menu_ch is not None:
+        await _ensure_us_menu(bot, menu_ch)
+    # Migration : retirer l'ancien menu épinglé dans -content (version précédente).
+    if content_ch is not None and bot is not None:
+        try:
+            for p in await content_ch.pins():
+                if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
+                        and "Jailbreak US" in (p.embeds[0].title or "")):
+                    try:
+                        await p.delete()
+                    except Exception:
+                        await p.unpin()
+        except Exception:
+            pass
     return created, errors
 
 
@@ -1524,7 +1548,7 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="ticketsall",
-        description="[ADMIN] Serveur US : crée les 2 salons (content + numero-mail) de chaque membre",
+        description="[ADMIN] Serveur US : crée les 3 salons (menu + content + numero-mail) de chaque membre",
     )
     async def ticketsall(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
@@ -1538,7 +1562,7 @@ class Welcome(commands.Cog):
             await interaction.response.send_message(
                 "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
             return
-        # 2 salons par membre : @pseudo-content + @pseudo-numero-mail (idempotent).
+        # 3 salons par membre : @pseudo-menu + @pseudo-content + @pseudo-numero-mail (idempotent).
         todo, deja = [], []
         for m in guild.members:
             if m.bot or m.id == interaction.user.id:
@@ -1557,7 +1581,7 @@ class Welcome(commands.Cog):
                 lambda c, n=_us_ticket_name(m, s): c.name == n, guild.text_channels))
         if not todo:
             await interaction.response.send_message(
-                f"Rien à faire : les {len(deja)} membre(s) ont déjà leurs 2 salons.",
+                f"Rien à faire : les {len(deja)} membre(s) ont déjà leurs salons.",
                 ephemeral=True)
             return
 
@@ -1630,7 +1654,8 @@ class Welcome(commands.Cog):
 
         await interaction.response.send_message(
             f"⚠️ **{guild.name}** — je vais créer **{n_salons}** salon(s) privé(s) pour "
-            f"**{len(todo)}** membre(s) : `@pseudo-content` + `@pseudo-numero-mail` "
+            f"**{len(todo)}** membre(s) : `@pseudo-menu` (menu Jailbreak US épinglé, lecture seule) "
+            f"+ `@pseudo-content` (le contenu généré arrive là) + `@pseudo-numero-mail` "
             f"({len(deja)} déjà équipé(s), toi et les bots exclus).\n{cat_txt}\nConfirme 👇",
             view=_ConfirmAll(), ephemeral=True)
 

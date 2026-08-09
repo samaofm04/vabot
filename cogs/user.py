@@ -1165,6 +1165,48 @@ def _jb_can_use(interaction):
     return _has_jailbreak_role(interaction.user)
 
 
+def _us_content_channel_for(guild, member):
+    """Salon @pseudo-content du membre sur le serveur US, ou None."""
+    try:
+        from cogs.welcome import _us_ticket_name
+        name = _us_ticket_name(member, "content")
+        return discord.utils.find(lambda c, n=name: c.name == n, guild.text_channels)
+    except Exception:
+        return None
+
+
+class _RedirectFollowup:
+    """followup.send qui route les messages NON-éphémères vers un autre salon
+    (les éphémères restent sur la vraie interaction : seuls le cliqueur les voit)."""
+    def __init__(self, real_followup, target_channel):
+        self._real = real_followup
+        self._target = target_channel
+
+    async def send(self, content=None, **kw):
+        if kw.get("ephemeral"):
+            return await self._real.send(content, **kw)
+        kw.pop("ephemeral", None)
+        kw.pop("wait", None)  # kwarg webhook, inconnu de TextChannel.send
+        if content is None:
+            return await self._target.send(**kw)
+        return await self._target.send(content, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _JBRedirect:
+    """Proxy d'interaction pour le menu Jailbreak du serveur US : le contenu
+    généré part dans le salon -content du membre (le salon -menu reste vierge).
+    Tout le reste (response.defer, user, guild…) est délégué tel quel."""
+    def __init__(self, interaction, target_channel):
+        object.__setattr__(self, "_itx", interaction)
+        object.__setattr__(self, "followup", _RedirectFollowup(interaction.followup, target_channel))
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_itx"), name)
+
+
 class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
     """Bouton « Générer le lien » sur une demande de lien. L'ID du VA est dans le
     custom_id -> persistant (marche même après un redémarrage du bot). Réservé staff.
@@ -2412,14 +2454,32 @@ class UserCog(commands.Cog):
         plafond Range[1,10] du slash n'est PAS applique ici (appel direct du callback)
         -> on peut demander beaucoup ; les generateurs plafonnent au stock dispo. Local
         a la task -> pas d'interference entre clics simultanes."""
+        # Serveur US : le contenu part dans le salon @pseudo-content du cliqueur
+        # (le salon -menu est en lecture seule), via un proxy d'interaction.
+        itx, target = interaction, None
+        try:
+            import guild_features as gf
+            if gf.is_us_guild(getattr(interaction, "guild", None)):
+                target = _us_content_channel_for(interaction.guild, interaction.user)
+                if target is not None and target.id != getattr(interaction.channel, "id", None):
+                    itx = _JBRedirect(interaction, target)
+                else:
+                    target = None
+        except Exception:
+            itx, target = interaction, None
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
         try:
             if supports_count and count and count > 0:
-                await cmd.callback(self, interaction, count)
+                await cmd.callback(self, itx, count)
             else:
-                await cmd.callback(self, interaction)
+                await cmd.callback(self, itx)
         finally:
             _IDENTITY_OVERRIDE.reset(token)
+        if target is not None:
+            try:
+                await interaction.followup.send(f"📬 Direction {target.mention} 👌", ephemeral=True)
+            except Exception:
+                pass
 
     async def _handle_assistance(self, interaction, probleme):
         """Bouton 🆘 Assistance : transmet le probleme du VA au salon d'aide
