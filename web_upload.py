@@ -4443,11 +4443,19 @@ function capLibInit(){
   try{ j=JSON.parse(el.textContent||'{}'); }catch(e){ return false; }
   if(!j||!j.identity) return false;
   if(capLib.identity!==j.identity||!capLib.block){
+    if(capLib.identity!==j.identity) capSelSet={};   // sélection liée à UNE identité
     capLib.identity=j.identity;
     capLib.block=j.block||{font:'Strong',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
     capLib.brutes=j.brutes||[];
   }
   return true;
+}
+// Sélection (cercles ⚪ des cartes) -> barre « Supprimer la sélection »
+var capSelSet={};
+function capSelUpdateBar(){
+  var n=0; for(var k in capSelSet){ if(capSelSet[k]) n++; }
+  var bar=document.getElementById('capSelBar'); if(bar) bar.style.display=n?'flex':'none';
+  var ct=document.getElementById('capSelCount'); if(ct) ct.textContent=n+' sélectionnée'+(n>1?'s':'');
 }
 // CSS inline du texte d une carte aperçu (MIROIR du builder Python : fond blanc
 // 9:16, texte à sa position x/y, taille en cqw = proportionnelle à la carte).
@@ -4484,20 +4492,25 @@ function capRenderCards(){
   for(var i=0;i<items.length;i++){
     var it=items[i], on=(it.enabled!==false), cid=nxMEsc(String(it.id||''));
     var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.5)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
+    var onoffCol=on?'#9aa0a6':'#ef4444';
     out.push('<div class="cap-card'+(on?'':' cap-off')+'" data-cid="'+cid+'">'
-      +'<div class="cap-prev" data-capact="place" data-cid="'+cid+'" title="Clique pour placer le texte (drag)">'
+      +'<div class="cap-prev" data-capact="place" data-cid="'+cid+'" title="Clique pour ouvrir l’éditeur">'
       +'<div class="cap-prev-txt" style="'+capPrevCss(it)+'">'+nxMEsc(String(it.text||''))+'</div>'
-      +'<div class="cap-prev-acts">'
-      +'<button type="button" data-capact="place" data-cid="'+cid+'" title="Placer (drag)">📍</button>'
-      +'<button type="button" data-capact="test" data-cid="'+cid+'" title="Vidéo test avec cette caption">🎬</button>'
-      +'<button type="button" data-capact="toggle" data-cid="'+cid+'" title="'+(on?'Retirer du tirage':'Remettre dans le tirage')+'">'+(on?'🚫':'↩')+'</button>'
-      +'<button type="button" data-capact="del" data-cid="'+cid+'" title="Supprimer">🗑</button>'
+      +'<div class="card-actions" style="position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5">'
+      +'<button class="card-edit-btn" data-capact="place" data-cid="'+cid+'" title="Gérer la caption (éditeur)" style="color:#a855f7">'
+      +'<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>'
+      +'<button class="card-edit-btn'+(on?'':' is-off')+'" data-capact="toggle" data-cid="'+cid+'" title="Désactiver / réactiver cette caption (sort du tirage random)" style="color:'+onoffCol+'">'
+      +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg></button>'
+      +'<label class="sel-circle-wrap" onclick="event.stopPropagation()" style="cursor:pointer;display:block">'
+      +'<input type="checkbox" class="sel-cb" data-capsel="'+cid+'"'+(capSelSet[it.id]?' checked':'')+' style="position:absolute;opacity:0;pointer-events:none">'
+      +'<span class="sel-circle"></span></label>'
       +'</div>'
       +(on?'':'<div class="cap-prev-off">hors tirage</div>')
       +'</div>'
       +'<div class="cap-card-meta">'+meta+'</div></div>');
   }
   grid.innerHTML=out.join('');
+  capSelUpdateBar();
   var info=document.getElementById('capCountInfo');
   if(info){ var n=items.length; info.textContent=n+' caption'+(n!==1?'s':'')+' · '+capLib.brutes.length+' brute'+(capLib.brutes.length!==1?'s':'')+' dispo'; }
 }
@@ -4546,6 +4559,19 @@ document.addEventListener('click', function(ev){
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
+  else if(act==='delsel'){
+    var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
+    if(!ids.length) return;
+    if(!confirm('Supprimer '+ids.length+' caption'+(ids.length>1?'s':'')+' ?')) return;
+    capLib.block.items=(capLib.block.items||[]).filter(function(c){ return !capSelSet[c.id]; });
+    capSelSet={};
+    capRenderCards(); capSave();
+  }
+  else if(act==='selclear'){
+    capSelSet={};
+    document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=false; });
+    capSelUpdateBar();
+  }
 });
 function capAddField(focus){
   var list=document.getElementById('capAddList'); if(!list) return null;
@@ -4657,6 +4683,11 @@ document.addEventListener('dragend', function(ev){
 });
 document.addEventListener('change', function(ev){
   var t=ev.target; if(!t||!t.getAttribute) return;
+  if(t.getAttribute('data-capsel')!=null){
+    capSelSet[t.getAttribute('data-capsel')]=!!t.checked;
+    capSelUpdateBar();
+    return;
+  }
   if(t.getAttribute('data-captoggle')!=null){
     if(!capLibInit()) return;
     var cid=t.getAttribute('data-captoggle');
@@ -14174,15 +14205,22 @@ def _render_cloud_captions_html() -> str:
         meta = f"📍 {round(it.get('x', 0.5) * 100)}·{round(it.get('y', 0.5) * 100)}%"
         if it.get("wrapW"):
             meta += f" · ↔ {round(it['wrapW'] * 100)}%"
+        # 3 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
+        # 🚫 (désactiver = sort du tirage), ⚪ (cercle de sélection -> barre 🗑).
+        onoff_col = "#9aa0a6" if on else "#ef4444"
         cards.append(
             f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
-            f"<div class='cap-prev' data-capact='place' data-cid='{cid}' title='Clique pour placer le texte (drag)'>"
+            f"<div class='cap-prev' data-capact='place' data-cid='{cid}' title='Clique pour ouvrir l’éditeur'>"
             f"<div class='cap-prev-txt' style='{_cap_css(it)}'>{_h.escape(it['text'], quote=True)}</div>"
-            "<div class='cap-prev-acts'>"
-            f"<button type='button' data-capact='place' data-cid='{cid}' title='Placer (drag)'>📍</button>"
-            f"<button type='button' data-capact='test' data-cid='{cid}' title='Vidéo test avec cette caption'>🎬</button>"
-            f"<button type='button' data-capact='toggle' data-cid='{cid}' title='{'Retirer du tirage' if on else 'Remettre dans le tirage'}'>{'🚫' if on else '↩'}</button>"
-            f"<button type='button' data-capact='del' data-cid='{cid}' title='Supprimer'>🗑</button>"
+            "<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
+            f"<button class='card-edit-btn' data-capact='place' data-cid='{cid}' title='Gérer la caption (éditeur)' style='color:#a855f7'>"
+            "<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg></button>"
+            f"<button class='card-edit-btn{'' if on else ' is-off'}' data-capact='toggle' data-cid='{cid}' "
+            f"title='Désactiver / réactiver cette caption (sort du tirage random)' style='color:{onoff_col}'>"
+            "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><circle cx='12' cy='12' r='9'/><line x1='5.6' y1='5.6' x2='18.4' y2='18.4'/></svg></button>"
+            "<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
+            f"<input type='checkbox' class='sel-cb' data-capsel='{cid}' style='position:absolute;opacity:0;pointer-events:none'>"
+            "<span class='sel-circle'></span></label>"
             "</div>"
             + ("" if on else "<div class='cap-prev-off'>hors tirage</div>")
             + "</div>"
@@ -14191,6 +14229,16 @@ def _render_cloud_captions_html() -> str:
         )
     grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px'>"
             + "".join(cards) + "</div>")
+
+    # Barre de sélection (cercles ⚪ des cartes) : suppression groupée
+    sel_bar = (
+        "<div id='capSelBar' style='display:none;align-items:center;gap:12px;margin-bottom:12px;padding:10px 14px;background:#101013;border:1px solid #7f2d35;border-radius:10px'>"
+        "<span id='capSelCount' style='font-size:12.5px;font-weight:700'>0 sélectionnée</span>"
+        "<span style='flex:1'></span>"
+        "<button type='button' data-capact='delsel' style='background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'>🗑 Supprimer la sélection</button>"
+        "<button type='button' data-capact='selclear' style='background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;font-family:inherit'>Annuler</button>"
+        "</div>"
+    )
 
     results = ("<div id='capGenStatus' style='margin-top:16px;font-size:12.5px;color:#9a9aa6'></div>"
                "<div id='capGenResults' style='margin-top:8px;display:flex;flex-direction:column;gap:8px'></div>")
@@ -14223,7 +14271,7 @@ def _render_cloud_captions_html() -> str:
         css
         + "<div class='vault-layout'>"
         + vault_sidebar
-        + f"<div class='vault-gallery'>{header}{grid}{results}{state}</div>"
+        + f"<div class='vault-gallery'>{header}{sel_bar}{grid}{results}{state}</div>"
         + "</div>"
     )
 
@@ -35252,6 +35300,14 @@ def _render_upload_inner(msg=None, error=None):
     )
     if allowed is not None:
         html += _role_gate_script(allowed)
+    # Tampon de version dans la console (F12) : vérifie en 2s que le navigateur
+    # a bien chargé le DERNIER déploiement (auto-pull VPS ~1 min après le push).
+    try:
+        import datetime as _dtb
+        _build = _dtb.datetime.fromtimestamp(Path(__file__).stat().st_mtime).strftime("%d/%m %H:%M")
+    except Exception:
+        _build = "?"
+    html += f"<script>window.__BUILD='{_build}';console.log('[youlab] build {_build}');</script>"
     return html
 
 
