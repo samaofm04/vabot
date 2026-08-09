@@ -4452,7 +4452,9 @@ function vaultSelectAll(){
   });
   if(typeof showToast==='function') showToast(allOn?'Sélection vidée':('☑ '+cbs.length+' élément'+(cbs.length>1?'s':'')+' sélectionné'+(cbs.length>1?'s':'')),'info',2500);
 }
-// ==================== PP : Appliquer aux autres (copie, jamais de suppression) ====================
+// ==================== PP : Partager (copie, jamais de suppression) ====================
+// MÊME modale que « Appliquer ce montage à… » (nxModelPicker) : bandeau info,
+// rangée All, coches rondes, compteur + Confirmer.
 function ppApplyOpen(){
   var files=[];
   try{ selectedFiles.forEach(function(f){ if(String(f).indexOf("|profile_pics|")>0) files.push(String(f)); }); }catch(e){}
@@ -4465,44 +4467,36 @@ function ppApplyOpen(){
   var items=sec?sec.querySelectorAll('.vault-item'):[];
   var act=sec?sec.querySelector('.vault-item-active'):null;
   var cur=act?(act.getAttribute('data-ident')||''):'';
-  var out=[];
+  var rows=[];
   items.forEach(function(a){
     var n=a.getAttribute('data-ident'); if(!n||n===cur) return;
-    // avatar : on RÉUTILISE celui de la sidebar (img ou pastille initiale, fallback géré)
-    var avWrap=a.querySelector('div[style*="position:relative"]');
-    var avHtml=(avWrap&&avWrap.children[0])?avWrap.children[0].outerHTML:'';
-    out.push('<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#131316;border:1px solid #2a2a30;border-radius:10px;cursor:pointer;font-size:13px">'
-      +'<span style="display:inline-flex;flex-shrink:0;transform:scale(.72);transform-origin:center;width:32px;height:32px;align-items:center;justify-content:center">'+avHtml+'</span>'
-      +'<span style="flex:1;font-weight:600;text-transform:capitalize">'+nxMEsc(n)+'</span>'
-      +'<input type="checkbox" value="'+nxMEsc(n)+'" style="width:16px;height:16px;accent-color:#3b82f6;cursor:pointer">'
-      +'</label>');
+    // sous-titre sidebar de la page PP = « N fichiers » -> nb de PP de la model
+    var subEl=a.querySelector('div[style*="color:#888"]');
+    var m=subEl?String(subEl.textContent||'').trim().match(/^(\\d+)/):null;
+    var nb=m?parseInt(m[1]):null;
+    var sub=(nb==null)?'':(nb+' PP');
+    if(nb===0) sub='⚠ aucune PP';
+    var img=a.querySelector('img');
+    rows.push({name:n, pp:img?img.getAttribute('src'):null, sub:sub, warn:nb===0});
   });
-  var list=document.getElementById('pp-apply-list');
-  if(list) list.innerHTML=out.join('')||'<div style="font-size:12px;color:#888">Aucune autre identité</div>';
-  var cnt=document.getElementById('pp-apply-count'); if(cnt) cnt.textContent=String(files.length);
-  window.__ppApplyFiles=files;
-  var m=document.getElementById('pp-apply-modal'); if(m) m.style.display='flex';
-}
-function ppApplyClose(){ var m=document.getElementById('pp-apply-modal'); if(m) m.style.display='none'; }
-async function ppApplyGo(){
-  var files=window.__ppApplyFiles||[], targets=[];
-  document.querySelectorAll('#pp-apply-list input:checked').forEach(function(cb){ targets.push(cb.value); });
-  if(!targets.length){ if(typeof showToast==='function') showToast('Coche au moins une identité','warning'); return; }
-  var fd=new FormData(); fd.set('files',JSON.stringify(files)); fd.set('targets',JSON.stringify(targets));
-  var go=document.getElementById('pp-apply-go'); if(go){ go.disabled=true; go.textContent='⏳'; }
-  try{
-    var r=await fetch('/cloud/pp_apply',{method:'POST',body:fd,credentials:'same-origin'});
-    var j=await r.json();
-    if(go){ go.disabled=false; go.textContent='Partager'; }
-    if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
-    ppApplyClose();
-    if(typeof clearSelection==='function') clearSelection();
-    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
-    if(typeof showToast==='function') showToast('✅ '+j.copied+' PP copiée(s) vers '+targets.length+' identité(s) — les originaux restent en place','success',6500);
-  }catch(e){
-    if(go){ go.disabled=false; go.textContent='Partager'; }
-    if(typeof showToast==='function') showToast('❌ '+e,'error');
-  }
+  if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
+  nxModelPicker({
+    title:'Partager ces PP à…',
+    info:files.length+' PP sélectionnée'+(files.length>1?'s':'')+' — <b>copiées</b> chez chaque model cochée. Les originaux restent en place.',
+    rows:rows,
+    onConfirm:function(sel, _x, ui){
+      ui.busy('⏳ Copie…');
+      var fd=new FormData(); fd.set('files',JSON.stringify(files)); fd.set('targets',JSON.stringify(sel));
+      fetch('/cloud/pp_apply',{method:'POST',body:fd,credentials:'same-origin'})
+        .then(function(r){return r.json();}).then(function(j){
+          ui.close();
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          if(typeof clearSelection==='function') clearSelection();
+          try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+          if(typeof showToast==='function') showToast('✅ '+j.copied+' PP copiée(s) vers '+sel.length+' model'+(sel.length>1?'s':'')+' — les originaux restent en place','success',6500);
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+    }
+  });
 }
 // ==================== Bibliothèque CAPTION (onglet Reel montage) ====================
 // Textes par identité, posés en RANDOM sur les vidéos brutes à la génération.
@@ -7265,22 +7259,6 @@ body.light .action-icon{color:#666}
 .nxm-plabel{font-size:10.5px;font-weight:700;color:#8b8b95;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
 @media(max-width:900px){.ce-main{grid-template-columns:1fr}.ce-lib,.ce-right{display:none}.ce-app{height:96vh}}
 </style>
-<!-- ===== PP : Appliquer aux autres (COPIE des PP selectionnees vers d autres identites) ===== -->
-<div id="pp-apply-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="ppApplyClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:360px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-      Partager
-    </div>
-    <div style="font-size:12px;color:#888;line-height:1.5"><span id="pp-apply-count">0</span> PP sélectionnée(s) seront <b style="color:#c4c4cc">copiées</b> chez les identités cochées — les originaux restent en place.</div>
-    <div id="pp-apply-list" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:0"></div>
-    <div style="display:flex;gap:8px">
-      <button type="button" onclick="ppApplyClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
-      <button type="button" id="pp-apply-go" onclick="ppApplyGo()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Partager</button>
-    </div>
-  </div>
-</div>
-
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
