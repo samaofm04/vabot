@@ -34502,14 +34502,19 @@ def _vt_card_dims(cfg):
 
 _VT_HEAD = """
 <style>
-.vt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:10px;margin:14px 0}
-.vt-card{background:#12151f;border:1px solid #262b3a;border-radius:10px;padding:11px 13px;transition:border-color .15s,background .15s}
-.vt-card.on{border-color:rgba(59,130,246,.6);background:rgba(59,130,246,.07)}
-.vt-h{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#e8eaf2;cursor:pointer;user-select:none}
-.vt-h input{width:16px;height:16px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
-.vt-mm{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:11px;color:#8a91a8}
-.vt-mm input{width:100%;min-width:0;padding:5px 7px;background:#0b0e16;border:1px solid #262b3a;color:#e8eaf2;border-radius:6px;font-size:12px;box-sizing:border-box}
-.vt-desc{margin-top:7px;font-size:10.5px;color:#6b7280;line-height:1.45}
+/* ===== Look TikFusion (demande user) : cartes bordées BLEU en permanence,
+   coche RONDE bleue, inputs Min/Max sombres, tout sur fond quasi noir ===== */
+.vt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:12px;margin:14px 0}
+.vt-card{background:#07090d;border:1.5px solid rgba(37,99,235,.5);border-radius:10px;padding:12px 14px;transition:border-color .15s,background .15s}
+.vt-card.on{border-color:#2f6fed;background:rgba(37,99,235,.07)}
+.vt-h{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;user-select:none}
+.vt-h input{appearance:none;-webkit-appearance:none;width:18px;height:18px;border-radius:50%;border:2px solid #3c4454;background:transparent;position:relative;flex-shrink:0;cursor:pointer;margin:0}
+.vt-h input:checked{background:#2563eb;border-color:#2563eb}
+.vt-h input:checked::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.vt-mm{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;color:#9aa3b5;font-weight:600}
+.vt-mm input{width:100%;min-width:0;padding:6px 9px;background:#0d1117;border:1px solid #2b3240;color:#fff;border-radius:8px;font-size:12.5px;box-sizing:border-box}
+.vt-mm input:focus{border-color:#2f6fed;outline:none}
+.vt-desc{margin-top:8px;font-size:10.5px;color:#6b7280;line-height:1.45}
 </style>
 <script>
 function vtCard(cb){var c=cb.closest('.vt-card'); if(c) c.classList.toggle('on', cb.checked);}
@@ -34599,9 +34604,9 @@ def _render_video_manager() -> str:
         "<form method='POST' action='/settings/video_transform'>"
         + mode_html + del_html
         + "<div class='vt-grid'>" + cards + "</div>"
-        + "<button type='submit' style='width:100%;padding:13px;font-size:14px;font-weight:800;border:0;"
-          "border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;cursor:pointer'>"
-          "💾 Enregistrer les réglages</button>"
+        + "<button type='submit' style='width:100%;padding:14px;font-size:14px;font-weight:700;border:0;"
+          "border-radius:8px;background:#1d4ed8;color:#dbe4ff;cursor:pointer;letter-spacing:.01em'>"
+          "Enregistrer les réglages</button>"
         "</form>"
     )
 
