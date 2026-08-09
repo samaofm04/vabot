@@ -5408,6 +5408,13 @@ setInterval(function(){
         }
       }
       if(st==='running'||(hasRun&&st!=='running')) limpCard(j);
+      // statut retombé à idle (redémarrage du site en plein import) : on ne
+      // laisse JAMAIS une carte orpheline tourner pour rien
+      if(st==='idle'){
+        var cc=document.getElementById('limpCard');
+        if(cc){ cc.remove(); clearInterval(__limpAnim); __limpAnim=null; __limpPct=0;
+          if(typeof showToast==='function') showToast('⚠️ Import interrompu (site redémarré) — relance tes liens','warning',7000); }
+      }
       // fin d import -> recharge la galerie UNE fois pour montrer les vidéos
       if(hasRun && st!=='running'){
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
@@ -14484,6 +14491,7 @@ def _linkimp_fetch(u: str, inf: dict):
     if cache and cache.exists() and 1024 < cache.stat().st_size <= 50 * 1024 * 1024:
         return cache.read_bytes()
     vb = None
+    _steps = []   # raison PAR ÉTAPE (affichée si tout échoue)
     # 1) Apify : LA source fiable de la Veille (zéro cookie, pas de 429)
     try:
         import apify_reels as _ap
@@ -14493,20 +14501,28 @@ def _linkimp_fetch(u: str, inf: dict):
             if _ad and _ad.get("video_url"):
                 vb = _vt.download_video_bytes(_ad["video_url"])
             if not vb:
-                inf["reason"] = "apify_sans_video"
+                _steps.append("Apify: pas de vidéo")
+        else:
+            _steps.append("Apify: non configuré")
     except Exception as e:
-        inf["reason"] = f"apify:{str(e)[:80]}"
+        _steps.append(f"Apify: {str(e)[:60]}")
     # 2) scrape page publique -> URL CDN fraîche
     if not vb:
         try:
             fresh = (_vt.refresh_post_data(u) or {}).get("video_url") or ""
             if fresh:
                 vb = _vt.download_video_bytes(fresh)
-        except Exception:
-            pass
+            if not vb:
+                _steps.append("scrape page: ∅")
+        except Exception as e:
+            _steps.append(f"scrape: {str(e)[:50]}")
     # 3) dernier recours : yt-dlp PUBLIC (le cookie AGGRAVE le 429)
     if not vb:
-        vb = _vt.download_via_ytdlp(u, timeout=45, info=inf, use_cookies=False)
+        _yi = {}
+        vb = _vt.download_via_ytdlp(u, timeout=45, info=_yi, use_cookies=False)
+        if not vb:
+            _steps.append(f"yt-dlp: {_yi.get('reason', '?')[:70]}")
+            inf["reason"] = " · ".join(_steps)
     if vb and cache:
         try:  # cache partagé avec Trends/Veille : le prochain besoin est instantané
             cache.parent.mkdir(parents=True, exist_ok=True)
@@ -39021,9 +39037,11 @@ def create_app():
         import threading as _th
         if _LINKIMP_STATUS.get("state") == "running":
             return _fail("Un import par lien tourne déjà — attends qu'il finisse", tab)
+        import time as _t0
         _LINKIMP_STATUS.update({"state": "running", "identity": ident, "subdir": subdir,
                                 "done": 0, "total": len(urls), "ok": 0, "fail": 0,
-                                "err": "", "thumb_url": "", "last_file": ""})
+                                "err": "", "thumb_url": "", "last_file": "",
+                                "run_ts": int(_t0.time())})
         _th.Thread(target=_linkimp_run, args=(ident, subdir, urls),
                    name="link-import", daemon=True).start()
         if ajax:
@@ -39033,11 +39051,23 @@ def create_app():
 
     @app.route("/cloud/import_link_status", methods=["GET"])
     def cloud_import_link_status():
-        """Statut live de l'import par lien (poll 3s côté client)."""
+        """Statut live de l'import par lien (poll 3s côté client). Un statut
+        « running » trop vieux (mur dépassé largement = thread mort / vieux
+        build / redémarrage raté) est signalé comme interrompu."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
-        return jsonify({"ok": True, **_LINKIMP_STATUS})
+        st = dict(_LINKIMP_STATUS)
+        try:
+            import time as _t
+            if st.get("state") == "running":
+                budget = max(1, int(st.get("total") or 1)) * 170 + 60
+                if _t.time() - int(st.get("run_ts") or _t.time()) > budget:
+                    st["state"] = "error"
+                    st["err"] = "import interrompu (trop long) — relance-le"
+        except Exception:
+            pass
+        return jsonify({"ok": True, **st})
 
     # ============ GOOGLE DRIVE (copie seule — jamais de suppression) =========
     @app.route("/gdrive/config", methods=["POST"])
