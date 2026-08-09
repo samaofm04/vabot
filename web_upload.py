@@ -4745,6 +4745,45 @@ document.addEventListener('click', function(ev){
     capSelUpdateBar();
   }
 });
+// ---- Détection « déjà utilisée » : normalisation + similarité par mots ----
+function capNorm(s){
+  s=String(s||'').toLowerCase();
+  s=s.replace(/[^a-z0-9À-ɏ\s]/g,' ').replace(/\s+/g,' ');
+  return s.replace(/^\s+|\s+$/g,'');
+}
+function capSim(a,b){
+  var A=capNorm(a).split(' ').filter(Boolean), B=capNorm(b).split(' ').filter(Boolean);
+  if(!A.length||!B.length) return 0;
+  var m={}, inter=0;
+  A.forEach(function(w){ m[w]=(m[w]||0)+1; });
+  B.forEach(function(w){ if(m[w]){ inter++; m[w]--; } });
+  return (2*inter)/(A.length+B.length);
+}
+function capAddWarnCheck(ta,wd){
+  if(!wd) return;
+  var v=String(ta.value||'').trim();
+  if(!v||!capLibInit()){ wd.style.display='none'; return; }
+  var nv=capNorm(v), best=null, bestS=0, bestField=false;
+  (capLib.block.items||[]).forEach(function(c){
+    var s=(capNorm(c.text)===nv)?1:capSim(v,c.text);
+    if(s>bestS){ bestS=s; best=String(c.text||''); bestField=false; }
+  });
+  document.querySelectorAll('#capAddList .capadd-ta').forEach(function(o){
+    if(o===ta) return;
+    var ov=String(o.value||'').trim(); if(!ov) return;
+    var s=(capNorm(ov)===nv)?1:capSim(v,ov);
+    if(s>bestS){ bestS=s; best=ov; bestField=true; }
+  });
+  if(bestS>=0.999){
+    wd.textContent='🚫 Déjà utilisée telle quelle'+(bestField?' (autre champ au-dessus)':'')+' — elle sera ignorée.';
+    wd.style.color='#ef4444'; wd.style.display='block';
+  }else if(bestS>=0.55){
+    wd.textContent='⚠️ Ressemble beaucoup à une caption déjà utilisée : « '+best.slice(0,70)+(best.length>70?'…':'')+' »';
+    wd.style.color='#f59e0b'; wd.style.display='block';
+  }else{
+    wd.style.display='none';
+  }
+}
 function capAddField(focus){
   var list=document.getElementById('capAddList'); if(!list) return null;
   var n=list.querySelectorAll('.capadd-wrap').length+1;
@@ -4752,10 +4791,18 @@ function capAddField(focus){
   wrap.className='capadd-wrap';
   wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">CAPTION '+n+' (OVERLAY SUR LA VIDÉO)</div>'
     +'<textarea rows="2" class="capadd-ta" placeholder="Pov : j&#39;ai fait la maline..." autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>'
+    +'<div class="capadd-warn" style="display:none;font-size:11.5px;font-weight:600;margin-top:6px"></div>'
     +'<div style="font-size:10.5px;font-weight:700;color:#6b6b75;letter-spacing:.08em;margin:8px 0 6px">DESCRIPTION (OPTIONNEL — LÉGENDE DU POST)</div>'
     +'<textarea rows="1" class="capadd-desc" placeholder="Vide = pas de description" autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#101014;border:1px dashed #2c2c33;color:#c9c9d2;border-radius:10px;padding:8px 12px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
   list.appendChild(wrap);
   var ta=wrap.querySelector('.capadd-ta');
+  var wd=wrap.querySelector('.capadd-warn');
+  if(ta){
+    var tmr=null;
+    ta.addEventListener('input', function(){
+      clearTimeout(tmr); tmr=setTimeout(function(){ capAddWarnCheck(ta,wd); },250);
+    });
+  }
   if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
   return ta;
 }
@@ -4775,15 +4822,19 @@ function capAddSubmit(){
   if(!capLibInit()) return;
   // doublons filtrés : entre les champs ET contre la bibliothèque existante
   // (une extension d autofill peut recopier le même texte partout)
-  var seen={}, dropped=0;
-  (capLib.block.items||[]).forEach(function(c){ seen[String(c.text||'').trim()]=1; });
+  // dédupe NORMALISÉE (casse/ponctuation ignorées) + comptage des « très proches »
+  var seen={}, dropped=0, near=0;
+  var existing=(capLib.block.items||[]).map(function(c){ return String(c.text||''); });
+  existing.forEach(function(t){ seen[capNorm(t)]=1; });
   var vals=[];
   document.querySelectorAll('#capAddList .capadd-wrap').forEach(function(w){
     var t=w.querySelector('.capadd-ta'), d=w.querySelector('.capadd-desc');
     var v=String(t&&t.value||'').trim(); if(!v) return;
     v=v.slice(0,300);
-    if(seen[v]){ dropped++; return; }
-    seen[v]=1;
+    var nv=capNorm(v);
+    if(seen[nv]){ dropped++; return; }
+    if(existing.some(function(x){ return capSim(v,x)>=0.55; })) near++;
+    seen[nv]=1;
     vals.push({text:v, desc:String(d&&d.value||'').trim().slice(0,1000)});
   });
   if(!vals.length){
@@ -4798,7 +4849,9 @@ function capAddSubmit(){
   }
   capAddClose();
   capRenderCards(); capSave();
-  if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')+(dropped?(' · '+dropped+' doublon'+(dropped>1?'s ignorés':' ignoré')):''),'success');
+  if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
+    +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')):'')
+    +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''), near?'warning':'success');
 }
 // NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
 // les modales (plus bas dans la page) existent ; les boutons de la modale sont
