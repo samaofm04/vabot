@@ -570,6 +570,35 @@ async def _ensure_us_menu(bot, channel):
         return False
 
 
+async def _ensure_num_panel(bot, channel):
+    """Poste (et épingle) le panneau « Numéro & Mail » dans un salon
+    -numero-mail s'il n'y est pas déjà. Idempotent."""
+    if bot is None or channel is None:
+        return False
+    try:
+        from cogs.numeros import NumPanelView, panel_embed
+        ncog = bot.get_cog("NumerosCog")
+        if ncog is None:
+            return False
+        try:
+            pins = await channel.pins()
+        except Exception:
+            pins = []
+        for p in pins:
+            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
+                    and "Numéro & Mail" in (p.embeds[0].title or "")):
+                return True
+        msg = await channel.send(embed=panel_embed(), view=NumPanelView(ncog))
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning(f"_ensure_num_panel: {e}")
+        return False
+
+
 async def create_us_tickets(guild, member, bot=None):
     """Garantit l'état cible d'un membre : UN dossier (catégorie) à son pseudo
     contenant ses 3 salons dans l'ordre menu → content → numero-mail, le menu
@@ -623,6 +652,9 @@ async def create_us_tickets(guild, member, bot=None):
     # Le menu Jailbreak US vit dans -menu, en permanence.
     if menu_ch is not None:
         await _ensure_us_menu(bot, menu_ch)
+    # Le panneau Numéro & Mail vit dans -numero-mail, en permanence.
+    if chans.get("numero-mail") is not None:
+        await _ensure_num_panel(bot, chans["numero-mail"])
     # Migration : retirer l'ancien menu épinglé dans -content (version précédente).
     if content_ch is not None and bot is not None:
         try:
