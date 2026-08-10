@@ -474,7 +474,9 @@ def read_lines(path):
 
 
 def random_username_for(identity):
+    """usernames.txt de l'identité + bibliothèque « Usernames » du site."""
     items = read_lines(IDENTITIES_DIR / identity / "usernames.txt")
+    items = items + [x for x in _vault_texts("usernames", identity) if x not in items]
     return unescape_newlines(random.choice(items)) if items else None
 
 
@@ -732,7 +734,9 @@ async def find_available_usernames(base: str, max_check: int = 30, want: int = 5
 
 
 def random_name_for(identity):
+    """names.txt de l'identité + bibliothèque « Names » du site."""
     items = read_lines(IDENTITIES_DIR / identity / "names.txt")
+    items = items + [x for x in _vault_texts("names", identity) if x not in items]
     return unescape_newlines(random.choice(items)) if items else None
 
 
@@ -883,10 +887,25 @@ def _read_bios_at(path):
     return [b.strip() for b in content.split("---") if b.strip()]
 
 
+def _vault_texts(category, identity):
+    """Textes de la BIBLIOTHÈQUE du site (data/text_pool.json) pour cette
+    identité. Le site écrit là ; le bot lisait seulement les .txt -> les bios
+    posées sur le site étaient invisibles pour les VA."""
+    try:
+        import text_pool as _tp
+        return [str(e.get("text") or "").strip()
+                for e in _tp.list_entries(category, identity=(identity or "").lower())
+                if str(e.get("text") or "").strip()]
+    except Exception:
+        return []
+
+
 def random_bio_for(identity):
-    """Try identity-specific bios first, fallback to shared bios."""
+    """Bios de l'identité : fichier bios.txt ET bibliothèque Bios du site
+    (les deux sources sont fusionnées), sinon bios partagées."""
     if identity:
         bios = _read_bios_at(IDENTITIES_DIR / identity / "bios.txt")
+        bios = bios + [b for b in _vault_texts("bios", identity) if b not in bios]
         if bios:
             return unescape_newlines(random.choice(bios))
     bios = _read_bios_at(SHARED_BIOS_FILE)
@@ -4450,12 +4469,12 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 _JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia",
                      "jessye"}   # jessye n'est PAS une identité du marché US
 
-# Serveur US : les TEXTES et les PP ne viennent pas de la model choisie mais
-# d'une identité « source » commune (toutes ces identités, c'est Jessye).
-# Concerne pseudo / name / bio / pp — le média (reel, story, post) reste celui
-# de la model cliquée.
+# Serveur US : les TEXTES ne viennent pas de la model choisie mais d'une
+# identité « source » commune (toutes ces identités, c'est Jessye) : pseudo,
+# name, bio — des EXEMPLES posés à la main sur le site, aucune génération IA.
+# Les MÉDIAS (reel, story, post, PP) restent ceux de la model cliquée.
 _US_SOURCE_IDENTITY = "jessye"
-_US_SOURCED_ACTIONS = {"pseudo", "name", "bio", "pp"}
+_US_SOURCED_ACTIONS = {"pseudo", "name", "bio"}
 
 
 def _jb_us_models():
