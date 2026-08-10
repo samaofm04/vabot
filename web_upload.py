@@ -14561,6 +14561,13 @@ window.vaultGoTo = function(ev, url){
     c.style.opacity = '.25';
     c.style.transform = 'scale(.98)';
   });
+  // Onglets SANS média (Bios, CTA, Caption) : le header change instantanément
+  // alors que la liste vient du serveur -> sans ce fade, l'ancienne identité
+  // reste nette sous le nouveau nom et on croit à un bug d'affichage.
+  sec.querySelectorAll('.txt-card, .cap-card, [data-txtai-box]').forEach(c=>{
+    c.style.transition = 'opacity .15s';
+    c.style.opacity = '.25';
+  });
   // Charge le nouveau HTML
   const apply = (html)=>{
     try{
@@ -15520,7 +15527,7 @@ def _render_textvault_html(cat: str) -> str:
     ai_box = ""
     if cat == "bios" and selected != "_pool_":
         ai_box = (
-            "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
+            "<div data-txtai-box='1' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
             "<span style='font-size:12.5px;font-weight:700'>✨ Générer avec l'IA</span>"
             "<label style='font-size:12px;color:#c4c4cc;display:flex;align-items:center;gap:6px'>Âge "
             "<input id='txtAiAge' type='number' min='18' max='40' value='22' style='width:56px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:12.5px;box-sizing:border-box'></label>"
