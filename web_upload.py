@@ -15529,8 +15529,8 @@ def _render_textvault_html(cat: str) -> str:
             "<div style='flex-basis:100%;height:0'></div>"
             "<div style='flex:1;min-width:260px'>"
             "<div style='font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin:2px 0 6px'>"
-            "TES BIOS D'EXEMPLE (OPTIONNEL — UNE PAR LIGNE)</div>"
-            "<textarea id='txtAiSeed' rows='3' placeholder=\"Colle ici des bios qui te plaisent, une par ligne — l'IA s'en inspire\" "
+            "TES BIOS D'EXEMPLE (OPTIONNEL — SAUTE UNE LIGNE ENTRE CHAQUE BIO)</div>"
+            "<textarea id='txtAiSeed' rows='5' placeholder=\"18 🎀 San Antonio us | tu Texas 🤠&#10;rodeo queen wannabe&#10;&#10;22 · Paris 🤍&#10;dm ouverts\" "
             "autocomplete='off' spellcheck='false' data-lpignore='true' "
             "style='width:100%;background:#131316;border:1px dashed #34343a;color:#e6e6ea;border-radius:10px;padding:9px 12px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none'></textarea>"
             "</div>"
@@ -42337,8 +42337,14 @@ def create_app():
             _examples = []
         # Exemples FOURNIS dans le formulaire : ils PRIMENT sur les bios en base
         # (cas d'une model qui n'en a encore aucune).
-        _seed = [l.strip() for l in (request.form.get("seed") or "").splitlines()
-                 if l.strip()][:20]
+        # ⚠️ Une bio Insta tient sur PLUSIEURS lignes -> le séparateur est une
+        # LIGNE VIDE, pas le retour à la ligne. Sans ligne vide, on retombe sur
+        # « une par ligne » (compatible avec l'ancien usage).
+        _raw_seed = (request.form.get("seed") or "").replace("\r\n", "\n")
+        if "\n\n" in _raw_seed:
+            _seed = [b.strip() for b in re.split(r"\n\s*\n", _raw_seed) if b.strip()][:20]
+        else:
+            _seed = [l.strip() for l in _raw_seed.splitlines() if l.strip()][:20]
         if _seed:
             _examples = _seed + [t for t in _examples if t not in _seed]
         _ex_block = ""
@@ -42355,9 +42361,12 @@ def create_app():
             f"Tu écris des bios Instagram pour le compte d'une créatrice/modèle.\n"
             f"Identité : {identity or 'une jeune femme française'} — Âge : {age} ans.\n"
             + _ex_block +
-            f"Génère exactement {count} bios DIFFÉRENTES, une par ligne, sans numérotation, sans tirets, sans guillemets.\n"
+            f"Génère exactement {count} bios DIFFÉRENTES.\n"
+            "FORMAT DE RÉPONSE : sépare chaque bio par une LIGNE VIDE. Une bio peut "
+            "elle-même tenir sur plusieurs lignes (comme une vraie bio Instagram). "
+            "Pas de numérotation, pas de tirets, pas de guillemets.\n"
             "Contraintes STRICTES :\n"
-            "- max 140 caractères chacune\n"
+            "- max 140 caractères chacune (sauts de ligne compris)\n"
             "- style fille jeune, française, naturelle (pas commercial)\n"
             "- quelques emojis bien placés (🇫🇷 💌 ☀️ 🤍 …)\n"
             "- varie les styles : mystérieuse, fun, directe, minimaliste\n"
@@ -42385,8 +42394,18 @@ def create_app():
         import text_pool as tp
         added = 0
         _seen = {t.lower() for t in _examples}
-        for line in text.splitlines():
-            line = line.strip().strip("\"'").lstrip("-•*0123456789. ").strip()
+        # Blocs séparés par une ligne vide (une bio = potentiellement plusieurs
+        # lignes) ; si l'IA a répondu à l'ancienne (1 par ligne), ça marche aussi.
+        _blocks = [b for b in re.split(r"\n\s*\n", text.replace("\r\n", "\n")) if b.strip()]
+        if len(_blocks) <= 1:
+            _blocks = text.splitlines()
+        for line in _blocks:
+            # Nettoyage PRUDENT : on retire « 1. », « 2) », « - », « • » en tête
+            # de bloc, mais JAMAIS un âge nu (« 18 🎀 … » doit rester intact).
+            _ls = [l.strip().strip("\"'") for l in line.strip().splitlines() if l.strip()]
+            if _ls:
+                _ls[0] = re.sub(r"^(?:\d{1,2}\s*[.)]\s+|[-•*]\s+)", "", _ls[0]).strip()
+            line = "\n".join(_ls)
             if not (5 <= len(line) <= 150):
                 continue
             if line.lower() in _seen:      # jamais deux fois la même
