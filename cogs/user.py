@@ -2107,6 +2107,119 @@ class UserCog(commands.Cog):
         for idx, (video, draft, description) in enumerate(ready, start=1):
             await self._gen_and_send_montaged(interaction, video, draft, description, idx, total, identity)
 
+    @app_commands.command(
+        name="reelcaption",
+        description="Vidéo brute + caption incrustée (bibliothèque Caption du site)")
+    @app_commands.describe(nombre="Combien de vidéos (1-10, défaut 3)")
+    async def reelcaption(self, interaction: discord.Interaction,
+                          nombre: app_commands.Range[int, 1, 10] = 3):
+        """Une brute de l'identité + UNE caption au hasard, incrustée par le
+        moteur montage — même recette que le bouton 🎲 du site (/captions/gen)."""
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        block = _captions_block(identity)
+        pool = [c for c in (block.get("items") or [])
+                if c.get("enabled", True) and str(c.get("text") or "").strip()]
+        if not pool:
+            await interaction.response.send_message(
+                f"Aucune **caption** active pour `{identity}`.\n"
+                "_(Un admin les ajoute sur le site, onglet **Caption**.)_", ephemeral=True)
+            return
+        bdir = IDENTITIES_DIR / identity / "brutes"
+        brutes = []
+        if bdir.exists():
+            brutes = [p for p in bdir.iterdir()
+                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                      and ".example" not in p.name]
+        if not brutes:
+            await interaction.response.send_message(
+                f"Aucune **vidéo brute** pour `{identity}`.\n"
+                "_(Un admin en ajoute sur le site, onglet **Vidéo brut**.)_", ephemeral=True)
+            return
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.response.send_message(
+                f"⚠️ Module vidéo indisponible : {e}", ephemeral=True)
+            return
+        if not noctus_web.setup_ok():
+            await interaction.response.send_message(
+                "⚠️ La génération vidéo n'est pas prête sur le serveur (Node/ffmpeg).",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = min(nombre, len(brutes) * 3)
+        await interaction.followup.send(
+            f"💬 **{total} reel(s) caption pour `{identity}`** — je les génère "
+            f"(≈15-30s chacun ⏳). Le texte est **incrusté** : poste **tel quel**.")
+        used_b, used_c = set(), set()
+        for idx in range(1, total + 1):
+            cap = _pick_fresh(pool, used_c, key=lambda c: c.get("id"))
+            vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
+            await self._gen_and_send_caption(interaction, vid, cap, block, idx, total, identity)
+
+    async def _gen_and_send_caption(self, interaction, video, cap, block, idx, total, identity):
+        """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description)."""
+        import asyncio
+        import json as _js
+        import noctus_web
+        gp = block.get("global_pos") or {}
+        seg = {"text": cap.get("text") or "", "start": None, "end": None,
+               "x": gp.get("x", 0.5) if gp.get("enabled") else cap.get("x", 0.5),
+               "y": gp.get("y", 0.2) if gp.get("enabled") else cap.get("y", 0.5)}
+        for k in ("wrapW", "lineSpacing"):
+            if cap.get(k) is not None:
+                seg[k] = cap[k]
+        draft = {"segments": _js.dumps([seg]),
+                 "font": block.get("font") or "TikTokSans",
+                 "style": _js.dumps(block.get("style") or {})}
+        try:
+            model = await asyncio.to_thread(
+                noctus_web.gen_from_draft, str(video), draft, ["V1"], None, None)
+        except Exception:
+            model = None
+        if not model:
+            await interaction.followup.send(f"⚠️ REEL CAPTION {idx}/{total} : génération impossible.")
+            return
+        state = "running"
+        for _ in range(90):                       # ~3 min max
+            await asyncio.sleep(2)
+            try:
+                state = noctus_web.status(model).get("state", "running")
+            except Exception:
+                state = "running"
+            if state in ("done", "error", "stopped"):
+                break
+        if state != "done":
+            await interaction.followup.send(
+                f"⚠️ REEL CAPTION {idx}/{total} : génération échouée ({state}).")
+            return
+        outs = noctus_web.output_paths(model)
+        if not outs:
+            await interaction.followup.send(f"⚠️ REEL CAPTION {idx}/{total} : aucun fichier produit.")
+            return
+        intro = (f"💬 **REEL CAPTION {idx}/{total}** → à poster sur ton **compte n°{idx}** "
+                 f"(`{identity}`)\n📥 Poste cette vidéo **telle quelle** — la caption est "
+                 f"**déjà écrite** dessus.")
+        try:
+            await interaction.followup.send(
+                content=intro,
+                file=discord.File(str(outs[0]), filename=f"reel_caption_{idx}.mp4"))
+        except discord.HTTPException as e:
+            await interaction.followup.send(
+                f"⚠️ REEL CAPTION {idx}/{total} : envoi impossible (trop lourd) : {e}")
+            return
+        desc = str(cap.get("desc") or "").strip()
+        if desc:
+            await interaction.followup.send(
+                f"📄 **DESCRIPTION REEL CAPTION {idx}/{total}** (à coller dans le **champ légende**) :")
+            await interaction.followup.send(desc)
+
     async def cog_load(self):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
         try:
@@ -4313,6 +4426,21 @@ _JB_ACTIONS = [
     ("pp", "🖼️ PP", "profilepic", True),
 ]
 
+# Serveur US : PAS de « Reel » brut (les VA US ne postent pas de reel avec
+# exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
+# Caption du site) et « Reel monté » (montage template).
+_JB_ACTIONS_US = [
+    ("reelcaption", "💬 Reel caption", "reelcaption", True),
+    ("reelmonte", "🎞️ Reel monté", "reelmonte", True),
+    ("story", "📖 Story", "story", True),
+    ("post", "🖼️ Post", "post", True),
+    ("storycta", "📲 Story CTA", "storycta", True),
+    ("pseudo", "👤 Pseudo", "username", False),
+    ("name", "📝 Name", "name", False),
+    ("bio", "💬 Bio", "bio", True),
+    ("pp", "🖼️ PP", "profilepic", True),
+]
+
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 
@@ -4321,6 +4449,13 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 # contrairement au menu classique qui les exclut).
 _JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia",
                      "jessye"}   # jessye n'est PAS une identité du marché US
+
+# Serveur US : les TEXTES et les PP ne viennent pas de la model choisie mais
+# d'une identité « source » commune (toutes ces identités, c'est Jessye).
+# Concerne pseudo / name / bio / pp — le média (reel, story, post) reste celui
+# de la model cliquée.
+_US_SOURCE_IDENTITY = "jessye"
+_US_SOURCED_ACTIONS = {"pseudo", "name", "bio", "pp"}
 
 
 def _jb_us_models():
@@ -4361,12 +4496,13 @@ class _JailbreakQtySelect(discord.ui.Select):
 
 class _JailbreakActionButton(discord.ui.Button):
     """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
-    def __init__(self, cog, model, label, cmd_attr, supports_count, row):
+    def __init__(self, cog, model, label, cmd_attr, supports_count, row, key=""):
         super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
         self.cog = cog
         self.model = model
         self.cmd_attr = cmd_attr
         self.supports_count = supports_count
+        self.key = key
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
@@ -4377,26 +4513,39 @@ class _JailbreakActionButton(discord.ui.Button):
         if cmd is None:
             await interaction.response.send_message("Action indisponible.", ephemeral=True)
             return
+        # Serveur US : pseudo / name / bio / pp viennent de l'identité SOURCE
+        # (toutes ces models, c'est Jessye) — le média reste celui de la model.
+        model = self.model
+        try:
+            import guild_features as gf
+            if (self.key in _US_SOURCED_ACTIONS
+                    and gf.is_us_guild(getattr(interaction, "guild", None))):
+                model = _US_SOURCE_IDENTITY
+        except Exception:
+            pass
         qty = getattr(self.view, "quantity", 3)
         await self.cog._run_for_model(
-            interaction, self.model, cmd, count=qty, supports_count=self.supports_count)
+            interaction, model, cmd, count=qty, supports_count=self.supports_count)
 
 
 class JailbreakActionsView(discord.ui.View):
-    """Quantite + 8 actions pour UNE model. Ephemere (regeneree a chaque choix)."""
-    def __init__(self, cog, model, quantity=3):
+    """Quantite + actions pour UNE model. Ephemere (regeneree a chaque choix).
+    us=True -> liste US (Reel caption au lieu du Reel brut)."""
+    def __init__(self, cog, model, quantity=3, us=False):
         super().__init__(timeout=600)
         self.cog = cog
         self.model = model
         self.quantity = quantity
+        self.us = us
         self._build()
 
     def _build(self):
         self.clear_items()
         self.add_item(_JailbreakQtySelect(self.quantity))
-        for i, (_key, label, cmd_attr, sc) in enumerate(_JB_ACTIONS):
+        actions = _JB_ACTIONS_US if self.us else _JB_ACTIONS
+        for i, (key, label, cmd_attr, sc) in enumerate(actions):
             self.add_item(_JailbreakActionButton(
-                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4))
+                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key))
 
     def _embed(self):
         m = self.model.capitalize()
@@ -4411,6 +4560,31 @@ class JailbreakActionsView(discord.ui.View):
             ),
             color=discord.Color.dark_red(),
         )
+
+
+def _captions_block(identity):
+    """Bloc caption d'une identité (data/captions.json, écrit par le site).
+    {font, style, global_pos, items:[{id,text,desc?,x,y,wrapW?,enabled}]}."""
+    import json as _js
+    p = DATA_DIR / "captions.json"
+    try:
+        lib = _js.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    b = lib.get((identity or "").lower().strip()) if isinstance(lib, dict) else None
+    return b if isinstance(b, dict) else {}
+
+
+def _pick_fresh(pool, used, key):
+    """Tire un élément non encore servi ; repart du début quand tout a servi
+    (évite 2 fois la même caption/brute tant qu'il en reste d'autres)."""
+    fresh = [x for x in pool if key(x) not in used]
+    if not fresh:
+        used.clear()
+        fresh = list(pool)
+    pick = random.choice(fresh)
+    used.add(key(pick))
+    return pick
 
 
 def _identity_pp_file(ident):
@@ -4547,7 +4721,12 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
         if cog is None:
             await interaction.response.send_message("Indisponible.", ephemeral=True)
             return
-        view = JailbreakActionsView(cog, self.ident)
+        try:
+            import guild_features as gf
+            us = gf.is_us_guild(getattr(interaction, "guild", None))
+        except Exception:
+            us = False
+        view = JailbreakActionsView(cog, self.ident, us=us)
         await interaction.response.send_message(
             embed=view._embed(), view=view, ephemeral=True)
 
