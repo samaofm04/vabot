@@ -890,7 +890,13 @@ def _read_bios_at(path):
 def _vault_texts(category, identity):
     """Textes de la BIBLIOTHÈQUE du site (data/text_pool.json) pour cette
     identité. Le site écrit là ; le bot lisait seulement les .txt -> les bios
-    posées sur le site étaient invisibles pour les VA."""
+    posées sur le site étaient invisibles pour les VA.
+
+    ⚠️ Les identités du MARCHÉ FR sont volontairement EXCLUES : leur contenu
+    ne doit pas bouger tant que l'user ne l'a pas demandé (elles continuent de
+    ne servir que leurs .txt, exactement comme avant)."""
+    if (identity or "").lower().strip() in _FR_MARKET_IDENTITIES:
+        return []
     try:
         import text_pool as _tp
         return [str(e.get("text") or "").strip()
@@ -4466,8 +4472,11 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 # Marché FR — exclu du menu Jailbreak US (/menujailbreakus). Le menu US montre
 # toutes les identités actives SAUF celles-ci (jessye/jailbreak-only INCLUSES,
 # contrairement au menu classique qui les exclut).
-_JB_FR_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia",
-                     "jessye"}   # jessye n'est PAS une identité du marché US
+# Marché FR : rien de leur comportement ne doit changer sans demande explicite
+# de l'user (leurs textes viennent UNIQUEMENT des .txt, comme avant).
+_FR_MARKET_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
+# + jessye : elle non plus n'est pas une model du menu US (elle en est la SOURCE)
+_JB_FR_IDENTITIES = _FR_MARKET_IDENTITIES | {"jessye"}
 
 # Serveur US : les TEXTES ne viennent pas de la model choisie mais d'une
 # identité « source » commune (toutes ces identités, c'est Jessye) : pseudo,
