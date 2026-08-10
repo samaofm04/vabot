@@ -4536,9 +4536,12 @@ function txtAddOpen(){
 function txtAddClose(){ var m=document.getElementById('txt-add-modal'); if(m) m.style.display='none'; }
 function txtAddSubmit(){
   var c=txtCtx(); if(!c) return;
+  // Règle user : une LIGNE VIDE sépare deux textes différents ; les sauts de
+  // ligne SIMPLES appartiennent au texte (une bio Insta tient sur 2-3 lignes).
   var vals=[];
   document.querySelectorAll('#txtAddList .txtadd-ta').forEach(function(t){
-    var v=String(t.value||'').trim(); if(v) vals.push(v);
+    var v=String(t.value||'').replace(/\\r\\n/g,'\\n').trim(); if(!v) return;
+    v.split(/\\n\\s*\\n/).forEach(function(b){ b=b.trim(); if(b) vals.push(b); });
   });
   if(!vals.length){ if(typeof showToast==='function') showToast('Écris au moins un texte','warning'); return; }
   var fd=new FormData(); fd.set('category',c.cat); fd.set('identity',c.ident); fd.set('texts',JSON.stringify(vals));
