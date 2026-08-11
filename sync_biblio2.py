@@ -21,6 +21,14 @@ import sys
 import time
 from pathlib import Path
 
+# Console Windows : sans ça, un simple accent dans un message fait
+# planter le programme au démarrage (cp1252).
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 try:
     import requests
 except ImportError:

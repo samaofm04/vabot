@@ -31,6 +31,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
+# Console Windows : sans ça, un simple accent dans un message fait
+# planter le programme au démarrage (cp1252).
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 try:
     import requests
 except ImportError:
@@ -38,8 +46,20 @@ except ImportError:
     sys.exit(1)
 
 CONF = Path(__file__).resolve().parent / "serveur_site_media.json"
-_STATE = {"url": "", "token": "", "identity": "", "last": {}}
+_STATE = {"url": "", "token": "", "identity": "", "last": {},
+          "noms": False}
 _LOCK = threading.Lock()
+
+# Le tunnel tourne SUR cette machine : l'adresse source est 127.0.0.1 dans les
+# deux cas, elle ne distingue rien. Le signal fiable est l'en-tete « Host » :
+# un appel local porte 127.0.0.1:<port>, un appel tunnele porte le domaine
+# public. (Mesure : localtunnel n'ajoute PAS de X-Forwarded-*.)
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1"}
+
+
+def _est_local(host: str) -> bool:
+    h = (host or "").split(":")[0].strip().lower()
+    return h in _LOCAL_HOSTS or h.startswith("192.168.") or h.startswith("10.")
 
 MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
         ".webp": "image/webp", ".mp4": "video/mp4", ".mov": "video/quicktime",
@@ -136,7 +156,11 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(data)
-            print(f"  → {kind}/{name} ({len(data)//1024} Ko)")
+            # Aucun NOM dans le journal (il peut trahir le contenu).
+            if _STATE.get("noms"):
+                print(f"  -> {kind}/{name} ({len(data)//1024} Ko)")
+            else:
+                print(f"  -> [{kind}] 1 fichier ({len(data)//1024} Ko)")
             return
         self._send(404, b"aucun media disponible pour cette identite")
 
@@ -155,6 +179,12 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path.rstrip("/") or "/"
+        # PUBLIC (tunnel) : uniquement les octets et les textes dont l'iPhone a
+        # besoin. Tout ce qui ENUMERE (etat, compteurs, identites) ou qui
+        # PILOTE reste reserve au local.
+        if not _est_local(self.headers.get("Host", "")) and (
+                path in ("/", "/etat") or path.startswith("/identite/")):
+            return self._send(404, b"inconnu")
         if path == "/photo.jpg":
             return self._media(["posts", "stories", "storyctas"])
         if path == "/video.mp4":
@@ -206,6 +236,8 @@ def main():
     ap.add_argument("port", nargs="?", type=int, default=8099)
     ap.add_argument("--setup", action="store_true")
     ap.add_argument("--identite", default=None)
+    ap.add_argument("--noms", action="store_true",
+                    help="journaliser les NOMS de fichiers (débogage seulement)")
     a = ap.parse_args()
     if a.setup:
         return setup()
@@ -214,12 +246,17 @@ def main():
         print("Configuration absente — lance d'abord :  python serveur_site_media.py --setup")
         return
     _STATE.update({"url": c["url"], "token": c["token"],
-                   "identity": (a.identite or c.get("identity") or "beta").lower()})
+                   "identity": (a.identite or c.get("identity") or "beta").lower(),
+                   "noms": bool(getattr(a, "noms", False))})
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), H)
     print(f"🌐 http://0.0.0.0:{a.port}   identite : {_STATE['identity']}")
     print(f"   source : {_STATE['url']} (Bibliothèque 2)")
-    print("   /photo.jpg  /video.mp4  /media  /pp.jpg  /caption  /bio  /cta\n"
-          "   Ctrl+C pour arrêter\n")
+    print("   /photo.jpg  /video.mp4  /media  /pp.jpg  /caption  /bio  /cta")
+    print("   par le tunnel : octets et textes SEULEMENT — /etat, / et")
+    print("   /identite/<nom> répondent 404 hors du local")
+    print("   journal : NOMS affichés (--noms)" if a.noms
+          else "   journal : sans noms de fichiers")
+    print("   Ctrl+C pour arrêter\n")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
