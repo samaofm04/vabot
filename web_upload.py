@@ -6353,9 +6353,32 @@ window.upPrefillIdentity = function(utab, ident, vault){
         bd.textContent = '🔒 Destination : Vault PRO — ces fichiers ne vont PAS dans la Bibliothèque';
         form.insertBefore(bd, form.firstChild);
       }
+      // Bibliothèque 2 : même repère (l'identité porte le préfixe v2_)
+      if(String(ident||'').indexOf('v2_') === 0){
+        var bd2 = document.createElement('div');
+        bd2.className = 'up-vault-badge';
+        bd2.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);color:#7aa2ff;border-radius:10px;font-size:12.5px;font-weight:700';
+        bd2.textContent = '📁 Destination : Bibliothèque 2 — @' + String(ident).replace(/^v2_/,'');
+        form.insertBefore(bd2, form.firstChild);
+      }
     }
     var sel = form.querySelector('select[name=identity]');
-    if(sel){ sel.value = ident; try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} }
+    if(sel){
+      // Les identités de la Bibliothèque 2 ne sont PAS dans la liste (elles y
+      // sont volontairement invisibles) : sans cette option ajoutée à la volée,
+      // sel.value = ident échoue en SILENCE et le fichier part chez la première
+      // identité de la Bibliothèque.
+      var found = false;
+      for(var i=0;i<sel.options.length;i++){ if(sel.options[i].value === ident){ found = true; break; } }
+      if(!found && ident){
+        var o = document.createElement('option');
+        o.value = ident;
+        o.textContent = '@' + String(ident).replace(/^v2_/,'');
+        sel.appendChild(o);
+      }
+      sel.value = ident;
+      try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
+    }
     // S'assure que la card identite est bien VISIBLE (au cas ou un ancien etat l'aurait cachee)
     form.querySelectorAll('.up-card').forEach(function(c){
       if(c.querySelector('select[name=identity]')) c.style.display = '';
@@ -13853,7 +13876,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "pro_storyctas": ("storycta", "Story CTA — Vault PRO", "Photo 1080x1920 pour CTA + lien", "Add media"),
         "pro_profile_pics": ("pp", "Photo de profil — Vault PRO", "PP propre à cette identité", "Add media"),
     }
-    # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form)
+    # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form).
+    # La Bibliothèque 2 partage les MÊMES dossiers : c'est l'identité (préfixée
+    # v2_) qui la distingue, donc vault_key reste vide.
     vault_key = "pro" if subdir.startswith(PRO_VAULT_PREFIX) else ""
     add_media_btn = ""
     if subdir in upload_tab_map:
