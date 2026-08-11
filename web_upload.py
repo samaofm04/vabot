@@ -6315,10 +6315,29 @@ window.igFallbackCopy = function(text){
 // (avant: on cachait le select + badge verrouille -> l'upload partait toujours
 //  vers l'identite du cloud d'ou on venait, impossible de changer. Maintenant
 //  on pre-remplit juste, et l'utilisateur voit + peut changer l'identite.)
-window.upPrefillIdentity = function(utab, ident){
+// vault : '' = Bibliotheque, 'pro' = Vault PRO. Les 2 bibliotheques partagent
+// les MEMES panneaux d'upload ; ce champ cache dit au serveur ou ranger le
+// fichier (dossier <ident>/<type> ou <ident>/pro_<type>). Toujours ecrit, meme
+// vide : sans ca un upload PRO puis un upload normal repartait en PRO.
+window.upPrefillIdentity = function(utab, ident, vault){
   setTimeout(function(){
     var form = document.getElementById('form-' + utab);
     if(!form) return;
+    var vf = form.querySelector('input[name=vault]');
+    if(vf){
+      vf.value = (vault === 'pro') ? 'pro' : '';
+      // Bandeau visible : le panneau etant partage, sans reperage on ne sait
+      // pas dans quelle bibliotheque le fichier va atterrir.
+      var old = form.querySelector('.up-vault-badge');
+      if(old) old.remove();
+      if(vf.value === 'pro'){
+        var bd = document.createElement('div');
+        bd.className = 'up-vault-badge';
+        bd.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:12.5px;font-weight:700';
+        bd.textContent = '🔒 Destination : Vault PRO — ces fichiers ne vont PAS dans la Bibliothèque';
+        form.insertBefore(bd, form.firstChild);
+      }
+    }
     var sel = form.querySelector('select[name=identity]');
     if(sel){ sel.value = ident; try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} }
     // S'assure que la card identite est bien VISIBLE (au cas ou un ancien etat l'aurait cachee)
@@ -6536,6 +6555,43 @@ document.addEventListener('click',function(e){
       Photos profil
     </button>
     <button class="item" id="tab-clouddrive" onclick="showTab('cloud','clouddrive','Drive','Tout le contenu d’une identité — lecture seule, rien ne peut être supprimé ici')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Drive
+    </button>
+  </div>
+</div>
+
+<!-- VAULT PRO : 2e bibliotheque, dossiers pro_* SEPARES de la Bibliotheque.
+     Gate RBAC via la cle « provault » -> invisible pour les roles restreints
+     tant que la case n'est pas cochee dans Reglages > Roles & permissions. -->
+<div class="group" id="grp-provault">
+  <button class="group-head" onclick="toggleGroup('provault')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    <span class="label">Vault PRO</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-provaultreels" onclick="showTab('provault','provaultreels','Reels — Vault PRO','Reels du Vault PRO, stockés à part de la Bibliothèque')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Reels
+    </button>
+    <button class="item" id="tab-provaultposts" onclick="showTab('provault','provaultposts','Posts — Vault PRO','Posts du Vault PRO')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      Posts
+    </button>
+    <button class="item" id="tab-provaultstories" onclick="showTab('provault','provaultstories','Stories — Vault PRO','Stories du Vault PRO')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      Stories
+    </button>
+    <button class="item" id="tab-provaultstoryctas" onclick="showTab('provault','provaultstoryctas','Story CTA — Vault PRO','Stories CTA du Vault PRO')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      Story CTA
+    </button>
+    <button class="item" id="tab-provaultpps" onclick="showTab('provault','provaultpps','Photos de profil — Vault PRO','PP du Vault PRO, par identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      Photos profil
+    </button>
+    <button class="item" id="tab-provaultdrive" onclick="showTab('provault','provaultdrive','Drive — Vault PRO','Tout le contenu PRO d’une identité — lecture seule')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       Drive
     </button>
@@ -6937,6 +6993,8 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-reel" style="display:none">
 <form method="POST" action="/upload/reel" enctype="multipart/form-data" class="up-form" data-utype="reel" data-accept="video/*">
+<!-- "" = Bibliotheque, "pro" = Vault PRO (pose par upPrefillIdentity) -->
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -6996,6 +7054,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-post" style="display:none">
 <form method="POST" action="/upload/post" enctype="multipart/form-data" class="up-form" data-utype="post" data-accept="image/*">
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7019,6 +7078,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-story" style="display:none">
 <form method="POST" action="/upload/story" enctype="multipart/form-data" class="up-form" data-utype="story" data-accept="image/*">
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7042,6 +7102,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-storycta" style="display:none">
 <form method="POST" action="/upload/storycta" enctype="multipart/form-data" class="up-form" data-utype="storycta" data-accept="image/*">
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7065,6 +7126,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-pp" style="display:none">
 <form method="POST" action="/upload/pp" enctype="multipart/form-data" class="up-form" data-utype="pp" data-accept="image/*">
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Photo de profil</h3></div>
 <small style="color:#888;margin-bottom:10px;display:block">Choisis l'identité (chaque model a ses propres PP)</small>
@@ -7146,6 +7208,26 @@ document.addEventListener('click',function(e){
 <!-- CLOUD : PPs -->
 <div class="form-section" id="form-cloudpps" style="display:none">
 <div class="box">{cloud_pps_html}</div>
+</div>
+
+<!-- VAULT PRO : memes galeries, dossiers pro_* -->
+<div class="form-section" id="form-provaultreels" style="display:none">
+{provault_reels_html}
+</div>
+<div class="form-section" id="form-provaultposts" style="display:none">
+{provault_posts_html}
+</div>
+<div class="form-section" id="form-provaultstories" style="display:none">
+{provault_stories_html}
+</div>
+<div class="form-section" id="form-provaultstoryctas" style="display:none">
+{provault_storyctas_html}
+</div>
+<div class="form-section" id="form-provaultpps" style="display:none">
+{provault_pps_html}
+</div>
+<div class="form-section" id="form-provaultdrive" style="display:none">
+{provault_drive_html}
 </div>
 
 <!-- INSTAGRAM ACCOUNTS (watchlist) -->
@@ -13309,6 +13391,44 @@ def _cloud_ident_stats_cached(subdir: str, exts_t: tuple, idents_t: tuple) -> di
     return ident_stats
 
 
+# ===== Vault PRO : 2e bibliothèque, stockage 100% SÉPARÉ =====
+# Même moteur que la Bibliothèque (galerie, lightbox, upload, Drive) mais rangé
+# dans des dossiers « pro_* » de chaque identité — aucun fichier en commun avec
+# la Bibliothèque. Gaté RBAC (clé « provault ») : invisible pour les rôles
+# restreints tant qu'on ne coche pas la case dans Rôles & permissions.
+PRO_VAULT_PREFIX = "pro_"
+# base (Bibliothèque) -> jumeau PRO. Sert aux uploads (champ caché « vault »).
+_PRO_SUBDIR_OF = {
+    "videos": "pro_videos",
+    "posts": "pro_posts",
+    "stories": "pro_stories",
+    "storyctas": "pro_storyctas",
+    "profile_pics": "pro_profile_pics",
+}
+# Source de vérité des dossiers servables/supprimables : les 5 routes qui
+# validaient un set en dur divergeaient dès qu'on ajoutait un dossier.
+CLOUD_SUBDIRS = frozenset(
+    {"videos", "posts", "stories", "storyctas", "profile_pics",
+     "brutes", "templates"} | set(_PRO_SUBDIR_OF.values())
+)
+
+
+def _vault_subdir(base: str, form=None) -> str:
+    """Dossier de destination d'un upload selon le vault d'où il part.
+
+    Les 2 bibliothèques partagent les mêmes panneaux d'upload : c'est le champ
+    caché « vault » du formulaire qui tranche. Absent/vide -> Bibliothèque
+    (comportement historique), « pro » -> Vault PRO."""
+    try:
+        from flask import request as _rq
+        val = (form if form is not None else _rq.form).get("vault", "")
+    except Exception:
+        val = ""
+    if str(val or "").strip().lower() == "pro":
+        return _PRO_SUBDIR_OF.get(base, base)
+    return base
+
+
 def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> str:
     """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
     (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
@@ -13327,7 +13447,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         return "<p style='color:#888'>Aucune identité créée.</p>"
     identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     # Rendu : vignette + badge lecture pour tout dossier video.
-    is_video = subdir in ("videos", "brutes", "templates")
+    is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
     # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
     # PAS sur « Video brut » — l'user veut des rushs nus, sans caption ni rien.
     can_montage = subdir in ("videos", "templates")
@@ -13369,7 +13489,12 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
                 # « brutes » = rushs par identite ; « templates » = modeles CapCut
                 # (chacun porte SON son) -> les 2 bibliotheques de Reel montage
                 "brutes": "cloudbrutes",
-                "templates": "cloudtemplates"}.get(subdir, "cloudoverview")
+                "templates": "cloudtemplates",
+                # Vault PRO : mêmes galeries, dossiers pro_* separes
+                "pro_videos": "provaultreels", "pro_posts": "provaultposts",
+                "pro_stories": "provaultstories",
+                "pro_storyctas": "provaultstoryctas",
+                "pro_profile_pics": "provaultpps"}.get(subdir, "cloudoverview")
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
@@ -13549,7 +13674,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     # Reels = vidéos only, Posts = photos only → pas de filtre.
     # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
     type_filter_html = ""
-    if subdir in ("stories", "storyctas"):
+    if subdir in ("stories", "storyctas", "pro_stories", "pro_storyctas"):
         def _type_url(value):
             params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
             if sort_mode and sort_mode != "recent":
@@ -13578,7 +13703,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         "brutes": ("brute", "Rush brut", "Matière première des montages", "Add vidéo"),
         "templates": ("template", "Template montage", "Modèle CapCut — apporte le son",
                       "Add template"),
+        # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
+        # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
+        "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
+        "pro_posts": ("post", "Upload Post — Vault PRO", "Photo simple pour le feed", "Add media"),
+        "pro_stories": ("story", "Upload Story — Vault PRO", "Photo simple pour story", "Add media"),
+        "pro_storyctas": ("storycta", "Story CTA — Vault PRO", "Photo 1080x1920 pour CTA + lien", "Add media"),
+        "pro_profile_pics": ("pp", "Photo de profil — Vault PRO", "PP propre à cette identité", "Add media"),
     }
+    # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form)
+    vault_key = "pro" if subdir.startswith(PRO_VAULT_PREFIX) else ""
     add_media_btn = ""
     if subdir in upload_tab_map:
         _entry = upload_tab_map[subdir]
@@ -13587,7 +13721,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
         add_media_btn = (
             f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
-            f"upPrefillIdentity('{utab}', '{selected}');\" "
+            f"upPrefillIdentity('{utab}', '{selected}', '{vault_key}');\" "
             f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
             f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
             f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
@@ -14243,6 +14377,11 @@ async function pushAllReels(form){
   if(!slots.length) return;
   const identity = form.querySelector('select[name=identity]')?.value;
   if(!identity){ alert('Selectionne une identite'); return; }
+  // Vault PRO : chaque slot part avec le meme marqueur (le form est partage)
+  const vaultIn = form.querySelector('input[name=vault]');
+  const vault = (vaultIn && vaultIn.value === 'pro') ? 'pro' : '';
+  const reelsTab = vault === 'pro' ? 'provaultreels' : 'cloudreels';
+  const reelsKey = vault === 'pro' ? 'cloud_pro_videos_ident' : 'cloud_videos_ident';
   // Verifier que chaque slot a au moins une video clean
   for(const s of slots){
     const v = s.querySelector('input.up-file-main');
@@ -14256,6 +14395,7 @@ async function pushAllReels(form){
   const jobs = slots.map(function(slot){
     const fd = new FormData();
     fd.append('identity', identity);
+    fd.append('vault', vault);
     const cleanInput = slot.querySelector('input[data-name=video]');
     const exampleInput = slot.querySelector('input[data-name=example]');
     const captionT = slot.querySelector('textarea[data-name=caption]');
@@ -14286,7 +14426,8 @@ async function pushAllReels(form){
     vaTask.progress(taskId, sum / jobs.length, (done + errs) + '/' + jobs.length + ' reels');
   }
   // Retour DIRECT sur la galerie Reels (l'upload continue en haut à droite)
-  var reelsTabBtn = document.querySelector('.sidebar button[onclick*=cloudreels]');
+  var reelsTabBtn = document.getElementById('tab-' + reelsTab)
+    || document.querySelector('.sidebar button[onclick*=' + reelsTab + ']');
   if(reelsTabBtn) reelsTabBtn.click();
   async function pushOne(fd, idx){
     try {
@@ -14309,9 +14450,9 @@ async function pushAllReels(form){
   // S'il bosse ailleurs, on ne le dérange pas (le toast suffit).
   if(done > 0){
     var curTab = new URLSearchParams(window.location.search).get('tab');
-    if(curTab === 'cloudreels'){
+    if(curTab === reelsTab){
       setTimeout(function(){
-        window.location.href = '?tab=cloudreels&cloud_videos_ident=' + encodeURIComponent(identity);
+        window.location.href = '?tab=' + reelsTab + '&' + reelsKey + '=' + encodeURIComponent(identity);
       }, 900);
     }
   }
@@ -14350,7 +14491,16 @@ document.addEventListener('submit', function(e){
     brute: ['cloudbrutes','cloud_brutes_ident'],
     template: ['cloudtemplates','cloud_templates_ident']
   };
-  const _g = _gmap[form.dataset.utype];
+  // Vault PRO : meme form, autre galerie de retour (dossiers pro_*)
+  const _gmapPro = {
+    reel: ['provaultreels','cloud_pro_videos_ident'],
+    post: ['provaultposts','cloud_pro_posts_ident'],
+    story: ['provaultstories','cloud_pro_stories_ident'],
+    storycta: ['provaultstoryctas','cloud_pro_storyctas_ident'],
+    pp: ['provaultpps','cloud_pro_profile_pics_ident']
+  };
+  const _isPro = nonFileFields['vault'] === 'pro';
+  const _g = (_isPro ? _gmapPro : _gmap)[form.dataset.utype];
   const _ident = nonFileFields['identity'] || '';
   const typeLbl = {reel:'reel(s)', post:'post(s)', story:'story(s)', storycta:'story CTA', pp:'photo(s) de profil', brute:'rush(s) brut(s)', template:'template(s)'}[form.dataset.utype] || 'fichier(s)';
   // Carte de progression façon Infloww, avec miniature du 1er fichier image
@@ -14524,9 +14674,13 @@ window.vaultGoTo = function(ev, url){
   });
   // Met a jour l URL
   try{ history.pushState({}, '', url); }catch(e){}
-  // Trouve la section ciblee (form-cloud<...>)
-  let sec = document.querySelector('.form-section[id^="form-cloud"]');
-  document.querySelectorAll('.form-section[id^="form-cloud"]').forEach(s=>{
+  // Trouve la section ciblee (form-cloud<...> pour la Bibliotheque,
+  // form-provault<...> pour le Vault PRO). Sans la 2e famille, un clic
+  // identite dans le Vault PRO retombait sur la 1re section Bibliotheque
+  // (cachee) et injectait le contenu PRO dedans -> ecran fige.
+  const VAULT_SECS = '.form-section[id^="form-cloud"],.form-section[id^="form-provault"]';
+  let sec = document.querySelector(VAULT_SECS);
+  document.querySelectorAll(VAULT_SECS).forEach(s=>{
     if(s.style.display && s.style.display !== 'none') sec = s;
   });
   if(!sec) { window.location.href = url; return false; }
@@ -15211,14 +15365,29 @@ _DRIVE_SECTIONS = (
     ("templates", "🎵 Templates montage", VIDEO_EXTS, True),
 )
 
+# Les 5 bibliothèques du Vault PRO (dossiers pro_*), même ordre d'affichage.
+_PRO_DRIVE_SECTIONS = (
+    ("pro_profile_pics", "🖼️ Photos de profil", IMAGE_EXTS, False),
+    ("pro_videos", "🎬 Reels", VIDEO_EXTS, True),
+    ("pro_posts", "📷 Posts", IMAGE_EXTS, False),
+    ("pro_stories", "📱 Stories", IMAGE_EXTS, False),
+    ("pro_storyctas", "🔗 Story CTA", IMAGE_EXTS, False),
+)
 
-def _render_cloud_drive_html() -> str:
+
+def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
+                             ident_key: str = "cloud_drive_ident", dom_key: str = "drive",
+                             show_sync: bool = True, vault_label: str = "Bibliothèque") -> str:
     """Onglet « Drive » : TOUT le contenu d'une identité (PP, reels, posts,
     stories, CTA, brutes, templates) sur UNE page, façon drive. LECTURE SEULE
     voulue : aucun bouton de suppression/désactivation ici — si la feature
     flop, rien ne peut être perdu. Visionnage via la lightbox (file_id vide =>
     pas de crayon d'édition), navigation identités façon vault (vaultGoTo).
-    C'est une VUE sur data/identities/<ident>/ : déjà synchro avec le site."""
+    C'est une VUE sur data/identities/<ident>/ : déjà synchro avec le site.
+
+    Paramétré pour servir AUSSI le Drive du Vault PRO (sections pro_*, son
+    propre onglet et sa propre clé d'identité) — sans la boîte Google Drive,
+    qui ne synchronise que les dossiers de la Bibliothèque."""
     from flask import request as _req
     identities = _apply_identity_order(_list_content_identities())
     if not identities:
@@ -15226,14 +15395,14 @@ def _render_cloud_drive_html() -> str:
 
     idents_t = tuple(identities)
     stats_by_subdir = {sd: _cloud_ident_stats_cached(sd, tuple(sorted(exts)), idents_t)
-                       for sd, _l, exts, _v in _DRIVE_SECTIONS}
+                       for sd, _l, exts, _v in sections}
 
     def _total(ident):
-        return sum(stats_by_subdir[sd][ident]["n_files"] for sd, _l, _e, _v in _DRIVE_SECTIONS)
+        return sum(stats_by_subdir[sd][ident]["n_files"] for sd, _l, _e, _v in sections)
 
     selected = ""
     try:
-        selected = (_req.args.get("cloud_drive_ident", "") or "").lower().strip()
+        selected = (_req.args.get(ident_key, "") or "").lower().strip()
     except Exception:
         pass
     if not selected or selected not in identities:
@@ -15252,7 +15421,7 @@ def _render_cloud_drive_html() -> str:
         status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
         active_class = "vault-item-active" if ident == selected else ""
         vault_items.append(
-            f"<a href='?tab=clouddrive&cloud_drive_ident={ident}' "
+            f"<a href='?tab={tab}&{ident_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
@@ -15266,17 +15435,17 @@ def _render_cloud_drive_html() -> str:
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-drive'>"
+        f"<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{dom_key}'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#22c55e;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
         "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
         "</div></div>"
-        "<div class='vault-list' id='vault-list-drive'>"
+        f"<div class='vault-list' id='vault-list-{dom_key}'>"
         + "".join(vault_items)
         + "</div>"
         + _VAULT_DND_CSS
-        + "<button type='button' data-newident='1' data-vtab='clouddrive' data-ikey='cloud_drive_ident' "
+        + f"<button type='button' data-newident='1' data-vtab='{tab}' data-ikey='{ident_key}' "
         "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
         "</div>"
     )
@@ -15303,9 +15472,13 @@ def _render_cloud_drive_html() -> str:
     )
 
     # ---- Boîte admin « ☁️ Google Drive » (copie seule, jamais de suppression) ----
+    # gdrive_sync ne connaît que les dossiers de la Bibliothèque : pas de boîte
+    # (donc pas de bouton qui mentirait) sur le Drive du Vault PRO.
     sync_box = ""
     try:
         _is_full = False
+        if not show_sync:
+            raise RuntimeError("drive sync hors Bibliothèque")
         try:
             from flask import session as _s_dr
             _u = _load_web_users().get((_s_dr.get("username") or "").lower())
@@ -15371,7 +15544,7 @@ def _render_cloud_drive_html() -> str:
         "</div>"
     )
     blocks = []
-    for sd, label, exts, is_video in _DRIVE_SECTIONS:
+    for sd, label, exts, is_video in sections:
         folder = IDENTITIES_DIR / selected / sd
         files = []
         if folder.exists():
@@ -15409,7 +15582,7 @@ def _render_cloud_drive_html() -> str:
     if not blocks:
         blocks.append(
             "<div style='padding:60px 20px;text-align:center;color:#666'>"
-            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{selected} — uploade depuis les pages Bibliothèque.</p>"
+            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{selected} — uploade depuis les pages {vault_label}.</p>"
             "</div>"
         )
 
@@ -15419,6 +15592,14 @@ def _render_cloud_drive_html() -> str:
         + f"<div class='vault-gallery'>{header}{sync_box}{''.join(blocks)}</div>"
         + "</div>"
     )
+
+
+def _render_provault_drive_html() -> str:
+    """Drive du Vault PRO : même page que le Drive, sur les dossiers pro_*."""
+    return _render_cloud_drive_html(
+        sections=_PRO_DRIVE_SECTIONS, tab="provaultdrive",
+        ident_key="cloud_pro_drive_ident", dom_key="prodrive",
+        show_sync=False, vault_label="Vault PRO")
 
 
 _TEXTVAULT_META = {
@@ -35546,6 +35727,13 @@ ROLE_MENU_STRUCTURE = [
         {"key": "clouddrive", "name": "Drive (tout le contenu par identité, lecture seule)", "perms": ["view"]},
         {"key": "textpool", "name": "Bibliothèque texte (Bios + CTA)", "perms": ["view", "edit"]},
     ]},
+    {"section": "Contenu — Vault PRO", "items": [
+        # Bibliothèque SÉPARÉE (dossiers pro_*). Case décochée par défaut : un
+        # rôle qui a la Bibliothèque ne voit PAS le Vault PRO pour autant.
+        {"key": "provault", "name": "Vault PRO (Reels, Posts, Stories, CTA, PP)",
+         "perms": ["view", "create", "delete"]},
+        {"key": "provaultdrive", "name": "Vault PRO — Drive (lecture seule)", "perms": ["view"]},
+    ]},
     {"section": "Création", "items": [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
         {"key": "svideo", "name": "Métadonnées vidéo (uniquification)", "perms": ["view", "edit"]},
@@ -35612,6 +35800,11 @@ _PERM_KEY_TO_TABS = {
     "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
     # Drive lecture seule : sa propre case (clé == nom d'onglet).
     "clouddrive": {"clouddrive"},
+    # Vault PRO : 2e bibliothèque, ses propres cases. Cocher « cloud » ne
+    # l'ouvre pas — c'est tout l'intérêt d'un vault séparé.
+    "provault": {"provaultreels", "provaultposts", "provaultstories",
+                 "provaultstoryctas", "provaultpps"},
+    "provaultdrive": {"provaultdrive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
     "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
@@ -36625,6 +36818,15 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
         .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
         .replace("{cloud_drive_html}", _lazy("clouddrive"))
+        # Vault PRO : mêmes producers, dossiers pro_*. TOUT en lazy — rendues
+        # d'office, ces 5 galeries ajoutaient ~270 Ko à chaque chargement de
+        # page (et 5 scans disque) pour un vault qu'on n'ouvre pas à chaque fois.
+        .replace("{provault_reels_html}", _lazy("provaultreels"))
+        .replace("{provault_posts_html}", _lazy("provaultposts"))
+        .replace("{provault_stories_html}", _lazy("provaultstories"))
+        .replace("{provault_storyctas_html}", _lazy("provaultstoryctas"))
+        .replace("{provault_pps_html}", _lazy("provaultpps"))
+        .replace("{provault_drive_html}", _lazy("provaultdrive"))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
         .replace("{gmsdash_html}", _g("gmsdash", _render_gmsdash_html))
@@ -37601,6 +37803,13 @@ def create_app():
                 "cloudstories": ("stories", IMAGE_EXTS, False),
                 "cloudstoryctas": ("storyctas", IMAGE_EXTS, False),
                 "cloudpps": None,   # PP a son propre producer
+                # Vault PRO : galeries generiques (les PP PRO aussi, contrairement
+                # a cloudpps qui a sa page a part)
+                "provaultreels": ("pro_videos", VIDEO_EXTS, False),
+                "provaultposts": ("pro_posts", IMAGE_EXTS, False),
+                "provaultstories": ("pro_stories", IMAGE_EXTS, False),
+                "provaultstoryctas": ("pro_storyctas", IMAGE_EXTS, False),
+                "provaultpps": ("pro_profile_pics", IMAGE_EXTS, True),
             }
             if _tab == "cloudpps":
                 try:
@@ -37608,12 +37817,14 @@ def create_app():
                             f"{_render_cloud_pps_page()}</div>", 200)
                 except Exception:
                     return ("", 200)
-            if _tab == "clouddrive":
+            if _tab in ("clouddrive", "provaultdrive"):
                 # Drive : fragment léger pour vaultGoTo (sinon fallback pleine
                 # page dont la section drive est un placeholder lazy -> vide).
                 try:
-                    return (f"<div class='form-section' id='form-clouddrive' style='display:block'>"
-                            f"{_render_cloud_drive_html()}</div>", 200)
+                    _dr = (_render_provault_drive_html() if _tab == "provaultdrive"
+                           else _render_cloud_drive_html())
+                    return (f"<div class='form-section' id='form-{_tab}' style='display:block'>"
+                            f"{_dr}</div>", 200)
                 except Exception:
                     return ("", 200)
             _cfg = _cloud.get(_tab)
@@ -37649,6 +37860,13 @@ def create_app():
                 # Drive lecture seule : scan disque x7 subdirs -> lazy ; HTML
                 # sans <script> (compatible ré-injection AJAX).
                 "clouddrive": _render_cloud_drive_html,
+                # Vault PRO : galeries + Drive, mêmes producers sur pro_*
+                "provaultdrive": _render_provault_drive_html,
+                "provaultreels": lambda: _render_cloud_content_html("pro_videos", VIDEO_EXTS),
+                "provaultposts": lambda: _render_cloud_content_html("pro_posts", IMAGE_EXTS),
+                "provaultstories": lambda: _render_cloud_content_html("pro_stories", IMAGE_EXTS),
+                "provaultstoryctas": lambda: _render_cloud_content_html("pro_storyctas", IMAGE_EXTS),
+                "provaultpps": lambda: _render_cloud_content_html("pro_profile_pics", IMAGE_EXTS, include_jb=True),
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
                 "sfssetupof": lambda: _render_sfssetup_html("of"),
@@ -37722,7 +37940,7 @@ def create_app():
         # Reuse logic but with VIDEO_EXTS
         return _save_image_or_video_with_pair(
             {"photo": request.files.get("video"), "example": request.files.get("example")},
-            request.form, "videos", VIDEO_EXTS,
+            request.form, _vault_subdir("videos"), VIDEO_EXTS,
         )
 
     def _save_many_videos(field: str, subdir: str):
@@ -37767,7 +37985,7 @@ def create_app():
             return redirect("/")
         return _save_image_or_video_with_pair(
             {"photo": request.files.get("photo"), "example": request.files.get("example")},
-            request.form, "posts", IMAGE_EXTS,
+            request.form, _vault_subdir("posts"), IMAGE_EXTS,
         )
 
     @app.route("/upload/story", methods=["POST"])
@@ -37776,7 +37994,7 @@ def create_app():
             return redirect("/")
         return _save_image_or_video_with_pair(
             {"photo": request.files.get("photo"), "example": request.files.get("example")},
-            request.form, "stories", IMAGE_EXTS,
+            request.form, _vault_subdir("stories"), IMAGE_EXTS,
         )
 
     @app.route("/upload/storycta", methods=["POST"])
@@ -37792,7 +38010,7 @@ def create_app():
         ext = os.path.splitext(photo.filename)[1].lower()
         if ext not in IMAGE_EXTS:
             return _error(f"Format non supporté ({ext})")
-        target_dir = IDENTITIES_DIR / identity / "storyctas"
+        target_dir = IDENTITIES_DIR / identity / _vault_subdir("storyctas")
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / _safe_upload_name(photo.filename)
         if target.exists():
@@ -37847,7 +38065,7 @@ def create_app():
     def cloud_thumb_file(identity, subdir, filename):
         if not is_auth():
             return redirect("/")
-        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
+        if subdir not in CLOUD_SUBDIRS:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -37858,9 +38076,9 @@ def create_app():
         if not src.exists() or not src.is_file():
             return "Not found", 404
         rel_key = f"{safe_identity}/{subdir}/{filename}"
-        # TOUS les dossiers video (reels, rushs bruts, templates) : sinon la
-        # miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
-        is_video = subdir in ("videos", "brutes", "templates")
+        # TOUS les dossiers video (reels, rushs bruts, templates, reels PRO) :
+        # sinon la miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
+        is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
         thumb = _get_or_create_thumbnail(src, rel_key, is_video)
         if thumb is None or not thumb.exists():
             # Fallback : servir le fichier original
@@ -37899,7 +38117,7 @@ def create_app():
         if not is_auth():
             return redirect("/")
         # Sécurité : restreindre aux dossiers valides
-        if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
+        if subdir not in CLOUD_SUBDIRS:
             return "Not found", 404
         safe_identity = identity.lower().strip()
         if safe_identity not in _list_identities():
@@ -37932,7 +38150,9 @@ def create_app():
             return jsonify({"ok": False, "error": "file_id invalide"})
         identity, subdir, filename = parts
         identity = identity.lower().strip()
-        # Securite (meme regles que cloud_serve_file / cloud_delete)
+        # Securite (meme regles que cloud_serve_file / cloud_delete). Les
+        # dossiers pro_* sont VOLONTAIREMENT absents : le Vault PRO est prive,
+        # rien n'en part vers Discord (l'etoile ⭐ n'y est d'ailleurs pas rendue).
         if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
             return jsonify({"ok": False, "error": "dossier invalide"})
         if identity not in _list_identities():
@@ -38004,7 +38224,7 @@ def create_app():
         deleted = []
         failed = []
         identities_list = _list_identities()
-        valid_subdirs = {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}
+        valid_subdirs = CLOUD_SUBDIRS
         for fid in files:
             try:
                 parts = fid.split("|", 2)
@@ -38095,7 +38315,7 @@ def create_app():
         # docstring promettait une validation qui n'existait que pour le nom).
         if ident not in _list_identities():
             return None
-        if subdir not in ("videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"):
+        if subdir not in CLOUD_SUBDIRS:
             return None
         target_dir = IDENTITIES_DIR / ident / subdir
         target = target_dir / name
@@ -39316,7 +39536,7 @@ def create_app():
         valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
         if not ident or ident not in valid:
             return _error("Choisis une identité pour les PP (le pool partagé n'existe plus)")
-        target_dir = IDENTITIES_DIR / ident / "profile_pics"
+        target_dir = IDENTITIES_DIR / ident / _vault_subdir("profile_pics")
         label = ident
         target_dir.mkdir(parents=True, exist_ok=True)
         saved = 0
