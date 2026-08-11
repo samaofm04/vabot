@@ -14374,10 +14374,39 @@ function _upRefreshTable(input){
     const row = document.createElement('div');
     row.className = 'up-edit-row';
     row.dataset.file = 'main-' + idx;
-    row.innerHTML = '<div class=up-edit-name>' + _upRowThumb(file) + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span></div><div><span class="up-progress" data-idx="' + idx + '" style="color:#666;font-size:12px;margin-right:8px"></span></div>';
+    row.innerHTML = '<div class=up-edit-name>' + _upRowThumb(file) + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span></div>'
+      + '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">'
+      + '<span class="up-progress" data-idx="' + idx + '" style="color:#666;font-size:12px"></span>'
+      + '<button type="button" class="up-rm" data-rm="' + idx + '" title="Retirer ce fichier de la liste">🗑</button>'
+      + '</div>';
     table.appendChild(row);
   });
 }
+// Retire UN fichier de la liste avant envoi (rien n'est supprime sur le site :
+// la selection du navigateur est simplement reconstruite sans ce fichier).
+function upRemoveOne(btn){
+  const card = btn.closest('.up-card');
+  const input = card ? card.querySelector('.up-file-main, .up-file-example') : null;
+  if(!input || !input.files || !input.files.length) return;
+  const idx = parseInt(btn.getAttribute('data-rm'), 10);
+  const files = Array.from(input.files);
+  if(isNaN(idx) || idx < 0 || idx >= files.length) return;
+  const nom = files[idx].name;
+  if(!confirm('Retirer ce fichier de la liste ? ' + nom + ' — rien ne sera supprimé sur le site.')) return;
+  try{
+    const dt = new DataTransfer();
+    files.forEach((f, i)=>{ if(i !== idx) dt.items.add(f); });
+    input.files = dt.files;
+  }catch(e){
+    // Navigateur sans DataTransfer : on vide tout plutôt que de mentir
+    input.value = '';
+  }
+  _upRefreshTable(input);
+}
+document.addEventListener('click', function(e){
+  const b = e.target.closest ? e.target.closest('.up-rm[data-rm]') : null;
+  if(b){ e.preventDefault(); upRemoveOne(b); }
+});
 function upClearMain(btn){
   const card = btn.closest('.up-card');
   const input = card.querySelector('.up-file-main, .up-file-example');
