@@ -13545,8 +13545,29 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                     identities.append(_jb)
     if not identities:
         if vault2:
-            return ("<p style='color:#888'>Aucune identité dans la Bibliothèque 2 — "
-                    "clique « ＋ Nouvelle identité » dans la colonne de gauche.</p>")
+            _t = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
+                  "storyctas": "v2storyctas", "profile_pics": "v2pps",
+                  "brutes": "v2brutes"}.get(subdir, "v2reels")
+            # Sidebar MINIMALE : sans elle, le bouton de création n'existe pas
+            # et la Bibliothèque 2 reste inutilisable (aucune identité à créer).
+            return (
+                "<div class='vault-layout'>"
+                "<div class='vault-sidebar'>"
+                "<div style='padding:14px 12px;color:#75757f;font-size:12.5px;line-height:1.5'>"
+                "Aucune identité ici pour l'instant.</div>"
+                f"<button type='button' data-newident='1' data-vtab='{_t}' "
+                f"data-ikey='cloud_{subdir}_ident' "
+                "style='width:calc(100% - 20px);margin:0 10px 12px;background:transparent;"
+                "border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;"
+                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit'>"
+                "＋ Nouvelle identité</button>"
+                "</div>"
+                "<div class='vault-gallery'>"
+                "<p style='color:#888;font-size:13.5px;line-height:1.6'>"
+                "La Bibliothèque 2 est vide — elle a ses <b>propres identités</b>, "
+                "séparées de la Bibliothèque et invisibles de Discord.<br>"
+                "Crée la première avec « ＋ Nouvelle identité » à gauche.</p>"
+                "</div></div>")
         return "<p style='color:#888'>Aucune identité créée.</p>"
     identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     # Rendu : vignette + badge lecture pour tout dossier video.
@@ -13598,6 +13619,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "pro_stories": "provaultstories",
                 "pro_storyctas": "provaultstoryctas",
                 "pro_profile_pics": "provaultpps"}.get(subdir, "cloudoverview")
+    if vault2:
+        tab_name = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
+                    "storyctas": "v2storyctas", "profile_pics": "v2pps",
+                    "brutes": "v2brutes"}.get(subdir, "v2reels")
     subdir_key = f"cloud_{subdir}_ident"
 
     # ============ Sidebar Vault (gauche) ============
@@ -15497,8 +15522,17 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         _list_v2_identities() if vault2 else _list_content_identities())
     if not identities:
         if vault2:
-            return ("<p style='color:#888'>Aucune identité dans la Bibliothèque 2 — "
-                    "crée-en une depuis un onglet de la Bibliothèque 2.</p>")
+            return ("<div class='vault-layout'><div class='vault-sidebar'>"
+                    "<div style='padding:14px 12px;color:#75757f;font-size:12.5px'>"
+                    "Aucune identité ici.</div>"
+                    "<button type='button' data-newident='1' data-vtab='v2reels' "
+                    "data-ikey='cloud_videos_ident' "
+                    "style='width:calc(100% - 20px);margin:0 10px 12px;background:transparent;"
+                    "border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;"
+                    "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit'>"
+                    "＋ Nouvelle identité</button></div>"
+                    "<div class='vault-gallery'><p style='color:#888'>La Bibliothèque 2 "
+                    "est vide — crée une identité pour commencer.</p></div></div>")
         return "<p style='color:#888'>Aucune identité créée.</p>"
 
     idents_t = tuple(identities)
