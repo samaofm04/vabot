@@ -4483,12 +4483,12 @@ _FR_MARKET_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
 # + jessye : elle non plus n'est pas une model du menu US (elle en est la SOURCE)
 _JB_FR_IDENTITIES = _FR_MARKET_IDENTITIES | {"jessye"}
 
-# Serveur US : les TEXTES ne viennent pas de la model choisie mais d'une
-# identité « source » commune (toutes ces identités, c'est Jessye) : pseudo,
-# name, bio — des EXEMPLES posés à la main sur le site, aucune génération IA.
-# Les MÉDIAS (reel, story, post, PP) restent ceux de la model cliquée.
+# Serveur US : pseudo et name viennent d'une identité « source » commune
+# (Jessye) — des EXEMPLES posés à la main sur le site, aucune génération IA.
+# Tout le reste (reel, story, post, PP et les BIOS) vient de la model cliquée :
+# chaque model US a SA propre liste de bios sur le site.
 _US_SOURCE_IDENTITY = "jessye"
-_US_SOURCED_ACTIONS = {"pseudo", "name", "bio"}
+_US_SOURCED_ACTIONS = {"pseudo", "name"}
 
 
 def _jb_us_models():
