@@ -226,11 +226,19 @@ def is_identity_active(name):
     return True  # par defaut actif
 
 
+# Bibliothèque 2 du site : espace 100 % séparé. Ses identités portent ce
+# préfixe technique et NE DOIVENT JAMAIS remonter dans Discord (menus, rotation
+# des VAs, Jailbreak, salons d'identité).
+V2_PREFIX = "v2_"
+
+
 def list_identities():
-    """Toutes les identités existantes (active ou non)."""
+    """Toutes les identités existantes (active ou non), SAUF celles de la
+    Bibliothèque 2 du site (préfixe v2_) qui n'existent que sur le site."""
     if not IDENTITIES_DIR.exists():
         return []
-    return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+    return sorted(p.name for p in IDENTITIES_DIR.iterdir()
+                  if p.is_dir() and not p.name.lower().startswith(V2_PREFIX))
 
 
 # Identités réservées à Jailbreak : JAMAIS assignées aux VAs Discord (pas de

@@ -53,7 +53,9 @@ def save_json(path, data):
 def list_identities():
     if not IDENTITIES_DIR.exists():
         return []
-    return sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+    # v2_ = Bibliothèque 2 du site : jamais dans Discord
+    return sorted(p.name for p in IDENTITIES_DIR.iterdir()
+                  if p.is_dir() and not p.name.lower().startswith('v2_'))
 
 
 def identity_videos_dir(name):

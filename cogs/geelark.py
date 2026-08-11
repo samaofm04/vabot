@@ -665,7 +665,8 @@ class GeeLark(commands.Cog):
     async def _identite_ac(self, interaction: discord.Interaction, current: str):
         if not IDENTITIES_DIR.exists():
             return []
-        names = sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
+        names = sorted(p.name for p in IDENTITIES_DIR.iterdir()
+                       if p.is_dir() and not p.name.lower().startswith('v2_'))
         q = (current or "").strip().lower()
         if q:
             names = [n for n in names if q in n.lower()]

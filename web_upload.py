@@ -5886,6 +5886,8 @@ async function identNewCreate(){
   var name=String((n&&n.value)||'').trim().toLowerCase();
   if(!name){ if(err) err.textContent='Donne un nom.'; return; }
   var fd=new FormData(); fd.set('identity_name',name);
+  // Onglet v2* => l identite est creee DANS la Bibliotheque 2 (prefixe serveur)
+  if(String(identNewCtx.vtab||'').indexOf('v2')===0) fd.set('vault2','1');
   var a=document.getElementById('ident-new-avatar');
   if(a&&a.files&&a.files[0]) fd.set('avatar',a.files[0]);
   if(go){ go.disabled=true; go.textContent='⏳'; }
@@ -5897,7 +5899,7 @@ async function identNewCreate(){
       if(go){ go.disabled=false; go.textContent='Créer'; }
       return;
     }
-    if(typeof showToast==='function') showToast('✅ Identité @'+j.identity+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
+    if(typeof showToast==='function') showToast('✅ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
     var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
     // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
     window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
@@ -6598,6 +6600,46 @@ document.addEventListener('click',function(e){
   </div>
 </div>
 
+<!-- BIBLIOTHÈQUE 2 : copie indépendante, avec SES PROPRES identités (préfixe
+     technique v2_ jamais affiché). Invisible du Discord, des VAs, du Jailbreak. -->
+<div class="group" id="grp-vault2">
+  <button class="group-head" onclick="toggleGroup('vault2')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-4.35-4.35a2 2 0 0 0-2.83 0L3 21"/></svg>
+    <span class="label">Bibliothèque 2</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Bibliothèque 2','Reels de la Bibliothèque 2 (identités séparées)')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Reels
+    </button>
+    <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Bibliothèque 2','Posts de la Bibliothèque 2')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      Posts
+    </button>
+    <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Bibliothèque 2','Stories de la Bibliothèque 2')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      Stories
+    </button>
+    <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Bibliothèque 2','Stories CTA de la Bibliothèque 2')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      Story CTA
+    </button>
+    <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Bibliothèque 2','PP de la Bibliothèque 2, par identité')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      Photos profil
+    </button>
+    <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Bibliothèque 2','Rushs bruts de la Bibliothèque 2')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Vidéo brut
+    </button>
+    <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Bibliothèque 2','Tout le contenu d’une identité de la Bibliothèque 2 — lecture seule')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Drive
+    </button>
+  </div>
+</div>
+
 <div class="section-label">Création</div>
 <!-- Création de vidéos : MASQUÉ du menu à la demande de l'user (09/08/2026) —
      page/routes/pipeline Noctus conservés ; réactivation = retirer le
@@ -7228,6 +7270,29 @@ document.addEventListener('click',function(e){
 </div>
 <div class="form-section" id="form-provaultdrive" style="display:none">
 {provault_drive_html}
+</div>
+
+<!-- BIBLIOTHEQUE 2 : memes galeries, SES identites (prefixe v2_) -->
+<div class="form-section" id="form-v2reels" style="display:none">
+{v2_reels_html}
+</div>
+<div class="form-section" id="form-v2posts" style="display:none">
+{v2_posts_html}
+</div>
+<div class="form-section" id="form-v2stories" style="display:none">
+{v2_stories_html}
+</div>
+<div class="form-section" id="form-v2storyctas" style="display:none">
+{v2_storyctas_html}
+</div>
+<div class="form-section" id="form-v2pps" style="display:none">
+{v2_pps_html}
+</div>
+<div class="form-section" id="form-v2brutes" style="display:none">
+{v2_brutes_html}
+</div>
+<div class="form-section" id="form-v2drive" style="display:none">
+{v2_drive_html}
 </div>
 
 <!-- INSTAGRAM ACCOUNTS (watchlist) -->
@@ -8463,13 +8528,38 @@ def _list_identities():
 JAILBREAK_ONLY_IDENTITIES = {"jessye"}
 
 
+# ===== Bibliothèque 2 : espace TOTALEMENT indépendant =====
+# Ses identités vivent dans le même dossier data/identities (donc tout le moteur
+# — galeries, upload, thumbs, Drive — marche sans duplication) mais leur NOM
+# porte un préfixe technique : elles sont donc invisibles de la Bibliothèque,
+# des menus Discord, de la rotation des VAs et du Jailbreak.
+V2_PREFIX = "v2_"
+
+
+def _is_v2(ident) -> bool:
+    return str(ident or "").lower().startswith(V2_PREFIX)
+
+
+def _v2_label(ident) -> str:
+    """Nom affiché : le préfixe technique n'apparaît jamais à l'écran."""
+    s = str(ident or "")
+    return s[len(V2_PREFIX):] if _is_v2(s) else s
+
+
 def _list_content_identities():
     """Identités affichées dans les pages Contenu/Bibliothèque : toutes SAUF
-    celles réservées à Jailbreak (JAILBREAK_ONLY_IDENTITIES).
+    celles réservées à Jailbreak (JAILBREAK_ONLY_IDENTITIES) et celles de la
+    Bibliothèque 2 (préfixe v2_).
     Le backend (routes CRUD, page Jailbreak, VAs) continue d'utiliser
     _list_identities() — donc Jessye reste pleinement fonctionnelle ailleurs."""
     hidden = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-    return [i for i in _list_identities() if i.lower() not in hidden]
+    return [i for i in _list_identities()
+            if i.lower() not in hidden and not _is_v2(i)]
+
+
+def _list_v2_identities():
+    """Identités de la Bibliothèque 2 uniquement."""
+    return [i for i in _list_identities() if _is_v2(i)]
 
 
 # ============ Utilisateurs web (login user/password) ============
@@ -13429,7 +13519,8 @@ def _vault_subdir(base: str, form=None) -> str:
     return base
 
 
-def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> str:
+def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
+                               vault2: bool = False) -> str:
     """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
     (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
     Pas de navigation back/forward, tout dans la même page.
@@ -13438,12 +13529,19 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
     UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
     """
     from flask import request as _req
-    identities = _list_content_identities()  # masque les identités Jailbreak-only
-    if include_jb:
-        for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
-            if _jb not in identities:
-                identities.append(_jb)
+    if vault2:
+        # Bibliothèque 2 : SES identités à elle, rien d'autre.
+        identities = _list_v2_identities()
+    else:
+        identities = _list_content_identities()  # masque Jailbreak-only ET v2_
+        if include_jb:
+            for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+                if _jb not in identities:
+                    identities.append(_jb)
     if not identities:
+        if vault2:
+            return ("<p style='color:#888'>Aucune identité dans la Bibliothèque 2 — "
+                    "clique « ＋ Nouvelle identité » dans la colonne de gauche.</p>")
         return "<p style='color:#888'>Aucune identité créée.</p>"
     identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     # Rendu : vignette + badge lecture pour tout dossier video.
@@ -13504,7 +13602,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         avatar_html = (
             f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
-            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
         # Dot statut (en ligne) à droite de l'avatar
         status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
@@ -13524,7 +13622,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
             f"</div>"
             f"{count_badge}"
@@ -13783,7 +13881,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
         f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         f"<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -13804,7 +13902,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False) -> s
             gallery_header +
             "<div style='padding:60px 20px;text-align:center;color:#666'>"
             "<svg viewBox='0 0 24 24' width='44' height='44' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:12px;opacity:.4'><path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/></svg>"
-            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{selected}</p>"
+            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{_v2_label(selected)}</p>"
             "</div>"
         )
     else:
@@ -14689,7 +14787,7 @@ window.vaultGoTo = function(ev, url){
     if(activeItem){
       var newIdent = activeItem.getAttribute('data-ident') || '';
       // @nom + count
-      sec.querySelectorAll('[data-vault-header-name]').forEach(function(n){ n.textContent = '@' + newIdent; });
+      sec.querySelectorAll('[data-vault-header-name]').forEach(function(n){ n.textContent = '@' + String(newIdent||'').replace(/^v2_/,''); });
       var srcCount = activeItem.querySelector('div[style*="color:#888"]');
       if(srcCount){
         sec.querySelectorAll('[data-vault-header-count]').forEach(function(c){ c.textContent = srcCount.textContent; });
@@ -15157,7 +15255,7 @@ def _render_cloud_captions_html() -> str:
         avatar_html = (
             f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
-            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
         status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
         count_badge = ""
@@ -15173,7 +15271,7 @@ def _render_cloud_captions_html() -> str:
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
             f"</div>{count_badge}</a>"
         )
@@ -15211,7 +15309,7 @@ def _render_cloud_captions_html() -> str:
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         "<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -15377,7 +15475,8 @@ _PRO_DRIVE_SECTIONS = (
 
 def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                              ident_key: str = "cloud_drive_ident", dom_key: str = "drive",
-                             show_sync: bool = True, vault_label: str = "Bibliothèque") -> str:
+                             show_sync: bool = True, vault_label: str = "Bibliothèque",
+                             vault2: bool = False) -> str:
     """Onglet « Drive » : TOUT le contenu d'une identité (PP, reels, posts,
     stories, CTA, brutes, templates) sur UNE page, façon drive. LECTURE SEULE
     voulue : aucun bouton de suppression/désactivation ici — si la feature
@@ -15389,8 +15488,12 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
     propre onglet et sa propre clé d'identité) — sans la boîte Google Drive,
     qui ne synchronise que les dossiers de la Bibliothèque."""
     from flask import request as _req
-    identities = _apply_identity_order(_list_content_identities())
+    identities = _apply_identity_order(
+        _list_v2_identities() if vault2 else _list_content_identities())
     if not identities:
+        if vault2:
+            return ("<p style='color:#888'>Aucune identité dans la Bibliothèque 2 — "
+                    "crée-en une depuis un onglet de la Bibliothèque 2.</p>")
         return "<p style='color:#888'>Aucune identité créée.</p>"
 
     idents_t = tuple(identities)
@@ -15416,7 +15519,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         avatar_html = (
             f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
-            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
         status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
         active_class = "vault-item-active" if ident == selected else ""
@@ -15427,7 +15530,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} fichier{'s' if n != 1 else ''}</div>"
             f"</div></a>"
         )
@@ -15463,7 +15566,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         "<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{selected}</div>"
+        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_sel} fichier{'s' if n_sel != 1 else ''} au total</div>"
         "</div></div>"
         "<span title='Aucune suppression possible depuis le Drive' "
@@ -15582,7 +15685,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
     if not blocks:
         blocks.append(
             "<div style='padding:60px 20px;text-align:center;color:#666'>"
-            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{selected} — uploade depuis les pages {vault_label}.</p>"
+            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{_v2_label(selected)} — uploade depuis les pages {vault_label}.</p>"
             "</div>"
         )
 
@@ -15662,7 +15765,7 @@ def _render_textvault_html(cat: str) -> str:
         avatar_html = (
             f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
-            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{ident[:1].upper()}</div>"
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
         status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
         active_class = "vault-item-active" if ident == selected else ""
@@ -15673,7 +15776,7 @@ def _render_textvault_html(cat: str) -> str:
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{ident.title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(n)}</div>"
             f"</div></a>"
         )
@@ -21693,7 +21796,7 @@ def _render_gms_html() -> str:
             avatar_html = (
                 f"<img src='{avatar}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0'>"
                 if avatar else
-                f"<div style='width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0'>{ident[:1].upper()}</div>"
+                f"<div style='width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
             )
             # Bouton Generate quick si template défini
             if cur_tpl:
@@ -35733,6 +35836,9 @@ ROLE_MENU_STRUCTURE = [
         {"key": "provault", "name": "Vault PRO (Reels, Posts, Stories, CTA, PP)",
          "perms": ["view", "create", "delete"]},
         {"key": "provaultdrive", "name": "Vault PRO — Drive (lecture seule)", "perms": ["view"]},
+        # Bibliothèque 2 : copie indépendante AVEC SES PROPRES identités.
+        {"key": "vault2", "name": "Bibliothèque 2 (identités séparées)",
+         "perms": ["view", "create", "delete"]},
     ]},
     {"section": "Création", "items": [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
@@ -35805,6 +35911,9 @@ _PERM_KEY_TO_TABS = {
     "provault": {"provaultreels", "provaultposts", "provaultstories",
                  "provaultstoryctas", "provaultpps"},
     "provaultdrive": {"provaultdrive"},
+    # Bibliothèque 2 : espace indépendant (ses propres identités), sa propre case.
+    "vault2": {"v2reels", "v2posts", "v2stories", "v2storyctas", "v2pps",
+               "v2brutes", "v2drive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
     "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
@@ -36827,6 +36936,13 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{provault_storyctas_html}", _lazy("provaultstoryctas"))
         .replace("{provault_pps_html}", _lazy("provaultpps"))
         .replace("{provault_drive_html}", _lazy("provaultdrive"))
+        .replace("{v2_reels_html}", _lazy("v2reels"))
+        .replace("{v2_posts_html}", _lazy("v2posts"))
+        .replace("{v2_stories_html}", _lazy("v2stories"))
+        .replace("{v2_storyctas_html}", _lazy("v2storyctas"))
+        .replace("{v2_pps_html}", _lazy("v2pps"))
+        .replace("{v2_brutes_html}", _lazy("v2brutes"))
+        .replace("{v2_drive_html}", _lazy("v2drive"))
         .replace("{sfs_html}", _g("sfs", _render_sfs_html))
         .replace("{revenus_html}", _g("revenus", _render_revenus_html))
         .replace("{gmsdash_html}", _g("gmsdash", _render_gmsdash_html))
@@ -37810,6 +37926,14 @@ def create_app():
                 "provaultstories": ("pro_stories", IMAGE_EXTS, False),
                 "provaultstoryctas": ("pro_storyctas", IMAGE_EXTS, False),
                 "provaultpps": ("pro_profile_pics", IMAGE_EXTS, True),
+                # Bibliothèque 2 : mêmes dossiers que la Bibliothèque mais
+                # SES identités à elle (préfixe v2_) -> 4e élément vault2=True
+                "v2reels": ("videos", VIDEO_EXTS, False, True),
+                "v2posts": ("posts", IMAGE_EXTS, False, True),
+                "v2stories": ("stories", IMAGE_EXTS, False, True),
+                "v2storyctas": ("storyctas", IMAGE_EXTS, False, True),
+                "v2pps": ("profile_pics", IMAGE_EXTS, False, True),
+                "v2brutes": ("brutes", VIDEO_EXTS, False, True),
             }
             if _tab == "cloudpps":
                 try:
@@ -37817,23 +37941,30 @@ def create_app():
                             f"{_render_cloud_pps_page()}</div>", 200)
                 except Exception:
                     return ("", 200)
-            if _tab in ("clouddrive", "provaultdrive"):
+            if _tab in ("clouddrive", "provaultdrive", "v2drive"):
                 # Drive : fragment léger pour vaultGoTo (sinon fallback pleine
                 # page dont la section drive est un placeholder lazy -> vide).
                 try:
-                    _dr = (_render_provault_drive_html() if _tab == "provaultdrive"
-                           else _render_cloud_drive_html())
+                    if _tab == "provaultdrive":
+                        _dr = _render_provault_drive_html()
+                    elif _tab == "v2drive":
+                        _dr = _render_cloud_drive_html(
+                            tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
+                            show_sync=False, vault_label="Bibliothèque 2", vault2=True)
+                    else:
+                        _dr = _render_cloud_drive_html()
                     return (f"<div class='form-section' id='form-{_tab}' style='display:block'>"
                             f"{_dr}</div>", 200)
                 except Exception:
                     return ("", 200)
             _cfg = _cloud.get(_tab)
             if _cfg:
-                _sub, _exts, _jb = _cfg
+                _sub, _exts, _jb = _cfg[0], _cfg[1], _cfg[2]
+                _v2 = bool(_cfg[3]) if len(_cfg) > 3 else False
                 _secid = "form-" + _tab
                 try:
                     return (f"<div class='form-section' id='{_secid}' style='display:block'>"
-                            f"{_render_cloud_content_html(_sub, _exts, include_jb=_jb)}</div>", 200)
+                            f"{_render_cloud_content_html(_sub, _exts, include_jb=_jb, vault2=_v2)}</div>", 200)
                 except Exception:
                     return ("", 200)
             if _tab == "jailbreak":
@@ -39312,6 +39443,10 @@ def create_app():
         safe = _re.sub(r"[^a-z0-9_\-]", "", raw_name.lower())[:30]
         if not safe:
             return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
+        # Bibliothèque 2 : l'identité est créée avec le préfixe technique v2_
+        # (jamais affiché) -> invisible de la Bibliothèque, de Discord et des VAs.
+        if str(request.form.get("vault2") or "").strip() in ("1", "true", "on"):
+            safe = V2_PREFIX + safe[:26]
         if safe in _list_identities():
             return jsonify({"ok": False, "error": f"L'identité {safe} existe déjà"})
         target_dir = IDENTITIES_DIR / safe

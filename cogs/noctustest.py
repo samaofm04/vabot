@@ -16,7 +16,9 @@ def _pick_clean_reel(identite=None):
     """Retourne (identity, video_path) d'un reel CLEAN aléatoire (hors .example)."""
     if not IDENTITIES_DIR.exists():
         return None, None
-    idents = [d.name for d in IDENTITIES_DIR.iterdir() if d.is_dir() and (d / "videos").exists()]
+    idents = [d.name for d in IDENTITIES_DIR.iterdir()
+              if d.is_dir() and (d / "videos").exists()
+              and not d.name.lower().startswith("v2_")]
     if identite:
         wanted = [i for i in idents if i.lower() == identite.lower().strip()]
         idents = wanted or idents
