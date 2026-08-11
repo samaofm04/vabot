@@ -39759,6 +39759,94 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         return jsonify({"ok": True, "token": _sync_token()})
 
+    def _sync_auth() -> bool:
+        tok = _sync_token()
+        sent = (request.headers.get("X-Sync-Token")
+                or request.args.get("t") or "").strip()
+        import hmac as _hmac
+        return bool(tok and sent and _hmac.compare_digest(sent, tok))
+
+    @app.route("/sync/list")
+    def sync_list():
+        """Noms des fichiers d'une identité (jamais leur contenu)."""
+        from flask import jsonify
+        if not _sync_auth():
+            return jsonify({"ok": False, "error": "jeton invalide"}), 403
+        ident = (request.args.get("identity") or "").strip().lower()
+        if not ident.startswith(V2_PREFIX):
+            ident = V2_PREFIX + re.sub(r"[^a-z0-9_\-]", "", ident)[:26]
+        kind = (request.args.get("kind") or "posts").strip().lower()
+        if kind not in _SYNC_SUBDIRS:
+            return jsonify({"ok": False, "error": f"type inconnu : {kind}"}), 400
+        sub, exts = _SYNC_SUBDIRS[kind]
+        d = IDENTITIES_DIR / ident / sub
+        files = []
+        if d.exists():
+            files = sorted(f.name for f in d.iterdir()
+                           if f.is_file() and f.suffix.lower() in exts
+                           and ".example" not in f.name)
+        return jsonify({"ok": True, "identity": ident, "kind": kind,
+                        "count": len(files), "files": files})
+
+    @app.route("/sync/get")
+    def sync_get():
+        """Renvoie UN fichier tel quel (octets, jamais inspecté)."""
+        from flask import send_file, abort
+        if not _sync_auth():
+            return abort(403)
+        ident = (request.args.get("identity") or "").strip().lower()
+        if not ident.startswith(V2_PREFIX):
+            ident = V2_PREFIX + re.sub(r"[^a-z0-9_\-]", "", ident)[:26]
+        kind = (request.args.get("kind") or "posts").strip().lower()
+        if kind not in _SYNC_SUBDIRS:
+            return abort(404)
+        sub, exts = _SYNC_SUBDIRS[kind]
+        name = _safe_upload_name(request.args.get("file") or "")
+        base = (IDENTITIES_DIR / ident / sub).resolve()
+        f = (base / name).resolve()
+        if not str(f).startswith(str(base)) or not f.is_file():
+            return abort(404)
+        if f.suffix.lower() not in exts:
+            return abort(404)
+        return send_file(str(f), conditional=True)
+
+    @app.route("/sync/text")
+    def sync_text():
+        """Textes d'une identité : bios, ctas, captions (pour la légende)."""
+        from flask import jsonify
+        if not _sync_auth():
+            return jsonify({"ok": False, "error": "jeton invalide"}), 403
+        ident = (request.args.get("identity") or "").strip().lower()
+        if not ident.startswith(V2_PREFIX):
+            ident = V2_PREFIX + re.sub(r"[^a-z0-9_\-]", "", ident)[:26]
+        kind = (request.args.get("kind") or "bios").strip().lower()
+        out = []
+        if kind in ("bios", "ctas", "names", "usernames"):
+            try:
+                import text_pool as _tp
+                out = [str(e.get("text") or "").strip()
+                       for e in _tp.list_entries(kind, identity=ident)
+                       if str(e.get("text") or "").strip()]
+            except Exception:
+                out = []
+        elif kind == "captions":
+            b = _clean_caption_block(_load_captions_lib().get(ident))
+            out = [str(c.get("text") or "").strip() for c in b.get("items", [])
+                   if c.get("enabled", True) and str(c.get("text") or "").strip()]
+        else:
+            return jsonify({"ok": False, "error": f"type inconnu : {kind}"}), 400
+        return jsonify({"ok": True, "identity": ident, "kind": kind,
+                        "count": len(out), "texts": out})
+
+    @app.route("/sync/identities")
+    def sync_identities():
+        """Identités de la Bibliothèque 2 (noms affichés, sans préfixe)."""
+        from flask import jsonify
+        if not _sync_auth():
+            return jsonify({"ok": False, "error": "jeton invalide"}), 403
+        return jsonify({"ok": True,
+                        "identities": [_v2_label(i) for i in _list_v2_identities()]})
+
     @app.route("/sync/push", methods=["POST"])
     def sync_push():
         """Dépose un fichier venu du dossier local dans la Bibliothèque 2."""
