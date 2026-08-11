@@ -1,9 +1,9 @@
-"""Dossier synchronisé — Bibliothèque 2.
+"""Dossier synchronisé — Vault PRO.
 
 À lancer SUR LE PC (pas sur le VPS). Surveille un dossier local et envoie
 chaque nouveau fichier au site : tu déposes une photo dans
-    Bibliothèque 2\\beta\\Posts\\
-et elle apparaît dans la Bibliothèque 2 du site, chez l'identité « beta ».
+    Vault PRO\\beta\\Posts\\
+et elle apparaît dans le Vault PRO du site, chez l'identité « beta ».
 
 Confidentialité : le script n'OUVRE jamais les fichiers — il les transmet tels
 quels et ne retient que leur nom + leur taille pour ne pas les renvoyer deux
@@ -69,7 +69,7 @@ def _save(d):
 
 def setup():
     c = _load()
-    print("── Dossier synchronisé — Bibliothèque 2 ──\n")
+    print("── Dossier synchronisé — Vault PRO ──\n")
     url = input(f"Adresse du site [{c.get('url', 'https://youl4b.com')}] : ").strip()
     c["url"] = (url or c.get("url") or "https://youl4b.com").rstrip("/")
     print("\nLe jeton s'obtient en étant connecté au site : ouvre "
@@ -77,7 +77,7 @@ def setup():
     tok = input("Jeton : ").strip()
     if tok:
         c["token"] = tok
-    default_root = str(Path.home() / "Desktop" / "Bibliotheque 2")
+    default_root = str(Path.home() / "Desktop" / "Vault PRO")
     root = input(f"\nDossier local [{c.get('root', default_root)}] : ").strip()
     c["root"] = root or c.get("root") or default_root
     _save(c)
@@ -89,7 +89,7 @@ def setup():
 
 
 def _identites_du_site(cfg):
-    """Identités déjà présentes dans la Bibliothèque 2 du site."""
+    """Identités déjà présentes dans le Vault PRO du site."""
     try:
         r = requests.get(cfg["url"] + "/sync/identities",
                          params={"t": cfg["token"]}, timeout=20)
@@ -195,7 +195,7 @@ def run(once=False):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Dossier synchronisé — Bibliothèque 2")
+    ap = argparse.ArgumentParser(description="Dossier synchronisé — Vault PRO")
     ap.add_argument("--setup", action="store_true", help="configurer (adresse, jeton, dossier)")
     ap.add_argument("--once", action="store_true", help="envoyer une fois puis quitter")
     a = ap.parse_args()

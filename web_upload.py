@@ -6403,18 +6403,18 @@ window.upPrefillIdentity = function(utab, ident, vault){
         bd.textContent = '🔒 Destination : Vault PRO — ces fichiers ne vont PAS dans la Bibliothèque';
         form.insertBefore(bd, form.firstChild);
       }
-      // Bibliothèque 2 : même repère (l'identité porte le préfixe v2_)
+      // Vault PRO : même repère (l'identité porte le préfixe v2_)
       if(String(ident||'').indexOf('v2_') === 0){
         var bd2 = document.createElement('div');
         bd2.className = 'up-vault-badge';
         bd2.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);color:#7aa2ff;border-radius:10px;font-size:12.5px;font-weight:700';
-        bd2.textContent = '📁 Destination : Bibliothèque 2 — @' + String(ident).replace(/^v2_/,'');
+        bd2.textContent = '📁 Destination : Vault PRO — @' + String(ident).replace(/^v2_/,'');
         form.insertBefore(bd2, form.firstChild);
       }
     }
     var sel = form.querySelector('select[name=identity]');
     if(sel){
-      // Les identités de la Bibliothèque 2 ne sont PAS dans la liste (elles y
+      // Les identités de le Vault PRO ne sont PAS dans la liste (elles y
       // sont volontairement invisibles) : sans cette option ajoutée à la volée,
       // sel.value = ident échoue en SILENCE et le fichier part chez la première
       // identité de la Bibliothèque.
@@ -6429,7 +6429,7 @@ window.upPrefillIdentity = function(utab, ident, vault){
       sel.value = ident;
       try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
     }
-    // Bibliothèque 2 : on MASQUE le sélecteur d'identité. Sinon il listerait
+    // Vault PRO : on MASQUE le sélecteur d'identité. Sinon il listerait
     // toutes les identités de la Bibliothèque (qui n'ont rien à faire là) et
     // afficherait le préfixe technique. Le bandeau ci-dessus dit déjà où va le
     // fichier. Ailleurs : la carte reste visible (ancien état éventuel nettoyé).
@@ -6664,7 +6664,7 @@ document.addEventListener('click',function(e){
      Gate RBAC via la cle « provault » -> invisible pour les roles restreints
      tant que la case n'est pas cochee dans Reglages > Roles & permissions. -->
 <!-- VAULT PRO retiré du menu à la demande de l'user (remplacé par la
-     Bibliothèque 2, qui a ses propres identités). RIEN n'est supprimé :
+     Vault PRO, qui a ses propres identités). RIEN n'est supprimé :
      les dossiers pro_* des identités, les routes et la page restent en
      place ; deep-link ?tab=provaultreels toujours fonctionnel. Pour le
      réafficher : retirer le display:none ci-dessous. -->
@@ -6707,35 +6707,35 @@ document.addEventListener('click',function(e){
 <div class="group" id="grp-vault2">
   <button class="group-head" onclick="toggleGroup('vault2')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-4.35-4.35a2 2 0 0 0-2.83 0L3 21"/></svg>
-    <span class="label">Bibliothèque 2</span>
+    <span class="label">Vault PRO</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Bibliothèque 2','Reels de la Bibliothèque 2 (identités séparées)')">
+    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Vault PRO','Reels de le Vault PRO (identités séparées)')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
     </button>
-    <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Bibliothèque 2','Posts de la Bibliothèque 2')">
+    <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Vault PRO','Posts de le Vault PRO')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
       Posts
     </button>
-    <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Bibliothèque 2','Stories de la Bibliothèque 2')">
+    <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Vault PRO','Stories de le Vault PRO')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
       Stories
     </button>
-    <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Bibliothèque 2','Stories CTA de la Bibliothèque 2')">
+    <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Vault PRO','Stories CTA de le Vault PRO')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
-    <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Bibliothèque 2','PP de la Bibliothèque 2, par identité')">
+    <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Vault PRO','PP de le Vault PRO, par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       Photos profil
     </button>
-    <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Bibliothèque 2','Rushs bruts de la Bibliothèque 2')">
+    <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Vault PRO','Rushs bruts de le Vault PRO')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Vidéo brut
     </button>
-    <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Bibliothèque 2','Tout le contenu d’une identité de la Bibliothèque 2 — lecture seule')">
+    <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Vault PRO','Tout le contenu d’une identité de le Vault PRO — lecture seule')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       Drive
     </button>
@@ -8148,7 +8148,7 @@ body.light .action-icon{color:#666}
   </div>
 </div>
 
-<!-- ===== Modifier une identité : photo (partout) + nom (Bibliothèque 2) ===== -->
+<!-- ===== Modifier une identité : photo (partout) + nom (Vault PRO) ===== -->
 <div id="ident-edit-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identEditClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div style="font-weight:800;font-size:15px">✏️ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
@@ -8648,7 +8648,7 @@ def _list_identities():
 JAILBREAK_ONLY_IDENTITIES = {"jessye"}
 
 
-# ===== Bibliothèque 2 : espace TOTALEMENT indépendant =====
+# ===== Vault PRO : espace TOTALEMENT indépendant =====
 # Ses identités vivent dans le même dossier data/identities (donc tout le moteur
 # — galeries, upload, thumbs, Drive — marche sans duplication) mais leur NOM
 # porte un préfixe technique : elles sont donc invisibles de la Bibliothèque,
@@ -8669,7 +8669,7 @@ def _v2_label(ident) -> str:
 def _list_content_identities():
     """Identités affichées dans les pages Contenu/Bibliothèque : toutes SAUF
     celles réservées à Jailbreak (JAILBREAK_ONLY_IDENTITIES) et celles de la
-    Bibliothèque 2 (préfixe v2_).
+    Vault PRO (préfixe v2_).
     Le backend (routes CRUD, page Jailbreak, VAs) continue d'utiliser
     _list_identities() — donc Jessye reste pleinement fonctionnelle ailleurs."""
     hidden = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
@@ -8678,7 +8678,7 @@ def _list_content_identities():
 
 
 def _list_v2_identities():
-    """Identités de la Bibliothèque 2 uniquement."""
+    """Identités de le Vault PRO uniquement."""
     return [i for i in _list_identities() if _is_v2(i)]
 
 
@@ -13650,7 +13650,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     """
     from flask import request as _req
     if vault2:
-        # Bibliothèque 2 : SES identités à elle, rien d'autre.
+        # Vault PRO : SES identités à elle, rien d'autre.
         identities = _list_v2_identities()
     else:
         identities = _list_content_identities()  # masque Jailbreak-only ET v2_
@@ -13664,7 +13664,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                   "storyctas": "v2storyctas", "profile_pics": "v2pps",
                   "brutes": "v2brutes"}.get(subdir, "v2reels")
             # Sidebar MINIMALE : sans elle, le bouton de création n'existe pas
-            # et la Bibliothèque 2 reste inutilisable (aucune identité à créer).
+            # et le Vault PRO reste inutilisable (aucune identité à créer).
             return (
                 "<div class='vault-layout'>"
                 "<div class='vault-sidebar'>"
@@ -13679,7 +13679,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "</div>"
                 "<div class='vault-gallery'>"
                 "<p style='color:#888;font-size:13.5px;line-height:1.6'>"
-                "La Bibliothèque 2 est vide — elle a ses <b>propres identités</b>, "
+                "Le Vault PRO est vide — il a ses <b>propres identités</b>, "
                 "séparées de la Bibliothèque et invisibles de Discord.<br>"
                 "Crée la première avec « ＋ Nouvelle identité » à gauche.</p>"
                 "</div></div>")
@@ -13955,7 +13955,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "pro_profile_pics": ("pp", "Photo de profil — Vault PRO", "PP propre à cette identité", "Add media"),
     }
     # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form).
-    # La Bibliothèque 2 partage les MÊMES dossiers : c'est l'identité (préfixée
+    # Le Vault PRO partage les MÊMES dossiers : c'est l'identité (préfixée
     # v2_) qui la distingue, donc vault_key reste vide.
     vault_key = "pro" if subdir.startswith(PRO_VAULT_PREFIX) else ""
     add_media_btn = ""
@@ -14032,7 +14032,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        # ✏️ Modifier : photo de l'identité (partout) + son nom (Bibliothèque 2)
+        # ✏️ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
         f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
         "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
@@ -15658,7 +15658,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                     "border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;"
                     "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit'>"
                     "＋ Nouvelle identité</button></div>"
-                    "<div class='vault-gallery'><p style='color:#888'>La Bibliothèque 2 "
+                    "<div class='vault-gallery'><p style='color:#888'>Le Vault PRO "
                     "est vide — crée une identité pour commencer.</p></div></div>")
         return "<p style='color:#888'>Aucune identité créée.</p>"
 
@@ -16973,7 +16973,7 @@ def _identity_avatar_url(identity: str) -> str:
     p = _identity_avatar_path(identity)
     if p:
         return f"/identity/avatar/{identity.lower().strip()}"
-    # Bibliothèque 2 : ces identités n'existent QUE sur le site — inutile
+    # Vault PRO : ces identités n'existent QUE sur le site — inutile
     # d'interroger MyPuls (appel réseau qui peut bloquer tout le rendu).
     if _is_v2(identity):
         return ""
@@ -36003,11 +36003,11 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Contenu — Vault PRO", "items": [
         # Bibliothèque SÉPARÉE (dossiers pro_*). Case décochée par défaut : un
         # rôle qui a la Bibliothèque ne voit PAS le Vault PRO pour autant.
-        {"key": "provault", "name": "Vault PRO (Reels, Posts, Stories, CTA, PP)",
+        {"key": "provault", "name": "Vault PRO — ancien (masqué du menu)",
          "perms": ["view", "create", "delete"]},
-        {"key": "provaultdrive", "name": "Vault PRO — Drive (lecture seule)", "perms": ["view"]},
-        # Bibliothèque 2 : copie indépendante AVEC SES PROPRES identités.
-        {"key": "vault2", "name": "Bibliothèque 2 (identités séparées)",
+        {"key": "provaultdrive", "name": "Vault PRO ancien — Drive (lecture seule)", "perms": ["view"]},
+        # Vault PRO : copie indépendante AVEC SES PROPRES identités.
+        {"key": "vault2", "name": "Vault PRO (identités séparées)",
          "perms": ["view", "create", "delete"]},
     ]},
     {"section": "Création", "items": [
@@ -36081,7 +36081,7 @@ _PERM_KEY_TO_TABS = {
     "provault": {"provaultreels", "provaultposts", "provaultstories",
                  "provaultstoryctas", "provaultpps"},
     "provaultdrive": {"provaultdrive"},
-    # Bibliothèque 2 : espace indépendant (ses propres identités), sa propre case.
+    # Vault PRO : espace indépendant (ses propres identités), sa propre case.
     "vault2": {"v2reels", "v2posts", "v2stories", "v2storyctas", "v2pps",
                "v2brutes", "v2drive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
@@ -38096,7 +38096,7 @@ def create_app():
                 "provaultstories": ("pro_stories", IMAGE_EXTS, False),
                 "provaultstoryctas": ("pro_storyctas", IMAGE_EXTS, False),
                 "provaultpps": ("pro_profile_pics", IMAGE_EXTS, True),
-                # Bibliothèque 2 : mêmes dossiers que la Bibliothèque mais
+                # Vault PRO : mêmes dossiers que la Bibliothèque mais
                 # SES identités à elle (préfixe v2_) -> 4e élément vault2=True
                 "v2reels": ("videos", VIDEO_EXTS, False, True),
                 "v2posts": ("posts", IMAGE_EXTS, False, True),
@@ -38120,7 +38120,7 @@ def create_app():
                     elif _tab == "v2drive":
                         _dr = _render_cloud_drive_html(
                             tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
-                            show_sync=False, vault_label="Bibliothèque 2", vault2=True)
+                            show_sync=False, vault_label="Vault PRO", vault2=True)
                     else:
                         _dr = _render_cloud_drive_html()
                     return (f"<div class='form-section' id='form-{_tab}' style='display:block'>"
@@ -38168,7 +38168,7 @@ def create_app():
                 "provaultstories": lambda: _render_cloud_content_html("pro_stories", IMAGE_EXTS),
                 "provaultstoryctas": lambda: _render_cloud_content_html("pro_storyctas", IMAGE_EXTS),
                 "provaultpps": lambda: _render_cloud_content_html("pro_profile_pics", IMAGE_EXTS, include_jb=True),
-                # Bibliothèque 2 : mêmes producers, mais SES identités (vault2)
+                # Vault PRO : mêmes producers, mais SES identités (vault2)
                 "v2reels": lambda: _render_cloud_content_html("videos", VIDEO_EXTS, vault2=True),
                 "v2posts": lambda: _render_cloud_content_html("posts", IMAGE_EXTS, vault2=True),
                 "v2stories": lambda: _render_cloud_content_html("stories", IMAGE_EXTS, vault2=True),
@@ -38177,7 +38177,7 @@ def create_app():
                 "v2brutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS, vault2=True),
                 "v2drive": lambda: _render_cloud_drive_html(
                     tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
-                    show_sync=False, vault_label="Bibliothèque 2", vault2=True),
+                    show_sync=False, vault_label="Vault PRO", vault2=True),
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
                 "sfssetupof": lambda: _render_sfssetup_html("of"),
@@ -39623,7 +39623,7 @@ def create_app():
         safe = _re.sub(r"[^a-z0-9_\-]", "", raw_name.lower())[:30]
         if not safe:
             return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
-        # Bibliothèque 2 : l'identité est créée avec le préfixe technique v2_
+        # Vault PRO : l'identité est créée avec le préfixe technique v2_
         # (jamais affiché) -> invisible de la Bibliothèque, de Discord et des VAs.
         if str(request.form.get("vault2") or "").strip() in ("1", "true", "on"):
             safe = V2_PREFIX + safe[:26]
@@ -39699,7 +39699,7 @@ def create_app():
             return jsonify({"ok": False, "error": "identité inconnue"})
         if not _is_v2(old):
             return jsonify({"ok": False, "error":
-                            "Renommage réservé à la Bibliothèque 2 (une identité "
+                            "Renommage réservé à le Vault PRO (une identité "
                             "de la Bibliothèque est liée aux VAs Discord)."})
         base = _re.sub(r"[^a-z0-9_\-]", "", raw.lower())[:26]
         if not base:
@@ -39927,7 +39927,7 @@ def create_app():
                         "caption": cap["text"], "desc": cap.get("desc") or "",
                         "brute": brute.name})
 
-    # ===== Dossier synchronisé (Bibliothèque 2) =====
+    # ===== Dossier synchronisé (Vault PRO) =====
     # Un agent tourne sur le PC de l'user, surveille un dossier local et POSTE
     # ici chaque nouveau fichier. Authentifié par un JETON (pas la session web)
     # -> aucun mot de passe stocké sur le PC. Le contenu n'est jamais ouvert,
@@ -40046,7 +40046,7 @@ def create_app():
 
     @app.route("/sync/identities")
     def sync_identities():
-        """Identités de la Bibliothèque 2 (noms affichés, sans préfixe)."""
+        """Identités de le Vault PRO (noms affichés, sans préfixe)."""
         from flask import jsonify
         if not _sync_auth():
             return jsonify({"ok": False, "error": "jeton invalide"}), 403
@@ -40055,7 +40055,7 @@ def create_app():
 
     @app.route("/sync/push", methods=["POST"])
     def sync_push():
-        """Dépose un fichier venu du dossier local dans la Bibliothèque 2."""
+        """Dépose un fichier venu du dossier local dans le Vault PRO."""
         from flask import jsonify
         tok = _sync_token()
         sent = (request.headers.get("X-Sync-Token") or "").strip()
@@ -40109,7 +40109,7 @@ def create_app():
         ident = (request.form.get("identity") or "").strip().lower()
         valid = ({x.lower() for x in _list_content_identities()}
                  | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
+                 | {x.lower() for x in _list_v2_identities()})  # PP de le Vault PRO
         if not ident or ident not in valid:
             return _error("Choisis une identité pour les PP (le pool partagé n'existe plus)")
         target_dir = IDENTITIES_DIR / ident / _vault_subdir("profile_pics")
@@ -40146,7 +40146,7 @@ def create_app():
         ident = (request.form.get("identity") or "").strip().lower()
         valid = ({x.lower() for x in _list_content_identities()}
                  | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
+                 | {x.lower() for x in _list_v2_identities()})  # PP de le Vault PRO
         if ident not in valid:
             return _error("Identité inconnue", tab="cloudpps")
         if not PROFILE_PICS_DIR.exists():
@@ -40190,7 +40190,7 @@ def create_app():
             return jsonify({"ok": False, "error": "sélection ou cibles manquantes"})
         valid = ({x.lower() for x in _list_content_identities()}
                  | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
-                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
+                 | {x.lower() for x in _list_v2_identities()})  # PP de le Vault PRO
         tgts = [t for t in (str(x).strip().lower() for x in targets[:50]) if t in valid]
         if not tgts:
             return jsonify({"ok": False, "error": "aucune identité cible valide"})

@@ -1,10 +1,10 @@
 """Source de médias pour l'automatisation de posting — depuis le SITE.
 
 Remplace le dossier local (`Downloads\\PP`, `Downloads\\VIDEO`) par la
-Bibliothèque 2 du site : les mêmes URL qu'avant, donc **les raccourcis iOS
+Vault PRO du site : les mêmes URL qu'avant, donc **les raccourcis iOS
 n'ont rien à changer**.
 
-    iPhone  →  tunnel  →  ce serveur  →  site (Bibliothèque 2)
+    iPhone  →  tunnel  →  ce serveur  →  site (Vault PRO)
 
     /photo.jpg   une photo au hasard de l'identité courante
     /video.mp4   une vidéo au hasard
@@ -250,7 +250,7 @@ def main():
                    "noms": bool(getattr(a, "noms", False))})
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), H)
     print(f"🌐 http://0.0.0.0:{a.port}   identite : {_STATE['identity']}")
-    print(f"   source : {_STATE['url']} (Bibliothèque 2)")
+    print(f"   source : {_STATE['url']} (Vault PRO)")
     print("   /photo.jpg  /video.mp4  /media  /pp.jpg  /caption  /bio  /cta")
     print("   par le tunnel : octets et textes SEULEMENT — /etat, / et")
     print("   /identite/<nom> répondent 404 hors du local")
