@@ -4512,15 +4512,36 @@ document.addEventListener('click', function(ev){
   }
 });
 // Modale d ajout : boutons en onclick INLINE (piège stopPropagation des modales)
+// Compte les textes d un champ (règle user : ligne vide = texte différent)
+function txtCountBlocks(v){
+  v=String(v||'').replace(/\\r\\n/g,'\\n').trim();
+  if(!v) return 0;
+  return v.split(/\\n\\s*\\n/).filter(function(b){ return b.trim(); }).length;
+}
+function txtAddRecount(){
+  var n=0;
+  document.querySelectorAll('#txtAddList .txtadd-ta').forEach(function(t){ n+=txtCountBlocks(t.value); });
+  var el=document.getElementById('txtAddCount');
+  if(el){
+    el.textContent = n ? (n+' texte'+(n>1?'s':'')+' détecté'+(n>1?'s':'')) : 'colle tes textes ci-dessus';
+    el.style.color = n ? '#22c55e' : '#75757f';
+  }
+  var b=document.getElementById('txtAddGo');
+  if(b) b.textContent = n>1 ? ('⬆ Tout ajouter ('+n+')') : '⬆ Ajouter';
+}
 function txtAddField(focus){
   var list=document.getElementById('txtAddList'); if(!list) return null;
   var n=list.querySelectorAll('.txtadd-ta').length+1;
   var wrap=document.createElement('div');
-  wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">TEXTE '+n+'</div>'
-    +'<textarea rows="2" class="txtadd-ta" autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
+  // BULK : un seul grand champ suffit — une LIGNE VIDE sépare deux textes.
+  wrap.innerHTML='<div style="font-size:10.5px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-bottom:7px">'
+    +(n===1?'COLLE TOUT ICI — UNE LIGNE VIDE ENTRE CHAQUE TEXTE':'TEXTE '+n)+'</div>'
+    +'<textarea rows="'+(n===1?8:3)+'" class="txtadd-ta" autocomplete="off" spellcheck="false" data-lpignore="true" data-form-type="other" placeholder="18 &#127872; San Antonio us | tu Texas&#10;rodeo queen wannabe&#10;&#10;22 &#183; Paris&#10;dm ouverts" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>';
   list.appendChild(wrap);
   var ta=wrap.querySelector('textarea');
+  if(ta) ta.addEventListener('input', txtAddRecount);
   if(focus&&ta) setTimeout(function(){ ta.focus(); },40);
+  txtAddRecount();
   return ta;
 }
 function txtAddOpen(){
@@ -7872,8 +7893,9 @@ body.light .action-icon{color:#666}
       <button type="button" onclick="txtAddClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
     </div>
     <div id="txtAddList" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0"></div>
-    <button type="button" onclick="txtAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter un autre texte</button>
-    <button type="button" onclick="txtAddSubmit()" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Tout ajouter</button>
+    <div id="txtAddCount" style="font-size:12px;color:#75757f;font-weight:600;text-align:center">colle tes textes ci-dessus</div>
+    <button type="button" onclick="txtAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter un autre champ</button>
+    <button type="button" id="txtAddGo" onclick="txtAddSubmit()" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter</button>
   </div>
 </div>
 
