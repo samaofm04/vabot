@@ -6566,7 +6566,12 @@ document.addEventListener('click',function(e){
 <!-- VAULT PRO : 2e bibliotheque, dossiers pro_* SEPARES de la Bibliotheque.
      Gate RBAC via la cle « provault » -> invisible pour les roles restreints
      tant que la case n'est pas cochee dans Reglages > Roles & permissions. -->
-<div class="group" id="grp-provault">
+<!-- VAULT PRO retiré du menu à la demande de l'user (remplacé par la
+     Bibliothèque 2, qui a ses propres identités). RIEN n'est supprimé :
+     les dossiers pro_* des identités, les routes et la page restent en
+     place ; deep-link ?tab=provaultreels toujours fonctionnel. Pour le
+     réafficher : retirer le display:none ci-dessous. -->
+<div class="group" id="grp-provault" style="display:none">
   <button class="group-head" onclick="toggleGroup('provault')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
     <span class="label">Vault PRO</span>
@@ -37998,6 +38003,16 @@ def create_app():
                 "provaultstories": lambda: _render_cloud_content_html("pro_stories", IMAGE_EXTS),
                 "provaultstoryctas": lambda: _render_cloud_content_html("pro_storyctas", IMAGE_EXTS),
                 "provaultpps": lambda: _render_cloud_content_html("pro_profile_pics", IMAGE_EXTS, include_jb=True),
+                # Bibliothèque 2 : mêmes producers, mais SES identités (vault2)
+                "v2reels": lambda: _render_cloud_content_html("videos", VIDEO_EXTS, vault2=True),
+                "v2posts": lambda: _render_cloud_content_html("posts", IMAGE_EXTS, vault2=True),
+                "v2stories": lambda: _render_cloud_content_html("stories", IMAGE_EXTS, vault2=True),
+                "v2storyctas": lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS, vault2=True),
+                "v2pps": lambda: _render_cloud_content_html("profile_pics", IMAGE_EXTS, vault2=True),
+                "v2brutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS, vault2=True),
+                "v2drive": lambda: _render_cloud_drive_html(
+                    tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
+                    show_sync=False, vault_label="Bibliothèque 2", vault2=True),
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
                 "sfssetupof": lambda: _render_sfssetup_html("of"),
