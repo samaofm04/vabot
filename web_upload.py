@@ -13614,6 +13614,10 @@ _PRO_SUBDIR_OF = {
     "stories": "pro_stories",
     "storyctas": "pro_storyctas",
     "profile_pics": "pro_profile_pics",
+    # Rushs et modèles de montage : sans ces deux lignes, un upload « vault=pro »
+    # retombait SILENCIEUSEMENT dans la Bibliothèque (Reel montage).
+    "brutes": "pro_brutes",
+    "templates": "pro_templates",
 }
 # Source de vérité des dossiers servables/supprimables : les 5 routes qui
 # validaient un set en dur divergeaient dès qu'on ajoutait un dossier.
@@ -38280,7 +38284,9 @@ def create_app():
         séparés des reels prêts à poster pour ne pas mélanger les deux stocks."""
         if not is_auth():
             return redirect("/")
-        return _save_many_videos("video", "brutes")
+        # _vault_subdir : « vault=pro » -> pro_brutes. Sans ça, un rush envoyé
+        # depuis le Vault PRO atterrissait dans la Bibliothèque (Reel montage).
+        return _save_many_videos("video", _vault_subdir("brutes"))
 
     @app.route("/upload/template", methods=["POST"])
     def upload_template():
@@ -38288,7 +38294,7 @@ def create_app():
         Chacun apporte SA piste son — c'est elle qui sera gardée à l'assemblage."""
         if not is_auth():
             return redirect("/")
-        return _save_many_videos("video", "templates")
+        return _save_many_videos("video", _vault_subdir("templates"))
 
     @app.route("/upload/post", methods=["POST"])
     def upload_post():
