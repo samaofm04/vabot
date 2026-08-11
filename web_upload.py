@@ -39721,6 +39721,88 @@ def create_app():
                         "caption": cap["text"], "desc": cap.get("desc") or "",
                         "brute": brute.name})
 
+    # ===== Dossier synchronisé (Bibliothèque 2) =====
+    # Un agent tourne sur le PC de l'user, surveille un dossier local et POSTE
+    # ici chaque nouveau fichier. Authentifié par un JETON (pas la session web)
+    # -> aucun mot de passe stocké sur le PC. Le contenu n'est jamais ouvert,
+    # juste écrit sur disque.
+    _SYNC_SUBDIRS = {
+        "reels": ("videos", VIDEO_EXTS), "posts": ("posts", IMAGE_EXTS),
+        "stories": ("stories", IMAGE_EXTS), "storyctas": ("storyctas", IMAGE_EXTS),
+        "pp": ("profile_pics", IMAGE_EXTS), "brutes": ("brutes", VIDEO_EXTS),
+        "templates": ("templates", VIDEO_EXTS),
+    }
+
+    def _sync_token() -> str:
+        """Jeton du dossier synchronisé (créé au premier appel)."""
+        f = DATA_DIR / "sync_token.txt"
+        try:
+            tok = f.read_text(encoding="utf-8").strip()
+            if tok:
+                return tok
+        except Exception:
+            pass
+        import secrets as _sec
+        tok = _sec.token_urlsafe(32)
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(tok, encoding="utf-8")
+        except Exception:
+            return ""
+        return tok
+
+    @app.route("/sync/token")
+    def sync_token_show():
+        """Le jeton à coller dans l'agent (visible seulement connecté)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify({"ok": True, "token": _sync_token()})
+
+    @app.route("/sync/push", methods=["POST"])
+    def sync_push():
+        """Dépose un fichier venu du dossier local dans la Bibliothèque 2."""
+        from flask import jsonify
+        tok = _sync_token()
+        sent = (request.headers.get("X-Sync-Token") or "").strip()
+        import hmac as _hmac
+        if not tok or not sent or not _hmac.compare_digest(sent, tok):
+            return jsonify({"ok": False, "error": "jeton invalide"}), 403
+        ident = (request.form.get("identity") or "").strip().lower()
+        kind = (request.form.get("kind") or "").strip().lower()
+        if not ident.startswith(V2_PREFIX):
+            ident = V2_PREFIX + re.sub(r"[^a-z0-9_\-]", "", ident)[:26]
+        if kind not in _SYNC_SUBDIRS:
+            return jsonify({"ok": False, "error": f"type inconnu : {kind}"}), 400
+        sub, exts = _SYNC_SUBDIRS[kind]
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"ok": False, "error": "fichier manquant"}), 400
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in exts:
+            return jsonify({"ok": False, "error": f"format refusé ({ext})"}), 400
+        # L'identité est créée à la volée : déposer dans un nouveau dossier suffit.
+        target_dir = IDENTITIES_DIR / ident / sub
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        name = _safe_upload_name(f.filename)
+        dst = target_dir / name
+        n = 2
+        while dst.exists():                       # jamais d'écrasement silencieux
+            dst = target_dir / f"{Path(name).stem}_{n}{ext}"
+            n += 1
+        try:
+            f.save(str(dst))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        try:
+            _invalidate_all_ttl_cache()
+        except Exception:
+            pass
+        return jsonify({"ok": True, "identity": ident, "kind": kind, "file": dst.name})
+
     @app.route("/upload/pp", methods=["POST"])
     def upload_pp():
         if not is_auth():
