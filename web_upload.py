@@ -16895,6 +16895,10 @@ def _identity_avatar_url(identity: str) -> str:
     p = _identity_avatar_path(identity)
     if p:
         return f"/identity/avatar/{identity.lower().strip()}"
+    # Bibliothèque 2 : ces identités n'existent QUE sur le site — inutile
+    # d'interroger MyPuls (appel réseau qui peut bloquer tout le rendu).
+    if _is_v2(identity):
+        return ""
     cid = _mypuls_creator_id_for_identity(identity)
     if cid:
         return f"/mypuls/avatar/{cid}"
