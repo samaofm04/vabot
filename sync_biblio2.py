@@ -88,8 +88,25 @@ def setup():
     print("Puis lance :  python sync_biblio2.py")
 
 
-def _ensure_tree(root: Path):
-    """Crée les sous-dossiers manquants de chaque identité."""
+def _identites_du_site(cfg):
+    """Identités déjà présentes dans la Bibliothèque 2 du site."""
+    try:
+        r = requests.get(cfg["url"] + "/sync/identities",
+                         params={"t": cfg["token"]}, timeout=20)
+        return [str(x) for x in (r.json().get("identities") or [])]
+    except Exception:
+        return []
+
+
+def _ensure_tree(root: Path, cfg=None):
+    """Crée les dossiers manquants — Y COMPRIS ceux des identités qui existent
+    DÉJÀ sur le site : sinon on ne sait pas où déposer ses fichiers."""
+    if cfg:
+        for ident in _identites_du_site(cfg):
+            try:
+                (root / ident).mkdir(exist_ok=True)
+            except Exception:
+                pass
     for ident_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         if ident_dir.name.startswith("_"):
             continue
@@ -121,11 +138,15 @@ def run(once=False):
     root = Path(cfg["root"])
     root.mkdir(parents=True, exist_ok=True)
     done = set(cfg.get("done") or [])          # clés « chemin|taille » déjà envoyées
-    print(f"👁  Surveillance de {root}\n    → {cfg['url']}\n"
-          f"    (Ctrl+C pour arrêter)\n")
+    _ensure_tree(root, cfg)
+    _ids = sorted(x.name for x in root.iterdir()
+                  if x.is_dir() and not x.name.startswith("_"))
+    print(f"👁  Surveillance de {root}\n    → {cfg['url']}")
+    print(f"    identités : {', '.join(_ids) if _ids else 'aucune — crée un dossier ici'}")
+    print("    (Ctrl+C pour arrêter)\n")
     while True:
         try:
-            _ensure_tree(root)
+            _ensure_tree(root, cfg)
             for ident_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                 ident = ident_dir.name.strip().lower()
                 if not ident or ident.startswith("_"):
