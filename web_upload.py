@@ -6379,9 +6379,17 @@ window.upPrefillIdentity = function(utab, ident, vault){
       sel.value = ident;
       try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
     }
-    // S'assure que la card identite est bien VISIBLE (au cas ou un ancien etat l'aurait cachee)
+    // Bibliothèque 2 : on MASQUE le sélecteur d'identité. Sinon il listerait
+    // toutes les identités de la Bibliothèque (qui n'ont rien à faire là) et
+    // afficherait le préfixe technique. Le bandeau ci-dessus dit déjà où va le
+    // fichier. Ailleurs : la carte reste visible (ancien état éventuel nettoyé).
+    var _v2 = String(ident||'').indexOf('v2_') === 0;
     form.querySelectorAll('.up-card').forEach(function(c){
-      if(c.querySelector('select[name=identity]')) c.style.display = '';
+      if(c.querySelector('select[name=identity]')) c.style.display = _v2 ? 'none' : '';
+    });
+    // le widget à avatars vit parfois HORS de la carte -> on le masque aussi
+    form.querySelectorAll('.isel').forEach(function(w){
+      w.style.display = _v2 ? 'none' : '';
     });
     var oldBadge = form.querySelector('.up-identity-badge');
     if(oldBadge) oldBadge.remove();
@@ -6393,6 +6401,8 @@ window.upClearPrefill = function(utab){
   form.querySelectorAll('.up-card').forEach(function(c){
     if(c.querySelector('select[name=identity]')) c.style.display = '';
   });
+  form.querySelectorAll('.isel').forEach(function(w){ w.style.display = ''; });
+  var vb = form.querySelector('.up-vault-badge'); if(vb) vb.remove();
   form.querySelectorAll('label').forEach(function(l){
     if(l.textContent.trim() === 'Identité'){
       l.style.display = '';
