@@ -907,13 +907,18 @@ def _vault_texts(category, identity):
 
 
 def random_bio_for(identity):
-    """Bios de l'identité : fichier bios.txt ET bibliothèque Bios du site
-    (les deux sources sont fusionnées), sinon bios partagées."""
+    """Bios de l'identité : fichier bios.txt ET bibliothèque Bios du site.
+
+    ⚠️ Le repli sur les bios PARTAGÉES (data/bios.txt) est réservé au marché
+    FR : sans ça, une identité US sans bio recevait des bios françaises."""
+    idl = (identity or "").lower().strip()
     if identity:
         bios = _read_bios_at(IDENTITIES_DIR / identity / "bios.txt")
         bios = bios + [b for b in _vault_texts("bios", identity) if b not in bios]
         if bios:
             return unescape_newlines(random.choice(bios))
+        if idl and idl not in _FR_MARKET_IDENTITIES:
+            return None            # US : pas de repli FR, on dit qu'il n'y en a pas
     bios = _read_bios_at(SHARED_BIOS_FILE)
     if bios:
         return unescape_newlines(random.choice(bios))
