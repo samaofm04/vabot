@@ -14937,7 +14937,10 @@ window.vaultGoTo = function(ev, url){
   // form-provault<...> pour le Vault PRO). Sans la 2e famille, un clic
   // identite dans le Vault PRO retombait sur la 1re section Bibliotheque
   // (cachee) et injectait le contenu PRO dedans -> ecran fige.
-  const VAULT_SECS = '.form-section[id^="form-cloud"],.form-section[id^="form-provault"]';
+  // …et form-v2<...> pour la 2e bibliothèque. Une famille oubliée ici = la
+  // section n'est jamais trouvée -> window.location.href, donc un RECHARGEMENT
+  // complet de la page à chaque changement d'identité (au lieu du swap).
+  const VAULT_SECS = '.form-section[id^="form-cloud"],.form-section[id^="form-provault"],.form-section[id^="form-v2"]';
   let sec = document.querySelector(VAULT_SECS);
   document.querySelectorAll(VAULT_SECS).forEach(s=>{
     if(s.style.display && s.style.display !== 'none') sec = s;
