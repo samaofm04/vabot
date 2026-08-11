@@ -5867,6 +5867,56 @@ document.addEventListener('DOMContentLoaded', function(){
   document.querySelectorAll('.up-form select[name=identity]').forEach(enhance);
 });
 // ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
+var identEditCtx={ident:'',rename:false};
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[data-identedit]'):null;
+  if(!b) return;
+  identEditCtx.ident=b.getAttribute('data-identedit')||'';
+  identEditCtx.rename=!!b.getAttribute('data-canrename');
+  var lbl=identEditCtx.ident.replace(/^v2_/,'');
+  var who=document.getElementById('ident-edit-who'); if(who) who.textContent='@'+lbl;
+  var nw=document.getElementById('ident-edit-namewrap');
+  if(nw) nw.style.display = identEditCtx.rename ? 'flex' : 'none';
+  var n=document.getElementById('ident-edit-name'); if(n) n.value=lbl;
+  var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
+  var e=document.getElementById('ident-edit-err'); if(e) e.textContent='';
+  var g=document.getElementById('ident-edit-go'); if(g){ g.disabled=false; g.textContent='Enregistrer'; }
+  var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='flex';
+});
+function identEditClose(){ var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='none'; }
+async function identEditSave(){
+  var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-go');
+  var ident=identEditCtx.ident, fait=false, cible=ident;
+  if(go){ go.disabled=true; go.textContent='⏳'; }
+  try{
+    if(identEditCtx.rename){
+      var nv=String((document.getElementById('ident-edit-name')||{}).value||'').trim().toLowerCase();
+      if(nv && nv !== ident.replace(/^v2_/,'')){
+        var f1=new FormData(); f1.set('identity',ident); f1.set('new_name',nv);
+        var r1=await fetch('/identity/rename',{method:'POST',body:f1,credentials:'same-origin'});
+        var j1=await r1.json();
+        if(!(j1&&j1.ok)){ if(err) err.textContent=(j1&&j1.error)||('Erreur '+r1.status);
+                          if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+        cible=j1.identity; fait=true;
+      }
+    }
+    var av=document.getElementById('ident-edit-avatar');
+    if(av&&av.files&&av.files[0]){
+      var f2=new FormData(); f2.set('identity',cible); f2.set('avatar',av.files[0]);
+      var r2=await fetch('/identity/avatar_set',{method:'POST',body:f2,credentials:'same-origin'});
+      var j2=await r2.json();
+      if(!(j2&&j2.ok)){ if(err) err.textContent=(j2&&j2.error)||('Erreur '+r2.status);
+                        if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+      fait=true;
+    }
+    if(!fait){ identEditClose(); return; }
+    identEditClose();
+    window.location.reload();
+  }catch(e){
+    if(err) err.textContent=String(e);
+    if(go){ go.disabled=false; go.textContent='Enregistrer'; }
+  }
+}
 var identNewCtx={vtab:'',ikey:''};
 document.addEventListener('click', function(ev){
   var b=ev.target.closest?ev.target.closest('[data-newident]'):null;
@@ -8095,6 +8145,24 @@ body.light .action-icon{color:#666}
     <div id="txtAddCount" style="font-size:12px;color:#75757f;font-weight:600;text-align:center">colle tes textes ci-dessus</div>
     <button type="button" onclick="txtAddField(true)" style="width:100%;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">＋ Ajouter un autre champ</button>
     <button type="button" id="txtAddGo" onclick="txtAddSubmit()" style="width:100%;background:#8b9cf7;border:0;color:#0b0d12;border-radius:10px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⬆ Ajouter</button>
+  </div>
+</div>
+
+<!-- ===== Modifier une identité : photo (partout) + nom (Bibliothèque 2) ===== -->
+<div id="ident-edit-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identEditClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="font-weight:800;font-size:15px">✏️ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
+    <label id="ident-edit-namewrap" style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Nom
+      <input id="ident-edit-name" type="text" autocomplete="off" data-lpignore="true"
+             style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box"></label>
+    <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil
+      <input id="ident-edit-avatar" type="file" accept="image/*"
+             style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box"></label>
+    <div id="ident-edit-err" style="color:#f87171;font-size:12px;min-height:15px"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" onclick="identEditClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
+      <button type="button" id="ident-edit-go" onclick="identEditSave()" style="flex:1;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Enregistrer</button>
+    </div>
   </div>
 </div>
 
@@ -13964,6 +14032,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        # ✏️ Modifier : photo de l'identité (partout) + son nom (Bibliothèque 2)
+        f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
+        f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
+        "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
+        "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
+        "cursor:pointer;font-family:inherit'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' "
+        "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+        "<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
+        "<path d='M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z'/></svg>Modifier</button>"
         f"{add_media_btn}"
         f"</div>"
         f"</div>"
@@ -39575,6 +39653,95 @@ def create_app():
                 warn = f"avatar refusé (format {ext})"
         _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
         return jsonify({"ok": True, "identity": safe, "warn": warn})
+
+    @app.route("/identity/avatar_set", methods=["POST"])
+    def identity_avatar_set():
+        """Change la photo d'une identité (avatar.<ext> dans son dossier)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        f = request.files.get("avatar")
+        if not f or not f.filename:
+            return jsonify({"ok": False, "error": "photo manquante"})
+        ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
+        if ext not in ("png", "jpg", "jpeg", "webp"):
+            return jsonify({"ok": False, "error": f"format refusé ({ext})"})
+        d = IDENTITIES_DIR / ident
+        for old in d.glob("avatar.*"):        # une seule photo à la fois
+            try:
+                old.unlink()
+            except Exception:
+                pass
+        try:
+            f.save(str(d / f"avatar.{ext}"))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "identity": ident})
+
+    @app.route("/identity/rename", methods=["POST"])
+    def identity_rename():
+        """Renomme une identité de la BIBLIOTHÈQUE 2 (dossier + ses textes).
+
+        Volontairement limité à ces identités : celles de la Bibliothèque sont
+        référencées par leur NOM un peu partout (fiches VA Discord, marques
+        banger, plannings…) — les renommer casserait ces liens en silence."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import re as _re
+        old = (request.form.get("identity") or "").strip().lower()
+        raw = (request.form.get("new_name") or "").strip()
+        if old not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if not _is_v2(old):
+            return jsonify({"ok": False, "error":
+                            "Renommage réservé à la Bibliothèque 2 (une identité "
+                            "de la Bibliothèque est liée aux VAs Discord)."})
+        base = _re.sub(r"[^a-z0-9_\-]", "", raw.lower())[:26]
+        if not base:
+            return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
+        new = V2_PREFIX + base
+        if new == old:
+            return jsonify({"ok": True, "identity": old, "label": _v2_label(old)})
+        if new in _list_identities():
+            return jsonify({"ok": False, "error": f"« {base} » existe déjà"})
+        try:
+            (IDENTITIES_DIR / old).rename(IDENTITIES_DIR / new)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Renommage impossible : {e}"})
+        # Suivre le nom dans les textes (bios/CTA/…), les captions et l'ordre
+        try:
+            import text_pool as _tp
+            _d = _tp._load() if hasattr(_tp, "_load") else None
+            if isinstance(_d, dict):
+                for _cat, _items in _d.items():
+                    if isinstance(_items, list):
+                        for _e in _items:
+                            if isinstance(_e, dict) and str(_e.get("identity") or "").lower() == old:
+                                _e["identity"] = new
+                if hasattr(_tp, "_save"):
+                    _tp._save(_d)
+        except Exception:
+            pass
+        try:
+            lib = _load_captions_lib()
+            if old in lib:
+                lib[new] = lib.pop(old)
+                _save_captions_lib(lib)
+        except Exception:
+            pass
+        try:
+            order = _load_identity_order()
+            if old in order:
+                _save_identity_order([new if x == old else x for x in order])
+        except Exception:
+            pass
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "identity": new, "label": _v2_label(new)})
 
     @app.route("/identity/reorder", methods=["POST"])
     def identity_reorder():
