@@ -5959,6 +5959,20 @@ function showTab(group,name,title,subtitle){
   if(btn)btn.classList.add('active');
   if(head)head.classList.add('active');
   if(sec)sec.style.display='block';
+  else {
+    // Section absente = page servie par une version plus ancienne du site
+    // (deploiement en cours). Sans ce garde-fou : ecran blanc, ou le Dashboard
+    // qui reapparait sous le titre du nouvel onglet -> incomprehensible.
+    var _home=document.getElementById('form-home');
+    if(_home){
+      _home.style.display='block';
+      _home.insertAdjacentHTML('afterbegin',
+        "<div style='margin:0 0 14px;padding:12px 14px;background:rgba(251,191,36,.1);"
+        +"border:1px solid rgba(251,191,36,.35);border-radius:10px;color:#fbbf24;font-size:13px'>"
+        +"⏳ Cet onglet vient d'etre ajoute au site — recharge la page "
+        +"(<b>Ctrl+Maj+R</b>) pour l'ouvrir.</div>");
+    }
+  }
   // ===== Lazy-load des onglets lourds (1er open seulement) =====
   if(sec){
     var lazy = sec.querySelector('[data-lazy-tab]');
@@ -11151,7 +11165,7 @@ body.light .va-id{color:#9ca3af}
         "<div class='va-vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
         "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' id='va-search' placeholder='Rechercher…' oninput='var e=this;siteDebounce(3, function(){ vaSearch(e.value); }, 130)'>"
+        "<input type='text' id='va-search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='var e=this;siteDebounce(3, function(){ vaSearch(e.value); }, 130)'>"
         "</div>"
         "<select id='va-filter-identity' onchange='vaSearch(null)' class='va-vault-filter'>"
         "<option value=''>Toutes les identités</option>"
@@ -12554,7 +12568,7 @@ function vaPaySave(){
         "<div id='vlm-subtitle'></div>"
         "<button onclick='vaLinksClose()' class='vlm-close'>×</button>"
         "</div>"
-        "<input type='text' id='vlm-search' placeholder='Rechercher un lien…' oninput='var e=this;siteDebounce(4, function(){ vaLinksFilter(e.value); }, 130)'>"
+        "<input type='text' id='vlm-search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher un lien…' oninput='var e=this;siteDebounce(4, function(){ vaLinksFilter(e.value); }, 130)'>"
         "<div id='vlm-pills'></div>"
         "<div id='vlm-list'></div>"
         "<div class='vlm-foot'>"
@@ -13667,7 +13681,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "<div class='vault-sidebar'>"
         f"<div class='vault-search'>"
         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
+        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
         f"</div>"
         f"<div class='vault-filter-row'>"
         f"<div style='color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -15311,7 +15325,7 @@ def _render_cloud_captions_html() -> str:
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-captions'>"
+        "<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-captions'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#a855f7;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -15577,7 +15591,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{dom_key}'>"
+        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{dom_key}'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#22c55e;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -15823,7 +15837,7 @@ def _render_textvault_html(cat: str) -> str:
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{cat}'>"
+        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{cat}'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#f59e0b;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -22787,7 +22801,7 @@ async function glDeleteWatcher(id, btn){
         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2' "
         f"style='position:absolute;left:10px;top:50%;transform:translateY(-50%)'>"
         f"<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' id='ext-sb-search' placeholder='Rechercher…' oninput='siteDebounce(2, extSbFilter, 130)' "
+        f"<input type='text' id='ext-sb-search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='siteDebounce(2, extSbFilter, 130)' "
         f"style='background:#0a0c10;border:1px solid #2a2a2a;color:#fff;padding:8px 12px 8px 32px;"
         f"border-radius:8px;font-size:12px;width:100%;font-family:inherit'>"
         f"</div>"
@@ -23438,7 +23452,7 @@ def _render_jailbreak_html() -> str:
         "<div class='jb-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='#888' stroke-width='2'>"
         "<circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' id='jb-search-input' placeholder='Rechercher (identité ou username)…' oninput='siteDebounce(1, jbApplyFilter, 130)'>"
+        "<input type='text' id='jb-search-input' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher (identité ou username)…' oninput='siteDebounce(1, jbApplyFilter, 130)'>"
         "</div>"
         f"<select id='jb-filter-identity' class='jb-filter' onchange='jbApplyFilter()'>{filter_opts}</select>"
         "</div>"
@@ -39717,7 +39731,9 @@ def create_app():
         # Cible : une identité OBLIGATOIRE (le pool partagé est retiré — sinon
         # il se re-remplirait en silence alors que plus aucune UI ne le liste).
         ident = (request.form.get("identity") or "").strip().lower()
-        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        valid = ({x.lower() for x in _list_content_identities()}
+                 | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
         if not ident or ident not in valid:
             return _error("Choisis une identité pour les PP (le pool partagé n'existe plus)")
         target_dir = IDENTITIES_DIR / ident / _vault_subdir("profile_pics")
@@ -39752,7 +39768,9 @@ def create_app():
         if not is_auth():
             return redirect("/")
         ident = (request.form.get("identity") or "").strip().lower()
-        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        valid = ({x.lower() for x in _list_content_identities()}
+                 | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
         if ident not in valid:
             return _error("Identité inconnue", tab="cloudpps")
         if not PROFILE_PICS_DIR.exists():
@@ -39794,7 +39812,9 @@ def create_app():
             return jsonify({"ok": False, "error": "JSON invalide"})
         if not isinstance(files, list) or not isinstance(targets, list) or not files or not targets:
             return jsonify({"ok": False, "error": "sélection ou cibles manquantes"})
-        valid = {x.lower() for x in _list_content_identities()} | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+        valid = ({x.lower() for x in _list_content_identities()}
+                 | {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
+                 | {x.lower() for x in _list_v2_identities()})  # PP de la Bibliothèque 2
         tgts = [t for t in (str(x).strip().lower() for x in targets[:50]) if t in valid]
         if not tgts:
             return jsonify({"ok": False, "error": "aucune identité cible valide"})
