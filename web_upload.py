@@ -6434,9 +6434,17 @@ window.upPrefillIdentity = function(utab, ident, vault){
     // afficherait le préfixe technique. Le bandeau ci-dessus dit déjà où va le
     // fichier. Ailleurs : la carte reste visible (ancien état éventuel nettoyé).
     var _v2 = String(ident||'').indexOf('v2_') === 0;
-    form.querySelectorAll('.up-card').forEach(function(c){
-      if(c.querySelector('select[name=identity]')) c.style.display = _v2 ? 'none' : '';
-    });
+    // ⚠️ On masque le SELECT, JAMAIS la carte : dans le panneau « Photo de
+    // profil », le sélecteur et la ZONE DE DÉPÔT partagent la même carte —
+    // la cacher faisait disparaître le choix du fichier (plus que le bandeau
+    // et le bouton, envoi impossible).
+    form.querySelectorAll('.up-card').forEach(function(c){ c.style.display = ''; });
+    if(sel){
+      sel.style.display = _v2 ? 'none' : '';
+      // le petit texte « Choisis l'identité… » juste au-dessus n'a plus de sens
+      var hint = sel.previousElementSibling;
+      if(hint && hint.tagName === 'SMALL') hint.style.display = _v2 ? 'none' : '';
+    }
     // le widget à avatars vit parfois HORS de la carte -> on le masque aussi
     form.querySelectorAll('.isel').forEach(function(w){
       w.style.display = _v2 ? 'none' : '';
