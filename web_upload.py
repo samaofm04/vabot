@@ -13970,7 +13970,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
         add_media_btn = (
             f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
-            f"upPrefillIdentity('{utab}', '{selected}', '{vault_key}');\" "
+            f"upPrefillIdentity('{utab}', '{selected}', '{vault_key}', '{tab_name}');\" "
             f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
             f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
             f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
