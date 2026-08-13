@@ -6385,7 +6385,7 @@ window.igFallbackCopy = function(text){
 // les MEMES panneaux d'upload ; ce champ cache dit au serveur ou ranger le
 // fichier (dossier <ident>/<type> ou <ident>/pro_<type>). Toujours ecrit, meme
 // vide : sans ca un upload PRO puis un upload normal repartait en PRO.
-window.upPrefillIdentity = function(utab, ident, vault){
+window.upPrefillIdentity = function(utab, ident, vault, backTab){
   setTimeout(function(){
     var form = document.getElementById('form-' + utab);
     if(!form) return;
@@ -6403,14 +6403,25 @@ window.upPrefillIdentity = function(utab, ident, vault){
         bd.textContent = '🔒 Destination : Vault PRO — ces fichiers ne vont PAS dans la Bibliothèque';
         form.insertBefore(bd, form.firstChild);
       }
-      // Vault PRO : même repère (l'identité porte le préfixe v2_)
+      // Bibliothèque 2 : même repère (l'identité porte le préfixe v2_)
       if(String(ident||'').indexOf('v2_') === 0){
         var bd2 = document.createElement('div');
         bd2.className = 'up-vault-badge';
         bd2.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);color:#7aa2ff;border-radius:10px;font-size:12.5px;font-weight:700';
-        bd2.textContent = '📁 Destination : Vault PRO — @' + String(ident).replace(/^v2_/,'');
+        bd2.textContent = '📁 Destination : Bibliothèque 2 — @' + String(ident).replace(/^v2_/,'');
         form.insertBefore(bd2, form.firstChild);
       }
+    }
+    // D'ou l'on vient : le formulaire d'upload est PARTAGE par toutes les
+    // bibliotheques, donc sans ce champ le POST redirige vers la Bibliotheque.
+    if(backTab){
+      var bt = form.querySelector('input[name=back_tab]');
+      if(!bt){
+        bt = document.createElement('input');
+        bt.type = 'hidden'; bt.name = 'back_tab';
+        form.appendChild(bt);
+      }
+      bt.value = backTab;
     }
     var sel = form.querySelector('select[name=identity]');
     if(sel){
@@ -14796,19 +14807,37 @@ document.addEventListener('submit', function(e){
     pp: ['provaultpps','cloud_pro_profile_pics_ident']
   };
   const _isPro = nonFileFields['vault'] === 'pro';
-  const _g = (_isPro ? _gmapPro : _gmap)[form.dataset.utype];
   const _ident = nonFileFields['identity'] || '';
+  // Bibliotheque 2 : ses onglets a elle, sinon on retombait dans la Bibliotheque
+  const _gmapV2 = {
+    reel: ['v2reels','cloud_videos_ident'],
+    post: ['v2posts','cloud_posts_ident'],
+    story: ['v2stories','cloud_stories_ident'],
+    storycta: ['v2storyctas','cloud_storyctas_ident'],
+    pp: ['v2pps','cloud_profile_pics_ident'],
+    brute: ['v2brutes','cloud_brutes_ident']
+  };
+  const _isV2 = String(_ident).indexOf('v2_') === 0;
+  const _g = (_isV2 ? _gmapV2 : (_isPro ? _gmapPro : _gmap))[form.dataset.utype];
+  // Nom affiche : jamais le prefixe technique
+  const _identLbl = String(_ident).replace(/^v2_/, '');
   const typeLbl = {reel:'reel(s)', post:'post(s)', story:'story(s)', storycta:'story CTA', pp:'photo(s) de profil', brute:'rush(s) brut(s)', template:'template(s)'}[form.dataset.utype] || 'fichier(s)';
   // Carte de progression façon Infloww, avec miniature du 1er fichier image
   const taskId = 'up-' + Date.now();
   let thumbUrl = null;
   try { if(files[0] && files[0].type && files[0].type.indexOf('image/') === 0) thumbUrl = URL.createObjectURL(files[0]); } catch(e2){}
-  vaTask.add(taskId, {title: 'Upload de ' + files.length + ' ' + typeLbl + (_ident ? ' → ' + _ident : ''), thumb: thumbUrl});
+  vaTask.add(taskId, {title: 'Upload de ' + files.length + ' ' + typeLbl + (_identLbl ? ' → ' + _identLbl : ''), thumb: thumbUrl});
   const fileProg = {};
   function updAgg(){
     let sum = 0;
     for(let i = 0; i < files.length; i++) sum += (fileProg[i] || 0);
-    vaTask.progress(taskId, sum / files.length, (done + errs) + '/' + files.length);
+    const frac = sum / files.length, fini = done + errs;
+    // « 0/1 · 100% » etait deroutant : a 100% le fichier est TRANSFERE, le
+    // serveur est encore en train de l'enregistrer.
+    const lbl = (frac >= 1 && fini < files.length)
+      ? 'enregistrement…'
+      : fini + '/' + files.length;
+    vaTask.progress(taskId, frac, lbl);
   }
   // Le form est libéré tout de suite : on vide l'input (re-spam possible) et on
   // retourne DIRECT sur la bonne galerie — l'upload continue en haut à droite.
@@ -14844,7 +14873,7 @@ document.addEventListener('submit', function(e){
     }
     if(thumbUrl){ try { URL.revokeObjectURL(thumbUrl); } catch(e4){} }
     if(errs > 0){ vaTask.error(taskId, errs + ' erreur(s) sur ' + files.length + ' upload(s)'); }
-    else { vaTask.done(taskId, '✓ ' + done + ' ' + typeLbl + ' uploadé(s)' + (_ident ? ' → ' + _ident : '')); }
+    else { vaTask.done(taskId, '✓ ' + done + ' ' + typeLbl + ' uploadé(s)' + (_identLbl ? ' → ' + _identLbl : '')); }
     // Refresh la galerie SEULEMENT si l'utilisateur y est encore (sinon on ne dérange pas)
     if(done > 0 && _g){
       var curTab = new URLSearchParams(window.location.search).get('tab');
