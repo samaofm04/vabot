@@ -190,7 +190,9 @@ def _upload_file(sess, parent_id: str, path: Path) -> str:
 
 
 # ---------------------------------------------------------------- synchro
-def _iter_jobs(include_videos: bool):
+def _iter_jobs(include_videos):
+    """`include_videos` : False/"" = photos seules, "montage" = + rushs bruts et
+    templates (Reel montage), True/"all" = tout (reels compris)."""
     """(chemin Drive, Path fichier) pour TOUT le site.
 
     Rangement dans le Drive : <Bibliothèque>/<Identité>/<Type>. Les trois
@@ -204,7 +206,10 @@ def _iter_jobs(include_videos: bool):
         nom = ident_dir.name
         est_v2 = nom.lower().startswith(V2_PREFIX)
         label = nom[len(V2_PREFIX):] if est_v2 else nom
-        biblio = "Bibliotheque 2" if est_v2 else "Bibliotheque"
+        # La Bibliotheque reste A LA RACINE (structure deja en place dans le
+        # Drive de l'user) : y ajouter un niveau aurait recree TOUT en double
+        # a cote de l'existant. Seules les 2 autres ont leur dossier.
+        biblio = "Bibliotheque 2" if est_v2 else None
         plan = list(SECTIONS) + ([] if est_v2 else
                                  [(s, n, v, "Vault PRO") for s, n, v in SECTIONS_PRO])
         for entree in plan:
@@ -213,15 +218,22 @@ def _iter_jobs(include_videos: bool):
             else:
                 sub, drive_name, is_video = entree
                 biblio_x = biblio
-            if is_video and not include_videos:
-                continue
+            if is_video:
+                mode = include_videos
+                if not mode:
+                    continue
+                # « montage » : les rushs et templates partent, PAS les reels
+                # (ce sont eux qui pesent le plus lourd dans le quota).
+                if str(mode).lower() == "montage" and sub in ("videos", "pro_videos"):
+                    continue
             exts = VIDEO_EXTS if is_video else IMAGE_EXTS
             folder = ident_dir / sub
             if not folder.exists():
                 continue
             for p in sorted(folder.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name:
-                    yield (biblio_x, label.title(), drive_name), p
+                    chemin = ((biblio_x,) if biblio_x else ()) + (label.title(), drive_name)
+                    yield chemin, p
 
 
 # ===== Import Drive -> site =====

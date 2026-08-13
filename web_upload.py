@@ -15878,7 +15878,9 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             else:
                 _stat = "Pas encore synchronisé."
             _email = _gd.sa_email() or "(email du compte de service inconnu)"
-            _iv = " checked" if _cfg.get("include_videos") else ""
+            _rawiv = _cfg.get("include_videos")
+            _ivmode = ("montage" if str(_rawiv).lower() == "montage"
+                       else ("all" if _rawiv else ""))
             sync_box = (
                 "<div style='margin:16px 0;padding:16px;background:#101013;border:1px solid #232327;border-radius:12px'>"
                 "<div style='font-weight:700;font-size:14px'>☁️ Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
@@ -15890,7 +15892,12 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "<form method='POST' action='/gdrive/config' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px'>"
                 f"<input type='text' name='folder' value='{_fol}' placeholder='Lien ou ID du dossier Drive partagé' "
                 "style='flex:1;min-width:260px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;height:34px;padding:0 10px;font-size:12.5px;font-family:inherit'>"
-                f"<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc;cursor:pointer'><input type='checkbox' name='include_videos' value='1'{_iv}> inclure les vidéos (reels/brutes/templates)</label>"
+                f"<label style='display:flex;align-items:center;gap:6px;font-size:12px;color:#c4c4cc'>Vidéos "
+                f"<select name='include_videos' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:6px 8px;font-size:12px;font-family:inherit'>"
+                f"<option value=''{'' if _ivmode else ' selected'}>aucune (photos seulement)</option>"
+                f"<option value='montage'{' selected' if _ivmode == 'montage' else ''}>Reel montage (rushs bruts + templates)</option>"
+                f"<option value='1'{' selected' if _ivmode == 'all' else ''}>tout (reels compris)</option>"
+                f"</select></label>"
                 "<button type='submit' style='padding:8px 14px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>💾 Enregistrer</button>"
                 "</form>"
                 "<form method='POST' action='/gdrive/sync' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
@@ -40463,7 +40470,9 @@ def create_app():
         if raw and not fid:
             return _error("Lien/ID de dossier Drive invalide", tab="clouddrive")
         cfg["folder"] = fid
-        cfg["include_videos"] = bool(request.form.get("include_videos"))
+        _v = (request.form.get("include_videos") or "").strip().lower()
+        # "" = photos seules | "montage" = rushs bruts + templates | "1" = tout
+        cfg["include_videos"] = ("montage" if _v == "montage" else (True if _v else False))
         _gd.save_config(cfg)
         return _success("☁️ Config Google Drive enregistrée", tab="clouddrive")
 
