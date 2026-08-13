@@ -42,6 +42,18 @@ SECTIONS = (
     ("templates", "Templates montage", True),
 )
 
+# Vault PRO : mêmes types, dossiers pro_* (2e bibliothèque, mêmes identités)
+SECTIONS_PRO = (
+    ("pro_profile_pics", "Photos de profil", False),
+    ("pro_posts", "Posts", False),
+    ("pro_stories", "Stories", False),
+    ("pro_storyctas", "Story CTA", False),
+    ("pro_videos", "Reels", True),
+)
+
+# Bibliothèque 2 : identités préfixées, mêmes sous-dossiers que la Bibliothèque
+V2_PREFIX = "v2_"
+
 _LOCK = threading.Lock()
 _THREAD: threading.Thread | None = None
 _STATUS: dict = {"state": "idle"}
@@ -179,13 +191,28 @@ def _upload_file(sess, parent_id: str, path: Path) -> str:
 
 # ---------------------------------------------------------------- synchro
 def _iter_jobs(include_videos: bool):
-    """(identité, section Drive, Path fichier) pour tout ce qui est à couvrir."""
+    """(chemin Drive, Path fichier) pour TOUT le site.
+
+    Rangement dans le Drive : <Bibliothèque>/<Identité>/<Type>. Les trois
+    bibliothèques sont couvertes — sans ça, la Bibliothèque 2 arrivait en vrac
+    sous « V2_Beta » et le Vault PRO n'était pas sauvegardé du tout."""
     if not IDENTITIES_DIR.exists():
         return
     for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
         if not ident_dir.is_dir():
             continue
-        for sub, drive_name, is_video in SECTIONS:
+        nom = ident_dir.name
+        est_v2 = nom.lower().startswith(V2_PREFIX)
+        label = nom[len(V2_PREFIX):] if est_v2 else nom
+        biblio = "Bibliotheque 2" if est_v2 else "Bibliotheque"
+        plan = list(SECTIONS) + ([] if est_v2 else
+                                 [(s, n, v, "Vault PRO") for s, n, v in SECTIONS_PRO])
+        for entree in plan:
+            if len(entree) == 4:
+                sub, drive_name, is_video, biblio_x = entree
+            else:
+                sub, drive_name, is_video = entree
+                biblio_x = biblio
             if is_video and not include_videos:
                 continue
             exts = VIDEO_EXTS if is_video else IMAGE_EXTS
@@ -194,7 +221,7 @@ def _iter_jobs(include_videos: bool):
                 continue
             for p in sorted(folder.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name:
-                    yield ident_dir.name, drive_name, p
+                    yield (biblio_x, label.title(), drive_name), p
 
 
 # ===== Import Drive -> site =====
@@ -206,10 +233,13 @@ IMPORT_FOLDER_NAME = "A IMPORTER"
 
 # sous-dossier du Drive -> dossier de l'identite
 IMPORT_MAP = {
+    # noms libres cote user
     "video brut": "brutes", "videos brutes": "brutes", "brutes": "brutes",
     "reels": "videos", "posts": "posts", "stories": "stories",
     "story cta": "storyctas", "photos de profil": "profile_pics",
     "templates montage": "templates", "templates": "templates",
+    # memes noms que ceux crees par la synchro (aller-retour coherent)
+    "rushs bruts": "brutes",
 }
 
 
@@ -316,18 +346,19 @@ def run_sync() -> dict:
     done = skipped = uploaded = errors = 0
     _set_status(state="running", total=total, done=0, uploaded=0,
                 skipped=0, errors=0, err="", ts=int(time.time()))
-    for ident, drive_name, path in jobs:
+    for chemin, path in jobs:
         done += 1
-        key = f"{ident}/{drive_name}/{path.name}"
+        key = "/".join(chemin) + "/" + path.name
         try:
             size = path.stat().st_size
             rec = st["uploaded"].get(key)
             if rec and rec.get("size") == size:
                 skipped += 1
             else:
-                ident_folder = _ensure_folder(sess, root, ident.title(), st)
-                sec_folder = _ensure_folder(sess, ident_folder, drive_name, st)
-                fid = _upload_file(sess, sec_folder, path)
+                parent = root
+                for niveau in chemin:          # <Bibliothèque>/<Identité>/<Type>
+                    parent = _ensure_folder(sess, parent, niveau, st)
+                fid = _upload_file(sess, parent, path)
                 st["uploaded"][key] = {"size": size, "id": fid}
                 uploaded += 1
                 if uploaded % 10 == 0:
