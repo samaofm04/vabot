@@ -15898,6 +15898,15 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 f"<span style='font-size:12px;color:#9a9aa6'>{_stat}</span>"
                 "</form>"
                 "<div style='font-size:11px;color:#75757f;margin-top:8px'>Par défaut les vidéos ne partent pas (quota ~15 Go du compte de service) — coche la case si tu veux tout envoyer.</div>"
+                # SENS INVERSE : Drive -> site. Pour les gros lots (le navigateur
+                # ne transporte rien, c'est le serveur qui télécharge).
+                "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
+                "<form method='POST' action='/gdrive/import' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
+                "<button type='submit' style='padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer depuis le Drive</button>"
+                "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
+                "</form>"
+                "<div style='font-size:11px;color:#75757f;margin-top:8px'>Sous-dossiers reconnus : Video brut, Reels, Posts, Stories, Story CTA, Photos de profil, Templates montage. Rien n'est supprimé du Drive.</div>"
+                "</div>"
                 "</div>"
             )
     except Exception:
@@ -40470,6 +40479,35 @@ def create_app():
         if not _gd.start_background():
             return _error("Une synchro tourne déjà — recharge l'onglet pour suivre", tab="clouddrive")
         return _success("☁️ Synchro Google Drive lancée en arrière-plan — recharge l'onglet Drive pour suivre l'avancement", tab="clouddrive")
+
+    @app.route("/gdrive/import", methods=["POST"])
+    def gdrive_import_now():
+        """Rapatrie « A IMPORTER » du Drive vers la bibliothèque. Idéal pour les
+        gros lots : le VPS télécharge depuis Google, donc aucune limite de
+        taille du navigateur."""
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        if not _gd.available():
+            return _error("Compte de service Google absent (data/google_service_account.json)",
+                          tab="clouddrive")
+        if not _gd.folder_id_from(_gd.load_config().get("folder") or ""):
+            return _error("Renseigne d'abord le dossier Drive partagé", tab="clouddrive")
+        try:
+            res = _gd.run_import()
+        except Exception as e:
+            return _error(f"Import Drive : {e}", tab="clouddrive")
+        if res.get("note"):
+            return _error(res["note"], tab="clouddrive")
+        if not res.get("total"):
+            return _success("Rien à importer — dépose tes fichiers dans "
+                            "« A IMPORTER/<identité>/Video brut/ » sur le Drive",
+                            tab="clouddrive")
+        return _success(
+            f"⬇️ {res['imported']} fichier(s) importé(s) depuis le Drive"
+            + (f" · {res['errors']} échec(s)" if res.get("errors") else "")
+            + (" · le reste était déjà là" if res["imported"] < res["total"] else ""),
+            tab="clouddrive")
 
     # ============ BUSINESS ROUTES ============
     @app.route("/business/sfs/add", methods=["POST"])

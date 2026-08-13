@@ -197,6 +197,110 @@ def _iter_jobs(include_videos: bool):
                     yield ident_dir.name, drive_name, p
 
 
+# ===== Import Drive -> site =====
+# Dossier « A IMPORTER » a la racine du Drive : tu y deposes tes videos (par
+# l'app Drive, sans limite de taille du navigateur), le serveur les rapatrie
+# dans la bibliotheque. Les fichiers ne sont JAMAIS supprimes du Drive : ils
+# sont simplement notes comme importes (etat local).
+IMPORT_FOLDER_NAME = "A IMPORTER"
+
+# sous-dossier du Drive -> dossier de l'identite
+IMPORT_MAP = {
+    "video brut": "brutes", "videos brutes": "brutes", "brutes": "brutes",
+    "reels": "videos", "posts": "posts", "stories": "stories",
+    "story cta": "storyctas", "photos de profil": "profile_pics",
+    "templates montage": "templates", "templates": "templates",
+}
+
+
+def _lister(sess, parent_id, dossiers=False):
+    q = (f"'{parent_id}' in parents and trashed = false and mimeType "
+         + ("=" if dossiers else "!=") + " 'application/vnd.google-apps.folder'")
+    out, page = [], None
+    while True:
+        prm = {"q": q, "fields": "nextPageToken, files(id,name,size)",
+               "pageSize": 200, "supportsAllDrives": "true",
+               "includeItemsFromAllDrives": "true"}
+        if page:
+            prm["pageToken"] = page
+        r = sess.get("https://www.googleapis.com/drive/v3/files", params=prm, timeout=60)
+        r.raise_for_status()
+        d = r.json()
+        out += d.get("files") or []
+        page = d.get("nextPageToken")
+        if not page:
+            return out
+
+
+def _telecharger(sess, file_id, cible: Path):
+    """Ecrit le fichier sans jamais lire son contenu."""
+    r = sess.get(f"https://www.googleapis.com/drive/v3/files/{file_id}",
+                 params={"alt": "media", "supportsAllDrives": "true"},
+                 stream=True, timeout=900)
+    r.raise_for_status()
+    tmp = cible.with_suffix(cible.suffix + ".part")
+    with tmp.open("wb") as fh:
+        for bloc in r.iter_content(1 << 20):
+            if bloc:
+                fh.write(bloc)
+    tmp.replace(cible)
+
+
+def run_import() -> dict:
+    """Rapatrie « A IMPORTER/<identite>/<type>/ » du Drive vers le site."""
+    cfg = load_config()
+    root = folder_id_from(cfg.get("folder") or "")
+    if not root:
+        raise RuntimeError("dossier Drive non configuré")
+    st = _load_state()
+    st.setdefault("imported", {})
+    sess = _session()
+    racine = None
+    for f in _lister(sess, root, dossiers=True):
+        if f["name"].strip().lower() == IMPORT_FOLDER_NAME.lower():
+            racine = f["id"]
+            break
+    if not racine:
+        return {"total": 0, "imported": 0, "errors": 0,
+                "note": f"crée un dossier « {IMPORT_FOLDER_NAME} » dans le Drive"}
+    total = imported = errors = 0
+    for ident_dir in _lister(sess, racine, dossiers=True):
+        ident = ident_dir["name"].strip().lower()
+        if not ident:
+            continue
+        for type_dir in _lister(sess, ident_dir["id"], dossiers=True):
+            sub = IMPORT_MAP.get(type_dir["name"].strip().lower())
+            if not sub:
+                continue
+            exts = VIDEO_EXTS if sub in ("brutes", "templates", "videos") else IMAGE_EXTS
+            cible_dir = IDENTITIES_DIR / ident / sub
+            for f in _lister(sess, type_dir["id"]):
+                nom = Path(f["name"]).name
+                if Path(nom).suffix.lower() not in exts:
+                    continue
+                total += 1
+                cle = f["id"]
+                if st["imported"].get(cle):
+                    continue
+                try:
+                    cible_dir.mkdir(parents=True, exist_ok=True)
+                    dst = cible_dir / nom
+                    k = 2
+                    while dst.exists():           # jamais d'ecrasement
+                        dst = cible_dir / f"{Path(nom).stem}_{k}{Path(nom).suffix}"
+                        k += 1
+                    _telecharger(sess, f["id"], dst)
+                    st["imported"][cle] = {"name": dst.name, "ts": int(time.time())}
+                    imported += 1
+                    _save_state(st)
+                except Exception as e:
+                    errors += 1
+                    _set_status(err=str(e)[:200])
+    _save_state(st)
+    return {"total": total, "imported": imported, "errors": errors,
+            "ts": int(time.time())}
+
+
 def run_sync() -> dict:
     """Synchro complète (bloquant — à lancer via start_background)."""
     cfg = load_config()
