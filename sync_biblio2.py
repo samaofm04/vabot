@@ -114,6 +114,47 @@ def _ensure_tree(root: Path, cfg=None):
             (ident_dir / label).mkdir(exist_ok=True)
 
 
+def _lister_site(cfg, ident, kind):
+    """Noms des fichiers présents sur le site pour cette identité/type."""
+    try:
+        r = requests.get(cfg["url"] + "/sync/list",
+                         params={"identity": ident, "kind": kind, "t": cfg["token"]},
+                         timeout=30)
+        return list(r.json().get("files") or [])
+    except Exception:
+        return []
+
+
+def _descendre(cfg, ident, kind, dossier: Path, done: set):
+    """Récupère du site les fichiers absents en local. COPIE pure : rien n'est
+    supprimé, ni ici ni là-bas. Les fichiers descendus sont marqués comme déjà
+    connus pour ne pas repartir vers le site juste après."""
+    n = 0
+    for name in _lister_site(cfg, ident, kind):
+        cible = dossier / name
+        if cible.exists():
+            continue
+        try:
+            r = requests.get(cfg["url"] + "/sync/get",
+                             params={"identity": ident, "kind": kind,
+                                     "file": name, "t": cfg["token"]},
+                             timeout=600, stream=True)
+            if r.status_code != 200:
+                continue
+            tmp = cible.with_suffix(cible.suffix + ".part")
+            with tmp.open("wb") as fh:          # écrit sans jamais lire
+                for bloc in r.iter_content(1 << 20):
+                    if bloc:
+                        fh.write(bloc)
+            tmp.replace(cible)
+            done.add(f"{cible}|{cible.stat().st_size}")
+            n += 1
+            print(f"  ⬇ {ident}/{dossier.name}/{name}")
+        except Exception as e:
+            print(f"  ⚠️  descente impossible : {e}")
+    return n
+
+
 def _push(cfg, ident, kind, path: Path):
     url = cfg["url"] + "/sync/push"
     with path.open("rb") as fh:                    # ouvert en BINAIRE, jamais lu
@@ -130,7 +171,7 @@ def _push(cfg, ident, kind, path: Path):
         return {"ok": False, "error": f"HTTP {r.status_code}"}
 
 
-def run(once=False):
+def run(once=False, descendre=True):
     cfg = _load()
     if not cfg.get("url") or not cfg.get("token") or not cfg.get("root"):
         print("Configuration absente — lance d'abord :  python sync_biblio2.py --setup")
@@ -143,6 +184,8 @@ def run(once=False):
                   if x.is_dir() and not x.name.startswith("_"))
     print(f"👁  Surveillance de {root}\n    → {cfg['url']}")
     print(f"    identités : {', '.join(_ids) if _ids else 'aucune — crée un dossier ici'}")
+    print("    les 2 sens : ce que tu déposes monte, ce qui est sur le site descend")
+    print("    (rien n'est JAMAIS supprimé, ni ici ni là-bas)")
     print("    (Ctrl+C pour arrêter)\n")
     while True:
         try:
@@ -155,6 +198,10 @@ def run(once=False):
                     d = ident_dir / label
                     if not d.exists():
                         continue
+                    if descendre:          # site -> PC (copie, aucune suppression)
+                        if _descendre(cfg, ident, kind, d, done):
+                            cfg["done"] = sorted(done)[-5000:]
+                            _save(cfg)
                     for f in sorted(d.iterdir()):
                         if not f.is_file() or f.name.startswith("."):
                             continue
@@ -198,8 +245,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Dossier synchronisé — Vault PRO")
     ap.add_argument("--setup", action="store_true", help="configurer (adresse, jeton, dossier)")
     ap.add_argument("--once", action="store_true", help="envoyer une fois puis quitter")
+    ap.add_argument("--sans-descente", action="store_true",
+                    help="ne pas rapatrier les fichiers du site vers le PC")
     a = ap.parse_args()
     if a.setup:
         setup()
     else:
-        run(once=a.once)
+        run(once=a.once, descendre=not a.sans_descente)

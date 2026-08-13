@@ -7099,7 +7099,7 @@ document.addEventListener('click',function(e){
 {msg_html}
 
 <div class="form-section" id="form-brute" style="display:none">
-<form method="POST" action="/upload/brute" enctype="multipart/form-data" class="up-form" data-utype="brute" data-accept="video/*">
+<form method="POST" action="/upload/brute" enctype="multipart/form-data" class="up-form" data-utype="brute" data-accept="video/*,.zip">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7107,9 +7107,9 @@ document.addEventListener('click',function(e){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Vidéo</h3></div>
 <label class="up-drop">
-<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
+<input type="file" name="video" accept="video/*,.zip,application/zip" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop the video here — plusieurs videos possibles</div>
+<div class="up-drop-hint">Drag and drop the video here — plusieurs videos, ou un <b>.zip</b> entier</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div style="margin-top:14px">
@@ -7127,7 +7127,7 @@ document.addEventListener('click',function(e){
 </div>
 
 <div class="form-section" id="form-template" style="display:none">
-<form method="POST" action="/upload/template" enctype="multipart/form-data" class="up-form" data-utype="template" data-accept="video/*">
+<form method="POST" action="/upload/template" enctype="multipart/form-data" class="up-form" data-utype="template" data-accept="video/*,.zip">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7135,9 +7135,9 @@ document.addEventListener('click',function(e){
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Vidéo</h3></div>
 <label class="up-drop">
-<input type="file" name="video" accept="video/*" required class="up-file-main" multiple>
+<input type="file" name="video" accept="video/*,.zip,application/zip" required class="up-file-main" multiple>
 <div class="up-drop-inner"><div class="up-plus">+</div><div class="up-plus-lbl">Add media</div></div>
-<div class="up-drop-hint">Drag and drop the template here — il apporte SON son</div>
+<div class="up-drop-hint">Drag and drop the template here — il apporte SON son (ou un <b>.zip</b>)</div>
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div style="margin-top:14px">
@@ -38339,6 +38339,53 @@ def create_app():
                 {"photo": None, "example": request.files.get("example")},
                 request.form, subdir, VIDEO_EXTS,
             )
+        # Un ZIP = toutes les vidéos qu'il contient (envoyer 50 rushs un par un
+        # est interminable). On extrait NOUS-MÊMES : chaque entrée est validée
+        # (extension + nom sûr), donc une archive piégée ne peut pas écrire
+        # hors du dossier de l'identité.
+        zips = [f for f in files if os.path.splitext(f.filename)[1].lower() == ".zip"]
+        if zips:
+            import zipfile as _zip
+            ident = (request.form.get("identity") or "").strip().lower()
+            if ident not in _list_identities():
+                return _error("Identité invalide")
+            target_dir = IDENTITIES_DIR / ident / subdir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            n_ok = n_skip = 0
+            for z in zips:
+                try:
+                    with _zip.ZipFile(z.stream._file if hasattr(z.stream, "_file") else z.stream) as arch:
+                        for info in arch.infolist():
+                            if info.is_dir() or info.file_size <= 0:
+                                continue
+                            nom = _safe_upload_name(info.filename)
+                            if os.path.splitext(nom)[1].lower() not in VIDEO_EXTS:
+                                n_skip += 1
+                                continue
+                            if info.file_size > 15 * 1024 * 1024 * 1024:   # garde-fou
+                                n_skip += 1
+                                continue
+                            dst = target_dir / nom
+                            k = 2
+                            while dst.exists():        # jamais d'écrasement
+                                dst = target_dir / f"{Path(nom).stem}_{k}{Path(nom).suffix}"
+                                k += 1
+                            with arch.open(info) as src, dst.open("wb") as out:
+                                _sh_copy = __import__("shutil").copyfileobj
+                                _sh_copy(src, out, 1 << 20)
+                            n_ok += 1
+                except Exception as e:
+                    return _error(f"ZIP illisible : {e}")
+            others = [f for f in files if f not in zips]
+            for f in others:
+                _save_image_or_video_with_pair(
+                    {"photo": f, "example": None}, request.form, subdir, VIDEO_EXTS)
+                n_ok += 1
+            if not n_ok:
+                return _error("Aucune vidéo dans le ZIP (formats acceptés : "
+                              + ", ".join(sorted(VIDEO_EXTS)) + ")")
+            return _success(f"✅ {n_ok} vidéo(s) importée(s) depuis le ZIP"
+                            + (f" · {n_skip} fichier(s) ignoré(s)" if n_skip else ""))
         last = None
         for f in files:
             last = _save_image_or_video_with_pair(
