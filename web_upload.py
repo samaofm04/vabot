@@ -14605,11 +14605,33 @@ window.vaXhrUpload = function(url, fd, onProg){
   return new Promise(function(resolve, reject){
     var x = new XMLHttpRequest();
     x.open('POST', url);
+    // Surveillance : sans elle, un envoi bloque restait a 0% INDEFINIMENT et
+    // on ne savait pas si ca chargeait encore ou si c'etait mort.
+    var vu = 0, bouge = Date.now(), fini = false;
+    var garde = setInterval(function(){
+      if(fini) return;
+      if(Date.now() - bouge > 90000){       // 90 s sans le moindre octet
+        fini = true; clearInterval(garde);
+        try{ x.abort(); }catch(e){}
+        reject(new Error("bloque : plus rien ne part depuis 90 s — le fichier est "
+                         + "peut-etre trop gros pour le serveur. Passe par le "
+                         + "dossier synchronise pour les gros lots."));
+      }
+    }, 5000);
     x.upload.onprogress = function(e){
+      if(e.loaded !== vu){ vu = e.loaded; bouge = Date.now(); }
       if(e.lengthComputable && onProg) onProg(e.loaded / e.total);
     };
-    x.onload = function(){ resolve({ok: x.status >= 200 && x.status < 400, status: x.status}); };
-    x.onerror = function(){ reject(new Error('network')); };
+    x.onload = function(){
+      fini = true; clearInterval(garde);
+      if(x.status === 413){
+        reject(new Error("refuse par le serveur : fichier trop volumineux (413)"));
+        return;
+      }
+      resolve({ok: x.status >= 200 && x.status < 400, status: x.status});
+    };
+    x.onerror = function(){ fini = true; clearInterval(garde); reject(new Error('connexion perdue')); };
+    x.ontimeout = function(){ fini = true; clearInterval(garde); reject(new Error('delai depasse')); };
     x.send(fd);
   });
 };
@@ -14743,6 +14765,7 @@ async function pushAllReels(form){
       if(r.ok) done++; else errs++;
     } catch(e){
       errs++; fileProg[idx] = 1;
+      lastErr = (e && e.message) ? e.message : String(e);
     }
     updAgg();
   }
@@ -14828,6 +14851,7 @@ document.addEventListener('submit', function(e){
   try { if(files[0] && files[0].type && files[0].type.indexOf('image/') === 0) thumbUrl = URL.createObjectURL(files[0]); } catch(e2){}
   vaTask.add(taskId, {title: 'Upload de ' + files.length + ' ' + typeLbl + (_identLbl ? ' → ' + _identLbl : ''), thumb: thumbUrl});
   const fileProg = {};
+  let lastErr = '';
   function updAgg(){
     let sum = 0;
     for(let i = 0; i < files.length; i++) sum += (fileProg[i] || 0);
@@ -14872,7 +14896,8 @@ document.addEventListener('submit', function(e){
       await Promise.all(files.slice(i, i + CONCURRENCY).map((f, j)=>pushOne(f, i+j)));
     }
     if(thumbUrl){ try { URL.revokeObjectURL(thumbUrl); } catch(e4){} }
-    if(errs > 0){ vaTask.error(taskId, errs + ' erreur(s) sur ' + files.length + ' upload(s)'); }
+    if(errs > 0){ vaTask.error(taskId, errs + ' erreur(s) sur ' + files.length
+                    + ' upload(s)' + (lastErr ? ' — ' + lastErr : '')); }
     else { vaTask.done(taskId, '✓ ' + done + ' ' + typeLbl + ' uploadé(s)' + (_identLbl ? ' → ' + _identLbl : '')); }
     // Refresh la galerie SEULEMENT si l'utilisateur y est encore (sinon on ne dérange pas)
     if(done > 0 && _g){
