@@ -41034,6 +41034,84 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
+    @app.route("/gdrive/root_cleanup", methods=["POST"])
+    def gdrive_root_cleanup():
+        """Range la racine du Drive : met à la CORBEILLE les dossiers laissés
+        par l'ancien rangement (identités en vrac, « Vault PRO »).
+
+        Volontairement à part de gdrive_sync, qui n'a le droit de rien
+        supprimer — invariant vérifié par les tests. Trois garde-fous :
+        seulement des DOSSIERS, seulement s'ils sont VIDES (récursivement),
+        et jamais « Bibliothèque » ni « A IMPORTER ». Corbeille, pas
+        suppression définitive : récupérable 30 jours.
+
+        `dry=1` : liste seulement, ne touche à rien."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "réservé à l'admin"}), 403
+        import gdrive_sync as _gd
+        cfg = _gd.load_config()
+        root = _gd.folder_id_from(cfg.get("folder") or "")
+        if not root:
+            return jsonify({"ok": False, "error": "dossier Drive non configuré"})
+        try:
+            sess = _gd._session()
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+
+        garder = {_gd._sansaccent(_gd.RACINE_BIBLIO),
+                  _gd._sansaccent(_gd.IMPORT_FOLDER_NAME)}
+
+        def _compte_fichiers(fid, profondeur=0):
+            """Nombre de fichiers sous ce dossier. S'arrête au premier trouvé :
+            un dossier qui contient quelque chose ne sera pas touché."""
+            if profondeur > 4:
+                return 1            # trop profond -> on considère non vide
+            try:
+                if _gd._lister(sess, fid, dossiers=False):
+                    return 1
+                for sous in _gd._lister(sess, fid, dossiers=True):
+                    if _compte_fichiers(sous["id"], profondeur + 1):
+                        return 1
+            except Exception:
+                return 1            # dans le doute, on n'y touche pas
+            return 0
+
+        candidats = []
+        try:
+            for f in _gd._lister(sess, root, dossiers=True):
+                if _gd._sansaccent(f["name"]) in garder:
+                    continue
+                candidats.append({"nom": f["name"], "id": f["id"],
+                                  "vide": _compte_fichiers(f["id"]) == 0})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+
+        vides = [c for c in candidats if c["vide"]]
+        if request.form.get("dry"):
+            return jsonify({"ok": True, "dry": True,
+                            "a_supprimer": [c["nom"] for c in vides],
+                            "gardes_car_non_vides": [c["nom"] for c in candidats
+                                                     if not c["vide"]]})
+        faits, echecs = [], []
+        for c in vides:
+            try:
+                r = sess.patch(
+                    "https://www.googleapis.com/drive/v3/files/" + c["id"]
+                    + "?supportsAllDrives=true",
+                    json={"trashed": True}, timeout=60)
+                if r.status_code < 400:
+                    faits.append(c["nom"])
+                else:
+                    echecs.append(c["nom"] + " (HTTP " + str(r.status_code) + ")")
+            except Exception as e:
+                echecs.append(c["nom"] + " — " + str(e)[:80])
+        return jsonify({"ok": True, "corbeille": faits, "echecs": echecs,
+                        "gardes_car_non_vides": [c["nom"] for c in candidats
+                                                 if not c["vide"]]})
+
     @app.route("/gdrive/report")
     def gdrive_report():
         """Statut de synchro identité par identité (pour rafraîchir sans recharger)."""
