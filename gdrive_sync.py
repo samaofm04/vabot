@@ -604,39 +604,99 @@ def _telecharger(sess, file_id, cible: Path):
     tmp.replace(cible)
 
 
-def _importer_dossier(sess, dossier_id, ident, sub, st, deja_envoyes):
-    """Descend les fichiers d'un dossier Drive vers <identite>/<sub>.
-    Upload CLASSIQUE : le fichier tel quel, sans caption ni description."""
-    exts = VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos") else IMAGE_EXTS
-    cible_dir = IDENTITIES_DIR / ident / sub
-    total = imported = errors = 0
-    for f in _lister(sess, dossier_id):
-        nom = Path(f["name"]).name
-        if Path(nom).suffix.lower() not in exts:
-            continue
-        total += 1
-        if st["imported"].get(f["id"]) or f["id"] in deja_envoyes:
-            continue                      # deja importe, ou c'est NOUS qui l'avons mis
-        try:
-            cible_dir.mkdir(parents=True, exist_ok=True)
-            dst = cible_dir / nom
-            k = 2
-            while dst.exists():
-                dst = cible_dir / f"{Path(nom).stem}_{k}{Path(nom).suffix}"
-                k += 1
-            _telecharger(sess, f["id"], dst)
-            st["imported"][f["id"]] = {"name": dst.name, "ts": int(time.time())}
-            imported += 1
-            _save_state(st)
-            _set_import(imported=imported, done=total)
-        except Exception as e:
-            errors += 1
-            _set_status(err=str(e)[:200])
-    return total, imported, errors
-
-
 # nom de dossier Drive -> sous-dossier de l'identite (sens inverse de SECTIONS)
 _DRIVE_TO_SUB = {n.lower(): s for s, n, _ in SECTIONS}
+
+
+# nom de sous-dossier local -> libelle affiche (inverse de SECTIONS)
+_SUB_TO_LABEL = {s: n for s, n, _ in SECTIONS}
+
+
+def _candidats_import(sess, st, root):
+    """Tout ce qui est depose dans le Drive et pas encore sur le site.
+
+    UN SEUL parcours, utilise par l'apercu ET par l'import : impossible que
+    le nombre annonce et le nombre rapatrie se contredisent."""
+    deja = {r.get("id") for r in (st.get("uploaded") or {}).values() if r.get("id")}
+    vus = st.get("imported") or {}
+    trouves = []
+
+    def _prendre(dossier_id, ident, sub):
+        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
+                else IMAGE_EXTS)
+        for f in _lister(sess, dossier_id):
+            nom = Path(f["name"]).name
+            if Path(nom).suffix.lower() not in exts:
+                continue
+            if vus.get(f["id"]) or f["id"] in deja:
+                continue          # deja importe, ou c'est NOUS qui l'avons mis
+            trouves.append({"id": f["id"], "nom": nom, "identity": ident, "sub": sub})
+
+    # 1) depot libre : « A IMPORTER / <identite> / <type> »
+    racine = None
+    for f in _lister(sess, root, dossiers=True):
+        if f["name"].strip().lower() == IMPORT_FOLDER_NAME.lower():
+            racine = f["id"]
+            break
+    for ident_dir in (_lister(sess, racine, dossiers=True) if racine else []):
+        ident = ident_dir["name"].strip().lower()
+        if not ident:
+            continue
+        for type_dir in _lister(sess, ident_dir["id"], dossiers=True):
+            sub = IMPORT_MAP.get(type_dir["name"].strip().lower())
+            if sub:
+                _prendre(type_dir["id"], ident, sub)
+
+    # 2) l'arborescence normale : depot directement dans le bon dossier
+    for dossier in _lister(sess, root, dossiers=True):
+        nom_d = dossier["name"].strip()
+        if nom_d.lower() in (IMPORT_FOLDER_NAME.lower(), "vault pro"):
+            continue
+        if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
+            for sous in _lister(sess, dossier["id"], dossiers=True):
+                ident_b = sous["name"].strip().lower()
+                if not (IDENTITIES_DIR / ident_b).exists():
+                    continue
+                for typ in _lister(sess, sous["id"], dossiers=True):
+                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                    if sub:
+                        _prendre(typ["id"], ident_b, sub)
+            continue
+        if nom_d.lower() == "bibliotheque 2":
+            for sous in _lister(sess, dossier["id"], dossiers=True):
+                ident_v = V2_PREFIX + sous["name"].strip().lower()
+                for typ in _lister(sess, sous["id"], dossiers=True):
+                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                    if sub:
+                        _prendre(typ["id"], ident_v, sub)
+            continue
+        ident = nom_d.lower()          # ancien rangement : identite a la racine
+        if not (IDENTITIES_DIR / ident).exists():
+            continue
+        for typ in _lister(sess, dossier["id"], dossiers=True):
+            sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+            if sub:
+                _prendre(typ["id"], ident, sub)
+    return trouves
+
+
+def import_preview() -> dict:
+    """Ce qui attend dans le Drive, SANS rien telecharger : combien, chez qui.
+    Le bouton d'import partait a l'aveugle avant."""
+    cfg = load_config()
+    root = folder_id_from(cfg.get("folder") or "")
+    if not root:
+        raise RuntimeError("dossier Drive non configuré")
+    st = _load_state()
+    st.setdefault("imported", {})
+    cands = _candidats_import(_session(), st, root)
+    compte: dict = {}
+    for c in cands:
+        cle = (c["identity"], c["sub"])
+        compte[cle] = compte.get(cle, 0) + 1
+    detail = [{"identity": i, "type": _SUB_TO_LABEL.get(sub, sub), "n": n}
+              for (i, sub), n in sorted(compte.items(), key=lambda x: -x[1])]
+    return {"total": len(cands), "detail": detail, "ts": int(time.time())}
 
 
 def run_import() -> dict:
@@ -654,82 +714,30 @@ def run_import() -> dict:
     st = _load_state()
     st.setdefault("imported", {})
     sess = _session()
-    racine = None
-    for f in _lister(sess, root, dossiers=True):
-        if f["name"].strip().lower() == IMPORT_FOLDER_NAME.lower():
-            racine = f["id"]
-            break
-    total = imported = errors = 0
-    _set_import(state="running", total=0, done=0, imported=0, errors=0,
+
+    # On liste TOUT d'abord : la barre connait son total des la premiere
+    # seconde, au lieu de le voir grossir au fil du parcours.
+    cands = _candidats_import(sess, st, root)
+    total, imported, errors = len(cands), 0, 0
+    _set_import(state="running", total=total, done=0, imported=0, errors=0,
                 err="", ts=int(time.time()))
-    for ident_dir in (_lister(sess, racine, dossiers=True) if racine else []):
-        ident = ident_dir["name"].strip().lower()
-        if not ident:
-            continue
-        for type_dir in _lister(sess, ident_dir["id"], dossiers=True):
-            sub = IMPORT_MAP.get(type_dir["name"].strip().lower())
-            if not sub:
-                continue
-            exts = VIDEO_EXTS if sub in ("brutes", "templates", "videos") else IMAGE_EXTS
-            cible_dir = IDENTITIES_DIR / ident / sub
-            for f in _lister(sess, type_dir["id"]):
-                nom = Path(f["name"]).name
-                if Path(nom).suffix.lower() not in exts:
-                    continue
-                total += 1
-                cle = f["id"]
-                if st["imported"].get(cle):
-                    continue
-                try:
-                    cible_dir.mkdir(parents=True, exist_ok=True)
-                    dst = cible_dir / nom
-                    k = 2
-                    while dst.exists():           # jamais d'ecrasement
-                        dst = cible_dir / f"{Path(nom).stem}_{k}{Path(nom).suffix}"
-                        k += 1
-                    _telecharger(sess, f["id"], dst)
-                    st["imported"][cle] = {"name": dst.name, "ts": int(time.time())}
-                    imported += 1
-                    _save_state(st)
-                except Exception as e:
-                    errors += 1
-                    _set_status(err=str(e)[:200])
-    # 2e source : l'arborescence normale (depot direct dans les dossiers crees)
-    deja = {r.get("id") for r in st.get("uploaded", {}).values() if r.get("id")}
-    for dossier in _lister(sess, root, dossiers=True):
-        nom_d = dossier["name"].strip()
-        if nom_d.lower() in (IMPORT_FOLDER_NAME.lower(), "vault pro"):
-            continue
-        # Nouveau rangement : <Bibliotheque>/<Identite>/<Type>. Sans ca, un
-        # depot direct dans le Drive n'etait plus jamais rapatrie.
-        if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
-            for sous in _lister(sess, dossier["id"], dossiers=True):
-                ident_b = sous["name"].strip().lower()
-                if not (IDENTITIES_DIR / ident_b).exists():
-                    continue
-                for typ in _lister(sess, sous["id"], dossiers=True):
-                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
-                    if sub:
-                        t, i, e = _importer_dossier(sess, typ["id"], ident_b, sub, st, deja)
-                        total += t; imported += i; errors += e
-            continue
-        if nom_d.lower() == "bibliotheque 2":
-            for sous in _lister(sess, dossier["id"], dossiers=True):
-                ident = V2_PREFIX + sous["name"].strip().lower()
-                for typ in _lister(sess, sous["id"], dossiers=True):
-                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
-                    if sub:
-                        t, i, e = _importer_dossier(sess, typ["id"], ident, sub, st, deja)
-                        total += t; imported += i; errors += e
-            continue
-        ident = nom_d.lower()
-        if not (IDENTITIES_DIR / ident).exists():
-            continue                       # dossier Drive sans identite -> ignore
-        for typ in _lister(sess, dossier["id"], dossiers=True):
-            sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
-            if sub:
-                t, i, e = _importer_dossier(sess, typ["id"], ident, sub, st, deja)
-                total += t; imported += i; errors += e
+    for n, c in enumerate(cands, 1):
+        cible_dir = IDENTITIES_DIR / c["identity"] / c["sub"]
+        try:
+            cible_dir.mkdir(parents=True, exist_ok=True)
+            dst = cible_dir / c["nom"]
+            k = 2
+            while dst.exists():                # jamais d'ecrasement
+                dst = cible_dir / f"{Path(c['nom']).stem}_{k}{Path(c['nom']).suffix}"
+                k += 1
+            _telecharger(sess, c["id"], dst)
+            st["imported"][c["id"]] = {"name": dst.name, "ts": int(time.time())}
+            imported += 1
+            _save_state(st)
+        except Exception as e:
+            errors += 1
+            _set_import(err=str(e)[:200])
+        _set_import(done=n, imported=imported, errors=errors)
     _save_state(st)
     res = {"total": total, "imported": imported, "errors": errors,
            "ts": int(time.time())}

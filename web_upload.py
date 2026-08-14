@@ -16324,10 +16324,40 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 # SENS INVERSE : Drive -> site. Pour les gros lots (le navigateur
                 # ne transporte rien, c'est le serveur qui télécharge).
                 "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
-                "<form method='POST' action='/gdrive/import' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
-                "<button type='submit' style='padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer depuis le Drive</button>"
+                "<form method='POST' action='/gdrive/import' id='gd-import-form' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
+                "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>🔍 Voir ce qui attend dans le Drive</button>"
+                "<button type='submit' id='gd-import-go' style='display:none;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
                 "</form>"
+                "<div id='gd-scan-res' style='display:none;margin-top:10px;padding:10px 12px;"
+                "background:#131316;border:1px solid #232327;border-radius:10px;font-size:12px;"
+                "color:#c4c4cc;line-height:1.7'></div>"
+                "<script>(function(){"
+                "if(window.__gdScan) return; window.__gdScan=1;"
+                "window.gdScan=function(btn){"
+                " var box=document.getElementById('gd-scan-res');"
+                " var go=document.getElementById('gd-import-go');"
+                " var t0=btn.textContent; btn.disabled=true; btn.textContent='⏳ Lecture du Drive…';"
+                " if(box){ box.style.display='block'; box.textContent='Lecture du Drive en cours…'; }"
+                " fetch('/gdrive/import_scan',{method:'POST',credentials:'same-origin'})"
+                "  .then(function(r){return r.json();}).then(function(j){"
+                "   btn.disabled=false; btn.textContent=t0;"
+                "   if(!box) return;"
+                "   if(!(j&&j.ok)){ box.innerHTML='<b style=\\'color:#f87171\\'>Erreur : '"
+                "     +((j&&j.error)||'?')+'</b>'; return; }"
+                "   if(!j.total){ box.innerHTML='Rien de nouveau dans le Drive.';"
+                "     if(go) go.style.display='none'; return; }"
+                "   var l=(j.detail||[]).map(function(d){"
+                "     return '&bull; <b>'+d.n+'</b> dans '+d.type+' de @'+d.identity; }).join('<br>');"
+                "   box.innerHTML='<b style=\\'color:#22c55e;font-size:13px\\'>'+j.total"
+                "     +' fichier'+(j.total>1?'s':'')+' à importer</b><br>'+l"
+                "     +'<br><span style=\\'color:#75757f;font-size:11px\\'>Rien ne sera supprimé du Drive.</span>';"
+                "   if(go){ go.style.display='inline-block';"
+                "     go.textContent='⬇️ Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
+                "  }).catch(function(e){ btn.disabled=false; btn.textContent=t0;"
+                "   if(box) box.textContent='Erreur : '+e; });"
+                "};"
+                "})();</script>"
                 "<div style='font-size:11px;color:#75757f;margin-top:8px'>Sous-dossiers reconnus : Video brut, Reels, Posts, Stories, Story CTA, Photos de profil, Templates montage. Rien n'est supprimé du Drive.</div>"
                 "</div>"
                 + _statut_box +
@@ -41033,6 +41063,19 @@ def create_app():
         import gdrive_sync as _gd
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
+
+    @app.route("/gdrive/import_scan", methods=["POST"])
+    def gdrive_import_scan():
+        """Combien de fichiers attendent dans le Drive, et chez qui — sans
+        rien télécharger. Le bouton d'import partait à l'aveugle avant."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import gdrive_sync as _gd
+        try:
+            return jsonify({"ok": True, **_gd.import_preview()})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
 
     @app.route("/gdrive/root_cleanup", methods=["POST"])
     def gdrive_root_cleanup():
