@@ -6660,6 +6660,10 @@ document.addEventListener('click',function(e){
     </button>
     <!-- Bibliothèque texte SCINDÉE en 2 vaults (Bios / CTA) — même stockage
          text_pool.json ; l'ancienne page reste accessible via ?tab=textpool -->
+    <button class="item" id="tab-cloudbrutes" onclick="showTab('cloud','cloudbrutes','Vidéo brut','Tes rushs bruts par identité — la matière première des montages')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      Vidéo brut
+    </button>
     <button class="item" id="tab-cloudbios" onclick="showTab('cloud','cloudbios','Bios','Tes bios par identité — ajout en liste + génération IA')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
       Bios
@@ -6781,10 +6785,6 @@ document.addEventListener('click',function(e){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-cloudbrutes" onclick="showTab('montage','cloudbrutes','Vidéo brut','Tes rushs bruts par identité — la matière première des montages')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-      Vidéo brut
-    </button>
     <button class="item" id="tab-cloudtemplates" onclick="showTab('montage','cloudtemplates','Template montage','Tes modèles CapCut — chacun apporte son son et son rythme')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       Template montage
