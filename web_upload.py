@@ -8805,6 +8805,24 @@ def _set_identity_market(ident: str, market: str) -> bool:
     return ok
 
 
+def _gdrive_redirect_uri() -> str:
+    """URI de retour OAuth. DOIT être identique dans la console Google, sur la
+    page et dans la route — sinon « redirect_uri_mismatch ». Derrière le proxy
+    du VPS, Flask voit du http : on force https hors local, car c'est bien ce
+    que le navigateur enverra."""
+    base = "https://youl4b.com"
+    try:
+        from flask import request as _rq
+        base = _rq.url_root.rstrip("/")
+        hote = (_rq.host or "").split(":")[0].lower()
+        local = hote in ("127.0.0.1", "localhost") or hote.startswith("192.168.")
+        if not local and base.startswith("http://"):
+            base = "https://" + base[len("http://"):]
+    except Exception:
+        pass
+    return base + "/gdrive/oauth/callback"
+
+
 def _list_v2_identities():
     """Identités de le Vault PRO uniquement."""
     return [i for i in _list_identities() if _is_v2(i)]
@@ -16007,12 +16025,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             # Google : ses envois repondent 403. Seul TON compte peut deposer
             # sur TON quota -> bloc de connexion.
             _mode = _gd.auth_mode()
-            try:
-                from flask import request as _rq_dr
-                _base_dr = _rq_dr.url_root.rstrip("/")
-            except Exception:
-                _base_dr = "https://youl4b.com"
-            _redir = _base_dr + "/gdrive/oauth/callback"
+            _redir = _gdrive_redirect_uri()
             _oc = _gd.oauth_config()
             if _mode == "oauth":
                 _oauth_box = (
@@ -40808,7 +40821,7 @@ def create_app():
         if not is_auth():
             return redirect("/")
         import gdrive_sync as _gd
-        url = _gd.oauth_auth_url(request.url_root.rstrip("/") + "/gdrive/oauth/callback")
+        url = _gd.oauth_auth_url(_gdrive_redirect_uri())
         if not url:
             return _error("Renseigne d'abord l'ID client OAuth", tab="clouddrive")
         return redirect(url)
@@ -40825,7 +40838,7 @@ def create_app():
         code = (request.args.get("code") or "").strip()
         if not code:
             return _error("Aucun code reçu de Google", tab="clouddrive")
-        msg = _gd.oauth_exchange(code, request.url_root.rstrip("/") + "/gdrive/oauth/callback")
+        msg = _gd.oauth_exchange(code, _gdrive_redirect_uri())
         if msg:
             return _error(f"Connexion impossible : {msg}", tab="clouddrive")
         who = _gd.oauth_email()
