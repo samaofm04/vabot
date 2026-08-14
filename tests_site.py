@@ -1994,6 +1994,35 @@ try:
               not _uMk._is_fr_market("jessye"))
         check("marche : ecriture atomique (pas de .tmp residuel)",
               _fMk.exists() and not list(_fMk.parent.glob("identity_market.json.tmp*")))
+        # drapeau : SVG et pas emoji (Windows n a pas de police de drapeaux)
+        _flFr = _wMk._market_flag_html("_tst_us")      # bascule en FR juste avant
+        _flUs = _wMk._market_flag_html("julia")        # bascule en US juste avant
+        check("drapeau : SVG (pas d emoji, illisible sous Windows)",
+              _flFr.startswith("<svg") and "\U0001f1eb" not in _flFr)
+        check("drapeau FR : bleu blanc rouge",
+              "#0055a4" in _flFr and "#ef4135" in _flFr and "Marché FR" in _flFr)
+        check("drapeau US : bandes rouges + canton bleu",
+              "#b22234" in _flUs and "#3c3b6e" in _flUs and "Marché US" in _flUs)
+        # il apparait sur les cartes des DEUX barres laterales (vault + drive)
+        import re as _reMk
+        _appMk = _wMk.create_app()
+        _appMk.config["TESTING"] = True
+        _cMk = _appMk.test_client()
+        with _cMk.session_transaction() as _sMk:
+            _sMk["auth"] = True
+            _sMk["username"] = "admin"   # seul nom qui ne depend pas de web_users.json
+            _sMk["role"] = "owner"
+            _sMk["sid"] = "tests"
+        for _tabMk in ("cloudreels", "clouddrive"):
+            _rMk = _cMk.get("/?tab=%s&frag=1" % _tabMk, headers={"X-Tab-Ajax": "1"})
+            _hMk = _rMk.get_data(as_text=True)
+            _cartes = _reMk.findall(r"<a [^>]*class='vault-item[^>]*>.*?</a>", _hMk, _reMk.S)
+            check("drapeau : present sur chaque carte (%s)" % _tabMk,
+                  len(_cartes) > 0
+                  and all(x.count("aria-label='Marché") == 1 for x in _cartes),
+                  "%d carte(s), HTTP %s, %d octets, identites=%s"
+                  % (len(_cartes), _rMk.status_code, len(_hMk),
+                     _wMk._list_content_identities()[:4]))
     finally:
         if _savMk is None:
             _fMk.unlink(missing_ok=True)

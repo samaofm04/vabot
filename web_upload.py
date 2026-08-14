@@ -8805,6 +8805,33 @@ def _set_identity_market(ident: str, market: str) -> bool:
     return ok
 
 
+def _market_flag_html(identity: str, h: int = 11) -> str:
+    """Drapeau du marché à côté du nom.
+
+    Dessiné en SVG et pas en emoji : Windows n'embarque aucune police de
+    drapeaux, 🇫🇷 s'y afficherait « FR » en petites lettres."""
+    m = identity_market(identity)
+    if m == "us":
+        w = int(round(h * 19 / 10))
+        bandes = "".join(
+            "<rect x='0' y='%.3f' width='19' height='%.3f' fill='#b22234'/>"
+            % (i * 2 * 10.0 / 13, 10.0 / 13) for i in range(7))
+        corps = ("<rect width='19' height='10' fill='#fff'/>" + bandes
+                 + "<rect width='7.6' height='%.3f' fill='#3c3b6e'/>" % (10.0 * 7 / 13))
+        vb, titre = "0 0 19 10", "Marché US — serveur Youl4b"
+    else:
+        w = int(round(h * 3 / 2))
+        corps = ("<rect width='1' height='2' fill='#0055a4'/>"
+                 "<rect x='1' width='1' height='2' fill='#fff'/>"
+                 "<rect x='2' width='1' height='2' fill='#ef4135'/>")
+        vb, titre = "0 0 3 2", "Marché FR — Discord YouL4b Agency"
+    return (
+        "<svg viewBox='%s' width='%d' height='%d' preserveAspectRatio='none' "
+        "role='img' aria-label='%s' style='border-radius:2px;flex-shrink:0;"
+        "box-shadow:0 0 0 1px rgba(255,255,255,.22);vertical-align:-1px'>"
+        "<title>%s</title>%s</svg>" % (vb, w, h, titre, titre, corps))
+
+
 def _gdrive_redirect_uri() -> str:
     """URI de retour OAuth. DOIT être identique dans la console Google, sur la
     page et dans la route — sinon « redirect_uri_mismatch ». Derrière le proxy
@@ -13917,7 +13944,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
+            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
+            f"{_market_flag_html(ident)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
             f"</div>"
             f"{count_badge}"
@@ -15936,7 +15966,10 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
+            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
+            f"{_market_flag_html(ident)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} fichier{'s' if n != 1 else ''}</div>"
             f"</div></a>"
         )
