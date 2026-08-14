@@ -2037,6 +2037,24 @@ try:
               "o.market || mkMarketOf(o.name)" in _pgMk)
         check("marche : l en-tete suit le changement d identite sans reload",
               "data-vault-header-flag]').forEach" in _pgMk)
+        # table des marches : sans elle, pas de drapeau dans les formulaires
+        # (le JS y lisait les cartes de la sidebar, qui n y sont pas chargees)
+        _mMk = _reMk.search(
+            r'<script type="application/json" id="mk-markets">(.*?)</script>',
+            _pgMk, _reMk.S)
+        check("marche : table {identite: marche} rendue pour le JS",
+              bool(_mMk) and "{markets_json}" not in _pgMk)
+        try:
+            _tblMk = _jsMk.loads(_mMk.group(1)) if _mMk else {}
+        except Exception:
+            _tblMk = {}
+        check("marche : table valide et coherente avec le serveur",
+              bool(_tblMk)
+              and all(v in ("fr", "us") for v in _tblMk.values())
+              and all(_wMk.identity_market(k) == v for k, v in list(_tblMk.items())[:5]))
+        check("marche : drapeau dans le selecteur d identite des uploads",
+              "fl.innerHTML=mkFlagSvg(mkMarketOf(v))" in _pgMk
+              and "fli.innerHTML=mkFlagSvg(mkMarketOf(o.value))" in _pgMk)
     finally:
         if _savMk is None:
             _fMk.unlink(missing_ok=True)

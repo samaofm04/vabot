@@ -5872,6 +5872,10 @@ document.addEventListener('DOMContentLoaded', function(){
       var sp=document.createElement('span'); sp.style.cssText='flex:1;text-align:left;text-transform:capitalize';
       sp.textContent=v||'Choisir…';
       btn.appendChild(sp);
+      if(v && typeof mkFlagSvg==='function'){
+        var fl=document.createElement('span'); fl.style.cssText='display:flex;flex-shrink:0';
+        fl.innerHTML=mkFlagSvg(mkMarketOf(v)); btn.appendChild(fl);
+      }
       var car=document.createElement('span'); car.textContent='▾'; car.style.color='#8b8b95';
       btn.appendChild(car);
     }
@@ -5879,8 +5883,13 @@ document.addEventListener('DOMContentLoaded', function(){
       if(!o.value) return;
       var it=document.createElement('div'); it.className='isel-it';
       it.appendChild(mkAv(o.value));
-      var sp=document.createElement('span'); sp.style.textTransform='capitalize'; sp.textContent=o.value;
+      var sp=document.createElement('span'); sp.style.cssText='flex:1;text-transform:capitalize';
+      sp.textContent=o.value;
       it.appendChild(sp);
+      if(typeof mkFlagSvg==='function'){
+        var fli=document.createElement('span'); fli.style.cssText='display:flex;flex-shrink:0';
+        fli.innerHTML=mkFlagSvg(mkMarketOf(o.value)); it.appendChild(fli);
+      }
       it.addEventListener('click',function(){
         sel.value=o.value;
         try{ sel.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
@@ -7153,6 +7162,7 @@ document.addEventListener('click',function(e){
   </span>
   <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
 </div>
+<script type="application/json" id="mk-markets">{markets_json}</script>
 <!-- Filtre de marche : Tout / FR / US (meme esprit que le SFW) -->
 <div id="market-floating" title="N'afficher que les identites d'un marche">
   <button type="button" data-mkopt="" onclick="marketSet('')">Tout</button>
@@ -8811,6 +8821,16 @@ def _set_identity_market(ident: str, market: str) -> bool:
     ok = bool(safe_json.write(MARKET_FILE, d, indent=2))
     _invalidate_json_cache(MARKET_FILE)
     return ok
+
+
+def _markets_json() -> str:
+    """{identité: marché} pour le JS de la page (drapeau dans les listes que le
+    serveur ne rend pas lui-même : formulaires d'upload, sélecteur de models)."""
+    import json as _j
+    try:
+        return _j.dumps({i: identity_market(i) for i in _list_identities()})
+    except Exception:
+        return "{}"
 
 
 def _market_flag_html(identity: str, h: int = 11) -> str:
@@ -15170,9 +15190,19 @@ function mkFlagSvg(m){
 // Le marche d'une identite se lit sur sa carte de barre laterale : une seule
 // source, donc pas de liste a tenir a jour de deux cotes.
 function mkMarketOf(ident){
-  try{
-    var n = String(ident || '').replace(/[^a-z0-9_.\-]/gi, '');
-    var el = document.querySelector(".vault-item[data-ident='" + n + "']");
+  var n = String(ident || '').trim().toLowerCase();
+  if(!n) return '';
+  if(window.__mkMap === undefined){
+    window.__mkMap = null;
+    try{
+      var b = document.getElementById('mk-markets');
+      if(b) window.__mkMap = JSON.parse(b.textContent || '{}');
+    }catch(e){}
+  }
+  if(window.__mkMap && window.__mkMap[n]) return window.__mkMap[n];
+  try{      // repli : la carte de la barre laterale, si elle est chargee
+    var el = document.querySelector(".vault-item[data-ident='"
+      + n.replace(/[^a-z0-9_.\-]/g, '') + "']");
     return el ? (el.getAttribute('data-market') || '') : '';
   }catch(e){ return ''; }
 }
@@ -37626,6 +37656,7 @@ def _render_upload_inner(msg=None, error=None):
 
     html = (
         UPLOAD_HTML
+        .replace("{markets_json}", _markets_json())
         .replace("{ident_opts}", opts)
         .replace("{pp_ident_opts}", pp_opts)
         .replace("{msg_html}", msg_html)
