@@ -42,6 +42,29 @@ SECTIONS = (
     ("templates", "Templates montage", True),
 )
 
+# Vault PRO retiree de la synchro le 15/08/2026 : elle a ete sortie du menu du
+# site quand la Bibliotheque 2 est arrivee, elle ne contient AUCUN fichier
+# (verifie : 0 sur les 5 onglets, 14 identites) et son dossier vide sur le
+# Drive ne faisait qu'embrouiller. Remettre a True pour la resynchroniser.
+SYNC_VAULT_PRO = False
+
+# Idem pour la Bibliotheque 2 : on ne synchronise QUE la Bibliotheque
+# principale pour l'instant (demande du 15/08/2026 : « fais uniquement un
+# dossier, celui de Bibliotheque, sans les autres »).
+SYNC_VAULT2 = False
+
+# Tout part desormais SOUS ce dossier, au lieu d'etaler une trentaine de
+# dossiers d'identites a la racine du Drive a cote de « Vault PRO » et
+# « A IMPORTER » — c'etait illisible.
+RACINE_BIBLIO = "Bibliothèque"
+
+
+def _sansaccent(t: str) -> str:
+    """Comparaison de noms de dossiers Drive sans se soucier des accents."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", (t or "").strip().lower())
+                   if unicodedata.category(c) != "Mn")
+
 # Vault PRO : mêmes types, dossiers pro_* (2e bibliothèque, mêmes identités)
 SECTIONS_PRO = (
     ("pro_profile_pics", "Photos de profil", False),
@@ -365,12 +388,12 @@ def _iter_jobs(include_videos):
             continue
         nom = ident_dir.name
         est_v2 = nom.lower().startswith(V2_PREFIX)
+        if est_v2 and not SYNC_VAULT2:
+            continue
         label = nom[len(V2_PREFIX):] if est_v2 else nom
-        # La Bibliotheque reste A LA RACINE (structure deja en place dans le
-        # Drive de l'user) : y ajouter un niveau aurait recree TOUT en double
-        # a cote de l'existant. Seules les 2 autres ont leur dossier.
-        biblio = "Bibliotheque 2" if est_v2 else None
-        plan = list(SECTIONS) + ([] if est_v2 else
+        # Chaque bibliotheque a SON dossier, identites a l'interieur.
+        biblio = "Bibliotheque 2" if est_v2 else RACINE_BIBLIO
+        plan = list(SECTIONS) + ([] if est_v2 or not SYNC_VAULT_PRO else
                                  [(s, n, v, "Vault PRO") for s, n, v in SECTIONS_PRO])
         for entree in plan:
             if len(entree) == 4:
@@ -591,6 +614,19 @@ def run_import() -> dict:
         nom_d = dossier["name"].strip()
         if nom_d.lower() in (IMPORT_FOLDER_NAME.lower(), "vault pro"):
             continue
+        # Nouveau rangement : <Bibliotheque>/<Identite>/<Type>. Sans ca, un
+        # depot direct dans le Drive n'etait plus jamais rapatrie.
+        if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
+            for sous in _lister(sess, dossier["id"], dossiers=True):
+                ident_b = sous["name"].strip().lower()
+                if not (IDENTITIES_DIR / ident_b).exists():
+                    continue
+                for typ in _lister(sess, sous["id"], dossiers=True):
+                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                    if sub:
+                        t, i, e = _importer_dossier(sess, typ["id"], ident_b, sub, st, deja)
+                        total += t; imported += i; errors += e
+            continue
         if nom_d.lower() == "bibliotheque 2":
             for sous in _lister(sess, dossier["id"], dossiers=True):
                 ident = V2_PREFIX + sous["name"].strip().lower()
@@ -625,8 +661,10 @@ def _creer_arborescence(sess, root, st, include_videos):
             continue
         nom = ident_dir.name
         est_v2 = nom.lower().startswith(V2_PREFIX)
+        if est_v2 and not SYNC_VAULT2:
+            continue
         label = (nom[len(V2_PREFIX):] if est_v2 else nom).title()
-        plans = [(("Bibliotheque 2",) if est_v2 else ()) + (label,), SECTIONS]
+        plans = [("Bibliotheque 2" if est_v2 else RACINE_BIBLIO, label), SECTIONS]
         parent = root
         for niveau in plans[0]:
             parent = _ensure_folder(sess, parent, niveau, st)
@@ -634,7 +672,7 @@ def _creer_arborescence(sess, root, st, include_videos):
         # servent de point de depot et montrent ce qui est vide.
         for sub, drive_name, is_video in SECTIONS:
             _ensure_folder(sess, parent, drive_name, st)
-        if not est_v2:                       # Vault PRO
+        if not est_v2 and SYNC_VAULT_PRO:    # Vault PRO
             pro = _ensure_folder(sess, root, "Vault PRO", st)
             pro_ident = _ensure_folder(sess, pro, label, st)
             for sub, drive_name, is_video in SECTIONS_PRO:

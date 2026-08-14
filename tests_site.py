@@ -1911,6 +1911,39 @@ try:
     check("gdrive : AUCUN appel de suppression dans le module (copie seule)",
           "sess.delete" not in _gdSrc and ".unlink(" not in _gdSrc
           and "rmtree" not in _gdSrc and '"trashed": true' not in _gdSrc.lower())
+
+    # --- rangement du Drive : UN dossier « Bibliothèque », identites dedans ---
+    import tempfile as _tfGd
+    import shutil as _shGd
+    _tmpGd = _plCa.Path(_tfGd.mkdtemp())
+    _origGd = _gdCa.IDENTITIES_DIR
+    _gdCa.IDENTITIES_DIR = _tmpGd
+    try:
+        for _idGd, _ssGd in (("julia", ["videos", "posts", "pro_videos"]),
+                             ("v2_beta", ["videos"])):
+            for _sdGd in _ssGd:
+                (_tmpGd / _idGd / _sdGd).mkdir(parents=True)
+                (_tmpGd / _idGd / _sdGd / ("f1" + (".mp4" if "video" in _sdGd else ".jpg"))
+                 ).write_bytes(b"x")
+        _chGd = ["/".join(c) + "/" + p.name for c, p in _gdCa._iter_jobs(True)]
+        check("gdrive : tout part sous « Bibliothèque »",
+              bool(_chGd) and all(c.startswith("Bibliothèque/") for c in _chGd), str(_chGd))
+        check("gdrive : ni Vault PRO ni Bibliotheque 2 (retirees a la demande)",
+              not any(("Vault PRO" in c or "Bibliotheque 2" in c) for c in _chGd))
+        _creGd = []
+        _vraiGd = _gdCa._ensure_folder
+        _gdCa._ensure_folder = lambda sess, parent, name, st: (
+            _creGd.append((parent, name)) or name)
+        try:
+            _gdCa._creer_arborescence(None, "RACINE", {"folders": {}}, True)
+        finally:
+            _gdCa._ensure_folder = _vraiGd
+        check("gdrive : un SEUL dossier cree a la racine du Drive",
+              {n for par, n in _creGd if par == "RACINE"} == {"Bibliothèque"},
+              str([c for c in _creGd if c[0] == "RACINE"]))
+    finally:
+        _gdCa.IDENTITIES_DIR = _origGd
+        _shGd.rmtree(_tmpGd, ignore_errors=True)
     _fGd = _plCa.Path("data/gdrive_sync.json")
     _savGd = _fGd.read_text(encoding="utf-8") if _fGd.exists() else None
     _rGc = _cCa.post("/gdrive/config", data={"folder": "https://drive.google.com/drive/folders/1AbC_dEf-234567890xyz"})
