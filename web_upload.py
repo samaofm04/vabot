@@ -41095,13 +41095,32 @@ def create_app():
                             "a_supprimer": [c["nom"] for c in vides],
                             "gardes_car_non_vides": [c["nom"] for c in candidats
                                                      if not c["vide"]]})
+        # Ces dossiers ont ete crees par le COMPTE DE SERVICE : sur Drive,
+        # seul le proprietaire peut mettre a la corbeille. Le compte du
+        # patron, meme editeur du dossier parent, recolte un 403. On tente
+        # donc avec son compte, puis avec le compte de service.
+        sess_sa = None
+        try:
+            if _gd.SA_FILE.exists():
+                from google.oauth2.service_account import Credentials as _SACreds
+                from google.auth.transport.requests import AuthorizedSession as _AuthSess
+                sess_sa = _AuthSess(_SACreds.from_service_account_file(
+                    str(_gd.SA_FILE), scopes=[_gd.OAUTH_SCOPE]))
+        except Exception:
+            sess_sa = None
+
+        def _corbeille(session, fid):
+            return session.patch(
+                "https://www.googleapis.com/drive/v3/files/" + fid
+                + "?supportsAllDrives=true",
+                json={"trashed": True}, timeout=60)
+
         faits, echecs = [], []
         for c in vides:
             try:
-                r = sess.patch(
-                    "https://www.googleapis.com/drive/v3/files/" + c["id"]
-                    + "?supportsAllDrives=true",
-                    json={"trashed": True}, timeout=60)
+                r = _corbeille(sess, c["id"])
+                if r.status_code >= 400 and sess_sa is not None:
+                    r = _corbeille(sess_sa, c["id"])       # le proprietaire
                 if r.status_code < 400:
                     faits.append(c["nom"])
                 else:
