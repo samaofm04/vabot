@@ -288,8 +288,48 @@ def _telecharger(sess, file_id, cible: Path):
     tmp.replace(cible)
 
 
+def _importer_dossier(sess, dossier_id, ident, sub, st, deja_envoyes):
+    """Descend les fichiers d'un dossier Drive vers <identite>/<sub>.
+    Upload CLASSIQUE : le fichier tel quel, sans caption ni description."""
+    exts = VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos") else IMAGE_EXTS
+    cible_dir = IDENTITIES_DIR / ident / sub
+    total = imported = errors = 0
+    for f in _lister(sess, dossier_id):
+        nom = Path(f["name"]).name
+        if Path(nom).suffix.lower() not in exts:
+            continue
+        total += 1
+        if st["imported"].get(f["id"]) or f["id"] in deja_envoyes:
+            continue                      # deja importe, ou c'est NOUS qui l'avons mis
+        try:
+            cible_dir.mkdir(parents=True, exist_ok=True)
+            dst = cible_dir / nom
+            k = 2
+            while dst.exists():
+                dst = cible_dir / f"{Path(nom).stem}_{k}{Path(nom).suffix}"
+                k += 1
+            _telecharger(sess, f["id"], dst)
+            st["imported"][f["id"]] = {"name": dst.name, "ts": int(time.time())}
+            imported += 1
+            _save_state(st)
+        except Exception as e:
+            errors += 1
+            _set_status(err=str(e)[:200])
+    return total, imported, errors
+
+
+# nom de dossier Drive -> sous-dossier de l'identite (sens inverse de SECTIONS)
+_DRIVE_TO_SUB = {n.lower(): s for s, n, _ in SECTIONS}
+
+
 def run_import() -> dict:
-    """Rapatrie « A IMPORTER/<identite>/<type>/ » du Drive vers le site."""
+    """Rapatrie ce qui a ete depose dans le Drive vers le site.
+
+    Deux endroits acceptes :
+      - « A IMPORTER/<identite>/<type>/ »  (depot libre)
+      - directement dans l'arborescence creee par la synchro, ex.
+        « Lillaroseconlon/Rushs bruts/ » — les fichiers que NOUS avons envoyes
+        sont ignores (on les reconnait par leur identifiant Drive)."""
     cfg = load_config()
     root = folder_id_from(cfg.get("folder") or "")
     if not root:
@@ -302,11 +342,8 @@ def run_import() -> dict:
         if f["name"].strip().lower() == IMPORT_FOLDER_NAME.lower():
             racine = f["id"]
             break
-    if not racine:
-        return {"total": 0, "imported": 0, "errors": 0,
-                "note": f"crée un dossier « {IMPORT_FOLDER_NAME} » dans le Drive"}
     total = imported = errors = 0
-    for ident_dir in _lister(sess, racine, dossiers=True):
+    for ident_dir in (_lister(sess, racine, dossiers=True) if racine else []):
         ident = ident_dir["name"].strip().lower()
         if not ident:
             continue
@@ -338,9 +375,58 @@ def run_import() -> dict:
                 except Exception as e:
                     errors += 1
                     _set_status(err=str(e)[:200])
+    # 2e source : l'arborescence normale (depot direct dans les dossiers crees)
+    deja = {r.get("id") for r in st.get("uploaded", {}).values() if r.get("id")}
+    for dossier in _lister(sess, root, dossiers=True):
+        nom_d = dossier["name"].strip()
+        if nom_d.lower() in (IMPORT_FOLDER_NAME.lower(), "vault pro"):
+            continue
+        if nom_d.lower() == "bibliotheque 2":
+            for sous in _lister(sess, dossier["id"], dossiers=True):
+                ident = V2_PREFIX + sous["name"].strip().lower()
+                for typ in _lister(sess, sous["id"], dossiers=True):
+                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                    if sub:
+                        t, i, e = _importer_dossier(sess, typ["id"], ident, sub, st, deja)
+                        total += t; imported += i; errors += e
+            continue
+        ident = nom_d.lower()
+        if not (IDENTITIES_DIR / ident).exists():
+            continue                       # dossier Drive sans identite -> ignore
+        for typ in _lister(sess, dossier["id"], dossiers=True):
+            sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+            if sub:
+                t, i, e = _importer_dossier(sess, typ["id"], ident, sub, st, deja)
+                total += t; imported += i; errors += e
     _save_state(st)
     return {"total": total, "imported": imported, "errors": errors,
             "ts": int(time.time())}
+
+
+def _creer_arborescence(sess, root, st, include_videos):
+    """Cree le dossier de CHAQUE identite et de chaque type, meme sans fichier.
+    Ainsi tout est visible dans le Drive et on sait ou deposer."""
+    if not IDENTITIES_DIR.exists():
+        return
+    for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
+        if not ident_dir.is_dir():
+            continue
+        nom = ident_dir.name
+        est_v2 = nom.lower().startswith(V2_PREFIX)
+        label = (nom[len(V2_PREFIX):] if est_v2 else nom).title()
+        plans = [(("Bibliotheque 2",) if est_v2 else ()) + (label,), SECTIONS]
+        parent = root
+        for niveau in plans[0]:
+            parent = _ensure_folder(sess, parent, niveau, st)
+        # TOUS les dossiers, meme ceux dont le contenu ne part pas : ils
+        # servent de point de depot et montrent ce qui est vide.
+        for sub, drive_name, is_video in SECTIONS:
+            _ensure_folder(sess, parent, drive_name, st)
+        if not est_v2:                       # Vault PRO
+            pro = _ensure_folder(sess, root, "Vault PRO", st)
+            pro_ident = _ensure_folder(sess, pro, label, st)
+            for sub, drive_name, is_video in SECTIONS_PRO:
+                _ensure_folder(sess, pro_ident, drive_name, st)
 
 
 def run_sync() -> dict:
@@ -352,6 +438,14 @@ def run_sync() -> dict:
     include_videos = bool(cfg.get("include_videos"))
     st = _load_state()
     sess = _session()
+
+    # Arborescence COMPLETE d'abord : on veut voir tous les dossiers dans le
+    # Drive meme vides — c'est la qu'on depose, et ca montre ce qui manque.
+    try:
+        _creer_arborescence(sess, root, st, include_videos)
+        _save_state(st)
+    except Exception as e:
+        _set_status(err=f"dossiers : {e}"[:200])
 
     jobs = list(_iter_jobs(include_videos))
     total = len(jobs)
