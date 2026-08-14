@@ -6726,11 +6726,11 @@ document.addEventListener('click',function(e){
 <div class="group" id="grp-vault2">
   <button class="group-head" onclick="toggleGroup('vault2')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-4.35-4.35a2 2 0 0 0-2.83 0L3 21"/></svg>
-    <span class="label">Vault PRO</span>
+    <span class="label">Bibliothèque 2</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Vault PRO','Reels de le Vault PRO (identités séparées)')">
+    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Vault PRO','Reels de le Bibliothèque 2 (identités séparées)')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
     </button>
@@ -15914,6 +15914,51 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "</form>"
                 "<div style='font-size:11px;color:#75757f;margin-top:8px'>Sous-dossiers reconnus : Video brut, Reels, Posts, Stories, Story CTA, Photos de profil, Templates montage. Rien n'est supprimé du Drive.</div>"
                 "</div>"
+                # ===== Barres d'avancement (les 2 sens) =====
+                "<div id='gdBars' style='margin-top:14px;display:flex;flex-direction:column;gap:12px'>"
+                "<div data-gdbar='sync' style='display:none'>"
+                "<div style='display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:#c4c4cc;margin-bottom:5px'>"
+                "<span>☁️ Envoi vers le Drive</span><span data-gdpct>0%</span></div>"
+                "<div style='height:8px;background:#1a1a1f;border-radius:99px;overflow:hidden'>"
+                "<div data-gdfill style='height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#a855f7);transition:width .3s'></div></div>"
+                "<div data-gdinfo style='font-size:11px;color:#75757f;margin-top:5px'></div>"
+                "</div>"
+                "<div data-gdbar='import' style='display:none'>"
+                "<div style='display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:#c4c4cc;margin-bottom:5px'>"
+                "<span>⬇️ Import depuis le Drive</span><span data-gdpct>0%</span></div>"
+                "<div style='height:8px;background:#1a1a1f;border-radius:99px;overflow:hidden'>"
+                "<div data-gdfill style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);transition:width .3s'></div></div>"
+                "<div data-gdinfo style='font-size:11px;color:#75757f;margin-top:5px'></div>"
+                "</div>"
+                "</div>"
+                "<script>(function(){"
+                "if(window.__gdPoll) return; window.__gdPoll=1;"
+                "function maj(){"
+                " fetch('/gdrive/status',{credentials:'same-origin'}).then(function(r){return r.json();})"
+                "  .then(function(j){"
+                "   if(!(j&&j.ok)) return;"
+                "   [['sync',j.sync],['import',j['import']]].forEach(function(p){"
+                "    var nom=p[0], st=p[1]||{};"
+                "    var box=document.querySelector('[data-gdbar='+nom+']'); if(!box) return;"
+                "    if(st.state==='idle'){ box.style.display='none'; return; }"
+                "    box.style.display='block';"
+                "    var tot=st.total||0, fait=(nom==='sync')?(st.done||0):(st.done||st.imported||0);"
+                "    var pct=tot?Math.min(100,Math.round(fait*100/tot)):(st.state==='done'?100:0);"
+                "    if(st.state==='done') pct=100;"
+                "    box.querySelector('[data-gdfill]').style.width=pct+'%';"
+                "    box.querySelector('[data-gdpct]').textContent=pct+'%';"
+                "    var det=(nom==='sync')"
+                "      ? ((st.uploaded||0)+' envoye(s) · '+(st.skipped||0)+' deja la')"
+                "      : ((st.imported||0)+' importe(s)');"
+                "    if(st.errors) det+=' · '+st.errors+' echec(s)';"
+                "    if(st.err) det+=' — '+String(st.err).slice(0,120);"
+                "    if(st.state==='done') det='✅ termine · '+det;"
+                "    box.querySelector('[data-gdinfo]').textContent=det;"
+                "   });"
+                "  }).catch(function(){});"
+                "}"
+                "maj(); setInterval(maj, 2000);"
+                "})();</script>"
                 "</div>"
             )
     except Exception:
@@ -36121,7 +36166,7 @@ ROLE_MENU_STRUCTURE = [
          "perms": ["view", "create", "delete"]},
         {"key": "provaultdrive", "name": "Vault PRO ancien — Drive (lecture seule)", "perms": ["view"]},
         # Vault PRO : copie indépendante AVEC SES PROPRES identités.
-        {"key": "vault2", "name": "Vault PRO (identités séparées)",
+        {"key": "vault2", "name": "Bibliothèque 2 (identités séparées)",
          "perms": ["view", "create", "delete"]},
     ]},
     {"section": "Création", "items": [
@@ -40489,6 +40534,15 @@ def create_app():
             return _error("Une synchro tourne déjà — recharge l'onglet pour suivre", tab="clouddrive")
         return _success("☁️ Synchro Google Drive lancée en arrière-plan — recharge l'onglet Drive pour suivre l'avancement", tab="clouddrive")
 
+    @app.route("/gdrive/status")
+    def gdrive_status():
+        """Avancement des 2 sens (barres de progression)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import gdrive_sync as _gd
+        return jsonify({"ok": True, "sync": _gd.status(), "import": _gd.import_status()})
+
     @app.route("/gdrive/import", methods=["POST"])
     def gdrive_import_now():
         """Rapatrie « A IMPORTER » du Drive vers la bibliothèque. Idéal pour les
@@ -40502,21 +40556,11 @@ def create_app():
                           tab="clouddrive")
         if not _gd.folder_id_from(_gd.load_config().get("folder") or ""):
             return _error("Renseigne d'abord le dossier Drive partagé", tab="clouddrive")
-        try:
-            res = _gd.run_import()
-        except Exception as e:
-            return _error(f"Import Drive : {e}", tab="clouddrive")
-        if res.get("note"):
-            return _error(res["note"], tab="clouddrive")
-        if not res.get("total"):
-            return _success("Rien à importer — dépose tes fichiers dans "
-                            "« A IMPORTER/<identité>/Video brut/ » sur le Drive",
-                            tab="clouddrive")
-        return _success(
-            f"⬇️ {res['imported']} fichier(s) importé(s) depuis le Drive"
-            + (f" · {res['errors']} échec(s)" if res.get("errors") else "")
-            + (" · le reste était déjà là" if res["imported"] < res["total"] else ""),
-            tab="clouddrive")
+        if not _gd.start_import_background():
+            return _error("Un import tourne déjà — la barre suit l'avancement",
+                          tab="clouddrive")
+        return _success("⬇️ Import lancé — la barre affiche l'avancement",
+                        tab="clouddrive")
 
     # ============ BUSINESS ROUTES ============
     @app.route("/business/sfs/add", methods=["POST"])

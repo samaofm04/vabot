@@ -57,6 +57,8 @@ V2_PREFIX = "v2_"
 _LOCK = threading.Lock()
 _THREAD: threading.Thread | None = None
 _STATUS: dict = {"state": "idle"}
+_IMPORT_STATUS: dict = {"state": "idle"}
+_IMPORT_THREAD = None
 
 
 # ---------------------------------------------------------------- config
@@ -116,6 +118,34 @@ def status() -> dict:
 def _set_status(**kw):
     with _LOCK:
         _STATUS.update(kw)
+
+
+def import_status() -> dict:
+    with _LOCK:
+        return dict(_IMPORT_STATUS)
+
+
+def _set_import(**kw):
+    with _LOCK:
+        _IMPORT_STATUS.update(kw)
+
+
+def start_import_background() -> bool:
+    """Lance l'import Drive -> site dans un thread (un seul a la fois)."""
+    global _IMPORT_THREAD
+    with _LOCK:
+        if _IMPORT_THREAD is not None and _IMPORT_THREAD.is_alive():
+            return False
+
+        def _run():
+            try:
+                run_import()
+            except Exception as e:
+                _set_import(state="error", err=str(e)[:300])
+
+        _IMPORT_THREAD = threading.Thread(target=_run, daemon=True)
+        _IMPORT_THREAD.start()
+        return True
 
 
 # ---------------------------------------------------------------- état local
@@ -312,6 +342,7 @@ def _importer_dossier(sess, dossier_id, ident, sub, st, deja_envoyes):
             st["imported"][f["id"]] = {"name": dst.name, "ts": int(time.time())}
             imported += 1
             _save_state(st)
+            _set_import(imported=imported, done=total)
         except Exception as e:
             errors += 1
             _set_status(err=str(e)[:200])
@@ -343,6 +374,8 @@ def run_import() -> dict:
             racine = f["id"]
             break
     total = imported = errors = 0
+    _set_import(state="running", total=0, done=0, imported=0, errors=0,
+                err="", ts=int(time.time()))
     for ident_dir in (_lister(sess, racine, dossiers=True) if racine else []):
         ident = ident_dir["name"].strip().lower()
         if not ident:
@@ -399,8 +432,10 @@ def run_import() -> dict:
                 t, i, e = _importer_dossier(sess, typ["id"], ident, sub, st, deja)
                 total += t; imported += i; errors += e
     _save_state(st)
-    return {"total": total, "imported": imported, "errors": errors,
-            "ts": int(time.time())}
+    res = {"total": total, "imported": imported, "errors": errors,
+           "ts": int(time.time())}
+    _set_import(state="done", **res)
+    return res
 
 
 def _creer_arborescence(sess, root, st, include_videos):
