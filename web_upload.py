@@ -6734,31 +6734,31 @@ document.addEventListener('click',function(e){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Vault PRO','Reels de le Bibliothèque 2 (identités séparées)')">
+    <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Bibliothèque 2','Reels de la Bibliothèque 2 (identités séparées)')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Reels
     </button>
-    <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Vault PRO','Posts de le Vault PRO')">
+    <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Bibliothèque 2','Posts de la Bibliothèque 2')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
       Posts
     </button>
-    <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Vault PRO','Stories de le Vault PRO')">
+    <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Bibliothèque 2','Stories de la Bibliothèque 2')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
       Stories
     </button>
-    <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Vault PRO','Stories CTA de le Vault PRO')">
+    <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Bibliothèque 2','Stories CTA de la Bibliothèque 2')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       Story CTA
     </button>
-    <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Vault PRO','PP de le Vault PRO, par identité')">
+    <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Bibliothèque 2','PP de la Bibliothèque 2, par identité')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
       Photos profil
     </button>
-    <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Vault PRO','Rushs bruts de le Vault PRO')">
+    <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Bibliothèque 2','Rushs bruts de la Bibliothèque 2')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Vidéo brut
     </button>
-    <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Vault PRO','Tout le contenu d’une identité de le Vault PRO — lecture seule')">
+    <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Bibliothèque 2','Tout le contenu d’une identité de la Bibliothèque 2 — lecture seule')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       Drive
     </button>
@@ -8688,7 +8688,7 @@ def _v2_label(ident) -> str:
 def _list_content_identities():
     """Identités affichées dans les pages Contenu/Bibliothèque : toutes SAUF
     celles réservées à Jailbreak (JAILBREAK_ONLY_IDENTITIES) et celles de la
-    Vault PRO (préfixe v2_).
+    Bibliothèque 2 (préfixe v2_).
     Le backend (routes CRUD, page Jailbreak, VAs) continue d'utiliser
     _list_identities() — donc Jessye reste pleinement fonctionnelle ailleurs."""
     hidden = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
@@ -38279,7 +38279,7 @@ def create_app():
                     elif _tab == "v2drive":
                         _dr = _render_cloud_drive_html(
                             tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
-                            show_sync=False, vault_label="Vault PRO", vault2=True)
+                            show_sync=False, vault_label="Bibliothèque 2", vault2=True)
                     else:
                         _dr = _render_cloud_drive_html()
                     return (f"<div class='form-section' id='form-{_tab}' style='display:block'>"
@@ -38327,7 +38327,7 @@ def create_app():
                 "provaultstories": lambda: _render_cloud_content_html("pro_stories", IMAGE_EXTS),
                 "provaultstoryctas": lambda: _render_cloud_content_html("pro_storyctas", IMAGE_EXTS),
                 "provaultpps": lambda: _render_cloud_content_html("pro_profile_pics", IMAGE_EXTS, include_jb=True),
-                # Vault PRO : mêmes producers, mais SES identités (vault2)
+                # Bibliothèque 2 : mêmes producers, mais SES identités (vault2)
                 "v2reels": lambda: _render_cloud_content_html("videos", VIDEO_EXTS, vault2=True),
                 "v2posts": lambda: _render_cloud_content_html("posts", IMAGE_EXTS, vault2=True),
                 "v2stories": lambda: _render_cloud_content_html("stories", IMAGE_EXTS, vault2=True),
@@ -38336,7 +38336,7 @@ def create_app():
                 "v2brutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS, vault2=True),
                 "v2drive": lambda: _render_cloud_drive_html(
                     tab="v2drive", ident_key="v2_drive_ident", dom_key="v2drive",
-                    show_sync=False, vault_label="Vault PRO", vault2=True),
+                    show_sync=False, vault_label="Bibliothèque 2", vault2=True),
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
                 "sfssetupof": lambda: _render_sfssetup_html("of"),
