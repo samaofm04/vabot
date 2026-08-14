@@ -1941,6 +1941,55 @@ try:
         check("gdrive : un SEUL dossier cree a la racine du Drive",
               {n for par, n in _creGd if par == "RACINE"} == {"Bibliothèque"},
               str([c for c in _creGd if c[0] == "RACINE"]))
+
+        # --- envois paralleles : rien en double, la relance ne renvoie rien ---
+        import threading as _thGd
+        _envGd, _dirGd, _vGd = [], [], _thGd.Lock()
+        _origGd2 = (_gdCa.STATE_FILE, _gdCa._session, _gdCa._session_thread,
+                    _gdCa._ensure_folder, _gdCa._upload_file,
+                    _gdCa.load_config, _gdCa.save_config)
+
+        def _upGd(sess, parent, path):
+            import time as _tGd
+            _tGd.sleep(0.01)                     # simule le reseau
+            with _vGd:
+                _envGd.append(str(path))
+            return "id-" + path.name
+
+        def _dirFnGd(sess, parent, name, st):
+            _cle = str(parent) + "/" + name
+            _cc = st.setdefault("folders", {})
+            if _cle in _cc:
+                return _cc[_cle]
+            with _vGd:
+                _dirGd.append(_cle)
+            _cc[_cle] = "dir-" + name
+            return _cc[_cle]
+
+        _gdCa.STATE_FILE = _tmpGd / "state.json"
+        _gdCa._session = lambda: "S"
+        _gdCa._session_thread = lambda: "S"
+        _gdCa._ensure_folder = _dirFnGd
+        _gdCa._upload_file = _upGd
+        _gdCa.load_config = lambda: {"folder": "RACINEbidon1234", "include_videos": True}
+        _gdCa.save_config = lambda c: True
+        try:
+            _r1Gd = _gdCa.run_sync()
+            check("gdrive : tout part, aucun echec (envois paralleles)",
+                  _r1Gd["uploaded"] == _r1Gd["total"] and _r1Gd["errors"] == 0, str(_r1Gd))
+            check("gdrive : aucun fichier envoye deux fois",
+                  len(_envGd) == len(set(_envGd)), "%d/%d" % (len(_envGd), len(set(_envGd))))
+            check("gdrive : aucun dossier cree deux fois (verrou sur le cache)",
+                  len(_dirGd) == len(set(_dirGd)), str(len(_dirGd)))
+            _envGd.clear()
+            _r2Gd = _gdCa.run_sync()
+            check("gdrive : relancer ne renvoie rien",
+                  _r2Gd["uploaded"] == 0 and _r2Gd["skipped"] == _r1Gd["total"]
+                  and not _envGd, str(_r2Gd))
+        finally:
+            (_gdCa.STATE_FILE, _gdCa._session, _gdCa._session_thread,
+             _gdCa._ensure_folder, _gdCa._upload_file,
+             _gdCa.load_config, _gdCa.save_config) = _origGd2
     finally:
         _gdCa.IDENTITIES_DIR = _origGd
         _shGd.rmtree(_tmpGd, ignore_errors=True)

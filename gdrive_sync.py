@@ -77,6 +77,16 @@ SECTIONS_PRO = (
 # Bibliothèque 2 : identités préfixées, mêmes sous-dossiers que la Bibliothèque
 V2_PREFIX = "v2_"
 
+# Envois simultanes vers le Drive. 6 = net gain sans risquer le
+# « userRateLimitExceeded » de Google (l'ancien mode sequentiel plafonnait
+# a ~40 fichiers/minute).
+UPLOAD_WORKERS = 12
+
+# En dessous de cette taille, un fichier part en UNE requete (multipart) au
+# lieu de deux (ouverture de session reprenable + envoi) : les photos, qui
+# sont l'essentiel du volume, vont deux fois plus vite.
+SEUIL_MULTIPART = 4 * 1024 * 1024
+
 _LOCK = threading.Lock()
 _THREAD: threading.Thread | None = None
 _STATUS: dict = {"state": "idle"}
@@ -281,6 +291,19 @@ def _save_state(st: dict) -> None:
 
 
 # ---------------------------------------------------------------- API Drive
+_LOCAL = threading.local()
+
+
+def _session_thread():
+    """Une session par thread : requests.Session n'est pas prevue pour etre
+    partagee entre plusieurs uploads simultanes."""
+    s = getattr(_LOCAL, "sess", None)
+    if s is None:
+        s = _session()
+        _LOCAL.sess = s
+    return s
+
+
 def _session():
     """Ton compte Google si connecte (le stockage est le TIEN), sinon le
     compte de service (lecture/dossiers seulement : il n'a pas de quota)."""
@@ -296,6 +319,35 @@ def _session():
     creds = Credentials.from_service_account_file(
         str(SA_FILE), scopes=[OAUTH_SCOPE])
     return AuthorizedSession(creds)
+
+
+class ErreurDrive(RuntimeError):
+    """Erreur Drive avec son code : sert a savoir si ca vaut le coup de
+    retenter (429 / 5xx) ou non (403 quota, 404...)."""
+
+    def __init__(self, msg, status=0, raison=""):
+        super().__init__(msg)
+        self.status = status
+        self.raison = raison
+
+
+_RAISONS_REPRISE = ("ratelimitexceeded", "userratelimitexceeded",
+                    "backenderror", "internalerror")
+
+
+def _avec_reprise(fn, *a, **kw):
+    """Retente en s'espacant : avec 12 envois en parallele, Google renvoie
+    parfois un 429 passager. Abandonner la ferait echouer un fichier pour
+    rien."""
+    for essai in range(4):
+        try:
+            return fn(*a, **kw)
+        except ErreurDrive as e:
+            reprenable = (e.status in (429, 500, 502, 503, 504)
+                          or (e.raison or "").lower() in _RAISONS_REPRISE)
+            if essai == 3 or not reprenable:
+                raise
+            time.sleep(1.5 * (2 ** essai))
 
 
 def _ok(r, quoi=""):
@@ -317,11 +369,9 @@ def _ok(r, quoi=""):
                   "ton propre Drive.")
     elif raison in ("insufficientFilePermissions", "forbidden") and not detail:
         detail = "accès refusé au dossier Drive"
-    return _boom(f"{quoi + ' — ' if quoi else ''}{detail or ('HTTP ' + str(r.status_code))}")
-
-
-def _boom(msg):
-    raise RuntimeError(msg)
+    raise ErreurDrive(
+        f"{quoi + ' — ' if quoi else ''}{detail or ('HTTP ' + str(r.status_code))}",
+        status=r.status_code, raison=raison)
 
 
 def _ensure_folder(sess, parent_id: str, name: str, st: dict) -> str:
@@ -354,7 +404,43 @@ def _ensure_folder(sess, parent_id: str, name: str, st: dict) -> str:
 
 
 def _upload_file(sess, parent_id: str, path: Path) -> str:
-    """Upload resumable en un coup (toutes tailles). Retourne l'id Drive."""
+    """Envoie un fichier. Petit -> une seule requete ; gros -> session
+    reprenable. Retourne l'id Drive."""
+    try:
+        taille = path.stat().st_size
+    except OSError:
+        taille = SEUIL_MULTIPART + 1
+    if taille <= SEUIL_MULTIPART:
+        return _upload_multipart(sess, parent_id, path)
+    return _upload_resumable(sess, parent_id, path)
+
+
+def _upload_multipart(sess, parent_id: str, path: Path) -> str:
+    """Metadonnees + octets dans UNE requete (limite Google : 5 Mo).
+    Les octets ne sont ni ouverts ni analyses, juste recopies."""
+    import json as _js
+    import mimetypes
+    bord = "----youl4bsync"
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    meta = {"name": path.name, "parents": [parent_id]}
+    corps = (
+        (f"--{bord}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n").encode()
+        + _js.dumps(meta).encode()
+        + (f"\r\n--{bord}\r\nContent-Type: {mime}\r\n\r\n").encode()
+        + path.read_bytes()
+        + (f"\r\n--{bord}--\r\n").encode()
+    )
+    r = sess.post(
+        "https://www.googleapis.com/upload/drive/v3/files"
+        "?uploadType=multipart&fields=id&supportsAllDrives=true",
+        data=corps,
+        headers={"Content-Type": f"multipart/related; boundary={bord}"},
+        timeout=(30, 900))
+    _ok(r, "envoi")
+    return r.json().get("id", "")
+
+
+def _upload_resumable(sess, parent_id: str, path: Path) -> str:
     meta = {"name": path.name, "parents": [parent_id]}
     r = sess.post(
         "https://www.googleapis.com/upload/drive/v3/files"
@@ -702,27 +788,47 @@ def run_sync() -> dict:
     done = skipped = uploaded = errors = 0
     _set_status(state="running", total=total, done=0, uploaded=0,
                 skipped=0, errors=0, err="", ts=int(time.time()))
-    for chemin, path in jobs:
-        done += 1
+
+    # Envois EN PARALLELE : un fichier a la fois plafonnait a ~40/minute, la
+    # liaison passait son temps a attendre. L'etat et le cache de dossiers
+    # sont partages, donc proteges par un verrou.
+    verrou = threading.Lock()
+
+    def _un(job):
+        chemin, path = job
         key = "/".join(chemin) + "/" + path.name
-        try:
-            size = path.stat().st_size
+        size = path.stat().st_size
+        with verrou:
             rec = st["uploaded"].get(key)
-            if rec and rec.get("size") == size:
-                skipped += 1
-            else:
-                parent = root
-                for niveau in chemin:          # <Bibliothèque>/<Identité>/<Type>
-                    parent = _ensure_folder(sess, parent, niveau, st)
-                fid = _upload_file(sess, parent, path)
-                st["uploaded"][key] = {"size": size, "id": fid}
-                uploaded += 1
-                if uploaded % 10 == 0:
-                    _save_state(st)
-        except Exception as e:  # un fichier en échec ne stoppe pas le reste
-            errors += 1
-            _set_status(err=str(e)[:200])
-        _set_status(done=done, uploaded=uploaded, skipped=skipped, errors=errors)
+        if rec and rec.get("size") == size:
+            return ("skip", key, None, 0)
+        s_th = _session_thread()
+        parent = root
+        for niveau in chemin:              # <Bibliothèque>/<Identité>/<Type>
+            with verrou:                   # cache partage : jamais 2 creations
+                parent = _ensure_folder(s_th, parent, niveau, st)
+        fid = _avec_reprise(_upload_file, s_th, parent, path)
+        return ("up", key, fid, size)
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as pool:
+        futurs = {pool.submit(_un, j): j for j in jobs}
+        for fut in as_completed(futurs):
+            done += 1
+            try:
+                quoi, key, fid, size = fut.result()
+                if quoi == "skip":
+                    skipped += 1
+                else:
+                    with verrou:
+                        st["uploaded"][key] = {"size": size, "id": fid}
+                        uploaded += 1
+                        if uploaded % 10 == 0:
+                            _save_state(st)
+            except Exception as e:   # un fichier en échec ne stoppe pas le reste
+                errors += 1
+                _set_status(err=str(e)[:200])
+            _set_status(done=done, uploaded=uploaded, skipped=skipped, errors=errors)
     _save_state(st)
     res = {"total": total, "uploaded": uploaded, "skipped": skipped,
            "errors": errors, "ts": int(time.time())}
