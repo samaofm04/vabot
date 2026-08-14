@@ -5916,11 +5916,27 @@ document.addEventListener('click', function(ev){
   if(nw) nw.style.display = identEditCtx.rename ? 'flex' : 'none';
   var n=document.getElementById('ident-edit-name'); if(n) n.value=lbl;
   var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
+  identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
+  identEditMarket(identEditCtx.market0);
   var e=document.getElementById('ident-edit-err'); if(e) e.textContent='';
   var g=document.getElementById('ident-edit-go'); if(g){ g.disabled=false; g.textContent='Enregistrer'; }
   var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='flex';
 });
 function identEditClose(){ var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='none'; }
+function identEditMarket(v){
+  identEditCtx.market = v;
+  [['fr','ident-edit-fr'],['us','ident-edit-us']].forEach(function(p){
+    var b=document.getElementById(p[1]); if(!b) return;
+    var on = (p[0] === v);
+    b.style.borderColor = on ? '#3b82f6' : '#34343a';
+    b.style.background  = on ? 'rgba(59,130,246,.14)' : '#131316';
+    b.style.color       = on ? '#7aa2ff' : '#e6e6ea';
+  });
+  var h=document.getElementById('ident-edit-mhint');
+  if(h) h.textContent = (v === 'us')
+    ? "US : cette identité reste sur le serveur Youl4b uniquement."
+    : "FR : cette identité va sur le Discord YouL4b Agency.";
+}
 async function identEditSave(){
   var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-go');
   var ident=identEditCtx.ident, fait=false, cible=ident;
@@ -5936,6 +5952,14 @@ async function identEditSave(){
                           if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
         cible=j1.identity; fait=true;
       }
+    }
+    if(identEditCtx.market && identEditCtx.market !== identEditCtx.market0){
+      var fm=new FormData(); fm.set('identity',cible); fm.set('market',identEditCtx.market);
+      var rm=await fetch('/identity/market',{method:'POST',body:fm,credentials:'same-origin'});
+      var jm=await rm.json();
+      if(!(jm&&jm.ok)){ if(err) err.textContent=(jm&&jm.error)||('Erreur '+rm.status);
+                        if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+      fait=true;
     }
     var av=document.getElementById('ident-edit-avatar');
     if(av&&av.files&&av.files[0]){
@@ -8214,6 +8238,15 @@ body.light .action-icon{color:#666}
     <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil
       <input id="ident-edit-avatar" type="file" accept="image/*"
              style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box"></label>
+    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Marché
+      <div style="display:flex;gap:8px">
+        <button type="button" id="ident-edit-fr" onclick="identEditMarket('fr')"
+                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🇫🇷 FR</button>
+        <button type="button" id="ident-edit-us" onclick="identEditMarket('us')"
+                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🇺🇸 US</button>
+      </div>
+      <div id="ident-edit-mhint" style="font-size:11px;color:#75757f;line-height:1.45"></div>
+    </div>
     <div id="ident-edit-err" style="color:#f87171;font-size:12px;min-height:15px"></div>
     <div style="display:flex;gap:8px">
       <button type="button" onclick="identEditClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
@@ -8731,6 +8764,45 @@ def _list_content_identities():
     hidden = {h.lower() for h in JAILBREAK_ONLY_IDENTITIES}
     return [i for i in _list_identities()
             if i.lower() not in hidden and not _is_v2(i)]
+
+
+MARKET_FILE = DATA_DIR / "identity_market.json"
+
+
+def _load_markets() -> dict:
+    """{identité: 'fr'|'us'} — qui va sur quel Discord."""
+    try:
+        d = _cached_json_load(MARKET_FILE)
+        return {str(k).lower(): str(v).lower() for k, v in d.items()} if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+# Répartition historique — MÊME règle que cogs/user.py : tant qu'aucun marché
+# n'a été choisi, ces identités-là sont FR et toutes les autres sont US (c'est
+# exactement ce que faisait la liste en dur du menu Jailbreak).
+_MARKET_FR_DEFAUT = {"julia", "emma", "lola", "sarah", "amelia", "alicia", "jessye"}
+
+
+def identity_market(ident: str) -> str:
+    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b)."""
+    idl = (ident or "").lower().strip()
+    m = _load_markets().get(idl)
+    if m in ("fr", "us"):
+        return m
+    return "fr" if idl in _MARKET_FR_DEFAUT else "us"
+
+
+def _set_identity_market(ident: str, market: str) -> bool:
+    """Le choix est écrit EN CLAIR (fr comme us) : sans ça, repasser une
+    identité US en FR retombait sur le défaut… c'est-à-dire US."""
+    d = _load_markets()
+    ident = (ident or "").lower().strip()
+    d[ident] = "us" if str(market).lower() == "us" else "fr"
+    MARKET_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ok = bool(safe_json.write(MARKET_FILE, d, indent=2))
+    _invalidate_json_cache(MARKET_FILE)
+    return ok
 
 
 def _list_v2_identities():
@@ -14104,6 +14176,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         # ✏️ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
         f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
+        f"data-market='{identity_market(selected)}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
         "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
         "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
@@ -15929,12 +16002,119 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             else:
                 _stat = "Pas encore synchronisé."
             _email = _gd.sa_email() or "(email du compte de service inconnu)"
+
+            # --- Qui televerse ? Un compte de service n'a AUCUN stockage
+            # Google : ses envois repondent 403. Seul TON compte peut deposer
+            # sur TON quota -> bloc de connexion.
+            _mode = _gd.auth_mode()
+            try:
+                from flask import request as _rq_dr
+                _base_dr = _rq_dr.url_root.rstrip("/")
+            except Exception:
+                _base_dr = "https://youl4b.com"
+            _redir = _base_dr + "/gdrive/oauth/callback"
+            _oc = _gd.oauth_config()
+            if _mode == "oauth":
+                _oauth_box = (
+                    "<div style='margin:0 0 12px;padding:10px 12px;background:rgba(34,197,94,.10);"
+                    "border:1px solid rgba(34,197,94,.35);border-radius:10px;display:flex;gap:10px;"
+                    "align-items:center;flex-wrap:wrap'>"
+                    "<span style='font-size:12.5px;color:#22c55e;font-weight:700'>&#9989; Ton compte Google est connecte"
+                    + (" &mdash; " + _gd.oauth_email() if _gd.oauth_email() else "")
+                    + "</span>"
+                    "<span style='font-size:11.5px;color:#75757f'>les fichiers arrivent sur TON Drive et comptent sur TON quota</span>"
+                    "<form method='POST' action='/gdrive/oauth/reset' style='margin-left:auto'>"
+                    "<button type='submit' style='padding:5px 10px;background:#1a1a1f;border:1px solid #34343a;"
+                    "color:#9a9aa6;border-radius:7px;font-size:11.5px;cursor:pointer;font-family:inherit'>Deconnecter</button>"
+                    "</form></div>")
+            else:
+                _oauth_box = (
+                    "<div style='margin:0 0 12px;padding:12px;background:rgba(239,68,68,.08);"
+                    "border:1px solid rgba(239,68,68,.35);border-radius:10px'>"
+                    "<div style='font-size:12.5px;color:#f87171;font-weight:700;margin-bottom:6px'>"
+                    "\u26a0\ufe0f Les fichiers ne peuvent pas partir (erreur 403)</div>"
+                    "<div style='font-size:11.5px;color:#c4c4cc;line-height:1.65;margin-bottom:10px'>"
+                    "Le compte de service cree bien les dossiers, mais Google ne lui donne "
+                    "<b>aucun espace de stockage</b> : tout envoi de fichier est refuse. "
+                    "Tes 2 To sont sur <b>ton</b> compte &mdash; c'est donc lui qui doit deposer.<br>"
+                    "1) <a href='https://console.cloud.google.com/apis/credentials' target='_blank' "
+                    "rel='noopener' style='color:#7aa2ff'>console Google Cloud &rarr; Identifiants</a> &rarr; "
+                    "&laquo;&nbsp;Creer des identifiants&nbsp;&raquo; &rarr; <b>ID client OAuth</b> &rarr; type <b>Application Web</b>.<br>"
+                    "2) URI de redirection autorisee, a coller tel quel : "
+                    "<code style='background:#1a1a1f;padding:2px 6px;border-radius:5px;user-select:all'>"
+                    + _redir + "</code><br>"
+                    "3) Colle l'ID et le secret ici, puis clique sur Connecter.</div>"
+                    "<form method='POST' action='/gdrive/oauth/client' style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
+                    "<input type='text' name='client_id' value='" + str(_oc.get("client_id", "")) + "' "
+                    "placeholder='ID client (...apps.googleusercontent.com)' "
+                    "style='flex:2;min-width:230px;background:#131316;border:1px solid #34343a;color:#e6e6ea;"
+                    "border-radius:8px;height:32px;padding:0 10px;font-size:12px;font-family:inherit'>"
+                    "<input type='password' name='client_secret' value='" + str(_oc.get("client_secret", "")) + "' "
+                    "placeholder='Secret client' "
+                    "style='flex:1;min-width:160px;background:#131316;border:1px solid #34343a;color:#e6e6ea;"
+                    "border-radius:8px;height:32px;padding:0 10px;font-size:12px;font-family:inherit'>"
+                    "<button type='submit' style='padding:7px 12px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;"
+                    "border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'>&#128190; Enregistrer</button>"
+                    + ("<a href='/gdrive/oauth/start' style='padding:7px 14px;"
+                       "background:linear-gradient(135deg,#3b82f6,#a855f7);"
+                       "color:#fff;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>"
+                       "\U0001f517 Connecter mon compte Google</a>"
+                       if _oc.get("client_id") and _oc.get("client_secret") else "")
+                    + "</form></div>")
+
+            # --- Statut de synchro, identite par identite (avec la PP) ---
+            try:
+                _rep = _gd.sync_report()
+            except Exception:
+                _rep = {"identities": [], "total": 0, "sync": 0, "pct": 100}
+            _cartes = []
+            for _e in _rep.get("identities", []):
+                _idt = _e["identity"]
+                _pc = _e["pct"]
+                _lb = _idt[3:] if _idt.lower().startswith("v2_") else _idt
+                _col = "#22c55e" if _pc >= 100 else ("#f59e0b" if _pc >= 50 else "#ef4444")
+                _sub = ("%d/%d fichiers" % (_e["sync"], _e["total"])) if _e["total"] else "vide"
+                _cartes.append(
+                    "<div style='display:flex;gap:9px;align-items:center;padding:8px 10px;"
+                    "background:#131316;border:1px solid #232327;border-radius:10px'>"
+                    + _identity_avatar_html(_idt, 30)
+                    + "<div style='min-width:0;flex:1'>"
+                    "<div style='font-size:12px;font-weight:700;color:#e6e6ea;white-space:nowrap;"
+                    "overflow:hidden;text-overflow:ellipsis'>" + _lb + "</div>"
+                    "<div style='font-size:10.5px;color:#75757f'>" + _sub + "</div>"
+                    "<div style='height:5px;background:#1a1a1f;border-radius:99px;overflow:hidden;margin-top:4px'>"
+                    "<div style='height:100%;width:" + str(_pc) + "%;background:" + _col + "'></div></div>"
+                    "</div>"
+                    "<div style='font-size:12px;font-weight:800;color:" + _col + ";flex-shrink:0'>"
+                    + str(_pc) + "%</div></div>")
+            _npasync = sum(1 for _e in _rep.get("identities", []) if _e["pct"] < 100)
+            _resume = ("%d/%d fichiers sur le Drive" % (_rep.get("sync", 0), _rep.get("total", 0)))
+            _resume += ((" &middot; <b style=\"color:#f59e0b\">%d identite(s) incomplete(s)</b>" % _npasync)
+                        if _npasync else " &middot; tout est a jour")
+            _statut_box = (
+                "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
+                "<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px'>"
+                "<span style='font-weight:700;font-size:13px'>&#128202; Statut de synchronisation</span>"
+                "<span style='font-size:12px;color:#9a9aa6'>" + _resume + "</span>"
+                "<form method='POST' action='/gdrive/sync' style='margin-left:auto;display:flex;gap:8px'>"
+                "<input type='hidden' name='all' value='1'>"
+                "<button type='submit' style='padding:7px 14px;background:linear-gradient(135deg,#3b82f6,#a855f7);"
+                "border:0;color:#fff;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;"
+                "font-family:inherit'>\u2601\ufe0f Tout synchroniser</button>"
+                "<button type='button' onclick='window.location.reload()' style='padding:7px 11px;background:#1a1a1f;"
+                "border:1px solid #34343a;color:#9a9aa6;border-radius:8px;font-size:12px;cursor:pointer;"
+                "font-family:inherit'>&#128260;</button>"
+                "</form></div>"
+                "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:8px'>"
+                + ("".join(_cartes) or "<div style='font-size:12px;color:#75757f'>Aucune identite.</div>")
+                + "</div></div>")
             _rawiv = _cfg.get("include_videos")
             _ivmode = ("montage" if str(_rawiv).lower() == "montage"
                        else ("all" if _rawiv else ""))
             sync_box = (
                 "<div style='margin:16px 0;padding:16px;background:#101013;border:1px solid #232327;border-radius:12px'>"
-                "<div style='font-weight:700;font-size:14px'>☁️ Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
+                "<div style='font-weight:700;font-size:14px;margin-bottom:10px'>☁️ Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
+                + _oauth_box +
                 "<div style='font-size:12px;color:#888;margin:6px 0 12px;line-height:1.6'>"
                 "1) Dans TON Google Drive, crée un dossier (ex : « VA DRIVE ») et partage-le en <b>Éditeur</b> avec : "
                 f"<code style='background:#1a1a1f;padding:2px 6px;border-radius:5px;user-select:all'>{_email}</code><br>"
@@ -15965,6 +16145,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "</form>"
                 "<div style='font-size:11px;color:#75757f;margin-top:8px'>Sous-dossiers reconnus : Video brut, Reels, Posts, Stories, Story CTA, Photos de profil, Templates montage. Rien n'est supprimé du Drive.</div>"
                 "</div>"
+                + _statut_box +
                 # ===== Barres d'avancement (les 2 sens) =====
                 "<div id='gdBars' style='margin-top:14px;display:flex;flex-direction:column;gap:12px'>"
                 "<div data-gdbar='sync' style='display:none'>"
@@ -16013,7 +16194,13 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "</div>"
             )
     except Exception:
+        # Ce except avalait TOUT : une faute dans la boîte Drive la faisait
+        # disparaître sans un mot. DRIVE_DEBUG=1 affiche la trace.
         sync_box = ""
+        import os as _os_dbg
+        if _os_dbg.environ.get("DRIVE_DEBUG"):
+            import traceback as _tb_dbg
+            _tb_dbg.print_exc()
 
     play_badge = (
         "<div style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);"
@@ -39935,6 +40122,23 @@ def create_app():
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "identity": ident})
 
+    @app.route("/identity/market", methods=["POST"])
+    def identity_market_set():
+        """Marché d'une identité : FR (Discord YouL4b Agency) ou US (Youl4b)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        market = (request.form.get("market") or "fr").strip().lower()
+        if market not in ("fr", "us"):
+            return jsonify({"ok": False, "error": "marché inconnu"})
+        if not _set_identity_market(ident, market):
+            return jsonify({"ok": False, "error": "écriture impossible"})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "identity": ident, "market": market})
+
     @app.route("/identity/rename", methods=["POST"])
     def identity_rename():
         """Renomme une identité de la BIBLIOTHÈQUE 2 (dossier + ses textes).
@@ -40573,11 +40777,81 @@ def create_app():
         import gdrive_sync as _gd
         if not _gd.available():
             return _error("Compte de service Google absent (data/google_service_account.json)", tab="clouddrive")
-        if not _gd.folder_id_from(_gd.load_config().get("folder") or ""):
+        _cfgs = _gd.load_config()
+        if not _gd.folder_id_from(_cfgs.get("folder") or ""):
             return _error("Renseigne d'abord le dossier Drive partagé", tab="clouddrive")
+        if request.form.get("all"):        # bouton « Tout synchroniser »
+            _cfgs["include_videos"] = True
+            _gd.save_config(_cfgs)
         if not _gd.start_background():
             return _error("Une synchro tourne déjà — recharge l'onglet pour suivre", tab="clouddrive")
         return _success("☁️ Synchro Google Drive lancée en arrière-plan — recharge l'onglet Drive pour suivre l'avancement", tab="clouddrive")
+
+    @app.route("/gdrive/oauth/client", methods=["POST"])
+    def gdrive_oauth_client():
+        """Identifiants de l'application OAuth (ID + secret de la console)."""
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        cid = (request.form.get("client_id") or "").strip()
+        sec = (request.form.get("client_secret") or "").strip()
+        if not cid or not sec:
+            return _error("ID client et secret sont tous les deux nécessaires",
+                          tab="clouddrive")
+        if not _gd.oauth_save_client(cid, sec):
+            return _error("Écriture impossible", tab="clouddrive")
+        return _success("💾 Identifiants enregistrés — clique sur « Connecter mon compte Google »",
+                        tab="clouddrive")
+
+    @app.route("/gdrive/oauth/start")
+    def gdrive_oauth_start():
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        url = _gd.oauth_auth_url(request.url_root.rstrip("/") + "/gdrive/oauth/callback")
+        if not url:
+            return _error("Renseigne d'abord l'ID client OAuth", tab="clouddrive")
+        return redirect(url)
+
+    @app.route("/gdrive/oauth/callback")
+    def gdrive_oauth_callback():
+        """Retour de Google : on échange le code contre un jeton durable."""
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        err = (request.args.get("error") or "").strip()
+        if err:
+            return _error(f"Google a refusé : {err}", tab="clouddrive")
+        code = (request.args.get("code") or "").strip()
+        if not code:
+            return _error("Aucun code reçu de Google", tab="clouddrive")
+        msg = _gd.oauth_exchange(code, request.url_root.rstrip("/") + "/gdrive/oauth/callback")
+        if msg:
+            return _error(f"Connexion impossible : {msg}", tab="clouddrive")
+        who = _gd.oauth_email()
+        return _success("✅ Google Drive connecté" + (f" ({who})" if who else "")
+                        + " — les fichiers partiront sur TON espace",
+                        tab="clouddrive")
+
+    @app.route("/gdrive/oauth/reset", methods=["POST"])
+    def gdrive_oauth_reset():
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        _gd.oauth_reset()
+        return _success("Compte Google déconnecté", tab="clouddrive")
+
+    @app.route("/gdrive/report")
+    def gdrive_report():
+        """Statut de synchro identité par identité (pour rafraîchir sans recharger)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import gdrive_sync as _gd
+        try:
+            return jsonify({"ok": True, **_gd.sync_report()})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
 
     @app.route("/gdrive/status")
     def gdrive_status():

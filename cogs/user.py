@@ -895,7 +895,7 @@ def _vault_texts(category, identity):
     ⚠️ Les identités du MARCHÉ FR sont volontairement EXCLUES : leur contenu
     ne doit pas bouger tant que l'user ne l'a pas demandé (elles continuent de
     ne servir que leurs .txt, exactement comme avant)."""
-    if (identity or "").lower().strip() in _FR_MARKET_IDENTITIES:
+    if _is_fr_market(identity):
         return []
     try:
         import text_pool as _tp
@@ -917,7 +917,7 @@ def random_bio_for(identity):
         bios = bios + [b for b in _vault_texts("bios", identity) if b not in bios]
         if bios:
             return unescape_newlines(random.choice(bios))
-        if idl and idl not in _FR_MARKET_IDENTITIES:
+        if idl and not _is_fr_market(idl):
             return None            # US : pas de repli FR, on dit qu'il n'y en a pas
     bios = _read_bios_at(SHARED_BIOS_FILE)
     if bios:
@@ -2981,7 +2981,9 @@ class UserCog(commands.Cog):
             return
         try:
             from cogs.welcome import list_active_identities
-            models = list_active_identities()  # actives, sans jessye (jailbreak-only)
+            # Serveur FR : seulement les models du marche FR — les US n'ont
+            # rien a faire ici (elles ont /menujailbreakus sur Youl4b).
+            models = [m for m in list_active_identities() if _market_of(m) == "fr"]
         except Exception:
             models = []
         if not models:
@@ -4479,9 +4481,49 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 # contrairement au menu classique qui les exclut).
 # Marché FR : rien de leur comportement ne doit changer sans demande explicite
 # de l'user (leurs textes viennent UNIQUEMENT des .txt, comme avant).
+# Repartition historique, utilisee tant que le marche n'a pas ete choisi sur
+# le site (Bibliotheque -> Modifier -> Marche 🇫🇷/🇺🇸).
 _FR_MARKET_IDENTITIES = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
 # + jessye : elle non plus n'est pas une model du menu US (elle en est la SOURCE)
 _JB_FR_IDENTITIES = _FR_MARKET_IDENTITIES | {"jessye"}
+
+_MARKET_FILE = Path("data") / "identity_market.json"
+_MARKET_CACHE = {"ts": 0.0, "sig": None, "data": {}}
+
+
+def _markets() -> dict:
+    """{identite: 'fr'|'us'} choisi depuis le site. Relu quand le fichier
+    bouge (le site ecrit, le bot lit — deux processus distincts)."""
+    try:
+        sig = _MARKET_FILE.stat().st_mtime_ns
+    except OSError:
+        _MARKET_CACHE.update(sig=None, data={})
+        return {}
+    if _MARKET_CACHE["sig"] != sig:
+        try:
+            d = json.loads(_MARKET_FILE.read_text(encoding="utf-8"))
+            d = {str(k).lower(): str(v).lower() for k, v in d.items()} if isinstance(d, dict) else {}
+        except Exception:
+            d = {}
+        _MARKET_CACHE.update(sig=sig, data=d)
+    return _MARKET_CACHE["data"]
+
+
+def _market_of(identity: str) -> str:
+    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b)."""
+    idl = (identity or "").strip().lower()
+    v = _markets().get(idl)
+    if v in ("fr", "us"):
+        return v
+    return "fr" if idl in _JB_FR_IDENTITIES else "us"
+
+
+def _is_fr_market(identity: str) -> bool:
+    """Marche FR au sens « textes et bios partages du serveur historique ».
+    Jessye en est exclue : elle est la SOURCE du menu US, pas une model FR
+    (c'etait deja le cas avant le selecteur, on ne change rien pour elle)."""
+    idl = (identity or "").strip().lower()
+    return idl != _US_SOURCE_IDENTITY and _market_of(idl) == "fr"
 
 # Serveur US : pseudo et name viennent d'une identité « source » commune
 # (Jessye) — des EXEMPLES posés à la main sur le site, aucune génération IA.
@@ -4495,7 +4537,7 @@ def _jb_us_models():
     try:
         from cogs.welcome import list_identities, is_identity_active
         return [n for n in list_identities()
-                if is_identity_active(n) and n.strip().lower() not in _JB_FR_IDENTITIES]
+                if is_identity_active(n) and _market_of(n) == "us"]
     except Exception:
         return []
 

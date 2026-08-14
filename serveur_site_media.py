@@ -73,6 +73,15 @@ def _load():
         return {}
 
 
+def _ecrire(c):
+    """Écriture atomique de la config (fichier temporaire puis remplacement)."""
+    txt = json.dumps(c, indent=2, ensure_ascii=False)
+    tmp = CONF.with_suffix(CONF.suffix + ".tmp")
+    tmp.write_text(txt, encoding="utf-8")
+    import os
+    os.replace(tmp, CONF)
+
+
 def setup():
     c = _load()
     print("── Source de médias : le site ──\n")
@@ -84,7 +93,7 @@ def setup():
         c["token"] = tok
     ident = input(f"\nIdentité à servir [{c.get('identity', 'beta')}] : ").strip()
     c["identity"] = (ident or c.get("identity") or "beta").lower()
-    CONF.write_text(json.dumps(c, indent=2, ensure_ascii=False), encoding="utf-8")
+    _ecrire(c)
     print(f"\n✅ Config enregistrée. Démarre avec :  python {Path(__file__).name} 8099")
 
 
@@ -205,8 +214,7 @@ class H(BaseHTTPRequestHandler):
             if new:
                 _STATE["identity"] = new
                 c = _load(); c["identity"] = new
-                CONF.write_text(json.dumps(c, indent=2, ensure_ascii=False),
-                                encoding="utf-8")
+                _ecrire(c)
             return self._send(200, f"identite : {_STATE['identity']}".encode())
         if path in ("/", "/etat"):
             lines = [f"identite : {_STATE['identity']}", f"site     : {_STATE['url']}", ""]

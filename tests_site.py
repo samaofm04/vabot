@@ -1848,8 +1848,9 @@ try:
         check("textvault : entrees bien assignees a l identite",
               all((e.get("identity") or "") == "_tst_captions" for e in _lst))
         _hB = _cCa.get("/?tab=cloudbios&cloud_bios_ident=_tst_captions").get_data(as_text=True)
-        check("textvault : onglet Bios rendu (carte + pool commun en sidebar)",
-              "data-txtroot" in _hB and "bio test B" in _hB and "Pool commun" in _hB)
+        check("textvault : onglet Bios rendu (sans « Pool commun », retire a la demande)",
+              "data-txtroot" in _hB and "bio test B" in _hB
+              and "Pool commun" not in _hB)
         check("textvault : identite inconnue refusee",
               ((_cCa.post("/textpool/vault_add", data={"category": "bios", "identity": "zz_inconnue",
                           "texts": _jsCa.dumps(["x"])}).get_json() or {}).get("ok")) is not True)
@@ -1958,6 +1959,49 @@ except Exception as _e:
     import traceback as _tbCa
     _tbCa.print_exc()
     check("captions : testable", False, repr(_e)[:120])
+
+print()
+print("=" * 70)
+print("22) Marche FR/US : le site et le bot doivent dire la MEME chose")
+print("=" * 70)
+try:
+    import json as _jsMk
+    import pathlib as _plMk
+    import web_upload as _wMk
+    import cogs.user as _uMk
+
+    _fMk = _plMk.Path("data/identity_market.json")
+    _savMk = _fMk.read_bytes() if _fMk.exists() else None
+    try:
+        _fMk.unlink(missing_ok=True)
+        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
+        # defaut : la repartition historique, des deux cotes
+        check("marche : julia FR par defaut (site + bot)",
+              _wMk.identity_market("julia") == "fr" and _uMk._market_of("julia") == "fr")
+        check("marche : une identite inconnue est US (site + bot)",
+              _wMk.identity_market("_tst_us") == "us" and _uMk._market_of("_tst_us") == "us")
+        # bascule US -> FR : elle doit TENIR (un simple 'pop' retombait sur US)
+        _wMk._set_identity_market("_tst_us", "fr")
+        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
+        check("marche : bascule US -> FR conservee (site + bot)",
+              _wMk.identity_market("_tst_us") == "fr" and _uMk._market_of("_tst_us") == "fr")
+        # bascule FR -> US
+        _wMk._set_identity_market("julia", "us")
+        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
+        check("marche : bascule FR -> US conservee (site + bot)",
+              _wMk.identity_market("julia") == "us" and _uMk._market_of("julia") == "us")
+        check("marche : jessye reste hors des textes FR partages",
+              not _uMk._is_fr_market("jessye"))
+        check("marche : ecriture atomique (pas de .tmp residuel)",
+              _fMk.exists() and not list(_fMk.parent.glob("identity_market.json.tmp*")))
+    finally:
+        if _savMk is None:
+            _fMk.unlink(missing_ok=True)
+        else:
+            _fMk.write_bytes(_savMk)
+        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
+except Exception as _eMk:
+    check("marche : testable", False, repr(_eMk)[:120])
 
 print()
 print("=" * 70)

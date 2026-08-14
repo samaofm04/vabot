@@ -64,7 +64,13 @@ def _load():
 
 
 def _save(d):
-    CONF.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Écriture atomique : on écrit à côté puis on remplace. Une coupure au
+    mauvais moment ne laisse jamais une config à moitié écrite (sinon la
+    liste des fichiers déjà envoyés est perdue et tout repart)."""
+    txt = json.dumps(d, indent=2, ensure_ascii=False)
+    tmp = CONF.with_suffix(CONF.suffix + ".tmp")
+    tmp.write_text(txt, encoding="utf-8")
+    os.replace(tmp, CONF)
 
 
 def setup():

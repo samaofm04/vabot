@@ -63,7 +63,9 @@ _IMPORT_THREAD = None
 
 # ---------------------------------------------------------------- config
 def available() -> bool:
-    """Compte de service présent + google-auth importable."""
+    """Utilisable : ton compte Google connecté, ou le compte de service."""
+    if oauth_ready():
+        return True
     if not SA_FILE.exists():
         return False
     try:
@@ -108,6 +110,99 @@ def folder_id_from(raw: str) -> str:
     if m:
         return m.group(1)
     return raw if re.fullmatch(r"[A-Za-z0-9_\-]{10,}", raw) else ""
+
+
+# ---------------------------------------------------------------- OAuth user
+# Un compte de service n'a AUCUN stockage Google : tout upload de fichier
+# repond 403 « storageQuotaExceeded » (les dossiers passent, ils pesent 0).
+# Pour deposer sur TON Drive (et donc TON quota), c'est TON compte qui doit
+# televerser -> OAuth. Le compte de service reste le mode de secours.
+OAUTH_FILE = DATA_DIR / "gdrive_oauth.json"
+OAUTH_SCOPE = "https://www.googleapis.com/auth/drive"
+_TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+
+def oauth_config() -> dict:
+    d = safe_json.load(OAUTH_FILE, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def oauth_ready() -> bool:
+    c = oauth_config()
+    return bool(c.get("refresh_token") and c.get("client_id") and c.get("client_secret"))
+
+
+def oauth_email() -> str:
+    return str(oauth_config().get("email") or "")
+
+
+def auth_mode() -> str:
+    """« oauth » (ton compte), « sa » (compte de service), « none »."""
+    if oauth_ready():
+        return "oauth"
+    return "sa" if SA_FILE.exists() else "none"
+
+
+def oauth_save_client(client_id: str, client_secret: str) -> bool:
+    c = oauth_config()
+    c["client_id"] = (client_id or "").strip()
+    c["client_secret"] = (client_secret or "").strip()
+    OAUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    return bool(safe_json.write(OAUTH_FILE, c, indent=2))
+
+
+def oauth_reset() -> bool:
+    """Deconnecte : on garde l'identifiant d'application, on jette le jeton."""
+    c = oauth_config()
+    c.pop("refresh_token", None)
+    c.pop("email", None)
+    return bool(safe_json.write(OAUTH_FILE, c, indent=2))
+
+
+def oauth_auth_url(redirect_uri: str) -> str:
+    from urllib.parse import urlencode
+    c = oauth_config()
+    if not c.get("client_id"):
+        return ""
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
+        "client_id": c["client_id"], "redirect_uri": redirect_uri,
+        "response_type": "code", "scope": OAUTH_SCOPE,
+        "access_type": "offline", "prompt": "consent",
+        "include_granted_scopes": "true",
+    })
+
+
+def oauth_exchange(code: str, redirect_uri: str) -> str:
+    """Echange le code contre un jeton durable. Retourne "" si OK, sinon
+    le message d'erreur."""
+    import requests
+    c = oauth_config()
+    if not (c.get("client_id") and c.get("client_secret")):
+        return "identifiants d'application manquants"
+    try:
+        r = requests.post(_TOKEN_URI, timeout=30, data={
+            "code": code, "client_id": c["client_id"],
+            "client_secret": c["client_secret"],
+            "redirect_uri": redirect_uri, "grant_type": "authorization_code"})
+        j = r.json() if r.content else {}
+    except Exception as e:
+        return str(e)[:200]
+    if r.status_code >= 400 or not j.get("refresh_token"):
+        return (j.get("error_description") or j.get("error")
+                or f"HTTP {r.status_code}") + (
+                    "" if j.get("refresh_token") or r.status_code >= 400
+                    else " (aucun jeton durable renvoyé — révoque l'accès puis recommence)")
+    c["refresh_token"] = j["refresh_token"]
+    try:                                   # a qui appartient ce Drive ?
+        from google.auth.transport.requests import AuthorizedSession
+        sess = _session()
+        d = sess.get("https://www.googleapis.com/drive/v3/about",
+                     params={"fields": "user(emailAddress)"}, timeout=30)
+        c["email"] = (d.json().get("user") or {}).get("emailAddress", "")
+    except Exception:
+        c["email"] = ""
+    safe_json.write(OAUTH_FILE, c, indent=2)
+    return ""
 
 
 def status() -> dict:
@@ -164,11 +259,46 @@ def _save_state(st: dict) -> None:
 
 # ---------------------------------------------------------------- API Drive
 def _session():
-    from google.oauth2.service_account import Credentials
+    """Ton compte Google si connecte (le stockage est le TIEN), sinon le
+    compte de service (lecture/dossiers seulement : il n'a pas de quota)."""
     from google.auth.transport.requests import AuthorizedSession
+    c = oauth_config()
+    if c.get("refresh_token") and c.get("client_id") and c.get("client_secret"):
+        from google.oauth2.credentials import Credentials as UserCreds
+        return AuthorizedSession(UserCreds(
+            None, refresh_token=c["refresh_token"], token_uri=_TOKEN_URI,
+            client_id=c["client_id"], client_secret=c["client_secret"],
+            scopes=[OAUTH_SCOPE]))
+    from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_file(
-        str(SA_FILE), scopes=["https://www.googleapis.com/auth/drive"])
+        str(SA_FILE), scopes=[OAUTH_SCOPE])
     return AuthorizedSession(creds)
+
+
+def _ok(r, quoi=""):
+    """Comme raise_for_status(), mais avec le MESSAGE de Google : « 403 »
+    tout court ne dit pas quoi corriger."""
+    if r.status_code < 400:
+        return r
+    raison = detail = ""
+    try:
+        j = (r.json() or {}).get("error") or {}
+        detail = str(j.get("message") or "")
+        errs = j.get("errors") or []
+        raison = str((errs[0] or {}).get("reason") or "") if errs else ""
+    except Exception:
+        detail = (r.text or "")[:200]
+    if raison == "storageQuotaExceeded" or "storage quota" in detail.lower():
+        detail = ("le compte de service n'a pas de stockage Google. Va dans "
+                  "Drive → « Connecter mon compte Google » pour déposer sur "
+                  "ton propre Drive.")
+    elif raison in ("insufficientFilePermissions", "forbidden") and not detail:
+        detail = "accès refusé au dossier Drive"
+    return _boom(f"{quoi + ' — ' if quoi else ''}{detail or ('HTTP ' + str(r.status_code))}")
+
+
+def _boom(msg):
+    raise RuntimeError(msg)
 
 
 def _ensure_folder(sess, parent_id: str, name: str, st: dict) -> str:
@@ -194,7 +324,7 @@ def _ensure_folder(sess, parent_id: str, name: str, st: dict) -> str:
                       json={"name": name, "parents": [parent_id],
                             "mimeType": "application/vnd.google-apps.folder"},
                       timeout=60)
-        r.raise_for_status()
+        _ok(r, f"dossier « {name} »")
         fid = r.json()["id"]
     st["folders"][key] = fid
     return fid
@@ -207,7 +337,7 @@ def _upload_file(sess, parent_id: str, path: Path) -> str:
         "https://www.googleapis.com/upload/drive/v3/files"
         "?uploadType=resumable&fields=id&supportsAllDrives=true",
         json=meta, timeout=60)
-    r.raise_for_status()
+    _ok(r, "envoi")
     put_url = r.headers.get("Location")
     if not put_url:
         raise RuntimeError("pas d'URL d'upload")
@@ -215,7 +345,7 @@ def _upload_file(sess, parent_id: str, path: Path) -> str:
         r2 = sess.put(put_url, data=fh,
                       headers={"Content-Length": str(path.stat().st_size)},
                       timeout=(30, 1800))
-    r2.raise_for_status()
+    _ok(r2, "envoi")
     return r2.json().get("id", "")
 
 
@@ -264,6 +394,53 @@ def _iter_jobs(include_videos):
                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name:
                     chemin = ((biblio_x,) if biblio_x else ()) + (label.title(), drive_name)
                     yield chemin, p
+
+
+def sync_report() -> dict:
+    """Etat de la copie Drive, identite par identite.
+
+    Compte TOUT (photos + videos, les 3 bibliotheques) : le pourcentage dit
+    ce qui est reellement sur le Drive, pas ce que le mode courant enverrait.
+    Un fichier compte comme synchronise si son id Drive est connu ET que sa
+    taille n'a pas bouge depuis l'envoi."""
+    st = _load_state()
+    up = st.get("uploaded") or {}
+    par: dict = {}
+
+    def _e(ident):
+        return par.setdefault(ident, {"identity": ident, "total": 0,
+                                      "sync": 0, "manque": 0, "octets": 0})
+
+    if IDENTITIES_DIR.exists():
+        for d in sorted(IDENTITIES_DIR.iterdir()):
+            if d.is_dir():
+                _e(d.name)
+    for chemin, path in _iter_jobs(True):
+        # data/identities/<ident>/<sous-dossier>/<fichier>
+        ent = _e(path.parent.parent.name)
+        ent["total"] += 1
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = -1
+        rec = up.get("/".join(chemin) + "/" + path.name)
+        if rec and rec.get("size") == size:
+            ent["sync"] += 1
+        else:
+            ent["manque"] += 1
+            ent["octets"] += max(0, size)
+    lignes = []
+    for ent in par.values():
+        t = ent["total"]
+        ent["pct"] = 100 if not t else int(round(ent["sync"] * 100.0 / t))
+        lignes.append(ent)
+    lignes.sort(key=lambda e: (e["pct"], -e["total"], e["identity"]))
+    tot = sum(e["total"] for e in lignes)
+    syn = sum(e["sync"] for e in lignes)
+    return {"identities": lignes, "total": tot, "sync": syn,
+            "manque": tot - syn, "octets": sum(e["octets"] for e in lignes),
+            "pct": 100 if not tot else int(round(syn * 100.0 / tot)),
+            "mode": auth_mode(), "email": oauth_email()}
 
 
 # ===== Import Drive -> site =====
