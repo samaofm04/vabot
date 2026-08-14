@@ -4548,7 +4548,7 @@ function txtAddOpen(){
   var c=txtCtx(); if(!c) return;
   var m=document.getElementById('txt-add-modal'); if(!m) return;
   var t=document.getElementById('txtAddTitle');
-  if(t) t.textContent=(c.cat==='ctas'?'CTA':'Bios')+' — '+(c.ident==='_pool_'?'Pool commun':'@'+c.ident);
+  if(t) t.textContent=(c.cat==='ctas'?'CTA':'Bios')+' — @'+String(c.ident||'').replace(/^_pool_$/,'commun');
   var list=document.getElementById('txtAddList'); if(list) list.innerHTML='';
   txtAddField(false);
   m.style.display='flex';
@@ -5011,6 +5011,43 @@ function capAddSubmit(){
 // (L auto-ajout de champ « quand on tape dans le dernier » a été RETIRÉ : les
 // extensions d autofill remplissaient chaque nouveau champ -> cascade de
 // doublons. On ajoute un champ UNIQUEMENT via le bouton.)
+// ---- Filtre des identités (Toutes / Avec du contenu / Vides) ----
+// Purement client : on lit le compteur deja affiche sous chaque nom.
+function identFilterApply(sec, val){
+  var items = sec.querySelectorAll('.vault-item');
+  items.forEach(function(a){
+    if(a.getAttribute('data-ident') === '_pool_') return;
+    var sub = a.querySelector('div[style*="color:#888"]');
+    var m = sub ? String(sub.textContent||'').match(/^(\d+)/) : null;
+    var n = m ? parseInt(m[1]) : 0;
+    var ok = (val === 'all') || (val === 'full' ? n > 0 : n === 0);
+    a.style.display = ok ? '' : 'none';
+  });
+}
+document.addEventListener('click', function(ev){
+  var t = ev.target.closest ? ev.target.closest('[data-identfilter]') : null;
+  if(t){
+    var menu = t.parentElement.querySelector('[data-filtermenu]');
+    if(menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+    return;
+  }
+  var opt = ev.target.closest ? ev.target.closest('.ident-fopt') : null;
+  if(opt){
+    var box = opt.closest('[data-filtermenu]');
+    var row = box.parentElement;
+    var sec = opt.closest('.form-section') || document;
+    var val = opt.getAttribute('data-fval');
+    box.querySelectorAll('.ident-fopt').forEach(function(o){ o.removeAttribute('data-on'); });
+    opt.setAttribute('data-on','1');
+    var lbl = row.querySelector('[data-filterlbl]');
+    if(lbl) lbl.textContent = opt.textContent;
+    identFilterApply(sec, val);
+    box.style.display = 'none';
+    return;
+  }
+  // clic ailleurs : on referme les menus ouverts
+  document.querySelectorAll('[data-filtermenu]').forEach(function(m){ m.style.display='none'; });
+});
 // ---- Réordonner les identités par GLISSER-DÉPOSER (sidebars vault) ----
 // On attrape le drag natif des <a> de la sidebar : déplacement libre dans la
 // liste, ordre sauvé serveur (/identity/reorder) => synchro entre Vidéo brut /
@@ -13807,10 +13844,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
         f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
         f"</div>"
-        f"<div class='vault-filter-row'>"
-        f"<div style='color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
-        f"<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
-        f"</div>"
+        f"<div class='vault-filter-row' style='position:relative'>"
+        f"<button type='button' data-identfilter='{subdir}' "
+        "style='background:none;border:0;padding:0;cursor:pointer;font-family:inherit;"
+        "color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>"
+        "<span data-filterlbl>Toutes les identités</span>"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</button>"
+        "<div data-filtermenu style='display:none;position:absolute;top:26px;left:0;z-index:40;"
+        "background:#141418;border:1px solid #2a2a30;border-radius:10px;padding:5px;min-width:170px;"
+        "box-shadow:0 10px 30px rgba(0,0,0,.5)'>"
+        "<button type='button' data-fval='all' class='ident-fopt'>Toutes les identités</button>"
+        "<button type='button' data-fval='full' class='ident-fopt'>Avec du contenu</button>"
+        "<button type='button' data-fval='empty' class='ident-fopt'>Vides</button>"
+        "</div>"
         f"</div>"
         f"<div class='vault-list' id='vault-list-{subdir}'>"
         + "".join(vault_items)
@@ -15221,7 +15268,11 @@ def _save_captions_lib(lib: dict) -> bool:
 # appareils. Les identités absentes de la liste vont à la fin, en alphabétique.
 IDENTITY_ORDER_FILE = DATA_DIR / "identity_order.json"
 
-_VAULT_DND_CSS = "<style>.vault-dragging{opacity:.35}</style>"
+_VAULT_DND_CSS = ("<style>.vault-dragging{opacity:.35}"
+                  ".ident-fopt{display:block;width:100%;text-align:left;background:none;border:0;"
+                  "color:#c4c4cc;font-family:inherit;font-size:12.5px;padding:8px 10px;border-radius:7px;cursor:pointer}"
+                  ".ident-fopt:hover{background:#1f1f26;color:#fff}"
+                  ".ident-fopt[data-on]{color:#3b82f6;font-weight:700}</style>")
 
 
 def _load_identity_order() -> list:
@@ -16073,17 +16124,9 @@ def _render_textvault_html(cat: str) -> str:
     def _count_label(n):
         return f"{n} {unit}{'s' if n != 1 and unit != 'CTA' else ''}"
 
+    # « Pool commun » retiré de la sidebar (demande user) : les textes non
+    # assignés restent en base, ils ne sont simplement plus proposés ici.
     vault_items = []
-    _pool_active = "vault-item-active" if selected == "_pool_" else ""
-    vault_items.append(
-        f"<a href='?tab={tab}&{ikey}=_pool_' onclick='return vaultGoTo(event,this.href)' "
-        f"data-no-loader='1' class='vault-item {_pool_active}' data-ident='_pool_'>"
-        "<div style='width:42px;height:42px;border-radius:50%;background:#26262c;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0'>🗃️</div>"
-        "<div style='flex:1;min-width:0'>"
-        "<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>Pool commun</div>"
-        f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(len(pool))} non assigné{'s' if len(pool) != 1 else ''}</div>"
-        "</div></a>"
-    )
     for ident in identities:
         n = len(by_ident.get(ident, []))
         avatar_url = _identity_avatar_url(ident)
@@ -16227,7 +16270,9 @@ def _render_cloud_pps_page() -> str:
     retiré de l'UI — demande user). Tant que le pool contient encore des
     fichiers, un bloc admin permet de TOUT déplacer vers une identité choisie
     (pur déplacement de fichiers — AUCUNE suppression)."""
-    vault = _render_cloud_content_html("profile_pics", IMAGE_EXTS, include_jb=True)
+    # Jessye retirée de cette page (demande user) : elle n'apparaît plus dans
+    # la sidebar des PP, comme dans les autres pages Contenu.
+    vault = _render_cloud_content_html("profile_pics", IMAGE_EXTS, include_jb=False)
     pool_files = []
     if PROFILE_PICS_DIR.exists():
         pool_files = [p for p in PROFILE_PICS_DIR.iterdir() if p.is_file()]
