@@ -2013,7 +2013,7 @@ try:
             _sMk["username"] = "admin"   # seul nom qui ne depend pas de web_users.json
             _sMk["role"] = "owner"
             _sMk["sid"] = "tests"
-        for _tabMk in ("cloudreels", "clouddrive"):
+        for _tabMk in ("cloudreels", "clouddrive", "cloudcaptions", "cloudbios", "cloudctas"):
             _rMk = _cMk.get("/?tab=%s&frag=1" % _tabMk, headers={"X-Tab-Ajax": "1"})
             _hMk = _rMk.get_data(as_text=True)
             _cartes = _reMk.findall(r"<a [^>]*class='vault-item[^>]*>.*?</a>", _hMk, _reMk.S)
@@ -2023,6 +2023,20 @@ try:
                   "%d carte(s), HTTP %s, %d octets, identites=%s"
                   % (len(_cartes), _rMk.status_code, len(_hMk),
                      _wMk._list_content_identities()[:4]))
+            check("drapeau : filtre FR/US alimente (%s)" % _tabMk,
+                  all("data-market=" in x for x in _cartes))
+            check("drapeau : en-tete de galerie (%s)" % _tabMk,
+                  "data-vault-header-flag" in _hMk)
+        # le bouton Tout/FR/US et le filtrage unifie (recherche + contenu + marche)
+        _pgMk = _cMk.get("/").get_data(as_text=True)
+        check("marche : bouton Tout/FR/US pose a cote du SFW",
+              'id="market-floating"' in _pgMk and _pgMk.count("data-mkopt=") == 3)
+        check("marche : un seul point de decision pour la visibilite",
+              "function vaultItemVisible(" in _pgMk and "function vaultRefilter(" in _pgMk)
+        check("marche : le selecteur de models porte le drapeau",
+              "o.market || mkMarketOf(o.name)" in _pgMk)
+        check("marche : l en-tete suit le changement d identite sans reload",
+              "data-vault-header-flag]').forEach" in _pgMk)
     finally:
         if _savMk is None:
             _fMk.unlink(missing_ok=True)

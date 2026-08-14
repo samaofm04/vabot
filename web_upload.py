@@ -3740,7 +3740,10 @@ function nxModelPicker(opts){
     }
     var tx=document.createElement('div');
     tx.style.cssText='flex:1;text-align:left';
-    tx.innerHTML='<div style="font-weight:700">'+nxMEsc(o.name)+'</div>'
+    var mkF=(typeof mkFlagSvg==='function' && typeof mkMarketOf==='function')
+      ? mkFlagSvg(o.market || mkMarketOf(o.name)) : '';
+    tx.innerHTML='<div style="font-weight:700;display:flex;align-items:center;gap:6px">'
+      +'<span>'+nxMEsc(o.name)+'</span>'+mkF+'</div>'
       +(o.sub?('<div style="font-size:11px;color:'+(o.warn?'#fbbf24':'#8b8b95')+'">'+nxMEsc(o.sub)+'</div>'):'');
     lab.appendChild(cb); lab.appendChild(av); lab.appendChild(tx);
     lw.appendChild(lab);
@@ -5014,15 +5017,10 @@ function capAddSubmit(){
 // ---- Filtre des identités (Toutes / Avec du contenu / Vides) ----
 // Purement client : on lit le compteur deja affiche sous chaque nom.
 function identFilterApply(sec, val){
-  var items = sec.querySelectorAll('.vault-item');
-  items.forEach(function(a){
-    if(a.getAttribute('data-ident') === '_pool_') return;
-    var sub = a.querySelector('div[style*="color:#888"]');
-    var m = sub ? String(sub.textContent||'').match(/^(\d+)/) : null;
-    var n = m ? parseInt(m[1]) : 0;
-    var ok = (val === 'all') || (val === 'full' ? n > 0 : n === 0);
-    a.style.display = ok ? '' : 'none';
-  });
+  // memorise le choix sur la section : vaultRefilter() le relit (sinon la
+  // recherche ou le filtre de marche l'effacait au premier passage)
+  if(sec && sec.setAttribute) sec.setAttribute('data-identfval', val || 'all');
+  if(typeof vaultRefilter === 'function') vaultRefilter();
 }
 document.addEventListener('click', function(ev){
   var t = ev.target.closest ? ev.target.closest('[data-identfilter]') : null;
@@ -7154,6 +7152,16 @@ document.addEventListener('click',function(e){
     <span class="sfw-thumb" style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s"></span>
   </span>
   <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
+</div>
+<!-- Filtre de marche : Tout / FR / US (meme esprit que le SFW) -->
+<div id="market-floating" title="N'afficher que les identites d'un marche">
+  <button type="button" data-mkopt="" onclick="marketSet('')">Tout</button>
+  <button type="button" data-mkopt="fr" onclick="marketSet('fr')" aria-label="France">
+    <svg viewBox="0 0 3 2" width="16" height="11" preserveAspectRatio="none"><rect width="1" height="2" fill="#0055a4"/><rect x="1" width="1" height="2" fill="#fff"/><rect x="2" width="1" height="2" fill="#ef4135"/></svg>
+  </button>
+  <button type="button" data-mkopt="us" onclick="marketSet('us')" aria-label="Etats-Unis">
+    <svg viewBox="0 0 19 10" width="19" height="11" preserveAspectRatio="none"><rect width="19" height="10" fill="#fff"/><rect y="0" width="19" height="0.77" fill="#b22234"/><rect y="1.54" width="19" height="0.77" fill="#b22234"/><rect y="3.08" width="19" height="0.77" fill="#b22234"/><rect y="4.62" width="19" height="0.77" fill="#b22234"/><rect y="6.15" width="19" height="0.77" fill="#b22234"/><rect y="7.69" width="19" height="0.77" fill="#b22234"/><rect y="9.23" width="19" height="0.77" fill="#b22234"/><rect width="7.6" height="5.38" fill="#3c3b6e"/></svg>
+  </button>
 </div>
 <h1 id="page-title">Dashboard</h1>
 <div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
@@ -11367,7 +11375,7 @@ body.light .va-id{color:#9ca3af}
             f"<div class='va-vlist-section' data-vlist-identity='{identity}'>"
             f"<div class='va-vlist-section-head'>"
             f"<div class='va-vlist-section-head-main' onclick=\"vaShowIdentity('{identity}')\">"
-            f"{ident_av_html}<span>@{identity}</span>"
+            f"{ident_av_html}<span>@{identity}</span>{_market_flag_html(identity, 10)}"
             f"<span class='va-vlist-count'>{len(members)}</span>"
             f"</div>"
             f"<button class='va-vlist-toggle' onclick=\"vaToggleSection(this)\" title='Réduire / déplier'>"
@@ -13941,7 +13949,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-market='{identity_market(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -14218,7 +14227,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         f"<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>"
+        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -14493,6 +14504,22 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 body.sfw-on .vault-gallery img,body.sfw-on .vault-thumb img,body.sfw-on .file-thumb img,body.sfw-on .preview-card img,body.sfw-on .reel-thumb,body.sfw-on .reel-video{filter:blur(22px) saturate(.5);transition:filter .25s}
 /* Pas d unblur au hover. Seul la lightbox / le detail (clic) affiche net. */
 body.sfw-on #lightbox img,body.sfw-on #lightbox video,body.sfw-on .lightbox-content img,body.sfw-on .lightbox-content video,body.sfw-on #reel-details-modal img,body.sfw-on #reel-details-modal video{filter:none!important}
+
+/* Filtre de marche FR/US — pose a gauche du SFW */
+#market-floating{position:fixed;top:18px;right:122px;z-index:90;display:flex;align-items:center;
+  gap:2px;padding:4px;background:#fff;border:1px solid #e5e7eb;border-radius:20px;
+  box-shadow:0 4px 16px rgba(0,0,0,.08);user-select:none}
+body.dark #market-floating,body:not(.light) #market-floating{background:#161616;border-color:#2a2a2a}
+#market-floating button{display:flex;align-items:center;justify-content:center;gap:4px;height:24px;
+  padding:0 9px;border:0;border-radius:14px;background:transparent;color:#9ca3af;font-family:inherit;
+  font-size:11px;font-weight:800;letter-spacing:.4px;cursor:pointer;transition:background .15s,color .15s}
+#market-floating button:hover{background:rgba(148,163,184,.16)}
+#market-floating button svg{border-radius:2px;box-shadow:0 0 0 1px rgba(148,163,184,.5);opacity:.55;
+  transition:opacity .15s}
+#market-floating button[data-on]{background:rgba(59,130,246,.16);color:#7aa2ff}
+#market-floating button[data-on] svg{opacity:1;box-shadow:0 0 0 1px rgba(122,162,255,.9)}
+@media(max-width:768px){#market-floating{top:12px;right:96px;padding:3px}
+  #market-floating button{height:22px;padding:0 7px}}
 
 /* SFW floating toggle (style iOS, dark theme adapte) */
 #sfw-floating{}
@@ -15120,13 +15147,81 @@ function toggleSFW(){
   }
 })();
 
-function vaultFilter(q){
-  q = (q || '').toLowerCase().trim();
-  var list = document.querySelectorAll('.vault-item');
-  list.forEach(function(el){
-    var ident = (el.getAttribute('data-ident') || '').toLowerCase();
-    el.style.display = (!q || ident.indexOf(q) !== -1) ? '' : 'none';
+// --- Visibilite d'une identite : recherche + filtre de contenu + marche ---
+// Les trois criteres passent par ICI. Avant, chacun ecrivait style.display de
+// son cote et le dernier appele annulait les autres.
+window.__vaultQ = window.__vaultQ || '';
+// SVG du drapeau cote client — meme dessin que _market_flag_html en Python.
+// (Emoji exclu : Windows n'a pas de police de drapeaux.)
+function mkFlagSvg(m){
+  if(m === 'us') return "<svg viewBox='0 0 19 10' width='19' height='11' preserveAspectRatio='none'"
+    + " style='border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.22);vertical-align:-1px;flex-shrink:0'>"
+    + "<rect width='19' height='10' fill='#fff'/><rect y='0' width='19' height='.77' fill='#b22234'/>"
+    + "<rect y='1.54' width='19' height='.77' fill='#b22234'/><rect y='3.08' width='19' height='.77' fill='#b22234'/>"
+    + "<rect y='4.62' width='19' height='.77' fill='#b22234'/><rect y='6.15' width='19' height='.77' fill='#b22234'/>"
+    + "<rect y='7.69' width='19' height='.77' fill='#b22234'/><rect y='9.23' width='19' height='.77' fill='#b22234'/>"
+    + "<rect width='7.6' height='5.38' fill='#3c3b6e'/></svg>";
+  if(m === 'fr') return "<svg viewBox='0 0 3 2' width='16' height='11' preserveAspectRatio='none'"
+    + " style='border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.22);vertical-align:-1px;flex-shrink:0'>"
+    + "<rect width='1' height='2' fill='#0055a4'/><rect x='1' width='1' height='2' fill='#fff'/>"
+    + "<rect x='2' width='1' height='2' fill='#ef4135'/></svg>";
+  return '';
+}
+// Le marche d'une identite se lit sur sa carte de barre laterale : une seule
+// source, donc pas de liste a tenir a jour de deux cotes.
+function mkMarketOf(ident){
+  try{
+    var n = String(ident || '').replace(/[^a-z0-9_.\-]/gi, '');
+    var el = document.querySelector(".vault-item[data-ident='" + n + "']");
+    return el ? (el.getAttribute('data-market') || '') : '';
+  }catch(e){ return ''; }
+}
+function marketCur(){
+  try{ return localStorage.getItem('vault_market') || ''; }catch(e){ return ''; }
+}
+function vaultItemVisible(a){
+  var mk = marketCur();
+  if(mk && (a.getAttribute('data-market') || '') !== mk) return false;
+  var q = window.__vaultQ;
+  if(q && (a.getAttribute('data-ident') || '').toLowerCase().indexOf(q) === -1) return false;
+  var sec = a.closest ? a.closest('.form-section') : null;
+  var fv = (sec && sec.getAttribute('data-identfval')) || 'all';
+  if(fv !== 'all' && a.getAttribute('data-ident') !== '_pool_'){
+    var sub = a.querySelector('div[style*="color:#888"]');
+    var m = sub ? String(sub.textContent || '').match(/^(\d+)/) : null;
+    var n = m ? parseInt(m[1]) : 0;
+    if(fv === 'full' ? !(n > 0) : !(n === 0)) return false;
+  }
+  return true;
+}
+function vaultRefilter(){
+  document.querySelectorAll('.vault-item').forEach(function(a){
+    a.style.display = vaultItemVisible(a) ? '' : 'none';
   });
+  var mk = marketCur();
+  document.querySelectorAll('#market-floating button').forEach(function(b){
+    if((b.getAttribute('data-mkopt') || '') === mk) b.setAttribute('data-on','1');
+    else b.removeAttribute('data-on');
+  });
+}
+function marketSet(v){
+  try{ localStorage.setItem('vault_market', v || ''); }catch(e){}
+  vaultRefilter();
+}
+// Les onglets remplacent leur contenu sans rejouer les scripts : on re-filtre
+// des que de nouvelles cartes apparaissent.
+document.addEventListener('DOMContentLoaded', function(){
+  vaultRefilter();
+  try{
+    new MutationObserver(function(){
+      if(window.__mkTimer) return;
+      window.__mkTimer = setTimeout(function(){ window.__mkTimer = 0; vaultRefilter(); }, 40);
+    }).observe(document.body, {childList:true, subtree:true});
+  }catch(e){}
+});
+function vaultFilter(q){
+  window.__vaultQ = (q || '').toLowerCase().trim();
+  vaultRefilter();
 }
 function vaultSortToggle(e, btn){
   e.stopPropagation();
@@ -15211,6 +15306,11 @@ window.vaultGoTo = function(ev, url){
       var newIdent = activeItem.getAttribute('data-ident') || '';
       // @nom + count
       sec.querySelectorAll('[data-vault-header-name]').forEach(function(n){ n.textContent = '@' + String(newIdent||'').replace(/^v2_/,''); });
+      // le nom est reecrit a la main : sans ca le drapeau de l'ancienne
+      // identite resterait affiche jusqu'au prochain rechargement
+      sec.querySelectorAll('[data-vault-header-flag]').forEach(function(f){
+        try{ f.innerHTML = mkFlagSvg(mkMarketOf(newIdent)); }catch(e){}
+      });
       var srcCount = activeItem.querySelector('div[style*="color:#888"]');
       if(srcCount){
         sec.querySelectorAll('[data-vault-header-count]').forEach(function(c){ c.textContent = srcCount.textContent; });
@@ -15695,10 +15795,14 @@ def _render_cloud_captions_html() -> str:
             f"<a href='?tab=cloudcaptions&cloud_captions_ident={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-market='{identity_market(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
+            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
+            f"{_market_flag_html(ident)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
             f"</div>{count_badge}</a>"
         )
@@ -15736,7 +15840,9 @@ def _render_cloud_captions_html() -> str:
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         "<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>"
+        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -15963,7 +16069,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"<a href='?tab={tab}&{ident_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-market='{identity_market(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -16005,7 +16112,9 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
         "<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>"
+        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_sel} fichier{'s' if n_sel != 1 else ''} au total</div>"
         "</div></div>"
         "<span title='Aucune suppression possible depuis le Drive' "
@@ -16374,10 +16483,14 @@ def _render_textvault_html(cat: str) -> str:
             f"<a href='?tab={tab}&{ikey}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}'>"
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-market='{identity_market(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em'>{_v2_label(ident).title()}</div>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
+            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
+            f"{_market_flag_html(ident)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(n)}</div>"
             f"</div></a>"
         )
@@ -16420,7 +16533,9 @@ def _render_textvault_html(cat: str) -> str:
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
         f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{head_avatar}</span>"
         "<div style='flex:1;min-width:0'>"
-        f"<div data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>{head_name}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>"
+        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>{head_name}</span>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{_count_label(len(cur))}</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -24574,6 +24689,7 @@ def _render_jailbreak_html() -> str:
                 f"</div>"
                 f"{avatar_img}"
                 f"<span class='jb-side-id-name'>@{ident_safe}</span>"
+                f"{_market_flag_html(ident_safe, 9)}"
                 f"<span class='jb-side-id-count'>{n_vas_section}</span>"
                 f"<span class='jb-side-id-arrow'>"
                 f"<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'>"
