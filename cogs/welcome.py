@@ -623,6 +623,18 @@ async def appliquer_roles_marche(guild, membre=None):
     return (poses, retires, sans)
 
 
+def _proprio_du_salon(channel):
+    """La personne a qui appartient ce salon prive : celle qui a une
+    autorisation nominative dessus (les salons -menu sont prives)."""
+    try:
+        for cible, _perm in (channel.overwrites or {}).items():
+            if isinstance(cible, discord.Member) and not cible.bot:
+                return cible
+    except Exception:
+        pass
+    return None
+
+
 async def _ensure_us_menu(bot, channel):
     """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
     pas déjà (détection via les messages épinglés du bot). Idempotent."""
@@ -640,11 +652,21 @@ async def _ensure_us_menu(bot, channel):
             if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
                     and "Jailbreak US" in (p.embeds[0].title or "")):
                 return True  # déjà en place
+        # Marche du PROPRIETAIRE du salon : chaque -menu appartient a une seule
+        # personne, on peut donc lui servir SES models (role Jailbreak FR/US).
+        marche = "us"
+        try:
+            from cogs.user import marche_du_membre
+            proprio = _proprio_du_salon(channel)
+            if proprio is not None:
+                marche = marche_du_membre(proprio)
+        except Exception:
+            pass
         # PP des models dans le select (emojis serveur, créés une seule fois)
         try:
-            emb, view = await ucog.jailbreak_us_menu_async(channel.guild)
+            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
         except Exception:
-            emb, view = ucog.jailbreak_us_menu()
+            emb, view = ucog.jailbreak_us_menu(marche)
         msg = await channel.send(embed=emb, view=view)
         try:
             await msg.pin()

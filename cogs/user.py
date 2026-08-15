@@ -1288,6 +1288,39 @@ class _RedirectFollowup:
         return getattr(self._real, name)
 
 
+class _RedirectResponse:
+    """`interaction.response.send_message` qui route le NON-éphémère vers le
+    salon -content.
+
+    Le proxy ne couvrait que `followup` : les commandes qui repondent
+    directement (77 appels dans ce fichier, dont les bios) deversaient leur
+    contenu dans le salon -menu. On accuse reception de l'interaction par un
+    defer ephemere, puis on ecrit dans le bon salon."""
+    def __init__(self, real_response, target_channel, interaction):
+        self._real = real_response
+        self._target = target_channel
+        self._itx = interaction
+
+    async def send_message(self, content=None, **kw):
+        if kw.get("ephemeral"):
+            return await self._real.send_message(content, **kw)
+        kw.pop("ephemeral", None)
+        try:
+            if not self._real.is_done():
+                await self._real.defer(ephemeral=True)
+        except Exception:
+            pass
+        if self._target is None:      # pas de -content : surtout pas ici
+            return await self._itx.followup.send(content, ephemeral=True, **kw)
+        kw.pop("wait", None)
+        if content is None:
+            return await self._target.send(**kw)
+        return await self._target.send(content, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 class _JBRedirect:
     """Proxy d'interaction pour le menu Jailbreak du serveur US : le contenu
     généré part dans le salon -content du membre (le salon -menu reste vierge).
@@ -1296,6 +1329,8 @@ class _JBRedirect:
         object.__setattr__(self, "_itx", interaction)
         object.__setattr__(self, "followup", _RedirectFollowup(
             interaction.followup, target_channel, interaction))
+        object.__setattr__(self, "response", _RedirectResponse(
+            interaction.response, target_channel, interaction))
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_itx"), name)
@@ -2371,10 +2406,11 @@ class UserCog(commands.Cog):
         except Exception:
             pass
 
-    async def jailbreak_us_menu_async(self, guild):
-        """(embed, view) : UN BOUTON PAR MODEL avec sa PP — 1 clic = choisi."""
-        emb, _v = self.jailbreak_us_menu()
-        models = _jb_us_models()
+    async def jailbreak_us_menu_async(self, guild, marche="us"):
+        """(embed, view) : UN BOUTON PAR MODEL avec sa PP — 1 clic = choisi.
+        `marche` : les models proposees suivent le role de la personne."""
+        emb, _v = self.jailbreak_us_menu(marche)
+        models = _jb_models_marche(marche)
         emojis = {}
         try:
             emojis = await ensure_identity_emojis(guild, models)
@@ -2382,12 +2418,14 @@ class UserCog(commands.Cog):
             emojis = {}
         return emb, JailbreakModelsView(models, emojis=emojis)
 
-    def jailbreak_us_menu(self):
-        """(embed, view) du menu Jailbreak US — utilisé par /menujailbreakus et
-        posté automatiquement dans les salons -content du serveur US."""
-        models = _jb_us_models()
+    def jailbreak_us_menu(self, marche="us"):
+        """(embed, view) du menu Jailbreak — utilisé par /menujailbreakus et
+        posté automatiquement dans les salons -menu du serveur US. Les models
+        affichées sont celles du MARCHÉ de la personne (rôle Jailbreak FR/US)."""
+        models = _jb_models_marche(marche)
         emb = discord.Embed(
-            title="🔓 Menu Jailbreak US — models US",
+            title=("🔓 Menu Jailbreak FR — models FR" if marche == "fr"
+                   else "🔓 Menu Jailbreak US — models US"),
             description=(
                 "Clique **directement sur la model** 👇 puis choisis l'action "
                 "(reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
@@ -4604,6 +4642,38 @@ def _is_fr_market(identity: str) -> bool:
 # chaque model US a SA propre liste de bios sur le site.
 _US_SOURCE_IDENTITY = "jessye"
 _US_SOURCED_ACTIONS = {"pseudo", "name"}
+
+
+def marche_du_membre(member) -> str:
+    """Marche d'une personne d'apres ses roles @Jailbreak FR / @Jailbreak US.
+    Par defaut « us » : c'est le marche du serveur ou vit ce menu."""
+    try:
+        for r in getattr(member, "roles", []) or []:
+            n = (getattr(r, "name", "") or "").strip().lower()
+            if n == "jailbreak fr":
+                return "fr"
+            if n == "jailbreak us":
+                return "us"
+    except Exception:
+        pass
+    return "us"
+
+
+def _jb_models_marche(marche="us"):
+    """Models d'un marche donne : c'est le drapeau de l'identite qui tranche
+    (data/identity_market.json), la meme source que le site."""
+    try:
+        from cogs.welcome import list_identities, is_identity_active
+        return [n for n in list_identities()
+                if is_identity_active(n)
+                and n.strip().lower() not in EXCLURE_MENU
+                and _market_of(n) == marche]
+    except Exception:
+        return []
+
+
+# Jessye est la SOURCE du menu (pseudo/name), pas une model a proposer.
+EXCLURE_MENU = {"jessye"}
 
 
 def _jb_us_models():
