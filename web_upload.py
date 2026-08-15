@@ -41104,8 +41104,14 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
 
-        garder = {_gd._sansaccent(_gd.RACINE_BIBLIO),
-                  _gd._sansaccent(_gd.IMPORT_FOLDER_NAME)}
+        # `tout=1` : on examine AUSSI les dossiers nommes comme la
+        # bibliotheque. Utile quand un doublon existe (« Bibliotheque » sans
+        # accent a cote de « Bibliothèque ») : c'est le test de vacuite qui
+        # protege, pas le nom.
+        _tout = bool(request.form.get("tout"))
+        garder = {_gd._sansaccent(_gd.IMPORT_FOLDER_NAME)}
+        if not _tout:
+            garder.add(_gd._sansaccent(_gd.RACINE_BIBLIO))
 
         def _compte_fichiers(fid, profondeur=0):
             """Nombre de fichiers sous ce dossier. S'arrête au premier trouvé :
@@ -41133,6 +41139,13 @@ def create_app():
             return jsonify({"ok": False, "error": str(e)[:200]})
 
         vides = [c for c in candidats if c["vide"]]
+        # Garde-fou : si TOUS les dossiers « bibliotheque » sont vides, on n'y
+        # touche pas. Ca voudrait dire que le contenu a disparu, et supprimer
+        # serait exactement la mauvaise reaction.
+        _nom_b = _gd._sansaccent(_gd.RACINE_BIBLIO)
+        _bibs = [c for c in candidats if _gd._sansaccent(c["nom"]) == _nom_b]
+        if _bibs and all(c["vide"] for c in _bibs):
+            vides = [c for c in vides if _gd._sansaccent(c["nom"]) != _nom_b]
         if request.form.get("dry"):
             # « tous » sert au diagnostic : deux dossiers dont le nom ne
             # differe que par un accent sont indiscernables a l'oeil.
