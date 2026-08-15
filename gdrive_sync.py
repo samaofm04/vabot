@@ -652,6 +652,18 @@ def _candidats_import(sess, st, root):
                 continue
             if vus.get(f["id"]) or f["id"] in deja:
                 continue          # deja importe, ou c'est NOUS qui l'avons mis
+            # CEINTURE ET BRETELLES : meme si l'identifiant Drive s'est perdu
+            # (etat reecrit, fichier renvoye...), un fichier de meme nom ET de
+            # meme taille est deja sur le site — le rapatrier le mettrait en
+            # double. C'est ce trou qui a rapatrie 4364 doublons le 15/08.
+            try:
+                local = IDENTITIES_DIR / ident / sub / nom
+                if local.exists():
+                    taille = int(f.get("size") or 0)
+                    if not taille or local.stat().st_size == taille:
+                        continue
+            except Exception:
+                pass
             trouves.append({"id": f["id"], "nom": nom, "identity": ident,
                             "sub": sub, "canonique": canonique})
 
