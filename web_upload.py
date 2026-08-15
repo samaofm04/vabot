@@ -4590,6 +4590,113 @@ function txtAddOpen(){
   var ta=document.querySelector('#txtAddList .txtadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
 }
 function txtAddClose(){ var m=document.getElementById('txt-add-modal'); if(m) m.style.display='none'; }
+// ---- Selection des textes (Bios / CTA) : meme pilule que la galerie ----
+var txtSelSet={};
+function txtSelUpdateBar(){
+  var n=0; for(var k in txtSelSet){ if(txtSelSet[k]) n++; }
+  var bar=document.getElementById('txt-action-bar');
+  var montre=(n && document.querySelector('.txt-sel-cb'));
+  if(bar) bar.style.display=montre?'flex':'none';
+  // les pilules occupent la meme place : une seule a la fois
+  ['action-bar','cap-action-bar'].forEach(function(id){
+    var o=document.getElementById(id); if(montre&&o) o.style.display='none';
+  });
+  var ct=document.getElementById('txt-sel-count'); if(ct) ct.textContent=String(n);
+}
+function txtSelIds(){
+  var ids=[]; for(var k in txtSelSet){ if(txtSelSet[k]) ids.push(k); }
+  return ids;
+}
+function txtSelClear(){
+  txtSelSet={};
+  document.querySelectorAll('.txt-sel-cb').forEach(function(cb){ cb.checked=false; });
+  txtSelUpdateBar();
+}
+function txtSelAll(){
+  var cbs=[].slice.call(document.querySelectorAll('.txt-sel-cb'));
+  if(!cbs.length){
+    if(typeof showToast==='function') showToast('Aucun texte à sélectionner','warning');
+    return;
+  }
+  var n=txtSelIds().length, all=(n<cbs.length);
+  txtSelSet={};
+  cbs.forEach(function(cb){
+    cb.checked=all;
+    if(all) txtSelSet[cb.getAttribute('data-txtsel')]=true;
+  });
+  txtSelUpdateBar();
+}
+function txtSelDelete(){
+  var c=txtCtx(); var ids=txtSelIds();
+  if(!c){ if(typeof showToast==='function') showToast('Recharge l’onglet','error'); return; }
+  if(!ids.length){ if(typeof showToast==='function') showToast('Rien de sélectionné','warning'); return; }
+  if(!confirm('Supprimer '+ids.length+' texte'+(ids.length>1?'s':'')+' ?')) return;
+  var reste=ids.length;
+  ids.forEach(function(id){
+    var fd=new FormData(); fd.set('category',c.cat); fd.set('entry_id',id);
+    fetch('/textpool/delete',{method:'POST',body:fd,credentials:'same-origin'})
+      .then(function(r){return r.json();}).then(function(){
+        var card=document.querySelector('.txt-card[data-eid="'+id+'"]');
+        if(card) card.remove();
+      }).catch(function(){}).then(function(){
+        if(--reste<=0){ txtSelClear(); if(typeof txtRefresh==='function') txtRefresh(); }
+      });
+  });
+}
+function txtShareOpen(){
+  var c=txtCtx();
+  if(!c){ if(typeof showToast==='function') showToast('Recharge l’onglet','error'); return; }
+  var ids=txtSelIds();
+  if(!ids.length){
+    if(typeof showToast==='function') showToast('Sélectionne au moins un texte','warning');
+    return;
+  }
+  var sec=document.querySelector('[data-txtroot]:not([style*="display: none"])');
+  sec=sec?sec.closest('.form-section'):null;
+  if(!sec){
+    sec=null;
+    document.querySelectorAll('.form-section').forEach(function(x){ if(!sec&&x.offsetParent!==null) sec=x; });
+  }
+  var rows=[];
+  (sec?sec.querySelectorAll('.vault-item'):[]).forEach(function(a){
+    var n=a.getAttribute('data-ident');
+    if(!n||n===c.ident||n==='_pool_') return;
+    var img=a.querySelector('img');
+    rows.push({name:n, pp:img?img.getAttribute('src'):null, sub:'', warn:false});
+  });
+  if(!rows.length){
+    if(typeof showToast==='function') showToast('Aucune autre model dans la liste de gauche','warning');
+    return;
+  }
+  nxModelPicker({
+    title:'Partager ces textes à…',
+    info:ids.length+' texte'+(ids.length>1?'s':'')+' — <b>copiés</b> chez chaque model cochée. '
+      +'Les doublons sont ignorés, les originaux restent en place.',
+    rows:rows,
+    onConfirm:function(sel,_x,ui){
+      ui.busy('⏳ Copie…');
+      var fd=new FormData();
+      fd.set('category',c.cat); fd.set('ids',JSON.stringify(ids));
+      fd.set('targets',JSON.stringify(sel));
+      fetch('/textpool/share',{method:'POST',body:fd,credentials:'same-origin'})
+        .then(function(r){return r.json();}).then(function(j){
+          ui.close();
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          txtSelClear();
+          if(typeof showToast==='function')
+            showToast('✅ '+j.copied+' texte(s) copié(s) vers '+sel.length+' model'
+              +(sel.length>1?'s':'')+(j.duplicates?(' · '+j.duplicates+' doublon(s) ignoré(s)'):''),
+              'success',6500);
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+    }
+  });
+}
+document.addEventListener('change', function(ev){
+  var t=ev.target;
+  if(!t||!t.getAttribute||t.getAttribute('data-txtsel')==null) return;
+  txtSelSet[t.getAttribute('data-txtsel')]=!!t.checked;
+  txtSelUpdateBar();
+});
 function txtAddSubmit(){
   var c=txtCtx(); if(!c) return;
   // Règle user : une LIGNE VIDE sépare deux textes différents ; les sauts de
@@ -8203,6 +8310,24 @@ document.addEventListener('keydown', function(e){
     <div style="flex:1"></div>
     <button class="action-icon" onclick="vaultSelectAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
     <button class="action-icon" onclick="deleteSelected()" title="Supprimer">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Barre flottante des vaults TEXTE (Bios / CTA) : selection + partage -->
+<div id="txt-action-bar" style="display:none">
+  <div class="action-bar-inner">
+    <button class="action-close" onclick="txtSelClear()" title="Annuler la sélection">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="action-count"><span id="txt-sel-count">0</span> Sélectionné(s)</div>
+    <div style="flex:1"></div>
+    <button class="action-icon" onclick="txtSelAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
+    <button class="action-icon" onclick="txtShareOpen()" title="Partager la sélection à d'autres models" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700;color:#c084fc;display:inline-flex;align-items:center;gap:6px">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>Partager
+    </button>
+    <button class="action-icon" onclick="txtSelDelete()" title="Supprimer la sélection">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
     </button>
   </div>
@@ -16753,7 +16878,10 @@ def _render_textvault_html(cat: str) -> str:
         used_html = (f"<span style='background:rgba(34,197,94,.14);color:#22c55e;padding:1px 7px;border-radius:8px;font-size:10.5px;font-weight:700'>@{_h.escape(used, quote=True)}</span>"
                      if used else "")
         cards.append(
-            f"<div class='txt-card'>"
+            f"<div class='txt-card' data-eid='{eid}'>"
+            f"<label class='txt-sel' onclick='event.stopPropagation()' title='Sélectionner'>"
+            f"<input type='checkbox' class='txt-sel-cb' data-txtsel='{eid}' data-txt='{txt}'>"
+            "<span class='sel-circle'></span></label>"
             f"<div class='txt-card-text'>{txt}</div>"
             f"<div class='txt-card-meta'><span>{date}</span>{used_html}"
             "<span style='flex:1'></span>"
@@ -16771,6 +16899,9 @@ def _render_textvault_html(cat: str) -> str:
 .txt-card-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:#75757f}
 .txt-card-meta button,.txtv-btn{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit}
 .txt-card-meta button:hover,.txtv-btn:hover{background:#232329;color:#fff}
+.txt-card{position:relative}
+.txt-sel{position:absolute;top:8px;right:8px;cursor:pointer;z-index:3}
+.txt-sel input{position:absolute;opacity:0;pointer-events:none}
 </style>
 """
     return (
@@ -44390,6 +44521,46 @@ def create_app():
                 dupes += 1
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "added": added, "duplicates": dupes})
+
+    @app.route("/textpool/share", methods=["POST"])
+    def textpool_share():
+        """Copie des textes (Bios / CTA) vers d'autres identités. COPIE : les
+        originaux restent en place, les doublons sont ignorés."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import text_pool as tp
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        import json as _js
+        cat = (request.form.get("category") or "").strip()
+        try:
+            ids = set(_js.loads(request.form.get("ids") or "[]"))
+            cibles = [str(t).strip().lower()
+                      for t in _js.loads(request.form.get("targets") or "[]")]
+        except Exception:
+            return jsonify({"ok": False, "error": "JSON invalide"})
+        if not ids or not cibles:
+            return jsonify({"ok": False, "error": "rien à copier"})
+        connues = set(_list_identities())
+        cibles = [t for t in cibles if t in connues]
+        if not cibles:
+            return jsonify({"ok": False, "error": "identité(s) inconnue(s)"})
+        textes = [str(e.get("text") or "") for e in tp.list_entries(cat)
+                  if str(e.get("id")) in ids]
+        if not textes:
+            return jsonify({"ok": False, "error": "textes introuvables"})
+        copies = dupes = 0
+        for cible in cibles:
+            for txt in textes:
+                res = tp.add_entry(cat, txt, identity=cible)
+                if res.get("ok"):
+                    copies += 1
+                elif res.get("error") == "already_exists":
+                    dupes += 1
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "copied": copies, "duplicates": dupes})
 
     @app.route("/textpool/delete", methods=["POST"])
     def textpool_delete():
