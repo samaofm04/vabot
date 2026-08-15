@@ -679,6 +679,39 @@ async def _ensure_us_menu(bot, channel):
         return False
 
 
+async def maj_menu_marche(bot, channel, marche=None):
+    """Remplace le contenu du message de menu deja epingle par celui du
+    marche demande. On EDITE : reposter laisserait deux menus dans le salon."""
+    if bot is None or channel is None:
+        return False
+    try:
+        ucog = bot.get_cog("UserCog")
+        if ucog is None:
+            return False
+        if marche is None:
+            from cogs.user import marche_du_membre
+            proprio = _proprio_du_salon(channel)
+            marche = marche_du_membre(proprio) if proprio is not None else "us"
+        try:
+            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
+        except Exception:
+            emb, view = ucog.jailbreak_us_menu(marche)
+        for m in await channel.pins():
+            if (m.author.id == getattr(bot.user, "id", 0) and m.embeds
+                    and "Menu Jailbreak" in (m.embeds[0].title or "")):
+                await m.edit(embed=emb, view=view)
+                return True
+        msg = await channel.send(embed=emb, view=view)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning(f"maj_menu_marche: {e}")
+        return False
+
+
 async def _ensure_us_panel(bot, channel):
     """Second message PERMANENT : le panneau d'actions, qui suit la model
     choisie dans le menu du dessus. Les deux restent affiches en
@@ -1142,6 +1175,30 @@ class Welcome(commands.Cog):
             await channel.send(content=text, view=WelcomeContinueView())
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Donner @Jailbreak FR doit changer le menu TOUT DE SUITE — sans
+        avoir a lancer /resetmenus derriere."""
+        try:
+            if before.roles == after.roles:
+                return
+            import guild_features as gf
+            if not gf.is_us_guild(after.guild):
+                return
+            from cogs.user import marche_du_membre
+            avant, apres = marche_du_membre(before), marche_du_membre(after)
+            if avant == apres:
+                return
+            cible = _us_ticket_name(after, "menu")
+            salon = discord.utils.find(
+                lambda c, n=cible: _us_norm(c.name) == n, after.guild.text_channels)
+            if salon is None:
+                return
+            await maj_menu_marche(self.bot, salon, apres)
+            log.info(f"[marche] menu de {after} passe en {apres.upper()}")
+        except Exception as e:
+            log.warning(f"on_member_update menu marche: {e}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
