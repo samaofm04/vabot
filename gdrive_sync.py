@@ -866,6 +866,9 @@ def _creer_arborescence(sess, root, st, include_videos):
                 _ensure_folder(sess, pro_ident, drive_name, st)
 
 
+_RANGEMENT_ERR: list = []
+
+
 def _regrouper_par_marche(sess, root, st) -> int:
     """Range les identites deja presentes sous « Bibliotheque » dans un
     sous-dossier FR ou US — en les DEPLACANT, pas en les recopiant.
@@ -874,6 +877,7 @@ def _regrouper_par_marche(sess, root, st) -> int:
     de nouveaux dossiers et laisse les anciens a cote. Idempotent : une fois
     range, il n'y a plus rien a bouger."""
     biblio = _ensure_folder(sess, root, RACINE_BIBLIO, st)
+    _RANGEMENT_ERR.clear()
     marches = {}
     bouges = 0
     for f in _lister(sess, biblio, dossiers=True):
@@ -897,8 +901,11 @@ def _regrouper_par_marche(sess, root, st) -> int:
                 bouges += 1
                 st["folders"][f"{marches[cible]}/{nom}"] = f["id"]
                 st["folders"].pop(f"{biblio}/{nom}", None)
+            else:
+                _RANGEMENT_ERR.append(f"{nom} : HTTP {r.status_code} "
+                                      f"{(r.text or '')[:120]}")
         except Exception as e:
-            _set_status(err=f"rangement {nom} : {e}"[:200])
+            _RANGEMENT_ERR.append(f"{nom} : {e}"[:160])
     if bouges:
         # les cles de l'etat doivent suivre, sinon tout serait considere
         # comme manquant et renvoye une seconde fois
@@ -931,10 +938,25 @@ def run_sync() -> dict:
     # Drive meme vides — c'est la qu'on depose, et ca montre ce qui manque.
     try:
         _regrouper_par_marche(sess, root, st)     # AVANT de creer : on deplace
+        # Garde-fou : si une identite est restee a plat sous « Bibliotheque »,
+        # ses fichiers ont une ancienne cle et TOUT repartirait en double dans
+        # le nouvel arbre. Mieux vaut ne rien envoyer et le dire.
+        _biblio_id = _ensure_folder(sess, root, RACINE_BIBLIO, st)
+        _restants = [f["name"] for f in _lister(sess, _biblio_id, dossiers=True)
+                     if (f["name"] or "").strip().upper() not in ("FR", "US")]
+        if _restants:
+            raise RuntimeError(
+                "rangement par marché impossible ("
+                + ", ".join(_restants[:4])
+                + (f" +{len(_restants) - 4}" if len(_restants) > 4 else "")
+                + ") — synchro annulée pour ne pas tout renvoyer en double. "
+                + ("Détail : " + " | ".join(_RANGEMENT_ERR[:2])
+                   if _RANGEMENT_ERR else ""))
         _creer_arborescence(sess, root, st, include_videos)
         _save_state(st)
     except Exception as e:
-        _set_status(err=f"dossiers : {e}"[:200])
+        _set_status(state="error", err=str(e)[:300], ts=int(time.time()))
+        raise
 
     jobs = list(_iter_jobs(include_videos))
     total = len(jobs)
