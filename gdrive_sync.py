@@ -58,6 +58,21 @@ SYNC_VAULT2 = False
 # « A IMPORTER » — c'etait illisible.
 RACINE_BIBLIO = "Bibliothèque"
 
+# Identites qui n'ont rien a faire sur le Drive. Jessye n'est pas une model :
+# elle sert de SOURCE au menu US (pseudo et name), elle n'a pas de contenu
+# propre a sauvegarder.
+EXCLURE_DRIVE = {"jessye"}
+
+
+def _marche_de(ident: str) -> str:
+    """« FR » ou « US » — un niveau de dossier dans le Drive. La regle vit
+    dans marche.py, partagee avec le site et le bot."""
+    try:
+        import marche as _mk
+        return _mk.libelle(ident)
+    except Exception:
+        return "FR"
+
 
 def _sansaccent(t: str) -> str:
     """Comparaison de noms de dossiers Drive sans se soucier des accents."""
@@ -476,9 +491,13 @@ def _iter_jobs(include_videos):
         est_v2 = nom.lower().startswith(V2_PREFIX)
         if est_v2 and not SYNC_VAULT2:
             continue
+        if nom.strip().lower() in EXCLURE_DRIVE:
+            continue
         label = nom[len(V2_PREFIX):] if est_v2 else nom
-        # Chaque bibliotheque a SON dossier, identites a l'interieur.
-        biblio = "Bibliotheque 2" if est_v2 else RACINE_BIBLIO
+        # <Bibliotheque>/<FR|US>/<Identite>/<Type> : le marche d'abord, pour
+        # ouvrir directement le bon lot.
+        biblio = ("Bibliotheque 2" if est_v2
+                  else RACINE_BIBLIO + "/" + _marche_de(nom))
         plan = list(SECTIONS) + ([] if est_v2 or not SYNC_VAULT_PRO else
                                  [(s, n, v, "Vault PRO") for s, n, v in SECTIONS_PRO])
         for entree in plan:
@@ -501,7 +520,8 @@ def _iter_jobs(include_videos):
                 continue
             for p in sorted(folder.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name:
-                    chemin = ((biblio_x,) if biblio_x else ()) + (label.title(), drive_name)
+                    chemin = (tuple(biblio_x.split("/")) if biblio_x else ()) \
+                        + (label.title(), drive_name)
                     yield chemin, p
 
 
@@ -654,13 +674,19 @@ def _candidats_import(sess, st, root):
             continue
         if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
             for sous in _lister(sess, dossier["id"], dossiers=True):
-                ident_b = sous["name"].strip().lower()
-                if not (IDENTITIES_DIR / ident_b).exists():
-                    continue
-                for typ in _lister(sess, sous["id"], dossiers=True):
-                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
-                    if sub:
-                        _prendre(typ["id"], ident_b, sub)
+                nom_s = sous["name"].strip()
+                # niveau marche (FR / US) : on descend encore d'un cran
+                grappes = ([(x["name"].strip().lower(), x["id"])
+                            for x in _lister(sess, sous["id"], dossiers=True)]
+                           if nom_s.upper() in ("FR", "US")
+                           else [(nom_s.lower(), sous["id"])])
+                for ident_b, did in grappes:
+                    if not (IDENTITIES_DIR / ident_b).exists():
+                        continue
+                    for typ in _lister(sess, did, dossiers=True):
+                        sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                        if sub:
+                            _prendre(typ["id"], ident_b, sub)
             continue
         if nom_d.lower() == "bibliotheque 2":
             for sous in _lister(sess, dossier["id"], dossiers=True):
@@ -821,8 +847,11 @@ def _creer_arborescence(sess, root, st, include_videos):
         est_v2 = nom.lower().startswith(V2_PREFIX)
         if est_v2 and not SYNC_VAULT2:
             continue
+        if nom.strip().lower() in EXCLURE_DRIVE:
+            continue
         label = (nom[len(V2_PREFIX):] if est_v2 else nom).title()
-        plans = [("Bibliotheque 2" if est_v2 else RACINE_BIBLIO, label), SECTIONS]
+        plans = [(("Bibliotheque 2",) if est_v2
+                  else (RACINE_BIBLIO, _marche_de(nom))) + (label,), SECTIONS]
         parent = root
         for niveau in plans[0]:
             parent = _ensure_folder(sess, parent, niveau, st)
@@ -835,6 +864,57 @@ def _creer_arborescence(sess, root, st, include_videos):
             pro_ident = _ensure_folder(sess, pro, label, st)
             for sub, drive_name, is_video in SECTIONS_PRO:
                 _ensure_folder(sess, pro_ident, drive_name, st)
+
+
+def _regrouper_par_marche(sess, root, st) -> int:
+    """Range les identites deja presentes sous « Bibliotheque » dans un
+    sous-dossier FR ou US — en les DEPLACANT, pas en les recopiant.
+
+    Sans ca, ajouter ce niveau aurait fait repartir les 2144 fichiers vers
+    de nouveaux dossiers et laisse les anciens a cote. Idempotent : une fois
+    range, il n'y a plus rien a bouger."""
+    biblio = _ensure_folder(sess, root, RACINE_BIBLIO, st)
+    marches = {}
+    bouges = 0
+    for f in _lister(sess, biblio, dossiers=True):
+        nom = (f["name"] or "").strip()
+        if nom.upper() in ("FR", "US"):
+            marches[nom.upper()] = f["id"]
+    for f in _lister(sess, biblio, dossiers=True):
+        nom = (f["name"] or "").strip()
+        if nom.upper() in ("FR", "US") or not nom:
+            continue
+        cible = _marche_de(nom.lower())
+        if cible not in marches:
+            marches[cible] = _ensure_folder(sess, biblio, cible, st)
+        try:
+            r = sess.patch(
+                "https://www.googleapis.com/drive/v3/files/" + f["id"]
+                + "?addParents=" + marches[cible] + "&removeParents=" + biblio
+                + "&fields=id&supportsAllDrives=true",
+                json={}, timeout=60)
+            if r.status_code < 400:
+                bouges += 1
+                st["folders"][f"{marches[cible]}/{nom}"] = f["id"]
+                st["folders"].pop(f"{biblio}/{nom}", None)
+        except Exception as e:
+            _set_status(err=f"rangement {nom} : {e}"[:200])
+    if bouges:
+        # les cles de l'etat doivent suivre, sinon tout serait considere
+        # comme manquant et renvoye une seconde fois
+        pref = RACINE_BIBLIO + "/"
+        nouveau = {}
+        for cle, val in (st.get("uploaded") or {}).items():
+            if cle.startswith(pref):
+                reste = cle[len(pref):]
+                tete = reste.split("/", 1)[0]
+                if tete.upper() not in ("FR", "US"):
+                    cle = pref + _marche_de(tete.lower()) + "/" + reste
+            nouveau[cle] = val
+        st["uploaded"] = nouveau
+        _save_state(st)
+        print(f"[gdrive] {bouges} identite(s) rangee(s) par marche", flush=True)
+    return bouges
 
 
 def run_sync() -> dict:
@@ -850,6 +930,7 @@ def run_sync() -> dict:
     # Arborescence COMPLETE d'abord : on veut voir tous les dossiers dans le
     # Drive meme vides — c'est la qu'on depose, et ca montre ce qui manque.
     try:
+        _regrouper_par_marche(sess, root, st)     # AVANT de creer : on deplace
         _creer_arborescence(sess, root, st, include_videos)
         _save_state(st)
     except Exception as e:

@@ -8821,6 +8821,8 @@ def _list_content_identities():
             if i.lower() not in hidden and not _is_v2(i)]
 
 
+import marche as _marche_mod
+
 MARKET_FILE = DATA_DIR / "identity_market.json"
 
 
@@ -8833,29 +8835,17 @@ def _load_markets() -> dict:
         return {}
 
 
-# Répartition historique — MÊME règle que cogs/user.py : tant qu'aucun marché
-# n'a été choisi, ces identités-là sont FR et toutes les autres sont US (c'est
-# exactement ce que faisait la liste en dur du menu Jailbreak).
-_MARKET_FR_DEFAUT = {"julia", "emma", "lola", "sarah", "amelia", "alicia", "jessye"}
+# La règle vit dans marche.py — site, bot et synchro Drive y puisent tous.
+_MARKET_FR_DEFAUT = _marche_mod.FR_DEFAUT
 
 
 def identity_market(ident: str) -> str:
     """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b)."""
-    idl = (ident or "").lower().strip()
-    m = _load_markets().get(idl)
-    if m in ("fr", "us"):
-        return m
-    return "fr" if idl in _MARKET_FR_DEFAUT else "us"
+    return _marche_mod.de(ident)
 
 
 def _set_identity_market(ident: str, market: str) -> bool:
-    """Le choix est écrit EN CLAIR (fr comme us) : sans ça, repasser une
-    identité US en FR retombait sur le défaut… c'est-à-dire US."""
-    d = _load_markets()
-    ident = (ident or "").lower().strip()
-    d[ident] = "us" if str(market).lower() == "us" else "fr"
-    MARKET_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ok = bool(safe_json.write(MARKET_FILE, d, indent=2))
+    ok = _marche_mod.definir(ident, market)
     _invalidate_json_cache(MARKET_FILE)
     return ok
 

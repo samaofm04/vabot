@@ -4510,12 +4510,17 @@ def _markets() -> dict:
 
 
 def _market_of(identity: str) -> str:
-    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b)."""
-    idl = (identity or "").strip().lower()
-    v = _markets().get(idl)
-    if v in ("fr", "us"):
-        return v
-    return "fr" if idl in _JB_FR_IDENTITIES else "us"
+    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b).
+    La regle vit dans marche.py, partagee avec le site et la synchro Drive."""
+    try:
+        import marche as _mk
+        return _mk.de(identity)
+    except Exception:                      # module absent -> ancien comportement
+        idl = (identity or "").strip().lower()
+        v = _markets().get(idl)
+        if v in ("fr", "us"):
+            return v
+        return "fr" if idl in _JB_FR_IDENTITIES else "us"
 
 
 def _is_fr_market(identity: str) -> bool:
