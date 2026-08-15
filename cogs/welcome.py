@@ -549,6 +549,80 @@ async def _us_member_category(guild, member):
     return cat
 
 
+# --------------------------------------------------------------------------
+# Roles de marche : @Jailbreak FR / @Jailbreak US, poses d'apres le marche de
+# l'IDENTITE du VA (data/identity_market.json, le meme drapeau que le site).
+# « hoist » : Discord regroupe alors les membres par role dans la liste de
+# droite — c'est tout l'interet, voir qui bosse sur quoi d'un coup d'oeil.
+ROLES_MARCHE = {"fr": "Jailbreak FR", "us": "Jailbreak US"}
+
+
+async def _role_marche(guild, marche):
+    nom = ROLES_MARCHE[marche]
+    r = discord.utils.find(
+        lambda x: (x.name or "").strip().lower() == nom.lower(), guild.roles)
+    if r is not None:
+        return r
+    try:
+        return await guild.create_role(
+            name=nom, hoist=True,
+            colour=(discord.Color.blurple() if marche == "fr"
+                    else discord.Color.red()),
+            reason="Marche des VA (identite FR / US)")
+    except Exception as e:
+        log.warning(f"_role_marche {nom}: {e}")
+        return None
+
+
+async def appliquer_roles_marche(guild, membre=None):
+    """Aligne les roles de marche sur l'identite de chaque VA.
+
+    `membre` : ne traiter que celui-la (a l'assignation d'une identite).
+    Retourne (poses, retires, sans_identite)."""
+    if guild is None:
+        return (0, 0, 0)
+    try:
+        import marche as mk
+    except Exception:
+        return (0, 0, 0)
+    users = load_users()
+    roles = {}
+    for m in ("fr", "us"):
+        roles[m] = await _role_marche(guild, m)
+    if not any(roles.values()):
+        return (0, 0, 0)
+    poses = retires = sans = 0
+    cibles = [membre] if membre is not None else None
+    if cibles is None:
+        cibles = []
+        for uid in users:
+            try:
+                m = guild.get_member(int(uid))
+            except Exception:
+                m = None
+            if m is not None:
+                cibles.append(m)
+    for m in cibles:
+        rec = users.get(str(m.id))
+        ident = (rec.get("identity") if isinstance(rec, dict) else rec) or ""
+        if not ident:
+            sans += 1
+            continue
+        bon = mk.de(ident)
+        garder, jeter = roles.get(bon), roles.get("us" if bon == "fr" else "fr")
+        try:
+            if garder is not None and garder not in m.roles:
+                await m.add_roles(garder, reason=f"identite {ident} -> {bon.upper()}")
+                poses += 1
+            if jeter is not None and jeter in m.roles:
+                await m.remove_roles(jeter, reason="changement de marche")
+                retires += 1
+        except Exception as e:
+            log.warning(f"roles marche {m}: {e}")
+        await asyncio.sleep(0.4)          # on menage l'API
+    return (poses, retires, sans)
+
+
 async def _ensure_us_menu(bot, channel):
     """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
     pas déjà (détection via les messages épinglés du bot). Idempotent."""
@@ -815,6 +889,11 @@ async def setup_va_ticket(guild, member, bot=None):
     _entry.setdefault("auto_post", True)
     users[str(member.id)] = _entry
     save_users(users)
+    # role de marche pose des l'assignation, sinon il faudrait y penser
+    try:
+        await appliquer_roles_marche(guild, member)
+    except Exception:
+        pass
 
     # Contenu d'accueil du ticket.
     import guild_features as gf
@@ -1702,6 +1781,33 @@ class Welcome(commands.Cog):
         await interaction.response.send_message(
             f"✅ Welcome simulé pour {target.mention}", ephemeral=True
         )
+
+    @app_commands.command(
+        name="rolesmarche",
+        description="[ADMIN] Pose @Jailbreak FR / @Jailbreak US sur les VA selon leur identité",
+    )
+    async def rolesmarche(self, interaction: discord.Interaction):
+        if not await self.require_admin(interaction):
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "🎭 Mise à jour des rôles de marché…", ephemeral=True)
+
+        async def _run():
+            poses, retires, sans = await appliquer_roles_marche(interaction.guild)
+            txt = (f"✅ **{poses}** rôle(s) posé(s)"
+                   + (f", {retires} retiré(s)" if retires else "")
+                   + (f" · {sans} VA sans identité" if sans else "")
+                   + "\n_Les rôles sont affichés séparément : la liste de droite "
+                     "regroupe désormais les membres par marché._")
+            try:
+                await interaction.followup.send(txt, ephemeral=True)
+            except Exception:
+                pass
+
+        interaction.client.loop.create_task(_run())
 
     @app_commands.command(
         name="resetmenus",
