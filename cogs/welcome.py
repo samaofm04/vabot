@@ -576,10 +576,61 @@ async def _ensure_us_menu(bot, channel):
             await msg.pin()
         except Exception:
             pass
+        await _ensure_us_panel(bot, channel)
         return True
     except Exception as e:
         log.warning(f"_ensure_us_menu: {e}")
         return False
+
+
+async def _ensure_us_panel(bot, channel):
+    """Second message PERMANENT : le panneau d'actions, qui suit la model
+    choisie dans le menu du dessus. Les deux restent affiches en
+    permanence — avant, le panneau etait ephemere et disparaissait."""
+    if bot is None or channel is None:
+        return False
+    try:
+        from cogs.user import _jb_panel, _jb_panel_set
+        try:
+            for m in await channel.pins():
+                if (m.author.id == getattr(bot.user, "id", 0) and m.embeds
+                        and (m.embeds[0].footer.text or "") == "panneau-actions-us"):
+                    _jb_panel_set(channel.id, m.id)
+                    return True                   # deja en place
+        except Exception:
+            pass
+        emb, view = _jb_panel(bot.get_cog("UserCog"), "_", 3)
+        msg = await channel.send(embed=emb, view=view)
+        _jb_panel_set(channel.id, msg.id)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning(f"_ensure_us_panel: {e}")
+        return False
+
+
+async def reset_us_menu(bot, channel):
+    """Repart de zero dans un salon -menu : on vide, puis on repose les deux
+    messages permanents. Utile quand le salon s'est encombre de contenu."""
+    if channel is None:
+        return False
+    try:
+        await channel.purge(limit=200, check=lambda m: True)
+    except Exception as e:
+        log.warning(f"reset_us_menu purge: {e}")
+    try:
+        from cogs.user import _jb_panel_ids
+        d = _jb_panel_ids()
+        d.pop(str(channel.id), None)
+        import safe_json
+        from pathlib import Path as _P
+        safe_json.write(_P("data") / "us_panels.json", d, indent=2)
+    except Exception:
+        pass
+    return await _ensure_us_menu(bot, channel)
 
 
 async def _ensure_num_panel(bot, channel):
@@ -1651,6 +1702,53 @@ class Welcome(commands.Cog):
         await interaction.response.send_message(
             f"✅ Welcome simulé pour {target.mention}", ephemeral=True
         )
+
+    @app_commands.command(
+        name="resetmenus",
+        description="[ADMIN] Serveur US : vide les salons -menu et repose les 2 menus permanents",
+    )
+    @app_commands.describe(salon="Ne remettre a neuf QUE ce salon -menu (sinon : tous)")
+    async def resetmenus(self, interaction: discord.Interaction,
+                         salon: discord.TextChannel = None):
+        if not await self.require_admin(interaction):
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        import guild_features as gf
+        if not gf.is_us_guild(guild):
+            await interaction.response.send_message(
+                "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.",
+                ephemeral=True)
+            return
+        cibles = ([salon] if salon is not None
+                  else [c for c in guild.text_channels if c.name.endswith("-menu")])
+        if not cibles:
+            await interaction.response.send_message(
+                "Aucun salon `-menu` trouvé.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"🧹 Remise à neuf de {len(cibles)} salon(s) `-menu`…", ephemeral=True)
+
+        async def _run():
+            faits, rates = [], []
+            for ch in cibles:
+                try:
+                    ok = await reset_us_menu(self.bot, ch)
+                    (faits if ok else rates).append(ch.name)
+                except Exception as e:
+                    rates.append(f"{ch.name} ({type(e).__name__})")
+                await asyncio.sleep(1.2)          # on menage l'API Discord
+            txt = f"✅ **{len(faits)}** salon(s) remis à neuf — menu + panneau d'actions épinglés."
+            if rates:
+                txt += f"\n⚠️ Échecs : {', '.join(rates[:8])}"
+            try:
+                await interaction.followup.send(txt, ephemeral=True)
+            except Exception:
+                pass
+
+        interaction.client.loop.create_task(_run())
 
     @app_commands.command(
         name="ticketsall",

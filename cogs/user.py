@@ -2260,6 +2260,9 @@ class UserCog(commands.Cog):
             self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
             self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
             self.bot.add_dynamic_items(JBModelButton)  # 1 bouton par model (menu US)
+            # panneau d'actions permanent : l'etat vit dans le custom_id, donc
+            # les boutons repondent encore apres un redemarrage
+            self.bot.add_dynamic_items(JBQtySelect, JBActionButton)
         except Exception:
             pass
         if not self.daily_menu.is_running():
@@ -4806,9 +4809,180 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
             us = gf.is_us_guild(getattr(interaction, "guild", None))
         except Exception:
             us = False
-        view = JailbreakActionsView(cog, self.ident, us=us)
-        await interaction.response.send_message(
-            embed=view._embed(), view=view, ephemeral=True)
+        if not us:
+            view = JailbreakActionsView(cog, self.ident, us=False)
+            await interaction.response.send_message(
+                embed=view._embed(), view=view, ephemeral=True)
+            return
+        # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
+        # d'envoyer un message ephemere qui disparait au rafraichissement.
+        emb, view = _jb_panel(cog, self.ident, 3)
+        chan = interaction.channel
+        msg_id = _jb_panel_ids().get(str(getattr(chan, "id", 0)))
+        cible = None
+        try:
+            if msg_id:
+                cible = await chan.fetch_message(int(msg_id))
+        except Exception:
+            cible = None
+        if cible is None:                      # panneau introuvable -> on le recree
+            try:
+                for m in await chan.pins():
+                    if (m.author.id == interaction.client.user.id and m.embeds
+                            and (m.embeds[0].footer.text or "") == "panneau-actions-us"):
+                        cible = m
+                        break
+            except Exception:
+                cible = None
+        try:
+            if cible is not None:
+                await cible.edit(embed=emb, view=view)
+                await interaction.response.defer()
+            else:
+                nouveau = await chan.send(embed=emb, view=view)
+                _jb_panel_set(chan.id, nouveau.id)
+                try:
+                    await nouveau.pin()
+                except Exception:
+                    pass
+                await interaction.response.defer()
+        except Exception:
+            await interaction.response.send_message(
+                embed=emb, view=view, ephemeral=True)
+
+
+# ---------------------------------------------------------------------------
+# Panneau d'actions PERMANENT du serveur US.
+#
+# Avant : cliquer une model envoyait un panneau EPHEMERE (« toi seul peux voir
+# ceci »), qui disparaissait au moindre rafraichissement. Demande du patron :
+# les deux messages restent affiches en permanence dans le salon -menu, le
+# second suit la model choisie dans le premier, et le contenu genere part dans
+# le salon -content.
+#
+# Tout l'etat (model, quantite) voyage dans le custom_id : les boutons
+# survivent donc a un redemarrage du bot, sans rien avoir a re-armer.
+_JB_PANEL_STORE = DATA_DIR / "us_panels.json"
+
+
+def _jb_panel_ids() -> dict:
+    try:
+        import json as _j
+        d = _j.loads(_JB_PANEL_STORE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _jb_panel_set(channel_id, message_id):
+    d = _jb_panel_ids()
+    d[str(channel_id)] = int(message_id)
+    try:
+        import safe_json
+        safe_json.write(_JB_PANEL_STORE, d, indent=2)
+    except Exception:
+        pass
+
+
+class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
+                  template=r"jbus:q:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)"):
+    """Quantite du panneau permanent. La valeur choisie est recuite dans les
+    custom_id des boutons -> aucun etat en memoire."""
+
+    def __init__(self, ident, qty):
+        self.ident = (ident or "_").lower()
+        self.qty = int(qty)
+        opts = [discord.SelectOption(label=f"{q} média par action", value=str(q),
+                                     default=(q == self.qty))
+                for q in _JB_QTY_OPTIONS]
+        super().__init__(discord.ui.Select(
+            placeholder=f"📦 Quantité : {self.qty} par action",
+            min_values=1, max_values=1, options=opts, row=0,
+            custom_id=f"jbus:q:{self.ident}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        try:
+            q = int(self.item.values[0])
+        except Exception:
+            q = self.qty
+        emb, view = _jb_panel(interaction.client.get_cog("UserCog"), self.ident, q)
+        await interaction.response.edit_message(embed=emb, view=view)
+
+
+class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
+                     template=r"jbus:a:(?P<ident>[a-z0-9_.\-]+):(?P<key>[a-z]+):(?P<qty>\d+)"):
+    """Une action du panneau permanent (reel caption, story, pseudo...)."""
+
+    def __init__(self, ident, key, qty, label=None, row=1):
+        self.ident = (ident or "_").lower()
+        self.key = key
+        self.qty = int(qty)
+        lib = label or dict((k, lb) for k, lb, _c, _s in _JB_ACTIONS_US).get(key, key)
+        super().__init__(discord.ui.Button(
+            label=lib, style=discord.ButtonStyle.primary, row=row,
+            custom_id=f"jbus:a:{self.ident}:{self.key}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["key"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        cog = interaction.client.get_cog("UserCog")
+        entree = next((e for e in _JB_ACTIONS_US if e[0] == self.key), None)
+        if cog is None or entree is None:
+            await interaction.response.send_message("Action indisponible.", ephemeral=True)
+            return
+        _k, _label, cmd_attr, supports_count = entree
+        cmd = getattr(cog, cmd_attr, None)
+        if cmd is None:
+            await interaction.response.send_message("Action indisponible.", ephemeral=True)
+            return
+        model = self.ident
+        if self.key in _US_SOURCED_ACTIONS:
+            model = _US_SOURCE_IDENTITY        # pseudo / name viennent de Jessye
+        await cog._run_for_model(interaction, cmd, model, supports_count, self.qty)
+
+
+def _jb_panel(cog, ident, qty=3):
+    """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
+    model n'est choisie : on n'affiche alors que la quantite."""
+    ident = (ident or "_").lower()
+    view = discord.ui.View(timeout=None)
+    view.add_item(JBQtySelect(ident, qty))
+    if ident != "_":
+        for i, (key, label, _c, _s) in enumerate(_JB_ACTIONS_US):
+            view.add_item(JBActionButton(ident, key, qty, label=label, row=1 + i // 4))
+        emb = discord.Embed(
+            title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
+            description=(
+                f"📦 **Quantité : {qty} média par action** "
+                "_(change-la dans le menu déroulant ci-dessus)._\n"
+                "La quantité est **plafonnée au stock dispo** de la model.\n"
+                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n\n"
+                "Le contenu arrive dans ton salon **-content** 👇"
+            ),
+            color=discord.Color.dark_red())
+    else:
+        emb = discord.Embed(
+            title="🔓 Choisis une model au-dessus 👆",
+            description=("Clique sur une model dans le menu du dessus : "
+                         "les actions apparaissent ici.\n"
+                         "Le contenu généré part dans ton salon **-content**."),
+            color=discord.Color.dark_red())
+    emb.set_footer(text="panneau-actions-us")
+    return emb, view
 
 
 class JailbreakModelsView(discord.ui.View):
