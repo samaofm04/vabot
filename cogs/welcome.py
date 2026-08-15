@@ -648,10 +648,44 @@ async def _ensure_us_menu(bot, channel):
             pins = await channel.pins()
         except Exception:
             pins = []
+        # Les DEUX messages doivent rester dans l'ordre : menu (choix de la
+        # model) PUIS panneau d'actions. Si le panneau est plus ancien que le
+        # menu (menu reposte apres coup), l'ordre est inverse a l'ecran -> on
+        # repart de zero pour les deux.
+        _menu = _panneau = None
         for p in pins:
-            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
-                    and "Jailbreak US" in (p.embeds[0].title or "")):
-                return True  # déjà en place
+            if p.author.id != getattr(bot.user, "id", 0) or not p.embeds:
+                continue
+            _t = p.embeds[0].title or ""
+            _f = p.embeds[0].footer.text or ""
+            if "Jailbreak" in _t and _menu is None:
+                _menu = p
+            elif _f == "panneau-actions-us" and _panneau is None:
+                _panneau = p
+        if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
+            return True                       # deja en place, dans le bon ordre
+        # Deux cas a reprendre : ordre inverse, OU menu absent alors qu'un
+        # panneau existe (le menu se poserait APRES -> inverse a l'ecran).
+        _a_refaire = [m for m in
+                      ((_menu, _panneau) if (_menu is not None and _panneau is not None
+                                             and _panneau.id < _menu.id)
+                       else ((_panneau,) if _menu is None and _panneau is not None else ()))
+                      if m is not None]
+        if _a_refaire:
+            for _m in _a_refaire:
+                try:
+                    await _m.delete()
+                except Exception:
+                    pass
+            try:
+                from cogs.user import _jb_panel_ids
+                import safe_json
+                from pathlib import Path as _P
+                _d = _jb_panel_ids()
+                _d.pop(str(channel.id), None)
+                safe_json.write(_P("data") / "us_panels.json", _d, indent=2)
+            except Exception:
+                pass
         # Marche du PROPRIETAIRE du salon : chaque -menu appartient a une seule
         # personne, on peut donc lui servir SES models (role Jailbreak FR/US).
         marche = "us"
