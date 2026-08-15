@@ -41315,6 +41315,24 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
+    def _memes_octets(a, b, bloc=262144):
+        """Meme contenu ? On lit le debut ET la fin : deux medias distincts de
+        meme poids different toujours quelque part, et lire 512 Ko au lieu de
+        1,5 Mo divise le temps par trois sur 4750 fichiers."""
+        try:
+            taille = a.stat().st_size
+            with a.open("rb") as fa, b.open("rb") as fb:
+                if fa.read(bloc) != fb.read(bloc):
+                    return False
+                if taille > bloc * 2:
+                    fa.seek(-bloc, 2)
+                    fb.seek(-bloc, 2)
+                    if fa.read(bloc) != fb.read(bloc):
+                        return False
+            return True
+        except Exception:
+            return False
+
     @app.route("/gdrive/doublons", methods=["POST"])
     def gdrive_doublons():
         """Repere (et sur demande supprime) les fichiers rapatries EN DOUBLE
@@ -41356,6 +41374,11 @@ def create_app():
                         try:
                             if f.stat().st_size != orig.stat().st_size:
                                 continue          # tailles differentes -> pas un doublon
+                            # meme taille ne suffit pas : on compare le CONTENU
+                            # (debut + fin), sinon deux photos de meme poids
+                            # passeraient pour identiques
+                            if not _memes_octets(f, orig):
+                                continue
                         except OSError:
                             continue
                         total += 1
