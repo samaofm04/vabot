@@ -641,7 +641,9 @@ def _candidats_import(sess, st, root):
     vus = st.get("imported") or {}
     trouves = []
 
-    def _prendre(dossier_id, ident, sub):
+    def _prendre(dossier_id, ident, sub, canonique=False):
+        """`canonique` : le fichier est deja RANGE au bon endroit du Drive
+        (par opposition a un depot libre dans « A IMPORTER »)."""
         exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
                 else IMAGE_EXTS)
         for f in _lister(sess, dossier_id):
@@ -650,7 +652,8 @@ def _candidats_import(sess, st, root):
                 continue
             if vus.get(f["id"]) or f["id"] in deja:
                 continue          # deja importe, ou c'est NOUS qui l'avons mis
-            trouves.append({"id": f["id"], "nom": nom, "identity": ident, "sub": sub})
+            trouves.append({"id": f["id"], "nom": nom, "identity": ident,
+                            "sub": sub, "canonique": canonique})
 
     # 1) depot libre : « A IMPORTER / <identite> / <type> »
     racine = None
@@ -686,7 +689,7 @@ def _candidats_import(sess, st, root):
                     for typ in _lister(sess, did, dossiers=True):
                         sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
                         if sub:
-                            _prendre(typ["id"], ident_b, sub)
+                            _prendre(typ["id"], ident_b, sub, canonique=True)
             continue
         if nom_d.lower() == "bibliotheque 2":
             for sous in _lister(sess, dossier["id"], dossiers=True):
@@ -694,7 +697,7 @@ def _candidats_import(sess, st, root):
                 for typ in _lister(sess, sous["id"], dossiers=True):
                     sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
                     if sub:
-                        _prendre(typ["id"], ident_v, sub)
+                        _prendre(typ["id"], ident_v, sub, canonique=True)
             continue
         ident = nom_d.lower()          # ancien rangement : identite a la racine
         if not (IDENTITIES_DIR / ident).exists():
@@ -702,7 +705,7 @@ def _candidats_import(sess, st, root):
         for typ in _lister(sess, dossier["id"], dossiers=True):
             sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
             if sub:
-                _prendre(typ["id"], ident, sub)
+                _prendre(typ["id"], ident, sub, canonique=True)
     return trouves
 
 
@@ -822,6 +825,18 @@ def run_import() -> dict:
                 k += 1
             _telecharger(sess, c["id"], dst)
             st["imported"][c["id"]] = {"name": dst.name, "ts": int(time.time())}
+            # Il etait DEJA range au bon endroit du Drive : sans cette ligne,
+            # la synchro le renverrait juste a cote de lui-meme.
+            if c.get("canonique"):
+                try:
+                    cle = "/".join((RACINE_BIBLIO, _marche_de(c["identity"]),
+                                    c["identity"].title(),
+                                    _SUB_TO_LABEL.get(c["sub"], c["sub"]),
+                                    dst.name))
+                    st.setdefault("uploaded", {})[cle] = {
+                        "size": dst.stat().st_size, "id": c["id"]}
+                except Exception:
+                    pass
             imported += 1
             _save_state(st)
         except Exception as e:
