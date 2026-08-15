@@ -4896,7 +4896,8 @@ class _JailbreakModelSelect(discord.ui.Select):
             await interaction.response.send_message(
                 "Aucune model disponible.", ephemeral=True)
             return
-        view = JailbreakActionsView(self.cog, model)
+        view = JailbreakActionsView(
+            self.cog, model, us=(marche_du_membre(interaction.user) != "fr"))
         await interaction.response.send_message(
             embed=view._embed(), view=view, ephemeral=True)
 
@@ -4944,14 +4945,17 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
             us = gf.is_us_guild(getattr(interaction, "guild", None))
         except Exception:
             us = False
+        # Le MARCHE du VA (role @Jailbreak FR / US) decide des actions, pas le
+        # serveur : un VA FR sur le serveur US garde le menu FR.
+        _marche = marche_du_membre(interaction.user)
         if not us:
-            view = JailbreakActionsView(cog, self.ident, us=False)
+            view = JailbreakActionsView(cog, self.ident, us=(_marche != "fr"))
             await interaction.response.send_message(
                 embed=view._embed(), view=view, ephemeral=True)
             return
         # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
         # d'envoyer un message ephemere qui disparait au rafraichissement.
-        emb, view = _jb_panel(cog, self.ident, 3)
+        emb, view = _jb_panel(cog, self.ident, 3, marche=_marche)
         chan = interaction.channel
         msg_id = _jb_panel_ids().get(str(getattr(chan, "id", 0)))
         cible = None
@@ -5048,7 +5052,8 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
             q = int(self.item.values[0])
         except Exception:
             q = self.qty
-        emb, view = _jb_panel(interaction.client.get_cog("UserCog"), self.ident, q)
+        emb, view = _jb_panel(interaction.client.get_cog("UserCog"), self.ident, q,
+                              marche=marche_du_membre(interaction.user))
         await interaction.response.edit_message(embed=emb, view=view)
 
 
@@ -5094,14 +5099,17 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                                  count=self.qty, supports_count=supports_count)
 
 
-def _jb_panel(cog, ident, qty=3):
+def _jb_panel(cog, ident, qty=3, marche="us"):
     """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
-    model n'est choisie : on n'affiche alors que la quantite."""
+    model n'est choisie : on n'affiche alors que la quantite.
+    `marche` (role @Jailbreak FR / US du VA) decide des ACTIONS proposees :
+    le marche FR garde son Reel avec exemple, le marche US a Reel caption."""
     ident = (ident or "_").lower()
     view = discord.ui.View(timeout=None)
     view.add_item(JBQtySelect(ident, qty))
     if ident != "_":
-        for i, (key, label, _c, _s) in enumerate(_JB_ACTIONS_US):
+        _actions = _JB_ACTIONS if marche == "fr" else _JB_ACTIONS_US
+        for i, (key, label, _c, _s) in enumerate(_actions):
             view.add_item(JBActionButton(ident, key, qty, label=label, row=1 + i // 4))
         emb = discord.Embed(
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
