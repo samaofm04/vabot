@@ -1206,6 +1206,48 @@ def _us_content_channel_for(guild, member):
         return None
 
 
+def _us_content_target(interaction):
+    """Le salon -content correspondant au salon COURANT.
+
+    Avant, on cherchait le -content du CLIQUEUR : un admin qui teste dans le
+    -menu de quelqu'un d'autre n'en a pas, la redirection ne se faisait pas,
+    et le contenu se deversait dans le -menu. On suit donc le salon, pas la
+    personne : meme categorie (le dossier de la personne), sinon meme prefixe,
+    et en dernier recours le -content du cliqueur."""
+    ch = getattr(interaction, "channel", None)
+    guild = getattr(interaction, "guild", None)
+    if ch is None or guild is None:
+        return None
+    try:
+        from cogs.welcome import _us_norm
+    except Exception:
+        return None
+    try:
+        cat = getattr(ch, "category", None)
+        if cat is not None:
+            for c in getattr(cat, "text_channels", []):
+                if _us_norm(c.name).endswith("-content"):
+                    return c
+        nom = _us_norm(getattr(ch, "name", ""))
+        if nom.endswith("-menu"):
+            cible = nom[: -len("-menu")] + "-content"
+            c = discord.utils.find(
+                lambda x, t=cible: _us_norm(x.name) == t, guild.text_channels)
+            if c is not None:
+                return c
+    except Exception:
+        pass
+    return _us_content_channel_for(guild, getattr(interaction, "user", None))
+
+
+def _est_salon_menu(ch) -> bool:
+    try:
+        from cogs.welcome import _us_norm
+        return _us_norm(getattr(ch, "name", "")).endswith("-menu")
+    except Exception:
+        return False
+
+
 class _RedirectFollowup:
     """followup.send qui route les messages NON-éphémères vers un autre salon
     (les éphémères restent sur la vraie interaction : seuls le cliqueur les voit)."""
@@ -1215,6 +1257,11 @@ class _RedirectFollowup:
 
     async def send(self, content=None, **kw):
         if kw.get("ephemeral"):
+            return await self._real.send(content, **kw)
+        if self._target is None:
+            # Aucun -content trouve : plutot que de polluer le salon -menu
+            # (qui ne doit contenir QUE les deux menus), on repond en prive.
+            kw["ephemeral"] = True
             return await self._real.send(content, **kw)
         kw.pop("ephemeral", None)
         kw.pop("wait", None)  # kwarg webhook, inconnu de TextChannel.send
@@ -2618,9 +2665,14 @@ class UserCog(commands.Cog):
         try:
             import guild_features as gf
             if gf.is_us_guild(getattr(interaction, "guild", None)):
-                target = _us_content_channel_for(interaction.guild, interaction.user)
+                target = _us_content_target(interaction)
                 if target is not None and target.id != getattr(interaction.channel, "id", None):
                     itx = _JBRedirect(interaction, target)
+                elif _est_salon_menu(getattr(interaction, "channel", None)):
+                    # salon -menu sans -content identifiable : on n'y publie
+                    # rien, tout repart en ephemere
+                    itx = _JBRedirect(interaction, None)
+                    target = None
                 else:
                     target = None
         except Exception:

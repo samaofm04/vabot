@@ -425,6 +425,37 @@ try:
     finally:
         _uP._jb_can_use = _vraiP
 
+    # le contenu doit TOUJOURS quitter le salon -menu
+    class _ChR:
+        def __init__(self, nom, cid, cat=None):
+            self.name, self.id, self.category, self.recu = nom, cid, cat, []
+
+        async def send(self, content=None, **kw):
+            self.recu.append(content)
+
+    _menuR = _ChR("abdoul_9684-menu", 1)
+    _contR = _ChR("abdoul_9684-content", 2)
+    _catR = type("Cat", (), {"text_channels": [_menuR, _contR]})()
+    _menuR.category = _contR.category = _catR
+    _gR = type("G", (), {"text_channels": [_menuR, _contR]})()
+    _itxR = type("I", (), {"channel": _menuR, "guild": _gR, "user": None})()
+    check("redirection : le -content se trouve depuis le -menu de la personne",
+          _uP._us_content_target(_itxR) is _contR)
+
+    class _FwR:
+        def __init__(self):
+            self.recu = []
+
+        async def send(self, content=None, **kw):
+            self.recu.append((content, kw.get("ephemeral")))
+
+    _fwR = _FwR()
+    _aioP.get_event_loop().run_until_complete(
+        _uP._RedirectFollowup(_fwR, None).send("contenu sans destination"))
+    check("redirection : sans -content, ephemere plutot que polluer le menu",
+          _fwR.recu == [("contenu sans destination", True)] and not _menuR.recu,
+          str(_fwR.recu))
+
     _embP, _viewP = _uP._jb_panel(None, "e30princesss", 5)
     _idsP = [getattr(getattr(i, "item", None), "custom_id", None) for i in _viewP.children]
     check("panneau : quantite et identite dans chaque custom_id",
