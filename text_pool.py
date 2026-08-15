@@ -100,6 +100,18 @@ def list_entries(category: str, only_available: bool = False,
     return items
 
 
+def norm_texte(t: str) -> str:
+    """Forme normalisee servant a reconnaitre un doublon : minuscules, sans
+    ponctuation ni emoji, espaces ecrases. « Viens voir ! 🔥 » et « viens
+    voir » sont le MEME texte — avant, seule l'egalite au caractere pres
+    comptait et les doublons passaient a travers."""
+    import re as _re
+    import unicodedata as _ud
+    t = _ud.normalize("NFKC", str(t or "")).lower()
+    t = _re.sub(r"[^0-9a-zà-ÿ\s]", " ", t)
+    return _re.sub(r"\s+", " ", t).strip()
+
+
 def add_entry(category: str, text: str, identity: str = "") -> Dict[str, Any]:
     """Ajoute une entree au pool (identity optionnelle : onglets par identité
     du site ; vide = pool commun, comme avant). Retourne l entry ou l erreur."""
@@ -115,8 +127,11 @@ def add_entry(category: str, text: str, identity: str = "") -> Dict[str, Any]:
     data = _load()
     # Dedupe : skip si meme texte deja present POUR LA MEME identite
     # (deux models peuvent volontairement avoir le meme CTA).
+    cible = norm_texte(text)
     for e in data[category]:
-        if e.get("text") == text and (e.get("identity") or "").lower() == identity:
+        if (e.get("identity") or "").lower() != identity:
+            continue
+        if e.get("text") == text or (cible and norm_texte(e.get("text")) == cible):
             return {"ok": False, "error": "already_exists", "entry": e}
     entry = {
         "id": uuid.uuid4().hex[:12],

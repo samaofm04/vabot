@@ -4521,13 +4521,45 @@ function txtCountBlocks(v){
   if(!v) return 0;
   return v.split(/\\n\\s*\\n/).filter(function(b){ return b.trim(); }).length;
 }
+// Textes DEJA presents pour l identite affichee (lus sur les cartes).
+function txtDejaLa(){
+  var out=[];
+  document.querySelectorAll('[data-txtact="copy"][data-txt]').forEach(function(b){
+    out.push(capNorm(b.getAttribute('data-txt')||''));
+  });
+  return out;
+}
+// Blocs du presse-papier, dedoublonnes entre eux ET contre l existant.
+function txtAddAnalyse(){
+  var deja=txtDejaLa(), vus={}, neufs=0, dbl=0;
+  document.querySelectorAll('#txtAddList .txtadd-ta').forEach(function(t){
+    String(t.value||'').replace(/\\r\\n/g,'\\n').trim().split(/\\n\\s*\\n/).forEach(function(b){
+      b=b.trim(); if(!b) return;
+      var k=capNorm(b);
+      if(!k) return;
+      if(vus[k] || deja.indexOf(k)!==-1){ dbl++; return; }
+      vus[k]=1; neufs++;
+    });
+  });
+  return {neufs:neufs, doublons:dbl};
+}
 function txtAddRecount(){
-  var n=0;
-  document.querySelectorAll('#txtAddList .txtadd-ta').forEach(function(t){ n+=txtCountBlocks(t.value); });
+  var r=txtAddAnalyse(), n=r.neufs+r.doublons;
   var el=document.getElementById('txtAddCount');
   if(el){
-    el.textContent = n ? (n+' texte'+(n>1?'s':'')+' détecté'+(n>1?'s':'')) : 'colle tes textes ci-dessus';
-    el.style.color = n ? '#22c55e' : '#75757f';
+    if(!n){
+      el.textContent='colle tes textes ci-dessus'; el.style.color='#75757f';
+    } else if(r.doublons){
+      el.textContent=r.neufs+' nouveau'+(r.neufs>1?'x':'')+' · '
+        +r.doublons+' doublon'+(r.doublons>1?'s':'')+' ignoré'+(r.doublons>1?'s':'');
+      el.style.color=r.neufs?'#f59e0b':'#ef4444';
+    } else {
+      el.textContent=n+' texte'+(n>1?'s':'')+' détecté'+(n>1?'s':'');
+      el.style.color='#22c55e';
+    }
+    return;
+  }
+  if(el){
   }
   var b=document.getElementById('txtAddGo');
   if(b) b.textContent = n>1 ? ('⬆ Tout ajouter ('+n+')') : '⬆ Ajouter';
@@ -44342,7 +44374,15 @@ def create_app():
         if not isinstance(texts, list) or not texts:
             return jsonify({"ok": False, "error": "aucun texte"})
         added = dupes = 0
-        for t in texts[:100]:
+        vus = set()
+        for t in texts[:500]:
+            # doublon DANS le lot colle : deux fois la meme ligne dans le
+            # presse-papier ne doit compter qu'une fois
+            cle = tp.norm_texte(str(t))
+            if cle and cle in vus:
+                dupes += 1
+                continue
+            vus.add(cle)
             res = tp.add_entry(cat, str(t), identity=ident)
             if res.get("ok"):
                 added += 1
