@@ -5106,6 +5106,17 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
         await interaction.response.edit_message(embed=emb, view=view)
 
 
+def _jb_action(key):
+    """Definition d'une action par sa cle, quel que soit le MARCHE.
+    Chercher seulement dans _JB_ACTIONS_US faisait repondre « Action
+    indisponible » a tout VA FR (sa cle « reel » n'y est pas)."""
+    for lst in (_JB_ACTIONS_US, _JB_ACTIONS):
+        for e in lst:
+            if e[0] == key:
+                return e
+    return None
+
+
 class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                      template=r"jbus:a:(?P<ident>[a-z0-9_.\-]+):(?P<key>[a-z]+):(?P<qty>\d+)"):
     """Une action du panneau permanent (reel caption, story, pseudo...)."""
@@ -5114,7 +5125,8 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         self.ident = (ident or "_").lower()
         self.key = key
         self.qty = int(qty)
-        lib = label or dict((k, lb) for k, lb, _c, _s in _JB_ACTIONS_US).get(key, key)
+        _e = _jb_action(key)
+        lib = label or (_e[1] if _e else key)
         super().__init__(discord.ui.Button(
             label=lib, style=discord.ButtonStyle.primary, row=row,
             custom_id=f"jbus:a:{self.ident}:{self.key}:{self.qty}"))
@@ -5129,18 +5141,23 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
         cog = interaction.client.get_cog("UserCog")
-        entree = next((e for e in _JB_ACTIONS_US if e[0] == self.key), None)
+        entree = _jb_action(self.key)
         if cog is None or entree is None:
-            await interaction.response.send_message("Action indisponible.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Action indisponible (`{self.key}`).", ephemeral=True)
             return
         _k, _label, cmd_attr, supports_count = entree
         cmd = getattr(cog, cmd_attr, None)
         if cmd is None:
-            await interaction.response.send_message("Action indisponible.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Action indisponible (`{cmd_attr}`).", ephemeral=True)
             return
         model = self.ident
-        if self.key in _US_SOURCED_ACTIONS:
-            model = _US_SOURCE_IDENTITY        # pseudo / name viennent de Jessye
+        # pseudo / name viennent de Jessye — UNIQUEMENT pour le marche US :
+        # un VA FR doit recevoir les textes de SA model.
+        if (self.key in _US_SOURCED_ACTIONS
+                and marche_du_membre(interaction.user) != "fr"):
+            model = _US_SOURCE_IDENTITY
         # ORDRE DES ARGUMENTS : (interaction, model, cmd, count, supports_count).
         # Les inverser faisait echouer l'action avant toute reponse -> Discord
         # affichait « n'a pas repondu a temps ».
