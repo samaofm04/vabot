@@ -41315,6 +41315,73 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
+    @app.route("/gdrive/doublons", methods=["POST"])
+    def gdrive_doublons():
+        """Repere (et sur demande supprime) les fichiers rapatries EN DOUBLE
+        par l'import Drive.
+
+        Signature d'un doublon d'import : le fichier s'appelle « x_2.jpg »,
+        l'original « x.jpg » existe a cote, et les deux font EXACTEMENT la
+        meme taille. Le triple critere evite de toucher a un vrai fichier que
+        tu aurais nomme ainsi.
+
+        `dry=1` (defaut) : compte seulement. `supprimer=1` : met a la
+        corbeille locale (data/_corbeille_doublons/) — rien n'est detruit."""
+        from flask import jsonify
+        import re as _re
+        import shutil as _sh
+        if not is_auth() or not _is_admin():
+            return jsonify({"ok": False}), 403
+        supprimer = bool(request.form.get("supprimer"))
+        corbeille = DATA_DIR / "_corbeille_doublons"
+        motif = _re.compile(r"^(.+)_(\d+)(\.[A-Za-z0-9]+)$")
+        par_ident, total, octets = {}, 0, 0
+        deplaces, echecs = 0, 0
+        if IDENTITIES_DIR.exists():
+            for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
+                if not ident_dir.is_dir():
+                    continue
+                for sous in sorted(ident_dir.iterdir()):
+                    if not sous.is_dir():
+                        continue
+                    noms = {f.name: f for f in sous.iterdir() if f.is_file()}
+                    for nom, f in sorted(noms.items()):
+                        m = motif.match(nom)
+                        if not m:
+                            continue
+                        base = m.group(1) + m.group(3)
+                        orig = noms.get(base)
+                        if orig is None:
+                            continue
+                        try:
+                            if f.stat().st_size != orig.stat().st_size:
+                                continue          # tailles differentes -> pas un doublon
+                        except OSError:
+                            continue
+                        total += 1
+                        try:
+                            octets += f.stat().st_size
+                        except OSError:
+                            pass
+                        cle = ident_dir.name + "/" + sous.name
+                        par_ident[cle] = par_ident.get(cle, 0) + 1
+                        if supprimer:
+                            try:
+                                dest = corbeille / ident_dir.name / sous.name
+                                dest.mkdir(parents=True, exist_ok=True)
+                                _sh.move(str(f), str(dest / nom))
+                                deplaces += 1
+                            except Exception:
+                                echecs += 1
+        if supprimer:
+            _invalidate_all_ttl_cache()
+        detail = sorted(par_ident.items(), key=lambda kv: -kv[1])[:40]
+        return jsonify({"ok": True, "doublons": total,
+                        "mo": round(octets / (1024 * 1024), 1),
+                        "detail": [{"ou": k, "n": v} for k, v in detail],
+                        "deplaces": deplaces, "echecs": echecs,
+                        "corbeille": str(corbeille) if supprimer else None})
+
     @app.route("/gdrive/debug_state", methods=["POST"])
     def gdrive_debug_state():
         """Pourquoi la synchro croit-elle que tout est a envoyer ? On compare
