@@ -1249,14 +1249,29 @@ def _est_salon_menu(ch) -> bool:
 
 
 class _RedirectFollowup:
-    """followup.send qui route les messages NON-éphémères vers un autre salon
-    (les éphémères restent sur la vraie interaction : seuls le cliqueur les voit)."""
-    def __init__(self, real_followup, target_channel):
+    """followup.send qui route les messages NON-éphémères vers un autre salon.
+
+    Les éphémères, eux, ne s'EMPILENT plus : le premier devient LE message,
+    les suivants l'éditent. Le salon -menu restait sinon jonché de « Aucun
+    story… » et « Direction #content » a chaque clic."""
+    def __init__(self, real_followup, target_channel, interaction=None):
         self._real = real_followup
         self._target = target_channel
+        self._itx = interaction
+        self._pose = False
 
     async def send(self, content=None, **kw):
         if kw.get("ephemeral"):
+            if self._itx is not None and self._pose:
+                # deja un message prive affiche -> on le remplace
+                garde = {k: v for k, v in kw.items()
+                         if k in ("embed", "embeds", "view", "attachments")}
+                try:
+                    return await self._itx.edit_original_response(
+                        content=content, **garde)
+                except Exception:
+                    pass
+            self._pose = True
             return await self._real.send(content, **kw)
         if self._target is None:
             # Aucun -content trouve : plutot que de polluer le salon -menu
@@ -1279,7 +1294,8 @@ class _JBRedirect:
     Tout le reste (response.defer, user, guild…) est délégué tel quel."""
     def __init__(self, interaction, target_channel):
         object.__setattr__(self, "_itx", interaction)
-        object.__setattr__(self, "followup", _RedirectFollowup(interaction.followup, target_channel))
+        object.__setattr__(self, "followup", _RedirectFollowup(
+            interaction.followup, target_channel, interaction))
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_itx"), name)
@@ -2685,11 +2701,8 @@ class UserCog(commands.Cog):
                 await cmd.callback(self, itx)
         finally:
             _IDENTITY_OVERRIDE.reset(token)
-        if target is not None:
-            try:
-                await interaction.followup.send(f"📬 Direction {target.mention} 👌", ephemeral=True)
-            except Exception:
-                pass
+        # (Plus de note « Direction #salon » : le panneau permanent l'annonce
+        # deja, et elle doublait le nombre de messages dans le salon -menu.)
 
     async def _handle_assistance(self, interaction, probleme):
         """Bouton 🆘 Assistance : transmet le probleme du VA au salon d'aide
