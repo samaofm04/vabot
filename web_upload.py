@@ -4903,8 +4903,14 @@ function capShareOpen(){
   if(!items.length){ if(typeof showToast==='function') showToast('Aucune caption à partager','warning'); return; }
   var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
   var nSel=ids.length||items.length;
-  var sec=null;
-  document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  // La section Caption NOMMEMENT : « la premiere section visible » tombait
+  // sur une autre galerie (toutes les sections vivent dans la meme page) et
+  // le partage listait alors les mauvaises models.
+  var sec=document.getElementById('form-cloudcaptions');
+  if(!sec||sec.offsetParent===null){
+    sec=null;
+    document.querySelectorAll('.form-section').forEach(function(s){ if(!sec&&s.offsetParent!==null) sec=s; });
+  }
   var act2=sec?sec.querySelector('.vault-item-active'):null;
   var cur=act2?(act2.getAttribute('data-ident')||''):capLib.identity;
   var rows=[];
@@ -38753,6 +38759,17 @@ def create_app():
                 try:
                     return (f"<div class='form-section' id='form-cloudpps' style='display:block'>"
                             f"{_render_cloud_pps_page()}</div>", 200)
+                except Exception:
+                    return ("", 200)
+            if _tab == "cloudcaptions":
+                # Sans ce fragment, changer d'identite sur l'onglet Caption
+                # changeait l'URL mais PAS le contenu : les cartes et le bloc
+                # de donnees restaient sur la model precedente, la selection
+                # comptait des captions qui n'etaient plus a l'ecran, et le
+                # partage visait la mauvaise identite.
+                try:
+                    return (f"<div class='form-section' id='form-cloudcaptions' style='display:block'>"
+                            f"{_render_cloud_captions_html()}</div>", 200)
                 except Exception:
                     return ("", 200)
             if _tab in ("clouddrive", "provaultdrive", "v2drive"):
