@@ -4952,7 +4952,11 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         model = self.ident
         if self.key in _US_SOURCED_ACTIONS:
             model = _US_SOURCE_IDENTITY        # pseudo / name viennent de Jessye
-        await cog._run_for_model(interaction, cmd, model, supports_count, self.qty)
+        # ORDRE DES ARGUMENTS : (interaction, model, cmd, count, supports_count).
+        # Les inverser faisait echouer l'action avant toute reponse -> Discord
+        # affichait « n'a pas repondu a temps ».
+        await cog._run_for_model(interaction, model, cmd,
+                                 count=self.qty, supports_count=supports_count)
 
 
 def _jb_panel(cog, ident, qty=3):

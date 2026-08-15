@@ -373,6 +373,67 @@ check("erreur de scrape : donnees conservees",
       _o2.get("followers") == 99 and _o2.get("reel_days") == {_D(2): 1}, str(_o2.get("followers")))
 check("erreur de scrape : marque stale", _o2.get("stale") is True)
 
+print("\n", "=" * 70, "\nPANNEAU US : boutons permanents\n", "=" * 70)
+try:
+    import asyncio as _aioP
+    import inspect as _inspP
+    import cogs.user as _uP
+
+    _sigP = list(_inspP.signature(_uP.UserCog._run_for_model).parameters)
+    check("panneau : signature (interaction, model, cmd, count, supports_count)",
+          _sigP[1:6] == ["interaction", "model", "cmd", "count", "supports_count"],
+          str(_sigP))
+
+    _recuP = {}
+
+    class _CogP:
+        reelcaption = "CMD_REELCAPTION"
+
+        async def _run_for_model(self, interaction, model, cmd,
+                                 count=None, supports_count=False):
+            _recuP.clear()
+            _recuP.update(model=model, cmd=cmd, count=count,
+                          supports_count=supports_count)
+
+    class _RepP:
+        def __init__(self):
+            self.msgs = []
+
+        async def send_message(self, *a, **k):
+            self.msgs.append(k)
+
+        async def defer(self, *a, **k):
+            pass
+
+    class _ItxP:
+        def __init__(self, cog):
+            self.client = type("C", (), {"get_cog": lambda s, n: cog})()
+            self.response = _RepP()
+            self.guild = self.user = self.channel = None
+
+    _vraiP = _uP._jb_can_use
+    _uP._jb_can_use = lambda i: True
+    try:
+        _bP = _uP.JBActionButton("e30princesss", "reelcaption", 7)
+        _aioP.get_event_loop().run_until_complete(_bP.callback(_ItxP(_CogP())))
+        # model et cmd inverses = « n'a pas repondu a temps » cote Discord
+        check("panneau : le bouton passe les bons arguments",
+              _recuP.get("model") == "e30princesss"
+              and _recuP.get("cmd") == "CMD_REELCAPTION"
+              and _recuP.get("count") == 7
+              and _recuP.get("supports_count") is True, str(_recuP))
+    finally:
+        _uP._jb_can_use = _vraiP
+
+    _embP, _viewP = _uP._jb_panel(None, "e30princesss", 5)
+    _idsP = [getattr(getattr(i, "item", None), "custom_id", None) for i in _viewP.children]
+    check("panneau : quantite et identite dans chaque custom_id",
+          all(str(x or "").endswith(":5") and "e30princesss" in str(x or "") for x in _idsP),
+          str(_idsP[:2]))
+    check("panneau : permanent (sans timeout)", _viewP.timeout is None)
+except Exception as _eP:
+    check("panneau US : testable", False, repr(_eP)[:120])
+
 print("\n", "=" * 70, "\nNETTOYAGE\n", "=" * 70)
 reset()
 with jb.transaction():
