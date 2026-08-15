@@ -1947,7 +1947,11 @@ try:
         _envGd, _dirGd, _vGd = [], [], _thGd.Lock()
         _origGd2 = (_gdCa.STATE_FILE, _gdCa._session, _gdCa._session_thread,
                     _gdCa._ensure_folder, _gdCa._upload_file,
-                    _gdCa.load_config, _gdCa.save_config)
+                    _gdCa.load_config, _gdCa.save_config, _gdCa._lister)
+        # Drive vide cote reseau : sans ca, le rangement par marche tenterait
+        # un vrai appel HTTP (et run_sync remonte desormais l erreur au lieu
+        # de l avaler, ce qui est justement le comportement voulu).
+        _gdCa._lister = lambda sess, parent, dossiers=False: []
 
         def _upGd(sess, parent, path):
             import time as _tGd
@@ -1989,7 +1993,7 @@ try:
         finally:
             (_gdCa.STATE_FILE, _gdCa._session, _gdCa._session_thread,
              _gdCa._ensure_folder, _gdCa._upload_file,
-             _gdCa.load_config, _gdCa.save_config) = _origGd2
+             _gdCa.load_config, _gdCa.save_config, _gdCa._lister) = _origGd2
     finally:
         _gdCa.IDENTITIES_DIR = _origGd
         _shGd.rmtree(_tmpGd, ignore_errors=True)

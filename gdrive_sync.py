@@ -836,6 +836,7 @@ def run_import() -> dict:
 
 
 def _creer_arborescence(sess, root, st, include_videos):
+    _racine_biblio(sess, root, st)       # remet le cache d'aplomb si besoin
     """Cree le dossier de CHAQUE identite et de chaque type, meme sans fichier.
     Ainsi tout est visible dans le Drive et on sait ou deposer."""
     if not IDENTITIES_DIR.exists():
@@ -869,6 +870,57 @@ def _creer_arborescence(sess, root, st, include_videos):
 _RANGEMENT_ERR: list = []
 
 
+def _normaliser_cles(st) -> int:
+    """Insere le niveau FR/US dans les cles de l'etat.
+
+    INCONDITIONNEL et idempotent : la premiere version ne le faisait que si
+    des dossiers avaient bouge, et un rangement deja effectue (ou effectue a
+    moitie) laissait les cles a l'ancien format — la synchro croyait alors
+    que TOUT etait a envoyer et recopiait 2900 fichiers a cote."""
+    up = st.get("uploaded") or {}
+    pref = RACINE_BIBLIO + "/"
+    nouveau, change = {}, 0
+    for cle, val in up.items():
+        if cle.startswith(pref):
+            reste = cle[len(pref):]
+            tete = reste.split("/", 1)[0]
+            if tete.upper() not in ("FR", "US"):
+                cle = pref + _marche_de(tete.lower()) + "/" + reste
+                change += 1
+        nouveau[cle] = val
+    if change:
+        st["uploaded"] = nouveau
+        _save_state(st)
+        print(f"[gdrive] {change} cle(s) rangee(s) par marche", flush=True)
+    return change
+
+
+def _racine_biblio(sess, root, st) -> str:
+    """Id du dossier « Bibliothèque », verifie a chaque passage.
+
+    Le cache local avait garde l'id d'un dossier mis a la corbeille : tout
+    partait dans un arbre fantome, et l'ancien contenu paraissait absent."""
+    cle = f"{root}/{RACINE_BIBLIO}"
+    fid = (st.get("folders") or {}).get(cle)
+    if fid:
+        try:
+            r = sess.get(
+                "https://www.googleapis.com/drive/v3/files/" + fid,
+                params={"fields": "id,trashed", "supportsAllDrives": "true"},
+                timeout=30)
+            mort = (r.status_code == 404
+                    or (r.status_code < 400 and (r.json() or {}).get("trashed")))
+        except Exception:
+            mort = False       # panne passagere : on GARDE le cache, sinon
+                               # une coupure reseau ferait recreer tout l'arbre
+        if not mort:
+            return fid
+        # id positivement mort : on le jette AVEC tout ce qui en descendait
+        st["folders"] = {k: v for k, v in (st.get("folders") or {}).items()
+                         if k != cle and not k.startswith(f"{fid}/")}
+    return _ensure_folder(sess, root, RACINE_BIBLIO, st)
+
+
 def _regrouper_par_marche(sess, root, st) -> int:
     """Range les identites deja presentes sous « Bibliotheque » dans un
     sous-dossier FR ou US — en les DEPLACANT, pas en les recopiant.
@@ -876,7 +928,7 @@ def _regrouper_par_marche(sess, root, st) -> int:
     Sans ca, ajouter ce niveau aurait fait repartir les 2144 fichiers vers
     de nouveaux dossiers et laisse les anciens a cote. Idempotent : une fois
     range, il n'y a plus rien a bouger."""
-    biblio = _ensure_folder(sess, root, RACINE_BIBLIO, st)
+    biblio = _racine_biblio(sess, root, st)
     _RANGEMENT_ERR.clear()
     marches = {}
     bouges = 0
@@ -907,19 +959,6 @@ def _regrouper_par_marche(sess, root, st) -> int:
         except Exception as e:
             _RANGEMENT_ERR.append(f"{nom} : {e}"[:160])
     if bouges:
-        # les cles de l'etat doivent suivre, sinon tout serait considere
-        # comme manquant et renvoye une seconde fois
-        pref = RACINE_BIBLIO + "/"
-        nouveau = {}
-        for cle, val in (st.get("uploaded") or {}).items():
-            if cle.startswith(pref):
-                reste = cle[len(pref):]
-                tete = reste.split("/", 1)[0]
-                if tete.upper() not in ("FR", "US"):
-                    cle = pref + _marche_de(tete.lower()) + "/" + reste
-            nouveau[cle] = val
-        st["uploaded"] = nouveau
-        _save_state(st)
         print(f"[gdrive] {bouges} identite(s) rangee(s) par marche", flush=True)
     return bouges
 
@@ -937,11 +976,12 @@ def run_sync() -> dict:
     # Arborescence COMPLETE d'abord : on veut voir tous les dossiers dans le
     # Drive meme vides — c'est la qu'on depose, et ca montre ce qui manque.
     try:
-        _regrouper_par_marche(sess, root, st)     # AVANT de creer : on deplace
+        _normaliser_cles(st)                      # les cles d'abord
+        _regrouper_par_marche(sess, root, st)     # puis les dossiers
         # Garde-fou : si une identite est restee a plat sous « Bibliotheque »,
         # ses fichiers ont une ancienne cle et TOUT repartirait en double dans
         # le nouvel arbre. Mieux vaut ne rien envoyer et le dire.
-        _biblio_id = _ensure_folder(sess, root, RACINE_BIBLIO, st)
+        _biblio_id = _racine_biblio(sess, root, st)
         _restants = [f["name"] for f in _lister(sess, _biblio_id, dossiers=True)
                      if (f["name"] or "").strip().upper() not in ("FR", "US")]
         if _restants:
