@@ -680,6 +680,70 @@ def _candidats_import(sess, st, root):
     return trouves
 
 
+ATTENTE_FILE = DATA_DIR / "gdrive_attente.json"
+VEILLE_SECONDES = 60           # une minute : « je ne veux plus sync a la main »
+
+
+def attente() -> dict:
+    """Dernier resultat connu de la veille, sans appeler Google."""
+    d = safe_json.load(ATTENTE_FILE, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def _veille_une_fois() -> dict:
+    res = import_preview()
+    safe_json.write(ATTENTE_FILE, res, indent=2)
+    return res
+
+
+def start_watcher(interval: int = VEILLE_SECONDES) -> bool:
+    """Surveille les DEUX sens, chaque minute, et agit tout seul :
+
+      - un fichier depose dans le Drive  -> import automatique vers le site ;
+      - un fichier ajoute sur le site    -> envoi automatique vers le Drive.
+
+    Le sens site -> Drive se detecte SANS appeler Google (comparaison avec
+    l'etat local), donc il ne coute rien. Les deux se coupent depuis la
+    config (`auto_import`, `auto_sync`)."""
+    def _boucle():
+        time.sleep(45)                     # laisse le serveur demarrer
+        while True:
+            attente = max(30, interval)
+            try:
+                if available():
+                    cfg = load_config()
+
+                    # --- site -> Drive : detection purement locale ---
+                    if cfg.get("auto_sync", True):
+                        try:
+                            rep = sync_report()
+                            if rep.get("manque") and status().get("state") != "running":
+                                print(f"[gdrive-auto] {rep['manque']} fichier(s) a "
+                                      f"envoyer -> synchro auto", flush=True)
+                                start_background()
+                        except Exception as e:
+                            print(f"[gdrive-auto] rapport: {e}", flush=True)
+
+                    # --- Drive -> site : la, il faut interroger Google ---
+                    r = _veille_une_fois()
+                    if r.get("total"):
+                        print(f"[gdrive-veille] {r['total']} fichier(s) a importer",
+                              flush=True)
+                        if (cfg.get("auto_import", True)
+                                and import_status().get("state") != "running"):
+                            print("[gdrive-auto] import automatique", flush=True)
+                            start_import_background()
+            except Exception as e:
+                print(f"[gdrive-veille] {type(e).__name__}: {e}", flush=True)
+                attente = max(attente, 300)      # en panne : on espace
+            time.sleep(attente)
+
+    threading.Thread(target=_boucle, daemon=True, name="gdrive-veille").start()
+    print(f"[gdrive-veille] surveillance des 2 sens toutes les "
+          f"{max(30, interval)}s (import et envoi automatiques)", flush=True)
+    return True
+
+
 def import_preview() -> dict:
     """Ce qui attend dans le Drive, SANS rien telecharger : combien, chez qui.
     Le bouton d'import partait a l'aveugle avant."""

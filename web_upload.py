@@ -7173,6 +7173,43 @@ document.addEventListener('click',function(e){
     <svg viewBox="0 0 19 10" width="19" height="11" preserveAspectRatio="none"><rect width="19" height="10" fill="#fff"/><rect y="0" width="19" height="0.77" fill="#b22234"/><rect y="1.54" width="19" height="0.77" fill="#b22234"/><rect y="3.08" width="19" height="0.77" fill="#b22234"/><rect y="4.62" width="19" height="0.77" fill="#b22234"/><rect y="6.15" width="19" height="0.77" fill="#b22234"/><rect y="7.69" width="19" height="0.77" fill="#b22234"/><rect y="9.23" width="19" height="0.77" fill="#b22234"/><rect width="7.6" height="5.38" fill="#3c3b6e"/></svg>
   </button>
 </div>
+<script>(function(){
+  // Pastille « X fichiers a importer » sur l'onglet Drive + notification.
+  // On lit un cache serveur : aucun appel a Google au chargement.
+  function pose(n){
+    var b = document.getElementById('tab-clouddrive'); if(!b) return;
+    var old = b.querySelector('[data-gdbadge]'); if(old) old.remove();
+    if(!n) return;
+    var s = document.createElement('span');
+    s.setAttribute('data-gdbadge','1');
+    s.textContent = n;
+    s.style.cssText = 'margin-left:auto;background:rgba(34,197,94,.18);color:#22c55e;'
+      + 'font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:9px';
+    b.appendChild(s);
+  }
+  function maj(){
+    fetch('/gdrive/attente',{credentials:'same-origin'})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!(j&&j.ok)) return;
+        var n = j.total || 0;
+        pose(n);
+        // Une seule notification par lot : re-signaler le meme nombre a
+        // chaque page deviendrait du bruit qu'on finit par ignorer.
+        try{
+          if(n && String(localStorage.getItem('gd_vu')) !== String(j.ts)){
+            localStorage.setItem('gd_vu', String(j.ts));
+            if(typeof showToast === 'function')
+              showToast('📥 ' + n + ' fichier' + (n>1?'s':'')
+                + ' à importer depuis le Drive — onglet Drive', 'success', 9000);
+          }
+        }catch(e){}
+      }).catch(function(){});
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    maj(); setInterval(maj, 300000);
+  });
+})();</script>
 <h1 id="page-title">Dashboard</h1>
 <div class="subtitle" id="page-subtitle">Tous tes revenus en un coup d'œil</div>
 {msg_html}
@@ -16328,6 +16365,9 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>🔍 Voir ce qui attend dans le Drive</button>"
                 "<button type='submit' id='gd-import-go' style='display:none;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
+                "<span style='font-size:11.5px;color:#22c55e;font-weight:700;width:100%'>"
+                "&#9889; Automatique : le site regarde le Drive chaque minute et importe tout seul "
+                "(comme il renvoie tout seul ce que tu ajoutes ici). Les boutons ne servent qu'à forcer.</span>"
                 "</form>"
                 "<div id='gd-scan-res' style='display:none;margin-top:10px;padding:10px 12px;"
                 "background:#131316;border:1px solid #232327;border-radius:10px;font-size:12px;"
@@ -41064,6 +41104,19 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
+    @app.route("/gdrive/attente")
+    def gdrive_attente():
+        """Ce que la veille a vu la derniere fois. Lecture d'un fichier :
+        aucun appel a Google, donc appelable a chaque chargement de page."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import gdrive_sync as _gd
+        try:
+            return jsonify({"ok": True, **(_gd.attente() or {})})
+        except Exception:
+            return jsonify({"ok": True, "total": 0})
+
     @app.route("/gdrive/import_scan", methods=["POST"])
     def gdrive_import_scan():
         """Combien de fichiers attendent dans le Drive, et chez qui — sans
@@ -48441,6 +48494,13 @@ def start_in_thread():
         _start_insta_trends_scheduler()
     except Exception as e:
         print(f"[start_in_thread] insta trends scheduler failed to start: {e}", flush=True)
+    # Veille du Drive : « il y a X fichiers a importer » sans que tu aies
+    # a y penser (pastille sur l'onglet Drive + bandeau).
+    try:
+        import gdrive_sync as _gd_w
+        _gd_w.start_watcher()
+    except Exception as e:
+        print(f"[start_in_thread] veille Drive non demarree: {e}", flush=True)
     # Pré-calcul des clics GMS -> le Dashboard clics est déjà prêt à l'ouverture
     try:
         _start_gmsdash_warm()
