@@ -4612,6 +4612,10 @@ _JB_ACTIONS = [
     ("brute", "🎥 Vidéo brut", "videobrut", True),
 ]
 
+# Liste AFFICHEE dans les menus Jailbreak (les 2 marches) : c'est « Reel
+# caption » partout, jamais le Reel brut avec exemple (demande user).
+# _JB_ACTIONS reste definie au-dessus : elle sert de table de compatibilite
+# pour les panneaux DEJA postes dont les boutons portent la cle « reel ».
 # Serveur US : PAS de « Reel » brut (les VA US ne postent pas de reel avec
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
@@ -4809,7 +4813,7 @@ class JailbreakActionsView(discord.ui.View):
     def _build(self):
         self.clear_items()
         self.add_item(_JailbreakQtySelect(self.quantity))
-        actions = _JB_ACTIONS_US if self.us else _JB_ACTIONS
+        actions = _JB_ACTIONS_US        # « Reel caption » pour les 2 marches
         for i, (key, label, cmd_attr, sc) in enumerate(actions):
             self.add_item(_JailbreakActionButton(
                 self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key))
@@ -5174,7 +5178,8 @@ def _jb_panel(cog, ident, qty=3, marche="us"):
     view = discord.ui.View(timeout=None)
     view.add_item(JBQtySelect(ident, qty))
     if ident != "_":
-        _actions = _JB_ACTIONS if marche == "fr" else _JB_ACTIONS_US
+        # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
+        _actions = _JB_ACTIONS_US
         for i, (key, label, _c, _s) in enumerate(_actions):
             view.add_item(JBActionButton(ident, key, qty, label=label, row=1 + i // 4))
         emb = discord.Embed(
