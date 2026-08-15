@@ -2236,6 +2236,53 @@ class UserCog(commands.Cog):
             await self._gen_and_send_montaged(interaction, video, draft, description, idx, total, identity)
 
     @app_commands.command(
+        name="videobrut",
+        description="Envoie des vidéos BRUTES (rushs) de ton identité, sans montage")
+    @app_commands.describe(nombre="Combien de vidéos (1-10, défaut 3)")
+    async def videobrut(self, interaction: discord.Interaction,
+                        nombre: app_commands.Range[int, 1, 10] = 3):
+        """Rushs nus du dossier « brutes » : aucun texte, aucun montage —
+        la vidéo telle qu'elle a été uploadée sur le site."""
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        bdir = IDENTITIES_DIR / identity / "brutes"
+        vids = []
+        if bdir.exists():
+            vids = [p for p in bdir.iterdir()
+                    if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                    and ".example" not in p.name]
+        if not vids:
+            await interaction.response.send_message(
+                f"Aucune **vidéo brute** pour `{identity}`.\n"
+                "_(Un admin en ajoute sur le site, onglet **Vidéo brut**.)_",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        picked = random.sample(vids, min(nombre, len(vids)))
+        total = len(picked)
+        await interaction.followup.send(
+            f"🎥 **{total} vidéo(s) brute(s) pour `{identity}`** — sans texte ni "
+            f"montage, à toi de les monter.")
+        if total < nombre:
+            await interaction.followup.send(
+                f"ℹ️ Seulement **{total}** vidéo(s) brute(s) dispo (tu en as "
+                f"demandé {nombre}).")
+        for idx, v in enumerate(picked, start=1):
+            try:
+                await interaction.followup.send(
+                    content=f"🎥 **VIDÉO BRUTE {idx}/{total}** (`{identity}`)",
+                    file=discord.File(str(v), filename=v.name))
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"⚠️ VIDÉO BRUTE {idx}/{total} : envoi impossible "
+                    f"(trop lourde pour Discord) : {e}")
+
+    @app_commands.command(
         name="reelcaption",
         description="Vidéo brute + caption incrustée (bibliothèque Caption du site)")
     @app_commands.describe(nombre="Combien de vidéos (1-10, défaut 3)")
@@ -4562,6 +4609,7 @@ _JB_ACTIONS = [
     ("name", "📝 Name", "name", False),
     ("bio", "💬 Bio", "bio", True),
     ("pp", "🖼️ PP", "profilepic", True),
+    ("brute", "🎥 Vidéo brut", "videobrut", True),
 ]
 
 # Serveur US : PAS de « Reel » brut (les VA US ne postent pas de reel avec
@@ -4577,6 +4625,7 @@ _JB_ACTIONS_US = [
     ("name", "📝 Name", "name", False),
     ("bio", "💬 Bio", "bio", True),
     ("pp", "🖼️ PP", "profilepic", True),
+    ("brute", "🎥 Vidéo brut", "videobrut", True),
 ]
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
