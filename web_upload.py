@@ -41333,6 +41333,76 @@ def create_app():
         except Exception:
             return False
 
+    @app.route("/gdrive/doublons_drive", methods=["POST"])
+    def gdrive_doublons_drive():
+        """Doublons DANS le Drive : plusieurs fichiers de meme nom ET meme
+        taille dans le MEME dossier. On garde le plus ancien, les autres vont
+        a la corbeille Google (recuperables 30 jours).
+
+        Ne descend que dans notre arborescence « Bibliothèque » : le reste du
+        Drive n'est jamais parcouru. `dry=1` (defaut) : compte seulement."""
+        from flask import jsonify
+        if not is_auth() or not _is_admin():
+            return jsonify({"ok": False}), 403
+        import gdrive_sync as _gd
+        supprimer = bool(request.form.get("supprimer"))
+        cfg = _gd.load_config()
+        root = _gd.folder_id_from(cfg.get("folder") or "")
+        if not root:
+            return jsonify({"ok": False, "error": "dossier Drive non configuré"})
+        try:
+            sess = _gd._session()
+            biblio = _gd._racine_biblio(sess, root, _gd._load_state())
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+
+        trouves, jetes, echecs, detail = 0, 0, 0, {}
+
+        def _feuilles(fid, chemin, profondeur=0):
+            """Chaque dossier terminal de l'arborescence, avec son chemin."""
+            if profondeur > 4:
+                return
+            sous = []
+            try:
+                sous = _gd._lister(sess, fid, dossiers=True)
+            except Exception:
+                sous = []
+            if not sous:
+                yield fid, chemin
+                return
+            for d in sous:
+                yield from _feuilles(d["id"], chemin + "/" + d["name"], profondeur + 1)
+
+        for dossier_id, chemin in _feuilles(biblio, "Bibliothèque"):
+            try:
+                fichiers = _gd._lister(sess, dossier_id)
+            except Exception:
+                continue
+            vus = {}
+            for f in fichiers:                # ordre de listage = du plus ancien
+                cle = (f.get("name"), int(f.get("size") or 0))
+                if cle not in vus:
+                    vus[cle] = f              # le premier est gardé
+                    continue
+                trouves += 1
+                detail[chemin] = detail.get(chemin, 0) + 1
+                if supprimer:
+                    try:
+                        r = sess.patch(
+                            "https://www.googleapis.com/drive/v3/files/" + f["id"]
+                            + "?supportsAllDrives=true",
+                            json={"trashed": True}, timeout=60)
+                        if r.status_code < 400:
+                            jetes += 1
+                        else:
+                            echecs += 1
+                    except Exception:
+                        echecs += 1
+        return jsonify({"ok": True, "doublons": trouves, "corbeille": jetes,
+                        "echecs": echecs,
+                        "detail": [{"ou": k, "n": v} for k, v in
+                                   sorted(detail.items(), key=lambda kv: -kv[1])[:30]]})
+
     @app.route("/gdrive/doublons", methods=["POST"])
     def gdrive_doublons():
         """Repere (et sur demande supprime) les fichiers rapatries EN DOUBLE

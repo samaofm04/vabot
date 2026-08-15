@@ -1036,6 +1036,23 @@ def run_sync() -> dict:
     # sont partages, donc proteges par un verrou.
     verrou = threading.Lock()
 
+    # Ce que le Drive contient DEJA, dossier par dossier (un seul listage par
+    # dossier). Sans ca, une comptabilite perdue faisait re-televerser des
+    # fichiers deja presents : c'est ainsi qu'on a obtenu des triplicats.
+    index_dossiers: dict = {}
+
+    def _index(parent_id):
+        idx = index_dossiers.get(parent_id)
+        if idx is None:
+            idx = {}
+            try:
+                for f in _lister(_session_thread(), parent_id):
+                    idx[f.get("name")] = (f.get("id"), int(f.get("size") or 0))
+            except Exception:
+                idx = {}
+            index_dossiers[parent_id] = idx
+        return idx
+
     def _un(job):
         chemin, path = job
         key = "/".join(chemin) + "/" + path.name
@@ -1049,7 +1066,15 @@ def run_sync() -> dict:
         for niveau in chemin:              # <Bibliothèque>/<Identité>/<Type>
             with verrou:                   # cache partage : jamais 2 creations
                 parent = _ensure_folder(s_th, parent, niveau, st)
+        with verrou:
+            deja_bas = _index(parent).get(path.name)
+        if deja_bas and deja_bas[1] == size:
+            # meme nom, meme taille, deja dans CE dossier du Drive : on ne
+            # renvoie pas, on note simplement son identifiant
+            return ("deja", key, deja_bas[0], size)
         fid = _avec_reprise(_upload_file, s_th, parent, path)
+        with verrou:
+            _index(parent)[path.name] = (fid, size)
         return ("up", key, fid, size)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1059,7 +1084,11 @@ def run_sync() -> dict:
             done += 1
             try:
                 quoi, key, fid, size = fut.result()
-                if quoi == "skip":
+                if quoi == "deja":         # deja sur le Drive : on comptabilise
+                    with verrou:
+                        st["uploaded"][key] = {"size": size, "id": fid}
+                    skipped += 1
+                elif quoi == "skip":
                     skipped += 1
                 else:
                     with verrou:
