@@ -41094,6 +41094,42 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
+    @app.route("/gdrive/debug_state", methods=["POST"])
+    def gdrive_debug_state():
+        """Pourquoi la synchro croit-elle que tout est a envoyer ? On compare
+        les cles de l'etat avec celles que le plan calcule. `pause=1` coupe
+        la synchro automatique (et `reprendre=1` la remet)."""
+        from flask import jsonify
+        if not is_auth() or not _is_admin():
+            return jsonify({"ok": False}), 403
+        import gdrive_sync as _gd
+        cfg = _gd.load_config()
+        if request.form.get("pause"):
+            cfg["auto_sync"] = False
+            cfg["auto_import"] = False
+            _gd.save_config(cfg)
+        if request.form.get("reprendre"):
+            cfg["auto_sync"] = True
+            cfg["auto_import"] = True
+            _gd.save_config(cfg)
+        st = _gd._load_state()
+        up = st.get("uploaded") or {}
+        jobs = ["/".join(c) + "/" + pth.name
+                for c, pth in _gd._iter_jobs(cfg.get("include_videos"))]
+        manquants = [k for k in jobs if k not in up]
+        return jsonify({
+            "ok": True,
+            "auto_sync": cfg.get("auto_sync", True),
+            "auto_import": cfg.get("auto_import", True),
+            "etat_nb_cles": len(up),
+            "etat_exemples": sorted(up)[:3],
+            "plan_nb": len(jobs),
+            "plan_exemples": jobs[:3],
+            "manquants_nb": len(manquants),
+            "manquants_exemples": manquants[:3],
+            "dossiers_en_cache": len(st.get("folders") or {}),
+        })
+
     @app.route("/gdrive/attente")
     def gdrive_attente():
         """Ce que la veille a vu la derniere fois. Lecture d'un fichier :
