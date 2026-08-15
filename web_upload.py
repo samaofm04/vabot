@@ -41134,7 +41134,14 @@ def create_app():
 
         vides = [c for c in candidats if c["vide"]]
         if request.form.get("dry"):
-            return jsonify({"ok": True, "dry": True,
+            # « tous » sert au diagnostic : deux dossiers dont le nom ne
+            # differe que par un accent sont indiscernables a l'oeil.
+            try:
+                tous = [{"nom": f["name"], "id": f["id"]}
+                        for f in _gd._lister(sess, root, dossiers=True)]
+            except Exception:
+                tous = []
+            return jsonify({"ok": True, "dry": True, "tous": tous,
                             "a_supprimer": [c["nom"] for c in vides],
                             "gardes_car_non_vides": [c["nom"] for c in candidats
                                                      if not c["vide"]]})
