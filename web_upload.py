@@ -9027,6 +9027,9 @@ def _list_content_identities():
 
 import marche as _marche_mod
 
+# Avancement du nettoyage des doublons du Drive (tache de fond)
+_DDRIVE: dict = {"etat": "repos"}
+
 MARKET_FILE = DATA_DIR / "identity_market.json"
 
 
@@ -41333,6 +41336,13 @@ def create_app():
         except Exception:
             return False
 
+    @app.route("/gdrive/doublons_drive_etat")
+    def gdrive_doublons_drive_etat():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        return jsonify({"ok": True, **_DDRIVE})
+
     @app.route("/gdrive/doublons_drive", methods=["POST"])
     def gdrive_doublons_drive():
         """Doublons DANS le Drive : plusieurs fichiers de meme nom ET meme
@@ -41356,6 +41366,8 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
 
+        if supprimer and _DDRIVE.get("etat") == "en cours":
+            return jsonify({"ok": True, "deja": True, **_DDRIVE})
         trouves, jetes, echecs, detail = 0, 0, 0, {}
 
         def _feuilles(fid, chemin, profondeur=0):
@@ -41372,6 +41384,43 @@ def create_app():
                 return
             for d in sous:
                 yield from _feuilles(d["id"], chemin + "/" + d["name"], profondeur + 1)
+
+        if supprimer:
+            # En fond : la requete rendait la main avant la fin et le proxy
+            # coupait au bout d'une minute.
+            def _travail():
+                _DDRIVE.update(etat="en cours", trouves=0, corbeille=0, echecs=0)
+                try:
+                    for did, chem in _feuilles(biblio, "Bibliothèque"):
+                        try:
+                            fichiers = _gd._lister(sess, did)
+                        except Exception:
+                            continue
+                        vus = set()
+                        for f in fichiers:
+                            cle = (f.get("name"), int(f.get("size") or 0))
+                            if cle not in vus:
+                                vus.add(cle)
+                                continue
+                            _DDRIVE["trouves"] += 1
+                            try:
+                                r = sess.patch(
+                                    "https://www.googleapis.com/drive/v3/files/"
+                                    + f["id"] + "?supportsAllDrives=true",
+                                    json={"trashed": True}, timeout=60)
+                                if r.status_code < 400:
+                                    _DDRIVE["corbeille"] += 1
+                                else:
+                                    _DDRIVE["echecs"] += 1
+                            except Exception:
+                                _DDRIVE["echecs"] += 1
+                    _DDRIVE["etat"] = "fini"
+                except Exception as e:
+                    _DDRIVE.update(etat="erreur", err=str(e)[:200])
+
+            threading.Thread(target=_travail, daemon=True,
+                             name="gdrive-doublons").start()
+            return jsonify({"ok": True, "lance": True})
 
         for dossier_id, chemin in _feuilles(biblio, "Bibliothèque"):
             try:
