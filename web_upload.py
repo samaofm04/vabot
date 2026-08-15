@@ -4702,7 +4702,13 @@ var capSelSet={};
 function capSelUpdateBar(){
   var n=0; for(var k in capSelSet){ if(capSelSet[k]) n++; }
   var bar=document.getElementById('cap-action-bar');
-  if(bar) bar.style.display=(n&&document.getElementById('capCards'))?'flex':'none';
+  var montre=(n&&document.getElementById('capCards'));
+  if(bar) bar.style.display=montre?'flex':'none';
+  // les deux pilules flottantes occupent EXACTEMENT la meme place : celle de
+  // la galerie doit s'effacer, sinon on clique sur l'une en croyant viser
+  // l'autre
+  var gal=document.getElementById('action-bar');
+  if(montre&&gal) gal.style.display='none';
   var ct=document.getElementById('cap-sel-count'); if(ct) ct.textContent=String(n);
 }
 function capSelClear(){
@@ -4710,20 +4716,45 @@ function capSelClear(){
   document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=false; });
   capSelUpdateBar();
 }
+// Les ids des captions AFFICHEES. capLibInit() peut echouer (bloc de donnees
+// absent apres un changement d'onglet, JSON pas encore la...) et les boutons
+// sortaient alors en silence : « Tout », « Partager » et la corbeille ne
+// faisaient rien, sans le moindre message. On retombe sur le DOM.
+function capIdsAffiches(){
+  var ids=[];
+  document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){
+    var v=cb.getAttribute('data-capsel'); if(v) ids.push(v);
+  });
+  if(!ids.length && window.capLib && capLib.block && capLib.block.items){
+    ids=capLib.block.items.map(function(c){ return String(c.id); });
+  }
+  return ids;
+}
 function capSelAll(){
-  if(!capLibInit()) return;
-  var items=(capLib.block.items||[]);
+  capLibInit();                       // best effort : on n'en depend plus
+  var ids=capIdsAffiches();
+  if(!ids.length){
+    if(typeof showToast==='function') showToast('Aucune caption à sélectionner','warning');
+    return;
+  }
   var n=0; for(var k in capSelSet){ if(capSelSet[k]) n++; }
-  var all=(n<items.length);          // pas tout coché -> tout cocher, sinon tout vider
+  var all=(n<ids.length);            // pas tout coché -> tout cocher, sinon tout vider
   capSelSet={};
-  if(all) items.forEach(function(c){ capSelSet[c.id]=true; });
+  if(all) ids.forEach(function(id){ capSelSet[id]=true; });
   document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=all; });
   capSelUpdateBar();
 }
 function capSelDelete(){
-  if(!capLibInit()) return;
+  if(!capLibInit()){
+    if(typeof showToast==='function')
+      showToast('Recharge l’onglet Caption : les données ne sont pas chargées','error');
+    return;
+  }
   var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
-  if(!ids.length) return;
+  if(!ids.length){
+    if(typeof showToast==='function') showToast('Rien de sélectionné','warning');
+    return;
+  }
   if(!confirm('Supprimer '+ids.length+' caption'+(ids.length>1?'s':'')+' ?')) return;
   capLib.block.items=(capLib.block.items||[]).filter(function(c){ return !capSelSet[c.id]; });
   capSelSet={};
@@ -4898,11 +4929,17 @@ function capAddWarnCheck(ta,wd){
 // 📤 Partage des captions à d autres models — même modale que « Appliquer ce
 // montage à… » (nxModelPicker). Sélection ⚪ si présente, sinon TOUTES.
 function capShareOpen(){
-  if(!capLibInit()) return;
+  if(!capLibInit()){
+    if(typeof showToast==='function')
+      showToast('Recharge l’onglet Caption : les données ne sont pas chargées','error');
+    return;
+  }
   var items=(capLib.block.items||[]);
-  if(!items.length){ if(typeof showToast==='function') showToast('Aucune caption à partager','warning'); return; }
+  if(!items.length && !capIdsAffiches().length){
+    if(typeof showToast==='function') showToast('Aucune caption à partager','warning'); return;
+  }
   var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
-  var nSel=ids.length||items.length;
+  var nSel=ids.length||items.length||capIdsAffiches().length;
   // La section Caption NOMMEMENT : « la premiere section visible » tombait
   // sur une autre galerie (toutes les sections vivent dans la meme page) et
   // le partage listait alors les mauvaises models.
@@ -4923,7 +4960,11 @@ function capShareOpen(){
     rows.push({name:n, pp:img?img.getAttribute('src'):null,
                sub:(nb==null)?'':(nb+' caption'+(nb>1?'s':'')), warn:false});
   });
-  if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
+  if(!rows.length){
+    if(typeof showToast==='function')
+      showToast('Aucune autre model trouvée dans la liste de gauche','warning');
+    return;
+  }
   nxModelPicker({
     title:'Partager ces captions à…',
     info:nSel+' caption'+(nSel>1?'s':'')+(ids.length?' sélectionnée'+(nSel>1?'s':''):' (toutes)')
