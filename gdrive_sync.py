@@ -914,7 +914,13 @@ def import_preview() -> dict:
 
 _INVENTAIRE_CACHE: dict = {"ts": 0, "data": None}
 _INVENTAIRE_TTL = 180          # 3 minutes : le temps de lire la page
-_INV_STATUS: dict = {"state": "idle", "err": "", "ts": 0}
+_INV_STATUS: dict = {"state": "idle", "err": "", "ts": 0, "etape": ""}
+_INV_DELAI_MAX = 420          # au-dela, on considere le comptage perdu
+
+
+def _inv_etape(texte: str) -> None:
+    """Ou en est le comptage — la page l'affiche pendant l'attente."""
+    _INV_STATUS["etape"] = texte
 
 
 def inventaire_lancer() -> dict:
@@ -925,21 +931,27 @@ def inventaire_lancer() -> dict:
     moindre delai d'attente coupe tout sans rien afficher.
     """
     if _INV_STATUS.get("state") == "running":
-        return dict(_INV_STATUS)
+        # Un thread mort en silence (redemarrage, memoire) laissait l'etat
+        # bloque sur « running » : la page se serait rafraichie sans fin.
+        if (time.time() - (_INV_STATUS.get("ts") or 0)) < _INV_DELAI_MAX:
+            return dict(_INV_STATUS)
+        _INV_STATUS.update(state="error", err="comptage interrompu — relance")
     if _INVENTAIRE_CACHE["data"] is not None and \
             (time.time() - _INVENTAIRE_CACHE["ts"]) < _INVENTAIRE_TTL:
         _INV_STATUS.update(state="done", err="", ts=int(time.time()))
         return dict(_INV_STATUS)
 
-    _INV_STATUS.update(state="running", err="", ts=int(time.time()))
+    _INV_STATUS.update(state="running", err="", ts=int(time.time()),
+                       etape="ouverture du Drive", debut=int(time.time()))
 
     def _travail():
         try:
             inventaire(force=True)
-            _INV_STATUS.update(state="done", err="", ts=int(time.time()))
+            _INV_STATUS.update(state="done", err="", ts=int(time.time()),
+                               etape="")
         except Exception as e:
             _INV_STATUS.update(state="error", err=str(e)[:200],
-                               ts=int(time.time()))
+                               ts=int(time.time()), etape="")
 
     threading.Thread(target=_travail, daemon=True,
                      name="gdrive-inventaire").start()
@@ -986,6 +998,7 @@ def inventaire(force: bool = False) -> dict:
     # tournait dans le vide plusieurs minutes.
 
     # vague 1 : la racine
+    _inv_etape("lecture de la racine")
     niveau1 = _lister(sess, root, dossiers=True)
 
     # vague 2 : ce que contiennent « Bibliothèque » et « A IMPORTER »
@@ -1015,6 +1028,7 @@ def inventaire(force: bool = False) -> dict:
             identites.append((x["name"].strip().lower(), x["id"]))
 
     # vague 4 : les sous-dossiers de chaque identite
+    _inv_etape("%d identite(s) trouvee(s)" % len(identites))
     types = _lister_paralleles(sess, [(d, True) for _i, d in identites])
 
     # vague 5 : le contenu de chaque sous-dossier, tout en meme temps
@@ -1025,6 +1039,7 @@ def inventaire(force: bool = False) -> dict:
             sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
             a_compter.append((typ["id"], ident, sub, connue,
                               typ["name"].strip()))
+    _inv_etape("comptage de %d dossier(s)" % len(a_compter))
     fichiers = _lister_paralleles(sess, [(t[0], False) for t in a_compter])
 
     for did, ident, sub, connue, nom_typ in a_compter:
@@ -1062,6 +1077,7 @@ def inventaire(force: bool = False) -> dict:
     # Ce que l'IMPORT, lui, compte prendre. Sans cette confrontation, la page
     # dit « il manque 192 fichiers » pendant que le bouton propose d'en
     # importer 2, sans que rien n'explique l'ecart.
+    _inv_etape("analyse de ce que l'import sait voir")
     vus_import: dict = {}
     raisons: dict = {}
     try:
