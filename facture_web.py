@@ -1,8 +1,10 @@
 """facture_web.py — Module Facture : compta mensuelle OFM (revenus / dépenses).
 
 Façon expert-comptable adapté agence OFM :
-- mois par mois (data/facture.json), bouton "Démarrer mois suivant" qui reporte
-  les lignes récurrentes (freq != once) avec paiements remis à zéro
+- mois par mois (data/facture.json) : les lignes récurrentes (freq != once)
+  sont reportées AUTOMATIQUEMENT sur le mois en cours à l'ouverture de la page
+  (_autofill_months), paiements remis à zéro ; le bouton "Démarrer mois
+  suivant" fait la même chose à la demande, pour prendre de l'avance
 - lignes revenus/dépenses par catégorie (Revenue OF/MYM, modèles, chatters,
   VAs, managers, apps, autres), montant fixe (USD/EUR) ou % d'un revenu
 - phases de paiement optionnelles (quinzaine/hebdo), "Marquer payé" par
@@ -73,6 +75,90 @@ def _save(d: dict):
 
 def _cur_month() -> str:
     return datetime.date.today().strftime("%Y-%m")
+
+
+_AUTOFILL_LOCK = threading.Lock()
+_AUTOFILL_MAX = 12          # garde-fou : jamais plus d'un an de rattrapage
+
+
+def _carry_lines(src: list) -> list:
+    """Lignes d'un mois -> lignes du mois suivant.
+
+    On garde les récurrentes (freq != once), on leur donne une identité neuve,
+    on remet les paiements à zéro et on décale les phases d'un mois. Les liens
+    « % d'une autre ligne » sont réécrits vers les NOUVELLES ids : sinon le
+    pourcentage pointerait sur les lignes du mois précédent et calculerait sur
+    une base à zéro.
+    """
+    new_lines, id_map = [], {}
+    for l in src or []:
+        if l.get("freq") == "once":
+            continue
+        nl = dict(l)
+        nl["id"] = uuid.uuid4().hex[:12]
+        if l.get("id"):
+            id_map[l["id"]] = nl["id"]
+        nl["paid"] = False
+        nl["paid_at"] = ""
+        phs = []
+        for ph in (l.get("phases") or []):
+            try:
+                pd = datetime.date.fromisoformat(ph["date"])
+                ny = pd.year + (1 if pd.month == 12 else 0)
+                nmn = 1 if pd.month == 12 else pd.month + 1
+                lastd = calendar.monthrange(ny, nmn)[1]
+                phs.append({"date": datetime.date(ny, nmn, min(pd.day, lastd)).isoformat(),
+                            "paid": False, "paid_at": ""})
+            except Exception:
+                pass
+        nl["phases"] = phs
+        new_lines.append(nl)
+    for nl in new_lines:
+        po = nl.get("pct_of") or ""
+        if po.startswith("line:"):
+            nl["pct_of"] = "line:" + id_map.get(po[5:], po[5:])
+        elif po.startswith("lines:"):
+            nl["pct_of"] = "lines:" + ",".join(id_map.get(i, i) for i in po[6:].split(",") if i)
+    return new_lines
+
+
+def _autofill_months(upto: str = "") -> int:
+    """Crée les mois MANQUANTS jusqu'au mois en cours, avec les lignes
+    récurrentes reportées — une charge mensuelle saisie une fois revient
+    ensuite toute seule, sans avoir à cliquer « Démarrer mois suivant ».
+
+    Deux garde-fous :
+    - un mois DÉJÀ présent n'est jamais retouché, même vide : le vider est un
+      choix, on ne le re-remplit pas dans son dos ;
+    - au plus 12 mois de rattrapage, pour qu'un fichier ancien ne fabrique pas
+      des années de comptabilité d'un coup.
+    """
+    cible = (upto or _cur_month())[:7]
+    faits = 0
+    with _AUTOFILL_LOCK:
+        d = _load()
+        mois = d.get("months") or {}
+        avec_lignes = sorted(k for k in mois if (mois[k].get("lines") or []))
+        if not avec_lignes:
+            return 0
+        cur = avec_lignes[-1]
+        if cur >= cible:
+            return 0
+        while cur < cible and faits < _AUTOFILL_MAX:
+            nxt = _month_shift(cur, 1)
+            if nxt in mois:                       # mois existant : on n'y touche pas
+                cur = nxt
+                continue
+            lignes = _carry_lines((mois.get(cur) or {}).get("lines") or [])
+            if not lignes:                        # rien de récurrent à propager
+                break
+            mois[nxt] = {"lines": lignes, "auto": True}
+            cur = nxt
+            faits += 1
+        if faits:
+            d["months"] = mois
+            _save(d)
+    return faits
 
 
 def _month_shift(month: str, delta: int) -> str:
@@ -1185,6 +1271,13 @@ def register(app, is_auth):
         if not re.match(r"^\d{4}-\d{2}$", month):
             month = _cur_month()
         try:
+            # Le mois en cours se remplit tout seul des charges récurrentes du
+            # mois précédent : sans ça, un 1er du mois affichait une page vide
+            # alors que les lignes « tous les mois » étaient déjà saisies.
+            _autofill_months()
+        except Exception:
+            pass          # la compta doit s'afficher même si le report échoue
+        try:
             return jsonify(compute_state(month))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
@@ -1421,40 +1514,8 @@ def register(app, is_auth):
         d = _load()
         if nm in d["months"] and (d["months"][nm].get("lines") or []):
             return jsonify({"ok": False, "error": f"Le mois {nm} existe déjà"})
-        src = (d["months"].get(month) or {}).get("lines") or []
-        new_lines = []
-        id_map = {}  # ancien id -> nouvel id (pour réécrire les % liés)
-        for l in src:
-            if l.get("freq") == "once":
-                continue
-            nl = dict(l)
-            nl["id"] = uuid.uuid4().hex[:12]
-            if l.get("id"):
-                id_map[l["id"]] = nl["id"]
-            nl["paid"] = False
-            nl["paid_at"] = ""
-            # décale les phases d'un mois
-            phs = []
-            for p in (l.get("phases") or []):
-                try:
-                    pd = datetime.date.fromisoformat(p["date"])
-                    ny = pd.year + (1 if pd.month == 12 else 0)
-                    nmn = 1 if pd.month == 12 else pd.month + 1
-                    lastd = calendar.monthrange(ny, nmn)[1]
-                    phs.append({"date": datetime.date(ny, nmn, min(pd.day, lastd)).isoformat(),
-                                "paid": False, "paid_at": ""})
-                except Exception:
-                    pass
-            nl["phases"] = phs
-            new_lines.append(nl)
-        # Réécrit les liens % (line:/lines:) vers les NOUVELLES ids du mois copié
-        # (sinon le % pointerait sur les lignes de l'ancien mois -> base 0)
-        for nl in new_lines:
-            po = nl.get("pct_of") or ""
-            if po.startswith("line:"):
-                nl["pct_of"] = "line:" + id_map.get(po[5:], po[5:])
-            elif po.startswith("lines:"):
-                nl["pct_of"] = "lines:" + ",".join(id_map.get(i, i) for i in po[6:].split(",") if i)
+        # Même report que l'automatique (une seule implémentation)
+        new_lines = _carry_lines((d["months"].get(month) or {}).get("lines") or [])
         d["months"][nm] = {"lines": new_lines}
         _save(d)
         return jsonify({"ok": True, "month": nm, "count": len(new_lines)})
