@@ -1589,9 +1589,14 @@ body.light .reel-video,body.light [style*="background:#000"]{background:#000!imp
    blanc en sombre (« color:#fff » attrape aussi « color:#ffffff »), donc
    texte sombre + contour noir = un pate illisible ; et le fond de l'apercu
    etait blanc, alors que la caption se lit sur une video. */
-body.light .cap-prev-txt[style*="color:#fff"],
-body.light .cap-prev-txt[style*="color:#ffffff"],
-body.light .cap-prev-txt[style*="color:#FFF"]{color:#fff!important}
+/* La regle generale du theme clair porte deux :not(), ce qui la rend PLUS
+   specifique : sans les reprendre ici, elle repassait devant et le texte
+   redevenait sombre. */
+body.light .cap-prev .cap-prev-txt[style*="color:#fff"]:not(.toast):not(button),
+body.light .cap-prev .cap-prev-txt[style*="color:#ffffff"]:not(.toast):not(button),
+body.light .cap-prev .cap-prev-txt[style*="color:#FFF"]:not(.toast):not(button){color:#fff!important}
+/* le contour noir doit rester, meme si un style l'ecrase ailleurs */
+body.light .cap-prev .cap-prev-txt{paint-order:stroke fill}
 /* fond neutre sombre : le blanc et son contour ressortent comme sur un reel */
 .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!important}
 body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!important;
