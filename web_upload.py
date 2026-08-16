@@ -1550,6 +1550,14 @@ body.light #nxm-apply-ov [style*="border-top:1px solid #26262c"]{border-color:rg
 body.light #av-m-cadence,body.light #bilan-date-btn,body.light #bilan-date-picker,body.light #bilan-from-input,body.light #bilan-to-input,body.light #cap-ed-modal,body.light #chat-fill-pop,body.light #chat-import-cre,body.light #emp-batch-menu,body.light #ext-bulk-input,body.light #ext-bulk-model,body.light #ext-bulk-vaname,body.light #gl-cr-ctas,body.light #gl-cr-freq,body.light #gl-cr-group,body.light #gl-cr-ident,body.light #gl-cr-reels,body.light #gl-cr-stories,body.light #gl-cr-time,body.light #ig-dl-bar,body.light #ig-filters-btn,body.light #ig-filters-panel,body.light #ig-sort-menu,body.light #jb-scrape-prog,body.light #ls-cr-folder,body.light #ls-cr-shortcode,body.light #ls-cr-type,body.light #ls-cr-url,body.light #market-floating,body.light #mp-shift-select,body.light #mpl-cal-day-detail,body.light #mpl-campaigns-block,body.light #nx-m-bulkn,body.light #nx-m-timeline,body.light #nx-montage-modal,body.light #nxm-apply-count,body.light #nxp-blackbox,body.light #role-filter-name,body.light #role-filter-status,body.light #sfs-actions-menu,body.light #sfs-bilan-panel,body.light #sfs-pushs-panel,body.light #sfw-floating,body.light #tp-ai-count,body.light #tp-ai-ident,body.light #va-manual-identity,body.light #vl-warm-bar{background:#fff!important;border-color:rgba(60,60,67,.12)!important;color:#1c1c1e!important}
 body.light #nxm-apply-cancel{background:#f2f2f7!important;border-color:rgba(60,60,67,.12)!important;color:#1c1c1e!important}
 
+.mypuls-export{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;
+  background:rgba(0,122,255,.10);border:1px solid rgba(0,122,255,.28);color:#3b82f6;
+  font-size:13px;font-weight:600;letter-spacing:-.01em;text-decoration:none;white-space:nowrap;
+  transition:background .15s,transform .12s ease-out}
+.mypuls-export:hover{background:rgba(0,122,255,.16)}
+.mypuls-export:active{transform:scale(.975)}
+body.light.apple .mypuls-export{color:#007aff}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -21119,6 +21127,14 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_ppv' style='color:#3b82f6'>{totals['ca_ppv']:.0f}€</div><div class='l'>CA PPV</div></div>"
         f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_tips' style='color:#a855f7'>{totals['ca_tips']:.0f}€</div><div class='l'>CA Tips</div></div>"
         f"<div class='mypuls-stat'><div class='v' data-mp-stat='nb_tx'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
+        # Registre verifiable : une vente contestee se retrouve ici, avec
+        # son heure, la creatrice et le fan concernes.
+        + f"<a href='/chatters/ventes.xlsx?start={start_str}&end={end_str}' "
+          f"class='mypuls-export' title='Toutes les ventes de la periode, avec heure, creatrice, fan et montant'>"
+          f"<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' "
+          f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          f"<path d='M12 3v12'/><path d='M7.5 10.5L12 15l4.5-4.5'/><path d='M4 20h16'/></svg>"
+          f"Registre des ventes (Excel)</a>"
         f"<div class='mypuls-stat'><div class='v' data-mp-stat='active_chatters'>{totals['active_chatters']}<span style='font-size:14px;color:#666'>/{totals['nb_chatters']}</span></div><div class='l'>Chatteurs actifs</div></div>"
         "</div>"
     )
@@ -42341,6 +42357,55 @@ def create_app():
             "manquants_exemples": manquants[:3],
             "dossiers_en_cache": len(st.get("folders") or {}),
         })
+
+
+    @app.route("/chatters/ventes.xlsx")
+    def chatters_ventes_xlsx():
+        """Registre detaille des ventes, en Excel.
+
+        Repond au besoin de VERIFIER une vente : un chatteur affirme l'avoir
+        faite, on ouvre le fichier et on voit l'heure, la creatrice, le fan et
+        le montant. Trois onglets : le registre, un total par chatteur, et un
+        controle qui signale les ventes sans chatteur ou sans date — c'est la
+        que se voient les lignes qui « ne montent pas ».
+        """
+        from flask import send_file, request as _rq
+        if not is_auth():
+            return redirect("/")
+        try:
+            _al = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al = None
+        if _al is not None and "revenus" not in _al:
+            return ("", 403)
+        import datetime as _d
+        today = _d.date.today()
+        start = (_rq.args.get("start") or "").strip() or (today - _d.timedelta(days=29)).isoformat()
+        end = (_rq.args.get("end") or "").strip() or today.isoformat()
+        try:
+            res = mypuls.fetch_team_stats(start, end, use_cache=True)
+        except Exception as e:
+            return _error(f"MyPuls indisponible : {e}", tab="revenus")
+        if not res.get("ok"):
+            return _error(res.get("error") or "MyPuls indisponible", tab="revenus")
+        tx = res.get("transactions") or []
+        # total annonce : sert a chiffrer l'ecart dans l'onglet Controle
+        _tot = None
+        try:
+            _t = res.get("totals") or {}
+            _tot = float(_t.get("ca") or _t.get("total") or 0) or None
+        except Exception:
+            _tot = None
+        import ventes_export as _ve
+        try:
+            data = _ve.construire_xlsx(tx, periode=f"{start} -> {end}", total_annonce=_tot)
+        except Exception as e:
+            return _error(f"Export impossible : {e}", tab="revenus")
+        import io as _io
+        return send_file(_io.BytesIO(data),
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         as_attachment=True,
+                         download_name=f"ventes_{start}_{end}.xlsx")
 
     @app.route("/gdrive/attente")
     def gdrive_attente():
