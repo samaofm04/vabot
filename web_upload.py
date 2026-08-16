@@ -7870,6 +7870,10 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-brute" style="display:none">
 <form method="POST" action="/upload/brute" enctype="multipart/form-data" class="up-form" data-utype="brute" data-accept="video/*,.zip">
+<!-- "" = Bibliotheque, "pro" = Vault PRO (pose par upPrefillIdentity).
+     Sans ce champ, un rush depose depuis le Vault PRO atterrissait dans la
+     Bibliotheque, invisible la ou on venait de le deposer. -->
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
@@ -7898,6 +7902,10 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-template" style="display:none">
 <form method="POST" action="/upload/template" enctype="multipart/form-data" class="up-form" data-utype="template" data-accept="video/*,.zip">
+<!-- "" = Bibliotheque, "pro" = Vault PRO (pose par upPrefillIdentity).
+     Sans ce champ, un rush depose depuis le Vault PRO atterrissait dans la
+     Bibliotheque, invisible la ou on venait de le deposer. -->
+<input type="hidden" name="vault" value="">
 <div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Identité</h3></div>
 <select name="identity" required class="up-input">{ident_opts}</select>
