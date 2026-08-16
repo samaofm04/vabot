@@ -5440,7 +5440,7 @@ function capRenderCards(){
   }
   for(var i=0;i<items.length;i++){
     var it=items[i], on=(it.enabled!==false), cid=nxMEsc(String(it.id||''));
-    var meta='📍 '+Math.round((it.x!=null?it.x:0.5)*100)+'·'+Math.round((it.y!=null?it.y:0.5)*100)+'%'+(it.wrapW?(' · ↔ '+Math.round(it.wrapW*100)+'%'):'');
+    var meta='';   // position et largeur retirees : l'apercu les montre deja
     var onoffCol=on?'#9aa0a6':'#ef4444';
     out.push('<div class="cap-card'+(on?'':' cap-off')+'" data-cid="'+cid+'">'
       +'<div class="cap-prev" data-capact="place" data-cid="'+cid+'" title="Clique pour ouvrir l’éditeur">'
@@ -5458,7 +5458,7 @@ function capRenderCards(){
       +'</div>'
       +(on?'':'<div class="cap-prev-off">hors tirage</div>')
       +'</div>'
-      +'<div class="cap-card-meta">'+meta+'</div>'
+      +(meta?('<div class="cap-card-meta">'+meta+'</div>'):'')
       +(it.desc?('<div class="cap-card-meta" style="color:#8b9cf7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+nxMEsc(String(it.desc))+'">📄 '+nxMEsc(String(it.desc))+'</div>'):'')
       +'</div>');
   }
