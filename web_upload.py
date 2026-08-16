@@ -9654,6 +9654,44 @@ function vaSetLangue(l){
   else init();
 })();
 </script>
+
+<script>
+// Synchronisation des ventes vers un Google Sheet : le classeur reste a jour,
+// contrairement a l'export Excel qui fige les chiffres.
+function ventesSheetSync(){
+  var b = document.getElementById('ventes-sheet-btn');
+  if(!b) return;
+  var fd = new FormData();
+  fd.set('start', b.getAttribute('data-start') || '');
+  fd.set('end', b.getAttribute('data-end') || '');
+  fetch('/chatters/ventes_sheet_etat', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(e){
+      // premiere fois : on demande le lien du classeur
+      if(!(e && e.sheet)){
+        var lien = window.prompt('Colle le lien du Google Sheet a alimenter (classeur vide, partage en Editeur avec le compte de service du site).');
+        if(!lien) return;
+        fd.set('sheet', lien);
+      }
+      var t0 = b.textContent;
+      b.disabled = true; b.textContent = 'Envoi en cours…';
+      fetch('/chatters/ventes_sheet', {method:'POST', body:fd, credentials:'same-origin'})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          b.disabled = false; b.textContent = t0;
+          if(typeof showToast === 'function'){
+            showToast(j && j.ok ? 'Ventes envoyees dans le Google Sheet'
+                                : ((j && j.error) || 'Echec de l envoi'),
+                      j && j.ok ? 'success' : 'error', 5000);
+          }
+        })
+        .catch(function(err){
+          b.disabled = false; b.textContent = t0;
+          if(typeof showToast === 'function') showToast('Echec : ' + err, 'error');
+        });
+    });
+}
+</script>
 </body></html>
 """
 
@@ -22113,6 +22151,15 @@ document.addEventListener('DOMContentLoaded', function(){
         f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
         f"<path d='M12 3v12'/><path d='M7.5 10.5L12 15l4.5-4.5'/><path d='M4 20h16'/></svg>"
         f"Registre des ventes (Excel)</a>"
+        # Classeur VIVANT : l'Excel est une photo, celui-ci se met a jour.
+        f"<button type='button' onclick='ventesSheetSync()' class='mypuls-export' "
+        f"data-start='{start_str}' data-end='{end_str}' id='ventes-sheet-btn' "
+        f"title='Envoyer ces ventes dans un Google Sheet, qui restera a jour'>"
+        f"<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' "
+        f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+        f"<rect x='3.4' y='3.4' width='17.2' height='17.2' rx='2.4'/>"
+        f"<path d='M3.4 9.4h17.2M3.4 15h17.2M9.4 3.4v17.2'/></svg>"
+        f"Google Sheets</button>"
         "</h3>"
         + period_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
@@ -42501,6 +42548,56 @@ def create_app():
             "dossiers_en_cache": len(st.get("folders") or {}),
         })
 
+
+
+    @app.route("/chatters/ventes_sheet", methods=["POST"])
+    def chatters_ventes_sheet():
+        """Pousse les ventes dans un Google Sheet, qui reste ainsi a jour.
+
+        L'export Excel est une photo ; ici le classeur est vivant. On reutilise
+        le compte de service deja en place pour la synchro Jailbreak.
+        """
+        from flask import jsonify, request as _rq
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            _al = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al = None
+        if _al is not None and "revenus" not in _al:
+            return jsonify({"ok": False, "error": "interdit"}), 403
+        import ventes_sheet as _vs
+        lien = (_rq.form.get("sheet") or "").strip()
+        if lien:
+            _vs.set_sheet(lien)
+        if not _vs.sheet_id():
+            return jsonify({"ok": False, "error": "Colle d'abord le lien du classeur"})
+        if not _vs.disponible():
+            return jsonify({"ok": False,
+                            "error": "Compte de service Google indisponible sur le serveur"})
+        import datetime as _d
+        today = _d.date.today()
+        start = (_rq.form.get("start") or "").strip() or (today - _d.timedelta(days=29)).isoformat()
+        end = (_rq.form.get("end") or "").strip() or today.isoformat()
+        try:
+            res = mypuls.fetch_team_stats(start, end, use_cache=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"MyPuls : {e}"})
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error") or "MyPuls indisponible"})
+        _vs.pousser_async(res.get("transactions") or [], periode=f"{start} -> {end}")
+        return jsonify({"ok": True, "lance": True})
+
+    @app.route("/chatters/ventes_sheet_etat")
+    def chatters_ventes_sheet_etat():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import ventes_sheet as _vs
+        cfg = _vs.load_config()
+        return jsonify({"ok": True, "sheet": _vs.sheet_id(),
+                        "last": cfg.get("last"), "lignes": cfg.get("last_lignes"),
+                        **_vs.etat()})
 
     @app.route("/chatters/ventes.xlsx")
     def chatters_ventes_xlsx():
