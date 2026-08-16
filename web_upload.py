@@ -1520,6 +1520,36 @@ body.light .av-badge,body.light .cap-ed-li,body.light .cap-preset,body.light .ca
 body.light .ce-btn,body.light .ce-card,body.light .ce-dot,body.light .ce-menu,body.light .ce-play,body.light .ce-tlic,body.light .mpl-opt-toggle,body.light .nxm-add,body.light .nxm-chip,body.light .nxm-tg{background:#f2f2f7!important}
 body.light .cap-ed-li,body.light .cap-preset,body.light .card,body.light .ce-btn,body.light .ce-lib,body.light .ce-menu,body.light .ce-right,body.light .ce-title,body.light .ce-tl,body.light .ce-tlic,body.light .flatpickr-calendar,body.light .gd-chart,body.light .gd-head,body.light .gd-mcard,body.light .gd-sel,body.light .gd-tbl,body.light .gd-tg,body.light .gd-tip,body.light .ig3-trk-stat,body.light .ja-tip,body.light .kpi,body.light .mpl-count-input,body.light .mpl-event,body.light .mpl-fetch-btn,body.light .mpl-slot-vis,body.light .mpl-wheel-modal,body.light .nxm-add,body.light .nxm-chip,body.light .nxm-inp,body.light .nxm-num,body.light .nxm-preset,body.light .nxm-ta,body.light .nxm-tg,body.light .txt-card,body.light .va-ig3-thead,body.light .va-pp,body.light .vim-open-btn,body.light .vlm-pill,body.light .vlm-pill-edit{border-color:rgba(60,60,67,.12)!important}
 
+/* --- Modale « choisir les models » (partage de bios / CTA) --------------
+   Ses styles sont injectes par JavaScript : ni HTML inline, ni regle CSS
+   statique, donc aucune des passes precedentes ne pouvait l'atteindre. Elle
+   restait noire, avec des noms de models illisibles. --- */
+body.light #nxm-apply-ov > div{background:#fff!important;border-color:rgba(60,60,67,.12)!important;
+  box-shadow:0 22px 70px rgba(0,0,0,.18)!important}
+body.light #nxm-apply-ov .nxrow{background:#f7f7f9!important;color:#1c1c1e!important}
+body.light #nxm-apply-ov .nxrow:hover{background:#efeff2!important}
+body.light #nxm-apply-ov .nxcbx{border-color:rgba(60,60,67,.30)!important}
+body.light #nxm-apply-ov .nxcbx:checked{background:#007aff!important;border-color:#007aff!important}
+/* le pied, le compteur et les boutons */
+body.light #nxm-apply-ov [style*="background:#17171b"]{background:#f2f2f7!important}
+body.light #nxm-apply-ov #nxm-apply-count{background:#e9e9ee!important;color:#1c1c1e!important}
+body.light #nxm-apply-ov [style*="background:#2a2a30"]{background:#f2f2f7!important;
+  border-color:rgba(60,60,67,.16)!important;color:#1c1c1e!important}
+/* tous les gris clairs du texte deviennent lisibles sur blanc */
+body.light #nxm-apply-ov [style*="color:#f2f2f5"],
+body.light #nxm-apply-ov [style*="color:#c4c4cc"],
+body.light #nxm-apply-ov [style*="color:#d4d4dc"]{color:#1c1c1e!important}
+body.light #nxm-apply-ov [style*="color:#8b8b95"]{color:rgba(60,60,67,.6)!important}
+body.light #nxm-apply-ov [style*="border-bottom:1px solid #26262c"],
+body.light #nxm-apply-ov [style*="border-top:1px solid #26262c"]{border-color:rgba(60,60,67,.10)!important}
+
+/* --- Modales, menus et selecteurs construits en JS ---------------------
+   Leur fond est pose sur un identifiant, souvent depuis du JavaScript :
+   ni style inline, ni classe CSS — les passes precedentes les rataient.
+   Memes garde-fous : pas de couleur vive, pas de conteneur de media. --- */
+body.light #av-m-cadence,body.light #bilan-date-btn,body.light #bilan-date-picker,body.light #bilan-from-input,body.light #bilan-to-input,body.light #cap-ed-modal,body.light #chat-fill-pop,body.light #chat-import-cre,body.light #emp-batch-menu,body.light #ext-bulk-input,body.light #ext-bulk-model,body.light #ext-bulk-vaname,body.light #gl-cr-ctas,body.light #gl-cr-freq,body.light #gl-cr-group,body.light #gl-cr-ident,body.light #gl-cr-reels,body.light #gl-cr-stories,body.light #gl-cr-time,body.light #ig-dl-bar,body.light #ig-filters-btn,body.light #ig-filters-panel,body.light #ig-sort-menu,body.light #jb-scrape-prog,body.light #ls-cr-folder,body.light #ls-cr-shortcode,body.light #ls-cr-type,body.light #ls-cr-url,body.light #market-floating,body.light #mp-shift-select,body.light #mpl-cal-day-detail,body.light #mpl-campaigns-block,body.light #nx-m-bulkn,body.light #nx-m-timeline,body.light #nx-montage-modal,body.light #nxm-apply-count,body.light #nxp-blackbox,body.light #role-filter-name,body.light #role-filter-status,body.light #sfs-actions-menu,body.light #sfs-bilan-panel,body.light #sfs-pushs-panel,body.light #sfw-floating,body.light #tp-ai-count,body.light #tp-ai-ident,body.light #va-manual-identity,body.light #vl-warm-bar{background:#fff!important;border-color:rgba(60,60,67,.12)!important;color:#1c1c1e!important}
+body.light #nxm-apply-cancel{background:#f2f2f7!important;border-color:rgba(60,60,67,.12)!important;color:#1c1c1e!important}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
