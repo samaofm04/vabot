@@ -17376,6 +17376,13 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
                 "<form method='POST' action='/gdrive/import' id='gd-import-form' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
                 "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⌕ Verifier ce qui attend (1)</button>"
+                # « Ce qui attend » ne montre que ce que l'import sait prendre.
+                # Ce lien-ci compte les DEUX cotes : c'est le seul endroit qui
+                # revele un fichier present sur le Drive et absent du site.
+                "<a href='/drive-manques' target='_blank' style='padding:8px 16px;"
+                "background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.45);"
+                "color:#fbbf24;border-radius:8px;font-size:12.5px;font-weight:700;"
+                "text-decoration:none;font-family:inherit'>Qu'est-ce qui manque ?</a>"
                 "<button type='submit' id='gd-import-go' disabled style='opacity:.45;cursor:not-allowed;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4.6v10.6'/><path d='M7.4 10.6L12 15.2l4.6-4.6'/><path d='M4.4 19.4h15.2'/></svg> Importer (2)</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
                 "<span style='font-size:11.5px;color:#22c55e;font-weight:700;width:100%'>"
@@ -42832,6 +42839,80 @@ def create_app():
             return jsonify({"ok": True, **_gd.import_preview()})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
+
+    @app.route("/drive-manques")
+    def gdrive_inventaire_page():
+        """Ce que le Drive contient face a ce que le site possede.
+
+        L'apercu d'import ne sait dire que « ce que je vais rapatrier » : il
+        annonce donc « rien de nouveau » alors qu'il manque des centaines de
+        fichiers qu'il n'a pas su voir. Cette page-ci compte les deux cotes.
+        """
+        if not is_auth():
+            return redirect("/")
+        import gdrive_sync as _gd
+        try:
+            inv = _gd.inventaire()
+        except Exception as e:
+            return ("<div style='font:15px/1.5 -apple-system,system-ui;padding:28px'>"
+                    "<b>Lecture impossible :</b> " + html_escape(str(e)[:300]) +
+                    "<p><a href='/?tab=cloud'>Retour</a></p></div>")
+
+        def _tr(r):
+            manque = r["manque"]
+            fond = "background:#fef2f2" if manque else ""
+            couleur = "#b91c1c" if manque else "#166534"
+            return (f"<tr style='{fond}'><td>{html_escape(r['identity'])}</td>"
+                    f"<td>{html_escape(r['type'])}</td>"
+                    f"<td style='text-align:right'>{r['drive']}</td>"
+                    f"<td style='text-align:right'>{r['site']}</td>"
+                    f"<td style='text-align:right;font-weight:700;color:{couleur}'>"
+                    f"{manque or '—'}</td></tr>")
+
+        lignes = "".join(_tr(r) for r in inv["lignes"]) or (
+            "<tr><td colspan='5' style='padding:18px;color:#888'>"
+            "Aucun dossier lisible sur le Drive.</td></tr>")
+
+        alertes = ""
+        if inv["dossiers_non_reconnus"]:
+            items = "".join("<li><b>%s</b> — %d fichier(s)</li>"
+                            % (html_escape(d["nom"]), d["n"])
+                            for d in inv["dossiers_non_reconnus"])
+            alertes += ("<div style='margin:14px 0;padding:12px 14px;background:#fffbeb;"
+                        "border:1px solid #fde68a;border-radius:10px'>"
+                        "<b>Dossiers dont le nom n'est pas reconnu</b> — leur contenu "
+                        "est ignoré par l'import :<ul style='margin:6px 0 0'>"
+                        + items + "</ul></div>")
+        if inv["identites_inconnues"]:
+            items = "".join("<li><b>%s</b> — %d fichier(s)</li>"
+                            % (html_escape(d["nom"]), d["n"])
+                            for d in inv["identites_inconnues"])
+            alertes += ("<div style='margin:14px 0;padding:12px 14px;background:#fef2f2;"
+                        "border:1px solid #fecaca;border-radius:10px'>"
+                        "<b>Identités présentes sur le Drive, inconnues du site</b> — "
+                        "leurs fichiers ne peuvent aller nulle part. Vérifie "
+                        "l'orthographe du dossier :<ul style='margin:6px 0 0'>"
+                        + items + "</ul></div>")
+
+        entete = ("<h2 style='margin:0 0 4px'>Drive face au site</h2>"
+                  f"<p style='color:#666;margin:0 0 16px'>{inv['total_drive']} fichier(s) "
+                  f"sur le Drive, {inv['total_site']} sur le site — "
+                  f"<b style='color:{'#b91c1c' if inv['total_manque'] else '#166534'}'>"
+                  f"{inv['total_manque']} manquant(s)</b>.</p>")
+
+        return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
+                "padding:28px;max-width:860px;margin:30px auto;background:#fff;"
+                "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                + entete + alertes +
+                "<table style='width:100%;border-collapse:collapse'>"
+                "<thead><tr style='text-align:left;border-bottom:2px solid #e5e7eb'>"
+                "<th>Identité</th><th>Type</th>"
+                "<th style='text-align:right'>Drive</th>"
+                "<th style='text-align:right'>Site</th>"
+                "<th style='text-align:right'>Manque</th></tr></thead>"
+                "<tbody>" + lignes + "</tbody></table>"
+                "<p style='margin-top:18px'><a href='/?tab=cloud'>Retour au Drive</a></p>"
+                "</div>")
 
     @app.route("/gdrive/root_cleanup", methods=["POST"])
     def gdrive_root_cleanup():

@@ -909,6 +909,109 @@ def import_preview() -> dict:
             "ignores": dict(trouves_ignores)}
 
 
+def inventaire() -> dict:
+    """Ce que le Drive contient, face a ce que le site possede.
+
+    L'apercu d'import ne repond qu'a « qu'est-ce que je vais rapatrier ? ». Il
+    peut donc annoncer « rien de nouveau » alors qu'il manque des centaines de
+    fichiers : tout ce qu'il n'a pas SU voir — mauvais dossier, extension non
+    geree, identite introuvable — n'entre dans aucun de ses compteurs.
+
+    Ici on compte les deux cotes sans rien interpreter, et on montre l'ecart.
+    C'est le seul moyen de reponder a « il ne capte pas qu'il lui manque des
+    trucs » : encore faut-il regarder ce qu'on N'A PAS.
+    """
+    cfg = load_config()
+    root = folder_id_from(cfg.get("folder") or "")
+    if not root:
+        raise RuntimeError("dossier Drive non configuré")
+    sess = _session()
+
+    cote_drive: dict = {}          # (identite, sub) -> nb de fichiers
+    inconnus: dict = {}            # nom de dossier ignore -> nb de fichiers
+    orphelines: dict = {}          # identite vue sur le Drive, absente du site
+
+    def _compter(dossier_id, ident, sub):
+        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
+                else IMAGE_EXTS)
+        n = 0
+        for f in _lister(sess, dossier_id):
+            if Path(f["name"]).suffix.lower() in exts:
+                n += 1
+        if n:
+            cle = (ident, sub)
+            cote_drive[cle] = cote_drive.get(cle, 0) + n
+
+    def _parcourir_identite(ident, dossier_id):
+        connue = (IDENTITIES_DIR / ident).exists()
+        for typ in _lister(sess, dossier_id, dossiers=True):
+            sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
+            if not sub:
+                nb = len(_lister(sess, typ["id"]))
+                if nb:
+                    inconnus[typ["name"].strip()] = inconnus.get(
+                        typ["name"].strip(), 0) + nb
+                continue
+            if not connue:
+                # Le scan d'import saute purement et simplement ces dossiers :
+                # sans cette ligne, leurs fichiers restaient introuvables.
+                nb = len(_lister(sess, typ["id"]))
+                if nb:
+                    orphelines[ident] = orphelines.get(ident, 0) + nb
+                continue
+            _compter(typ["id"], ident, sub)
+
+    for dossier in _lister(sess, root, dossiers=True):
+        nom_d = dossier["name"].strip()
+        if nom_d.lower() == "vault pro":
+            continue
+        if nom_d.lower() == IMPORT_FOLDER_NAME.lower():
+            for ident_dir in _lister(sess, dossier["id"], dossiers=True):
+                _parcourir_identite(ident_dir["name"].strip().lower(),
+                                    ident_dir["id"])
+            continue
+        if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
+            for sous in _lister(sess, dossier["id"], dossiers=True):
+                nom_s = sous["name"].strip()
+                grappes = ([(x["name"].strip().lower(), x["id"])
+                            for x in _lister(sess, sous["id"], dossiers=True)]
+                           if nom_s.upper() in ("FR", "US")
+                           else [(nom_s.lower(), sous["id"])])
+                for ident_b, did in grappes:
+                    _parcourir_identite(ident_b, did)
+            continue
+        _parcourir_identite(nom_d.lower(), dossier["id"])
+
+    # Cote site : on compte les memes paires, sans se fier a un quelconque etat
+    lignes = []
+    for (ident, sub), n_drive in cote_drive.items():
+        d = IDENTITIES_DIR / ident / sub
+        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
+                else IMAGE_EXTS)
+        try:
+            n_site = sum(1 for p in d.iterdir()
+                         if p.is_file() and p.suffix.lower() in exts)
+        except Exception:
+            n_site = 0
+        lignes.append({"identity": ident, "type": _SUB_TO_LABEL.get(sub, sub),
+                       "drive": n_drive, "site": n_site,
+                       "manque": max(0, n_drive - n_site)})
+    lignes.sort(key=lambda r: (-r["manque"], r["identity"]))
+    return {
+        "lignes": lignes,
+        "total_drive": sum(r["drive"] for r in lignes),
+        "total_site": sum(r["site"] for r in lignes),
+        "total_manque": sum(r["manque"] for r in lignes),
+        "dossiers_non_reconnus": [{"nom": k, "n": v}
+                                  for k, v in sorted(inconnus.items(),
+                                                     key=lambda x: -x[1])],
+        "identites_inconnues": [{"nom": k, "n": v}
+                                for k, v in sorted(orphelines.items(),
+                                                   key=lambda x: -x[1])],
+        "ts": int(time.time()),
+    }
+
+
 def run_import() -> dict:
     """Rapatrie ce qui a ete depose dans le Drive vers le site.
 
