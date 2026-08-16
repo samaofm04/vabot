@@ -8595,11 +8595,11 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🌐 Langue</h3>
 <small>Langue de l'interface</small>
 <label style="margin-top:14px">Langue</label>
-<select disabled>
-  <option>Français (par défaut)</option>
-  <option>English (coming soon)</option>
+<select id="va-lang-select" onchange="vaSetLangue(this.value)">
+  <option value="en">English (default)</option>
+  <option value="fr">Français</option>
 </select>
-<small style="margin-top:8px">L'anglais sera disponible bientôt.</small>
+<small style="margin-top:8px">Le choix est mémorisé sur cet appareil. Certains écrans restent en français&nbsp;: dis-le-moi et je les complète.</small>
 </div>
 </div>
 
@@ -9425,6 +9425,32 @@ function rankToggleSort(){
   var parent = lignes[0].parentNode;
   lignes.reverse().forEach(function(l){ parent.appendChild(l); });
 }
+</script>
+
+<script>
+// Langue de l'interface : un cookie, lu par le serveur au rendu. On recharge
+// pour que la page reparte traduite (le menu et les titres viennent du serveur).
+function vaSetLangue(l){
+  l = (l === 'fr') ? 'fr' : 'en';
+  try{ document.cookie = 'va_lang=' + l + ';path=/;max-age=31536000;samesite=lax'; }catch(e){}
+  try{ localStorage.setItem('va_lang', l); }catch(e){}
+  if(typeof showToast === 'function'){
+    showToast(l === 'fr' ? '🌐 Interface en français' : '🌐 Interface in English', 'info', 1400);
+  }
+  setTimeout(function(){ location.reload(); }, 350);
+}
+// refleter la langue en cours dans le selecteur
+(function(){
+  function init(){
+    var sel = document.getElementById('va-lang-select');
+    if(!sel) return;
+    var l = 'en';
+    try{ l = (document.cookie.match(/(?:^|;\s*)va_lang=(fr|en)/) || [])[1] || 'en'; }catch(e){}
+    sel.value = l;
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
 </script>
 </body></html>
 """
