@@ -5911,6 +5911,10 @@ function linkGoFromForm(f){
   if(!urls){ if(typeof showToast==='function') showToast('Colle au moins un lien Instagram ou TikTok','warning'); return; }
   if(btn){ btn.disabled=true; btn.textContent='⏳ Lancement…'; }
   var fd=new FormData(); fd.set('identity',ident); fd.set('subdir',sub); fd.set('urls',urls); fd.set('ajax','1');
+  // Description saisie dans le meme formulaire : elle suit les videos importees
+  var _dta=f.querySelector('textarea[name=description]');
+  var _dv=_dta?String(_dta.value||'').trim():'';
+  if(_dv) fd.set('desc',_dv.slice(0,1000));
   fetch('/cloud/import_link',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
       if(btn){ btn.disabled=false; btn.textContent='⬇ Importer les liens'; }
@@ -7451,6 +7455,11 @@ document.addEventListener('click',function(e){
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
 <div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
 </div>
+</div>
+<div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Description <span class="up-opt">(optionnel)</span></h3></div>
+<label class="up-mini-label">Texte du post — posé sur <b>chaque</b> template envoyé, modifiable ensuite dans l'éditeur</label>
+<textarea name="description" placeholder="Ouais bon on va espérer hein 💀" class="up-input"></textarea>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader les templates</button>
 </form>
@@ -15864,7 +15873,7 @@ def _linkimp_fetch(u: str, inf: dict):
     return vb
 
 
-def _linkimp_run(ident: str, subdir: str, urls: list):
+def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
     import time as _t
     try:
         import veille_telegram as _vt
@@ -15905,6 +15914,14 @@ def _linkimp_run(ident: str, subdir: str, urls: list):
                 tdir.mkdir(parents=True, exist_ok=True)
                 _fname = f"import_{int(_t.time())}_{i}.mp4"
                 (tdir / _fname).write_bytes(vb)
+                # Description du formulaire d'import : meme sidecar que les
+                # uploads fichier (.desc.txt), lu par /reelmonte et l'envoi banger.
+                if desc:
+                    try:
+                        (tdir / _fname).with_suffix(".desc.txt").write_text(
+                            desc, encoding="utf-8")
+                    except Exception:
+                        pass
                 _LINKIMP_STATUS["last_file"] = _fname   # miniature de la carte de progression
                 ok += 1
             except Exception as e:
@@ -39168,6 +39185,16 @@ def create_app():
                             with arch.open(info) as src, dst.open("wb") as out:
                                 _sh_copy = __import__("shutil").copyfileobj
                                 _sh_copy(src, out, 1 << 20)
+                            # Description du formulaire : posee sur CHAQUE
+                            # video du zip (sinon un envoi .zip perdait le
+                            # texte en silence).
+                            _dz = (request.form.get("description") or "").strip()[:1000]
+                            if _dz:
+                                try:
+                                    dst.with_suffix(".desc.txt").write_text(
+                                        _dz, encoding="utf-8")
+                                except Exception:
+                                    pass
                             n_ok += 1
                 except Exception as e:
                     return _error(f"ZIP illisible : {e}")
@@ -41199,7 +41226,9 @@ def create_app():
                                 "done": 0, "total": len(urls), "ok": 0, "fail": 0,
                                 "err": "", "thumb_url": "", "last_file": "",
                                 "run_ts": int(_t0.time())})
-        _th.Thread(target=_linkimp_run, args=(ident, subdir, urls),
+        _th.Thread(target=_linkimp_run,
+                   args=(ident, subdir, urls,
+                         (request.form.get("desc") or "").strip()[:1000]),
                    name="link-import", daemon=True).start()
         if ajax:
             return jsonify({"ok": True, "count": len(urls)})
