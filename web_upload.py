@@ -1453,6 +1453,16 @@ body.light .rank-row{border-bottom-color:rgba(60,60,67,.10)}
 body.light .rank-badge-off{background:#f2f2f7;color:#3c3c43}
 body.light.apple .rank-amount{color:#007aff}
 
+/* Le tri du classement : c'etait un simple texte, c'est un vrai bouton */
+#rank-sort-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:0;
+  padding:2px 4px;border-radius:6px;font-size:11px;font-weight:500;color:#888;
+  cursor:pointer;font-family:inherit;transition:color .15s,background .15s}
+#rank-sort-btn:hover{color:#bbb;background:rgba(255,255,255,.06)}
+body.light #rank-sort-btn{color:rgba(60,60,67,.6)}
+body.light #rank-sort-btn:hover{color:#1c1c1e;background:rgba(60,60,67,.06)}
+#rank-sort-btn svg{transition:transform .2s ease}
+#rank-sort-btn[data-asc='1'] svg{transform:rotate(180deg)}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -9399,6 +9409,22 @@ function vaAppliquerIcones(actif){
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
+</script>
+
+<script>
+// Classement des ventes : inverse l'ordre a l'ecran (aucun rechargement).
+function rankToggleSort(){
+  var b = document.getElementById('rank-sort-btn');
+  if(!b) return;
+  var asc = b.getAttribute('data-asc') === '1';
+  asc = !asc;
+  b.setAttribute('data-asc', asc ? '1' : '0');
+  b.childNodes[0].nodeValue = asc ? 'Croissant' : 'Décroissant';
+  var lignes = Array.prototype.slice.call(document.querySelectorAll('.rank-row'));
+  if(!lignes.length) return;
+  var parent = lignes[0].parentNode;
+  lignes.reverse().forEach(function(l){ parent.appendChild(l); });
+}
 </script>
 </body></html>
 """
@@ -20366,7 +20392,11 @@ def _render_home_dashboard_html() -> str:
         top_chatters_html = (
             "<div class='home-card'>"
             "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Sales ranking "
-            "<span style='font-size:11px;color:#888;font-weight:500'>Décroissant</span></div>"
+            "<button type='button' id='rank-sort-btn' onclick='rankToggleSort()' "
+            "title='Inverser l&#39;ordre du classement'>Décroissant"
+            "<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' "
+            "stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>"
+            "<polyline points='6 9 12 15 18 9'/></svg></button></div>"
             "<div style='display:flex;flex-direction:column'>"
             + "".join(items)
             + "</div></div>"
@@ -20469,8 +20499,6 @@ def _render_home_dashboard_html() -> str:
 .home-period-btn{background:transparent;border:0;color:#888;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;flex:1;text-align:center}
 .home-period-btn:hover{color:#fff}
 .home-period-active{background:rgba(0,122,255,.12) !important;color:#0a84ff !important;box-shadow:none}
-body.light .home-period-btn{color:#3c3c43}
-body.light .home-period-btn:hover{color:#1c1c1e}
 body.light .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
 body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
@@ -20494,7 +20522,8 @@ body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
 .home-card-header{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em}
 body.light .home-period-row{background:#f3f4f6;border-color:#e5e7eb}
-body.light .home-period-btn{color:#666}
+body.light .home-period-btn{color:#1c1c1e}          /* inactifs en noir, pas en bleu */
+body.light .home-period-btn:hover{color:#000}
 body.light .home-overview{background:#fff;border-color:#e5e7eb}
 body.light .home-stat{background:#f9fafb;border-color:#e5e7eb}
 body.light .home-card{background:#fff;border-color:#e5e7eb}
