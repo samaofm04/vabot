@@ -401,7 +401,7 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
             if video_path.stat().st_size > limit:
                 return (False, f"video {video_path.stat().st_size//(1024*1024)} Mo > limite Discord "
                                f"({limit//(1024*1024)} Mo) — serveur non boost ?", None)
-            intro = f"🎬 **REEL — identité `{ident}`**\n📥 Télécharge la vidéo CLEAN."
+            intro = f"▶ **REEL — identité `{ident}`**\n↓ Télécharge la vidéo CLEAN."
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
             files = [discord.File(str(video_path), filename=video_path.name)]
@@ -1391,7 +1391,7 @@ body.light.apple .btn,body.light.apple button,body.light.apple .up-submit{
   font-weight:590!important;letter-spacing:-.01em!important}
 
 /* --- NOTIFICATIONS facon iOS -------------------------------------------
-   Avant : bloc opaque, grosse barre verte a gauche, pastille ✅ generique.
+   Avant : bloc opaque, grosse barre verte a gauche, pastille ✓ generique.
    Maintenant : verre depoli, coins larges, et une pastille qui porte l'emoji
    du message (Drive, telechargement...) — comme une notification d'iPhone. */
 .toast{background:rgba(28,28,30,.72)!important;
@@ -1896,8 +1896,8 @@ function showToast(message, type, duration){
   // Skip les messages d auth (geres par le wrapper fetch global qui redirige)
   var msgLower = (message || '').toString().toLowerCase();
   if(msgLower.indexOf('unauth') !== -1) return;
-  // L'emoji de tete du message EST l'icone de la notification (📥 Drive,
-  // ⚡ telechargement...) : plus parlant que la pastille verte generique, et
+  // L'emoji de tete du message EST l'icone de la notification (↓ Drive,
+  // ↓ telechargement...) : plus parlant que la pastille verte generique, et
   // c'est ainsi que se lisent les notifications d'iOS.
   // Extraction sans expression reguliere : le JS vit dans une chaine Python,
   // ou les echappements Unicode seraient un piege.
@@ -1917,7 +1917,7 @@ function showToast(message, type, duration){
     container.className = 'toast-container';
     document.body.appendChild(container);
   }
-  var icon = _emo || (type === 'success' ? '✅' : type === 'error' ? '❌'
+  var icon = _emo || (type === 'success' ? '✓' : type === 'error' ? '✕'
                       : type === 'warning' ? '⚠️' : 'ℹ️');
   var toast = document.createElement('div');
   toast.className = 'toast ' + type;
@@ -2159,20 +2159,20 @@ window.igRefreshDlBar = function(){
       function _n(x){ return (x||0).toLocaleString('fr-FR'); }  // 1 234 au lieu de 1234
       if(txt){
         var s = _n(d.ready) + ' / ' + _n(d.total) + ' vidéos';
-        if(d.running && d.pass_total){ s += ' · ⏳ ' + _n(d.pass_done) + '/' + _n(d.pass_total) + ' en cours'; }
-        else if(pct >= 100 && d.total){ s += ' ✅'; }
+        if(d.running && d.pass_total){ s += ' · ◌ ' + _n(d.pass_done) + '/' + _n(d.pass_total) + ' en cours'; }
+        else if(pct >= 100 && d.total){ s += ' ✓'; }
         // diagnostic Apify visible ici (les URL manuelles deconnectent)
         var a = d.apify;
         if(a && (a.error || a.resolved !== undefined)){
           if(a.error){ s += ' · ⚠ Apify: ' + a.error; }
-          else { s += ' · 🎬 Apify: ' + _n(a.resolved || 0) + ' résolus'; }
+          else { s += ' · ▶ Apify: ' + _n(a.resolved || 0) + ' résolus'; }
         }
         txt.textContent = s;
       }
       window.__igDlLast = !!d.running;   // cadence du prochain refresh
       var b = document.getElementById('ig-dl-now');
       if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
-             b.textContent = d.running ? '⏳ En cours…' : '⚡ Télécharger'; }
+             b.textContent = d.running ? '◌ En cours…' : '↓ Télécharger'; }
       // suivi visuel : la/les carte(s) en cours passent en bleu clair + filigrane
       var act = {}; (d.active || []).forEach(function(sc){ act[sc] = 1; });
       document.querySelectorAll('.reel-card').forEach(function(card){
@@ -2192,18 +2192,18 @@ window.igRefreshDlBar = function(){
     }).catch(function(){});
 };
 window.igDownloadNow = function(btn){
-  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '⏳ …'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '◌ …'; }
   fetch('/insta/download_now', {method:'POST', credentials:'same-origin'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(typeof showToast === 'function') showToast(
-        d && d.ok ? (d.already ? 'Téléchargement déjà en cours…' : '⚡ Téléchargement lancé') : 'Erreur',
+        d && d.ok ? (d.already ? 'Téléchargement déjà en cours…' : '↓ Téléchargement lancé') : 'Erreur',
         d && d.ok ? 'success' : 'error');
       igRefreshDlBar();
       // pendant le DL, rafraichir plus vite pour voir la barre monter
       var n = 0, iv = setInterval(function(){ igRefreshDlBar(); if(++n > 40) clearInterval(iv); }, 3000);
     })
-    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='⚡ Télécharger'; } });
+    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='↓ Télécharger'; } });
 };
 (function(){
   // rafraichissement auto-adaptatif : 2.5 s pendant un telechargement (pour
@@ -2231,27 +2231,27 @@ window.vlRefreshWarmBar = function(){
       var txt = document.getElementById('vl-warm-txt');
       if(txt){
         var s = (d.ready||0) + ' / ' + (d.total||0) + ' sur Telegram';
-        if(d.running && d.queue){ s += ' · ⏳ ' + (d.done||0) + '/' + d.queue + ' en cours'; }
-        else if(pct >= 100 && d.total){ s += ' ✅'; }
+        if(d.running && d.queue){ s += ' · ◌ ' + (d.done||0) + '/' + d.queue + ' en cours'; }
+        else if(pct >= 100 && d.total){ s += ' ✓'; }
         txt.textContent = s;
       }
       window.__vlWarmLast = !!d.running;
       var b = document.getElementById('vl-warm-now');
       if(b){ b.disabled = !!d.running; b.style.opacity = d.running ? '.5' : '1';
-             b.textContent = d.running ? '⏳ En cours…' : '⚡ Précharger'; }
+             b.textContent = d.running ? '◌ En cours…' : '↓ Précharger'; }
     }).catch(function(){});
 };
 window.vlWarmNow = function(btn){
-  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '⏳ …'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '◌ …'; }
   fetch('/veille/warm_now', {method:'POST', credentials:'same-origin'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(typeof showToast === 'function') showToast(
-        d && d.ok ? (d.already ? 'Préchargement déjà en cours…' : '⚡ Préchargement lancé') : ((d && d.error) || 'Erreur'),
+        d && d.ok ? (d.already ? 'Préchargement déjà en cours…' : '↓ Préchargement lancé') : ((d && d.error) || 'Erreur'),
         d && d.ok ? 'success' : 'error');
       vlRefreshWarmBar();
     })
-    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='⚡ Précharger'; } });
+    .catch(function(){ if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='↓ Précharger'; } });
 };
 (function(){
   window.__vlWarmLast = false;
@@ -2524,7 +2524,7 @@ window.igShowCardError = function(card, title, detail){
     + '</a>'
     + (owner ? '<button data-rescrape="' + owner + '" '
         + 'style="background:#1f2937;border:1px solid #374151;color:#9ca3af;padding:7px 14px;border-radius:7px;font-size:11px;cursor:pointer;margin-bottom:10px">'
-        + '🔄 Rescrape @' + owner + '</button>' : '')
+        + '↻ Rescrape @' + owner + '</button>' : '')
     + '<div style="font-size:10px;color:#666;max-width:240px;line-height:1.4">URL CDN Instagram expirée</div>'
     + '<button data-close-err="1" '
     +    'style="margin-top:10px;background:transparent;border:1px solid #333;color:#666;padding:4px 12px;border-radius:5px;font-size:10px;cursor:pointer">Fermer</button>';
@@ -2539,7 +2539,7 @@ window.igShowCardError = function(card, title, detail){
       e.stopPropagation();
       var u = rescrapeBtn.getAttribute('data-rescrape');
       rescrapeBtn.disabled = true;
-      rescrapeBtn.textContent = '⏳ Scrape en cours...';
+      rescrapeBtn.textContent = '◌ Scrape en cours...';
       var fd = new FormData();
       fd.append('username', u);
       fetch('/insta/scrape', {method:'POST', body:fd})
@@ -2591,7 +2591,7 @@ window.igAutoRescrapeAndRetry = function(card, media, v, proxyUrl){
   loader.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:7;pointer-events:none;color:#fff;text-align:center;padding:16px';
   loader.innerHTML = ''
     + '<div style="width:42px;height:42px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:plSpin .8s linear infinite;margin-bottom:10px"></div>'
-    + '<div style="font-size:11px;font-weight:600">🔄 Refresh @' + owner + '...</div>'
+    + '<div style="font-size:11px;font-weight:600">↻ Refresh @' + owner + '...</div>'
     + '<div style="font-size:10px;color:#aaa;margin-top:4px">via RapidAPI</div>';
   media.appendChild(loader);
   var fd = new FormData();
@@ -2784,7 +2784,7 @@ window.toggleReelExpand = function(card){
         var url = card.getAttribute('data-url') || '';
         if(url){
           card.setAttribute('data-caption-fetched', '1');
-          capDiv.innerHTML = '<span style="color:#888;font-style:italic">⏳ Chargement caption…</span>';
+          capDiv.innerHTML = '<span style="color:#888;font-style:italic">◌ Chargement caption…</span>';
           fetch('/insta/fetch_caption?url=' + encodeURIComponent(url))
             .then(function(r){ return r.json(); })
             .then(function(d){
@@ -2991,7 +2991,7 @@ function clearSelection(){
   document.querySelectorAll('.sel-cb').forEach(function(cb){ cb.checked = false; });
   updateActionBar();
 }
-// ⭐ Étoile banger : grise par défaut -> jaune au clic (= envoyé dans banger-{identité}).
+// ★ Étoile banger : grise par défaut -> jaune au clic (= envoyé dans banger-{identité}).
 // L'identité est déjà connue (1er segment du file_id "identite|subdir|fichier").
 function _setBangerStar(btn, on){
   btn.classList.toggle('is-banger', on);
@@ -3004,7 +3004,7 @@ function _setBangerStar(btn, on){
   }
   if(typeof applyBangerFilter === 'function') applyBangerFilter();  // garde le filtre cohérent
 }
-// === Filtre "⭐ Bangers seulement" (client, instantané) ===
+// === Filtre "★ Bangers seulement" (client, instantané) ===
 var bangerFilterOn = false;
 function applyBangerFilter(){
   var grid = document.getElementById('vault-grid');
@@ -3023,7 +3023,7 @@ function applyBangerFilter(){
       empty = document.createElement('div');
       empty.id = 'banger-empty-note';
       empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
-      empty.textContent = 'Aucun reel marqué ⭐ banger pour cette identité.';
+      empty.textContent = 'Aucun reel marqué ★ banger pour cette identité.';
       grid.appendChild(empty);
     }
     empty.style.display = '';
@@ -3038,7 +3038,7 @@ function toggleBangerFilter(btn){
       sort.classList.remove('open');  // ferme le menu
       var lbl = sort.querySelector('.vault-sort-btn span');
       if(lbl){
-        if(bangerFilterOn){ if(!lbl.dataset.orig) lbl.dataset.orig = lbl.textContent; lbl.textContent = '⭐ Bangers'; }
+        if(bangerFilterOn){ if(!lbl.dataset.orig) lbl.dataset.orig = lbl.textContent; lbl.textContent = '★ Bangers'; }
         else if(lbl.dataset.orig){ lbl.textContent = lbl.dataset.orig; }
       }
     }
@@ -3048,16 +3048,16 @@ function toggleBangerFilter(btn){
   if(sb){
     sb.style.background = bangerFilterOn ? '#3a2f00' : '#1a1a1a';
     sb.style.borderColor = bangerFilterOn ? '#f5c518' : '#3a3a3a';
-    sb.textContent = bangerFilterOn ? '⭐ Bangers ✓' : '⭐ Reels Banger';
+    sb.textContent = bangerFilterOn ? '★ Bangers ✓' : '★ Reels Banger';
   }
   applyBangerFilter();
 }
-// 🗑 Vide le salon banger-{identite} (supprime les messages du bot + etoiles -> gris)
+// ⌫ Vide le salon banger-{identite} (supprime les messages du bot + etoiles -> gris)
 async function purgeBanger(identity, btn){
   if(btn){ var s = btn.closest('.vault-sort'); if(s) s.classList.remove('open'); }
   var go = await uiConfirm(
     'Tous les messages postés par le bot dans banger-' + identity + ' seront supprimés, et les étoiles repassent en gris. (Les vidéos de la Bibliothèque ne sont PAS touchées.)',
-    { title: '🗑 Vider le salon banger-' + identity + ' ?', okText: 'Vider', cancelText: 'Annuler', danger: true }
+    { title: '⌫ Vider le salon banger-' + identity + ' ?', okText: 'Vider', cancelText: 'Annuler', danger: true }
   );
   if(!go) return;
   try {
@@ -3067,12 +3067,12 @@ async function purgeBanger(identity, btn){
     if(j.ok){
       document.querySelectorAll('.banger-star.is-banger').forEach(function(b){ _setBangerStar(b, false); });
       await uiConfirm((j.deleted || 0) + ' message(s) supprimé(s) de ' + (j.channel || ('banger-' + identity)) + '.',
-        { title: '✅ Salon vidé', okText: 'OK', cancelText: 'OK' });
+        { title: '✓ Salon vidé', okText: 'OK', cancelText: 'OK' });
     } else {
-      await uiConfirm(j.error || '?', { title: '❌ Échec', okText: 'OK', cancelText: 'OK' });
+      await uiConfirm(j.error || '?', { title: '✕ Échec', okText: 'OK', cancelText: 'OK' });
     }
   } catch(e){
-    await uiConfirm('Erreur réseau : ' + e, { title: '❌ Erreur', okText: 'OK', cancelText: 'OK' });
+    await uiConfirm('Erreur réseau : ' + e, { title: '✕ Erreur', okText: 'OK', cancelText: 'OK' });
   }
 }
 // Jolie pop-up de confirmation (remplace le confirm() natif moche du navigateur)
@@ -3123,7 +3123,7 @@ async function toggleBanger(btn, fileId){
     // Dé-cocher = supprimer le(s) message(s) du salon banger Discord -> on confirme
     const _go = await uiConfirm(
       'Le(s) message(s) de ce reel seront supprimés du salon banger Discord.',
-      { title: '⭐ Retirer ce reel des bangers ?', okText: 'Retirer', cancelText: 'Annuler', danger: true }
+      { title: '★ Retirer ce reel des bangers ?', okText: 'Retirer', cancelText: 'Annuler', danger: true }
     );
     if(!_go) return;
   }
@@ -3136,13 +3136,13 @@ async function toggleBanger(btn, fileId){
       const r = await fetch('/cloud/banger_unmark', { method:'POST', body: fd });
       const j = await r.json();
       if(j.ok){ _setBangerStar(btn, false); }
-      else { alert('❌ ' + (j.error || '?')); }
+      else { alert('✕ ' + (j.error || '?')); }
     } else {
       // Gris -> jaune : envoie le reel dans le salon banger + marque l'étoile
       const r = await fetch('/cloud/send_banger', { method:'POST', body: fd });
       const j = await r.json();
       if(j.ok){ _setBangerStar(btn, true); }
-      else { alert('❌ Pas envoyé : ' + (j.error || '?')); }
+      else { alert('✕ Pas envoyé : ' + (j.error || '?')); }
     }
   } catch(e){
     alert('Erreur réseau : ' + e);
@@ -3159,12 +3159,12 @@ async function toggleReelDisabled(btn, fileId){
     var fd = new FormData(); fd.set('file_id', fileId);
     var r = await fetch('/reel/toggle_disabled', { method:'POST', body: fd });
     var j = await r.json();
-    if(!j.ok){ alert('❌ ' + (j.error || '?')); return; }
+    if(!j.ok){ alert('✕ ' + (j.error || '?')); return; }
     var off = !!j.disabled;
     if(card) card.classList.toggle('is-reel-off', off);
     btn.classList.toggle('is-off', off);
     btn.style.color = off ? '#ef4444' : '#9aa0a6';
-    if(typeof showToast === 'function') showToast(off ? '🚫 Reel désactivé' : '✅ Reel réactivé', off ? 'warning' : 'success');
+    if(typeof showToast === 'function') showToast(off ? '⊘ Reel désactivé' : '✓ Reel réactivé', off ? 'warning' : 'success');
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
@@ -3349,7 +3349,7 @@ function lbKeyboard(e){
   if(e.key === 'ArrowLeft'){ lbPrev(); e.preventDefault(); return; }
   if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
 }
-// ===== 🎬 Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
+// ===== ▶ Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
 var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1};
 function nxMEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function nxMDur(){ var v=document.getElementById('nx-m-video'); return (v&&!isNaN(v.duration)&&v.duration>0)?v.duration:0; }
@@ -3913,8 +3913,8 @@ function nxMAnalyze(){
   // alors qu une nouvelle vient d etre lancee.
   nxMState.aiRun=(nxMState.aiRun||0)+1;
   var myRun=nxMState.aiRun;
-  if(btn){ btn.textContent='⏳ Analyse…'; btn.disabled=true; }
-  if(btn2){ btn2.textContent='⏳ Analyse en cours…'; btn2.classList.add('busy'); }
+  if(btn){ btn.textContent='◌ Analyse…'; btn.disabled=true; }
+  if(btn2){ btn2.textContent='◌ Analyse en cours…'; btn2.classList.add('busy'); }
   function done(txt){
     if(myRun!==nxMState.aiRun) return;      // une autre analyse a pris la main
     nxMState.aiBusy=false;
@@ -3935,7 +3935,7 @@ function nxMAnalyze(){
         if(typeof showToast==='function') showToast('Analyse ignoree : tu as change de reel entre-temps','warning',7000);
         return;
       }
-      if(!j.ok){ done('❌ Erreur'); if(typeof showToast==='function') showToast('❌ '+(j.error||'analyse impossible'),'error',9000); return; }
+      if(!j.ok){ done('✕ Erreur'); if(typeof showToast==='function') showToast('✕ '+(j.error||'analyse impossible'),'error',9000); return; }
       // Claude renvoie cut_at=0 quand il ne trouve pas de coupe : ne JAMAIS
       // effacer avec ca un trait place a la main.
       var _nc=Math.max(0,+j.cut_at||0);
@@ -3965,13 +3965,13 @@ function nxMAnalyze(){
       var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
       try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
       nxMHistTouch();
-      done('✅ Analyse OK');
+      done('✓ Analyse OK');
       var msg='Coupe placee a '+(nxMState.cut||0).toFixed(2)+'s';
       msg+=caps.length?(' · '+caps.length+' caption'+(caps.length>1?'s':'')+' recopiee'+(caps.length>1?'s':'')):' · aucune caption trouvee';
       if(j.cut_reason) msg+=' — '+j.cut_reason;
       if(typeof showToast==='function') showToast(msg+' · verifie et ajuste avant de generer','success',10000);
     })
-    .catch(function(){ done('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
+    .catch(function(){ done('✕ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
 }
 // ── Sélecteur de models façon Infloww (réutilisable) ─────────────────────────
 // Utilisé par « Appliquer aux autres » (montage) ET par l envoi Veille.
@@ -4099,7 +4099,7 @@ function nxModelPicker(opts){
     if(opts.onConfirm) opts.onConfirm(sel, !!(va && va.checked), ui);
   });
 }
-// 📤 Applique ce TEMPLATE a d autres models : copie la video + le brouillon
+// ↗ Applique ce TEMPLATE a d autres models : copie la video + le brouillon
 // (captions, style, trait de coupe) dans identities/<model>/templates/.
 // Chaque model garde ses propres brutes -> memes montages, contenus differents.
 function nxMApplyOpen(){
@@ -4135,7 +4135,7 @@ function nxMApplyOpen(){
           fd.set('style', JSON.stringify(nxMState.style||{}));
           if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
           if(vaChecked) fd.set('va_ready','1');
-          ui.busy('⏳ Copie…');
+          ui.busy('◌ Copie…');
           fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'})
             .then(function(r){return r.json();}).then(function(j2){
               ui.close();
@@ -4144,7 +4144,7 @@ function nxMApplyOpen(){
                 var msg='Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j2.done||[]).join(', ');
                 if(j2.errors&&j2.errors.length) msg+=' — échec : '+j2.errors.join(' ; ');
                 if(typeof showToast==='function') showToast(msg,(j2.errors&&j2.errors.length)?'warning':'success',10000);
-              } else if(typeof showToast==='function') showToast('❌ '+(j2.error||'échec'),'error',8000);
+              } else if(typeof showToast==='function') showToast('✕ '+(j2.error||'échec'),'error',8000);
             }).catch(function(){ ui.close(); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
         }
       });
@@ -4154,7 +4154,7 @@ function nxMApplyOpen(){
 function nxMontageSave(){
   if(!nxMState.fid) return;
   var btn=document.getElementById('nx-m-save'), orig='💾 Enregistrer';
-  if(btn){ btn.textContent='⏳ Enregistrement…'; btn.disabled=true; }
+  if(btn){ btn.textContent='◌ Enregistrement…'; btn.disabled=true; }
   function reset(txt){ if(btn){ btn.textContent=txt; setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },1800); } }
   var fd=new FormData(); fd.set('file_id',nxMState.fid);
   fd.set('segments',JSON.stringify(nxMState.caps||[]));
@@ -4165,9 +4165,9 @@ function nxMontageSave(){
   // description du post (sidecar .desc.txt) : envoyee avec la video partout
   fd.set('desc',String((document.getElementById('nx-m-desc')||{}).value||'').trim().slice(0,1000));
   fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
-    reset(j.ok?'✅ Enregistré !':'❌ Erreur');
+    reset(j.ok?'✓ Enregistré !':'✕ Erreur');
     if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ta caption + le style sont gardés':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
-  }).catch(function(){ reset('❌ Erreur'); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+  }).catch(function(){ reset('✕ Erreur'); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
 // Recharge le brouillon enregistré (captions + style) à l'ouverture
 function nxMLoadDraft(fid){
@@ -4257,7 +4257,7 @@ function nxMBuildThumbs(){
 function nxMRenderCaps(){
   var dur=nxMDur(), caps=nxMState.caps||[];
   var wrap=document.getElementById('nx-m-frise'), list=document.getElementById('nx-m-caplist');
-  // « 🗑 Supprimer » ne s affiche que si une caption est vraiment selectionnee.
+  // « ⌫ Supprimer » ne s affiche que si une caption est vraiment selectionnee.
   // Ici parce que c est le seul endroit appele a CHAQUE changement d etat.
   var _db=document.getElementById('nx-m-delcap');
   if(_db){
@@ -4273,8 +4273,8 @@ function nxMRenderCaps(){
       +'<span style="background:#2a2a2a;color:#aaa;font-size:10px;border-radius:4px;padding:1px 6px">'+(i+1)+'</span>'
       +'<span data-edit="'+i+'" title="Cliquer pour modifier" style="flex:1;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">« '+nxMEsc(c.text)+' »</span>'
       +'<span style="font-size:11px;color:#888;white-space:nowrap">'+t+'</span>'
-      +'<button type="button" data-edit="'+i+'" title="Modifier le texte" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✏️</button>'
-      +'<button type="button" data-del="'+i+'" title="Supprimer" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:13px;padding:0">🗑</button></div>';
+      +'<button type="button" data-edit="'+i+'" title="Modifier le texte" style="background:none;border:0;color:#a855f7;cursor:pointer;font-size:13px;padding:0">✎</button>'
+      +'<button type="button" data-del="'+i+'" title="Supprimer" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:13px;padding:0">⌫</button></div>';
   });
   list.innerHTML=lh;
   list.querySelectorAll('[data-edit]').forEach(function(el){ el.addEventListener('click',function(){ nxMEditCap(parseInt(el.getAttribute('data-edit'),10)); }); });
@@ -4337,8 +4337,8 @@ function nxMRenderCaps(){
   var vtop=rulerH+tracksH+gap;
   var thumbs=nxMState.thumbs||[]; var strip='';
   if(thumbs.length){ var cw=W/thumbs.length; thumbs.forEach(function(u,k){ if(u) strip+='<img src="'+u+'" style="position:absolute;left:'+Math.round(k*cw)+'px;top:0;width:'+Math.ceil(cw+1)+'px;height:'+vidTrackH+'px;object-fit:cover;pointer-events:none">'; }); }
-  else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">⏳ miniatures…</div>'; }
-  var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">🎬 '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
+  else { strip='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#2a6b63;font-size:10px">◌ miniatures…</div>'; }
+  var vtrack='<div style="position:absolute;left:0;top:'+vtop+'px;width:'+W+'px;height:'+vidTrackH+'px;border-radius:6px;overflow:hidden;border:2px solid #0d9488;box-sizing:border-box;background:#0a1a18">'+strip+'<span style="position:absolute;top:2px;left:6px;color:#5eead4;font-size:9px;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none">▶ '+nxMEsc(nxMState.vname||'vidéo')+'</span></div>';
   // MARQUEUR DE COUPE : tout ce qui est AVANT le trait est RETIRE du template
   // et remplace par la VIDEO BRUTE a la generation. Le template ne garde que la
   // partie apres le trait. Glissable. Par defaut : 0 = rien de remplace.
@@ -4434,7 +4434,7 @@ function nxMEditCap(i, focusText){
   else { if(rRange) rRange.checked=true; document.getElementById('nx-m-start').value=c.start; document.getElementById('nx-m-end').value=c.end; }
   nxMTimeToggle();
   nxMState.editIdx=i;
-  document.getElementById('nx-m-editnote').textContent='✏️ caption '+(i+1)+' — « Mettre à jour », ou touche Suppr pour l’effacer';
+  document.getElementById('nx-m-editnote').textContent='✎ caption '+(i+1)+' — « Mettre à jour », ou touche Suppr pour l’effacer';
   document.getElementById('nx-m-addcap').textContent='✔ Mettre à jour';
   var _db=document.getElementById('nx-m-delcap'); if(_db) _db.style.display='inline-block';
   try{ nxMRenderCaps(); }catch(e){}       // surbrillance de la caption sélectionnée
@@ -4458,7 +4458,7 @@ function nxMDelCap(i){
   nxMHistTouch();
   if(typeof showToast==='function'){
     var t=((c&&c.text)||'').replace(/\s+/g,' ').slice(0,40);
-    showToast('🗑 Caption supprimee'+(t?' : « '+t+' »':'')+' — Ctrl+Z pour annuler','info',5000);
+    showToast('⌫ Caption supprimee'+(t?' : « '+t+' »':'')+' — Ctrl+Z pour annuler','info',5000);
   }
 }
 // Efface la caption actuellement selectionnee (touche Suppr / bouton corbeille)
@@ -4583,12 +4583,12 @@ async function nxMontageGen(count){
   // point de coupe : chaque variante remplacera [0..cut] par une vidéo brute
   if(nxMState.cut!=null && nxMState.cut>0.05) fd.set('cut_at', String(nxMState.cut));
   var gen=document.getElementById('nx-m-gen');
-  nxMGenBtns(true); gen.textContent='⏳ '+(count>1?('×'+count+' '):'')+'Génération…';
-  document.getElementById('nx-m-prog').textContent='⏳ génération de '+count+' variante(s)…';
-  if(typeof showToast==='function') showToast('⏳ Génération de '+count+' variante(s) en cours…','info');
+  nxMGenBtns(true); gen.textContent='◌ '+(count>1?('×'+count+' '):'')+'Génération…';
+  document.getElementById('nx-m-prog').textContent='◌ génération de '+count+' variante(s)…';
+  if(typeof showToast==='function') showToast('◌ Génération de '+count+' variante(s) en cours…','info');
   try{
     var r=await fetch('/noctus/montage_gen',{method:'POST',body:fd}); var j=await r.json();
-    if(!j.ok){ nxMGenReset(); document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('❌ '+(j.error||'?'),'error'); else alert('❌ '+(j.error||'?')); return; }
+    if(!j.ok){ nxMGenReset(); document.getElementById('nx-m-prog').textContent=''; if(typeof showToast==='function') showToast('✕ '+(j.error||'?'),'error'); else alert('✕ '+(j.error||'?')); return; }
     nxMState.model=j.model; nxMState.identity=j.identity||nxMState.identity; nxMState.genStart=Date.now();
     nxMState.resultTries=0;   // remis a zero : sinon un echec precedent bloque les nouvelles tentatives
     nxMontagePoll();
@@ -4596,10 +4596,10 @@ async function nxMontageGen(count){
 }
 function nxMGenFail(msg){
   var p=document.getElementById('nx-m-prog');
-  if(p) p.textContent='❌ '+msg;
+  if(p) p.textContent='✕ '+msg;
   nxMGenReset();
   nxMState.genStart=0;
-  if(typeof showToast==='function') showToast('❌ Échec du rendu : '+msg,'error',9000);
+  if(typeof showToast==='function') showToast('✕ Échec du rendu : '+msg,'error',9000);
 }
 async function nxMontagePoll(){
   if(!nxMState.model) return;
@@ -4608,13 +4608,13 @@ async function nxMontagePoll(){
   try{
     var r=await fetch('/noctus/status?model='+encodeURIComponent(nxMState.model)); var s=await r.json();
     var p=document.getElementById('nx-m-prog'), gen=document.getElementById('nx-m-gen');
-    if(s.state==='running'){ var pc=(s.pct||0); p.textContent='⏳ '+pc+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); if(gen) gen.textContent='⏳ '+pc+'%'; setTimeout(nxMontagePoll,1500); }
+    if(s.state==='running'){ var pc=(s.pct||0); p.textContent='◌ '+pc+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); if(gen) gen.textContent='◌ '+pc+'%'; setTimeout(nxMontagePoll,1500); }
     else if(s.state==='done'){
       // Un « terminé » qui tombe dans les 2,5 s du lancement est forcement un
       // reste de la generation precedente (un rendu prend bien plus longtemps).
       // On l ignore au lieu d annoncer « aucune video produite » a tort.
-      if(Date.now()-nxMState.genStart < 2500){ p.textContent='⏳ démarrage…'; setTimeout(nxMontagePoll,1200); return; }
-      p.textContent='✅ Terminé'; nxMState.genStart=0; nxMontageResults();
+      if(Date.now()-nxMState.genStart < 2500){ p.textContent='◌ démarrage…'; setTimeout(nxMontagePoll,1200); return; }
+      p.textContent='✓ Terminé'; nxMState.genStart=0; nxMontageResults();
     }
     else if(s.state==='error'){ nxMGenFail((s.error||'erreur').toString().slice(0,180)); }
     else if(s.state==='idle'||s.state==='stopped'){ nxMGenFail('le rendu a été arrêté'); }
@@ -4645,12 +4645,12 @@ async function nxMontageResults(){
         // on redonne 3 chances espacees avant de conclure.
         nxMState.resultTries=(nxMState.resultTries||0)+1;
         var pr=document.getElementById('nx-m-prog');
-        if(pr) pr.textContent='⏳ finalisation…';
+        if(pr) pr.textContent='◌ finalisation…';
         setTimeout(nxMontageResults,2500); return;
       }
       if(alive){
         var pr2=document.getElementById('nx-m-prog');
-        if(pr2) pr2.textContent='⏳ rendu en cours…';
+        if(pr2) pr2.textContent='◌ rendu en cours…';
         if(!nxMState.genStart) nxMState.genStart=Date.now();
         setTimeout(nxMontagePoll,2000); return;   // le rendu continue -> on reprend le suivi
       }
@@ -4659,10 +4659,10 @@ async function nxMontageResults(){
     nxMState.resultTries=0;
     nxMDownloadAll(dls);   // chaque vidéo téléchargée directement (le navigateur peut demander 1x l'autorisation pour plusieurs)
     var n=dls.length;
-    if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✅ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s':'')+' sur ton PC'+(n>1?' <span style="color:#9a9aa6;font-weight:500">(autorise « télécharger plusieurs fichiers » si le navigateur demande)</span>':'')+'</div>';
-    if(typeof showToast==='function') showToast('✅ '+n+' vidéo'+(n>1?'s prêtes — téléchargement':' prête — téléchargement')+' en cours sur ton PC','success',6000);
+    if(wrap) wrap.innerHTML='<div style="font-size:12.5px;color:#22c55e;font-weight:700">✓ '+n+' vidéo'+(n>1?'s':'')+' téléchargée'+(n>1?'s':'')+' sur ton PC'+(n>1?' <span style="color:#9a9aa6;font-weight:500">(autorise « télécharger plusieurs fichiers » si le navigateur demande)</span>':'')+'</div>';
+    if(typeof showToast==='function') showToast('✓ '+n+' vidéo'+(n>1?'s prêtes — téléchargement':' prête — téléchargement')+' en cours sur ton PC','success',6000);
     var gen=document.getElementById('nx-m-gen'), bulk=document.getElementById('nx-m-bulk');
-    if(gen){ gen.disabled=false; gen.textContent='✅ Téléchargé !'; }
+    if(gen){ gen.disabled=false; gen.textContent='✓ Téléchargé !'; }
     if(bulk){ bulk.disabled=false; }
     setTimeout(nxMGenReset,3000);
   }catch(e){ nxMGenFail('erreur chargement résultats'); }
@@ -4673,7 +4673,7 @@ function nxMShowGenLog(){
   fetch('/noctus/montage_log?model='+encodeURIComponent(nxMState.model),{credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
       var log=(j&&j.log)?j.log:'(log vide)';
-      wrap.innerHTML='<div style="font-size:12px;color:#f87171;font-weight:700;margin-bottom:6px">❌ Échec — détail du rendu :</div>'
+      wrap.innerHTML='<div style="font-size:12px;color:#f87171;font-weight:700;margin-bottom:6px">✕ Échec — détail du rendu :</div>'
         +'<pre style="white-space:pre-wrap;word-break:break-word;font-size:10px;color:#c4c4cc;background:#131316;border:1px solid #34343a;border-radius:8px;padding:10px;max-height:220px;overflow:auto;margin:0">'+nxMEsc(log)+'</pre>';
     }).catch(function(){});
 }
@@ -4703,13 +4703,13 @@ function nxMDownloadAll(list){
   });
 }
 async function nxMontageSend(vf,file,btn){
-  btn.disabled=true; btn.textContent='⏳';
+  btn.disabled=true; btn.textContent='◌';
   var fd=new FormData(); fd.set('identity',nxMState.identity); fd.set('model',nxMState.model); fd.set('vf',vf); fd.set('file',file);
   var _mdsc=String((document.getElementById('nx-m-desc')||{}).value||'').trim();
   if(_mdsc) fd.set('desc',_mdsc);   // la description part en message apres la video
   try{ var r=await fetch('/noctus/montage_send',{method:'POST',body:fd}); var j=await r.json();
-    if(j.ok){ btn.textContent='✅ envoyé'; } else { btn.disabled=false; btn.textContent='📤 Discord'; alert('❌ '+(j.error||'?')); }
-  }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; alert('Erreur: '+e); }
+    if(j.ok){ btn.textContent='✓ envoyé'; } else { btn.disabled=false; btn.textContent='↗ Discord'; alert('✕ '+(j.error||'?')); }
+  }catch(e){ btn.disabled=false; btn.textContent='↗ Discord'; alert('Erreur: '+e); }
 }
 // Met à jour EN DIRECT le filigrane de la carte du reel dans la Bibliothèque (derrière
 // la modale) — pas besoin de recharger/naviguer pour voir le changement.
@@ -4724,11 +4724,11 @@ function nxMSyncCardFiligrane(fid, on){
 function nxMSetApproveBtn(on){
   nxMState.vaReady=!!on;
   var btn=document.getElementById('nx-m-approve'); if(!btn) return;
-  btn.textContent = on ? '✅ Dispo VA — retirer' : '📥 Dispo pour les VA';
+  btn.textContent = on ? '✓ Dispo VA — retirer' : '↓ Dispo pour les VA';
   btn.style.background = on ? 'rgba(34,197,94,.22)' : '';
   btn.style.color = on ? '#22c55e' : '';
 }
-// « 📥 Dispo pour les VA » = TOGGLE. Marque/retire CE reel comme bon pour les VA
+// « ↓ Dispo pour les VA » = TOGGLE. Marque/retire CE reel comme bon pour les VA
 // (va_ready dans son .montage.json). AUCUNE génération ici — la variante montée est
 // générée À LA DEMANDE quand un VA clique « 🎞️ Reel déjà monté » (1 variante unique/VA).
 // Re-cliquer retire l'approbation + le filigrane de la Bibliothèque.
@@ -4752,15 +4752,15 @@ function nxMontageApprove(){
         nxMSetApproveBtn(on);
         try{ nxMSyncCardFiligrane(nxMState.fid, on); }catch(e){}   // carte mise à jour EN DIRECT (derrière la modale)
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}   // filigrane à jour en revenant sur la VA
-        if(typeof showToast==='function') showToast(on?'✅ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque':'➖ Reel retiré des VA — filigrane enlevé','success',5000);
+        if(typeof showToast==='function') showToast(on?'✓ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque':'➖ Reel retiré des VA — filigrane enlevé','success',5000);
       } else {
-        alert('❌ '+((j&&j.error)||'?'));
+        alert('✕ '+((j&&j.error)||'?'));
       }
     }).catch(function(e){ if(btn) btn.disabled=false; alert('Erreur: '+e); });
 }
 // ==================== Tout sélectionner (galeries vault + captions) ====================
 // Coche/décoche TOUTES les cartes de l onglet visible. Fonctionne pour les
-// galeries média (checkboxes toggleSelect -> barre 🗑 globale) ET les cartes
+// galeries média (checkboxes toggleSelect -> barre ⌫ globale) ET les cartes
 // caption (data-capsel -> barre de l onglet Caption) : on déclenche un vrai
 // événement change pour passer par les handlers existants.
 function vaultSelectAll(){
@@ -4803,7 +4803,7 @@ document.addEventListener('click', function(ev){
   var c=txtCtx(); if(!c) return;
   if(act==='copy'){
     var t=b.getAttribute('data-txt')||'';
-    var done=function(){ if(typeof showToast==='function') showToast('📋 Copié','success',2000); };
+    var done=function(){ if(typeof showToast==='function') showToast('⧉ Copié','success',2000); };
     try{ navigator.clipboard.writeText(t).then(done).catch(function(){ done(); }); }catch(e){ done(); }
   }
   else if(act==='del'){
@@ -4812,22 +4812,22 @@ document.addEventListener('click', function(ev){
     fetch('/textpool/delete',{method:'POST',body:fd,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
         if(j&&j.ok){ var card=b.closest('.txt-card'); if(card) card.remove(); }
-        else if(typeof showToast==='function') showToast('❌ suppression impossible','error');
+        else if(typeof showToast==='function') showToast('✕ suppression impossible','error');
       }).catch(function(){});
   }
   else if(act==='add'){ txtAddOpen(); }
   else if(act==='ai'){
     var age=(document.getElementById('txtAiAge')||{}).value||'22';
     var nb=(document.getElementById('txtAiCount')||{}).value||'6';
-    b.disabled=true; var old=b.textContent; b.textContent='⏳ IA…';
+    b.disabled=true; var old=b.textContent; b.textContent='◌ IA…';
     var seed=String((document.getElementById('txtAiSeed')||{}).value||'').trim();
     var fd2=new FormData(); fd2.set('identity',c.ident); fd2.set('age',age); fd2.set('count',nb);
     if(seed) fd2.set('seed',seed);   // bios d exemple fournies par l user
     fetch('/textpool/ai_bios',{method:'POST',body:fd2,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
         b.disabled=false; b.textContent=old;
-        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error',9000); return; }
-        if(typeof showToast==='function') showToast('✨ '+j.added+' bio(s) générées pour @'+c.ident,'success');
+        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error',9000); return; }
+        if(typeof showToast==='function') showToast('✧ '+j.added+' bio(s) générées pour @'+c.ident,'success');
         txtRefresh();
       }).catch(function(e){ b.disabled=false; b.textContent=old; });
   }
@@ -4992,20 +4992,20 @@ function txtShareOpen(){
       +'Les doublons sont ignorés, les originaux restent en place.',
     rows:rows,
     onConfirm:function(sel,_x,ui){
-      ui.busy('⏳ Copie…');
+      ui.busy('◌ Copie…');
       var fd=new FormData();
       fd.set('category',c.cat); fd.set('ids',JSON.stringify(ids));
       fd.set('targets',JSON.stringify(sel));
       fetch('/textpool/share',{method:'POST',body:fd,credentials:'same-origin'})
         .then(function(r){return r.json();}).then(function(j){
           ui.close();
-          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error'); return; }
           txtSelClear();
           if(typeof showToast==='function')
-            showToast('✅ '+j.copied+' texte(s) copié(s) vers '+sel.length+' model'
+            showToast('✓ '+j.copied+' texte(s) copié(s) vers '+sel.length+' model'
               +(sel.length>1?'s':'')+(j.duplicates?(' · '+j.duplicates+' doublon(s) ignoré(s)'):''),
               'success',6500);
-        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('✕ '+e,'error'); });
     }
   });
 }
@@ -5028,9 +5028,9 @@ function txtAddSubmit(){
   var fd=new FormData(); fd.set('category',c.cat); fd.set('identity',c.ident); fd.set('texts',JSON.stringify(vals));
   fetch('/textpool/vault_add',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
-      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error'); return; }
       txtAddClose();
-      if(typeof showToast==='function') showToast('✅ '+j.added+' ajouté(s)'+(j.duplicates?(' · '+j.duplicates+' doublon(s) ignoré(s)'):''),'success');
+      if(typeof showToast==='function') showToast('✓ '+j.added+' ajouté(s)'+(j.duplicates?(' · '+j.duplicates+' doublon(s) ignoré(s)'):''),'success');
       txtRefresh();
     }).catch(function(){});
 }
@@ -5067,20 +5067,20 @@ function ppApplyOpen(){
     info:files.length+' PP sélectionnée'+(files.length>1?'s':'')+' — <b>copiées</b> chez chaque model cochée. Les originaux restent en place.',
     rows:rows,
     onConfirm:function(sel, _x, ui){
-      ui.busy('⏳ Copie…');
+      ui.busy('◌ Copie…');
       var fd=new FormData(); fd.set('files',JSON.stringify(files)); fd.set('targets',JSON.stringify(sel));
       fetch('/cloud/pp_apply',{method:'POST',body:fd,credentials:'same-origin'})
         .then(function(r){return r.json();}).then(function(j){
           ui.close();
-          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error'); return; }
           if(typeof clearSelection==='function') clearSelection();
           try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
-          if(typeof showToast==='function') showToast('✅ '+j.copied+' PP copiée(s) vers '+sel.length+' model'+(sel.length>1?'s':'')+' — les originaux restent en place','success',6500);
-        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+          if(typeof showToast==='function') showToast('✓ '+j.copied+' PP copiée(s) vers '+sel.length+' model'+(sel.length>1?'s':'')+' — les originaux restent en place','success',6500);
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('✕ '+e,'error'); });
     }
   });
 }
-// 📤 Partage des TEMPLATES sélectionnés à d autres models (galerie Template
+// ↗ Partage des TEMPLATES sélectionnés à d autres models (galerie Template
 // montage) — même modale, copie video + montage + description + exemple via
 // /noctus/montage_apply (le serveur reprend le brouillon enregistré).
 function tplShareOpen(){
@@ -5111,7 +5111,7 @@ function tplShareOpen(){
     info:files.length+' template'+(files.length>1?'s':'')+' — <b>copiés</b> chez chaque model cochée avec le montage, la description et l&#39;exemple. Les originaux restent en place.',
     rows:rows,
     onConfirm:function(sel,_x,ui){
-      ui.busy('⏳ Copie…');
+      ui.busy('◌ Copie…');
       (async function(){
         var okN=0, errs=[];
         for(var i=0;i<files.length;i++){
@@ -5126,8 +5126,8 @@ function tplShareOpen(){
         if(typeof clearSelection==='function') clearSelection();
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
         if(typeof showToast==='function') showToast(
-          okN?('✅ '+okN+' template'+(okN>1?'s copiés':' copié')+' vers '+sel.length+' model'+(sel.length>1?'s':'')
-               +(errs.length?(' · '+errs.length+' échec(s)'):'')):('❌ '+(errs[0]||'échec')),
+          okN?('✓ '+okN+' template'+(okN>1?'s copiés':' copié')+' vers '+sel.length+' model'+(sel.length>1?'s':'')
+               +(errs.length?(' · '+errs.length+' échec(s)'):'')):('✕ '+(errs[0]||'échec')),
           errs.length?'warning':'success',7000);
       })();
     }
@@ -5286,11 +5286,11 @@ function capSave(){
     var fd=new FormData(); fd.set('identity',capLib.identity); fd.set('data',JSON.stringify(capLib.block));
     fetch('/captions/save',{method:'POST',body:fd,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
-        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ Sauvegarde captions : '+((j&&j.error)||'?'),'error'); return; }
+        if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+((j&&j.error)||'?'),'error'); return; }
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
         var el=document.getElementById('capLibData');
         if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes});
-      }).catch(function(e){ if(typeof showToast==='function') showToast('❌ Sauvegarde captions : '+e,'error'); });
+      }).catch(function(e){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+e,'error'); });
   },250);
 }
 // ---- Actions (délégation : survit au swap vaultGoTo de la section) ----
@@ -5374,7 +5374,7 @@ function capAddWarnCheck(ta,wd){
     if(s>bestS){ bestS=s; best=ov; bestField=true; }
   });
   if(bestS>=0.999){
-    wd.textContent='🚫 Déjà utilisée telle quelle'+(bestField?' (autre champ au-dessus)':'')+' — elle sera ignorée.';
+    wd.textContent='⊘ Déjà utilisée telle quelle'+(bestField?' (autre champ au-dessus)':'')+' — elle sera ignorée.';
     wd.style.color='#ef4444'; wd.style.display='block';
   }else if(bestS>=0.55){
     wd.textContent='⚠️ Ressemble beaucoup à une caption déjà utilisée : « '+best.slice(0,70)+(best.length>70?'…':'')+' »';
@@ -5383,7 +5383,7 @@ function capAddWarnCheck(ta,wd){
     wd.style.display='none';
   }
 }
-// 📤 Partage des captions à d autres models — même modale que « Appliquer ce
+// ↗ Partage des captions à d autres models — même modale que « Appliquer ce
 // montage à… » (nxModelPicker). Sélection ⚪ si présente, sinon TOUTES.
 function capShareOpen(){
   if(!capLibInit()){
@@ -5428,18 +5428,18 @@ function capShareOpen(){
       +' — <b>copiées</b> chez chaque model cochée (positions et descriptions comprises, doublons ignorés). Les originales restent en place.',
     rows:rows,
     onConfirm:function(sel,_x,ui){
-      ui.busy('⏳ Copie…');
+      ui.busy('◌ Copie…');
       var fd=new FormData(); fd.set('identity',capLib.identity);
       fd.set('ids',JSON.stringify(ids)); fd.set('targets',JSON.stringify(sel));
       fetch('/captions/apply',{method:'POST',body:fd,credentials:'same-origin'})
         .then(function(r){return r.json();}).then(function(j){
           ui.close();
-          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error'); return; }
+          if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error'); return; }
           try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
-          if(typeof showToast==='function') showToast('✅ '+j.added+' caption'+(j.added>1?'s copiées':' copiée')
+          if(typeof showToast==='function') showToast('✓ '+j.added+' caption'+(j.added>1?'s copiées':' copiée')
             +' vers '+((j.targets||[]).length)+' model'+(((j.targets||[]).length>1)?'s':'')
             +(j.skipped?(' · '+j.skipped+' doublon'+(j.skipped>1?'s ignorés':' ignoré')):''),'success',7000);
-        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('❌ '+e,'error'); });
+        }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('✕ '+e,'error'); });
     }
   });
 }
@@ -5508,7 +5508,7 @@ function capAddSubmit(){
   }
   capAddClose();
   capRenderCards(); capSave();
-  if(typeof showToast==='function') showToast('✅ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
+  if(typeof showToast==='function') showToast('✓ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
     +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')):'')
     +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''), near?'warning':'success');
 }
@@ -5570,7 +5570,7 @@ document.addEventListener('dragend', function(ev){
   var fd=new FormData(); fd.set('order', JSON.stringify(order));
   fetch('/identity/reorder',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
-      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ Ordre non sauvé : '+((j&&j.error)||'?'),'error'); return; }
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ Ordre non sauvé : '+((j&&j.error)||'?'),'error'); return; }
       try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
     }).catch(function(){});
 });
@@ -6069,18 +6069,18 @@ async function capGenerate(count,cid){
   var stat=document.getElementById('capGenStatus'), res=document.getElementById('capGenResults');
   var okN=0;
   for(var i=0;i<n;i++){
-    if(stat) stat.textContent='⏳ Vidéo '+(i+1)+'/'+n+' — tirage + rendu en cours…';
+    if(stat) stat.textContent='◌ Vidéo '+(i+1)+'/'+n+' — tirage + rendu en cours…';
     try{
       var fd=new FormData(); fd.set('identity',capLib.identity); if(cid) fd.set('caption_id',cid);
       var r=await fetch('/captions/gen',{method:'POST',body:fd,credentials:'same-origin'});
       var j=await r.json();
-      if(!(j&&j.ok)){ if(stat) stat.textContent='❌ '+((j&&j.error)||'?'); break; }
+      if(!(j&&j.ok)){ if(stat) stat.textContent='✕ '+((j&&j.error)||'?'); break; }
       var out=await capPollModel(j.model,stat,i+1,n);
-      if(!out){ if(stat) stat.textContent='❌ Rendu échoué — vidéo '+(i+1)+'/'+n; continue; }
+      if(!out){ if(stat) stat.textContent='✕ Rendu échoué — vidéo '+(i+1)+'/'+n; continue; }
       okN++; capResultRow(res,j,out);
-    }catch(e){ if(stat) stat.textContent='❌ '+e; break; }
+    }catch(e){ if(stat) stat.textContent='✕ '+e; break; }
   }
-  if(stat&&okN) stat.textContent='✅ '+okN+' vidéo'+(okN>1?'s prêtes':' prête')+' ci-dessous';
+  if(stat&&okN) stat.textContent='✓ '+okN+' vidéo'+(okN>1?'s prêtes':' prête')+' ci-dessous';
   if(btn) btn.disabled=false;
   capGenBusy=false;
 }
@@ -6090,7 +6090,7 @@ async function capPollModel(model,stat,idx,total){
     await new Promise(function(rs){ setTimeout(rs,1500); });
     try{
       var r=await fetch('/noctus/status?model='+encodeURIComponent(model)); var s=await r.json();
-      if(s.state==='running'){ if(stat) stat.textContent='⏳ Vidéo '+idx+'/'+total+' — '+(s.pct||0)+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); }
+      if(s.state==='running'){ if(stat) stat.textContent='◌ Vidéo '+idx+'/'+total+' — '+(s.pct||0)+'%'+(s.eta!=null?(' · ~'+s.eta+'s'):''); }
       else if(s.state==='done'){
         if(Date.now()-t0<2500) continue;   // « done » fantôme de la génération précédente
         var ro=await fetch('/noctus/outputs?model='+encodeURIComponent(model)); var jo=await ro.json();
@@ -6108,34 +6108,34 @@ function capResultRow(res,j,out){
   var url='/noctus/file/'+encodeURIComponent(j.model)+'/'+out.vf+'/'+encodeURIComponent(out.file);
   var row=document.createElement('div');
   row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 12px;background:#101013;border:1px solid #232327;border-radius:10px';
-  row.innerHTML='<span style="font-size:16px">🎬</span>'
+  row.innerHTML='<span style="font-size:16px">▶</span>'
     +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nxMEsc(String(j.caption||''))+'</div>'
     +'<div style="font-size:11px;color:#888">brute : '+nxMEsc(String(j.brute||''))+'</div>'
     +(j.desc?('<div style="font-size:11px;color:#8b9cf7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+nxMEsc(String(j.desc))+'">📄 '+nxMEsc(String(j.desc))+'</div>'):'')
     +'</div>'
-    +(j.desc?('<button type="button" class="cap-cpd" title="Copier la description" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">📋 Desc</button>'):'')
+    +(j.desc?('<button type="button" class="cap-cpd" title="Copier la description" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">⧉ Desc</button>'):'')
     +'<a href="'+url+'" target="_blank" style="text-decoration:none;font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px">▶ Voir</a>'
     +'<button type="button" class="cap-dl" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">⬇ Télécharger</button>'
-    +'<button type="button" class="cap-dc" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">📤 Discord</button>';
+    +'<button type="button" class="cap-dc" style="font-size:12px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">↗ Discord</button>';
   var cpd=row.querySelector('.cap-cpd'); if(cpd) cpd.addEventListener('click',function(){
-    try{ navigator.clipboard.writeText(String(j.desc||'')); cpd.textContent='✅'; setTimeout(function(){ cpd.textContent='📋 Desc'; },1200); }catch(e){}
+    try{ navigator.clipboard.writeText(String(j.desc||'')); cpd.textContent='✓'; setTimeout(function(){ cpd.textContent='⧉ Desc'; },1200); }catch(e){}
   });
-  var dl=row.querySelector('.cap-dl'); if(dl) dl.addEventListener('click',function(){ nxMDownloadOne(url+'?dl=1'); dl.textContent='✅'; });
+  var dl=row.querySelector('.cap-dl'); if(dl) dl.addEventListener('click',function(){ nxMDownloadOne(url+'?dl=1'); dl.textContent='✓'; });
   var dc=row.querySelector('.cap-dc'); if(dc) dc.addEventListener('click',function(){ capSendDiscord(j,out,dc); });
   res.appendChild(row);
 }
 async function capSendDiscord(j,out,btn){
-  btn.disabled=true; btn.textContent='⏳';
+  btn.disabled=true; btn.textContent='◌';
   var fd=new FormData(); fd.set('identity',j.identity||capLib.identity); fd.set('model',j.model); fd.set('vf',out.vf); fd.set('file',out.file);
   if(j.desc) fd.set('desc',j.desc);   // la description part avec la vidéo (message après)
   try{
     var r=await fetch('/noctus/montage_send',{method:'POST',body:fd,credentials:'same-origin'}); var jj=await r.json();
-    if(jj&&jj.ok){ btn.textContent='✅ envoyé'; }
-    else{ btn.disabled=false; btn.textContent='📤 Discord'; if(typeof showToast==='function') showToast('❌ '+((jj&&jj.error)||'?'),'error'); }
-  }catch(e){ btn.disabled=false; btn.textContent='📤 Discord'; }
+    if(jj&&jj.ok){ btn.textContent='✓ envoyé'; }
+    else{ btn.disabled=false; btn.textContent='↗ Discord'; if(typeof showToast==='function') showToast('✕ '+((jj&&jj.error)||'?'),'error'); }
+  }catch(e){ btn.disabled=false; btn.textContent='↗ Discord'; }
 }
 // ---- Import par lien (Vidéo brut / Template montage) ----
-// Poll du statut : la ligne « ⏳ Import lien X/Y » se met à jour toute seule
+// Poll du statut : la ligne « ◌ Import lien X/Y » se met à jour toute seule
 // toutes les 3s, et la galerie se recharge automatiquement quand c est fini.
 var __limpLast='';
 setInterval(function(){
@@ -6151,13 +6151,13 @@ setInterval(function(){
       var st=j.state||'idle';
       if(sp){
         if(st==='running'){
-          sp.textContent='⏳ Import lien '+(j.done||0)+'/'+(j.total||0)+' pour @'+(j.identity||'')+'…';
+          sp.textContent='◌ Import lien '+(j.done||0)+'/'+(j.total||0)+' pour @'+(j.identity||'')+'…';
           sp.style.color='#fbbf24';
         } else if(st==='done'){
-          sp.textContent='✅ Import : '+(j.ok||0)+' ajouté(s)'+(j.fail?(', '+j.fail+' échec(s) ('+(j.err||'')+')'):'');
+          sp.textContent='✓ Import : '+(j.ok||0)+' ajouté(s)'+(j.fail?(', '+j.fail+' échec(s) ('+(j.err||'')+')'):'');
           sp.style.color=j.fail&&!j.ok?'#f87171':'#22c55e';
         } else if(st==='error'){
-          sp.textContent='❌ Import : '+(j.err||'erreur');
+          sp.textContent='✕ Import : '+(j.err||'erreur');
           sp.style.color='#f87171';
         }
       }
@@ -6179,7 +6179,7 @@ setInterval(function(){
           vaultGoTo({preventDefault:function(){}}, '/?tab='+tab+'&'+key+'='+encodeURIComponent(j.identity||''));
         }
         if(typeof showToast==='function' && st==='done'){
-          showToast((j.ok?('✅ '+j.ok+' vidéo(s) importée(s) chez @'+(j.identity||'')):'❌ Import terminé sans succès')+(j.fail?(' · '+j.fail+' échec(s) : '+(j.err||'')):''), j.ok?'success':'error', 8000);
+          showToast((j.ok?('✓ '+j.ok+' vidéo(s) importée(s) chez @'+(j.identity||'')):'✕ Import terminé sans succès')+(j.fail?(' · '+j.fail+' échec(s) : '+(j.err||'')):''), j.ok?'success':'error', 8000);
         }
       }
       __limpLast=st;
@@ -6197,7 +6197,7 @@ function linkGoFromForm(f){
   var urls=ta?String(ta.value||'').trim():'';
   if(!ident){ if(typeof showToast==='function') showToast('Choisis une identité au-dessus','warning'); return; }
   if(!urls){ if(typeof showToast==='function') showToast('Colle au moins un lien Instagram ou TikTok','warning'); return; }
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Lancement…'; }
+  if(btn){ btn.disabled=true; btn.textContent='◌ Lancement…'; }
   var fd=new FormData(); fd.set('identity',ident); fd.set('subdir',sub); fd.set('urls',urls); fd.set('ajax','1');
   // Description saisie dans le meme formulaire : elle suit les videos importees
   var _dta=f.querySelector('textarea[name=description]');
@@ -6206,16 +6206,16 @@ function linkGoFromForm(f){
   fetch('/cloud/import_link',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(j){
       if(btn){ btn.disabled=false; btn.textContent='⬇ Importer les liens'; }
-      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('❌ '+((j&&j.error)||'?'),'error',7000); return; }
+      if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error',7000); return; }
       if(ta){ ta.value=''; }
       var fi=f.querySelector('.up-file-main'); if(fi) fi.required=true;
       __limpLast='running';
       __limpPct=0; __limpTarget=0;   // nouveau % à chaque import
       limpCard({state:'running',done:0,total:j.count,identity:ident,subdir:sub});
-      if(typeof showToast==='function') showToast('🔗 Import lancé : '+j.count+' lien(s) → @'+ident,'success',5000);
+      if(typeof showToast==='function') showToast('⛓ Import lancé : '+j.count+' lien(s) → @'+ident,'success',5000);
     }).catch(function(e){
       if(btn){ btn.disabled=false; btn.textContent='⬇ Importer les liens'; }
-      if(typeof showToast==='function') showToast('❌ '+e,'error');
+      if(typeof showToast==='function') showToast('✕ '+e,'error');
     });
 }
 document.addEventListener('click', function(ev){
@@ -6307,9 +6307,9 @@ function limpTick(){
   if(txt){
     if(j.state==='running'){
       var el=window.__limpT0?Math.floor((Date.now()-window.__limpT0)/1000):0;
-      txt.textContent='🔗 @'+(j.identity||'')+' — '+(j.done||0)+'/'+Math.max(1,j.total||1)+' lien(s) · '+el+'s';
+      txt.textContent='⛓ @'+(j.identity||'')+' — '+(j.done||0)+'/'+Math.max(1,j.total||1)+' lien(s) · '+el+'s';
     }
-    else txt.textContent=(j.ok?('✅ '+j.ok+' vidéo(s) importée(s)'):'❌ import échoué');
+    else txt.textContent=(j.ok?('✓ '+j.ok+' vidéo(s) importée(s)'):'✕ import échoué');
   }
 }
 // ---- Selects d identité avec PP (avatars) dans les formulaires d upload ----
@@ -6425,7 +6425,7 @@ function identEditMarket(v){
 async function identEditSave(){
   var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-go');
   var ident=identEditCtx.ident, fait=false, cible=ident;
-  if(go){ go.disabled=true; go.textContent='⏳'; }
+  if(go){ go.disabled=true; go.textContent='◌'; }
   try{
     if(identEditCtx.rename){
       var nv=String((document.getElementById('ident-edit-name')||{}).value||'').trim().toLowerCase();
@@ -6486,7 +6486,7 @@ async function identNewCreate(){
   if(String(identNewCtx.vtab||'').indexOf('v2')===0) fd.set('vault2','1');
   var a=document.getElementById('ident-new-avatar');
   if(a&&a.files&&a.files[0]) fd.set('avatar',a.files[0]);
-  if(go){ go.disabled=true; go.textContent='⏳'; }
+  if(go){ go.disabled=true; go.textContent='◌'; }
   try{
     var r=await fetch('/identity/create',{method:'POST',body:fd,credentials:'same-origin'});
     var j=await r.json();
@@ -6495,7 +6495,7 @@ async function identNewCreate(){
       if(go){ go.disabled=false; go.textContent='Créer'; }
       return;
     }
-    if(typeof showToast==='function') showToast('✅ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
+    if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
     var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
     // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
     window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
@@ -6565,7 +6565,7 @@ function showTab(group,name,title,subtitle){
       _home.insertAdjacentHTML('afterbegin',
         "<div style='margin:0 0 14px;padding:12px 14px;background:rgba(251,191,36,.1);"
         +"border:1px solid rgba(251,191,36,.35);border-radius:10px;color:#fbbf24;font-size:13px'>"
-        +"⏳ Cet onglet vient d'etre ajoute au site — recharge la page "
+        +"◌ Cet onglet vient d'etre ajoute au site — recharge la page "
         +"(<b>Ctrl+Maj+R</b>) pour l'ouvrir.</div>");
     }
   }
@@ -6712,7 +6712,7 @@ window.igCopyCaption = function(el){
       try{ document.execCommand('copy'); copied = true; }catch(e){}
       document.body.removeChild(ta);
       if(typeof showToast === 'function'){
-        showToast(copied ? '📝 Légende copiée' : '❌ Copy bloqué', copied ? 'success' : 'error');
+        showToast(copied ? '📝 Légende copiée' : '✕ Copy bloqué', copied ? 'success' : 'error');
       }
     });
   } else {
@@ -6724,7 +6724,7 @@ window.igCopyCaption = function(el){
     try{ document.execCommand('copy'); copied = true; }catch(e){}
     document.body.removeChild(ta);
     if(typeof showToast === 'function'){
-      showToast(copied ? '📝 Légende copiée' : '❌ Copy bloqué', copied ? 'success' : 'error');
+      showToast(copied ? '📝 Légende copiée' : '✕ Copy bloqué', copied ? 'success' : 'error');
     }
   }
   // Flash visuel
@@ -6749,7 +6749,7 @@ window.igDownloadVideo = function(btn, url, owner){
   // Spinner
   var orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '⏳';
+  btn.innerHTML = '◌';
   if(typeof showToast === 'function') showToast('⬇ Téléchargement…', 'info');
   // Fetch puis trigger download via blob
   fetch(proxyUrl).then(function(r){
@@ -6767,11 +6767,11 @@ window.igDownloadVideo = function(btn, url, owner){
     }, 100);
     btn.disabled = false;
     btn.innerHTML = orig;
-    if(typeof showToast === 'function') showToast('✅ ' + filename, 'success');
+    if(typeof showToast === 'function') showToast('✓ ' + filename, 'success');
   }).catch(function(err){
     btn.disabled = false;
     btn.innerHTML = orig;
-    if(typeof showToast === 'function') showToast('❌ Erreur: ' + err, 'error');
+    if(typeof showToast === 'function') showToast('✕ Erreur: ' + err, 'error');
   });
 };
 // Fetch automatique de la caption Instagram pour une card
@@ -6843,7 +6843,7 @@ window.addToVeille = async function(btn, payload){
   if(!payload || !payload.url) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '⏳';
+  btn.innerHTML = '◌';
   // Verifier si la card est deja en Veille (via data attribute)
   const existingId = btn.getAttribute('data-veille-id') || '';
   try {
@@ -6860,7 +6860,7 @@ window.addToVeille = async function(btn, payload){
         window.refreshVeilleSection && window.refreshVeilleSection();
       } else {
         btn.innerHTML = orig;
-        if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur remove'), 'error');
+        if(typeof showToast === 'function') showToast('✕ ' + (j.error || 'Erreur remove'), 'error');
       }
     } else {
       // Pas dans la Veille -> add
@@ -6882,12 +6882,12 @@ window.addToVeille = async function(btn, payload){
         window.refreshVeilleSection && window.refreshVeilleSection();
       } else {
         btn.innerHTML = orig;
-        if(typeof showToast === 'function') showToast('❌ ' + (j.error || 'Erreur'), 'error');
+        if(typeof showToast === 'function') showToast('✕ ' + (j.error || 'Erreur'), 'error');
       }
     }
   } catch(e){
     btn.innerHTML = orig;
-    if(typeof showToast === 'function') showToast('❌ Erreur réseau', 'error');
+    if(typeof showToast === 'function') showToast('✕ Erreur réseau', 'error');
   } finally {
     btn.disabled = false;
   }
@@ -6898,7 +6898,7 @@ window.igCopyLink = function(url){
   // Try moderne d'abord
   if(navigator.clipboard && window.isSecureContext){
     navigator.clipboard.writeText(url).then(function(){
-      if(typeof showToast === 'function') showToast('🔗 Lien copié', 'success');
+      if(typeof showToast === 'function') showToast('⛓ Lien copié', 'success');
     }).catch(function(){
       igFallbackCopy(url);
     });
@@ -6918,8 +6918,8 @@ window.igFallbackCopy = function(text){
   try{ ok = document.execCommand('copy'); }catch(e){}
   document.body.removeChild(ta);
   if(typeof showToast === 'function'){
-    if(ok) showToast('🔗 Lien copié', 'success');
-    else showToast('❌ Copy bloqué - copie manuelle: ' + text.substring(0, 60), 'error');
+    if(ok) showToast('⛓ Lien copié', 'success');
+    else showToast('✕ Copy bloqué - copie manuelle: ' + text.substring(0, 60), 'error');
   }
 };
 
@@ -7717,7 +7717,7 @@ document.addEventListener('click',function(e){
           if(n && String(localStorage.getItem('gd_vu')) !== String(j.ts)){
             localStorage.setItem('gd_vu', String(j.ts));
             if(typeof showToast === 'function')
-              showToast('📥 ' + n + ' fichier' + (n>1?'s':'')
+              showToast('↓ ' + n + ' fichier' + (n>1?'s':'')
                 + ' à importer depuis le Drive — onglet Drive', 'success', 9000);
           }
         }catch(e){}
@@ -7746,13 +7746,13 @@ document.addEventListener('click',function(e){
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div style="margin-top:14px">
-<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">🔗 OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
+<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">⛓ OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
 <textarea class="up-links" rows="2" placeholder="https://www.instagram.com/reel/…   (un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:9px 11px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
 <button type="button" data-linkgo="brutes" style="width:100%;margin-top:8px;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">⬇ Importer les liens</button>
 </div>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader les rushs</button>
@@ -7774,13 +7774,13 @@ document.addEventListener('click',function(e){
 <div class="up-drop-limits"><span>Video size limit: 14GB</span></div>
 </label>
 <div style="margin-top:14px">
-<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">🔗 OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
+<div style="font-size:11px;font-weight:700;color:#8b8b95;letter-spacing:.06em;margin-bottom:6px">⛓ OU PAR LIEN (INSTAGRAM / TIKTOK)</div>
 <textarea class="up-links" rows="2" placeholder="https://www.instagram.com/reel/…   (un lien par ligne, 10 max)" autocomplete="off" spellcheck="false" data-lpignore="true" style="width:100%;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:10px;padding:9px 11px;font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;outline:none"></textarea>
 <button type="button" data-linkgo="templates" style="width:100%;margin-top:8px;background:transparent;border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">⬇ Importer les liens</button>
 </div>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <div class="up-card">
@@ -7870,7 +7870,7 @@ document.addEventListener('click',function(e){
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader le post</button>
@@ -7894,7 +7894,7 @@ document.addEventListener('click',function(e){
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader la story</button>
@@ -7918,7 +7918,7 @@ document.addEventListener('click',function(e){
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader story CTA</button>
@@ -7939,7 +7939,7 @@ document.addEventListener('click',function(e){
 </label>
 <div class="up-edit-table" style="display:none">
 <div class="up-edit-head"><div>Media</div><div>Action</div></div>
-<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">🗑</button></div></div>
+<div class="up-edit-row" data-file="main"><div class="up-edit-name">—</div><div><button type="button" class="up-rm" onclick="upClearMain(this)">⌫</button></div></div>
 </div>
 </div>
 <button type="submit" class="up-submit">⬆ Uploader la PP</button>
@@ -8279,7 +8279,7 @@ document.addEventListener('keydown', function(e){
 <!-- VA STATS -->
 <div class="form-section" id="form-vastats" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">📊 Statistiques par identité</h3>
+<h3 style="margin-top:0">▥ Statistiques par identité</h3>
 {identity_stats_html}
 </div>
 </div>
@@ -8448,7 +8448,7 @@ document.addEventListener('keydown', function(e){
 <button type="submit" style="background:#00d68f">▶ Tester maintenant</button>
 </form>
 <form method="POST" action="/insta/reset_rapidapi_host" class="box">
-<h4 style="margin-top:0">🔄 Reset host (si tu l'as cassé)</h4>
+<h4 style="margin-top:0">↻ Reset host (si tu l'as cassé)</h4>
 <small>Réinitialise le host à <code>instagram-scraper-stable-api.p.rapidapi.com</code> (la clé est conservée).</small>
 <button type="submit" style="background:#ffb800;color:#000">↻ Reset host par défaut</button>
 </form>
@@ -8459,12 +8459,12 @@ document.addEventListener('keydown', function(e){
 
 <!-- Import depuis fichier cookies.txt -->
 <form method="POST" action="/settings/insta_auth_file" enctype="multipart/form-data" class="box" style="border:2px dashed #3b82f6">
-<h3 style="margin-top:0">⚡ Import cookies.txt <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">+ TÉLÉCHARGE LES REELS</span></h3>
+<h3 style="margin-top:0">↓ Import cookies.txt <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">+ TÉLÉCHARGE LES REELS</span></h3>
 <small>Uploade le cookies.txt (extension <b>"Get cookies.txt LOCALLY"</b> de Chrome, en étant connecté à Instagram). Sert au scraping <b>ET</b> au téléchargement des vidéos de la Veille (yt-dlp) — y compris les reels que le scrape public ne voit pas.</small>
 <label style="margin-top:14px">Fichier cookies.txt</label>
 <input type="file" name="cookies_file" accept=".txt,text/plain" required>
 <small>Format Netscape (par défaut dans l'extension)</small>
-<button type="submit">📥 Importer</button>
+<button type="submit">↓ Importer</button>
 </form>
 
 <form method="POST" action="/settings/insta_auth" class="box">
@@ -8712,7 +8712,7 @@ body.light .action-count{color:#111}
 body.light .action-icon{color:#666}
 </style>
 
-<!-- 🎬 Modal Montage (génération variations d'un reel + envoi Discord) -->
+<!-- ▶ Modal Montage (génération variations d'un reel + envoi Discord) -->
 <style>
 /* ===== Éditeur vidéo type CapCut ===== accent bleu #3467FF ===== */
 .ce-app{background:#1a1a1e;border:0;border-radius:0;width:100vw;max-width:100vw;height:100vh;display:grid;grid-template-rows:38px minmax(0,1fr) auto;overflow:hidden}
@@ -8836,7 +8836,7 @@ body.light .action-icon{color:#666}
 <!-- ===== Modifier une identité : photo (partout) + nom (Vault PRO) ===== -->
 <div id="ident-edit-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identEditClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="font-weight:800;font-size:15px">✏️ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
+    <div style="font-weight:800;font-size:15px">✎ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
     <label id="ident-edit-namewrap" style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Nom
       <input id="ident-edit-name" type="text" autocomplete="off" data-lpignore="true"
              style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box"></label>
@@ -9018,7 +9018,7 @@ body.light .action-icon{color:#666}
             <span style="font-size:11px;color:#75757f">quand ACTIVE, toutes les captions sont posées ici</span>
           </div>
           <div class="nxm-hint">Glisse le texte sur la vidéo · coins = taille · poignées ↔ = largeur · ↕ = interligne. Le style (police, taille, couleur…) s'applique à TOUTES les captions de la model ; position, largeur et interligne sont propres à chaque caption.</div>
-          <button type="button" id="cap-ed-del" onclick="capEdDelete()" style="display:none;margin-top:14px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption</button>
+          <button type="button" id="cap-ed-del" onclick="capEdDelete()" style="display:none;margin-top:14px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">⌫ Supprimer cette caption</button>
         </div>
       </div>
     </div>
@@ -9029,7 +9029,7 @@ body.light .action-icon{color:#666}
   <div onclick="event.stopPropagation()" class="ce-app">
     <!-- 1) BARRE DE TITRE -->
     <div class="ce-title">
-      <span class="ce-app-name">🎬 Montage</span>
+      <span class="ce-app-name">▶ Montage</span>
       <button class="ce-menu" onclick="nxMSoon()">Menu ▾</button>
       <div class="ce-proj" id="nx-m-proj">Mon reel</div>
       <button class="ce-btn ce-btn-ai" id="nx-m-ai" onclick="nxMAnalyze()" title="Claude regarde la vidéo : il place le trait de coupe ✂ et recopie la caption incrustée (texte, position, style). Tu vérifies et tu ajustes.">Analyser</button>
@@ -9038,7 +9038,7 @@ body.light .action-icon{color:#666}
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
       <button class="ce-btn" id="nx-m-bulk" onclick="nxMontageGenBulk()">⬇ Download bulk</button>
-      <button class="ce-btn" id="nx-m-approve" onclick="nxMontageApprove()" title="Marque ce reel « bon pour les VA » : ils le recevront MONTÉ (texte incrusté), généré à la demande — une variante unique par VA. Aucune génération maintenant.">📥 Dispo pour les VA</button>
+      <button class="ce-btn" id="nx-m-approve" onclick="nxMontageApprove()" title="Marque ce reel « bon pour les VA » : ils le recevront MONTÉ (texte incrusté), généré à la demande — une variante unique par VA. Aucune génération maintenant.">↓ Dispo pour les VA</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
     <!-- 2) ZONE PRINCIPALE : 3 colonnes -->
@@ -9066,7 +9066,7 @@ body.light .action-icon{color:#666}
           </div>
           <div id="nx-m-example-wrap" class="ce-vwrap" style="display:none;border:1px solid #fbbf24">
             <video id="nx-m-example" controls muted loop playsinline class="ce-video"></video>
-            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fbbf24;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">📋 EXEMPLE</span>
+            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fbbf24;font-size:10px;font-weight:800;padding:3px 8px;border-radius:5px;z-index:3;pointer-events:none">⧉ EXEMPLE</span>
           </div>
         </div>
         <div class="ce-ctrl">
@@ -9157,7 +9157,7 @@ body.light .action-icon{color:#666}
             <span id="nx-m-timeinfo" style="color:#6b7280"></span>
           </div>
           <button type="button" id="nx-m-addcap" onclick="nxMAddCap()" class="nxm-add">Ajouter cette caption</button>
-          <button type="button" id="nx-m-delcap" onclick="nxMDelSelected()" style="display:none;margin-top:8px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">🗑 Supprimer cette caption <span style="opacity:.7;font-weight:500">(Suppr)</span></button>
+          <button type="button" id="nx-m-delcap" onclick="nxMDelSelected()" style="display:none;margin-top:8px;width:100%;background:#3a1f22;border:1px solid #7f2d35;color:#fca5a5;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">⌫ Supprimer cette caption <span style="opacity:.7;font-weight:500">(Suppr)</span></button>
           <span id="nx-m-editnote" style="font-size:11px;color:#fbbf24;display:block;margin-top:6px"></span>
         </div>
       </div>
@@ -10294,7 +10294,7 @@ def _get_insta_3_for_va(user_id) -> list:
 #   in_progress_since, last_summary, error}
 # - Lock (threading.Lock) pour eviter 2 refreshes simultanes
 # - Boot smart-refresh + boucle daily 00:00:30
-# - UI : badge "MAJ il y a Xh" + bouton 🔄 Forcer refresh
+# - UI : badge "MAJ il y a Xh" + bouton ↻ Forcer refresh
 
 INSTA_REFRESH_STATE_FILE = DATA_DIR / "insta_refresh_state.json"
 import threading as _threading_mod
@@ -10650,7 +10650,7 @@ def _render_refresh_status_text(st: dict) -> str:
         since = int(st.get("in_progress_since") or 0)
         elapsed = int(_t_r.time()) - since if since else 0
         total = st.get("in_progress_total") or 0
-        return f"⏳ Refresh en cours ({elapsed}s / {total} comptes)"
+        return f"◌ Refresh en cours ({elapsed}s / {total} comptes)"
     last = int(st.get("last_run_at") or 0)
     if not last:
         return "⏸ Jamais refresh"
@@ -10666,7 +10666,7 @@ def _render_refresh_status_text(st: dict) -> str:
     summary = st.get("last_summary") or {}
     extra = ""
     if summary:
-        extra = f" · {summary.get('ok',0)}✓ {summary.get('banned',0)}🚫"
+        extra = f" · {summary.get('ok',0)}✓ {summary.get('banned',0)}⊘"
     return f"✓ MAJ {ago}{extra}"
 
 
@@ -10851,7 +10851,7 @@ def _scrape_via_ig_public(handle: str) -> dict:
     if r is None:
         return {"error": "reseau IG public: pas de reponse"}
     if r.status_code == 404:
-        return {"error": f"🚫 Compte banni ou supprimé (@{handle})", "banned": True}
+        return {"error": f"⊘ Compte banni ou supprimé (@{handle})", "banned": True}
     if r.status_code == 429:
         return {"error": "Instagram rate-limit (429). Réessaie dans qq minutes."}
     if r.status_code != 200:
@@ -10862,7 +10862,7 @@ def _scrape_via_ig_public(handle: str) -> dict:
         return {"error": "Reponse non-JSON"}
     user = (d.get("data") or {}).get("user") or {}
     if not user:
-        return {"error": f"🚫 Compte banni ou introuvable (@{handle})", "banned": True}
+        return {"error": f"⊘ Compte banni ou introuvable (@{handle})", "banned": True}
     profile = {
         "username": user.get("username") or handle,
         "full_name": user.get("full_name") or "",
@@ -10941,7 +10941,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             else:
                 # False = confirmé. None = indéterminé, MAIS l'API dit déjà
                 # « introuvable » : dans la vraie vie c'est un ban -> on classe banni.
-                err_msg = f"🚫 Compte introuvable (@{h}) — banni (ou supprimé/renommé)"
+                err_msg = f"⊘ Compte introuvable (@{h}) — banni (ou supprimé/renommé)"
                 is_banned = True
         # « Échec » générique sur un compte qui n'a JAMAIS donné de stats : c'est
         # très souvent un compte banni que l'erreur empêche de classifier. On
@@ -10962,7 +10962,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                 # d'existence -> banni (l'expérience : ces « Échec » sont des bans).
                 if _ex is False or (_ex is None and not _transient):
                     is_banned = True
-                    err_msg = f"🚫 Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
+                    err_msg = f"⊘ Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
             else:
                 _chk_ts = _last_chk
         # On CONSERVE les données du dernier bon scrape (abonnés, vues, PP,
@@ -11552,7 +11552,7 @@ def _render_va_list_html() -> str:
         "</div>"
         "<div>"
         "<label style='font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px'>"
-        "📋 Comptes Insta à attribuer (optionnel) — <b style='color:#a855f7'>1 @handle par ligne</b></label>"
+        "⧉ Comptes Insta à attribuer (optionnel) — <b style='color:#a855f7'>1 @handle par ligne</b></label>"
         "<textarea id='va-manual-bulk' rows='6' placeholder='@compte1&#10;@compte2&#10;@compte3&#10;…' "
         "style='background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;"
         "border-radius:8px;font-size:12px;width:100%;font-family:monospace;resize:vertical'></textarea>"
@@ -11602,7 +11602,7 @@ def _render_va_list_html() -> str:
     except Exception as e:
         return clicks_widget + add_manual_btn + (
             f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
-            f"border-radius:10px;color:#ef4444;font-size:13px'>❌ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
+            f"border-radius:10px;color:#ef4444;font-size:13px'>✕ Erreur rendu liste VAs : {type(e).__name__}: {e}</div>"
         ) + add_manual_modal
 
 
@@ -12096,7 +12096,7 @@ body.light .va-id{color:#9ca3af}
                 # Mini badges pour les features configurées
                 badges = []
                 if assigned_side:
-                    badges.append(f"<span class='va-vlist-mini-badge' style='color:#a855f7' title='{len(assigned_side)} lien(s) GMS'>🔗</span>")
+                    badges.append(f"<span class='va-vlist-mini-badge' style='color:#a855f7' title='{len(assigned_side)} lien(s) GMS'>⛓</span>")
                 if pay_has:
                     badges.append("<span class='va-vlist-mini-badge' style='color:#22c55e' title='Paiement configuré'>💳</span>")
                 if ig_h_side:
@@ -12336,7 +12336,7 @@ body.light .va-id{color:#9ca3af}
                 short_num = ("…" + num[-4:]) if len(num) > 4 else num
                 pay_label = f"{short_num}" if num else "TapTap"
                 pay_color = "#f59e0b"
-                pay_icon = "📱"
+                pay_icon = "▭"
             else:
                 pay_label = "Paiement"
                 pay_color = "#444"
@@ -12413,7 +12413,7 @@ body.light .va-id{color:#9ca3af}
                 f"<button type='button' onclick=\"vaIg3TrkOpen('{uid}', '{username.replace(chr(39), chr(92)+chr(39))}')\" "
                 f"class='va-ig3-btn' style='border-color:{_trk_color}40;color:{_trk_color}' "
                 f"title='Suivi vues reels par compte'>"
-                f"<span>📊</span>"
+                f"<span>▥</span>"
                 f"<span class='va-ig3-label'>Tracking</span>"
                 f"</button>"
             )
@@ -12651,10 +12651,10 @@ body.light .va-id{color:#9ca3af}
         "<div id='va-ig3-trk-modal' onclick='vaIg3TrkClose(event)'>"
         "<div class='ig3-box' onclick='event.stopPropagation()'>"
         "<div class='ig3-head'>"
-        "<span style='font-size:18px'>📊</span>"
+        "<span style='font-size:18px'>▥</span>"
         "<div style='flex:1'>Tracking Instagram</div>"
         "<div id='ig3-trk-subtitle'></div>"
-        "<button onclick='vaIg3TrkRefresh()' class='ig3-trk-refresh' title='Forcer un re-scrape (bypass cache)'>🔄</button>"
+        "<button onclick='vaIg3TrkRefresh()' class='ig3-trk-refresh' title='Forcer un re-scrape (bypass cache)'>↻</button>"
         "<button onclick='vaIg3TrkClose()' class='ig3-close'>×</button>"
         "</div>"
         "<div class='ig3-body' id='ig3-trk-body'>"
@@ -12977,7 +12977,7 @@ document.addEventListener('click', function(e){
 });
 
 // Auto-load DESACTIVE au page-load : le cache server-side rend deja tout.
-// Le refresh quotidien 00:00 + le bouton 🔄 manuel suffisent. Plus de
+// Le refresh quotidien 00:00 + le bouton ↻ manuel suffisent. Plus de
 // requetes au render -> ouverture instantanee meme avec 150 comptes.
 // Le click sur une row force toujours un re-scrape individuel si besoin.
 function vaIg3MiniLoad(uid, detail, force){
@@ -13290,7 +13290,7 @@ function vaInstaScrape(){
         # Toggle Crypto / TapTap
         "<div class='vpm-toggle'>"
         "<button class='vpm-kind-btn' data-kind='crypto' onclick='vaPaySetKind(\"crypto\")'>💵 Crypto</button>"
-        "<button class='vpm-kind-btn' data-kind='taptap' onclick='vaPaySetKind(\"taptap\")'>📱 TapTap</button>"
+        "<button class='vpm-kind-btn' data-kind='taptap' onclick='vaPaySetKind(\"taptap\")'>▭ TapTap</button>"
         "</div>"
         # Form Crypto (caché par défaut)
         "<div id='vpm-form-crypto' class='vpm-form'>"
@@ -13536,7 +13536,7 @@ function vaPaySave(){
         "<div id='vlm-list'></div>"
         "<div class='vlm-foot'>"
         "<button type='button' onclick='vaLinksClose()' class='vlm-cancel'>Annuler</button>"
-        "<button type='button' onclick='vaLinksGenerate()' class='vlm-gen'>✨ Générer</button>"
+        "<button type='button' onclick='vaLinksGenerate()' class='vlm-gen'>✧ Générer</button>"
         "<button type='button' onclick='vaLinksDuplicateSelected()' class='vlm-dup'>⎘ Dupliquer sélection</button>"
         "<button type='button' onclick='vaLinksSave()' class='vlm-save'>Enregistrer</button>"
         "</div>"
@@ -13640,7 +13640,7 @@ function vaLinksOpen(uid, username, identity){
     var prefixLabel = (prefix && prefix !== m.toLowerCase()) ? '<span class="vlm-pill-prefix" title="Préfixe enregistré">→ ' + prefix + '</span>' : '';
     pillsHtml += '<span class="vlm-pill-wrap">'
       + '<button type="button" class="vlm-pill ' + active + '" data-pill-model="' + safeAttr + '" onclick="vaLinksSetModel(this)">' + m + ' <span class="vlm-pill-count">' + counts[m] + '</span>' + prefixLabel + '</button>'
-      + '<button type="button" class="vlm-pill-edit" data-pill-edit="' + safeAttr + '" title="Définir le préfixe par défaut" onclick="vaLinksEditPrefix(this)">✏️</button>'
+      + '<button type="button" class="vlm-pill-edit" data-pill-edit="' + safeAttr + '" title="Définir le préfixe par défaut" onclick="vaLinksEditPrefix(this)">✎</button>'
       + '</span>';
   });
   document.getElementById('vlm-pills').innerHTML = pillsHtml;
@@ -13681,10 +13681,10 @@ function vaLinksRender(){
       html += '<div class="vlm-item ' + (checked ? 'checked' : '') + '" data-link-id="' + l.id + '" data-search="' + (l.name + ' ' + l.shortcode + ' ' + l.model).toLowerCase() + '" onclick="vaLinksToggle(this, event)">'
         + '<div class="vlm-cb"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
         + '<div class="vlm-info">'
-        + '<div class="vlm-name">' + l.name + (isStar ? ' <span class="vlm-star-badge" title="Template du dossier">⭐</span>' : '') + assignedBadge + '</div>'
+        + '<div class="vlm-name">' + l.name + (isStar ? ' <span class="vlm-star-badge" title="Template du dossier">★</span>' : '') + assignedBadge + '</div>'
         + '<div class="vlm-meta">/' + l.shortcode + '</div>'
         + '</div>'
-        + '<button type="button" class="vlm-row-star ' + (isStar ? 'active' : '') + '" data-star-id="' + l.id + '" data-star-folder="' + l.model.replace(/"/g, '&quot;') + '" title="Definir comme template du dossier (Generer dupliquera celui-ci)" onclick="vaLinksToggleTemplate(event, this)">' + (isStar ? '⭐' : '☆') + '</button>'
+        + '<button type="button" class="vlm-row-star ' + (isStar ? 'active' : '') + '" data-star-id="' + l.id + '" data-star-folder="' + l.model.replace(/"/g, '&quot;') + '" title="Definir comme template du dossier (Generer dupliquera celui-ci)" onclick="vaLinksToggleTemplate(event, this)">' + (isStar ? '★' : '☆') + '</button>'
         + '<button type="button" class="vlm-row-dup" data-dup-id="' + l.id + '" title="Dupliquer ce lien dans le meme dossier" onclick="vaLinksDuplicateOne(event, this)">⎘</button>'
         + '</div>';
     });
@@ -13768,7 +13768,7 @@ function vaLinksToggleTemplate(e, btn){
     if(typeof showToast === 'function') showToast('Template retire pour ' + folder, 'info');
   } else {
     vaLinksSetTemplate(folder, linkId);
-    if(typeof showToast === 'function') showToast('⭐ Template defini pour ' + folder, 'success');
+    if(typeof showToast === 'function') showToast('★ Template defini pour ' + folder, 'success');
   }
   vaLinksRender();
 }
@@ -13874,17 +13874,17 @@ function vaLinksGenerate(){
     return;
   }
   // Utilise directement le prefix sauvegarde (ou nom du folder par defaut)
-  // L'edition se fait via ✏️ a cote de la pill -> pas de prompt ici
+  // L'edition se fait via ✎ a cote de la pill -> pas de prompt ici
   var prefix = vaLinksGetPrefix(folder);
   if(!prefix){
-    if(typeof showToast === 'function') showToast("Préfixe vide - clique ✏️ pour le definir", 'error');
+    if(typeof showToast === 'function') showToast("Préfixe vide - clique ✎ pour le definir", 'error');
     return;
   }
   if(typeof showToast === 'function') showToast('Génération avec prefixe "' + prefix + '"…', 'info');
   var fd = new FormData();
   fd.append('folder_name', folder);
   fd.append('prefix', prefix);
-  // Si l'utilisateur a defini un template (⭐), l'envoyer pour dupliquer celui-ci
+  // Si l'utilisateur a defini un template (★), l'envoyer pour dupliquer celui-ci
   var templateId = vaLinksGetTemplate(folder);
   if(templateId) fd.append('template_link_id', templateId);
   fetch(vaLinksGenEndpoint(), {method:'POST', body:fd})
@@ -14147,7 +14147,7 @@ def _render_identity_stats_html() -> str:
         entry = cfg.get(ident)
         if isinstance(entry, dict):
             enabled = entry.get("enabled", True)
-        statut = "✅" if enabled else "❌"
+        statut = "✓" if enabled else "✕"
         rows.append(
             f"<tr style='border-bottom:1px solid #333'>"
             f"<td style='padding:6px'><b>{ident}</b></td>"
@@ -14363,7 +14363,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     show_edit = "|videos|" in (file_id or "")
     actions_html = ""
     if file_id:
-        # ⭐ Banger : envoie cette video dans le salon banger-{identite}. RESERVE
+        # ★ Banger : envoie cette video dans le salon banger-{identite}. RESERVE
         # aux Reels : un rush brut ou un template n'a rien a y faire.
         banger_btn = ""
         if "|videos|" in (file_id or ""):
@@ -14383,7 +14383,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         if can_montage:
             montage_btn = (
                 f"<button class='card-edit-btn' onclick='event.stopPropagation();nxMontageOpen(\"{fid_safe}\", \"{montage_ex_safe}\")' "
-                f"title='🎬 Montage : générer des variations de ce reel' style='color:#a855f7'>"
+                f"title='▶ Montage : générer des variations de ce reel' style='color:#a855f7'>"
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg>"
                 f"</button>"
             )
@@ -14395,7 +14395,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>"
                 f"</button>"
             )
-        # 🚫 Désactiver : grise le reel pour montrer qu'il n'est plus à utiliser
+        # ⊘ Désactiver : grise le reel pour montrer qu'il n'est plus à utiliser
         _doff = bool(is_disabled)
         _dcol = "#ef4444" if _doff else "#9aa0a6"
         disable_btn = (
@@ -14630,7 +14630,7 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 
 /* Filigrane « DISPO VA » : reels marqués « Dispo pour les VA » (classe togglable en direct) */
 .vault-card-bg.va-ready::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background-repeat:repeat;background-size:150px 96px;background-image:url("__VA_WM__")}
-.vault-card-bg.va-ready::after{content:'✅ DISPO VA';position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.vault-card-bg.va-ready::after{content:'✓ DISPO VA';position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 
 /* En PAUSE (clic manuel sur PC) : re-afficher le bouton ▶ meme sous la media
    query hover (feedback visuel du seul moyen de couper le son sur PC) */
@@ -14696,7 +14696,7 @@ function _upRowThumb(file){
     const url = URL.createObjectURL(file);
     return '<img class=up-edit-thumb src="'+url+'">';
   } else if(file.type && file.type.startsWith('video/')){
-    // Aperçu RÉEL de la vidéo (1re image) -> on voit le contenu, pas juste 🎬
+    // Aperçu RÉEL de la vidéo (1re image) -> on voit le contenu, pas juste ▶
     const url = URL.createObjectURL(file);
     return '<video class=up-edit-thumb src="'+url+'" muted playsinline preload=metadata '
          + 'onloadeddata="try{this.currentTime=0.1}catch(e){}" '
@@ -14742,7 +14742,7 @@ function _upRefreshTable(input){
     row.innerHTML = '<div class=up-edit-name>' + _upRowThumb(file) + '<span>' + file.name + ' <span style="color:#888">· ' + _upHumanSize(file.size) + '</span></span></div>'
       + '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">'
       + '<span class="up-progress" data-idx="' + idx + '" style="color:#666;font-size:12px"></span>'
-      + '<button type="button" class="up-rm" data-rm="' + idx + '" title="Retirer ce fichier de la liste">🗑</button>'
+      + '<button type="button" class="up-rm" data-rm="' + idx + '" title="Retirer ce fichier de la liste">⌫</button>'
       + '</div>';
     table.appendChild(row);
   });
@@ -15916,20 +15916,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             "<button type='button' class='vault-sort-item' "
             f"onclick='purgeBanger(\"{selected}\", this)' "
             "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
-            "<span class='vault-radio'></span>🗑 Vider le salon banger</button>")
+            "<span class='vault-radio'></span>⌫ Vider le salon banger</button>")
            if is_reels else "")
         + "</div>"
         "</div>"
     )
 
     # Bouton VISIBLE "Reels Banger" (uniquement sur les pages vidéo/reels) : filtre
-    # instantané pour n'afficher que les reels marqués ⭐ (banger_marks.json).
+    # instantané pour n'afficher que les reels marqués ★ (banger_marks.json).
     banger_toggle_html = (
         "<button type='button' id='banger-toggle-btn' onclick='toggleBangerFilter(this)' "
-        "title='Afficher seulement les reels marqués ⭐ banger' "
+        "title='Afficher seulement les reels marqués ★ banger' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
-        "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Reels Banger</button>"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>★ Reels Banger</button>"
     ) if is_reels else ""
 
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
@@ -15994,7 +15994,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"{_btn_lbl}</button>"
         )
         if subdir == "templates":
-            # 📤 Partage des templates sélectionnés (cercles ⚪) à d'autres models
+            # ↗ Partage des templates sélectionnés (cercles ⚪) à d'autres models
             # — même modale que « Appliquer ce montage à… », montage compris.
             add_media_btn = (
                 "<button type='button' onclick='tplShareOpen()' "
@@ -16009,18 +16009,18 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             ) + add_media_btn
         if subdir in ("brutes", "templates"):
             # Import par lien : le champ vit DANS le formulaire d'upload
-            # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
+            # (« ⛓ OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
             _ls = _LINKIMP_STATUS
             if _ls.get("subdir") == subdir and _ls.get("state") in ("running", "done", "error"):
                 if _ls.get("state") == "running":
-                    _txt = (f"⏳ Import lien {_ls.get('done', 0)}/{_ls.get('total', 0)} "
+                    _txt = (f"◌ Import lien {_ls.get('done', 0)}/{_ls.get('total', 0)} "
                             f"pour @{_ls.get('identity', '')}…")
                     _col = "#fbbf24"
                 elif _ls.get("state") == "error":
-                    _txt = f"❌ Import : {_ls.get('err', 'erreur')}"
+                    _txt = f"✕ Import : {_ls.get('err', 'erreur')}"
                     _col = "#f87171"
                 else:
-                    _txt = (f"✅ Import : {_ls.get('ok', 0)} ajouté(s)"
+                    _txt = (f"✓ Import : {_ls.get('ok', 0)} ajouté(s)"
                             + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else ""))
                     _col = "#22c55e"
                 # data-limpstat : le JS le met à jour tout seul toutes les 3s
@@ -16053,7 +16053,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        # ✏️ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
+        # ✎ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
         f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
         f"data-market='{identity_market(selected)}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
@@ -16584,7 +16584,7 @@ def _render_cloud_captions_html() -> str:
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        # 📤 Partager = même modale que « Appliquer ce montage à… » (nxModelPicker) :
+        # ↗ Partager = même modale que « Appliquer ce montage à… » (nxModelPicker) :
         # copie la sélection ⚪ (sinon TOUTES les captions) chez les models cochées.
         "<button type='button' data-capact='share' title='Copier ces captions chez les autres models (sélection ⚪, sinon toutes)' "
         "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
@@ -16658,7 +16658,7 @@ def _render_cloud_captions_html() -> str:
         if it.get("wrapW"):
             meta += f" · ↔ {round(it['wrapW'] * 100)}%"
         # 3 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
-        # 🚫 (désactiver = sort du tirage), ⚪ (cercle de sélection -> barre 🗑).
+        # ⊘ (désactiver = sort du tirage), ⚪ (cercle de sélection -> barre ⌫).
         onoff_col = "#9aa0a6" if on else "#ef4444"
         cards.append(
             f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
@@ -16726,10 +16726,10 @@ def _render_cloud_captions_html() -> str:
 # Les 7 bibliothèques d'une identité, dans l'ordre d'affichage du Drive.
 _DRIVE_SECTIONS = (
     ("profile_pics", "🖼️ Photos de profil", IMAGE_EXTS, False),
-    ("videos", "🎬 Reels", VIDEO_EXTS, True),
+    ("videos", "▶ Reels", VIDEO_EXTS, True),
     ("posts", "📷 Posts", IMAGE_EXTS, False),
-    ("stories", "📱 Stories", IMAGE_EXTS, False),
-    ("storyctas", "🔗 Story CTA", IMAGE_EXTS, False),
+    ("stories", "▭ Stories", IMAGE_EXTS, False),
+    ("storyctas", "⛓ Story CTA", IMAGE_EXTS, False),
     ("brutes", "🎞️ Rushs bruts", VIDEO_EXTS, True),
     ("templates", "🎵 Templates montage", VIDEO_EXTS, True),
 )
@@ -16737,10 +16737,10 @@ _DRIVE_SECTIONS = (
 # Les 5 bibliothèques du Vault PRO (dossiers pro_*), même ordre d'affichage.
 _PRO_DRIVE_SECTIONS = (
     ("pro_profile_pics", "🖼️ Photos de profil", IMAGE_EXTS, False),
-    ("pro_videos", "🎬 Reels", VIDEO_EXTS, True),
+    ("pro_videos", "▶ Reels", VIDEO_EXTS, True),
     ("pro_posts", "📷 Posts", IMAGE_EXTS, False),
-    ("pro_stories", "📱 Stories", IMAGE_EXTS, False),
-    ("pro_storyctas", "🔗 Story CTA", IMAGE_EXTS, False),
+    ("pro_stories", "▭ Stories", IMAGE_EXTS, False),
+    ("pro_storyctas", "⛓ Story CTA", IMAGE_EXTS, False),
 )
 
 
@@ -16885,16 +16885,16 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             if not _gd.available():
                 _stat = "⚠️ Compte de service Google absent — uploade data/google_service_account.json (le même que la synchro Sheets Jailbreak)."
             elif _st.get("state") == "running":
-                _stat = (f"⏳ Synchro en cours : {_st.get('done', 0)}/{_st.get('total', 0)} — "
+                _stat = (f"◌ Synchro en cours : {_st.get('done', 0)}/{_st.get('total', 0)} — "
                          f"{_st.get('uploaded', 0)} envoyé(s), {_st.get('skipped', 0)} déjà à jour"
                          + (f", {_st.get('errors', 0)} erreur(s)" if _st.get('errors') else "")
                          + " · recharge l'onglet pour actualiser")
             elif _st.get("state") == "error":
-                _stat = f"❌ Dernière synchro en erreur : {_st.get('err', '?')}"
+                _stat = f"✕ Dernière synchro en erreur : {_st.get('err', '?')}"
             elif _lr:
                 import datetime as _dts
                 _when = _dts.datetime.fromtimestamp(_lr.get("ts", 0)).strftime("%d/%m %H:%M")
-                _stat = (f"✅ Dernière synchro {_when} : {_lr.get('uploaded', 0)} envoyé(s), "
+                _stat = (f"✓ Dernière synchro {_when} : {_lr.get('uploaded', 0)} envoyé(s), "
                          f"{_lr.get('skipped', 0)} déjà à jour"
                          + (f", {_lr.get('errors', 0)} erreur(s)" if _lr.get("errors") else ""))
             else:
@@ -17048,7 +17048,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "window.gdScan=function(btn){"
                 " var box=document.getElementById('gd-scan-res');"
                 " var go=document.getElementById('gd-import-go');"
-                " var t0=btn.textContent; btn.disabled=true; btn.textContent='⏳ Lecture du Drive…';"
+                " var t0=btn.textContent; btn.disabled=true; btn.textContent='◌ Lecture du Drive…';"
                 " if(box){ box.style.display='block'; box.textContent='Lecture du Drive en cours…'; }"
                 " fetch('/gdrive/import_scan',{method:'POST',credentials:'same-origin'})"
                 "  .then(function(r){return r.json();}).then(function(j){"
@@ -17110,7 +17110,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "      : ((st.imported||0)+' importe(s)');"
                 "    if(st.errors) det+=' · '+st.errors+' echec(s)';"
                 "    if(st.err) det+=' — '+String(st.err).slice(0,120);"
-                "    if(st.state==='done') det='✅ termine · '+det;"
+                "    if(st.state==='done') det='✓ termine · '+det;"
                 "    box.querySelector('[data-gdinfo]').textContent=det;"
                 "   });"
                 "  }).catch(function(){});"
@@ -17321,11 +17321,11 @@ def _render_textvault_html(cat: str) -> str:
     if cat == "bios" and selected != "_pool_":
         ai_box = (
             "<div data-txtai-box='1' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#101013;border:1px solid #232327;border-radius:12px'>"
-            "<span style='font-size:12.5px;font-weight:700'>✨ Générer avec l'IA</span>"
+            "<span style='font-size:12.5px;font-weight:700'>✧ Générer avec l'IA</span>"
             "<label style='font-size:12px;color:#c4c4cc;display:flex;align-items:center;gap:6px'>Âge "
             "<input id='txtAiAge' type='number' min='18' max='40' value='22' style='width:56px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:12.5px;box-sizing:border-box'></label>"
             "<select id='txtAiCount' style='background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;height:30px;font-size:12.5px;font-family:inherit'><option>6</option><option>10</option><option>15</option></select>"
-            "<button type='button' data-txtact='ai' class='txtv-btn' style='font-weight:700'>✨ Générer</button>"
+            "<button type='button' data-txtact='ai' class='txtv-btn' style='font-weight:700'>✧ Générer</button>"
             # Exemples FOURNIS par l'user : l'IA s'en sert comme modèle de style
             # (prioritaires sur les bios déjà en base, utile quand la model n'en
             # a encore aucune).
@@ -17362,8 +17362,8 @@ def _render_textvault_html(cat: str) -> str:
             f"<div class='txt-card-text'>{txt}</div>"
             f"<div class='txt-card-meta'><span>{date}</span>{used_html}"
             "<span style='flex:1'></span>"
-            f"<button type='button' data-txtact='copy' data-txt='{txt}' title='Copier'>📋</button>"
-            f"<button type='button' data-txtact='del' data-eid='{eid}' title='Supprimer'>🗑</button>"
+            f"<button type='button' data-txtact='copy' data-txt='{txt}' title='Copier'>⧉</button>"
+            f"<button type='button' data-txtact='del' data-eid='{eid}' title='Supprimer'>⌫</button>"
             "</div></div>"
         )
     grid = ("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px'>"
@@ -17451,7 +17451,7 @@ def _render_insta_auth_status() -> str:
         from insta_scraper import auth_status
         return auth_status()
     except Exception:
-        return "❌ Module pas chargé"
+        return "✕ Module pas chargé"
 
 
 def _render_insta_accounts_html() -> str:
@@ -17541,7 +17541,7 @@ def _render_insta_accounts_html() -> str:
                 f"<div class='ig-scraped-at' style='font-size:11px;color:#666'>Dernier scrape : {scraped_str}</div>"
                 f"{_dead_html}"
                 f"<div style='display:flex;gap:6px;margin-top:auto'>"
-                f"<button type='button' data-username='{u}' onclick='igScrapeOne(this)' style='flex:1;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>🔄 Scrape</button>"
+                f"<button type='button' data-username='{u}' onclick='igScrapeOne(this)' style='flex:1;padding:8px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0'>↻ Scrape</button>"
                 f"<button type='button' data-username='{u}' onclick='igRemoveOne(this)' style='padding:8px 12px;background:#d9534f;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin:0' data-confirm=\"Retirer @{u} de la watchlist ?\">×</button>"
                 f"</div>"
                 f"</div>"
@@ -17551,7 +17551,7 @@ def _render_insta_accounts_html() -> str:
             "<button type='button' onclick='igScrapeAll(this)' "
             "style='padding:12px 24px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:18px' "
             "data-confirm=\"Scraper tous les comptes de la watchlist ? ~10s par compte (en arriere-plan).\" "
-            "data-confirm-title=\"Lancer le scrape global\">🔄 Scraper tous les comptes</button>"
+            "data-confirm-title=\"Lancer le scrape global\">↻ Scraper tous les comptes</button>"
         )
         rows.append(
             "<button type='button' onclick='igRebuildWatchlist(this)' "
@@ -17785,7 +17785,7 @@ function igRebuildWatchlist(btn){
   fetch('/insta/rebuild_watchlist', {method:'POST'})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(d && d.ok){ alert('✅ ' + d.added + ' compte(s) recupere(s). Total : ' + d.total); location.reload(); }
+      if(d && d.ok){ alert('✓ ' + d.added + ' compte(s) recupere(s). Total : ' + d.total); location.reload(); }
       else { alert('⚠️ ' + ((d && d.error) || 'echec')); btn.disabled = false; btn.textContent = orig; }
     }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
 }
@@ -18044,11 +18044,11 @@ def _render_insta_trends_grid_html() -> str:
     if not reels and wl:
         return (
             "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:40px 20px;text-align:center'>"
-            f"<h3 style='margin:0 0 8px;color:#fff'>📥 {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
+            f"<h3 style='margin:0 0 8px;color:#fff'>↓ {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
             "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
-            "<button type='button' onclick=\"if(!confirm('Scraper tous les comptes ? Compte ~10 sec par compte (en arriere-plan).')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='⏳ ...'; fetch('/insta/scrape_all',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}).catch(e=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');});\" "
+            "<button type='button' onclick=\"if(!confirm('Scraper tous les comptes ? Compte ~10 sec par compte (en arriere-plan).')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='◌ ...'; fetch('/insta/scrape_all',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}).catch(e=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');});\" "
             "style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0'>"
-            "🔄 Scraper tous mes comptes maintenant</button></div>"
+            "↻ Scraper tous mes comptes maintenant</button></div>"
         )
     if not reels:
         return ""
@@ -18077,14 +18077,14 @@ def _render_insta_trends_grid_html() -> str:
     cards = [
         "<div id='ig-dl-bar' style='margin:14px 0 0;background:#12121a;border:1px solid #26263a;"
         "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
-        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>📥 Vidéos prêtes</span>"
+        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>↓ Vidéos prêtes</span>"
         "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
         "<div id='ig-dl-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);"
         "border-radius:5px;transition:width .4s'></div></div>"
         "<span id='ig-dl-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
         "<button type='button' id='ig-dl-now' onclick='igDownloadNow(this)' "
         "title='Télécharger maintenant toutes les vidéos manquantes (en fond)' "
-        "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>⚡ Télécharger</button>"
+        "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>↓ Télécharger</button>"
         "</div>",
         "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
     for r in reels[:1000]:
@@ -18152,7 +18152,7 @@ def _render_insta_trends_grid_html() -> str:
             "<div class='reel-dl-badge' style='position:absolute;top:10px;left:50%;transform:translateX(-50%);"
             "background:rgba(0,0,0,.62);backdrop-filter:blur(6px);color:#fbbf24;font-size:10px;font-weight:700;"
             "padding:4px 9px;border-radius:9px;z-index:3;display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap'>"
-            "⏳ pas encore téléchargé</div>")
+            "◌ pas encore téléchargé</div>")
         # Video preview au hover
         video_html = ""
         if is_video and video_url:
@@ -18228,9 +18228,9 @@ def _render_insta_trends_grid_html() -> str:
     cards.append("</div>")
     cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
                  f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
-                 f"<button type='button' onclick=\"if(!confirm('Rafraichir tous les comptes ? (en arriere-plan)')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='⏳ ...'; fetch('/insta/scrape_all',{{method:'POST'}}).then(r=>r.json()).then(d=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}}).catch(e=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');}});\" "
+                 f"<button type='button' onclick=\"if(!confirm('Rafraichir tous les comptes ? (en arriere-plan)')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='◌ ...'; fetch('/insta/scrape_all',{{method:'POST'}}).then(r=>r.json()).then(d=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}}).catch(e=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');}});\" "
                  f"style='padding:8px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0'>"
-                 f"🔄 Rafraîchir</button></div>")
+                 f"↻ Rafraîchir</button></div>")
     return "".join(cards)
 
 
@@ -18766,7 +18766,7 @@ def _render_sfs_html() -> str:
         "<div id='sfs-actions-menu' style='display:none;position:absolute;right:0;top:112%;background:#1b1b26;border:1px solid #2e2e3e;border-radius:10px;padding:6px;z-index:60;min-width:250px;box-shadow:0 10px 28px rgba(0,0,0,.55)'>"
         "<button type='button' id='sfs-mym-sync' onclick='toggleSfsActions();loadSfsPushes(true)' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#e9d5ff;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
-        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>🔄 Sync MyPuls</button>"
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>↻ Sync MyPuls</button>"
         "<button type='button' id='sfs-maj-btn' onclick='toggleSfsActions();majAllPushs()' "
         "title='Force MyPuls à rafraîchir les pushs de TOUTES les créatrices, puis resynchronise ici' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#fbbf24;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
@@ -18782,10 +18782,10 @@ def _render_sfs_html() -> str:
         "<button type='button' id='sfs-bilan-btn' onclick='toggleSfsActions();toggleSfsBilan()' "
         "title='Qui respecte la règle 1 SFS (@) tous les 2 jours — par modèle et au global' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#93c5fd;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
-        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>📊 Bilan SFS</button>"
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>▥ Bilan SFS</button>"
         "<button type='button' id='sfs-of-import' onclick='toggleSfsActions();ofHarPick()' "
         "style='display:none;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#7dd3fc;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
-        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>📥 Importer HAR OnlyFans</button>"
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>↓ Importer HAR OnlyFans</button>"
         "<div style='height:1px;background:#2e2e3e;margin:5px 8px'></div>"
         "<button type='button' id='sfs-mym-har' onclick='toggleSfsActions();mypulsHarPick()' title='Rafraîchir les cookies MyPuls depuis un HAR (DevTools → Network → Export HAR)' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#86efac;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
@@ -18808,7 +18808,7 @@ def _render_sfs_html() -> str:
         "<button type='button' onclick='loadSfsInbox(true)' "
         "style='background:#26263a;color:#cbd5e1;border:1px solid #333;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700'>↻ Actualiser</button>"
         "</div>"
-        "<div id='sfs-inbox-list' style='color:#889;font-size:12.5px;margin-top:6px'>⏳ Chargement…</div>"
+        "<div id='sfs-inbox-list' style='color:#889;font-size:12.5px;margin-top:6px'>◌ Chargement…</div>"
         "</div>"
         "</div>"
         # ---- Panneau Bilan SFS (replié par défaut, ouvert via ⚙ Actions) ----
@@ -18871,7 +18871,7 @@ def _render_sfs_html() -> str:
         "function renderSfsBilan(){"
         "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
         "  var ps=window.__sfsPushCache||[];"
-        "  if(!ps.length){ out.innerHTML='Aucune donnée — fais un 🔄 Sync MyPuls d abord (menu ⚙ Actions).'; return; }"
+        "  if(!ps.length){ out.innerHTML='Aucune donnée — fais un ↻ Sync MyPuls d abord (menu ⚙ Actions).'; return; }"
         "  var stats={};"
         "  (window.__mypulsCreators||[]).forEach(function(n){ stats[n]={n14:0,last:null}; });"
         "  var now=new Date(); var cut=new Date(now.getTime()-14*86400000);"
@@ -18923,7 +18923,7 @@ def _render_sfs_html() -> str:
         "  function done(){ if(b){ b.disabled=false; b.style.opacity='1'; b.textContent='⟳ MAJ profils'; } }"
         "  try{"
         "    var r=await fetch('/mypuls/refresh_pushs_now'); var j=await r.json();"
-        "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); done(); return; }"
+        "    if(!j.ok){ if(box) box.innerHTML='✕ '+(j.error||'Erreur'); done(); return; }"
         "    var left=150;"
         "    if(box) box.innerHTML='🟠 MAJ demandée à MyPuls pour toutes les créatrices — resync auto dans '+left+' s…';"
         "    var iv=setInterval(function(){"
@@ -18933,17 +18933,17 @@ def _render_sfs_html() -> str:
         "      if(typeof loadSfsPushes==='function') loadSfsPushes(true);"
         "      if(typeof loadSfsInbox==='function') loadSfsInbox(true);"
         "    },10000);"
-        "  }catch(e){ if(box) box.innerHTML='❌ '+e; done(); }"
+        "  }catch(e){ if(box) box.innerHTML='✕ '+e; done(); }"
         "}"
         "async function loadSfsInbox(force){"
         "  var box=document.getElementById('sfs-inbox-list'); if(!box) return;"
-        "  if(!window.__sfsInbox){ box.innerHTML='⏳ Synchro des messages entrants…'; }"
+        "  if(!window.__sfsInbox){ box.innerHTML='◌ Synchro des messages entrants…'; }"
         "  try{"
         "    var r=await fetch('/sfssetup/sfs_inbox'+(force?'?refresh=1':'')); var j=await r.json();"
-        "    if(!j.ok){ var w1=document.getElementById('sfs-inbox-wrap'); if(w1)w1.style.display=''; box.innerHTML='❌ '+(j.error||'API indisponible'); return; }"
+        "    if(!j.ok){ var w1=document.getElementById('sfs-inbox-wrap'); if(w1)w1.style.display=''; box.innerHTML='✕ '+(j.error||'API indisponible'); return; }"
         "    window.__sfsInbox=j.items||[];"
         "    renderSfsInbox();"
-        "  }catch(e){ var w2=document.getElementById('sfs-inbox-wrap'); if(w2)w2.style.display=''; box.innerHTML='❌ '+e; }"
+        "  }catch(e){ var w2=document.getElementById('sfs-inbox-wrap'); if(w2)w2.style.display=''; box.innerHTML='✕ '+e; }"
         "}"
         "function renderSfsInbox(){"
         "  var box=document.getElementById('sfs-inbox-list'); if(!box) return;"
@@ -19078,45 +19078,45 @@ def _render_sfs_html() -> str:
         "}"
         "async function loadSfsPushes(force){"
         "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
-        "  if(force){ box.style.display=''; box.innerHTML='⏳ Synchro MyPuls…'; }"
+        "  if(force){ box.style.display=''; box.innerHTML='◌ Synchro MyPuls…'; }"
         "  let subs=-1;"
         "  if(force){ try{ const rs=await fetch('/sfssetup/fetch_mypuls_subs'); const js=await rs.json(); if(js && js.ok) subs=js.applied||0; }catch(e){} }"
         "  try{"
         "    const r=await fetch('/sfssetup/mypuls_pushes'+(force?'?refresh=1':'')); const j=await r.json();"
-        "    if(!j.ok){ if(force){ box.innerHTML='❌ '+(j.error||'Erreur'); } return; }"
+        "    if(!j.ok){ if(force){ box.innerHTML='✕ '+(j.error||'Erreur'); } return; }"
         "    const ps=j.pushs||[];"
         "    window.__sfsPushCache=ps;"
         "    try{ sessionStorage.setItem('sfsPushCache', JSON.stringify(ps)); }catch(e){}"
         "    renderSfsPushes();"
         # succès : pas de phrase de recap, la ligne de statut se replie
         "    if(force && !ps.length && j.note){ box.style.display=''; box.innerHTML=j.note; }"
-        "  }catch(err){ if(force){ box.style.display=''; box.innerHTML='❌ '+err; } }"
+        "  }catch(err){ if(force){ box.style.display=''; box.innerHTML='✕ '+err; } }"
         "}"
         "function mypulsHarPick(){ var el=document.getElementById('sfs-mym-har-file'); if(el) el.click(); }"
         "async function importMypulsHar(input){"
         "  if(!input||!input.files||!input.files[0]) return;"
-        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='⏳ Import du HAR MyPuls (cookies)…'; }"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='◌ Import du HAR MyPuls (cookies)…'; }"
         "  var fd=new FormData(); fd.append('har', input.files[0]);"
         "  try{"
         "    var r=await fetch('/mypuls/import_har',{method:'POST',body:fd}); var j=await r.json();"
-        "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); input.value=''; return; }"
-        "    if(box) box.innerHTML='✅ Cookies MyPuls à jour ('+(j.email||'?')+').'+(j.note||'')+' Synchro en cours…';"
+        "    if(!j.ok){ if(box) box.innerHTML='✕ '+(j.error||'Erreur'); input.value=''; return; }"
+        "    if(box) box.innerHTML='✓ Cookies MyPuls à jour ('+(j.email||'?')+').'+(j.note||'')+' Synchro en cours…';"
         "    setTimeout(function(){ loadSfsPushes(true); }, 600);"
-        "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
+        "  }catch(e){ if(box) box.innerHTML='✕ '+e; }"
         "  input.value='';"
         "}"
         "function ofHarPick(){ var el=document.getElementById('sfs-of-har'); if(el) el.click(); }"
         "async function importOfHar(input){"
         "  if(!input || !input.files || !input.files[0]) return;"
-        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='⏳ Import du HAR OnlyFans…'; }"
+        "  var box=document.getElementById('sfs-pushs-list'); if(box){ box.style.display=''; box.innerHTML='◌ Import du HAR OnlyFans…'; }"
         "  var fd=new FormData(); fd.append('har', input.files[0]);"
         "  try{"
         "    var r=await fetch('/sfssetup/import_of_har',{method:'POST',body:fd}); var j=await r.json();"
-        "    if(!j.ok){ if(box) box.innerHTML='❌ '+(j.error||'Erreur'); return; }"
+        "    if(!j.ok){ if(box) box.innerHTML='✕ '+(j.error||'Erreur'); return; }"
         "    window.__ofPushData=j.data||window.__ofPushData;"
         "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "    if(box){ box.style.display=''; box.innerHTML='✅ Import OK : '+j.items+' message(s) importé(s).'; }"
-        "  }catch(e){ if(box) box.innerHTML='❌ '+e; }"
+        "    if(box){ box.style.display=''; box.innerHTML='✓ Import OK : '+j.items+' message(s) importé(s).'; }"
+        "  }catch(e){ if(box) box.innerHTML='✕ '+e; }"
         "}"
         "function renderOfPushes(){"
         "  var data=window.__ofPushData||{items:[],counters:{}};"
@@ -19141,7 +19141,7 @@ def _render_sfs_html() -> str:
         "    (function(D,L){ bar.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, L[0]); }; })(d,list);"
         "    bars.appendChild(bar);"
         "  });"
-        # Jours à compteur sans détail : juste le badge « 📅 N programmés ».
+        # Jours à compteur sans détail : juste le badge « ▤ N programmés ».
         # (Avant, les messages SANS date étaient dupliqués sous CHAQUE jour à
         # compteur — le même message semblait programmé partout — et 'placed'
         # comptait chaque doublon. Ils sont maintenant listés une seule fois
@@ -19565,7 +19565,7 @@ function openSfsModal(date){{
       existingHtml += '<div onclick="editSfs(' + x.id + ')" title="Cliquer pour modifier" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer">'
         + '<div style="display:flex;align-items:center;gap:10px">' + identityAvatarHtml(x.identity, 32)
         + '<div><b>' + x.identity + '</b> × @' + x.partner + ' <span style="color:#888">à ' + x.time + '</span></div></div>'
-        + '<div>' + statusBadge + ' <span style="color:#3b82f6;font-size:11px;font-weight:700">✏️ Modifier</span></div>'
+        + '<div>' + statusBadge + ' <span style="color:#3b82f6;font-size:11px;font-weight:700">✎ Modifier</span></div>'
         + '</div>';
     }});
     existingHtml += '</div>';
@@ -19598,7 +19598,7 @@ function editSfs(id){{
     var st=f.querySelector('[name=status]'); if(st) st.value = item.status || 'scheduled';
     var no=f.querySelector('[name=notes]'); if(no) no.value = item.notes || '';
   }}
-  document.getElementById('sfs-modal-title').innerHTML = '✏️ Modifier le SFS — ' + date;
+  document.getElementById('sfs-modal-title').innerHTML = '✎ Modifier le SFS — ' + date;
   var sb=document.getElementById('sfs-modal-submit'); if(sb) sb.textContent='Enregistrer';
   var ex=document.getElementById('sfs-modal-existing'); if(ex && ex.scrollIntoView) ex.scrollIntoView({{block:'start'}});
 }}
@@ -19624,7 +19624,7 @@ window.addEventListener('DOMContentLoaded', function(){{
 <div id='sfs-modal' class='confirm-overlay' onclick='closeSfsModal()'>
   <div class='confirm-box' style='max-width:520px;width:90%' onclick='event.stopPropagation()'>
     <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>
-      <h3 id='sfs-modal-title' style='margin:0'>📅 SFS</h3>
+      <h3 id='sfs-modal-title' style='margin:0'>▤ SFS</h3>
       <button onclick='closeSfsModal()' style='background:none;border:0;color:#888;font-size:20px;cursor:pointer;margin:0;padding:0'>×</button>
     </div>
     <div id='sfs-modal-existing'></div>
@@ -19656,7 +19656,7 @@ window.addEventListener('DOMContentLoaded', function(){{
             <option value='scheduled'>✓ Scheduled</option>
             <option value='to_program'>⚙ To program</option>
             <option value='to_verify'>🔍 À vérifier</option>
-            <option value='done'>✅ Done</option>
+            <option value='done'>✓ Done</option>
           </select>
         </div>
         <div></div>
@@ -19673,7 +19673,7 @@ window.addEventListener('DOMContentLoaded', function(){{
         </label>
         <label class='proof-zone' style='display:flex;flex-direction:column;align-items:center;gap:5px;border:1.5px dashed #3a3a3a;border-radius:12px;padding:16px 10px;cursor:pointer;background:#0f0f0f;text-align:center;transition:border-color .15s,background .15s' onmouseover='this.style.borderColor="#22c55e";this.style.background="#0d1a12"' onmouseout='if(!this.classList.contains("filled")){{this.style.borderColor="#3a3a3a";this.style.background="#0f0f0f"}}'>
           <svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' x2='12' y1='3' y2='15'/></svg>
-          <span style='font-size:12px;color:#ddd;font-weight:600'>✅ Preuve APRÈS</span>
+          <span style='font-size:12px;color:#ddd;font-weight:600'>✓ Preuve APRÈS</span>
           <span class='proof-hint' style='font-size:10px;color:#666'>post publié — clique pour choisir</span>
           <img class='proof-preview' alt='' style='display:none;width:100%;max-height:110px;object-fit:cover;border-radius:8px;margin-top:6px'>
           <input type='file' name='proof_after' accept='image/*' style='display:none' onchange='proofPreview(this)'>
@@ -19706,7 +19706,7 @@ window.addEventListener('DOMContentLoaded', function(){{
 
     # === LISTE DES SFS (filtré par platform aussi) ===
     if items:
-        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Tous les SFS</h4>")
+        rows.append("<div class='box'><h4 style='margin-top:0'>⧉ Tous les SFS</h4>")
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
             "<tr style='background:#1a1a1a'>"
@@ -19722,7 +19722,7 @@ window.addEventListener('DOMContentLoaded', function(){{
         )
         for it in items:
             done = it.get("done", False)
-            check = "✅" if done else "⏳"
+            check = "✓" if done else "◌"
             color_style = "opacity:.5;text-decoration:line-through" if done else ""
             status = it.get("status", "scheduled")
             status_badge = (
@@ -19893,7 +19893,7 @@ def _render_depenses_html() -> str:
         # Row 4 : Toggle recurrent (label clickable)
         f"<label class='rec-toggle'>"
         f"<input type='checkbox' name='recurring' id='exp-recurring' {init_rec_checked}>"
-        f"<span class='rec-text'>🔄 Dépense mensuelle récurrente</span>"
+        f"<span class='rec-text'>↻ Dépense mensuelle récurrente</span>"
         f"</label>"
         # Submit
         f"<button type='submit' class='exp-submit'>Ajouter la dépense</button>"
@@ -20007,7 +20007,7 @@ def _render_depenses_html() -> str:
         # Récurrent / mois
         "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px 18px'>"
         f"<div style='font-size:24px;font-weight:800;color:#a855f7;letter-spacing:-.02em;line-height:1.1'>-{monthly_rec:.2f} €</div>"
-        "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:5px;font-weight:600'>🔄 Récurrent / mois</div>"
+        "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-top:5px;font-weight:600'>↻ Récurrent / mois</div>"
         f"<div style='font-size:11px;color:#666;margin-top:2px'>≈ {monthly_rec * 12:.0f} € / an</div>"
         "</div>"
         "</div>"
@@ -20031,7 +20031,7 @@ def _render_depenses_html() -> str:
         items_sorted = sorted(items, key=lambda x: x.get("date", ""), reverse=True)
         running_total_eur = 0.0  # total toujours en EUR (base)
         for it in items_sorted:
-            rec_icon = "🔄" if it.get("recurring") else ""
+            rec_icon = "↻" if it.get("recurring") else ""
             try:
                 amount_eur = float(it.get("amount", 0) or 0)
             except (TypeError, ValueError):
@@ -20750,7 +20750,7 @@ def _render_mypuls_section_html() -> str:
     try:
         import mypuls
     except Exception as e:
-        return f"<div class='box' style='border:1px solid rgba(239,68,68,.3)'><p style='color:#ef4444;margin:0;font-size:13px'>❌ Module mypuls indispo : {e}</p></div>"
+        return f"<div class='box' style='border:1px solid rgba(239,68,68,.3)'><p style='color:#ef4444;margin:0;font-size:13px'>✕ Module mypuls indispo : {e}</p></div>"
 
     from flask import request as flask_request
     import datetime as _dt
@@ -20865,7 +20865,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
             "Sync MyPuls — Erreur"
             "</h3>"
-            f"<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;margin-bottom:14px'>❌ {res.get('error', '?')}</div>"
+            f"<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;margin-bottom:14px'>✕ {res.get('error', '?')}</div>"
             "<form method='POST' action='/mypuls/clear_cookies' style='margin:0'>"
             "<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer'>Reset cookies</button>"
             "</form>"
@@ -21182,7 +21182,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"{info_html}"
             f"<button onclick=\"mpToggleEdit({_json_escape(c['name'])})\" "
             f"style='background:transparent;border:1px solid #2a2a2a;color:#888;padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer'>"
-            f"✏️</button>"
+            f"✎</button>"
             f"</div>"
         )
         # Construire le bloc edit inline (caché par défaut)
@@ -21240,7 +21240,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             + (
                 f"<form method='POST' action='/mypuls/chatter/delete_crypto' style='margin:0'>"
                 f"<input type='hidden' name='name' value='{name_esc}'>"
-                f"<button type='submit' data-confirm='Cette action est irréversible.' data-confirm-title='Supprimer le screenshot ?' style='width:100%;background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px;border-radius:6px;font-size:11px;cursor:pointer'>🗑 Supprimer le screenshot</button>"
+                f"<button type='submit' data-confirm='Cette action est irréversible.' data-confirm-title='Supprimer le screenshot ?' style='width:100%;background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:7px;border-radius:6px;font-size:11px;cursor:pointer'>⌫ Supprimer le screenshot</button>"
                 f"</form>"
                 if has_screenshot else ""
             )
@@ -21644,11 +21644,11 @@ async function mpUploadCryptoShot(input, rowIdx){
   try{
     var r = await fetch('/mypuls/chatter/upload_crypto', {method:'POST', body:fd});
     var j = await r.json();
-    if(!j.ok){ if(typeof showToast==='function') showToast('❌ '+(j.error||'Upload échoué'),'error'); else alert('❌ '+(j.error||'?')); return; }
+    if(!j.ok){ if(typeof showToast==='function') showToast('✕ '+(j.error||'Upload échoué'),'error'); else alert('✕ '+(j.error||'?')); return; }
     var box = document.getElementById('mp-shot-'+rowIdx);
     if(box){ box.innerHTML = '<div style="position:relative"><img src="/mypuls/chatter/crypto/'+encodeURIComponent(name)+'?t='+Date.now()+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000"></div>'; }
-    if(typeof showToast==='function') showToast('✅ Screenshot enregistré','success');
-  }catch(e){ if(typeof showToast==='function') showToast('❌ '+e,'error'); else alert('Erreur: '+e); }
+    if(typeof showToast==='function') showToast('✓ Screenshot enregistré','success');
+  }catch(e){ if(typeof showToast==='function') showToast('✕ '+e,'error'); else alert('Erreur: '+e); }
   finally{ if(lbl) lbl.style.opacity='1'; input.value=''; }
 }
 function mpCopyAddr(addr, btn){
@@ -21764,7 +21764,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     keepalive_info = (
         f"<div style='font-size:11px;color:#666;margin-top:10px;padding:8px 12px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.15);border-radius:6px'>"
-        f"🔄 <strong>Auto-refresh actif</strong> : le bot ping MyPuls toutes les 12h pour prolonger ton cookie REMEMBERME automatiquement — tant que tu changes pas ton mot de passe MyPuls, ça reste connecté pour toujours. {refresh_status}"
+        f"↻ <strong>Auto-refresh actif</strong> : le bot ping MyPuls toutes les 12h pour prolonger ton cookie REMEMBERME automatiquement — tant que tu changes pas ton mot de passe MyPuls, ça reste connecté pour toujours. {refresh_status}"
         f"</div>"
     )
 
@@ -21840,7 +21840,7 @@ def _render_revenus_html() -> str:
     if not items:
         rows.append("<p style='color:#888'>Aucun revenu enregistré.</p>")
     else:
-        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Historique</h4>")
+        rows.append("<div class='box'><h4 style='margin-top:0'>⧉ Historique</h4>")
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
             "<tr style='background:#1a1a1a'>"
@@ -22305,7 +22305,7 @@ def _render_paievas_html() -> str:
     if not items:
         rows.append("<p style='color:#888'>Aucun paiement enregistré.</p>")
     else:
-        rows.append("<div class='box'><h4 style='margin-top:0'>📋 Historique</h4>")
+        rows.append("<div class='box'><h4 style='margin-top:0'>⧉ Historique</h4>")
         rows.append(
             "<table style='width:100%;border-collapse:collapse'>"
             "<tr style='background:#1a1a1a'>"
@@ -22398,7 +22398,7 @@ def _render_biolinks_html() -> str:
             f"</div>"
             f"<div style='font-size:13px;color:#aaa;height:36px;overflow:hidden;margin-bottom:12px'>{bio_text or '<span style=color:#666>(Pas de bio)</span>'}</div>"
             f"<div style='display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#aaa;padding:8px 0;border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;margin-bottom:12px'>"
-            f"<span>🔗 <b>{nb_links}</b> lien(s)</span>"
+            f"<span>⛓ <b>{nb_links}</b> lien(s)</span>"
             f"<a href='{public_url}' target='_blank' style='color:#3b82f6;text-decoration:none;font-weight:600'>Voir la page →</a>"
             f"</div>"
             f"<button onclick='openBioEditor(\"{ident}\")' style='width:100%;padding:10px;background:#3b82f6;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin:0'>Éditer la page</button>"
@@ -22417,7 +22417,7 @@ def _render_biolinks_html() -> str:
     <form method='POST' action='/biolinks/save_meta' id='bio-meta-form'>
       <input type='hidden' name='identity' id='bio-identity'>
       <label>Nom affiché</label>
-      <input type='text' name='display_name' id='bio-display-name' maxlength='60' placeholder='Amelia ✨'>
+      <input type='text' name='display_name' id='bio-display-name' maxlength='60' placeholder='Amelia ✧'>
       <label>Bio (description)</label>
       <textarea name='bio' id='bio-text' maxlength='300' rows='3' placeholder='Modèle OnlyFans · Paris · DM ouvert'></textarea>
       <label>Thème de la page publique</label>
@@ -22434,7 +22434,7 @@ def _render_biolinks_html() -> str:
       <input type='hidden' name='identity' id='bio-add-identity'>
       <h4 style='margin:0 0 8px;font-size:14px'>➕ Ajouter un lien</h4>
       <div style='display:grid;grid-template-columns:60px 1fr;gap:8px'>
-        <div><label>Icône</label><input type='text' name='icon' id='bio-link-icon' maxlength='5' placeholder='🔗' value='🔗'></div>
+        <div><label>Icône</label><input type='text' name='icon' id='bio-link-icon' maxlength='5' placeholder='⛓' value='⛓'></div>
         <div><label>Titre</label><input type='text' name='title' id='bio-link-title' maxlength='100' placeholder='OnlyFans' required></div>
       </div>
       <label>URL</label>
@@ -22470,7 +22470,7 @@ function renderBioLinks(links){
   var html = '';
   links.forEach(function(l){
     html += '<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px">'
-      + '<div style="font-size:18px">' + (l.icon || '🔗') + '</div>'
+      + '<div style="font-size:18px">' + (l.icon || '⛓') + '</div>'
       + '<div style="flex:1;min-width:0">'
       + '<div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + l.title + '</div>'
       + '<div style="font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + l.url + '</div>'
@@ -22489,7 +22489,7 @@ function removeBioLink(ident, linkId){
       .then(function(r){ return r.json(); })
       .then(function(data){
         if(data.success){
-          showToast('✅ Lien supprimé', 'success');
+          showToast('✓ Lien supprimé', 'success');
           window.__bioData.links = (window.__bioData.links || []).filter(function(l){ return l.id !== linkId; });
           renderBioLinks(window.__bioData.links);
         }
@@ -22552,7 +22552,7 @@ def _render_bio_public_page(identity: str) -> str:
     for l in links:
         url = l.get("url", "#")
         title = l.get("title", "")
-        icon = l.get("icon", "🔗")
+        icon = l.get("icon", "⛓")
         links_html += (
             f"<a href='{url}' target='_blank' rel='noopener' style='display:flex;align-items:center;gap:14px;padding:16px 20px;background:{link_bg};border:1px solid {link_border};border-radius:14px;color:{text};text-decoration:none;font-weight:600;transition:all .15s;font-size:15px' "
             f"onmouseover='this.style.background=\"{link_hover}\";this.style.transform=\"translateY(-2px)\"' "
@@ -22651,7 +22651,7 @@ def _render_linkscale_html() -> str:
     if not configured:
         return (
             "<div style='max-width:880px'>"
-            "<h2 style='margin:0 0 6px;font-size:20px'>🔗 Linkscale</h2>"
+            "<h2 style='margin:0 0 6px;font-size:20px'>⛓ Linkscale</h2>"
             "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
             "Gere tes liens Linkscale (bio links, direct links) directement depuis le dashboard.</p>"
             + key_status + key_form
@@ -22671,7 +22671,7 @@ def _render_linkscale_html() -> str:
     header = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
-        "<h2 style='margin:0 0 4px;font-size:20px;display:flex;align-items:center;gap:10px'>🔗 Linkscale "
+        "<h2 style='margin:0 0 4px;font-size:20px;display:flex;align-items:center;gap:10px'>⛓ Linkscale "
         "<span style='font-size:11px;background:#3b82f6;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>BIO LINKS</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Bio links + direct links - duplique pour copier dans le meme dossier.</p>"
         "</div>"
@@ -22726,7 +22726,7 @@ def _render_linkscale_html() -> str:
         mini_dash_html = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
             f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
-            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>📊</div>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px'>▥</div>"
             f"<div><div style='color:#fff;font-weight:800;font-size:15px'>Stats du dossier {fname_safe}</div>"
             f"<div style='font-size:11px;color:#666'>Clicks comptabilises sur les links de ce dossier</div></div>"
             "</div>"
@@ -22758,7 +22758,7 @@ def _render_linkscale_html() -> str:
         if not all_links:
             list_html = (
                 "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
-                "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
+                "<div style='font-size:32px;margin-bottom:8px'>⛓</div>"
                 "<div style='color:#888;font-size:13px;margin-bottom:6px'>Aucun link dans ce dossier</div>"
                 "<div style='color:#555;font-size:11px'>Click sur \"+ Creer un link\" pour ajouter dans ce dossier</div>"
                 "</div>"
@@ -22865,7 +22865,7 @@ def _render_linkscale_html() -> str:
         empty_msg = "Aucun link pour le moment - clique sur un dossier ci-dessus"
         list_html = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
-            "<div style='font-size:32px;margin-bottom:8px'>🔗</div>"
+            "<div style='font-size:32px;margin-bottom:8px'>⛓</div>"
             f"<div style='color:#888;font-size:13px;margin-bottom:6px'>{empty_msg}</div>"
             "<div style='color:#555;font-size:11px'>Selectionne un dossier (emma, lola, amelia...) pour voir ses links</div>"
             "</div>"
@@ -22907,7 +22907,7 @@ def _render_linkscale_html() -> str:
                     f"<span style='font-size:9px;color:{status_color};font-weight:700;letter-spacing:.5px'>{status_label}</span>"
                     f"<button type='button' onclick=\"lsDuplicate('{lid}', this)\" style='background:transparent;border:1px solid #2a3a5a;color:#3b82f6;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600' title='Dupliquer dans le meme dossier'>⎘</button>"
                     f"<button type='button' onclick=\"lsToggle('{lid}', {toggle_val}, this)\" style='background:transparent;border:1px solid #444;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='{toggle_title}'>{toggle_icon}</button>"
-                    f"<button type='button' onclick=\"lsDelete('{lid}', this)\" style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer'>🗑</button>"
+                    f"<button type='button' onclick=\"lsDelete('{lid}', this)\" style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer'>⌫</button>"
                     f"</div>"
                 )
             list_html += "</div>"
@@ -22928,7 +22928,7 @@ async function lsEditNote(id, el){
     if(j.ok){
       if(typeof showToast==='function') showToast('✓ Note enregistree', 'success', 2000);
       setTimeout(()=>location.reload(), 400);
-    } else if(typeof showToast==='function') showToast('❌ ' + (j.error||'?'), 'error');
+    } else if(typeof showToast==='function') showToast('✕ ' + (j.error||'?'), 'error');
   } catch(e){}
 }
 function lsMenu(id, btn){
@@ -22944,7 +22944,7 @@ function lsMenu(id, btn){
       '<span style="color:#3b82f6">⎘</span> Dupliquer' +
     '</button>' +
     '<button type="button" onclick="lsDelete(\\'' + id + '\\', this); document.querySelectorAll(\\'.ls-action-menu\\').forEach(m=>m.remove())" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:0;color:#ef4444;cursor:pointer;padding:8px 10px;border-radius:6px;font-size:13px;text-align:left">' +
-      '<span>🗑</span> Supprimer' +
+      '<span>⌫</span> Supprimer' +
     '</button>';
   document.body.appendChild(menu);
   // Fermer au click ailleurs
@@ -22969,7 +22969,7 @@ async function lsDuplicate(id, btn){
       setTimeout(()=>location.reload(), 700);
     } else {
       btn.textContent = '⎘'; btn.disabled = false;
-      if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error');
+      if(typeof showToast==='function') showToast('✕ ' + (j.error || '?'), 'error');
     }
   } catch(e){ btn.textContent = '⎘'; btn.disabled = false; }
 }
@@ -22979,12 +22979,12 @@ async function lsToggle(id, enabled, btn){
     const r = await fetch('/linkscale/toggle', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok){ setTimeout(()=>location.reload(), 400); }
-    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+    else if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
   } catch(e){}
 }
 async function lsDelete(id, btn){
   mplConfirmAction({
-    icon: '🗑',
+    icon: '⌫',
     title: 'Supprimer ce link ?',
     subtitle: 'La suppression est definitive sur Linkscale.',
     confirmLabel: 'Supprimer',
@@ -22997,7 +22997,7 @@ async function lsDelete(id, btn){
         const row = btn.closest('div[style*="background:#0f0f0f"]');
         if(row){ row.style.transition='all .25s'; row.style.opacity='0'; row.style.transform='translateX(20px)'; }
         setTimeout(()=>location.reload(), 300);
-      } else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+      } else if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
     }
   });
 }
@@ -23015,7 +23015,7 @@ function lsOpenCreateModal(){
   card.innerHTML =
     '<div style="padding:20px 24px;border-bottom:1px solid #232323">' +
       '<div style="display:flex;align-items:center;gap:10px">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px">🔗</div>' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,.15);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:16px">⛓</div>' +
         '<div><div style="color:#fff;font-weight:700;font-size:16px">Creer un link Linkscale</div>' +
         '<div style="color:#888;font-size:12px;margin-top:2px">Direct link ou bio link, ranged dans un dossier</div></div>' +
       '</div>' +
@@ -23068,10 +23068,10 @@ function lsOpenCreateModal(){
         close();
         setTimeout(function(){ location.reload(); }, 600);
       } else {
-        if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error');
+        if(typeof showToast==='function') showToast('✕ ' + (j.error || '?'), 'error');
       }
     } catch(e){
-      if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+      if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
     }
   };
 }
@@ -23133,7 +23133,7 @@ def _render_gms_html() -> str:
         if not res.get("ok"):
             links_html = (
                 f"<div style='padding:18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px'>"
-                f"❌ Erreur API : {res.get('error', '?')}</div>"
+                f"✕ Erreur API : {res.get('error', '?')}</div>"
             )
             tabs_html = ""
         else:
@@ -23215,7 +23215,7 @@ def _render_gms_html() -> str:
                         f"<div style='font-size:11px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>→ {url}</div>"
                         f"</div>"
                         f"<div style='display:flex;gap:6px;align-items:center'>"
-                        f"<button onclick=\"copyToClipboard('/{short}', this)\" style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer' title='Copier le shortcode'>📋</button>"
+                        f"<button onclick=\"copyToClipboard('/{short}', this)\" style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer' title='Copier le shortcode'>⧉</button>"
                         f"<form method='POST' action='/gms/toggle' style='margin:0;display:inline'>"
                         f"<input type='hidden' name='link_id' value='{lid}'>"
                         f"<input type='hidden' name='action' value='{toggle_action}'>"
@@ -23466,7 +23466,7 @@ def _render_geelark_html() -> str:
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
         "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
-        "📱 GeeLark"
+        "▭ GeeLark"
         "<span style='font-size:11px;background:#a855f7;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>CLOUD PHONES</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Push reels/stories/CTAs sur les phones cloud GeeLark - mode sequentiel pour eviter les rate-limits.</p>"
         "</div>"
@@ -23505,7 +23505,7 @@ def _render_geelark_html() -> str:
                 f"{reels} reels · {stories} stories · {ctas} CTAs &nbsp;·&nbsp; last : <code style='color:#666'>{last_run}</code></div>"
                 f"</div>"
                 f"<button type='button' onclick=\"glDeleteSchedule('{sid}', this)\" "
-                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer'>🗑</button>"
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer'>⌫</button>"
                 f"</div>"
             )
         schedules_block = (
@@ -23549,7 +23549,7 @@ def _render_geelark_html() -> str:
                 f"Par phone allumee : {reels} reels · {stories} stories · {ctas} CTAs</div>"
                 f"</div>"
                 f"<button type='button' onclick=\"glDeleteWatcher('{wid}', this)\" "
-                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Stop watcher'>🗑</button>"
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Stop watcher'>⌫</button>"
                 f"</div>"
             )
         watchers_block = (
@@ -23638,7 +23638,7 @@ def _render_geelark_html() -> str:
         history_block = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px'>"
             f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px'>"
-            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(34,197,94,.15);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:16px'>📊</div>"
+            f"<div style='width:36px;height:36px;border-radius:10px;background:rgba(34,197,94,.15);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:16px'>▥</div>"
             f"<div><div style='font-weight:800;color:#fff;font-size:15px'>Historique des runs</div>"
             f"<div style='font-size:11px;color:#666'>20 dernieres executions</div></div>"
             f"</div>"
@@ -23648,7 +23648,7 @@ def _render_geelark_html() -> str:
     else:
         history_block = (
             "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:24px;text-align:center'>"
-            "<div style='font-size:32px;margin-bottom:8px'>📊</div>"
+            "<div style='font-size:32px;margin-bottom:8px'>▥</div>"
             "<div style='color:#888;font-size:13px'>Aucun run dans l historique pour l instant</div>"
             "</div>"
         )
@@ -23709,7 +23709,7 @@ function glOpenCreateModal(){
   card.innerHTML =
     '<div style="padding:20px 24px;border-bottom:1px solid #232323">' +
       '<div style="display:flex;align-items:center;gap:10px">' +
-        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px">📱</div>' +
+        '<div style="width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:16px">▭</div>' +
         '<div>' +
           '<div style="color:#fff;font-weight:700;font-size:16px">Créer un push GeeLark</div>' +
           '<div style="color:#888;font-size:12px;margin-top:2px">Quotidien a heure de Paris</div>' +
@@ -23817,10 +23817,10 @@ function glOpenCreateModal(){
         close();
         setTimeout(() => location.reload(), 600);
       } else {
-        if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error', 3000);
+        if(typeof showToast==='function') showToast('✕ ' + (j.error || '?'), 'error', 3000);
       }
     } catch(e){
-      if(typeof showToast==='function') showToast('❌ Erreur réseau', 'error');
+      if(typeof showToast==='function') showToast('✕ Erreur réseau', 'error');
     }
   }
   function close(){
@@ -23830,7 +23830,7 @@ function glOpenCreateModal(){
 }
 async function glDeleteSchedule(id, btn){
   mplConfirmAction({
-    icon: '🗑',
+    icon: '⌫',
     title: 'Supprimer ce push programme ?',
     subtitle: 'Le push quotidien sera annule. Tu peux le recreer via /geelarkpush sur Discord.',
     confirmLabel: 'Supprimer',
@@ -23921,7 +23921,7 @@ async function glDeleteWatcher(id, btn){
         recap_badges = (
             (f"<span style='font-size:10px;background:rgba(34,197,94,.15);color:#22c55e;padding:2px 7px;border-radius:5px;font-weight:700'>{n_active} actif{'s' if n_active > 1 else ''}</span>" if n_active else "")
             + (f"<span style='font-size:10px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 7px;border-radius:5px;font-weight:700'>{n_banned} banni{'s' if n_banned > 1 else ''}</span>" if n_banned else "")
-            + (f"<span style='font-size:10px;background:rgba(59,130,246,.15);color:#3b82f6;padding:2px 7px;border-radius:5px;font-weight:700'>{n_posted_24h} 24h ⚡</span>" if n_posted_24h else "")
+            + (f"<span style='font-size:10px;background:rgba(59,130,246,.15);color:#3b82f6;padding:2px 7px;border-radius:5px;font-weight:700'>{n_posted_24h} 24h ↓</span>" if n_posted_24h else "")
             + (f"<span style='font-size:10px;background:rgba(160,160,160,.12);color:#888;padding:2px 7px;border-radius:5px;font-weight:700'>{n_unscraped} —</span>" if n_unscraped else "")
         )
         ext_rows_html.append(
@@ -24225,18 +24225,18 @@ async function glDeleteWatcher(id, btn){
         + f"<div style='margin-top:30px;padding:20px;background:#16181f;border:1px solid #2a2a2a;border-radius:14px'>"
         f"<div style='display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px'>"
         f"<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>"
-        f"📋 Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
+        f"⧉ Comptes externes <span style='font-size:11px;background:#a855f7;color:#fff;padding:2px 8px;border-radius:6px;font-weight:700'>{len(ext_accounts)}</span>"
         f"</h3>"
         f"<p style='margin:0;flex:1;color:#888;font-size:12px;min-width:200px'>Click un VA dans la sidebar pour voir ses comptes Insta.</p>"
-        # Widget refresh : dernier MAJ + bouton 🔄
+        # Widget refresh : dernier MAJ + bouton ↻
         + (lambda st: (
             f"<div id='insta-refresh-widget' style='display:flex;align-items:center;gap:8px;background:rgba(34,197,94,.08);padding:6px 12px;border-radius:8px;border:1px solid rgba(34,197,94,.2)'>"
             f"<span id='insta-refresh-status' style='font-size:11px;color:#22c55e;font-weight:700'>{_render_refresh_status_text(st)}</span>"
             f"<button type='button' onclick='instaRefreshNow()' id='insta-refresh-btn' title='Forcer un refresh complet maintenant' "
-            f"style='background:transparent;border:1px solid rgba(34,197,94,.4);color:#22c55e;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;transition:all .12s'>🔄</button>"
+            f"style='background:transparent;border:1px solid rgba(34,197,94,.4);color:#22c55e;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;transition:all .12s'>↻</button>"
             f"</div>"
         ))(_load_refresh_state())
-        + f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>📋 Bulk upload</button>"
+        + f"<button type='button' onclick='extOpenBulkModal()' style='background:#a855f7;color:#fff;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700'>⧉ Bulk upload</button>"
         f"</div>"
         # === Layout sidebar + detail (comme page VAs) ===
         f"<div class='ext-sb-layout'>"
@@ -24258,7 +24258,7 @@ async function glDeleteWatcher(id, btn){
         + f"</select>"
         f"</div>"
         f"<div class='ext-sb-list'>"
-        + ("".join(sidebar_sections) if sidebar_sections else "<p style='color:#666;text-align:center;padding:20px 0;font-size:12px'>Aucun compte externe.<br>Click 📋 Bulk upload.</p>")
+        + ("".join(sidebar_sections) if sidebar_sections else "<p style='color:#666;text-align:center;padding:20px 0;font-size:12px'>Aucun compte externe.<br>Click ⧉ Bulk upload.</p>")
         + f"</div>"
         f"</div>"
         # Detail panel a droite
@@ -24278,7 +24278,7 @@ async function glDeleteWatcher(id, btn){
         "<div id='ext-bulk-modal' onclick='extCloseBulkModal(event)' style='display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px'>"
         "<div onclick='event.stopPropagation()' style='background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;width:100%;max-width:520px;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.6)'>"
         "<div style='display:flex;justify-content:space-between;align-items:center'>"
-        "<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>📋 Bulk upload</h3>"
+        "<h3 style='margin:0;font-size:16px;display:flex;align-items:center;gap:8px'>⧉ Bulk upload</h3>"
         "<button onclick='extCloseBulkModal()' style='background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1'>×</button>"
         "</div>"
         "<p style='margin:0;color:#888;font-size:12px'>Colle ta liste de @handles Instagram, <b>1 par ligne</b> (ou separes par virgule). Les @ et espaces sont auto-nettoyes. Les doublons sont skippes.</p>"
@@ -24329,10 +24329,10 @@ async function glDeleteWatcher(id, btn){
         "function instaRefreshNow(){"
         "  var btn=document.getElementById('insta-refresh-btn');var st=document.getElementById('insta-refresh-status');"
         "  if(btn){btn.disabled=true;btn.style.opacity='.5';btn.style.cursor='not-allowed';}"
-        "  if(st)st.textContent='⏳ Lancement…';"
+        "  if(st)st.textContent='◌ Lancement…';"
         "  fetch('/insta/refresh_now',{method:'POST'}).then(function(r){return r.json();}).then(function(d){"
         "    if(d&&d.ok){"
-        "      if(typeof showToast==='function')showToast('🔄 Refresh lance ('+d.handles+' comptes)','success',2500);"
+        "      if(typeof showToast==='function')showToast('↻ Refresh lance ('+d.handles+' comptes)','success',2500);"
         "      instaRefreshPoll();"
         "    } else {"
         "      if(typeof showToast==='function')showToast('Erreur: '+((d&&d.error)||'?'),'error');"
@@ -24348,13 +24348,13 @@ async function glDeleteWatcher(id, btn){
         "    var st=d.state||{};var el=document.getElementById('insta-refresh-status');var btn=document.getElementById('insta-refresh-btn');"
         "    if(st.status==='in_progress'){"
         "      var elapsed=Math.floor(Date.now()/1000)-(st.in_progress_since||0);"
-        "      if(el)el.textContent='⏳ Refresh en cours ('+elapsed+'s / '+(st.in_progress_total||0)+' comptes)';"
+        "      if(el)el.textContent='◌ Refresh en cours ('+elapsed+'s / '+(st.in_progress_total||0)+' comptes)';"
         "      if(btn){btn.disabled=true;btn.style.opacity='.5';}"
         "      _instaPollTimer=setTimeout(instaRefreshPoll,2000);"
         "    } else {"
         "      var s=st.last_summary||{};"
         "      var msg='✓ MAJ a l\\'instant';"
-        "      if(s.ok!==undefined)msg+=' · '+s.ok+'✓ '+(s.banned||0)+'🚫 ('+s.duration_s+'s)';"
+        "      if(s.ok!==undefined)msg+=' · '+s.ok+'✓ '+(s.banned||0)+'⊘ ('+s.duration_s+'s)';"
         "      if(el)el.textContent=msg;"
         "      if(btn){btn.disabled=false;btn.style.opacity='';btn.style.cursor='pointer';}"
         "      /* Refresh forced de toutes les rows visibles (cache server est now fresh) */"
@@ -24508,7 +24508,7 @@ async function glDeleteWatcher(id, btn){
         "  overlay.onclick=function(e){if(e.target===overlay)close();};"
         "  var card=document.createElement('div');"
         "  card.style.cssText='background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;max-width:380px;width:100%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.6);text-align:center;animation:extPopIn .18s ease';"
-        "  card.innerHTML='<div style=\"font-size:36px;margin-bottom:10px\">'+ (opts.icon||'🗑') +'</div>'"
+        "  card.innerHTML='<div style=\"font-size:36px;margin-bottom:10px\">'+ (opts.icon||'⌫') +'</div>'"
         "    +'<h3 style=\"margin:0 0 6px;font-size:16px;color:#fff;font-weight:700\">'+(opts.title||'Confirmer ?')+'</h3>'"
         "    +'<p style=\"margin:0 0 18px;color:#888;font-size:13px;line-height:1.5\">'+(opts.subtitle||'')+'</p>'"
         "    +'<div style=\"display:flex;gap:10px;justify-content:center\">'"
@@ -24525,7 +24525,7 @@ async function glDeleteWatcher(id, btn){
         "if(!document.getElementById('_ec_kf')){var st=document.createElement('style');st.id='_ec_kf';st.textContent='@keyframes extFadeIn{from{opacity:0}to{opacity:1}}@keyframes extPopIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}';document.head.appendChild(st);}"
         "function extRemove(h){"
         "  extShowConfirm({"
-        "    icon:'🗑',"
+        "    icon:'⌫',"
         "    title:'Supprimer @'+h+' ?',"
         "    subtitle:'Le compte sera retire de la liste. Tu peux le re-ajouter via Bulk upload.',"
         "    confirmLabel:'Supprimer',"
@@ -24643,7 +24643,7 @@ def _render_jailbreak_html() -> str:
         f"<button type='button' id='jb-scrape-now-btn' onclick='jbScrapeNow(this)' "
         f"title='Lance un scrape immédiat de TOUS les comptes, bannis compris (auto : 2x/jour, 00h/12h)' "
         f"style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(34,197,94,.3);display:inline-flex;align-items:center;gap:7px'>"
-        f"<span id='jb-scrape-now-ico'>🔄</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
+        f"<span id='jb-scrape-now-ico'>↻</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
         f"<div style='text-align:center' id='jb-kpi-comptes'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
         f"<div style='text-align:center' id='jb-kpi-idents'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
@@ -25309,7 +25309,7 @@ def _render_jailbreak_html() -> str:
                     _n_mois = _sm["mois"]
                     scrape_pill += (
                         f"<span class='jb-acc-pill ok' title='Comptes actifs (non bannis, avec données)'>"
-                        f"✅ {max(0, _n_actif)} actifs</span>"
+                        f"✓ {max(0, _n_actif)} actifs</span>"
                     )
                     if _n_ban:
                         scrape_pill += (
@@ -25332,7 +25332,7 @@ def _render_jailbreak_html() -> str:
                     scrape_pill += (
                         f"<span class='jb-acc-pill {_mcls}' title=\"Oublis du mois : 1 par JOUR où au moins un "
                         f"compte est resté muet plus de 48 h (10 comptes le même jour = 1 seul oubli)\">"
-                        f"📅 {_n_mois} oubli{'s' if _n_mois > 1 else ''} ce mois</span>"
+                        f"▤ {_n_mois} oubli{'s' if _n_mois > 1 else ''} ce mois</span>"
                     )
 
                 detail_cards_html.append(
@@ -25354,7 +25354,7 @@ def _render_jailbreak_html() -> str:
                     f"<button type='button' class='jb-scrape-one' "
                     f"onclick=\"jbScrapeScope(this,'{ident_safe}','{va_attr}')\" "
                     f"title='Scraper UNIQUEMENT les comptes de ce VA (bannis compris)'>"
-                    f"🔄 Scraper ce bloc</button>"
+                    f"↻ Scraper ce bloc</button>"
                     f"<button type='button' class='jb-detail-head-edit' "
                     f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
                     f"data-va-discord='{html_escape(discord_username)}' "
@@ -25781,7 +25781,7 @@ def _render_jailbreak_html() -> str:
         "  if(sbtn && sbtn.disabled) return false;"
         "  var sOld = sbtn ? sbtn.textContent : '';"
         "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
-        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '◌…'; }"
         "  var fd = new FormData(form);"
         "  fd.append('ajax', '1');"
         "  fetch(form.action, {method:'POST', body: fd})"
@@ -25876,7 +25876,7 @@ def _render_jailbreak_html() -> str:
         "  if(sbtn && sbtn.disabled) return false;"
         "  var sOld = sbtn ? sbtn.textContent : '';"
         "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
-        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '◌…'; }"
         "  var fd = new FormData(form);"
         "  fd.append('ajax', '1');"
         "  fetch('/jailbreak/bulk_add_accounts', {method:'POST', body: fd})"
@@ -25958,14 +25958,14 @@ def _render_jailbreak_html() -> str:
         "  var btn = form.querySelector('button[type=submit]');"
         "  if(btn && btn.disabled) return false;"
         "  var old = btn ? btn.textContent : '';"
-        "  if(btn){ btn.disabled = true; btn.textContent = '⏳…'; }"
+        "  if(btn){ btn.disabled = true; btn.textContent = '◌…'; }"
         "  var idEl = document.getElementById('jb-edit-va-identity');"
         "  var ident = ((idEl && idEl.value) || '').trim().toLowerCase();"
         "  fetch(form.action, {method:'POST', body:new FormData(form)})"
         "   .then(_jbJsonOrAuth)"
         "   .then(function(j){"
         "     if(btn){ btn.disabled=false; btn.textContent=old; }"
-        "     if(!j.ok){ if(typeof showToast==='function') showToast('❌ ' + (j.error||'échec'), 'error'); return; }"
+        "     if(!j.ok){ if(typeof showToast==='function') showToast('✕ ' + (j.error||'échec'), 'error'); return; }"
         "     jbCloseEditVaModal();"
         "     if(j.discord && !j.discord_found){"
         "       if(typeof showToast==='function') showToast('VA enregistré, mais le pseudo Discord est introuvable sur ton serveur — pas de photo', 'error', 3400);"
@@ -26082,7 +26082,7 @@ def _render_jailbreak_html() -> str:
         "  if(sbtn && sbtn.disabled) return false;"
         "  var sOld = sbtn ? sbtn.textContent : '';"
         "  var _re = function(){ if(sbtn){ sbtn.disabled = false; sbtn.textContent = sOld; } };"
-        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '⏳…'; }"
+        "  if(sbtn){ sbtn.disabled = true; sbtn.textContent = '◌…'; }"
         "  var fd = new FormData(form);"
         "  fd.append('ajax', '1');"
         "  fetch('/jailbreak/add_va', {method:'POST', body: fd})"
@@ -26498,7 +26498,7 @@ def _render_jailbreak_html() -> str:
         "  if(lbl) lbl.textContent='Scrape en cours…';"
         "  fetch('/insta/refresh_now', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){"
         "    if(d && d.ok){"
-        "      if(typeof showToast === 'function') showToast('🔄 Scrape lancé sur ' + (d.handles||'?') + ' comptes — recharge dans ~1 min', 'success', 4000);"
+        "      if(typeof showToast === 'function') showToast('↻ Scrape lancé sur ' + (d.handles||'?') + ' comptes — recharge dans ~1 min', 'success', 4000);"
         "      jbPollScrape(btn, ico, lbl);"
         "    } else {"
         "      var msg = (d && d.error) ? d.error : 'Erreur';"
@@ -26513,19 +26513,19 @@ def _render_jailbreak_html() -> str:
         # Affiche/alimente la barre de progression du scrape (done/total du state serveur)
         "function jbScrapeScope(btn, identity, va){"
         "  if(btn && btn.disabled) return;"
-        "  if(btn){ btn.disabled=true; btn.textContent='⏳ Scrape…'; }"
+        "  if(btn){ btn.disabled=true; btn.textContent='◌ Scrape…'; }"
         "  var fd=new FormData(); fd.append('identity', identity); fd.append('va', va);"
         "  fetch('/insta/refresh_now', {method:'POST', body:fd})"
         "   .then(function(r){ return r.json(); }).then(function(d){"
         "    if(d && d.ok){"
-        "      if(typeof showToast==='function') showToast('🔄 Scrape de ' + (d.scope||va) + ' — ' + (d.handles||0) + ' compte(s)', 'success', 4000);"
+        "      if(typeof showToast==='function') showToast('↻ Scrape de ' + (d.scope||va) + ' — ' + (d.handles||0) + ' compte(s)', 'success', 4000);"
         "      jbPollScrape(null, null, null);"
         "    } else {"
-        "      if(btn){ btn.disabled=false; btn.textContent='🔄 Scraper ce bloc'; }"
+        "      if(btn){ btn.disabled=false; btn.textContent='↻ Scraper ce bloc'; }"
         "      if(typeof showToast==='function') showToast('⚠ ' + ((d&&d.error)||'Erreur'), 'error', 3500);"
         "    }"
         "   }).catch(function(e){"
-        "    if(btn){ btn.disabled=false; btn.textContent='🔄 Scraper ce bloc'; }"
+        "    if(btn){ btn.disabled=false; btn.textContent='↻ Scraper ce bloc'; }"
         "    if(typeof showToast==='function') showToast('⚠ Réseau : ' + e, 'error', 3500);"
         "   });"
         "}"
@@ -26544,7 +26544,7 @@ def _render_jailbreak_html() -> str:
         "  if(txt) txt.textContent = don + ' / ' + tot + '  (' + pct + '%)';"
         "  if(sub){"
         "    var ok=(st&&st.in_progress_ok)||0, er=(st&&st.in_progress_err)||0, bn=(st&&st.in_progress_banned)||0;"
-        "    var html = '✅ ' + ok + ' ok · ⚠ ' + er + ' échecs · ⛔ ' + bn + ' bannis'"
+        "    var html = '✓ ' + ok + ' ok · ⚠ ' + er + ' échecs · ⛔ ' + bn + ' bannis'"
         "      + ' — les photos et les vues apparaissent au fur et à mesure.';"
         "    var fl = (st && st.in_progress_fails) || [];"
         "    if(fl.length){"
@@ -26569,7 +26569,7 @@ def _render_jailbreak_html() -> str:
         # Récap final : POURQUOI ça a échoué, regroupé par motif
         "  var sm = (st && st.last_summary) ? st.last_summary : null;"
         "  if(sub && sm){"
-        "    var h = '✅ ' + (sm.ok||0) + ' ok · ⚠ ' + (sm.err||0) + ' échecs · ⛔ ' + (sm.banned||0)"
+        "    var h = '✓ ' + (sm.ok||0) + ' ok · ⚠ ' + (sm.err||0) + ' échecs · ⛔ ' + (sm.banned||0)"
         "          + ' bannis · ' + (sm.duration_s||0) + 's';"
         "    var rs = sm.fail_reasons || [];"
         "    if(rs.length){"
@@ -26677,7 +26677,7 @@ def _render_textpool_html() -> str:
         pass
     ai_bios_html = (
         "<div style='background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:12px;margin-bottom:10px'>"
-        "<div style='font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px'>✨ Générer par IA (selon la model et son âge)</div>"
+        "<div style='font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px'>✧ Générer par IA (selon la model et son âge)</div>"
         "<div style='display:flex;gap:6px;margin-bottom:8px'>"
         f"<select id='tp-ai-ident' style='flex:1;padding:8px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px'>{ident_opts}</select>"
         "<input id='tp-ai-age' type='number' min='18' max='35' value='21' title='Âge de la model' "
@@ -26685,7 +26685,7 @@ def _render_textpool_html() -> str:
         "<select id='tp-ai-count' title='Nombre de bios' style='width:60px;padding:8px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:7px;font-size:12px'>"
         "<option>6</option><option>10</option><option>15</option></select>"
         "</div>"
-        "<button onclick='tpAiBios(this)' style='width:100%;background:#22c55e;color:#04241d;border:0;padding:9px;border-radius:7px;font-size:12.5px;font-weight:800;cursor:pointer'>✨ Générer les bios</button>"
+        "<button onclick='tpAiBios(this)' style='width:100%;background:#22c55e;color:#04241d;border:0;padding:9px;border-radius:7px;font-size:12.5px;font-weight:800;cursor:pointer'>✧ Générer les bios</button>"
         "</div>"
     )
     columns_html = ""
@@ -26711,11 +26711,11 @@ def _render_textpool_html() -> str:
                 f"<div data-id='{eid}' data-cat='{cat}' style='display:flex;align-items:center;gap:6px;background:#0a0a0a;border:1px solid #1f1f1f;border-radius:8px;padding:9px 11px;margin-bottom:6px;opacity:{opacity}'>"
                 f"<div style='flex:1;min-width:0;color:#ddd;font-size:13px;word-break:break-word'>{used_badge}{text}</div>"
                 f"<button onclick=\"tpCopy(this, {json.dumps(e.get('text', ''))})\" "
-                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Copier'>📋</button>"
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Copier'>⧉</button>"
                 f"<button onclick=\"tpToggleUsed('{cat}', '{eid}', this)\" "
                 f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Marquer utilise / dispo'>{'↺' if used_by else '✓'}</button>"
                 f"<button onclick=\"tpDelete('{cat}', '{eid}', this)\" "
-                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Supprimer'>🗑</button>"
+                f"style='background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:3px 6px' title='Supprimer'>⌫</button>"
                 f"</div>"
             )
         if not items_html:
@@ -26749,7 +26749,7 @@ def _render_textpool_html() -> str:
             f"</div>"
             f'<button onclick=\'tpBulk("{cat}")\' '
             f"style='background:transparent;border:1px dashed #444;color:#888;padding:6px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;margin-bottom:10px'>"
-            f"📋 Bulk paste (1 par ligne)</button>"
+            f"⧉ Bulk paste (1 par ligne)</button>"
             # Génération IA (bios uniquement)
             + (ai_bios_html if cat == "bios" else "")
             # Items
@@ -26777,7 +26777,7 @@ async function tpAiBios(btn){
     const r = await fetch('/textpool/ai_bios', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok){
-      if(typeof showToast==='function') showToast('✨ ' + j.added + ' bios générées pour ' + (ident||'la model'), 'success');
+      if(typeof showToast==='function') showToast('✧ ' + j.added + ' bios générées pour ' + (ident||'la model'), 'success');
       tpRefresh();
     } else {
       if(typeof showToast==='function') showToast(j.error || 'Erreur IA', 'error', 8000);
@@ -26803,10 +26803,10 @@ async function tpAdd(cat){
       if(typeof showToast==='function') showToast('⚠ Deja dans la liste', 'warning', 2000);
       inp.value = '';
     } else {
-      if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+      if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
     }
   } catch(e){
-    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
   }
 }
 async function tpBulk(cat){
@@ -26891,7 +26891,7 @@ def _render_onboarding_html() -> str:
         f"<div style='display:flex;gap:18px;align-items:center'>"
         f"<button onclick='obImportDiscord()' "
         f"style='background:#5865f2;color:#fff;border:0;padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px'>"
-        f"🔄 Importer depuis Discord</button>"
+        f"↻ Importer depuis Discord</button>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#fff'>{s['step_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>ETAPES</div></div>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#22c55e'>{s['media_count']}</div><div style='font-size:10px;color:#888;letter-spacing:1px'>MEDIAS</div></div>"
         f"<div style='text-align:center'><div style='font-size:24px;font-weight:800;color:#3b82f6'>{s['total_size_mb']} MB</div><div style='font-size:10px;color:#888;letter-spacing:1px'>POIDS</div></div>"
@@ -26903,7 +26903,7 @@ def _render_onboarding_html() -> str:
     cards_html = ""
     for step in steps:
         sid = step["id"]
-        icon = step.get("icon", "📅")
+        icon = step.get("icon", "▤")
         title = step.get("title", "?").replace("<", "&lt;").replace(">", "&gt;")
         desc = step.get("description", "").replace("<", "&lt;").replace(">", "&gt;")
         media_list = step.get("media", [])
@@ -26916,9 +26916,9 @@ def _render_onboarding_html() -> str:
             name = (m.get("name") or "?").replace("<", "&lt;").replace(">", "&gt;")
             size_mb = (m.get("size", 0) or 0) / (1024 * 1024)
             size_label = f"{size_mb:.1f} MB" if size_mb >= 0.05 else f"{int(m.get('size', 0) / 1024)} KB"
-            ok_badge = "✅" if size_mb <= 10 else ("❌" if size_mb > 10 else "")
+            ok_badge = "✓" if size_mb <= 10 else ("✕" if size_mb > 10 else "")
             if kind == "link":
-                ok_badge = "🔗"
+                ok_badge = "⛓"
                 size_label = "lien"
             media_url = f"/onboarding/media/{sid}/{mid}" if kind != "link" else (m.get("url", ""))
 
@@ -26959,7 +26959,7 @@ def _render_onboarding_html() -> str:
                     preview = (
                         f"<a href='{url}' target='_blank' rel='noopener' "
                         f"style='display:flex;align-items:center;gap:10px;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;border-radius:8px;color:#3b82f6;text-decoration:none;word-break:break-all'>"
-                        f"🔗 {url}</a>"
+                        f"⛓ {url}</a>"
                     )
             elif kind == "note":
                 # Texte d un embed Discord ou note rich
@@ -26984,7 +26984,7 @@ def _render_onboarding_html() -> str:
                 f"<div style='font-weight:700;color:#fff;font-size:13px;flex:1;word-break:break-word'>{name}</div>"
                 f"<span style='font-size:10px;color:#666;background:#1a1a1a;padding:3px 8px;border-radius:5px;letter-spacing:.5px;font-family:monospace'>{size_label}</span>"
                 f"<button onclick=\"obDeleteMedia('{sid}','{mid}',this)\" "
-                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer ce media'>🗑</button>"
+                f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px' title='Supprimer ce media'>⌫</button>"
                 f"</div>"
                 f"{preview}"
                 f"</div>"
@@ -27011,7 +27011,7 @@ def _render_onboarding_html() -> str:
             f"onclick=\"obEditDesc('{sid}', this)\" title='Cliquer pour modifier'>{desc_html}</div>"
             f"</div>"
             f"<button onclick=\"obDeleteStep('{sid}')\" "
-            f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer l étape'>🗑</button>"
+            f"style='background:transparent;border:1px solid #3a2020;color:#888;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px' title='Supprimer l étape'>⌫</button>"
             f"</div>"
             # Media list
             + media_html
@@ -27022,10 +27022,10 @@ def _render_onboarding_html() -> str:
             f"📎 Ajouter fichier(s)</label>"
             f"<button onclick=\"obImportMessage('{sid}')\" "
             f"style='padding:10px 14px;background:#0f0f0f;border:1.5px dashed #5865f2;border-radius:10px;color:#5865f2;font-size:12px;font-weight:700;cursor:pointer'>"
-            f"📥 Importer un message Discord</button>"
+            f"↓ Importer un message Discord</button>"
             f"<button onclick=\"obAddLink('{sid}')\" "
             f"style='padding:10px 14px;background:#0f0f0f;border:1.5px dashed #444;border-radius:10px;color:#aaa;font-size:12px;font-weight:700;cursor:pointer'>"
-            f"🔗 Coller un lien</button>"
+            f"⛓ Coller un lien</button>"
             f"</div>"
             f"</div>"
         )
@@ -27044,21 +27044,21 @@ async function obUploadFiles(sid, input){
   if(!input.files || !input.files.length) return;
   for(const f of input.files){
     if(f.size > 50*1024*1024){
-      if(typeof showToast==='function') showToast('❌ '+f.name+' > 50 MB', 'error');
+      if(typeof showToast==='function') showToast('✕ '+f.name+' > 50 MB', 'error');
       continue;
     }
     const fd = new FormData();
     fd.set('step_id', sid);
     fd.set('file', f, f.name);
     try {
-      if(typeof showToast==='function') showToast('⏳ Upload '+f.name+'...', 'info', 1500);
+      if(typeof showToast==='function') showToast('◌ Upload '+f.name+'...', 'info', 1500);
       const r = await fetch('/onboarding/media/upload', {method:'POST', body:fd});
       const j = await r.json();
       if(!j.ok){
-        if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+        if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
       }
     } catch(e){
-      if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+      if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
     }
   }
   obRefresh();
@@ -27073,15 +27073,15 @@ async function obAddLink(sid){
     const r = await fetch('/onboarding/media/link', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok){ obRefresh(); }
-    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+    else if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
   } catch(e){
-    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
   }
 }
 async function obImportMessage(sid){
   const url = prompt('Colle l URL du message Discord :\\n(clic droit sur le message > Copier le lien du message)\\n\\nExemple : https://discord.com/channels/123/456/789');
   if(!url) return;
-  if(typeof showToast==='function') showToast('⏳ Telechargement des attachments...', 'info', 3000);
+  if(typeof showToast==='function') showToast('◌ Telechargement des attachments...', 'info', 3000);
   const fd = new FormData(); fd.set('step_id', sid); fd.set('url', url);
   try {
     const r = await fetch('/onboarding/import_message', {method:'POST', body:fd});
@@ -27093,10 +27093,10 @@ async function obImportMessage(sid){
       if(j.errors && j.errors.length) console.warn('Erreurs:', j.errors);
       obRefresh();
     } else {
-      if(typeof showToast==='function') showToast('❌ ' + (j.error || '?'), 'error', 6000);
+      if(typeof showToast==='function') showToast('✕ ' + (j.error || '?'), 'error', 6000);
     }
   } catch(e){
-    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
   }
 }
 async function obDeleteMedia(sid, mid, btn){
@@ -27115,14 +27115,14 @@ async function obDeleteMedia(sid, mid, btn){
 async function obAddStep(){
   const title = prompt('Titre de la nouvelle etape :', 'JOUR X — ...');
   if(!title) return;
-  const icon = prompt('Icone (emoji) :', '📅') || '📅';
+  const icon = prompt('Icone (emoji) :', '▤') || '▤';
   const fd = new FormData();
   fd.set('title', title); fd.set('icon', icon);
   try {
     const r = await fetch('/onboarding/step/add', {method:'POST', body:fd});
     const j = await r.json();
     if(j.ok) obRefresh();
-    else if(typeof showToast==='function') showToast('❌ '+(j.error||'?'), 'error');
+    else if(typeof showToast==='function') showToast('✕ '+(j.error||'?'), 'error');
   } catch(e){}
 }
 async function obDeleteStep(sid){
@@ -27144,7 +27144,7 @@ async function obEditIcon(sid, el){
   const cur = el.textContent.trim();
   const v = prompt('Nouvelle icone (emoji) :', cur);
   if(v === null) return;
-  await obUpdateStep(sid, {icon: v.trim() || '📅'});
+  await obUpdateStep(sid, {icon: v.trim() || '▤'});
 }
 async function obEditDesc(sid, el){
   const cur = el.textContent.trim();
@@ -27174,7 +27174,7 @@ async function obRefresh(){
 async function obImportDiscord(){
   if(!confirm('Importer les textes du bot Discord (cogs/onboarding.py) et les fichiers MP4 stockes dans data/onboarding_media/ ?\\n\\nLes textes des etapes seront mis a jour avec les versions du bot.')) return;
   try {
-    if(typeof showToast==='function') showToast('⏳ Import en cours...', 'info', 2000);
+    if(typeof showToast==='function') showToast('◌ Import en cours...', 'info', 2000);
     const r = await fetch('/onboarding/import_discord', {method:'POST'});
     const j = await r.json();
     if(j.ok){
@@ -27185,10 +27185,10 @@ async function obImportDiscord(){
       }
       obRefresh();
     } else {
-      if(typeof showToast==='function') showToast('❌ Import echoue', 'error');
+      if(typeof showToast==='function') showToast('✕ Import echoue', 'error');
     }
   } catch(e){
-    if(typeof showToast==='function') showToast('❌ Erreur reseau', 'error');
+    if(typeof showToast==='function') showToast('✕ Erreur reseau', 'error');
   }
 }
 </script>
@@ -27249,7 +27249,7 @@ def _render_veille_feed_html() -> str:
             "<div style='margin-left:auto;color:#888;font-size:12px'><span id='veille-selected-count'>0</span> sélectionné(s)</div>"
             "<button onclick='sendSelectedVeille()' id='veille-send-selected-btn' disabled "
             "style='background:#0088cc;color:#fff;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;opacity:0.4'>"
-            "📤 Envoyer la sélection</button>"
+            "↗ Envoyer la sélection</button>"
             "</div>"
         )
     else:
@@ -27283,7 +27283,7 @@ def _render_veille_feed_html() -> str:
             "<div style='display:inline-flex;align-items:center;gap:8px;margin-bottom:14px'>"
             "<select id='veille-date-picker' onchange='veilleJumpToDate(this.value)' "
             "style='background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:500'>"
-            f"<option value=''>📅 Aller à une date…</option>{opts_html}"
+            f"<option value=''>▤ Aller à une date…</option>{opts_html}"
             "</select>"
             "</div>"
         )
@@ -27292,7 +27292,7 @@ def _render_veille_feed_html() -> str:
     # Barre « Sur Telegram » (même look que « Vidéos prêtes » de Trends), UNE
     # SEULE fois en tête de page (compte GLOBAL, ids uniques) : combien de
     # reels non envoyés sont déjà pré-chauffés (file_id) -> leur « Envoyer »
-    # est instantané. ⚡ Précharger = tout chauffer maintenant, en fond.
+    # est instantané. ↓ Précharger = tout chauffer maintenant, en fond.
     warm_bar_html = (
         "<div id='vl-warm-bar' style='margin:0 0 14px;background:#12121a;border:1px solid #26263a;"
         "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
@@ -27304,7 +27304,7 @@ def _render_veille_feed_html() -> str:
         "<button type='button' id='vl-warm-now' onclick='vlWarmNow(this)' "
         "title='Uploader maintenant sur Telegram toutes les vidéos non envoyées (en fond) : l&#39;envoi du soir sera instantané' "
         "style='background:#3467FF;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;"
-        "font-size:11.5px;font-weight:700;white-space:nowrap'>⚡ Précharger</button>"
+        "font-size:11.5px;font-weight:700;white-space:nowrap'>↓ Précharger</button>"
         "</div>")
     sections = [bulk_bar, warm_bar_html, date_picker_html]
     for day in all_days_sorted:
@@ -27315,11 +27315,11 @@ def _render_veille_feed_html() -> str:
             today = _dt_v.date.today()
             short = f"{d.day:02d}/{d.month:02d}"
             if d == today:
-                day_label = f"📅 {short} — Aujourd'hui"
+                day_label = f"▤ {short} — Aujourd'hui"
             elif d == today - _dt_v.timedelta(days=1):
-                day_label = f"📅 {short} — Hier"
+                day_label = f"▤ {short} — Hier"
             else:
-                day_label = f"📅 {short}/{d.year}"
+                day_label = f"▤ {short}/{d.year}"
         except Exception:
             day_label = day
 
@@ -27392,7 +27392,7 @@ def _render_veille_feed_html() -> str:
                 ribbon = ("<div class='vl-ready-badge' style='position:absolute;top:11px;left:46px;background:#22c55e;"
                           "color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;z-index:6;letter-spacing:.3px;"
                           "box-shadow:0 2px 10px rgba(34,197,94,.5)'>✓ PRÊT</div>")
-            # ⚡ vidéo déjà stockée sur Telegram (pré-chauffée en journée) : le
+            # ↓ vidéo déjà stockée sur Telegram (pré-chauffée en journée) : le
             # « Envoyer » de ce reel partira en file_id, sans téléchargement
             if not sent:
                 try:
@@ -27401,7 +27401,7 @@ def _render_veille_feed_html() -> str:
                     if bool(r.get("tg_file_id")) or bool(_mw and _vtw.fileid_get(_mw.group(1))):
                         ribbon += ("<div class='vl-warm-badge' title='Vidéo déjà stockée sur Telegram — envoi instantané' "
                                    "style='position:absolute;top:38px;left:46px;background:rgba(250,204,21,.95);color:#0d0d18;"
-                                   "font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6'>⚡</div>")
+                                   "font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;z-index:6'>↓</div>")
                 except Exception:
                     pass
             # Interrupteur PRÊT sur la carte (aussi sur les envoyés : re-préparer
@@ -27644,7 +27644,7 @@ async function veillePickModels(onOk){
   });
 }
 
-// ===== ⭐ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
+// ===== ★ Banger : envoie un reel en VIDEO vers le salon banger-{identite} =====
 window.__bangerIdentities = null;
 async function _loadBangerIdentities(){
   if(window.__bangerIdentities) return window.__bangerIdentities;
@@ -27665,7 +27665,7 @@ async function starReelMenu(btn, rid){
   // position:fixed + append au body -> JAMAIS rogne par l'overflow:hidden des cartes
   menu.style.cssText = 'position:fixed;z-index:9999;background:#161616;border:1px solid #3a3a3a;border-radius:10px;padding:6px;min-width:180px;max-height:300px;overflow:auto;box-shadow:0 12px 34px rgba(0,0,0,.7)';
   const title = document.createElement('div');
-  title.textContent = '⭐ Meilleur reel → banger';
+  title.textContent = '★ Meilleur reel → banger';
   title.style.cssText = 'font-size:11px;color:#888;padding:5px 8px;font-weight:600';
   menu.appendChild(title);
   function cleanup(){
@@ -27716,7 +27716,7 @@ function veilleMarkSent(rid){
   card.classList.remove('is-picked');
   const cb=card.querySelector('.veille-cb'); if(cb) cb.checked=false;
   // l envoi CONSOMME le brouillon « prêt » (clear_prepared cote serveur) et le
-  // ⚡ n a plus de sens : la carte reflete l etat reel sans recharger
+  // ↓ n a plus de sens : la carte reflete l etat reel sans recharger
   const rcb=card.querySelector('.vl-rdy-cb'); if(rcb) rcb.checked=false;
   if(typeof veilleReadyVisual==='function') veilleReadyVisual(card, false);
   const wb=card.querySelector('.vl-warm-badge'); if(wb) wb.remove();
@@ -27740,25 +27740,25 @@ async function veilleVerifySent(rid){
 }
 async function sendReelToBanger(rid, identity, btn){
   const orig = btn.innerHTML;
-  btn.innerHTML = '⏳';
+  btn.innerHTML = '◌';
   btn.disabled = true;
   try {
     const fd = new FormData(); fd.set('reel_id', rid); fd.set('identity', identity);
     const r = await fetch('/veille/send_banger', { method:'POST', body: fd });
     const j = await vjson(r);
     if(j.ok){
-      btn.innerHTML = '✅';
+      btn.innerHTML = '✓';
       btn.title = 'Envoyé dans ' + (j.channel || ('banger-' + identity));
     } else {
       btn.innerHTML = orig;
-      alert('❌ Pas envoyé : ' + (j.error || '?'));
+      alert('✕ Pas envoyé : ' + (j.error || '?'));
     }
   } catch(e){
     btn.innerHTML = orig;
     alert('Erreur réseau : ' + e);
   } finally {
     btn.disabled = false;
-    setTimeout(function(){ if(btn.innerHTML === '✅') btn.innerHTML = orig; }, 3000);
+    setTimeout(function(){ if(btn.innerHTML === '✓') btn.innerHTML = orig; }, 3000);
   }
 }
 function sendSelectedVeille(){
@@ -27785,7 +27785,7 @@ async function veilleDoSend(){
   pb.style.cssText='margin:0 0 16px;padding:16px 18px;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:13px;box-shadow:0 8px 24px rgba(0,0,0,.45)';
   pb.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">'
-    +'<span id="vp-label" style="font-size:14px;font-weight:800;color:#fff">📤 Préparation…</span>'
+    +'<span id="vp-label" style="font-size:14px;font-weight:800;color:#fff">↗ Préparation…</span>'
     +'<span id="vp-eta" style="font-size:15px;font-weight:800;color:#3b82f6;font-family:ui-monospace,monospace">⏱️ —</span></div>'
     +'<div id="vp-dots" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>'
     +'<div style="position:relative;height:12px;background:#1b2330;border-radius:7px;overflow:hidden;border:1px solid #283341;margin-bottom:9px">'
@@ -27811,8 +27811,8 @@ async function veilleDoSend(){
     // pastille COURANTE : pulse bleu
     dotEls[i].style.background='#1e3a8a'; dotEls[i].style.borderColor='#3b82f6'; dotEls[i].style.color='#fff';
     dotEls[i].style.animation='vpPulse 1s ease-in-out infinite';
-    vpLabel.textContent='📤 Envoi '+(i+1)+' / '+ids.length;
-    btn.innerHTML='⏳ '+(i+1)+'/'+ids.length;
+    vpLabel.textContent='↗ Envoi '+(i+1)+' / '+ids.length;
+    btn.innerHTML='◌ '+(i+1)+'/'+ids.length;
     let okv=false, mode='', hasd=false, errmsg='';
     const _c0=document.querySelector('.veille-card[data-rid="'+rid+'"]');
     // déjà envoyé AVANT cet essai ? -> la re-vérification d'erreur ne doit pas
@@ -27903,7 +27903,7 @@ async function veilleDoSend(){
 async function resendVeilleReel(rid, btn){
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '⏳';
+  btn.innerHTML = '◌';
   try {
     const fd = new FormData(); fd.set('reel_id', rid);
     const _rc=document.querySelector('.veille-card[data-rid="'+rid+'"]');
@@ -28103,7 +28103,7 @@ function removeVeilleReel(rid, btn){
     });
   }, 230);
   // 3) Toast Annuler en bas (5s pour cancel)
-  const toast = veilleToast('🗑 Reel retiré', 'Annuler', () => {
+  const toast = veilleToast('⌫ Reel retiré', 'Annuler', () => {
     // Cancel : rollback la card
     clearTimeout(window.__vlPendingRemoves[rid].timer);
     delete window.__vlPendingRemoves[rid];
@@ -28209,7 +28209,7 @@ def _render_vtg_html() -> str:
 
     return (
         "<div style='max-width:680px'>"
-        "<h2 style='margin:0 0 6px;font-size:20px'>📤 Veille Telegram</h2>"
+        "<h2 style='margin:0 0 6px;font-size:20px'>↗ Veille Telegram</h2>"
         "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
         "Configure ton bot Telegram pour envoyer les reels intéressants au groupe de veille en 1 clic. "
         "Le serveur télécharge la vidéo IG et l'upload directement comme fichier vidéo (comme un bot downloader Discord)."
@@ -28248,13 +28248,13 @@ def _render_vtg_html() -> str:
         "  const chatEl = document.getElementById('vtg-chatid');"
         "  const token = (tokenEl.value || '').trim();"
         "  if(!token){ alert('Colle d abord le bot token au-dessus'); tokenEl.focus(); return; }"
-        "  listEl.innerHTML = '<div style=\"color:#888;font-size:12px;padding:8px\">⏳ Recherche des chats...</div>';"
+        "  listEl.innerHTML = '<div style=\"color:#888;font-size:12px;padding:8px\">◌ Recherche des chats...</div>';"
         "  const fd = new FormData(); fd.set('bot_token', token);"
         "  try {"
         "    const r = await fetch('/settings/veille_telegram/detect_chats', {method:'POST', body:fd});"
         "    const j = await r.json();"
         "    if(!j.ok){"
-        "      listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px\">❌ '+(j.error||'Erreur')+'</div>';"
+        "      listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px\">✕ '+(j.error||'Erreur')+'</div>';"
         "      return;"
         "    }"
         "    if(!j.chats || j.chats.length===0){"
@@ -28271,7 +28271,7 @@ def _render_vtg_html() -> str:
         "    }"
         "    listEl.innerHTML = html;"
         "  } catch(e) {"
-        "    listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px\">❌ Erreur réseau : '+e+'</div>';"
+        "    listEl.innerHTML = '<div style=\"color:#ef4444;font-size:12px;padding:10px\">✕ Erreur réseau : '+e+'</div>';"
         "  }"
         "}"
         "</script>"
@@ -28494,7 +28494,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     mypuls_btn = (
         f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
         f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
-        f"🔄 Auto-fill abonnes depuis MyPuls</button>"
+        f"↻ Auto-fill abonnes depuis MyPuls</button>"
     ) if platform == "mym" else ""
 
     bulk_meta = {
@@ -28502,7 +28502,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         "age":        {"icon": "🎂", "label": "Âge",         "placeholder": "ex: 50 ans"},
         "abonnement": {"icon": "💳", "label": "Abonnement",  "placeholder": "ex: free"},
         "sub_total":  {"icon": "👥", "label": "SUB Total",   "placeholder": "ex: 20K9"},
-        "last_30d":   {"icon": "📅", "label": "Last 30 Day", "placeholder": "ex: 6172"},
+        "last_30d":   {"icon": "▤", "label": "Last 30 Day", "placeholder": "ex: 6172"},
     }
     bulk_inputs_html = ""
     for f in sfs_setup.bulk_fields_for(platform):
@@ -28521,7 +28521,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         "border:1px solid rgba(59,130,246,.25);border-radius:12px;padding:14px;margin-bottom:18px'>"
         # Header
         f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
-        f"<span style='font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800'>⚡ Appliquer à TOUS les modèles</span>"
+        f"<span style='font-size:11px;color:#3b82f6;letter-spacing:1px;text-transform:uppercase;font-weight:800'>↓ Appliquer à TOUS les modèles</span>"
         f"<small style='color:#666;font-size:11px'>(les champs vides sont ignorés)</small>"
         f"</div>"
         # Grid inputs dynamique
@@ -28532,7 +28532,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
         f"<button type='button' onclick='applyBulk_{platform}()' "
         f"style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
-        f"⚡ Appliquer à tous</button>"
+        f"↓ Appliquer à tous</button>"
         + mypuls_btn
         + f"</div>"
         + f"</div>"
@@ -28540,7 +28540,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
 
     return (
         "<div style='max-width:1100px'>"
-        f"<h2 style='margin:0 0 6px;font-size:20px;display:flex;align-items:center;gap:10px'>📋 Setup SFS "
+        f"<h2 style='margin:0 0 6px;font-size:20px;display:flex;align-items:center;gap:10px'>⧉ Setup SFS "
         f"<span style='background:{platform_color};color:#fff;padding:3px 12px;border-radius:8px;font-size:12px;font-weight:800;letter-spacing:.5px'>{platform_label.upper()}</span></h2>"
         f"<p style='margin:0 0 18px;color:#888;font-size:13px'>"
         f"Remplis les infos pour chaque modele {platform_label}. Au final clique <b>Générer le message</b> "
@@ -28553,10 +28553,10 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"<div style='display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap'>"
         f"<button type='button' onclick='setupGenerate_{platform}()' "
         f"style='background:linear-gradient(135deg,#3b82f6,{platform_color});color:#fff;border:0;padding:12px 22px;border-radius:10px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(59,130,246,.3)'>"
-        f"✨ Générer le message {platform_label}</button>"
+        f"✧ Générer le message {platform_label}</button>"
         f"<button type='button' onclick='setupCopy_{platform}()' id='setup-copy-btn-{platform}' "
         f"style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:{'inline-flex' if _gen_msg else 'none'}'>"
-        f"📋 Copier</button>"
+        f"⧉ Copier</button>"
         f"<small id='setup-save-status-{platform}' style='color:#666;margin-left:auto;font-size:12px'></small>"
         f"</div>"
         f"<textarea id='setup-output-{platform}' rows='14' placeholder='Le message généré apparaîtra ici...' "
@@ -28743,7 +28743,7 @@ def _render_schedule_html() -> str:
         # ===== Stories =====
         "<div style='margin-top:18px'>"
         "<label style='display:flex;align-items:center;gap:8px'>"
-        "<span>📱 Stories — heures de publication</span>"
+        "<span>▭ Stories — heures de publication</span>"
         "<span style='font-weight:400;color:#666;font-size:12px'>(audience : Tous MyM / Abonnés / Ex-abonnés / Intéressés)</span>"
         "</label>"
         "<small style='display:block;margin-bottom:8px;color:#888'>Optionnel. 1 story par heure indiquée, chaque jour. Sheet \"Stories\" séparée dans l'Excel. Auto-suppression 24h native MyPuls.</small>"
@@ -28809,7 +28809,7 @@ def _render_schedule_html() -> str:
         "<svg viewBox='0 0 24 24' width='20' height='20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>"
         "</div>"
         "<div class='sx-opt-text'>"
-        "<p class='sx-opt-title'>🔄 Randomiser les minutes</p>"
+        "<p class='sx-opt-title'>↻ Randomiser les minutes</p>"
         "<p class='sx-opt-sub'>Les minutes varient (3 à 25) chaque jour pour faire plus humain. Si désactivé : minute :00 exacte (20:00 reste 20:00).</p>"
         "</div>"
         "<div class='sx-opt-tog'></div>"
@@ -29857,12 +29857,12 @@ function gdNum(n){ n=+n||0; return n.toLocaleString('fr-FR'); }
 function gdChangeKey(){
   var panel = document.getElementById('gd-keypanel');
   if(!panel) return;
-  panel.innerHTML = '<div class="gd-msg" style="text-align:left;padding:14px 16px">⏳ chargement des clés…</div>';
+  panel.innerHTML = '<div class="gd-msg" style="text-align:left;padding:14px 16px">◌ chargement des clés…</div>';
   fetch('/gmsdash/keys', {credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
     if(!d || !d.ok){ panel.innerHTML = ''; return; }
     var rows = gdKeyRow('main', '🏛 Clé PRINCIPALE — report horaire + paie', d.main);
     for(var i = 1; i <= 4; i++){
-      rows += gdKeyRow('k' + i, '⚡ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
+      rows += gdKeyRow('k' + i, '↓ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
     }
     panel.innerHTML = '<div style="background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:14px">'
       + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🔑 Clés API GetMySocial</div>'
@@ -29898,7 +29898,7 @@ function gdSaveKeys(){
         if(typeof showToast === 'function') showToast(msg, d.main_ping === false ? 'error' : 'success', 6000);
         setTimeout(function(){ location.reload(); }, 1300);
       } else {
-        if(typeof showToast === 'function') showToast('❌ ' + ((d && d.error) || '?'), 'error', 7000);
+        if(typeof showToast === 'function') showToast('✕ ' + ((d && d.error) || '?'), 'error', 7000);
       }
     }).catch(function(e){ if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); });
 }
@@ -29915,7 +29915,7 @@ function gdSaveKey2(){
         window.__gdData = null; gdLoad(true);
         if(el){ el.value=''; el.placeholder='clé dédiée active ✓'; }
       } else {
-        if(typeof showToast==='function') showToast('❌ '+((d&&d.error)||'?'),'error');
+        if(typeof showToast==='function') showToast('✕ '+((d&&d.error)||'?'),'error');
       }
     }).catch(function(e){ if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
 }
@@ -30016,7 +30016,7 @@ function gdProgressHtml(p){
     + ' — nouvelle tentative automatique…</div>') : '';
   return '<div class="gd-msg" style="text-align:left;padding:16px 18px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">'
-    + '<span>⏳ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '<b style="color:#4ade80">' + eta + '</b></span>'
+    + '<span>◌ Calcul en cours — ' + gdEsc(p.stage || 'préparation') + '<b style="color:#4ade80">' + eta + '</b></span>'
     + '<b style="color:#4ade80;font-variant-numeric:tabular-nums">' + don + ' / ' + (tot || '…')
     + (tot ? ('&nbsp;(' + pct + '%)') : '') + '</b></div>'
     + '<div style="height:8px;background:#1b1e27;border-radius:20px;overflow:hidden">'
@@ -30041,7 +30041,7 @@ function gdLoad(force){
     if(!tid || tid.indexOf('tm_') !== 0) return;
   }
   if(!(window.__gdData && (window.__gdData.links||[]).length)){
-    document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">⏳ Connexion…</div>';
+    document.getElementById('gd-tbl').innerHTML = '<div class="gd-msg">◌ Connexion…</div>';
   }
   var u = '/gmsdash/data?team='+encodeURIComponent(tid)+'&period='+encodeURIComponent(window.__gdPeriod)+(force?'&force=1':'');
   fetch(u, {credentials:'same-origin'}).then(function(r){
@@ -30058,7 +30058,7 @@ function gdLoad(force){
     if(!d || !d.ok) throw new Error((d && d.error) || 'Erreur');
     if(d.loading){
       var rb = document.getElementById('gd-refresh');
-      if(rb){ rb.disabled = true; rb.style.opacity = '.5'; rb.style.cursor = 'wait'; rb.textContent = '⏳'; }
+      if(rb){ rb.disabled = true; rb.style.opacity = '.5'; rb.style.cursor = 'wait'; rb.textContent = '◌'; }
       var ch = document.getElementById('gd-chart'); if(ch) ch.innerHTML = '';
       document.getElementById('gd-ctry').innerHTML = '';
       var q = (d.progress || {}).quick;
@@ -30092,7 +30092,7 @@ function gdLoad(force){
     if(d.refreshing){
       // Recalcul en fond : la BARRE + « prêt dans ~X » s'affichent AU-DESSUS des
       // données servies (avant, on ne voyait qu'un petit « mise à jour en cours »)
-      if(rb2){ rb2.disabled = true; rb2.style.opacity = '.5'; rb2.style.cursor = 'wait'; rb2.textContent = '⏳'; }
+      if(rb2){ rb2.disabled = true; rb2.style.opacity = '.5'; rb2.style.cursor = 'wait'; rb2.textContent = '◌'; }
       var tp = document.getElementById('gd-topprog');
       if(tp){ tp.innerHTML = d.progress ? gdProgressHtml(d.progress) : ''; }
       gdSchedulePoll(3000);
@@ -30107,7 +30107,7 @@ function gdLoad(force){
     var tbl = document.getElementById('gd-tbl');
     var had = window.__gdData && (window.__gdData.links||[]).length;
     if(had){ gdRender(window.__gdData); }
-    var msg = '<div class="gd-msg" style="color:#f87171">❌ '+gdEsc(e && e.message ? e.message : e)
+    var msg = '<div class="gd-msg" style="color:#f87171">✕ '+gdEsc(e && e.message ? e.message : e)
             + ' — clique ↻ pour réessayer</div>';
     if(had){ tbl.insertAdjacentHTML('afterbegin', msg); } else { tbl.innerHTML = msg; }
   });
@@ -30369,7 +30369,7 @@ function gdRender(d){
     + '<div class="sub">'+gdEsc(links.length?(links[0].name||links[0].shortcode):'—')+'</div></div>'
     + '<div class="gd-card"><div class="lab">Mis à jour</div><div class="val" style="font-size:19px">'
       + ((d.age_min==null || d.age_min<1) ? 'maintenant' : ('il y a '+d.age_min+' min'))
-      + '</div><div class="sub">'+(d.refreshing?'🔄 mise à jour en cours…':'recalcul auto toutes les 30 min · ↻ pour forcer')+'</div></div>'
+      + '</div><div class="sub">'+(d.refreshing?'↻ mise à jour en cours…':'recalcul auto toutes les 30 min · ↻ pour forcer')+'</div></div>'
     + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
        + '<div class="sub">non lus — clique ↻</div></div>' : '')
@@ -31832,7 +31832,7 @@ def _render_chatplanning_html() -> str:
             "<form method='POST' action='/chatting/create_preset' style='margin:0'>"
             "<input type='hidden' name='preset' value='mym'>"
             "<button type='submit' style='width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;padding:24px 14px;background:linear-gradient(135deg,#ff4d8d,#a855f7);border:0;color:#fff;border-radius:14px;cursor:pointer;font-family:inherit;box-shadow:0 6px 18px rgba(255,77,141,.25)'>"
-            "<span style='font-size:30px'>📱</span>"
+            "<span style='font-size:30px'>▭</span>"
             "<span style='font-weight:800;font-size:15px;letter-spacing:.3px'>EDT MYM</span>"
             "<span style='font-size:11px;opacity:.85;font-weight:500'>Planning MYM</span>"
             "</button>"
@@ -31966,11 +31966,11 @@ def _render_chatplanning_html() -> str:
         f"<form method='POST' action='/chatting/delete_edt' style='display:inline;margin:0' "
         f"onsubmit=\"return chatConfirmDelEdt(this)\">"
         f"<input type='hidden' name='edt_id' value='{active_edt['id']}'>"
-        f"<button type='submit' style='background:transparent;border:0;color:#ef4444;font-size:13px;cursor:pointer;padding:4px 8px'>🗑 supprimer</button>"
+        f"<button type='submit' style='background:transparent;border:0;color:#ef4444;font-size:13px;cursor:pointer;padding:4px 8px'>⌫ supprimer</button>"
         f"</form>"
         f"<button type='button' onclick='chatOpenImport()' "
         f"style='background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#3b82f6;font-size:13px;font-weight:600;cursor:pointer;padding:5px 12px;border-radius:8px;margin-left:8px'>"
-        f"📋 Importer (coller Excel)</button>"
+        f"⧉ Importer (coller Excel)</button>"
     )
 
     # === Construction du tableau ===
@@ -32098,7 +32098,7 @@ def _render_chatplanning_html() -> str:
         del_btn = (
             f"<td style='text-align:center;white-space:nowrap'>"
             f"<button type='button' onclick='chatFillOpen(event,this,\"{r['id']}\")' title='Remplir toute la ligne (les 7 jours)' "
-            f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>⚡</button>"
+            f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>↓</button>"
             f"<button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 6px'>×</button>"
             f"</td>"
         )
@@ -32206,7 +32206,7 @@ def _render_chatplanning_html() -> str:
             del_btn = (
                 f"<td style='text-align:center;white-space:nowrap'>"
                 f"<button type='button' onclick='chatFillOpen(event,this,\"{r['id']}\")' title='Remplir toute la ligne (les 7 jours)' "
-                f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>⚡</button>"
+                f"style='background:transparent;border:0;color:#3b82f6;font-size:14px;cursor:pointer;padding:0 4px'>↓</button>"
                 f"<button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 6px'>×</button>"
                 f"</td>"
             )
@@ -32332,7 +32332,7 @@ def _render_chatplanning_html() -> str:
         # Score pondere du mois : absence x3 (le pire), retard x2, coupure x1
         score = a * 3 + r * 2 + c * 1
         if score == 0:
-            bg, fg, lab = "rgba(34,197,94,.16)", "#22c55e", "✨ Exemplaire"
+            bg, fg, lab = "rgba(34,197,94,.16)", "#22c55e", "✧ Exemplaire"
         elif score <= 3:
             bg, fg, lab = "rgba(34,197,94,.12)", "#4ade80", "🟢 Bon"
         elif score <= 7:
@@ -32348,7 +32348,7 @@ def _render_chatplanning_html() -> str:
         recap_html = (
             "<div style='margin-top:16px;padding:16px;background:#0f0f0f;border:1px dashed #232323;"
             "border-radius:12px;color:#666;font-size:13px;text-align:center'>"
-            "📊 Récap paie : ajoute des pseudos aux chatteurs pour voir le décompte des absences / retards / coupures."
+            "▥ Récap paie : ajoute des pseudos aux chatteurs pour voir le décompte des absences / retards / coupures."
             "</div>"
         )
     else:
@@ -32403,10 +32403,10 @@ def _render_chatplanning_html() -> str:
             "<div style='margin-top:16px;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;overflow:hidden'>"
             "<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1a1a1a'>"
             "<div style='display:flex;align-items:center;gap:8px'>"
-            "<span style='font-size:16px'>📊</span>"
+            "<span style='font-size:16px'>▥</span>"
             f"<span style='font-weight:800;font-size:14px;color:#eee'>Récap paie — {_mois_fr[_aw.month].capitalize()} {_aw.year}</span>"
             "</div>"
-            "<span style='font-size:11px;color:#666'>★ période affichée · trié par incidents · Comportement = abs×3 + retard×2 + coupure (✨ 0 · 🟢 ≤3 · 🟠 ≤7 · 🔴 +)</span>"
+            "<span style='font-size:11px;color:#666'>★ période affichée · trié par incidents · Comportement = abs×3 + retard×2 + coupure (✧ 0 · 🟢 ≤3 · 🟠 ≤7 · 🔴 +)</span>"
             "</div>"
             "<div style='overflow-x:auto'>"
             "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
@@ -32581,7 +32581,7 @@ function saveSplit(el){
   if(_PC_PRES[bot.value]){ bot.style.background=_PC_PRES[bot.value][0]; bot.style.color=_PC_PRES[bot.value][1]; }
   saveDayValue(row,field, top.value+'+'+bot.value); chatUpdateCountsFor(row);
 }
-// === Remplir une ligne (⚡) : applique 1 valeur aux 7 jours ===
+// === Remplir une ligne (↓) : applique 1 valeur aux 7 jours ===
 window._chatFillRowId = null;
 function chatFillOpen(ev, btn, rid){
   if(ev){ ev.stopPropagation(); }
@@ -32832,7 +32832,7 @@ async function addChatRow(creneau){
         "<div id='chat-import-overlay' class='confirm-overlay' style='display:none' "
         "onclick='if(event.target===this)chatCloseImport()'>"
         "<div class='confirm-box' style='max-width:660px;width:92%;text-align:left' onclick='event.stopPropagation()'>"
-        "<h3 style='margin:0 0 6px;font-size:18px;color:#fff'>📋 Importer le planning</h3>"
+        "<h3 style='margin:0 0 6px;font-size:18px;color:#fff'>⧉ Importer le planning</h3>"
         f"<p style='margin:0 0 14px;color:#888;font-size:13px'>EDT <b style='color:#fff'>{html_escape(active_edt['name'])}</b> · "
         f"Semaine <b style='color:#3b82f6'>{week_lbl}</b> <span style='color:#666'>(navigue d'abord vers la bonne semaine)</span></p>"
         "<label style='display:block;color:#aaa;font-size:12px;font-weight:600;margin-bottom:4px'>Créneau</label>"
@@ -32856,7 +32856,7 @@ async function addChatRow(creneau){
         "</div></div>"
     )
 
-    # Popup partagé "remplir la ligne" (⚡) : 5 valeurs de presence colorees
+    # Popup partagé "remplir la ligne" (↓) : 5 valeurs de presence colorees
     fill_pop = (
         "<div id='chat-fill-pop' style='display:none;position:absolute;z-index:9999;background:#161616;"
         "border:1px solid #2a2a2a;border-radius:10px;padding:6px;box-shadow:0 12px 30px rgba(0,0,0,.6);min-width:130px'>"
@@ -33556,7 +33556,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     <div class='mpl-row-head' onclick='mplToggle(this.parentElement)'>
       <div class='mpl-row-icon' style='background:rgba(59,130,246,.12);color:#3b82f6'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='14' height='20' x='5' y='2' rx='2' ry='2'/><line x1='12' x2='12' y1='18' y2='18'/></svg></div>
       <div class='mpl-row-text'>
-        <div class='mpl-row-title'>📱 Stories <span class='mpl-mini-badge' style='background:rgba(59,130,246,.15);color:#3b82f6' id='mpl-stories-tag'>4 / jour</span></div>
+        <div class='mpl-row-title'>▭ Stories <span class='mpl-mini-badge' style='background:rgba(59,130,246,.15);color:#3b82f6' id='mpl-stories-tag'>4 / jour</span></div>
         <div class='mpl-row-sub'>Stories ephemères MyM (auto-supprimees au bout de 24h)</div>
       </div>
       <svg class='mpl-row-arrow' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' width='18' height='18'><polyline points='6 9 12 15 18 9'/></svg>
@@ -33723,7 +33723,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap'>
         <small style='color:#888' id='mpl-media-status'>Liste des media_id MyPuls. Ordre = ordre de publication.</small>
         <div style='display:flex;gap:6px'>
-          <button type='button' class='mpl-fetch-btn' onclick='bulkPasteMedia()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>📋 Bulk paste</button>
+          <button type='button' class='mpl-fetch-btn' onclick='bulkPasteMedia()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>⧉ Bulk paste</button>
           <button type='button' class='mpl-fetch-btn' onclick='fetchMyPulsMedia()'>↓ Recuperer depuis MyPuls</button>
         </div>
       </div>
@@ -33746,7 +33746,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
     </div>
     <div class='mpl-row-body'>
       <div style='display:flex;justify-content:flex-end;margin-bottom:8px'>
-        <button type='button' class='mpl-fetch-btn' onclick='bulkPasteCaptions()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>📋 Bulk paste</button>
+        <button type='button' class='mpl-fetch-btn' onclick='bulkPasteCaptions()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa'>⧉ Bulk paste</button>
       </div>
       <div class='mpl-slots' id='mpl-captions-list'></div>
       <button type='button' class='mpl-add-slot' onclick='addCaptionSlot()'>+ Ajouter une caption</button>
@@ -33756,13 +33756,13 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
   </div>
 
   <div style='text-align:center;margin-top:24px;display:flex;flex-direction:column;gap:12px;align-items:center'>
-    <button type='submit' class='mpl-push-btn'>⚡ Pousser dans MyPuls (LIVE)</button>
+    <button type='submit' class='mpl-push-btn'>↓ Pousser dans MyPuls (LIVE)</button>
     <div style='display:flex;gap:10px;flex-wrap:wrap;justify-content:center'>
       <button type='button' onclick='pushAllCreators()' style='background:linear-gradient(135deg,#10b981,#3b82f6);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,.3);display:inline-flex;align-items:center;gap:8px'>
         🚀 Pousser POSTS + STORIES pour TOUS
       </button>
       <button type='button' onclick='deleteAllCreators()' style='background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.3);display:inline-flex;align-items:center;gap:8px'>
-        🗑 Tout supprimer (période du planning)
+        ⌫ Tout supprimer (période du planning)
       </button>
       <button type='button' onclick='deleteAllUpcoming()' style='background:linear-gradient(135deg,#dc2626,#7f1d1d);color:#fff;border:0;padding:12px 22px;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(220,38,38,.4);display:inline-flex;align-items:center;gap:8px'>
         🔥 Vider TOUT à partir d'aujourd'hui
@@ -33777,7 +33777,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
 <div class='mpl-shell'>
   <div class='mpl-card'>
     <div class='mpl-card-header'>
-      <span style='color:#888;font-size:12px;letter-spacing:1px;text-transform:uppercase'>MyPuls Live ⚡</span>
+      <span style='color:#888;font-size:12px;letter-spacing:1px;text-transform:uppercase'>MyPuls Live ↓</span>
       <a href='?tab=mypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
     </div>
 
@@ -33803,7 +33803,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
       <div class='mpl-banner-dot'></div>
       <div>
         <p class='mpl-banner-title'>Push manuel (one-shot)</p>
-        <p class='mpl-banner-sub'>Tu definis tes slots → ⚡ Pousser → MyPuls execute aux dates/heures prevues.</p>
+        <p class='mpl-banner-sub'>Tu definis tes slots → ↓ Pousser → MyPuls execute aux dates/heures prevues.</p>
       </div>
     </div>
 
@@ -34160,8 +34160,8 @@ function switchTab(tab){{
     if(showDelete){{ btn.style.display = 'none'; }}
     else {{
       btn.style.display = '';
-      if(showStories) btn.innerHTML = '⚡ Pousser les stories';
-      else btn.innerHTML = '⚡ Pousser les posts';
+      if(showStories) btn.innerHTML = '↓ Pousser les stories';
+      else btn.innerHTML = '↓ Pousser les posts';
     }}
   }}
   // Cache aussi le bloc dates en mode delete (le calendrier a sa propre nav)
@@ -34199,7 +34199,7 @@ function toggleInfinite(){{
     if(on){{
       btn.innerHTML = '♾️ Lancer la campagne infinie';
     }} else {{
-      btn.innerHTML = (ct==='story')?'⚡ Pousser les stories':'⚡ Pousser les posts';
+      btn.innerHTML = (ct==='story')?'↓ Pousser les stories':'↓ Pousser les posts';
     }}
   }}
 }}
@@ -34408,7 +34408,7 @@ function calDayDetail(iso){{
     return;
   }}
   const allIds = all.map(e=>e.id).join(',');
-  let html = '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:12px\"><strong style=\"color:#fff;font-size:14px\">'+iso+'</strong><div style=\"display:flex;align-items:center;gap:10px\"><span style=\"color:#888;font-size:12px\">'+all.length+' event(s)</span><button type=\"button\" onclick=\"deleteAllDay(\\''+iso+'\\',\\''+allIds+'\\')\" style=\"background:#ef4444;border:0;color:#fff;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer\">🗑 Tout supprimer ce jour</button></div></div>';
+  let html = '<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:12px\"><strong style=\"color:#fff;font-size:14px\">'+iso+'</strong><div style=\"display:flex;align-items:center;gap:10px\"><span style=\"color:#888;font-size:12px\">'+all.length+' event(s)</span><button type=\"button\" onclick=\"deleteAllDay(\\''+iso+'\\',\\''+allIds+'\\')\" style=\"background:#ef4444;border:0;color:#fff;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer\">⌫ Tout supprimer ce jour</button></div></div>';
   // SVG icones par type
   const SVG = {{
     pub: '<svg viewBox=\"0 0 24 24\" width=\"11\" height=\"11\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20\"/><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/></svg>',
@@ -35301,7 +35301,7 @@ function _openBulkDeleteProgress(jobId){{
     <div style="background:#161616;border:1px solid #2a2a2a;border-radius:18px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden">
       <div style="padding:24px 26px 14px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
-          <div style="width:42px;height:42px;border-radius:50%;background:rgba(239,68,68,.12);color:#ef4444;display:flex;align-items:center;justify-content:center;font-size:20px">🗑</div>
+          <div style="width:42px;height:42px;border-radius:50%;background:rgba(239,68,68,.12);color:#ef4444;display:flex;align-items:center;justify-content:center;font-size:20px">⌫</div>
           <div>
             <div style="color:#fff;font-size:16px;font-weight:700">Suppression en cours...</div>
             <div id="bdm-phase" style="color:#888;font-size:12px;margin-top:2px">En attente</div>
@@ -35463,7 +35463,7 @@ function submitMyPulsForm(ev){{
       return false;
     }}
     mplConfirmAction({{
-      icon: '🗑',
+      icon: '⌫',
       title: 'Supprimer ' + ids.length + ' event(s) ?',
       subtitle: 'Action IRREVERSIBLE - les posts/stories sur MyPuls seront supprimes definitivement.',
       confirmLabel: 'Supprimer',
@@ -35516,7 +35516,7 @@ function submitMyPulsForm(ev){{
   // Tout OK -> modal confirm
   const label = (ct==='story')?'stories':'posts';
   mplConfirmAction({{
-    icon: '⚡',
+    icon: '↓',
     title: 'Pousser les ' + label + ' dans MyPuls ?',
     subtitle: 'Du ' + ds + ' au ' + de + ' - Action IRREVERSIBLE.',
     confirmLabel: 'Pousser',
@@ -35834,7 +35834,7 @@ def _render_bilan_html() -> str:
     return (
         "<div style='max-width:1500px;margin:0 auto;width:100%'>"
         "<div style='display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px'>"
-        "<h2 style='margin:0;font-size:26px'>📊 Bilan</h2>"
+        "<h2 style='margin:0;font-size:26px'>▥ Bilan</h2>"
         "<div style='flex:1'></div>"
         "<button onclick='location.reload()' style='padding:9px 15px;background:#15151d;border:1px solid #2a2a35;color:#ddd;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;margin:0'>↻ Actualiser</button>"
         "</div>"
@@ -36219,7 +36219,7 @@ def _render_bilan_html_OLD() -> str:
             )
         rows.append("</div>")
     # Dépenses par catégorie
-    rows.append("<div class='box'><h4 style='margin-top:0'>📊 Dépenses par catégorie</h4>")
+    rows.append("<div class='box'><h4 style='margin-top:0'>▥ Dépenses par catégorie</h4>")
     by_cat = exp.get("by_category", {})
     if not by_cat:
         rows.append("<p style='color:#888;margin:0'>Aucune dépense enregistrée.</p>")
@@ -36809,7 +36809,7 @@ def _render_gemini_settings() -> str:
     status = (
         "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
         "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
-        "✅ Gemini enregistré — l'OCR lit le texte incrusté <b>et les emojis</b>, gratuitement. "
+        "✓ Gemini enregistré — l'OCR lit le texte incrusté <b>et les emojis</b>, gratuitement. "
         "Colle une nouvelle clé pour la remplacer.</div>"
         if present else
         "<div style='padding:12px 16px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.35);"
@@ -36846,7 +36846,7 @@ def _render_aikey_settings() -> str:
     status = (
         "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
         "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
-        "✅ Clé Anthropic enregistrée — les bios IA sont actives. "
+        "✓ Clé Anthropic enregistrée — les bios IA sont actives. "
         "Colle une nouvelle clé ci-dessous pour la remplacer.</div>"
         if present else
         "<div style='padding:12px 16px;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);"
@@ -36887,7 +36887,7 @@ def _render_apify_settings() -> str:
     status = (
         "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
         "border-radius:8px;margin-bottom:12px;font-size:13px;color:#34d399'>"
-        "✅ Apify connecté — les vidéos des reels se téléchargent via Apify "
+        "✓ Apify connecté — les vidéos des reels se téléchargent via Apify "
         "(sans toucher ton compte Instagram).</div>"
         if ok else
         "<div style='padding:12px 16px;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);"
@@ -36898,7 +36898,7 @@ def _render_apify_settings() -> str:
     )
     return (
         "<div style='margin-top:22px;border-top:1px solid #26263a;padding-top:18px'>"
-        "<div style='font-weight:800;font-size:14px;margin-bottom:10px'>🎬 Apify — téléchargement des reels</div>"
+        "<div style='font-weight:800;font-size:14px;margin-bottom:10px'>▶ Apify — téléchargement des reels</div>"
         + status
         + "<form method='POST' action='/settings/apify_token' style='display:flex;flex-direction:column;gap:8px'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Token API Apify (apify_api_…)</label>"
@@ -36906,7 +36906,7 @@ def _render_apify_settings() -> str:
         "style='font-family:monospace;font-size:12px' minlength='20'>"
         "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer le token Apify</button>"
         "</form>"
-        + ("<button type='button' onclick=\"fetch('/settings/apify_test').then(r=>r.json()).then(d=>{if(typeof showToast==='function')showToast(d.ok?('✅ Apify OK ('+(d.user||'?')+')'):('❌ '+(d.error||'?')),d.ok?'success':'error');})\" "
+        + ("<button type='button' onclick=\"fetch('/settings/apify_test').then(r=>r.json()).then(d=>{if(typeof showToast==='function')showToast(d.ok?('✓ Apify OK ('+(d.user||'?')+')'):('✕ '+(d.error||'?')),d.ok?'success':'error');})\" "
            "style='width:100%;margin-top:8px;background:#26263a;color:#cbd5e1;border:1px solid #333'>Tester la connexion</button>" if ok else "")
         + "<details style='font-size:12px;color:#888;margin-top:14px'>"
         "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Où trouver mon token ?</summary>"
@@ -37031,7 +37031,7 @@ function vtToggle(btn){
       btn.disabled=false;
       if(!d||!d.ok){ if(typeof showToast==='function') showToast('Erreur','error'); return; }
       vtPaint(btn,d.enabled);
-      if(typeof showToast==='function') showToast(d.enabled?'✅ Uniquification ACTIVÉE':'⛔ Uniquification désactivée', d.enabled?'success':'info');
+      if(typeof showToast==='function') showToast(d.enabled?'✓ Uniquification ACTIVÉE':'⛔ Uniquification désactivée', d.enabled?'success':'info');
     })
     .catch(function(){ btn.disabled=false; if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
@@ -37058,7 +37058,7 @@ def _render_video_manager() -> str:
     ff_line = "" if ff_ok else (
         "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;"
         "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
-        "❌ ffmpeg absent sur le VPS — les transformations ne s'appliqueront pas tant qu'il n'est pas installé.</div>"
+        "✕ ffmpeg absent sur le VPS — les transformations ne s'appliqueront pas tant qu'il n'est pas installé.</div>"
     )
 
     btn_txt = "🟢 ACTIVÉ — clique pour couper" if enabled else "⚪ DÉSACTIVÉ — clique pour activer"
@@ -37158,7 +37158,7 @@ def _render_mypuls_cookies_settings() -> str:
         status = (
             "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
             "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
-            "✅ Cookies enregistrés — la sync MyPuls est active. Colle de nouveaux cookies ci-dessous pour les remplacer."
+            "✓ Cookies enregistrés — la sync MyPuls est active. Colle de nouveaux cookies ci-dessous pour les remplacer."
             "</div>"
         )
     else:
@@ -37191,7 +37191,7 @@ def _render_mypuls_cookies_settings() -> str:
         + (
             "<form method='POST' action='/mypuls/clear_cookies' "
             "onsubmit='return confirm(\"Effacer les cookies MyPuls ? La sync revenus sera coupée.\")'>"
-            "<button type='submit' class='danger-btn' style='margin:0'>🗑 Effacer les cookies</button>"
+            "<button type='submit' class='danger-btn' style='margin:0'>⌫ Effacer les cookies</button>"
             "</form>"
             if configured else ""
         )
@@ -37719,7 +37719,7 @@ def _render_employees_table_html() -> str:
 <div id='emp-batch-menu' style='display:none;position:absolute;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:6px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50'>
   <button type='button' onclick='batchEmpAction("activate")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#22c55e;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>✓ Activate selected</button>
   <button type='button' onclick='batchEmpAction("deactivate")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#aaa;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>⊘ Deactivate selected</button>
-  <button type='button' onclick='batchEmpAction("delete")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#ef4444;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>🗑 Delete selected</button>
+  <button type='button' onclick='batchEmpAction("delete")' style='display:block;width:100%;text-align:left;background:transparent;border:0;color:#ef4444;padding:9px 14px;font-size:13px;cursor:pointer;border-radius:6px'>⌫ Delete selected</button>
 </div>
 """
     js = """
@@ -38140,10 +38140,10 @@ function savePermissions(){
     .then(function(r){ return r.json(); })
     .then(function(data){
       if(data.success){
-        showToast('✅ Permissions sauvées', 'success');
+        showToast('✓ Permissions sauvées', 'success');
         closePermissions();
       } else {
-        showToast('❌ ' + (data.error || 'Erreur'), 'error');
+        showToast('✕ ' + (data.error || 'Erreur'), 'error');
       }
     });
 }
@@ -38179,20 +38179,20 @@ function savePermissions(){
 def _web_password_status() -> str:
     if WEB_PASSWORD == "changeme":
         return "⚠️ DÉFAUT (changeme) — change-le tout de suite !"
-    return f"✅ Configuré ({len(WEB_PASSWORD)} caractères)"
+    return f"✓ Configuré ({len(WEB_PASSWORD)} caractères)"
 
 
 def _admin_token_status() -> str:
     """Resume du statut du token admin (sans jamais l'afficher en clair)."""
     val = os.environ.get("DISCORD_ADMIN_TOKEN")
     if val:
-        return f"✅ Configuré (token de {len(val)} caractères)"
+        return f"✓ Configuré (token de {len(val)} caractères)"
     # Re-check .env (au cas ou il a ete ajoute apres le start)
     for line in _read_env_lines():
         s = line.strip()
         if s.startswith("DISCORD_ADMIN_TOKEN=") and len(s) > len("DISCORD_ADMIN_TOKEN="):
             return "⚠️ Présent dans .env mais bot pas restart (relance via Settings)"
-    return "❌ Non configuré — colle ton token ci-dessous"
+    return "✕ Non configuré — colle ton token ci-dessous"
 
 
 def _render_account_section_html() -> str:
@@ -39603,7 +39603,7 @@ def create_app():
                 ex_target = target_dir / f"{stem}.example{ex_ext}"
                 example.save(str(ex_target))
         session["last_upload_identity"] = identity  # le Cloud s'ouvrira sur cette identité
-        return _success(f"✅ Ajouté à {identity}/{subdir_name} : {photo.filename}")
+        return _success(f"✓ Ajouté à {identity}/{subdir_name} : {photo.filename}")
 
     @app.route("/upload/reel", methods=["POST"])
     def upload_reel():
@@ -39682,7 +39682,7 @@ def create_app():
             if not n_ok:
                 return _error("Aucune vidéo dans le ZIP (formats acceptés : "
                               + ", ".join(sorted(VIDEO_EXTS)) + ")")
-            return _success(f"✅ {n_ok} vidéo(s) importée(s) depuis le ZIP"
+            return _success(f"✓ {n_ok} vidéo(s) importée(s) depuis le ZIP"
                             + (f" · {n_skip} fichier(s) ignoré(s)" if n_skip else ""))
         last = None
         for f in files:
@@ -39748,7 +39748,7 @@ def create_app():
             return _error(f"Fichier existe déjà")
         photo.save(str(target))
         session["last_upload_identity"] = identity  # le Cloud s'ouvrira sur cette identité
-        return _success(f"✅ Story CTA ajoutée à {identity}")
+        return _success(f"✓ Story CTA ajoutée à {identity}")
 
     @app.route("/identity/avatar/<identity>")
     def identity_avatar(identity):
@@ -39771,13 +39771,13 @@ def create_app():
             return redirect("/")
         identity = (request.form.get("identity") or "").strip().lower()
         if not identity or identity not in _list_identities():
-            return _error("❌ Identité invalide")
+            return _error("✕ Identité invalide")
         f = request.files.get("avatar")
         if not f or not f.filename:
-            return _error("❌ Pas de fichier")
+            return _error("✕ Pas de fichier")
         ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
         if ext not in ("png", "jpg", "jpeg", "webp"):
-            return _error(f"❌ Format non supporté ({ext})")
+            return _error(f"✕ Format non supporté ({ext})")
         target_dir = IDENTITIES_DIR / identity
         target_dir.mkdir(parents=True, exist_ok=True)
         # Supprimer les anciens avatars
@@ -39790,7 +39790,7 @@ def create_app():
                     pass
         target = target_dir / f"avatar.{ext}"
         f.save(str(target))
-        return _success(f"✅ Avatar de <b>{identity}</b> uploadé")
+        return _success(f"✓ Avatar de <b>{identity}</b> uploadé")
 
     @app.route("/cloud/thumb/<identity>/<subdir>/<path:filename>")
     def cloud_thumb_file(identity, subdir, filename):
@@ -39870,7 +39870,7 @@ def create_app():
         """Envoie une video de la Bibliothèque dans le salon banger-{identite}.
 
         L'identite est le 1er segment du file_id ('identite|subdir|fichier'), donc
-        pas de selection a faire : ⭐ -> direct dans le bon salon Discord.
+        pas de selection a faire : ★ -> direct dans le bon salon Discord.
         """
         from flask import jsonify
         if not is_auth():
@@ -39883,7 +39883,7 @@ def create_app():
         identity = identity.lower().strip()
         # Securite (meme regles que cloud_serve_file / cloud_delete). Les
         # dossiers pro_* sont VOLONTAIREMENT absents : le Vault PRO est prive,
-        # rien n'en part vers Discord (l'etoile ⭐ n'y est d'ailleurs pas rendue).
+        # rien n'en part vers Discord (l'etoile ★ n'y est d'ailleurs pas rendue).
         if subdir not in {"videos", "posts", "stories", "storyctas", "profile_pics", "brutes", "templates"}:
             return jsonify({"ok": False, "error": "dossier invalide"})
         if identity not in _list_identities():
@@ -39951,7 +39951,7 @@ def create_app():
             return redirect("/")
         files = request.form.getlist("files")
         if not files:
-            return _error("❌ Aucun fichier sélectionné")
+            return _error("✕ Aucun fichier sélectionné")
         deleted = []
         failed = []
         identities_list = _list_identities()
@@ -39999,7 +39999,7 @@ def create_app():
                         t.unlink()
                     except Exception:
                         pass
-                # Marque « banger » (⭐) : sans ce nettoyage, un NOUVEAU fichier
+                # Marque « banger » (★) : sans ce nettoyage, un NOUVEAU fichier
                 # portant le même nom héritait de l'étoile — et du texte de
                 # montage — du fichier supprimé.
                 try:
@@ -40011,9 +40011,9 @@ def create_app():
                 failed.append((fid, str(e)))
         msg_parts = []
         if deleted:
-            msg_parts.append(f"✅ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
+            msg_parts.append(f"✓ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
         if failed:
-            msg_parts.append(f"❌ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
+            msg_parts.append(f"✕ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
         if bool(failed) and not deleted:
             return _error(" • ".join(msg_parts))
         return _success(" • ".join(msg_parts))
@@ -41242,7 +41242,7 @@ def create_app():
 
     @app.route("/captions/apply", methods=["POST"])
     def captions_apply():
-        """📤 Partage : copie des captions (ids, sinon toutes) de `identity` vers
+        """↗ Partage : copie des captions (ids, sinon toutes) de `identity` vers
         d'autres models — positions/desc comprises, doublons (texte normalisé)
         ignorés. Une cible VIDE hérite aussi de la police + du style source."""
         from flask import jsonify
@@ -41571,7 +41571,7 @@ def create_app():
             session["last_upload_identity"] = ident
         except Exception:
             pass
-        return _success(f"✅ {saved} photo(s) de profil ajoutée(s) → {label}")
+        return _success(f"✓ {saved} photo(s) de profil ajoutée(s) → {label}")
 
     @app.route("/cloud/pp_pool_move", methods=["POST"])
     def cloud_pp_pool_move():
@@ -41708,7 +41708,7 @@ def create_app():
                    name="link-import", daemon=True).start()
         if ajax:
             return jsonify({"ok": True, "count": len(urls)})
-        return _success(f"🔗 Import lancé : {len(urls)} lien(s) → @{ident} — "
+        return _success(f"⛓ Import lancé : {len(urls)} lien(s) → @{ident} — "
                         "recharge l'onglet dans ~1 min pour voir les vidéos", tab=tab)
 
     @app.route("/cloud/import_link_status", methods=["GET"])
@@ -41811,7 +41811,7 @@ def create_app():
         if msg:
             return _error(f"Connexion impossible : {msg}", tab="clouddrive")
         who = _gd.oauth_email()
-        return _success("✅ Google Drive connecté" + (f" ({who})" if who else "")
+        return _success("✓ Google Drive connecté" + (f" ({who})" if who else "")
                         + " — les fichiers partiront sur TON espace",
                         tab="clouddrive")
 
@@ -42266,7 +42266,7 @@ def create_app():
         status = (request.form.get("status") or "scheduled").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity or not partner or not date or not time_s:
-            return _error("❌ Champs requis manquants")
+            return _error("✕ Champs requis manquants")
         edit_id = (request.form.get("id") or "").strip()
         if edit_id:
             # Edition d'un SFS existant
@@ -42306,7 +42306,7 @@ def create_app():
             pass
         recv_lbl = f" → 🎯 <b>{receiver_identity}</b>" if receiver_identity != identity else ""
         _verb = "modifié" if edit_id else "ajouté"
-        return _success(f"✅ SFS {_verb} : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
+        return _success(f"✓ SFS {_verb} : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
 
     @app.route("/business/sfs/update_proof", methods=["POST"])
     def business_sfs_update_proof():
@@ -42323,20 +42323,20 @@ def create_app():
             sid = 0
         slot = (request.form.get("slot") or "").strip()
         if sid <= 0 or slot not in ("proof_before", "proof_after"):
-            return _error("❌ Params invalides")
+            return _error("✕ Params invalides")
         f = request.files.get("file")
         if not f or not getattr(f, "filename", "").strip():
-            return _error("❌ Fichier manquant")
+            return _error("✕ Fichier manquant")
         import os as _os
         ext = _os.path.splitext(f.filename)[1].lower() or ".jpg"
         if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-            return _error("❌ Format non supporte (jpg/png/webp/gif)")
+            return _error("✕ Format non supporte (jpg/png/webp/gif)")
         SFS_PROOFS_DIR = DATA_DIR / "sfs_proofs"
         SFS_PROOFS_DIR.mkdir(parents=True, exist_ok=True)
         target = SFS_PROOFS_DIR / f"sfs_{sid}_{slot}{ext}"
         f.save(str(target))
         _upd_sfs(sid, **{slot: f"/sfs_proof/{target.name}"})
-        return _success(f"✅ Preuve {slot.replace('proof_','')} sauvegardée")
+        return _success(f"✓ Preuve {slot.replace('proof_','')} sauvegardée")
 
     @app.route("/sfs_proof/<path:fname>", methods=["GET"])
     def sfs_proof_serve(fname):
@@ -42365,7 +42365,7 @@ def create_app():
                 new_map[ident] = [v for v in vals if v in PLATFORMS]
         # Garder même les identités sans plateforme cochée (liste vide)
         save_identity_platforms(new_map)
-        return _success(f"✅ Plateformes sauvées pour {len(new_map)} identité(s)")
+        return _success(f"✓ Plateformes sauvées pour {len(new_map)} identité(s)")
 
     @app.route("/business/sfs/remove", methods=["POST"])
     def business_sfs_remove():
@@ -42378,10 +42378,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if remove_sfs(iid):
-            return _success("✅ SFS supprimé")
-        return _error("❌ SFS introuvable")
+            return _success("✓ SFS supprimé")
+        return _error("✕ SFS introuvable")
 
     @app.route("/business/sfs/toggle", methods=["POST"])
     def business_sfs_toggle():
@@ -42394,10 +42394,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if toggle_sfs_done(iid):
-            return _success("✅ Statut SFS modifié")
-        return _error("❌ SFS introuvable")
+            return _success("✓ Statut SFS modifié")
+        return _error("✕ SFS introuvable")
 
     @app.route("/business/expense/add", methods=["POST"])
     def business_expense_add():
@@ -42421,10 +42421,10 @@ def create_app():
         try:
             amount_input = float(request.form.get("amount") or "0")
         except Exception:
-            return _error("❌ Montant invalide")
+            return _error("✕ Montant invalide")
         recurring = request.form.get("recurring") == "on"
         if not category or not description or not date or amount_input <= 0:
-            return _error("❌ Champs requis manquants ou invalides")
+            return _error("✕ Champs requis manquants ou invalides")
         # Conversion : on stocke TOUJOURS amount en EUR (devise de base, pour les totaux).
         # Si l user a paye en USD, on convertit au taux actuel et on garde le montant USD d origine.
         if currency == "USD":
@@ -42440,13 +42440,13 @@ def create_app():
             add_expense(category, description, amount_eur, date, recurring,
                         currency="USD", amount_original=amount_input)
             return _success(
-                f"✅ Dépense ajoutée : <b>{description}</b> "
+                f"✓ Dépense ajoutée : <b>{description}</b> "
                 f"(${amount_input:.2f} ≈ {amount_eur:.2f}€)"
             )
         else:
             add_expense(category, description, amount_input, date, recurring,
                         currency="EUR", amount_original=amount_input)
-            return _success(f"✅ Dépense ajoutée : <b>{description}</b> ({amount_input:.2f}€)")
+            return _success(f"✓ Dépense ajoutée : <b>{description}</b> ({amount_input:.2f}€)")
 
     @app.route("/business/expense/remove", methods=["POST"])
     def business_expense_remove():
@@ -42459,10 +42459,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if remove_expense(iid):
-            return _success("✅ Dépense supprimée")
-        return _error("❌ Dépense introuvable")
+            return _success("✓ Dépense supprimée")
+        return _error("✕ Dépense introuvable")
 
     # ============ GESTION DES CATEGORIES DE DEPENSE ============
     @app.route("/business/category/add", methods=["POST"])
@@ -42475,15 +42475,15 @@ def create_app():
             return _error(f"Module indispo: {e}")
         name = (request.form.get("name") or "").strip()
         if not name:
-            return _error("❌ Nom de catégorie vide")
+            return _error("✕ Nom de catégorie vide")
         if len(name) > 50:
-            return _error("❌ Nom trop long (max 50 caractères)")
+            return _error("✕ Nom trop long (max 50 caractères)")
         if add_category(name):
             # Invalide tous les caches au cas ou un render aurait cache l ancienne liste
             try: _invalidate_all_ttl_cache()
             except Exception: pass
-            return _success(f"✅ Catégorie <b>{name}</b> ajoutée")
-        return _error(f"❌ La catégorie <b>{name}</b> existe déjà")
+            return _success(f"✓ Catégorie <b>{name}</b> ajoutée")
+        return _error(f"✕ La catégorie <b>{name}</b> existe déjà")
 
     @app.route("/business/category/edit", methods=["POST"])
     def business_category_edit():
@@ -42496,14 +42496,14 @@ def create_app():
         old_name = (request.form.get("old_name") or "").strip()
         new_name = (request.form.get("new_name") or "").strip()
         if not old_name or not new_name:
-            return _error("❌ Ancien et nouveau nom requis")
+            return _error("✕ Ancien et nouveau nom requis")
         if len(new_name) > 50:
-            return _error("❌ Nom trop long (max 50 caractères)")
+            return _error("✕ Nom trop long (max 50 caractères)")
         if update_category(old_name, new_name):
             try: _invalidate_all_ttl_cache()
             except Exception: pass
-            return _success(f"✅ <b>{old_name}</b> renommée en <b>{new_name}</b>")
-        return _error(f"❌ Renommage impossible (nom invalide ou déjà existant)")
+            return _success(f"✓ <b>{old_name}</b> renommée en <b>{new_name}</b>")
+        return _error(f"✕ Renommage impossible (nom invalide ou déjà existant)")
 
     @app.route("/business/category/remove", methods=["POST"])
     def business_category_remove():
@@ -42515,15 +42515,15 @@ def create_app():
             return _error(f"Module indispo: {e}")
         name = (request.form.get("name") or "").strip()
         if not name:
-            return _error("❌ Nom requis")
+            return _error("✕ Nom requis")
         if remove_category(name):
             try: _invalidate_all_ttl_cache()
             except Exception: pass
             return _success(
-                f"✅ Catégorie <b>{name}</b> supprimée. "
+                f"✓ Catégorie <b>{name}</b> supprimée. "
                 f"Les dépenses existantes gardent leur catégorie en texte."
             )
-        return _error(f"❌ Impossible de supprimer (catégorie introuvable ou c'est la dernière)")
+        return _error(f"✕ Impossible de supprimer (catégorie introuvable ou c'est la dernière)")
 
     @app.route("/business/revenue/add", methods=["POST"])
     def business_revenue_add():
@@ -42541,11 +42541,11 @@ def create_app():
         try:
             amount = float(request.form.get("amount") or "0")
         except Exception:
-            return _error("❌ Montant invalide")
+            return _error("✕ Montant invalide")
         if not identity or not chatter or not date or amount <= 0:
-            return _error("❌ Champs requis manquants")
+            return _error("✕ Champs requis manquants")
         add_revenue(identity, chatter, amount, date, source, notes)
-        return _success(f"✅ Revenu ajouté : <b>+{amount:.2f}€</b> via {chatter} pour {identity}")
+        return _success(f"✓ Revenu ajouté : <b>+{amount:.2f}€</b> via {chatter} pour {identity}")
 
     @app.route("/business/revenue/remove", methods=["POST"])
     def business_revenue_remove():
@@ -42558,10 +42558,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if remove_revenue(iid):
-            return _success("✅ Revenu supprimé")
-        return _error("❌ Revenu introuvable")
+            return _success("✓ Revenu supprimé")
+        return _error("✕ Revenu introuvable")
 
     @app.route("/business/vapayment/add", methods=["POST"])
     def business_vapayment_add():
@@ -42579,12 +42579,12 @@ def create_app():
         try:
             amount = float(request.form.get("amount") or "0")
         except Exception:
-            return _error("❌ Montant invalide")
+            return _error("✕ Montant invalide")
         if not va_username or not description or not date or amount <= 0:
-            return _error("❌ Champs requis manquants")
+            return _error("✕ Champs requis manquants")
         add_va_payment(va_username, amount, date, description, paid, method)
         status = "payé" if paid else "à payer"
-        return _success(f"✅ Paiement ajouté : <b>@{va_username}</b> {amount:.2f}€ ({status})")
+        return _success(f"✓ Paiement ajouté : <b>@{va_username}</b> {amount:.2f}€ ({status})")
 
     @app.route("/business/vapayment/toggle", methods=["POST"])
     def business_vapayment_toggle():
@@ -42597,10 +42597,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if toggle_va_payment_paid(iid):
-            return _success("✅ Statut paiement modifié")
-        return _error("❌ Paiement introuvable")
+            return _success("✓ Statut paiement modifié")
+        return _error("✕ Paiement introuvable")
 
     @app.route("/business/vapayment/remove", methods=["POST"])
     def business_vapayment_remove():
@@ -42613,10 +42613,10 @@ def create_app():
         try:
             iid = int(request.form.get("id", "0"))
         except Exception:
-            return _error("❌ ID invalide")
+            return _error("✕ ID invalide")
         if remove_va_payment(iid):
-            return _success("✅ Paiement supprimé")
-        return _error("❌ Paiement introuvable")
+            return _success("✓ Paiement supprimé")
+        return _error("✕ Paiement introuvable")
 
     # ============ BIO LINKS ============
 
@@ -42644,12 +42644,12 @@ def create_app():
             return _error(f"Module indispo: {e}")
         ident = (request.form.get("identity", "") or "").lower().strip()
         if not ident:
-            return _error("❌ Identité manquante")
+            return _error("✕ Identité manquante")
         display_name = request.form.get("display_name", "") or ""
         bio_text = request.form.get("bio", "") or ""
         theme = request.form.get("theme", "dark") or "dark"
         set_bio_meta(ident, display_name, bio_text, theme)
-        return _success(f"✅ Profil bio de @{ident} mis à jour")
+        return _success(f"✓ Profil bio de @{ident} mis à jour")
 
     @app.route("/biolinks/add_link", methods=["POST"])
     def biolinks_add_link():
@@ -42662,11 +42662,11 @@ def create_app():
         ident = (request.form.get("identity", "") or "").lower().strip()
         title = (request.form.get("title", "") or "").strip()
         url = (request.form.get("url", "") or "").strip()
-        icon = (request.form.get("icon", "🔗") or "🔗").strip() or "🔗"
+        icon = (request.form.get("icon", "⛓") or "⛓").strip() or "⛓"
         if not ident or not title or not url:
-            return _error("❌ Identité, titre et URL requis")
+            return _error("✕ Identité, titre et URL requis")
         add_link(ident, title, url, icon)
-        return _success(f"✅ Lien ajouté à @{ident}")
+        return _success(f"✓ Lien ajouté à @{ident}")
 
     @app.route("/biolinks/remove_link", methods=["POST"])
     def biolinks_remove_link():
@@ -42702,15 +42702,15 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         key = (request.form.get("api_key") or "").strip()
         if not key or len(key) < 20 or not key.startswith("gms_"):
-            return _error("❌ Clé invalide (doit commencer par <code>gms_</code> et faire 20+ caractères)")
+            return _error("✕ Clé invalide (doit commencer par <code>gms_</code> et faire 20+ caractères)")
         gms.save_api_key(key)
         # Test immédiat
         res = gms.ping()
         if res.get("ok"):
-            return _success(f"✅ Clé enregistrée et validée (user <code>{res.get('user_id', '?')[:18]}…</code>)")
+            return _success(f"✓ Clé enregistrée et validée (user <code>{res.get('user_id', '?')[:18]}…</code>)")
         return _error(f"⚠ Clé enregistrée mais le test a échoué : {res.get('error', '?')}")
 
     @app.route("/gms/test", methods=["POST"])
@@ -42720,11 +42720,11 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         res = gms.ping()
         if res.get("ok"):
-            return _success(f"✅ Connexion OK (user <code>{res.get('user_id', '?')[:18]}…</code>)")
-        return _error(f"❌ Test échoué : {res.get('error', '?')}")
+            return _success(f"✓ Connexion OK (user <code>{res.get('user_id', '?')[:18]}…</code>)")
+        return _error(f"✕ Test échoué : {res.get('error', '?')}")
 
     @app.route("/gms/set_template", methods=["POST"])
     def gms_set_template():
@@ -42733,15 +42733,15 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         ident = (request.form.get("identity") or "").strip().lower()
         link_id = (request.form.get("link_id") or "").strip()
         if not ident:
-            return _error("❌ Identité manquante")
+            return _error("✕ Identité manquante")
         gms.set_template_for_model(ident, link_id)
         if link_id:
-            return _success(f"✅ Template défini pour <code>@{ident}</code>")
-        return _success(f"✅ Template retiré pour <code>@{ident}</code>")
+            return _success(f"✓ Template défini pour <code>@{ident}</code>")
+        return _success(f"✓ Template retiré pour <code>@{ident}</code>")
 
     @app.route("/gms/quick_generate", methods=["POST"])
     def gms_quick_generate():
@@ -42750,14 +42750,14 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         ident = (request.form.get("identity") or "").strip().lower()
         if not ident:
-            return _error("❌ Identité manquante")
+            return _error("✕ Identité manquante")
         templates = gms.load_templates()
         tpl_id = templates.get(ident)
         if not tpl_id:
-            return _error(f"❌ Aucun template défini pour <code>@{ident}</code>. Configure-le d'abord ↑")
+            return _error(f"✕ Aucun template défini pour <code>@{ident}</code>. Configure-le d'abord ↑")
 
         # Detecte le team (workspace) du template — auto-detect via liste des
         # links du team marche francais (par default si le template y est)
@@ -42789,7 +42789,7 @@ def create_app():
             if "shortcode_taken" not in last_err.lower():
                 break
         if not dup_res.get("ok"):
-            return _error(f"❌ {last_err or 'Génération échouée'}")
+            return _error(f"✕ {last_err or 'Génération échouée'}")
 
         # Auto-assign au groupe de l'identité dans le bon workspace
         gid = gms.get_group_id_for_folder(folder_name, team_id=team_id)
@@ -42805,7 +42805,7 @@ def create_app():
         link = dup_res.get("link") or {}
         url_dest = link.get("url") or "(landing page)"
         return _success(
-            f"✅ <b>VA {n}</b> /<code>{new_shortcode}</code> créé{grp_info} → {url_dest}"
+            f"✓ <b>VA {n}</b> /<code>{new_shortcode}</code> créé{grp_info} → {url_dest}"
         )
 
     @app.route("/gms/duplicate", methods=["POST"])
@@ -42815,24 +42815,24 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         source = (request.form.get("source_link_id") or "").strip()
         short = (request.form.get("shortcode") or "").strip()
         name = (request.form.get("display_name") or "").strip()
         url = (request.form.get("url") or "").strip()
         if not source or not source.startswith("lnk_"):
-            return _error("❌ Lien source invalide")
+            return _error("✕ Lien source invalide")
         if not short or len(short) < 3 or len(short) > 24:
-            return _error("❌ Shortcode doit faire 3-24 caractères")
+            return _error("✕ Shortcode doit faire 3-24 caractères")
         if not name:
-            return _error("❌ Nom affiché requis")
+            return _error("✕ Nom affiché requis")
         res = gms.duplicate_link(source, short, name, url)
         if res.get("ok"):
             link = res.get("link") or {}
             lid = link.get("id", "?")
             url_part = f" → {url}" if url else " (URL conservée du template)"
-            return _success(f"✅ Lien <code>/{short}</code> dupliqué depuis le template{url_part}")
-        return _error(f"❌ {res.get('error', 'Duplication échouée')}")
+            return _success(f"✓ Lien <code>/{short}</code> dupliqué depuis le template{url_part}")
+        return _error(f"✕ {res.get('error', 'Duplication échouée')}")
 
     @app.route("/gms/duplicate_one", methods=["POST"])
     def gms_duplicate_one():
@@ -43071,20 +43071,20 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         short = (request.form.get("shortcode") or "").strip()
         url = (request.form.get("url") or "").strip()
         name = (request.form.get("display_name") or "").strip()
         if not short or not url:
-            return _error("❌ Shortcode et URL requis")
+            return _error("✕ Shortcode et URL requis")
         if len(short) < 3 or len(short) > 24:
-            return _error("❌ Shortcode doit faire 3-24 caractères")
+            return _error("✕ Shortcode doit faire 3-24 caractères")
         res = gms.create_directlink(short, url, name)
         if res.get("ok"):
             link = res.get("link") or {}
             lid = link.get("id", "?")
-            return _success(f"✅ Lien <code>/{short}</code> créé ({lid[:18]}…)")
-        return _error(f"❌ {res.get('error', 'Création échouée')}")
+            return _success(f"✓ Lien <code>/{short}</code> créé ({lid[:18]}…)")
+        return _error(f"✕ {res.get('error', 'Création échouée')}")
 
     @app.route("/gms/toggle", methods=["POST"])
     def gms_toggle():
@@ -43093,16 +43093,16 @@ def create_app():
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         lid = (request.form.get("link_id") or "").strip()
         action = (request.form.get("action") or "").strip()
         if not lid or action not in ("enable", "disable"):
-            return _error("❌ Paramètres invalides")
+            return _error("✕ Paramètres invalides")
         res = gms.enable_link(lid) if action == "enable" else gms.disable_link(lid)
         if res.get("ok"):
             verb = "activé" if action == "enable" else "désactivé"
-            return _success(f"✅ Lien {verb}")
-        return _error(f"❌ {res.get('error', 'Action échouée')}")
+            return _success(f"✓ Lien {verb}")
+        return _error(f"✕ {res.get('error', 'Action échouée')}")
 
     # ============ DASHBOARD HOME (fragment AJAX, switch de période fluide) ============
 
@@ -43143,15 +43143,15 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="smypuls")
+            return _error(f"✕ Module indispo : {e}", tab="smypuls")
         tok = (request.form.get("api_token") or "").strip()
         if len(tok) < 10:
-            return _error("❌ Token trop court", tab="smypuls")
+            return _error("✕ Token trop court", tab="smypuls")
         mypuls.save_api_token(tok)
         ok = mypuls.api_session()
         mypuls.set_api_token_ok(bool(ok.get("ok")))
         if ok.get("ok"):
-            return _success("✅ Token API MyPuls enregistré et <b>validé</b>. "
+            return _success("✓ Token API MyPuls enregistré et <b>validé</b>. "
                             "Les revenus (posts inclus) peuvent maintenant venir de l'API.",
                             tab="smypuls")
         return _error(f"⚠️ Token enregistré mais refusé par MyPuls : {html_escape(str(ok.get('error'))[:180])}",
@@ -43452,7 +43452,7 @@ def create_app():
 
     @app.route("/insta/download_now", methods=["POST"])
     def insta_download_now():
-        """Force un passage de téléchargement MAINTENANT (bouton ⚡), en fond,
+        """Force un passage de téléchargement MAINTENANT (bouton ↓), en fond,
         parallélisé et sans cookie."""
         from flask import jsonify
         if not is_auth():
@@ -43613,16 +43613,16 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         phpsessid = (request.form.get("phpsessid") or "").strip()
         rememberme = (request.form.get("rememberme") or "").strip()
         if not phpsessid or len(phpsessid) < 16:
-            return _error("❌ PHPSESSID invalide (au moins 16 caractères)")
+            return _error("✕ PHPSESSID invalide (au moins 16 caractères)")
         mypuls.save_cookies(phpsessid, rememberme)
         # Test immédiat
         res = mypuls.ping()
         if res.get("ok"):
-            return _success(f"✅ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
+            return _success(f"✓ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"⚠ Cookies enregistrés mais ping échoué : {res.get('error', '?')}")
 
     @app.route("/mypuls/import_har", methods=["POST"])
@@ -43688,12 +43688,12 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         cfg = mypuls.load_config()
         cfg.pop("PHPSESSID", None)
         cfg.pop("REMEMBERME", None)
         mypuls.save_config(cfg)
-        return _success("✅ Cookies MyPuls supprimés")
+        return _success("✓ Cookies MyPuls supprimés")
 
     @app.route("/mypuls/sales_window", methods=["GET"])
     def mypuls_sales_window():
@@ -43815,9 +43815,9 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         res = mypuls.get_eur_usd_rate(force_refresh=True)
-        return _success(f"✅ Taux EUR→USD mis à jour : 1€ = {res['rate']:.4f}$ ({res.get('date', '?')})")
+        return _success(f"✓ Taux EUR→USD mis à jour : 1€ = {res['rate']:.4f}$ ({res.get('date', '?')})")
 
     @app.route("/mypuls/chatter/set_pct", methods=["POST"])
     def mypuls_chatter_set_pct():
@@ -43826,14 +43826,14 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         name = (request.form.get("name") or "").strip()
         try:
             pct = float(request.form.get("pct") or "0")
         except Exception:
-            return _error("❌ % invalide")
+            return _error("✕ % invalide")
         if not name:
-            return _error("❌ Nom manquant")
+            return _error("✕ Nom manquant")
         mypuls.set_commission_pct(name, pct)
         # Le tableau Revenus est mis en cache 180 s -> sans ça, la nouvelle
         # valeur ne s'affiche qu'après expiration ("rien ne se passe").
@@ -43841,7 +43841,7 @@ def create_app():
             _render_mypuls_section_html.invalidate()
         except Exception:
             pass
-        return _success(f"✅ {name} → {pct:g}%")
+        return _success(f"✓ {name} → {pct:g}%")
 
     @app.route("/mypuls/chatter/set_crypto", methods=["POST"])
     def mypuls_chatter_set_crypto():
@@ -43850,23 +43850,23 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         name = (request.form.get("name") or "").strip()
         crypto_type = (request.form.get("crypto_type") or "").strip().upper()
         network = (request.form.get("crypto_network") or "").strip()
         address = (request.form.get("crypto_address") or "").strip()
         if not name:
-            return _error("❌ Nom du chatteur manquant")
+            return _error("✕ Nom du chatteur manquant")
         if crypto_type and crypto_type not in mypuls.CRYPTO_TYPES:
-            return _error(f"❌ Crypto inconnue ({crypto_type})")
+            return _error(f"✕ Crypto inconnue ({crypto_type})")
         mypuls.set_crypto_address(name, crypto_type, network, address)
         try:
             _render_mypuls_section_html.invalidate()
         except Exception:
             pass
         if crypto_type:
-            return _success(f"✅ {name} → {crypto_type} ({network or 'pas de réseau'})")
-        return _success(f"✅ Infos crypto effacées pour {name}")
+            return _success(f"✓ {name} → {crypto_type} ({network or 'pas de réseau'})")
+        return _success(f"✓ Infos crypto effacées pour {name}")
 
     @app.route("/mypuls/chatter/upload_crypto", methods=["POST"])
     def mypuls_chatter_upload_crypto():
@@ -43876,7 +43876,7 @@ def create_app():
         ajax = (request.form.get("ajax") == "1")
 
         def _fail(m):
-            return jsonify({"ok": False, "error": m}) if ajax else _error("❌ " + m)
+            return jsonify({"ok": False, "error": m}) if ajax else _error("✕ " + m)
 
         try:
             import mypuls
@@ -43905,7 +43905,7 @@ def create_app():
             pass
         if ajax:
             return jsonify({"ok": True})
-        return _success(f"✅ Screenshot crypto enregistré pour <code>{name}</code>")
+        return _success(f"✓ Screenshot crypto enregistré pour <code>{name}</code>")
 
     @app.route("/mypuls/chatter/crypto/<path:name>")
     def mypuls_chatter_crypto(name):
@@ -43930,16 +43930,16 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         name = (request.form.get("name") or "").strip()
         if not name:
-            return _error("❌ Nom manquant")
+            return _error("✕ Nom manquant")
         ok = mypuls.delete_crypto_file(name)
         try:
             _render_mypuls_section_html.invalidate()
         except Exception:
             pass
-        return _success(f"✅ Screenshot supprimé pour <code>{name}</code>") if ok else _error("❌ Pas de screenshot à supprimer")
+        return _success(f"✓ Screenshot supprimé pour <code>{name}</code>") if ok else _error("✕ Pas de screenshot à supprimer")
 
     @app.route("/mypuls/avatar/<int:creator_id>")
     def mypuls_avatar(creator_id):
@@ -43964,11 +43964,11 @@ def create_app():
         try:
             import mypuls
         except Exception as e:
-            return _error(f"❌ Module mypuls indispo : {e}")
+            return _error(f"✕ Module mypuls indispo : {e}")
         res = mypuls.ping()
         if res.get("ok"):
-            return _success(f"✅ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
-        return _error(f"❌ {res.get('error', 'Test échoué')}")
+            return _success(f"✓ MyPuls OK — connecté en tant que <code>{res.get('email', '?')}</code>")
+        return _error(f"✕ {res.get('error', 'Test échoué')}")
 
     @app.route("/sfssetup/save", methods=["POST"])
     def sfssetup_save():
@@ -44230,12 +44230,12 @@ def create_app():
         try:
             import linkscale
         except Exception as e:
-            return _error(f"❌ Module linkscale indispo : {e}", tab="linkscale")
+            return _error(f"✕ Module linkscale indispo : {e}", tab="linkscale")
         key = (request.form.get("api_key") or "").strip()
         if not key.startswith("lk_") or len(key) < 20:
-            return _error("❌ Cle Linkscale invalide (doit commencer par lk_)", tab="linkscale")
+            return _error("✕ Cle Linkscale invalide (doit commencer par lk_)", tab="linkscale")
         linkscale.save_api_key(key)
-        return _success("✅ Cle Linkscale enregistree", tab="linkscale")
+        return _success("✓ Cle Linkscale enregistree", tab="linkscale")
 
     @app.route("/linkscale/test", methods=["POST"])
     def linkscale_test():
@@ -44244,11 +44244,11 @@ def create_app():
         try:
             import linkscale
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="linkscale")
+            return _error(f"✕ Module indispo : {e}", tab="linkscale")
         res = linkscale.ping()
         if res.get("ok"):
-            return _success("✅ Connexion Linkscale OK", tab="linkscale")
-        return _error(f"❌ {res.get('error', 'Inconnu')}", tab="linkscale")
+            return _success("✓ Connexion Linkscale OK", tab="linkscale")
+        return _error(f"✕ {res.get('error', 'Inconnu')}", tab="linkscale")
 
     @app.route("/linkscale/create", methods=["POST"])
     def linkscale_create():
@@ -44535,17 +44535,17 @@ def create_app():
         import re
         safe = re.sub(r'[^a-z0-9_\-]', '', raw_name.lower())[:30]
         if not safe:
-            return _error("❌ Nom invalide (lettres, chiffres, _ ou - uniquement)", tab="jailbreak")
+            return _error("✕ Nom invalide (lettres, chiffres, _ ou - uniquement)", tab="jailbreak")
         if safe in _list_identities():
-            return _error(f"❌ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
+            return _error(f"✕ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
         # Cree le dossier
         target_dir = IDENTITIES_DIR / safe
         try:
             target_dir.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
-            return _error(f"❌ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
+            return _error(f"✕ L'identité <b>{safe}</b> existe déjà", tab="jailbreak")
         except Exception as e:
-            return _error(f"❌ Création échouée : {e}", tab="jailbreak")
+            return _error(f"✕ Création échouée : {e}", tab="jailbreak")
         # Sous-dossiers standards (memes que les autres identites)
         for sub in ("videos", "posts", "stories", "storyctas"):
             (target_dir / sub).mkdir(exist_ok=True)
@@ -44559,15 +44559,15 @@ def create_app():
                 except Exception as e:
                     # Pas grave, l identite existe, juste pas d avatar
                     return _success(
-                        f"✅ Identité <b>{safe}</b> créée (avatar non sauvé : {e})",
+                        f"✓ Identité <b>{safe}</b> créée (avatar non sauvé : {e})",
                         tab="jailbreak",
                     )
             else:
                 return _success(
-                    f"✅ Identité <b>{safe}</b> créée (avatar refusé : format {ext} non supporté)",
+                    f"✓ Identité <b>{safe}</b> créée (avatar refusé : format {ext} non supporté)",
                     tab="jailbreak",
                 )
-        return _success(f"✅ Identité <b>{safe}</b> créée", tab="jailbreak")
+        return _success(f"✓ Identité <b>{safe}</b> créée", tab="jailbreak")
 
     @app.route("/jailbreak/edit_identity", methods=["POST"])
     def jailbreak_edit_identity():
@@ -44576,23 +44576,23 @@ def create_app():
             return redirect("/")
         old_name = (request.form.get("old_name") or "").strip().lower()
         if not old_name or old_name not in _list_identities():
-            return _error("❌ Identité introuvable", tab="jailbreak")
+            return _error("✕ Identité introuvable", tab="jailbreak")
         # Nouveau nom : sanitize comme la creation
         raw_new = (request.form.get("identity_name") or "").strip()
         import re
         new_name = re.sub(r'[^a-z0-9_\-]', '', raw_new.lower())[:30]
         if not new_name:
-            return _error("❌ Nouveau nom invalide", tab="jailbreak")
+            return _error("✕ Nouveau nom invalide", tab="jailbreak")
         renamed = False
         if new_name != old_name:
             # Le nouveau nom ne doit pas exister deja
             if new_name in _list_identities():
-                return _error(f"❌ L'identité <b>{new_name}</b> existe déjà", tab="jailbreak")
+                return _error(f"✕ L'identité <b>{new_name}</b> existe déjà", tab="jailbreak")
             # Move filesystem
             try:
                 (IDENTITIES_DIR / old_name).rename(IDENTITIES_DIR / new_name)
             except Exception as e:
-                return _error(f"❌ Rename échoué : {e}", tab="jailbreak")
+                return _error(f"✕ Rename échoué : {e}", tab="jailbreak")
             # Move storage jailbreak.json
             try:
                 import jailbreak as jb
@@ -44625,8 +44625,8 @@ def create_app():
         if renamed: parts.append(f"renommée <b>{old_name}</b> → <b>{new_name}</b>")
         if avatar_changed: parts.append("photo de profil mise à jour")
         if not parts:
-            return _success(f"✅ Aucun changement pour <b>{new_name}</b>", tab="jailbreak")
-        return _success("✅ Identité " + ", ".join(parts), tab="jailbreak")
+            return _success(f"✓ Aucun changement pour <b>{new_name}</b>", tab="jailbreak")
+        return _success("✓ Identité " + ", ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/add_account", methods=["POST"])
     def jailbreak_add_account():
@@ -44639,7 +44639,7 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         username = (request.form.get("username") or "").strip()
         password = (request.form.get("password") or "").strip()
@@ -44649,9 +44649,9 @@ def create_app():
         va = (request.form.get("va") or "").strip()
         notes = (request.form.get("notes") or "").strip()
         if not identity:
-            return _error("❌ Identité manquante", tab="jailbreak")
+            return _error("✕ Identité manquante", tab="jailbreak")
         if not username:
-            return _error("❌ Username manquant", tab="jailbreak")
+            return _error("✕ Username manquant", tab="jailbreak")
         try:
             jb.add_account(identity, username, password=password, email=email,
                            two_fa=two_fa, two_fa_validated=two_fa_validated,
@@ -44660,12 +44660,12 @@ def create_app():
             if request.form.get("ajax") == "1":
                 from flask import jsonify
                 return jsonify({"ok": False, "error": str(e)[:160]})
-            return _error(f"❌ {e}", tab="jailbreak")
+            return _error(f"✕ {e}", tab="jailbreak")
         except Exception as e:
             if request.form.get("ajax") == "1":
                 from flask import jsonify
                 return jsonify({"ok": False, "error": f"Ajout échoué : {e}"[:160]})
-            return _error(f"❌ Ajout échoué : {e}", tab="jailbreak")
+            return _error(f"✕ Ajout échoué : {e}", tab="jailbreak")
         # Scrape immediat en arriere-plan : le compte ne reste pas "NON SCRAPÉ"
         try:
             _kick_scrape_handles([username], label="jb-add-scrape")
@@ -44674,7 +44674,7 @@ def create_app():
         if request.form.get("ajax") == "1":
             from flask import jsonify
             return jsonify({"ok": True, "username": username})
-        return _success(f"✅ Compte <b>@{username}</b> ajouté à <b>{identity}</b> — scrape lancé 🔄", tab="jailbreak")
+        return _success(f"✓ Compte <b>@{username}</b> ajouté à <b>{identity}</b> — scrape lancé ↻", tab="jailbreak")
 
     @app.route("/jailbreak/bulk_add_accounts", methods=["POST"])
     def jailbreak_bulk_add_accounts():
@@ -44687,12 +44687,12 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         va = (request.form.get("va") or "").strip()
         usernames_raw = request.form.get("usernames") or ""
         if not identity:
-            return _error("❌ Identité manquante", tab="jailbreak")
+            return _error("✕ Identité manquante", tab="jailbreak")
         # Parse : 1 username par ligne. Aussi tolerer separateurs , ; et tabs.
         usernames = []
         for chunk in usernames_raw.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines():
@@ -44700,19 +44700,19 @@ def create_app():
             if u:
                 usernames.append(u)
         if not usernames:
-            return _error("❌ Aucun username fourni", tab="jailbreak")
+            return _error("✕ Aucun username fourni", tab="jailbreak")
         try:
             res = jb.bulk_add_accounts(identity, usernames, va=va)
         except ValueError as e:
             if request.form.get("ajax") == "1":
                 from flask import jsonify
                 return jsonify({"ok": False, "error": str(e)[:160]})
-            return _error(f"❌ {e}", tab="jailbreak")
+            return _error(f"✕ {e}", tab="jailbreak")
         except Exception as e:
             if request.form.get("ajax") == "1":
                 from flask import jsonify
                 return jsonify({"ok": False, "error": f"Bulk add échoué : {e}"[:160]})
-            return _error(f"❌ Bulk add échoué : {e}", tab="jailbreak")
+            return _error(f"✕ Bulk add échoué : {e}", tab="jailbreak")
         # Scrape immediat en arriere-plan des comptes reellement ajoutes
         n_kick = 0
         try:
@@ -44728,13 +44728,13 @@ def create_app():
         if va:
             parts.append(f"sous VA <b>{va}</b>")
         if n_kick:
-            parts.append("scrape lancé 🔄")
+            parts.append("scrape lancé ↻")
         if request.form.get("ajax") == "1":
             from flask import jsonify
             import re as _re_bk
             return jsonify({"ok": True,
                             "msg": _re_bk.sub(r"<[^>]+>", "", " · ".join(parts))})
-        return _success("✅ " + " · ".join(parts), tab="jailbreak")
+        return _success("✓ " + " · ".join(parts), tab="jailbreak")
 
     @app.route("/jailbreak/edit_account", methods=["POST"])
     def jailbreak_edit_account():
@@ -44747,14 +44747,14 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         try:
             account_id = int(request.form.get("account_id") or 0)
         except Exception:
-            return _error("❌ account_id invalide", tab="jailbreak")
+            return _error("✕ account_id invalide", tab="jailbreak")
         if not identity or not account_id:
-            return _error("❌ Identité ou account_id manquant", tab="jailbreak")
+            return _error("✕ Identité ou account_id manquant", tab="jailbreak")
         ok = jb.update_account(
             identity, account_id,
             username=(request.form.get("username") or "").strip(),
@@ -44769,8 +44769,8 @@ def create_app():
             from flask import jsonify
             return jsonify({"ok": bool(ok), "error": "" if ok else "Compte introuvable"})
         if not ok:
-            return _error("❌ Compte introuvable", tab="jailbreak")
-        return _success("✅ Compte mis à jour", tab="jailbreak")
+            return _error("✕ Compte introuvable", tab="jailbreak")
+        return _success("✓ Compte mis à jour", tab="jailbreak")
 
     @app.route("/jailbreak/add_va", methods=["POST"])
     def jailbreak_add_va():
@@ -44783,14 +44783,14 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         va_name = (request.form.get("va_name") or "").strip()
         discord_username = (request.form.get("discord_username") or "").strip().lstrip("@")
         if not identity:
-            return _error("❌ Identité manquante", tab="jailbreak")
+            return _error("✕ Identité manquante", tab="jailbreak")
         if not va_name:
-            return _error("❌ Nom du VA manquant", tab="jailbreak")
+            return _error("✕ Nom du VA manquant", tab="jailbreak")
         added = jb.add_va(identity, va_name, discord_username=discord_username)
         if request.form.get("ajax") == "1":
             # Mode AJAX (modal du site) : pas de redirect — la page se met à jour
@@ -44801,8 +44801,8 @@ def create_app():
             return jsonify({"ok": False, "error": f"Le VA {va_name} existe déjà pour cette identité"})
         if added:
             extra = f" (lié à <code>@{discord_username}</code>)" if discord_username else ""
-            return _success(f"✅ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
-        return _error(f"❌ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
+            return _success(f"✓ VA <b>{va_name}</b> ajoutée à <b>{identity}</b>{extra}", tab="jailbreak")
+        return _error(f"✕ VA <b>{va_name}</b> existe déjà pour cette identité", tab="jailbreak")
 
     @app.route("/jailbreak/reorder_vas", methods=["POST"])
     def jailbreak_reorder_vas():
@@ -44931,14 +44931,14 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         old_name = (request.form.get("old_name") or "").strip()
         new_name = (request.form.get("new_name") or "").strip()
         # discord_username peut etre vide pour le retirer
         discord_username = (request.form.get("discord_username") or "").strip().lstrip("@")
         if not identity or not old_name:
-            return _error("❌ Identité ou ancien nom manquant", tab="jailbreak")
+            return _error("✕ Identité ou ancien nom manquant", tab="jailbreak")
         kwargs = {}
         if new_name:
             kwargs["new_name"] = new_name
@@ -44966,8 +44966,8 @@ def create_app():
                             "avatar": avatar, "discord_found": found,
                             "error": "" if ok else "Conflit de nom ou VA introuvable"})
         if ok:
-            return _success(f"✅ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
-        return _error("❌ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
+            return _success(f"✓ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
+        return _error("✕ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
 
     @app.route("/jailbreak/remove_va", methods=["POST"])
     def jailbreak_remove_va():
@@ -44980,11 +44980,11 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         va_name = (request.form.get("va_name") or "").strip()
         if not identity or not va_name:
-            return _error("❌ Identité ou nom du VA manquant", tab="jailbreak")
+            return _error("✕ Identité ou nom du VA manquant", tab="jailbreak")
         n = jb.remove_va_and_accounts(identity, va_name)
         if n >= 0:
             # Push Sheet en ARRIÈRE-PLAN : en synchrone il réécrit un classeur
@@ -45000,13 +45000,13 @@ def create_app():
                 from flask import jsonify
                 return jsonify({"ok": True, "removed_accounts": n})
             return _success(
-                f"✅ VA <b>{va_name}</b> supprimé avec ses <b>{n}</b> compte(s).",
+                f"✓ VA <b>{va_name}</b> supprimé avec ses <b>{n}</b> compte(s).",
                 tab="jailbreak",
             )
         if request.form.get("ajax") == "1":
             from flask import jsonify
             return jsonify({"ok": False, "error": f"VA {va_name} introuvable"})
-        return _error(f"❌ VA <b>{va_name}</b> introuvable", tab="jailbreak")
+        return _error(f"✕ VA <b>{va_name}</b> introuvable", tab="jailbreak")
 
     @app.route("/jailbreak/remove_account", methods=["POST"])
     def jailbreak_remove_account():
@@ -45019,21 +45019,21 @@ def create_app():
         try:
             import jailbreak as jb
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="jailbreak")
+            return _error(f"✕ Module indispo : {e}", tab="jailbreak")
         identity = (request.form.get("identity") or "").strip().lower()
         try:
             account_id = int(request.form.get("account_id") or 0)
         except Exception:
-            return _error("❌ account_id invalide", tab="jailbreak")
+            return _error("✕ account_id invalide", tab="jailbreak")
         if not identity or not account_id:
-            return _error("❌ Identité ou account_id manquant", tab="jailbreak")
+            return _error("✕ Identité ou account_id manquant", tab="jailbreak")
         removed = jb.remove_account(identity, account_id)
         if request.form.get("ajax") == "1":
             from flask import jsonify
             return jsonify({"ok": bool(removed), "error": "" if removed else "Compte introuvable"})
         if removed:
-            return _success("✅ Compte supprimé", tab="jailbreak")
-        return _error("❌ Compte introuvable", tab="jailbreak")
+            return _success("✓ Compte supprimé", tab="jailbreak")
+        return _error("✕ Compte introuvable", tab="jailbreak")
 
     # ============ TEXT POOL (Bibliotheque) ============
     @app.route("/textpool/render", methods=["GET"])
@@ -45357,7 +45357,7 @@ def create_app():
             import onboarding as ob
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
-        icon = (request.form.get("icon") or "📅").strip()
+        icon = (request.form.get("icon") or "▤").strip()
         title = (request.form.get("title") or "Nouvelle étape").strip()
         desc = (request.form.get("description") or "").strip()
         step = ob.add_step(icon=icon, title=title, description=desc)
@@ -45897,7 +45897,7 @@ def create_app():
             never = r.get("never") or 0
             _notes = []
             if ban:
-                _notes.append(f"🚫 {ban} banni(s)")
+                _notes.append(f"⊘ {ban} banni(s)")
             if never:
                 _notes.append(f"∅ {never} sans reel")
             ban_html = (f"<div style='font-size:11px;color:#6b7280;font-weight:400'>{' · '.join(_notes)} ignoré(s)</div>" if _notes else "")
@@ -45913,7 +45913,7 @@ def create_app():
                     dot = _STDOT.get(a["state"], "#6b7280")
                     extra = (f" <span style='color:#7a5a5a'>{a['ago_h']}h</span>"
                              if a["state"] == "silent" and a.get("ago_h") is not None else "")
-                    tag = {"never": " ∅", "banned": " 🚫"}.get(a["state"], "")
+                    tag = {"never": " ∅", "banned": " ⊘"}.get(a["state"], "")
                     chips.append(
                         f"<a href='https://instagram.com/{html_escape(u)}' target='_blank' rel='noopener' "
                         f"style='display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#12151f;"
@@ -45943,7 +45943,7 @@ def create_app():
                 f"<tr class='jba-d' style='display:none'><td colspan='6' style='padding:14px 18px;background:#0b0e15;border-bottom:1px solid #1c2230'>{detail_html}</td></tr>")
         table_body = "".join(trs) or ("<tr><td colspan='6' style='padding:24px;text-align:center;color:#5a6178'>"
                                       "Aucun VA / aucune donnée. Lance un scan.</td></tr>")
-        scan_line = (f"⏳ scan en cours… {st.get('done',0)}/{st.get('total',0)}"
+        scan_line = (f"◌ scan en cours… {st.get('done',0)}/{st.get('total',0)}"
                      if st.get("on") else
                      (f"dernier scan : {html_escape(st.get('last_scan') or 'jamais')}"))
         MONTH = html_escape(month)
@@ -45983,7 +45983,7 @@ button:hover{{filter:brightness(1.2)}}
   <div style="font-size:11.5px;color:#5a6178;margin-top:12px">« Sans data » = pas encore scanné / privé / erreur · « sans reel » = jamais posté · « banni » : tous **exclus** (jamais pénalisés). Seuls les comptes qui ont déjà posté et sont silencieux &gt;48h comptent. Scan auto 1×/jour.</div>
 </div>
 <script>
-function jbaScan(b){{ b.disabled=true; b.textContent='⏳ scan lancé…';
+function jbaScan(b){{ b.disabled=true; b.textContent='◌ scan lancé…';
   fetch('/jbactivity/scan',{{method:'POST'}}).then(r=>r.json()).then(function(){{
     setTimeout(function(){{ location.reload(); }}, 2500);
   }}).catch(function(){{ b.disabled=false; b.textContent='🔍 Scanner maintenant'; }}); }}
@@ -46047,7 +46047,7 @@ function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
                             for k, v in sorted(rep["identities"].items()))
                         report_html = (
                             f"<div style='background:#0d2818;border:1px solid #22c55e;border-radius:12px;padding:16px;margin-bottom:18px'>"
-                            f"<div style='font-size:17px;font-weight:800;color:#4ade80'>✅ Restauration terminée</div>"
+                            f"<div style='font-size:17px;font-weight:800;color:#4ade80'>✓ Restauration terminée</div>"
                             f"<div style='color:#a7f3d0;margin-top:4px'><b>{rep['added']}</b> compte(s) ajouté(s) · "
                             f"<b>{rep['filled']}</b> complété(s) · aucune suppression.</div>"
                             f"<div style='color:#6ee7b7;font-size:12.5px;margin-top:6px'>"
@@ -46119,7 +46119,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     _vsend_inflight: dict = {}   # rid -> timestamp : verrou anti double-envoi
     _vsend_lock = threading.Lock()   # protège la purge/check/set du dict (multi-thread)
-    _vsend_stage: dict = {}   # rid -> étape en cours (« ⚡ envoi… », « copie vers X (1/2) »)
+    _vsend_stage: dict = {}   # rid -> étape en cours (« ↓ envoi… », « copie vers X (1/2) »)
 
     # ---- Pré-chauffage Telegram de la veille -------------------------------
     # Chaque reel NON envoyé est téléchargé + uploadé EN JOURNÉE en silencieux
@@ -46129,7 +46129,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     _vwarm_fails: dict = {}   # rid -> nb d'échecs : 3 ratés = on n'insiste plus (Apify payant)
     _vwarm_lock = threading.Lock()   # 1 upload warm à la fois (worker + passe forcée)
     _vwarm_state_lock = threading.Lock()   # claim ATOMIQUE de la passe forcée
-    _VWARM_STATE = {"running": False, "done": 0, "total": 0}   # passe forcée (bouton ⚡)
+    _VWARM_STATE = {"running": False, "done": 0, "total": 0}   # passe forcée (bouton ↓)
 
     def _vwarm_candidates(veille, veille_telegram):
         """Reels non envoyés, pas encore sur Telegram, pas condamnés (3 échecs)."""
@@ -46203,7 +46203,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             _t.sleep(600)   # toutes les 10 min
 
     def _vwarm_force():
-        """Bouton ⚡ Précharger : chauffe TOUT le backlog d'un coup, en fond.
+        """Bouton ↓ Précharger : chauffe TOUT le backlog d'un coup, en fond.
         Un envoi manuel en cours garde la priorité (on attend qu'il finisse).
         « running » est CLAMÉ par la route avant le spawn (claim atomique) —
         ici on ne fait que remplir la file et le compteur."""
@@ -46284,7 +46284,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     @app.route("/veille/warm_now", methods=["POST"])
     def veille_warm_now():
-        """Bouton ⚡ Précharger : uploade TOUT le backlog sur Telegram, en fond."""
+        """Bouton ↓ Précharger : uploade TOUT le backlog sur Telegram, en fond."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
@@ -46396,7 +46396,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                        "message_id": reel.get("veille_msg_id"),
                        "description": description}
             else:
-                _vsend_stage[rid] = ("⚡ Envoi instantané dans le canal Veille (déjà sur Telegram)…"
+                _vsend_stage[rid] = ("↓ Envoi instantané dans le canal Veille (déjà sur Telegram)…"
                                      if _wrm else
                                      "⬇️ Téléchargement Instagram + upload Telegram (pas encore pré-chauffé)…")
                 # 1) Tente download + sendVideo, fallback sur lien si echec
@@ -46483,7 +46483,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     @app.route("/veille/send_stage")
     def veille_send_stage():
         """Étape en cours d'un envoi (poll du panneau « Envoi X/Y ») : le client
-        affiche « ⚡ envoi instantané… », « ➡️ copie vers carla (1/2)… » au lieu
+        affiche « ↓ envoi instantané… », « ➡️ copie vers carla (1/2)… » au lieu
         d'un « En attente… » muet qui ressemble à un bug."""
         from flask import jsonify
         if not is_auth():
@@ -46506,7 +46506,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     @app.route("/veille/identities", methods=["GET"])
     def veille_identities():
-        """Liste des identites (pour le menu '⭐ banger')."""
+        """Liste des identites (pour le menu '★ banger')."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -46682,13 +46682,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import veille_telegram
         except Exception as e:
-            return _error(f"❌ Module veille_telegram indispo : {e}", tab="vtg")
+            return _error(f"✕ Module veille_telegram indispo : {e}", tab="vtg")
         bot_token = (request.form.get("bot_token") or "").strip()
         chat_id = (request.form.get("chat_id") or "").strip()
         if not bot_token or not chat_id:
-            return _error("❌ Bot token + chat ID requis", tab="vtg")
+            return _error("✕ Bot token + chat ID requis", tab="vtg")
         veille_telegram.set_credentials(bot_token, chat_id)
-        return _success("✅ Config Veille Telegram sauvegardée", tab="vtg")
+        return _success("✓ Config Veille Telegram sauvegardée", tab="vtg")
 
     @app.route("/settings/veille_telegram/test", methods=["POST"])
     def settings_veille_telegram_test():
@@ -46697,11 +46697,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import veille_telegram
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="vtg")
+            return _error(f"✕ Module indispo : {e}", tab="vtg")
         res = veille_telegram.test_connection()
         if res.get("ok"):
-            return _success("✅ Connexion OK — message test envoyé sur le chat", tab="vtg")
-        return _error(f"❌ {res.get('error', 'Erreur inconnue')}", tab="vtg")
+            return _success("✓ Connexion OK — message test envoyé sur le chat", tab="vtg")
+        return _error(f"✕ {res.get('error', 'Erreur inconnue')}", tab="vtg")
 
     @app.route("/settings/veille_telegram/detect_chats", methods=["POST"])
     def settings_veille_telegram_detect_chats():
@@ -46771,7 +46771,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         import chatting
         name = (request.form.get("name") or "").strip()
         if not name:
-            return _error("❌ Nom manquant", tab="chatplanning")
+            return _error("✕ Nom manquant", tab="chatplanning")
         edt = chatting.create_edt(name)
         for cre in chatting.CRENEAUX:
             chatting.add_row(edt["id"], cre)
@@ -46792,7 +46792,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             name = "Planning Managers"
             kind = "manager"
         else:
-            return _error("❌ Preset invalide", tab="chatplanning")
+            return _error("✕ Preset invalide", tab="chatplanning")
         # Verifier qu il n existe pas deja
         for e in chatting.list_edts():
             if e.get("name", "").lower() == name.lower():
@@ -46933,7 +46933,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     @app.route("/chatting/fill_row", methods=["POST"])
     def chatting_fill_row():
-        """Remplit les 7 jours d'une ligne avec la meme valeur (bouton ⚡)."""
+        """Remplit les 7 jours d'une ligne avec la meme valeur (bouton ↓)."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False}), 401
@@ -47029,13 +47029,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import mypuls_campaigns
         except Exception as e:
-            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+            return _error(f"✕ Module campagnes indispo : {e}", tab="mypulslive")
         cid = (request.form.get("campaign_id") or "").strip()
         if not cid:
-            return _error("❌ Campaign ID manquant", tab="mypulslive")
+            return _error("✕ Campaign ID manquant", tab="mypulslive")
         if mypuls_campaigns.set_campaign_active(cid, False):
             return _success(f"⏸ Campagne {cid[:14]} mise en pause", tab="mypulslive")
-        return _error("❌ Campagne introuvable", tab="mypulslive")
+        return _error("✕ Campagne introuvable", tab="mypulslive")
 
     @app.route("/mypulslive/campaign/resume", methods=["POST"])
     def mypulslive_campaign_resume():
@@ -47044,13 +47044,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import mypuls_campaigns
         except Exception as e:
-            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+            return _error(f"✕ Module campagnes indispo : {e}", tab="mypulslive")
         cid = (request.form.get("campaign_id") or "").strip()
         if not cid:
-            return _error("❌ Campaign ID manquant", tab="mypulslive")
+            return _error("✕ Campaign ID manquant", tab="mypulslive")
         if mypuls_campaigns.set_campaign_active(cid, True):
             return _success(f"▶ Campagne {cid[:14]} reactivee", tab="mypulslive")
-        return _error("❌ Campagne introuvable", tab="mypulslive")
+        return _error("✕ Campagne introuvable", tab="mypulslive")
 
     @app.route("/mypulslive/campaign/delete", methods=["POST"])
     def mypulslive_campaign_delete():
@@ -47059,13 +47059,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import mypuls_campaigns
         except Exception as e:
-            return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+            return _error(f"✕ Module campagnes indispo : {e}", tab="mypulslive")
         cid = (request.form.get("campaign_id") or "").strip()
         if not cid:
-            return _error("❌ Campaign ID manquant", tab="mypulslive")
+            return _error("✕ Campaign ID manquant", tab="mypulslive")
         if mypuls_campaigns.delete_campaign(cid):
-            return _success(f"🗑 Campagne {cid[:14]} supprimee", tab="mypulslive")
-        return _error("❌ Campagne introuvable", tab="mypulslive")
+            return _success(f"⌫ Campagne {cid[:14]} supprimee", tab="mypulslive")
+        return _error("✕ Campagne introuvable", tab="mypulslive")
 
     @app.route("/mypulslive/list_events", methods=["GET"])
     def mypulslive_list_events():
@@ -47107,14 +47107,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import mypuls_scheduler
         except Exception as e:
-            return _error(f"❌ Module indispo : {e}", tab="mypulslive")
+            return _error(f"✕ Module indispo : {e}", tab="mypulslive")
         ids_raw = (request.form.get("delete_ids") or "").strip()
         if not ids_raw:
-            return _error("❌ Aucun event selectionne", tab="mypulslive")
+            return _error("✕ Aucun event selectionne", tab="mypulslive")
         try:
             ids = [int(x.strip()) for x in ids_raw.split(",") if x.strip()]
         except Exception:
-            return _error("❌ IDs invalides", tab="mypulslive")
+            return _error("✕ IDs invalides", tab="mypulslive")
         deleted, failed = 0, 0
         first_errors = []
         for i in ids:
@@ -47125,7 +47125,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 failed += 1
                 if len(first_errors) < 3:
                     first_errors.append(f"{i}: {res.get('error','?')[:60]}")
-        msg = f"✅ Suppression : {deleted} OK / {failed} fail"
+        msg = f"✓ Suppression : {deleted} OK / {failed} fail"
         if first_errors:
             msg += " | " + " ; ".join(first_errors)
         return _success(msg, tab="mypulslive")
@@ -47159,14 +47159,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import mypuls_scheduler
         except Exception as e:
-            return _error(f"❌ Module mypuls_scheduler indispo : {e}", tab="mypulslive")
+            return _error(f"✕ Module mypuls_scheduler indispo : {e}", tab="mypulslive")
 
         try:
             creator_id = int(request.form.get("creator_id") or 0)
         except Exception:
-            return _error("❌ Createur invalide", tab="mypulslive")
+            return _error("✕ Createur invalide", tab="mypulslive")
         if not creator_id:
-            return _error("❌ Createur manquant", tab="mypulslive")
+            return _error("✕ Createur manquant", tab="mypulslive")
 
         content_type = (request.form.get("content_type") or "both").strip()
         date_start = (request.form.get("date_start") or "").strip()
@@ -47202,9 +47202,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             story_slots = []
 
         if not date_start:
-            return _error("❌ Date de debut manquante", tab="mypulslive")
+            return _error("✕ Date de debut manquante", tab="mypulslive")
         if not infinite_mode and not date_end:
-            return _error("❌ Date de fin manquante (sinon active Mode infini)", tab="mypulslive")
+            return _error("✕ Date de fin manquante (sinon active Mode infini)", tab="mypulslive")
 
         def _parse_lines(raw):
             return [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
@@ -47213,9 +47213,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             media_ids = [int(m) for m in media_ids_str]
         except Exception:
-            return _error("❌ media_ids doivent etre des entiers", tab="mypulslive")
+            return _error("✕ media_ids doivent etre des entiers", tab="mypulslive")
         if not media_ids:
-            return _error("❌ Aucun media_id", tab="mypulslive")
+            return _error("✕ Aucun media_id", tab="mypulslive")
 
         captions = _parse_lines(captions_raw) or [""]
 
@@ -47225,7 +47225,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 import mypuls_campaigns
                 import mypuls
             except Exception as e:
-                return _error(f"❌ Module campagnes indispo : {e}", tab="mypulslive")
+                return _error(f"✕ Module campagnes indispo : {e}", tab="mypulslive")
             creators = mypuls.list_creators().get("creators", {})
             cname = ""
             for n, cid in creators.items():
@@ -47241,7 +47241,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 campaigns_to_create.append(("story", story_slots))
             if not campaigns_to_create:
                 return _error(
-                    "❌ Mode infini : configure au moins un slot post ou story (et clique sur l'onglet correspondant)",
+                    "✕ Mode infini : configure au moins un slot post ou story (et clique sur l'onglet correspondant)",
                     tab="mypulslive",
                 )
             results = []
@@ -47259,7 +47259,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                     start_date=date_start,
                 )
                 if not res.get("ok"):
-                    return _error(f"❌ Creation campagne {ctype} : {res.get('error', '?')}", tab="mypulslive")
+                    return _error(f"✕ Creation campagne {ctype} : {res.get('error', '?')}", tab="mypulslive")
                 results.append((ctype, res.get("planned", 0)))
             msg_parts = [f"♾️ {n} {ct}(s) sur les 2 prochains jours" for ct, n in results]
             return _success(
@@ -47285,7 +47285,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 randomize_minutes=randomize_minutes,
             )
             summary_parts.append(
-                f"📱 Stories : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
+                f"▭ Stories : {res.get('planned', 0)} OK / {res.get('failed', 0)} fail"
             )
             if res.get("errors"):
                 all_errors.extend(res["errors"][:3])
@@ -47312,9 +47312,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 all_errors.extend(res["errors"][:3])
 
         if not summary_parts:
-            return _error("❌ Aucun slot configure pour le type choisi", tab="mypulslive")
+            return _error("✕ Aucun slot configure pour le type choisi", tab="mypulslive")
 
-        msg = "✅ Push live termine — " + " | ".join(summary_parts)
+        msg = "✓ Push live termine — " + " | ".join(summary_parts)
         if all_errors:
             msg += " | Premieres erreurs : " + "; ".join(all_errors[:3])
         return _success(msg, tab="mypulslive")
@@ -47579,7 +47579,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import schedule_xlsx
         except Exception as e:
-            return _error(f"❌ Module schedule_xlsx indispo (pip install openpyxl ?) : {e}", tab="schedule")
+            return _error(f"✕ Module schedule_xlsx indispo (pip install openpyxl ?) : {e}", tab="schedule")
 
         model_name = (request.form.get("model_name") or "").strip()
         date_start = (request.form.get("date_start") or "").strip()
@@ -47611,13 +47611,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             story_slots_list = []
 
         if not model_name:
-            return _error("❌ Nom du modele manquant", tab="schedule")
+            return _error("✕ Nom du modele manquant", tab="schedule")
         if not date_start or not date_end:
-            return _error("❌ Dates manquantes", tab="schedule")
+            return _error("✕ Dates manquantes", tab="schedule")
         if not media_ids.strip():
-            return _error("❌ Aucun media_id fourni", tab="schedule")
+            return _error("✕ Aucun media_id fourni", tab="schedule")
         if not public_hours and not private_hours and not story_slots_list:
-            return _error("❌ Au moins un slot (post public/prive ou story) doit etre indique", tab="schedule")
+            return _error("✕ Au moins un slot (post public/prive ou story) doit etre indique", tab="schedule")
 
         try:
             xlsx_bytes, filename = schedule_xlsx.generate_xlsx(
@@ -47634,9 +47634,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 randomize_minutes=randomize_minutes,
             )
         except ValueError as e:
-            return _error(f"❌ {e}", tab="schedule")
+            return _error(f"✕ {e}", tab="schedule")
         except Exception as e:
-            return _error(f"❌ Generation echouee : {type(e).__name__}: {e}", tab="schedule")
+            return _error(f"✕ Generation echouee : {type(e).__name__}: {e}", tab="schedule")
 
         from flask import Response
         resp = Response(
@@ -47661,15 +47661,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import gms
         except Exception as e:
-            return _error(f"❌ Module gms indispo : {e}")
+            return _error(f"✕ Module gms indispo : {e}")
         lid = (request.form.get("link_id") or "").strip()
         short = (request.form.get("shortcode") or "").strip() or lid[:12]
         if not lid:
-            return _error("❌ ID manquant")
+            return _error("✕ ID manquant")
         res = gms.delete_link(lid)
         if res.get("ok"):
-            return _success(f"✅ Lien <code>/{short}</code> supprimé")
-        return _error(f"❌ {res.get('error', 'Suppression échouée')}")
+            return _success(f"✓ Lien <code>/{short}</code> supprimé")
+        return _error(f"✕ {res.get('error', 'Suppression échouée')}")
 
     @app.route("/account/profile_pic")
     def account_profile_pic():
@@ -47689,7 +47689,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not is_auth():
             return redirect("/")
         if not _is_admin():
-            return _error("❌ Action réservée à l'admin", tab="saccount")
+            return _error("✕ Action réservée à l'admin", tab="saccount")
         settings = _load_account_settings()
         display_name = (request.form.get("display_name") or "").strip()
         email = (request.form.get("email") or "").strip()
@@ -47711,25 +47711,25 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                             pass
                 f.save(str(DATA_DIR / f"profile_pic.{ext}"))
         _save_account_settings(settings)
-        return _success("✅ Profil sauvegardé")
+        return _success("✓ Profil sauvegardé")
 
     @app.route("/settings/account_password", methods=["POST"])
     def settings_account_password():
         if not is_auth():
             return redirect("/")
         if not _is_admin():
-            return _error("❌ Action réservée à l'admin", tab="saccount")
+            return _error("✕ Action réservée à l'admin", tab="saccount")
         new_pwd = (request.form.get("new_password") or "").strip()
         confirm = (request.form.get("confirm_password") or "").strip()
         if not new_pwd or len(new_pwd) < 6:
-            return _error("❌ Mot de passe trop court (min 6 caractères)")
+            return _error("✕ Mot de passe trop court (min 6 caractères)")
         if new_pwd != confirm:
-            return _error("❌ Les mots de passe ne correspondent pas")
+            return _error("✕ Les mots de passe ne correspondent pas")
         ok = _write_env_var("WEB_UPLOAD_PASSWORD", new_pwd)
         if not ok:
-            return _error("❌ Erreur écriture .env")
+            return _error("✕ Erreur écriture .env")
         _schedule_restart(2.0)
-        return _success("✅ Mot de passe changé. Redémarrage dans 2 sec — reconnecte-toi.")
+        return _success("✓ Mot de passe changé. Redémarrage dans 2 sec — reconnecte-toi.")
 
     @app.route("/settings/my_password", methods=["POST"])
     def settings_my_password():
@@ -47741,11 +47741,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         new_pwd = (request.form.get("new_password") or "").strip()
         confirm = (request.form.get("confirm_password") or "").strip()
         if not uname:
-            return _error("❌ Utilisateur inconnu", tab="saccount")
+            return _error("✕ Utilisateur inconnu", tab="saccount")
         if len(new_pwd) < 6:
-            return _error("❌ Mot de passe trop court (min 6 caractères)", tab="saccount")
+            return _error("✕ Mot de passe trop court (min 6 caractères)", tab="saccount")
         if new_pwd != confirm:
-            return _error("❌ Les mots de passe ne correspondent pas", tab="saccount")
+            return _error("✕ Les mots de passe ne correspondent pas", tab="saccount")
         h = _hash_password(new_pwd)
         wu = _load_web_users()
         if uname in wu:
@@ -47757,7 +47757,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 u["password_hash"] = h
                 break
         _save_role_users(ru)
-        return _success("✅ Ton mot de passe a été changé.", tab="saccount")
+        return _success("✓ Ton mot de passe a été changé.", tab="saccount")
 
     @app.route("/security/revoke_session", methods=["POST"])
     def security_revoke():
@@ -47770,8 +47770,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             safe_json.write_text(DATA_DIR / "active_sessions.json", json.dumps(sessions, indent=2, ensure_ascii=False))
         except Exception as e:
-            return _error(f"❌ Erreur : {e}")
-        return _success("✅ Session révoquée")
+            return _error(f"✕ Erreur : {e}")
+        return _success("✓ Session révoquée")
 
     @app.route("/settings/role/add", methods=["POST"])
     def settings_role_add():
@@ -47782,12 +47782,12 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         password = (request.form.get("password") or "").strip()
         agency = (request.form.get("agency") or "").strip()
         if not username or not role or len(password) < 6:
-            return _error("❌ Champs requis manquants ou password trop court (min 6 caractères)", tab="semp")
+            return _error("✕ Champs requis manquants ou password trop court (min 6 caractères)", tab="semp")
         # Normalise le username : lowercase + sans espaces
         username = username.lower().strip()
         users = _load_role_users()
         if any((u.get("username") or "").lower() == username for u in users):
-            return _error(f"❌ {username} existe déjà", tab="semp")
+            return _error(f"✕ {username} existe déjà", tab="semp")
         # 1) Enregistre dans role_users.json (pour affichage + permissions)
         hashed = _hash_password(password)
         users.append({
@@ -47809,7 +47809,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         }
         _save_web_users(web_users)
         return _success(
-            f"✅ Utilisateur <b>{username}</b> créé (rôle : <b>{role}</b>). "
+            f"✓ Utilisateur <b>{username}</b> créé (rôle : <b>{role}</b>). "
             f"Il peut maintenant se connecter avec ce username + le mot de passe défini.",
             tab="semp",
         )
@@ -47862,7 +47862,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if action == "activate" and not restored and username not in web_users:
             note = " ⚠️ aucun mot de passe enregistré — recrée-le pour qu'il puisse se connecter."
         return _success(
-            f"✅ {username} {'activé' if action == 'activate' else 'désactivé'}{note}",
+            f"✓ {username} {'activé' if action == 'activate' else 'désactivé'}{note}",
             tab="semp")
 
     @app.route("/settings/role/edit_user", methods=["POST"])
@@ -47874,7 +47874,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         new_role = (request.form.get("role") or "").strip().lower()
         new_agency = (request.form.get("agency") or "").strip()
         if not new_role:
-            return _error("❌ Rôle manquant", tab="semp")
+            return _error("✕ Rôle manquant", tab="semp")
         users = _load_role_users()
         found = False
         for u in users:
@@ -47891,10 +47891,10 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             wu["agency"] = new_agency
             found = True
         if not found:
-            return _error(f"❌ Utilisateur {orig} introuvable", tab="semp")
+            return _error(f"✕ Utilisateur {orig} introuvable", tab="semp")
         _save_role_users(users)
         _save_web_users(web_users)
-        return _success(f"✅ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)", tab="semp")
+        return _success(f"✓ <b>{orig}</b> mis à jour (rôle : <b>{new_role}</b>)", tab="semp")
 
     @app.route("/settings/role/batch", methods=["POST"])
     def settings_role_batch():
@@ -47905,7 +47905,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         raw = (request.form.get("usernames") or "").strip()
         names = [n.strip().lower() for n in raw.split(",") if n.strip()]
         if not names or action not in ("activate", "deactivate", "delete"):
-            return _error("❌ Action ou sélection invalide", tab="semp")
+            return _error("✕ Action ou sélection invalide", tab="semp")
         # Protege le owner
         names = [n for n in names if n != "samaali"]
         users = _load_role_users()
@@ -47929,7 +47929,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         _save_role_users(users)
         _save_web_users(web_users)
         verb = {"activate": "activé(s)", "deactivate": "désactivé(s)", "delete": "supprimé(s)"}[action]
-        return _success(f"✅ {len(names)} employé(s) {verb}", tab="semp")
+        return _success(f"✓ {len(names)} employé(s) {verb}", tab="semp")
 
     @app.route("/settings/role/set_assigned", methods=["POST"])
     def settings_role_set_assigned():
@@ -47945,7 +47945,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 break
         _save_role_users(users)
         return _success(
-            f"✅ Identités assignées à {username} : " +
+            f"✓ Identités assignées à {username} : " +
             (", ".join(assigned) if assigned else "<i>(aucune)</i>")
         )
 
@@ -47955,7 +47955,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return redirect("/")
         username = (request.form.get("username") or "").strip().lower()
         if username == "samaali":
-            return _error("❌ Impossible de supprimer le owner.")
+            return _error("✕ Impossible de supprimer le owner.")
         # Retire de role_users.json
         users = _load_role_users()
         users = [u for u in users if (u.get("username") or "").lower() != username]
@@ -47965,7 +47965,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if username in web_users:
             web_users.pop(username, None)
             _save_web_users(web_users)
-        return _success(f"✅ {username} supprimé — accès révoqué.")
+        return _success(f"✓ {username} supprimé — accès révoqué.")
 
     @app.route("/settings/role/delete", methods=["POST"])
     def settings_role_delete():
@@ -47973,7 +47973,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return redirect("/")
         key = _role_key(request.form.get("role_key"))
         if not key or key == "owner":
-            return _error("❌ Impossible de supprimer ce rôle")
+            return _error("✕ Impossible de supprimer ce rôle")
         defs = _load_role_definitions()
         if key in defs:
             del defs[key]
@@ -48000,7 +48000,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             _invalidate_all_ttl_cache()
         except Exception:
             pass
-        return _success(f"✅ Rôle <b>{key}</b> supprimé")
+        return _success(f"✓ Rôle <b>{key}</b> supprimé")
 
     @app.route("/settings/role/create", methods=["POST"])
     def settings_role_create():
@@ -48013,7 +48013,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not name:
             if is_ajax:
                 return jsonify({"ok": False, "error": "Nom du rôle requis"})
-            return _error("❌ Nom du rôle requis", tab="srole")
+            return _error("✕ Nom du rôle requis", tab="srole")
         import re as _re_role
         key = _re_role.sub(r"[^a-z0-9]+", "", name.lower())[:30] or "role"
         existing = {r["key"] for r in _get_all_roles()}
@@ -48026,7 +48026,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         _save_role_definitions(defs)
         if is_ajax:
             return jsonify({"ok": True, "key": key, "name": name, "desc": desc, "color": "#6b7280"})
-        return _success(f"✅ Rôle <b>{name}</b> créé", tab="srole")
+        return _success(f"✓ Rôle <b>{name}</b> créé", tab="srole")
 
     @app.route("/settings/role/edit_def", methods=["POST"])
     def settings_role_edit_def():
@@ -48036,14 +48036,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         name = (request.form.get("name") or "").strip()[:50]
         desc = (request.form.get("description") or "").strip()[:300]
         if not key or not name:
-            return _error("❌ Champs requis manquants")
+            return _error("✕ Champs requis manquants")
         defs = _load_role_definitions()
         if key not in defs:
             defs[key] = {}
         defs[key]["name"] = name
         defs[key]["description"] = desc
         _save_role_definitions(defs)
-        return _success(f"✅ Rôle <b>{name}</b> mis à jour")
+        return _success(f"✓ Rôle <b>{name}</b> mis à jour")
 
     @app.route("/settings/role/permissions", methods=["GET", "POST"])
     def settings_role_permissions():
@@ -48089,7 +48089,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             from insta_scraper import save_auth, load_auth
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return _error(f"✕ Module indispo: {e}")
         key = (request.form.get("rapidapi_key") or "").strip()
         host = (request.form.get("rapidapi_host") or "").strip()
         # Validation host : doit ressembler à un domaine
@@ -48106,14 +48106,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not looks_valid_host:
             host = DEFAULT_HOST
         if not key or len(key) < 20:
-            return _error("❌ Clé RapidAPI invalide (trop courte). Récupère-la sur RapidAPI → ton API → x-rapidapi-key")
+            return _error("✕ Clé RapidAPI invalide (trop courte). Récupère-la sur RapidAPI → ton API → x-rapidapi-key")
         # Garder cookies existants si présents
         current = load_auth()
         current["rapidapi_key"] = key
         current["rapidapi_host"] = host
         save_auth(current)
         return _success(
-            f"✅ Sauvegardé. Host : <code>{host}</code> — Clé : <code>{key[:6]}...{key[-4:]}</code>. "
+            f"✓ Sauvegardé. Host : <code>{host}</code> — Clé : <code>{key[:6]}...{key[-4:]}</code>. "
             f"Teste avec le bouton ▶ Tester maintenant."
         )
 
@@ -48124,14 +48124,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             from insta_scraper import save_auth, load_auth
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return _error(f"✕ Module indispo: {e}")
         f = request.files.get("cookies_file")
         if not f or not f.filename:
-            return _error("❌ Aucun fichier")
+            return _error("✕ Aucun fichier")
         try:
             content = f.read().decode("utf-8", errors="ignore")
         except Exception as e:
-            return _error(f"❌ Erreur lecture : {e}")
+            return _error(f"✕ Erreur lecture : {e}")
         # Parser le format Netscape : domain TRUE path TRUE expiry name value (séparés par tab)
         wanted = {"sessionid": None, "ds_user_id": None, "csrftoken": None}
         for line in content.splitlines():
@@ -48146,7 +48146,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             if name in wanted and value:
                 wanted[name] = value
         if not wanted["sessionid"]:
-            return _error("❌ Aucun <code>sessionid</code> trouvé dans le fichier. "
+            return _error("✕ Aucun <code>sessionid</code> trouvé dans le fichier. "
                 "Assure-toi d'être connecté à Instagram avant d'exporter les cookies.",
                 error=True,)
         # MERGE dans l'auth existante : NE PAS ecraser rapidapi_key / rapidapi_host
@@ -48174,7 +48174,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             pass
         found = [k for k, v in wanted.items() if v]
         extra = " + activé le téléchargement des vidéos Veille (yt-dlp)" if ytdlp_ok else ""
-        return _success(f"✅ Cookies importés ({', '.join(found)}){extra}. Tu peux maintenant ajouter des comptes à scraper.")
+        return _success(f"✓ Cookies importés ({', '.join(found)}){extra}. Tu peux maintenant ajouter des comptes à scraper.")
 
     @app.route("/settings/insta_auth", methods=["POST"])
     def settings_insta_auth():
@@ -48183,20 +48183,20 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             from insta_scraper import save_auth, load_auth
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return _error(f"✕ Module indispo: {e}")
         sessionid = (request.form.get("sessionid") or "").strip()
         ds_user_id = (request.form.get("ds_user_id") or "").strip()
         csrftoken = (request.form.get("csrftoken") or "").strip()
         username = (request.form.get("username") or "").strip()
         if not sessionid:
-            return _error("❌ sessionid obligatoire")
+            return _error("✕ sessionid obligatoire")
         save_auth({
             "sessionid": sessionid,
             "ds_user_id": ds_user_id,
             "csrftoken": csrftoken,
             "username": username,
         })
-        return _success("✅ Cookies Instagram sauvegardés")
+        return _success("✓ Cookies Instagram sauvegardés")
 
     @app.route("/insta/add_account", methods=["POST"])
     def insta_add_account():
@@ -48719,11 +48719,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             from insta_scraper import load_auth, save_auth
         except Exception as e:
-            return _error(f"❌ Module indispo: {e}")
+            return _error(f"✕ Module indispo: {e}")
         current = load_auth()
         current["rapidapi_host"] = "instagram-scraper-stable-api.p.rapidapi.com"
         save_auth(current)
-        return _success("✅ Host réinitialisé à <code>instagram-scraper-stable-api.p.rapidapi.com</code>")
+        return _success("✓ Host réinitialisé à <code>instagram-scraper-stable-api.p.rapidapi.com</code>")
 
     @app.route("/insta/test_rapidapi", methods=["POST"])
     def insta_test_rapidapi():
@@ -48735,15 +48735,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return _error(f"Module indispo: {e}")
         auth = load_auth()
         if not auth.get("rapidapi_key"):
-            return _error("❌ Pas de clé RapidAPI configurée — sauve-la d'abord")
+            return _error("✕ Pas de clé RapidAPI configurée — sauve-la d'abord")
         # Test avec un profil public connu
         test_user = "instagram"
         result = _scrape_via_rapidapi(test_user, limit=3)
         if "error" in result:
-            return _error(f"❌ Test RapidAPI échoué : {result['error']}")
+            return _error(f"✕ Test RapidAPI échoué : {result['error']}")
         prof = result.get("profile", {})
         return _success(
-            f"✅ RapidAPI fonctionne ! Test @{test_user} → "
+            f"✓ RapidAPI fonctionne ! Test @{test_user} → "
             f"<b>{prof.get('followers', 0):,}</b> followers, "
             f"<b>{len(result.get('reels', []))}</b> reels récupérés."
         )
@@ -48823,12 +48823,12 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return redirect("/")
         key = (request.form.get("ai_key") or "").strip()
         if not key.startswith("sk-ant-") or len(key) < 20:
-            return _error("❌ Clé invalide (elle doit commencer par sk-ant-…)", tab="saikey")
+            return _error("✕ Clé invalide (elle doit commencer par sk-ant-…)", tab="saikey")
         if not _write_env_var("ANTHROPIC_API_KEY", key):
-            return _error("❌ Erreur écriture .env (permissions ?)", tab="saikey")
+            return _error("✕ Erreur écriture .env (permissions ?)", tab="saikey")
         os.environ["ANTHROPIC_API_KEY"] = key  # dispo tout de suite (avant restart)
         _schedule_restart(2.0)
-        return _success("✅ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
+        return _success("✓ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
                         "Le site redémarre dans 2 s.", tab="saikey")
 
     @app.route("/settings/apify_token", methods=["POST"])
@@ -48837,16 +48837,16 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return redirect("/")
         tok = (request.form.get("apify_token") or "").strip()
         if len(tok) < 20 or " " in tok:
-            return _error("❌ Token Apify invalide (copie le token complet)", tab="saikey")
+            return _error("✕ Token Apify invalide (copie le token complet)", tab="saikey")
         try:
             import apify_reels
             apify_reels.save_token(tok)
             r = apify_reels.test_token()
         except Exception as e:
-            return _error(f"❌ {e}", tab="saikey")
+            return _error(f"✕ {e}", tab="saikey")
         if not r.get("ok"):
-            return _error(f"❌ Token refusé par Apify : {r.get('error')}", tab="saikey")
-        return _success(f"✅ Apify connecté ({r.get('user')}). Les vidéos des reels se "
+            return _error(f"✕ Token refusé par Apify : {r.get('error')}", tab="saikey")
+        return _success(f"✓ Apify connecté ({r.get('user')}). Les vidéos des reels se "
                         "téléchargent maintenant via Apify, sans toucher ton compte Instagram.",
                         tab="saikey")
 
@@ -48886,7 +48886,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             import video_transform as vt
             cfg = vt.load_config()
         except Exception as e:
-            return _error(f"❌ Module vidéo indispo : {e}", tab="svideo")
+            return _error(f"✕ Module vidéo indispo : {e}", tab="svideo")
         f = request.form
         cfg["metadata_only"] = (f.get("mode") != "full")
         cfg["delete_source_after_use"] = bool(f.get("delete_source"))
@@ -48921,8 +48921,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             vt.save_config(cfg)
         except Exception as e:
-            return _error(f"❌ Erreur sauvegarde : {e}", tab="svideo")
-        return _success("✅ Réglages vidéo enregistrés.", tab="svideo")
+            return _error(f"✕ Erreur sauvegarde : {e}", tab="svideo")
+        return _success("✓ Réglages vidéo enregistrés.", tab="svideo")
 
     @app.route("/settings/gemini_key", methods=["POST"])
     def settings_gemini_key():
@@ -48932,12 +48932,12 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # Google émet 2 formats de clés : AIza… (ancien) ET AQ.… (nouveau) -> on
         # ne bloque plus sur le préfixe, juste une longueur minimale plausible.
         if len(key) < 20 or " " in key:
-            return _error("❌ Clé Gemini invalide (copie la clé complète depuis aistudio.google.com)", tab="saikey")
+            return _error("✕ Clé Gemini invalide (copie la clé complète depuis aistudio.google.com)", tab="saikey")
         if not _write_env_var("GEMINI_API_KEY", key):
-            return _error("❌ Erreur écriture .env (permissions ?)", tab="saikey")
+            return _error("✕ Erreur écriture .env (permissions ?)", tab="saikey")
         os.environ["GEMINI_API_KEY"] = key  # dispo tout de suite (avant restart)
         _schedule_restart(2.0)
-        return _success("✅ Clé Gemini enregistrée — l'OCR lit maintenant le texte incrusté "
+        return _success("✓ Clé Gemini enregistrée — l'OCR lit maintenant le texte incrusté "
                         "ET les emojis, gratuitement. Le site redémarre dans 2 s.", tab="saikey")
 
     @app.route("/settings/admin_token", methods=["POST"])
@@ -48947,13 +48947,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         token = (request.form.get("token") or "").strip()
         # Validation basique d'un token Discord (format MZ.XX.YY avec base64-like chars)
         if not token or len(token) < 50 or "." not in token:
-            return _error("❌ Token invalide (trop court ou format incorrect)")
+            return _error("✕ Token invalide (trop court ou format incorrect)")
         ok = _write_env_var("DISCORD_ADMIN_TOKEN", token)
         if not ok:
-            return _error("❌ Erreur ecriture .env (permissions ?)")
+            return _error("✕ Erreur ecriture .env (permissions ?)")
         # Programmer le redemarrage (systemd relance le service)
         _schedule_restart(2.0)
-        return _success("✅ Token sauvegardé. Le bot redémarre dans 2 sec. "
+        return _success("✓ Token sauvegardé. Le bot redémarre dans 2 sec. "
             "Recharge cette page dans ~15 sec pour voir le statut.")
 
     @app.route("/settings/web_password", methods=["POST"])
@@ -48961,15 +48961,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not is_auth():
             return redirect("/")
         if not _is_admin():
-            return _error("❌ Action réservée à l'admin", tab="saccount")
+            return _error("✕ Action réservée à l'admin", tab="saccount")
         pwd = (request.form.get("password") or "").strip()
         if len(pwd) < 6:
-            return _error("❌ Mot de passe trop court (min 6 caractères)")
+            return _error("✕ Mot de passe trop court (min 6 caractères)")
         ok = _write_env_var("WEB_UPLOAD_PASSWORD", pwd)
         if not ok:
-            return _error("❌ Erreur ecriture .env")
+            return _error("✕ Erreur ecriture .env")
         _schedule_restart(2.0)
-        return _success("✅ Mot de passe sauvegardé. Le bot redémarre dans 2 sec. "
+        return _success("✓ Mot de passe sauvegardé. Le bot redémarre dans 2 sec. "
             "Tu seras déco — reconnecte-toi avec le nouveau mot de passe.")
 
     @app.route("/va/reset", methods=["POST"])
@@ -48978,14 +48978,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return redirect("/")
         uid = (request.form.get("user_id") or "").strip()
         if not uid:
-            return _error("❌ user_id manquant")
+            return _error("✕ user_id manquant")
         users = _load_users()
         if uid not in users:
-            return _error(f"❌ VA {uid} introuvable")
+            return _error(f"✕ VA {uid} introuvable")
         identity = users[uid].get("identity") if isinstance(users[uid], dict) else users[uid]
         del users[uid]
         _save_users(users)
-        return _success(f"✅ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
+        return _success(f"✓ VA <code>{uid}</code> retiré (était assigné à <b>{identity}</b>). "
             "Son salon Discord n'est PAS supprimé — fais /resetva sur Discord si tu veux le supprimer.")
 
     @app.route("/va/set_insta", methods=["POST"])
@@ -49390,12 +49390,12 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         uid = (request.form.get("user_id") or "").strip()
         new_identity = (request.form.get("identity") or "").strip().lower()
         if not uid or not new_identity:
-            return _error("❌ user_id ou identite manquant")
+            return _error("✕ user_id ou identite manquant")
         if new_identity not in _list_identities():
-            return _error(f"❌ Identité <code>{new_identity}</code> introuvable")
+            return _error(f"✕ Identité <code>{new_identity}</code> introuvable")
         users = _load_users()
         if uid not in users:
-            return _error(f"❌ VA {uid} introuvable")
+            return _error(f"✕ VA {uid} introuvable")
 
         # Update users.json (en gardant le reste : channel_id, auto_post...)
         entry = users[uid]
@@ -49424,7 +49424,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         elif not channel_id:
             moved_msg = " (Pas de salon associé à déplacer.)"
 
-        return _success(f"✅ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
+        return _success(f"✓ <b>@{username}</b> réassigné : <code>{old_identity}</code> → "
             f"<code>{new_identity}</code>.{moved_msg}")
 
     # Page « Création de vidéos » : routes du pipeline Node (noctus_web.py)
