@@ -1430,7 +1430,16 @@ body.light .toast.warning,body.light .toast.info{
 .toast.success .toast-icon{background:rgba(52,199,89,.18)}
 .toast.error .toast-icon{background:rgba(255,59,48,.18)}
 .toast.warning .toast-icon{background:rgba(255,149,0,.18)}
-.toast.info .toast-icon{background:rgba(0,122,255,.16)}
+.toast.info .toast-icon{background:rgba(120,120,128,.16)}   /* neutre : une info n'est ni un succes ni une alerte */
+
+.va-loading{font-size:13.5px;color:#8b8b95;letter-spacing:-.006em;
+  display:inline-flex;align-items:center;gap:9px}
+.va-loading::before{content:'';width:15px;height:15px;border-radius:50%;
+  border:2px solid rgba(140,140,150,.28);border-top-color:rgba(140,140,150,.85);
+  animation:spin .7s linear infinite}
+body.light .va-loading{color:rgba(60,60,67,.6)}
+body.light.apple .va-loading::before{border-color:rgba(60,60,67,.18);border-top-color:#007aff}
+@media (prefers-reduced-motion:reduce){.va-loading::before{animation:none}}
 
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
@@ -1799,7 +1808,7 @@ function setTheme(theme){
     }
   });
   if(typeof showToast === 'function'){
-    showToast('🎨 Thème ' + _vabotThemeLabel(theme) + ' activé', 'success', 2000);
+    showToast('🎨 Thème ' + _vabotThemeLabel(theme) + ' activé', 'info', 2000);
   }
 }
 // Appliquer le thème au plus tôt (avant render) - défaut : clair
@@ -16059,7 +16068,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"</div>"
         f"</div>"
         # === Row 2 : tri + filtres ===
-        f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0;border-top:1px solid #232323'>"
+        f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0'>"   # trait retire : l'en-tete au-dessus en a deja un (on en voyait deux)
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
@@ -38389,8 +38398,8 @@ def _render_upload_inner(msg=None, error=None):
     def _lazy(tab):
         if allowed is not None and tab not in allowed:
             return ""  # role-gate : onglet interdit -> rien
-        return (f"<div data-lazy-tab='{tab}' style='padding:60px 20px;text-align:center;color:#666'>"
-                f"<div style='font-size:13px'>⏳ Chargement…</div></div>")
+        return (f"<div data-lazy-tab='{tab}' style='padding:60px 20px;text-align:center'>"
+                f"<div class='va-loading'>Chargement…</div></div>")
 
     # Theme lu dans le cookie : la page part deja au bon theme, sans le
     # passage par un fond sombre repeint ensuite en JS.
