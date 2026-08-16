@@ -42883,17 +42883,26 @@ def create_app():
 
         def _tr(r):
             manque = r["manque"]
-            fond = "background:#fef2f2" if manque else ""
+            invisible = r.get("invisible", 0)
+            # Rouge vif : l'import ne voit meme pas ces fichiers. C'est la
+            # colonne qui compte — un manque que l'import connait se resout
+            # d'un clic, un manque invisible ne se resoudra jamais tout seul.
+            fond = ("background:#fee2e2" if invisible
+                    else ("background:#fffbeb" if manque else ""))
             couleur = "#b91c1c" if manque else "#166534"
             return (f"<tr style='{fond}'><td>{html_escape(r['identity'])}</td>"
                     f"<td>{html_escape(r['type'])}</td>"
                     f"<td style='text-align:right'>{r['drive']}</td>"
                     f"<td style='text-align:right'>{r['site']}</td>"
                     f"<td style='text-align:right;font-weight:700;color:{couleur}'>"
-                    f"{manque or '—'}</td></tr>")
+                    f"{manque or '—'}</td>"
+                    f"<td style='text-align:right;color:#2563eb'>"
+                    f"{r.get('import', 0) or '—'}</td>"
+                    f"<td style='text-align:right;font-weight:700;color:#b91c1c'>"
+                    f"{invisible or '—'}</td></tr>")
 
         lignes = "".join(_tr(r) for r in inv["lignes"]) or (
-            "<tr><td colspan='5' style='padding:18px;color:#888'>"
+            "<tr><td colspan='7' style='padding:18px;color:#888'>"
             "Aucun dossier lisible sur le Drive.</td></tr>")
 
         alertes = ""
@@ -42918,10 +42927,33 @@ def create_app():
                         + items + "</ul></div>")
 
         entete = ("<h2 style='margin:0 0 4px'>Drive face au site</h2>"
-                  f"<p style='color:#666;margin:0 0 16px'>{inv['total_drive']} fichier(s) "
+                  f"<p style='color:#666;margin:0 0 6px'>{inv['total_drive']} fichier(s) "
                   f"sur le Drive, {inv['total_site']} sur le site — "
                   f"<b style='color:{'#b91c1c' if inv['total_manque'] else '#166534'}'>"
-                  f"{inv['total_manque']} manquant(s)</b>.</p>")
+                  f"{inv['total_manque']} manquant(s)</b>.</p>"
+                  f"<p style='color:#666;margin:0 0 16px;font-size:13px'>"
+                  f"L'import en reconnait <b style='color:#2563eb'>"
+                  f"{inv.get('total_import', 0)}</b> — il en reste "
+                  f"<b style='color:#b91c1c'>{inv.get('total_invisible', 0)}</b> "
+                  f"qu'il ne voit pas.</p>")
+
+        # Les compteurs du scan : c'est la que se lit POURQUOI un fichier
+        # present sur le Drive n'est pas propose a l'import.
+        _r = inv.get("raisons_import") or {}
+        _lbl = {"deja_sur_le_site": "ecartes car deja presents sur le site",
+                "identique_au_site": "ecartes : meme nom et meme taille en local",
+                "format_non_gere": "ecartes : extension non geree",
+                "dossiers_non_reconnus": "dossiers au nom inconnu",
+                "erreur": "erreur pendant le scan"}
+        _items = "".join(
+            "<li>%s : <b>%s</b></li>" % (html_escape(_lbl.get(k, k)),
+                                         html_escape(str(v)))
+            for k, v in _r.items() if v and k != "vus")
+        if _items:
+            entete += ("<div style='margin:0 0 16px;padding:12px 14px;background:#f8fafc;"
+                       "border:1px solid #e2e8f0;border-radius:10px;font-size:13px'>"
+                       "<b>Ce que le scan d'import a ecarte</b>"
+                       "<ul style='margin:6px 0 0'>" + _items + "</ul></div>")
 
         return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
                 "padding:28px;max-width:860px;margin:30px auto;background:#fff;"
@@ -42932,7 +42964,11 @@ def create_app():
                 "<th>Identité</th><th>Type</th>"
                 "<th style='text-align:right'>Drive</th>"
                 "<th style='text-align:right'>Site</th>"
-                "<th style='text-align:right'>Manque</th></tr></thead>"
+                "<th style='text-align:right'>Manque</th>"
+                "<th style='text-align:right' title='Ce que le bouton Importer "
+                "compte rapatrier'>Import</th>"
+                "<th style='text-align:right' title='Manquants que l import ne "
+                "voit meme pas'>Invisible</th></tr></thead>"
                 "<tbody>" + lignes + "</tbody></table>"
                 "<p style='margin-top:18px'><a href='/?tab=cloud'>Retour au Drive</a>"
                 " &nbsp;·&nbsp; <a href='/drive-manques?refaire=1'>Recompter</a></p>"

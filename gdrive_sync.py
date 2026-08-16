@@ -694,6 +694,7 @@ for _sub, _noms in _ALIAS_SECTIONS.items():
 
 # nom de sous-dossier local -> libelle affiche (inverse de SECTIONS)
 _SUB_TO_LABEL = {s: n for s, n, _ in SECTIONS}
+_LABEL_TO_SUB = {n: s for s, n, _ in SECTIONS}
 
 
 # Rempli par le dernier _candidats_import : ce qui a ete ecarte, par raison.
@@ -1058,8 +1059,30 @@ def inventaire(force: bool = False) -> dict:
         lignes.append({"identity": ident, "type": _SUB_TO_LABEL.get(sub, sub),
                        "drive": n_drive, "site": n_site,
                        "manque": max(0, n_drive - n_site)})
+    # Ce que l'IMPORT, lui, compte prendre. Sans cette confrontation, la page
+    # dit « il manque 192 fichiers » pendant que le bouton propose d'en
+    # importer 2, sans que rien n'explique l'ecart.
+    vus_import: dict = {}
+    raisons: dict = {}
+    try:
+        st = _load_state()
+        st.setdefault("imported", {})
+        for c in _candidats_import(sess, st, root):
+            cle = (c["identity"], c["sub"])
+            vus_import[cle] = vus_import.get(cle, 0) + 1
+        raisons = dict(trouves_ignores)
+    except Exception as e:
+        raisons = {"erreur": str(e)[:150]}
+    for r in lignes:
+        sub = _LABEL_TO_SUB.get(r["type"], r["type"])
+        r["import"] = vus_import.get((r["identity"], sub), 0)
+        r["invisible"] = max(0, r["manque"] - r["import"])
+
     lignes.sort(key=lambda r: (-r["manque"], r["identity"]))
     resultat = {
+        "raisons_import": raisons,
+        "total_import": sum(r.get("import", 0) for r in lignes),
+        "total_invisible": sum(r.get("invisible", 0) for r in lignes),
         "lignes": lignes,
         "total_drive": sum(r["drive"] for r in lignes),
         "total_site": sum(r["site"] for r in lignes),
