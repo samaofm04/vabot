@@ -6940,6 +6940,7 @@ window.upClearPrefill = function(utab){
   }catch(e){}
 })();
 </script>
+{vault_core_html}
 </head><body>
 <!-- Page loader global (affiché pendant la navigation) -->
 <div id="page-loader"><div class="pl-ring"></div></div>
@@ -14264,539 +14265,9 @@ def _vault_subdir(base: str, form=None) -> str:
     return base
 
 
-def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
-                               vault2: bool = False) -> str:
-    """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
-    (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
-    Pas de navigation back/forward, tout dans la même page.
-
-    include_jb=True ajoute les identités jailbreak-only (ex: jessye) — utilisé
-    UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
-    """
-    from flask import request as _req
-    if vault2:
-        # Vault PRO : SES identités à elle, rien d'autre.
-        identities = _list_v2_identities()
-    else:
-        identities = _list_content_identities()  # masque Jailbreak-only ET v2_
-        if include_jb:
-            for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
-                if _jb not in identities:
-                    identities.append(_jb)
-    if not identities:
-        if vault2:
-            _t = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
-                  "storyctas": "v2storyctas", "profile_pics": "v2pps",
-                  "brutes": "v2brutes"}.get(subdir, "v2reels")
-            # Sidebar MINIMALE : sans elle, le bouton de création n'existe pas
-            # et le Vault PRO reste inutilisable (aucune identité à créer).
-            return (
-                "<div class='vault-layout'>"
-                "<div class='vault-sidebar'>"
-                "<div style='padding:14px 12px;color:#75757f;font-size:12.5px;line-height:1.5'>"
-                "Aucune identité ici pour l'instant.</div>"
-                f"<button type='button' data-newident='1' data-vtab='{_t}' "
-                f"data-ikey='cloud_{subdir}_ident' "
-                "style='width:calc(100% - 20px);margin:0 10px 12px;background:transparent;"
-                "border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;"
-                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit'>"
-                "＋ Nouvelle identité</button>"
-                "</div>"
-                "<div class='vault-gallery'>"
-                "<p style='color:#888;font-size:13.5px;line-height:1.6'>"
-                "Le Vault PRO est vide — il a ses <b>propres identités</b>, "
-                "séparées de la Bibliothèque et invisibles de Discord.<br>"
-                "Crée la première avec « ＋ Nouvelle identité » à gauche.</p>"
-                "</div></div>")
-        return "<p style='color:#888'>Aucune identité créée.</p>"
-    identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
-    # Rendu : vignette + badge lecture pour tout dossier video.
-    is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
-    # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
-    # PAS sur « Video brut » — l'user veut des rushs nus, sans caption ni rien.
-    can_montage = subdir in ("videos", "templates")
-    # Fonctions PROPRES aux Reels (banger, va_ready) : ni sur brut ni sur template.
-    is_reels = subdir == "videos"
-
-    # Stats par identité (counts + size) — cachées 30s (cf helper ci-dessus)
-    ident_stats = _cloud_ident_stats_cached(
-        subdir, tuple(sorted(exts)), tuple(identities))
-
-    # Identité sélectionnée. Priorité : ?param explicite > dernière identité
-    # où on vient d'uploader (pour voir son upload tout de suite) > 1re avec
-    # fichiers > 1re tout court.
-    selected = ""
-    try:
-        selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
-    except Exception:
-        pass
-    if not selected or selected not in identities:
-        last_up = ""
-        try:
-            from flask import session as _sess_cloud
-            last_up = (_sess_cloud.get("last_upload_identity") or "").lower().strip()
-        except Exception:
-            last_up = ""
-        if last_up in identities:
-            selected = last_up
-        else:
-            for ident in identities:
-                if ident_stats[ident]["n_files"] > 0:
-                    selected = ident
-                    break
-            if not selected:
-                selected = identities[0]
-
-    tab_name = {"videos": "cloudreels", "posts": "cloudposts",
-                "stories": "cloudstories", "storyctas": "cloudstoryctas",
-                "profile_pics": "cloudpps",
-                # « brutes » = rushs par identite ; « templates » = modeles CapCut
-                # (chacun porte SON son) -> les 2 bibliotheques de Reel montage
-                "brutes": "cloudbrutes",
-                "templates": "cloudtemplates",
-                # Vault PRO : mêmes galeries, dossiers pro_* separes
-                "pro_videos": "provaultreels", "pro_posts": "provaultposts",
-                "pro_stories": "provaultstories",
-                "pro_storyctas": "provaultstoryctas",
-                "pro_profile_pics": "provaultpps"}.get(subdir, "cloudoverview")
-    if vault2:
-        tab_name = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
-                    "storyctas": "v2storyctas", "profile_pics": "v2pps",
-                    "brutes": "v2brutes"}.get(subdir, "v2reels")
-    subdir_key = f"cloud_{subdir}_ident"
-
-    # ============ Sidebar Vault (gauche) ============
-    def _vitem(ident):
-        stats = ident_stats[ident]
-        avatar_url = _identity_avatar_url(ident)
-        avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
-            if avatar_url else
-            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
-        )
-        # Dot statut (en ligne) à droite de l'avatar
-        status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
-        # Badge count (à droite du nom)
-        count_badge = ""
-        if stats["n_files"] > 0:
-            count_badge = (
-                f"<span class='vault-count' style='background:rgba(251,113,133,.15);color:#fb7185;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px'>"
-                f"<svg viewBox='0 0 24 24' width='10' height='10' fill='currentColor'><path d='M12 2C6.48 2 2 5.94 2 10.8c0 2.43 1.09 4.64 2.85 6.21L4 22l4.8-2.4c.96.25 1.96.4 3 .4c5.52 0 10-3.94 10-8.8S17.52 2 12 2z'/></svg>"
-                f"{stats['n_files']}</span>"
-            )
-        active_class = "vault-item-active" if ident == selected else ""
-        return (
-            f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
-            f"onclick='return vaultGoTo(event,this.href)' "
-            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
-            f"data-market='{identity_market(ident)}'>"
-            f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
-            f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
-            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
-            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
-            f"{_market_flag_html(ident)}</div>"
-            f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
-            f"</div>"
-            f"{count_badge}"
-            f"</a>"
-        )
-
-    # Glisser-déposer une identité = la déplacer où on veut (ordre partagé
-    # entre tous les onglets vault, sauvegardé via /identity/reorder).
-    vault_items = [_vitem(i) for i in identities]
-
-    vault_sidebar = (
-        "<div class='vault-sidebar'>"
-        f"<div class='vault-search'>"
-        f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
-        f"</div>"
-        f"<div class='vault-filter-row' style='position:relative'>"
-        f"<button type='button' data-identfilter='{subdir}' "
-        "style='background:none;border:0;padding:0;cursor:pointer;font-family:inherit;"
-        "color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>"
-        "<span data-filterlbl>Toutes les identités</span>"
-        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
-        "</button>"
-        "<div data-filtermenu style='display:none;position:absolute;top:26px;left:0;z-index:40;"
-        "background:#141418;border:1px solid #2a2a30;border-radius:10px;padding:5px;min-width:170px;"
-        "box-shadow:0 10px 30px rgba(0,0,0,.5)'>"
-        "<button type='button' data-fval='all' class='ident-fopt'>Toutes les identités</button>"
-        "<button type='button' data-fval='full' class='ident-fopt'>Avec du contenu</button>"
-        "<button type='button' data-fval='empty' class='ident-fopt'>Vides</button>"
-        "</div>"
-        f"</div>"
-        f"<div class='vault-list' id='vault-list-{subdir}'>"
-        + "".join(vault_items)
-        + "</div>"
-        + _VAULT_DND_CSS
-        # ＋ Nouvelle identité : ouvre la modale statique #ident-new-modal
-        # (délégation [data-newident] — survit aux swaps vaultGoTo).
-        + f"<button type='button' data-newident='1' data-vtab='{tab_name}' data-ikey='{subdir_key}' "
-        + "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
-        "</div>"
-    )
-
-    # ============ Galerie (droite) ============
-    sel_stats = ident_stats.get(selected, {"n_files": 0, "size_mb": 0})
-    sel_avatar_url = _identity_avatar_url(selected)
-    sel_avatar_html = (
-        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
-        if sel_avatar_url else
-        f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
-    )
-
-    # Récupérer les options de tri/filtre depuis l'URL
-    sort_mode = ""
-    filter_date = ""
-    type_filter = "all"
-    try:
-        sort_mode = (_req.args.get(f"cloud_{subdir}_sort", "recent") or "recent").lower().strip()
-        filter_date = (_req.args.get(f"cloud_{subdir}_date", "") or "").strip()
-        type_filter = (_req.args.get(f"cloud_{subdir}_type", "all") or "all").lower().strip()
-    except Exception:
-        sort_mode = "recent"
-
-    folder = IDENTITIES_DIR / selected / subdir
-    files = []
-    if folder.exists():
-        files = [
-            p for p in folder.iterdir()
-            if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
-        ]
-
-    # Filtre type (photo/vidéo) — appliqué après chargement, avant tri
-    if type_filter == "photo":
-        files = [p for p in files if p.suffix.lower() in IMAGE_EXTS]
-    elif type_filter == "video":
-        files = [p for p in files if p.suffix.lower() in VIDEO_EXTS]
-
-    # Filtre "Aller à la date" : ne garder que les fichiers de cette date
-    if filter_date:
-        try:
-            import datetime as _dt_fc
-            target = _dt_fc.date.fromisoformat(filter_date)
-            files = [
-                p for p in files
-                if _dt_fc.date.fromtimestamp(p.stat().st_mtime) == target
-            ]
-        except Exception:
-            pass
-
-    # Tri
-    if sort_mode == "asc":
-        files.sort(key=lambda p: p.stat().st_mtime)  # plus ancien d'abord
-    elif sort_mode == "desc" or sort_mode == "recent":
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)  # plus récent d'abord
-    else:  # "all" ou inconnu : tri alphabétique
-        files.sort(key=lambda p: p.name.lower())
-
-    # Construire les URLs de tri (préservant la sélection d'identité courante)
-    def _sort_url(value):
-        params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
-        if value != "recent":
-            params.append(f"cloud_{subdir}_sort={value}")
-        return "?" + "&".join(params)
-
-    # Compteur fichiers affichés (après filtre)
-    n_shown = len(files)
-    filter_label = ""
-    if filter_date:
-        filter_label = f" · filtré au {filter_date}"
-
-    sort_btn_html = (
-        "<div class='vault-sort'>"
-        "<button type='button' class='vault-sort-btn' onclick='vaultSortToggle(event,this)'>"
-        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><line x1='4' y1='6' x2='20' y2='6'/><line x1='8' y1='12' x2='16' y2='12'/><line x1='10' y1='18' x2='14' y2='18'/></svg>"
-        f"<span>{('Tout' if sort_mode == 'all' else 'Récemment' if sort_mode == 'recent' else 'Croissant' if sort_mode == 'asc' else 'Décroissant' if sort_mode == 'desc' else 'Trier')}</span>"
-        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
-        "</button>"
-        "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
-        f"<a href='{_sort_url('all')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
-        "<span class='vault-radio'></span>Tout</a>"
-        f"<form method='GET' class='vault-sort-form'>"
-        f"<input type='hidden' name='tab' value='{tab_name}'>"
-        f"<input type='hidden' name='{subdir_key}' value='{selected}'>"
-        "<label class='vault-sort-item' style='cursor:default'>"
-        "<span class='vault-radio'></span>Aller à la date :</label>"
-        f"<input type='date' name='cloud_{subdir}_date' value='{filter_date}' onchange='this.form.submit()' "
-        "style='margin:6px 36px 8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:12px;width:calc(100% - 72px)'>"
-        "</form>"
-        "<div class='vault-sort-sep'></div>"
-        f"<a href='{_sort_url('recent')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'recent' else '')}'>"
-        "<span class='vault-radio'></span>Récemment</a>"
-        "<div class='vault-sort-sep'></div>"
-        f"<a href='{_sort_url('asc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'asc' else '')}'>"
-        "<span class='vault-radio'></span>Croissant</a>"
-        f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
-        "<span class='vault-radio'></span>Décroissant</a>"
-        + (("<div class='vault-sort-sep'></div>"
-            "<button type='button' class='vault-sort-item' "
-            f"onclick='purgeBanger(\"{selected}\", this)' "
-            "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
-            "<span class='vault-radio'></span>🗑 Vider le salon banger</button>")
-           if is_reels else "")
-        + "</div>"
-        "</div>"
-    )
-
-    # Bouton VISIBLE "Reels Banger" (uniquement sur les pages vidéo/reels) : filtre
-    # instantané pour n'afficher que les reels marqués ⭐ (banger_marks.json).
-    banger_toggle_html = (
-        "<button type='button' id='banger-toggle-btn' onclick='toggleBangerFilter(this)' "
-        "title='Afficher seulement les reels marqués ⭐ banger' "
-        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
-        "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
-        "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Reels Banger</button>"
-    ) if is_reels else ""
-
-    # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
-    # Reels = vidéos only, Posts = photos only → pas de filtre.
-    # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
-    type_filter_html = ""
-    if subdir in ("stories", "storyctas", "pro_stories", "pro_storyctas"):
-        def _type_url(value):
-            params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
-            if sort_mode and sort_mode != "recent":
-                params.append(f"cloud_{subdir}_sort={sort_mode}")
-            if filter_date:
-                params.append(f"cloud_{subdir}_date={filter_date}")
-            if value != "all":
-                params.append(f"cloud_{subdir}_type={value}")
-            return "?" + "&".join(params)
-
-        type_filter_html = (
-            "<div class='media-type-pills'>"
-            + f"<a href='{_type_url('all')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
-            + f"<a href='{_type_url('photo')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
-            + f"<a href='{_type_url('video')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
-            + "</div>"
-        )
-
-    # Mapping subdir -> upload tab name (pour le bouton + Add media)
-    upload_tab_map = {
-        "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description", "Add media"),
-        "posts": ("post", "Upload Post", "Photo simple pour le feed", "Add media"),
-        "stories": ("story", "Upload Story", "Photo simple pour story", "Add media"),
-        "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien", "Add media"),
-        "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité", "Add media"),
-        "brutes": ("brute", "Rush brut", "Matière première des montages", "Add vidéo"),
-        "templates": ("template", "Template montage", "Modèle CapCut — apporte le son",
-                      "Add template"),
-        # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
-        # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
-        "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
-        "pro_posts": ("post", "Upload Post — Vault PRO", "Photo simple pour le feed", "Add media"),
-        "pro_stories": ("story", "Upload Story — Vault PRO", "Photo simple pour story", "Add media"),
-        "pro_storyctas": ("storycta", "Story CTA — Vault PRO", "Photo 1080x1920 pour CTA + lien", "Add media"),
-        "pro_profile_pics": ("pp", "Photo de profil — Vault PRO", "PP propre à cette identité", "Add media"),
-    }
-    # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form).
-    # Le Vault PRO partage les MÊMES dossiers : c'est l'identité (préfixée
-    # v2_) qui la distingue, donc vault_key reste vide.
-    vault_key = "pro" if subdir.startswith(PRO_VAULT_PREFIX) else ""
-    add_media_btn = ""
-    if subdir in upload_tab_map:
-        _entry = upload_tab_map[subdir]
-        utab, utitle, usub = _entry[0], _entry[1], _entry[2]
-        _btn_lbl = _entry[3] if len(_entry) > 3 else "Add media"
-        # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
-        add_media_btn = (
-            f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
-            f"upPrefillIdentity('{utab}', '{selected}', '{vault_key}', '{tab_name}');\" "
-            f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
-            f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
-            f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
-            f"box-shadow:0 4px 12px rgba(59,130,246,.25);letter-spacing:.01em'>"
-            f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
-            f"{_btn_lbl}</button>"
-        )
-        if subdir == "templates":
-            # 📤 Partage des templates sélectionnés (cercles ⚪) à d'autres models
-            # — même modale que « Appliquer ce montage à… », montage compris.
-            add_media_btn = (
-                "<button type='button' onclick='tplShareOpen()' "
-                "title='Copier les templates sélectionnés (cercle ⚪) chez les autres models — montage, description et exemple compris' "
-                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
-                "border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;"
-                "cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(168,85,247,.12);margin-right:8px'>"
-                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' "
-                "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
-                "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
-                "Partager</button>"
-            ) + add_media_btn
-        if subdir in ("brutes", "templates"):
-            # Import par lien : le champ vit DANS le formulaire d'upload
-            # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
-            _ls = _LINKIMP_STATUS
-            if _ls.get("subdir") == subdir and _ls.get("state") in ("running", "done", "error"):
-                if _ls.get("state") == "running":
-                    _txt = (f"⏳ Import lien {_ls.get('done', 0)}/{_ls.get('total', 0)} "
-                            f"pour @{_ls.get('identity', '')}…")
-                    _col = "#fbbf24"
-                elif _ls.get("state") == "error":
-                    _txt = f"❌ Import : {_ls.get('err', 'erreur')}"
-                    _col = "#f87171"
-                else:
-                    _txt = (f"✅ Import : {_ls.get('ok', 0)} ajouté(s)"
-                            + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else ""))
-                    _col = "#22c55e"
-                # data-limpstat : le JS le met à jour tout seul toutes les 3s
-                add_media_btn += (
-                    f"<span data-limpstat='1' data-state='{_ls.get('state')}' "
-                    f"style='font-size:11.5px;color:{_col};margin-left:10px'>{_txt}</span>"
-                )
-        if subdir == "profile_pics":
-            # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
-            # (cercles ⚪) vers d'autres identités — les originaux restent.
-            add_media_btn += (
-                "<button type='button' onclick='ppApplyOpen()' "
-                "title='Copier les PP sélectionnées (⚪) vers d autres identités' "
-                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
-                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
-                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
-                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7'/><polyline points='16 6 12 2 8 6'/><line x1='12' y1='2' x2='12' y2='15'/></svg>"
-                "Partager</button>"
-            )
-
-    gallery_header = (
-        # === Row 1 : identite a gauche + Add media a droite ===
-        f"<div class='vault-gallery-header' style='justify-content:space-between'>"
-        f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
-        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
-        f"<div style='flex:1;min-width:0'>"
-        f"<div style='display:flex;align-items:center;gap:8px'>"
-        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
-        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
-        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
-        f"</div></div>"
-        f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
-        # ✏️ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
-        f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
-        f"data-market='{identity_market(selected)}' "
-        f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
-        "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
-        "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
-        "cursor:pointer;font-family:inherit'>"
-        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' "
-        "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-        "<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
-        "<path d='M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z'/></svg>Modifier</button>"
-        f"{add_media_btn}"
-        f"</div>"
-        f"</div>"
-        # === Row 2 : tri + filtres ===
-        f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0;border-top:1px solid #232323'>"
-        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
-        + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
-        + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{sort_btn_html}</div>"
-        f"</div>"
-    )
-
-    if not files:
-        gallery = (
-            gallery_header +
-            "<div style='padding:60px 20px;text-align:center;color:#666'>"
-            "<svg viewBox='0 0 24 24' width='44' height='44' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:12px;opacity:.4'><path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/></svg>"
-            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{_v2_label(selected)}</p>"
-            "</div>"
-        )
-    else:
-        # === PAGINATION : ne render que les N premiers, le reste = lazy via Intersection Observer ===
-        INITIAL_BATCH = 24  # cards visibles direct (rapide a charger)
-        cards_html = []
-        # Pré-indexer les fichiers exemple par stem (pour swap clean -> example)
-        example_by_stem = {}
-        if folder.exists():
-            for pe in folder.iterdir():
-                if pe.is_file() and ".example" in pe.name:
-                    base_stem = pe.stem.replace(".example", "")
-                    example_by_stem[base_stem] = pe.name
-
-        total_files = len(files)
-        _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
-        _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
-        # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
-        # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
-        _va_ready_stems = set()
-        # templates/ compte aussi : un template approuve part chez les VA au
-        # meme titre qu'un reel (sinon le filigrane disparaissait au F5).
-        if (is_reels or subdir == "templates") and folder.exists():
-            import json as _jvr
-            for _mj in folder.glob("*.montage.json"):
-                try:
-                    _dv = _jvr.loads(_mj.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if isinstance(_dv, dict) and _dv.get("va_ready"):
-                    _va_ready_stems.add(_mj.name[:-len(".montage.json")])
-        # PERF : pré-génère les thumbnails manquants en arrière-plan -> quand le
-        # navigateur les demande, ils sont déjà prêts (plus de ffmpeg bloquant).
-        try:
-            _pregen_thumbs_async([
-                (p, f"{selected}/{subdir}/{p.name}", p.suffix.lower() in VIDEO_EXTS)
-                for p in files])
-        except Exception:
-            pass
-        for idx, p in enumerate(files):
-            file_id = f"{selected}|{subdir}|{p.name}"
-            clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
-            ex_name = example_by_stem.get(p.stem)
-            if ex_name:
-                url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
-                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
-                second_url = clean_url
-            else:
-                url = clean_url
-                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
-                second_url = ""
-            # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
-            deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
-        gallery = (
-            gallery_header
-            # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
-            # disponible (fenetre reduite, panneau ouvert a cote...). Avant :
-            # 3 colonnes FIGEES -> cartes minuscules sous des pastilles a
-            # taille fixe qui recouvraient tout.
-            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px' id='vault-grid'>"
-            + "".join(cards_html)
-            + "</div>"
-        )
-        # Retour d'un upload de TEMPLATE : on enchaine directement sur l'editeur
-        # de montage du fichier qui vient d'etre depose (le plus recent = 1re
-        # carte). C'est le « je fais le montage et ca arrive » demande.
-        # NB : `request` n'est PAS global dans ce module (importé localement
-        # partout) — sans cet import, le NameError était avalé par le except
-        # et l'ouverture auto ne partait jamais, en silence.
-        _want_open = False
-        if subdir == "templates" and cards_html:
-            try:
-                from flask import request as _rq_open
-                _want_open = (_rq_open.args.get("openmontage") or "") == "1"
-            except Exception:
-                _want_open = False
-        if _want_open:
-            gallery += (
-                "<script>(function(){"
-                "var g=document.getElementById('vault-grid');if(!g)return;"
-                "var b=g.querySelector('.card-edit-btn[onclick*=nxMontageOpen]');"
-                "if(b)setTimeout(function(){b.click();},350);"
-                "})();</script>"
-            )
-        # Compteur en bas + auto-scroll trigger
-        if total_files > INITIAL_BATCH:
-            gallery += (
-                f"<div id='vault-load-status' style='text-align:center;padding:14px;color:#666;font-size:12px;margin-top:10px'>"
-                f"{INITIAL_BATCH} / {total_files} affiches — scroll pour charger plus"
-                f"</div>"
-            )
-
-    css = """
-<style>
+# Socle commun des galeries (styles + filtres + tri + recherche). Emis UNE
+# FOIS dans la page : il etait auparavant recopie devant chaque galerie.
+_VAULT_CORE_RAW = """<style>
 .vault-layout{display:grid;grid-template-columns:280px 1fr;gap:18px;align-items:start}
 @media(max-width:900px){.vault-layout{grid-template-columns:1fr}}
 .vault-sidebar{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 160px);overflow:hidden}
@@ -15662,6 +15133,10 @@ function marketSet(v){
 // des que de nouvelles cartes apparaissent.
 document.addEventListener('DOMContentLoaded', function(){
   vaultRefilter();
+  // UN SEUL observateur pour toute la page : il y en avait un par galerie,
+  // et chacun re-filtrait toutes les cartes a la moindre mutation du DOM.
+  if(window.__vaultObs) return;
+  window.__vaultObs = 1;          // poser AVANT : .observe() renvoie undefined
   try{
     new MutationObserver(function(){
       if(window.__mkTimer) return;
@@ -15895,7 +15370,551 @@ document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(fu
 });
 </script>
 """
-    css = css.replace("__VA_WM__", _VA_READY_WM)   # injecte le data-URI du filigrane « DISPO VA »
+
+
+def _vault_core_html() -> str:
+    """Le socle, filigrane « DISPO VA » injecte (calcule une seule fois)."""
+    global _VAULT_CORE_CACHE
+    if _VAULT_CORE_CACHE is None:
+        _VAULT_CORE_CACHE = _VAULT_CORE_RAW.replace("__VA_WM__", _VA_READY_WM)
+    return _VAULT_CORE_CACHE
+
+
+_VAULT_CORE_CACHE = None
+
+
+def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
+                               vault2: bool = False) -> str:
+    """Vue "Vault" style Infloww : sidebar à gauche avec liste des identités
+    (avatars + counts + search), galerie à droite pour l'identité sélectionnée.
+    Pas de navigation back/forward, tout dans la même page.
+
+    include_jb=True ajoute les identités jailbreak-only (ex: jessye) — utilisé
+    UNIQUEMENT pour la page Photos de profil (jessye = marché US, que pour les PP).
+    """
+    from flask import request as _req
+    if vault2:
+        # Vault PRO : SES identités à elle, rien d'autre.
+        identities = _list_v2_identities()
+    else:
+        identities = _list_content_identities()  # masque Jailbreak-only ET v2_
+        if include_jb:
+            for _jb in sorted({h.lower() for h in JAILBREAK_ONLY_IDENTITIES}):
+                if _jb not in identities:
+                    identities.append(_jb)
+    if not identities:
+        if vault2:
+            _t = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
+                  "storyctas": "v2storyctas", "profile_pics": "v2pps",
+                  "brutes": "v2brutes"}.get(subdir, "v2reels")
+            # Sidebar MINIMALE : sans elle, le bouton de création n'existe pas
+            # et le Vault PRO reste inutilisable (aucune identité à créer).
+            return (
+                "<div class='vault-layout'>"
+                "<div class='vault-sidebar'>"
+                "<div style='padding:14px 12px;color:#75757f;font-size:12.5px;line-height:1.5'>"
+                "Aucune identité ici pour l'instant.</div>"
+                f"<button type='button' data-newident='1' data-vtab='{_t}' "
+                f"data-ikey='cloud_{subdir}_ident' "
+                "style='width:calc(100% - 20px);margin:0 10px 12px;background:transparent;"
+                "border:1.5px dashed #3467FF;color:#3467FF;border-radius:10px;padding:11px;"
+                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit'>"
+                "＋ Nouvelle identité</button>"
+                "</div>"
+                "<div class='vault-gallery'>"
+                "<p style='color:#888;font-size:13.5px;line-height:1.6'>"
+                "Le Vault PRO est vide — il a ses <b>propres identités</b>, "
+                "séparées de la Bibliothèque et invisibles de Discord.<br>"
+                "Crée la première avec « ＋ Nouvelle identité » à gauche.</p>"
+                "</div></div>")
+        return "<p style='color:#888'>Aucune identité créée.</p>"
+    identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
+    # Rendu : vignette + badge lecture pour tout dossier video.
+    is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
+    # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
+    # PAS sur « Video brut » — l'user veut des rushs nus, sans caption ni rien.
+    can_montage = subdir in ("videos", "templates")
+    # Fonctions PROPRES aux Reels (banger, va_ready) : ni sur brut ni sur template.
+    is_reels = subdir == "videos"
+
+    # Stats par identité (counts + size) — cachées 30s (cf helper ci-dessus)
+    ident_stats = _cloud_ident_stats_cached(
+        subdir, tuple(sorted(exts)), tuple(identities))
+
+    # Identité sélectionnée. Priorité : ?param explicite > dernière identité
+    # où on vient d'uploader (pour voir son upload tout de suite) > 1re avec
+    # fichiers > 1re tout court.
+    selected = ""
+    try:
+        selected = (_req.args.get(f"cloud_{subdir}_ident", "") or "").lower().strip()
+    except Exception:
+        pass
+    if not selected or selected not in identities:
+        last_up = ""
+        try:
+            from flask import session as _sess_cloud
+            last_up = (_sess_cloud.get("last_upload_identity") or "").lower().strip()
+        except Exception:
+            last_up = ""
+        if last_up in identities:
+            selected = last_up
+        else:
+            for ident in identities:
+                if ident_stats[ident]["n_files"] > 0:
+                    selected = ident
+                    break
+            if not selected:
+                selected = identities[0]
+
+    tab_name = {"videos": "cloudreels", "posts": "cloudposts",
+                "stories": "cloudstories", "storyctas": "cloudstoryctas",
+                "profile_pics": "cloudpps",
+                # « brutes » = rushs par identite ; « templates » = modeles CapCut
+                # (chacun porte SON son) -> les 2 bibliotheques de Reel montage
+                "brutes": "cloudbrutes",
+                "templates": "cloudtemplates",
+                # Vault PRO : mêmes galeries, dossiers pro_* separes
+                "pro_videos": "provaultreels", "pro_posts": "provaultposts",
+                "pro_stories": "provaultstories",
+                "pro_storyctas": "provaultstoryctas",
+                "pro_profile_pics": "provaultpps"}.get(subdir, "cloudoverview")
+    if vault2:
+        tab_name = {"videos": "v2reels", "posts": "v2posts", "stories": "v2stories",
+                    "storyctas": "v2storyctas", "profile_pics": "v2pps",
+                    "brutes": "v2brutes"}.get(subdir, "v2reels")
+    subdir_key = f"cloud_{subdir}_ident"
+
+    # ============ Sidebar Vault (gauche) ============
+    def _vitem(ident):
+        stats = ident_stats[ident]
+        avatar_url = _identity_avatar_url(ident)
+        avatar_html = (
+            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            if avatar_url else
+            f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
+        )
+        # Dot statut (en ligne) à droite de l'avatar
+        status_dot = "<div style='position:absolute;bottom:0;right:0;width:12px;height:12px;background:#22c55e;border:2px solid #0a0a0a;border-radius:50%'></div>"
+        # Badge count (à droite du nom)
+        count_badge = ""
+        if stats["n_files"] > 0:
+            count_badge = (
+                f"<span class='vault-count' style='background:rgba(251,113,133,.15);color:#fb7185;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px'>"
+                f"<svg viewBox='0 0 24 24' width='10' height='10' fill='currentColor'><path d='M12 2C6.48 2 2 5.94 2 10.8c0 2.43 1.09 4.64 2.85 6.21L4 22l4.8-2.4c.96.25 1.96.4 3 .4c5.52 0 10-3.94 10-8.8S17.52 2 12 2z'/></svg>"
+                f"{stats['n_files']}</span>"
+            )
+        active_class = "vault-item-active" if ident == selected else ""
+        return (
+            f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
+            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-market='{identity_market(ident)}'>"
+            f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
+            f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
+            f"{_market_flag_html(ident)}</div>"
+            f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
+            f"</div>"
+            f"{count_badge}"
+            f"</a>"
+        )
+
+    # Glisser-déposer une identité = la déplacer où on veut (ordre partagé
+    # entre tous les onglets vault, sauvegardé via /identity/reorder).
+    vault_items = [_vitem(i) for i in identities]
+
+    vault_sidebar = (
+        "<div class='vault-sidebar'>"
+        f"<div class='vault-search'>"
+        f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
+        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
+        f"</div>"
+        f"<div class='vault-filter-row' style='position:relative'>"
+        f"<button type='button' data-identfilter='{subdir}' "
+        "style='background:none;border:0;padding:0;cursor:pointer;font-family:inherit;"
+        "color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>"
+        "<span data-filterlbl>Toutes les identités</span>"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</button>"
+        "<div data-filtermenu style='display:none;position:absolute;top:26px;left:0;z-index:40;"
+        "background:#141418;border:1px solid #2a2a30;border-radius:10px;padding:5px;min-width:170px;"
+        "box-shadow:0 10px 30px rgba(0,0,0,.5)'>"
+        "<button type='button' data-fval='all' class='ident-fopt'>Toutes les identités</button>"
+        "<button type='button' data-fval='full' class='ident-fopt'>Avec du contenu</button>"
+        "<button type='button' data-fval='empty' class='ident-fopt'>Vides</button>"
+        "</div>"
+        f"</div>"
+        f"<div class='vault-list' id='vault-list-{subdir}'>"
+        + "".join(vault_items)
+        + "</div>"
+        + _VAULT_DND_CSS
+        # ＋ Nouvelle identité : ouvre la modale statique #ident-new-modal
+        # (délégation [data-newident] — survit aux swaps vaultGoTo).
+        + f"<button type='button' data-newident='1' data-vtab='{tab_name}' data-ikey='{subdir_key}' "
+        + "style='margin:10px 12px 12px;padding:9px;background:transparent;border:1px dashed #34343a;color:#9a9aa6;border-radius:10px;font-size:12.5px;cursor:pointer;font-family:inherit'>＋ Nouvelle identité</button>"
+        "</div>"
+    )
+
+    # ============ Galerie (droite) ============
+    sel_stats = ident_stats.get(selected, {"n_files": 0, "size_mb": 0})
+    sel_avatar_url = _identity_avatar_url(selected)
+    sel_avatar_html = (
+        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        if sel_avatar_url else
+        f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
+    )
+
+    # Récupérer les options de tri/filtre depuis l'URL
+    sort_mode = ""
+    filter_date = ""
+    type_filter = "all"
+    try:
+        sort_mode = (_req.args.get(f"cloud_{subdir}_sort", "recent") or "recent").lower().strip()
+        filter_date = (_req.args.get(f"cloud_{subdir}_date", "") or "").strip()
+        type_filter = (_req.args.get(f"cloud_{subdir}_type", "all") or "all").lower().strip()
+    except Exception:
+        sort_mode = "recent"
+
+    folder = IDENTITIES_DIR / selected / subdir
+    files = []
+    if folder.exists():
+        files = [
+            p for p in folder.iterdir()
+            if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name
+        ]
+
+    # Filtre type (photo/vidéo) — appliqué après chargement, avant tri
+    if type_filter == "photo":
+        files = [p for p in files if p.suffix.lower() in IMAGE_EXTS]
+    elif type_filter == "video":
+        files = [p for p in files if p.suffix.lower() in VIDEO_EXTS]
+
+    # Filtre "Aller à la date" : ne garder que les fichiers de cette date
+    if filter_date:
+        try:
+            import datetime as _dt_fc
+            target = _dt_fc.date.fromisoformat(filter_date)
+            files = [
+                p for p in files
+                if _dt_fc.date.fromtimestamp(p.stat().st_mtime) == target
+            ]
+        except Exception:
+            pass
+
+    # Tri
+    if sort_mode == "asc":
+        files.sort(key=lambda p: p.stat().st_mtime)  # plus ancien d'abord
+    elif sort_mode == "desc" or sort_mode == "recent":
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)  # plus récent d'abord
+    else:  # "all" ou inconnu : tri alphabétique
+        files.sort(key=lambda p: p.name.lower())
+
+    # Construire les URLs de tri (préservant la sélection d'identité courante)
+    def _sort_url(value):
+        params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
+        if value != "recent":
+            params.append(f"cloud_{subdir}_sort={value}")
+        return "?" + "&".join(params)
+
+    # Compteur fichiers affichés (après filtre)
+    n_shown = len(files)
+    filter_label = ""
+    if filter_date:
+        filter_label = f" · filtré au {filter_date}"
+
+    sort_btn_html = (
+        "<div class='vault-sort'>"
+        "<button type='button' class='vault-sort-btn' onclick='vaultSortToggle(event,this)'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><line x1='4' y1='6' x2='20' y2='6'/><line x1='8' y1='12' x2='16' y2='12'/><line x1='10' y1='18' x2='14' y2='18'/></svg>"
+        f"<span>{('Tout' if sort_mode == 'all' else 'Récemment' if sort_mode == 'recent' else 'Croissant' if sort_mode == 'asc' else 'Décroissant' if sort_mode == 'desc' else 'Trier')}</span>"
+        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
+        "</button>"
+        "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
+        f"<a href='{_sort_url('all')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
+        "<span class='vault-radio'></span>Tout</a>"
+        f"<form method='GET' class='vault-sort-form'>"
+        f"<input type='hidden' name='tab' value='{tab_name}'>"
+        f"<input type='hidden' name='{subdir_key}' value='{selected}'>"
+        "<label class='vault-sort-item' style='cursor:default'>"
+        "<span class='vault-radio'></span>Aller à la date :</label>"
+        f"<input type='date' name='cloud_{subdir}_date' value='{filter_date}' onchange='this.form.submit()' "
+        "style='margin:6px 36px 8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:6px;font-size:12px;width:calc(100% - 72px)'>"
+        "</form>"
+        "<div class='vault-sort-sep'></div>"
+        f"<a href='{_sort_url('recent')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'recent' else '')}'>"
+        "<span class='vault-radio'></span>Récemment</a>"
+        "<div class='vault-sort-sep'></div>"
+        f"<a href='{_sort_url('asc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'asc' else '')}'>"
+        "<span class='vault-radio'></span>Croissant</a>"
+        f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
+        "<span class='vault-radio'></span>Décroissant</a>"
+        + (("<div class='vault-sort-sep'></div>"
+            "<button type='button' class='vault-sort-item' "
+            f"onclick='purgeBanger(\"{selected}\", this)' "
+            "style='width:100%;background:none;border:0;text-align:left;font-family:inherit;color:#f87171'>"
+            "<span class='vault-radio'></span>🗑 Vider le salon banger</button>")
+           if is_reels else "")
+        + "</div>"
+        "</div>"
+    )
+
+    # Bouton VISIBLE "Reels Banger" (uniquement sur les pages vidéo/reels) : filtre
+    # instantané pour n'afficher que les reels marqués ⭐ (banger_marks.json).
+    banger_toggle_html = (
+        "<button type='button' id='banger-toggle-btn' onclick='toggleBangerFilter(this)' "
+        "title='Afficher seulement les reels marqués ⭐ banger' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Reels Banger</button>"
+    ) if is_reels else ""
+
+    # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
+    # Reels = vidéos only, Posts = photos only → pas de filtre.
+    # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
+    type_filter_html = ""
+    if subdir in ("stories", "storyctas", "pro_stories", "pro_storyctas"):
+        def _type_url(value):
+            params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
+            if sort_mode and sort_mode != "recent":
+                params.append(f"cloud_{subdir}_sort={sort_mode}")
+            if filter_date:
+                params.append(f"cloud_{subdir}_date={filter_date}")
+            if value != "all":
+                params.append(f"cloud_{subdir}_type={value}")
+            return "?" + "&".join(params)
+
+        type_filter_html = (
+            "<div class='media-type-pills'>"
+            + f"<a href='{_type_url('all')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
+            + f"<a href='{_type_url('photo')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
+            + f"<a href='{_type_url('video')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
+            + "</div>"
+        )
+
+    # Mapping subdir -> upload tab name (pour le bouton + Add media)
+    upload_tab_map = {
+        "videos": ("reel", "Upload Reel", "Vidéo clean + caption + description", "Add media"),
+        "posts": ("post", "Upload Post", "Photo simple pour le feed", "Add media"),
+        "stories": ("story", "Upload Story", "Photo simple pour story", "Add media"),
+        "storyctas": ("storycta", "Story CTA", "Photo 1080x1920 pour CTA + lien", "Add media"),
+        "profile_pics": ("pp", "Photo de profil", "PP propre à cette identité", "Add media"),
+        "brutes": ("brute", "Rush brut", "Matière première des montages", "Add vidéo"),
+        "templates": ("template", "Template montage", "Modèle CapCut — apporte le son",
+                      "Add template"),
+        # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
+        # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
+        "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
+        "pro_posts": ("post", "Upload Post — Vault PRO", "Photo simple pour le feed", "Add media"),
+        "pro_stories": ("story", "Upload Story — Vault PRO", "Photo simple pour story", "Add media"),
+        "pro_storyctas": ("storycta", "Story CTA — Vault PRO", "Photo 1080x1920 pour CTA + lien", "Add media"),
+        "pro_profile_pics": ("pp", "Photo de profil — Vault PRO", "PP propre à cette identité", "Add media"),
+    }
+    # "" = Bibliothèque, "pro" = Vault PRO (lu par le champ caché des up-form).
+    # Le Vault PRO partage les MÊMES dossiers : c'est l'identité (préfixée
+    # v2_) qui la distingue, donc vault_key reste vide.
+    vault_key = "pro" if subdir.startswith(PRO_VAULT_PREFIX) else ""
+    add_media_btn = ""
+    if subdir in upload_tab_map:
+        _entry = upload_tab_map[subdir]
+        utab, utitle, usub = _entry[0], _entry[1], _entry[2]
+        _btn_lbl = _entry[3] if len(_entry) > 3 else "Add media"
+        # On cache la card identite + on l auto-remplit + on affiche un badge "Pour @<identity>"
+        add_media_btn = (
+            f"<button type='button' onclick=\"showTab('upload','{utab}','{utitle}','{usub}');"
+            f"upPrefillIdentity('{utab}', '{selected}', '{vault_key}', '{tab_name}');\" "
+            f"style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
+            f"background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;"
+            f"border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"
+            f"box-shadow:0 4px 12px rgba(59,130,246,.25);letter-spacing:.01em'>"
+            f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
+            f"{_btn_lbl}</button>"
+        )
+        if subdir == "templates":
+            # 📤 Partage des templates sélectionnés (cercles ⚪) à d'autres models
+            # — même modale que « Appliquer ce montage à… », montage compris.
+            add_media_btn = (
+                "<button type='button' onclick='tplShareOpen()' "
+                "title='Copier les templates sélectionnés (cercle ⚪) chez les autres models — montage, description et exemple compris' "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
+                "border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;"
+                "cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(168,85,247,.12);margin-right:8px'>"
+                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' "
+                "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
+                "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
+                "Partager</button>"
+            ) + add_media_btn
+        if subdir in ("brutes", "templates"):
+            # Import par lien : le champ vit DANS le formulaire d'upload
+            # (« 🔗 OU PAR LIEN ») — ici on n'affiche que le STATUT en cours.
+            _ls = _LINKIMP_STATUS
+            if _ls.get("subdir") == subdir and _ls.get("state") in ("running", "done", "error"):
+                if _ls.get("state") == "running":
+                    _txt = (f"⏳ Import lien {_ls.get('done', 0)}/{_ls.get('total', 0)} "
+                            f"pour @{_ls.get('identity', '')}…")
+                    _col = "#fbbf24"
+                elif _ls.get("state") == "error":
+                    _txt = f"❌ Import : {_ls.get('err', 'erreur')}"
+                    _col = "#f87171"
+                else:
+                    _txt = (f"✅ Import : {_ls.get('ok', 0)} ajouté(s)"
+                            + (f", {_ls.get('fail', 0)} échec(s) ({_ls.get('err', '')})" if _ls.get("fail") else ""))
+                    _col = "#22c55e"
+                # data-limpstat : le JS le met à jour tout seul toutes les 3s
+                add_media_btn += (
+                    f"<span data-limpstat='1' data-state='{_ls.get('state')}' "
+                    f"style='font-size:11.5px;color:{_col};margin-left:10px'>{_txt}</span>"
+                )
+        if subdir == "profile_pics":
+            # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
+            # (cercles ⚪) vers d'autres identités — les originaux restent.
+            add_media_btn += (
+                "<button type='button' onclick='ppApplyOpen()' "
+                "title='Copier les PP sélectionnées (⚪) vers d autres identités' "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
+                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
+                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
+                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7'/><polyline points='16 6 12 2 8 6'/><line x1='12' y1='2' x2='12' y2='15'/></svg>"
+                "Partager</button>"
+            )
+
+    gallery_header = (
+        # === Row 1 : identite a gauche + Add media a droite ===
+        f"<div class='vault-gallery-header' style='justify-content:space-between'>"
+        f"<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
+        f"<span data-vault-header-avatar style='display:inline-flex;flex-shrink:0'>{sel_avatar_html}</span>"
+        f"<div style='flex:1;min-width:0'>"
+        f"<div style='display:flex;align-items:center;gap:8px'>"
+        f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
+        f"</div></div>"
+        f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
+        # ✏️ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
+        f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
+        f"data-market='{identity_market(selected)}' "
+        f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
+        "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
+        "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
+        "cursor:pointer;font-family:inherit'>"
+        "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' "
+        "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+        "<path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>"
+        "<path d='M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z'/></svg>Modifier</button>"
+        f"{add_media_btn}"
+        f"</div>"
+        f"</div>"
+        # === Row 2 : tri + filtres ===
+        f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0;border-top:1px solid #232323'>"
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
+        + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
+        + f"</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{sort_btn_html}</div>"
+        f"</div>"
+    )
+
+    if not files:
+        gallery = (
+            gallery_header +
+            "<div style='padding:60px 20px;text-align:center;color:#666'>"
+            "<svg viewBox='0 0 24 24' width='44' height='44' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:12px;opacity:.4'><path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/></svg>"
+            f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{_v2_label(selected)}</p>"
+            "</div>"
+        )
+    else:
+        # === PAGINATION : ne render que les N premiers, le reste = lazy via Intersection Observer ===
+        INITIAL_BATCH = 24  # cards visibles direct (rapide a charger)
+        cards_html = []
+        # Pré-indexer les fichiers exemple par stem (pour swap clean -> example)
+        example_by_stem = {}
+        if folder.exists():
+            for pe in folder.iterdir():
+                if pe.is_file() and ".example" in pe.name:
+                    base_stem = pe.stem.replace(".example", "")
+                    example_by_stem[base_stem] = pe.name
+
+        total_files = len(files)
+        _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
+        _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
+        # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
+        # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
+        _va_ready_stems = set()
+        # templates/ compte aussi : un template approuve part chez les VA au
+        # meme titre qu'un reel (sinon le filigrane disparaissait au F5).
+        if (is_reels or subdir == "templates") and folder.exists():
+            import json as _jvr
+            for _mj in folder.glob("*.montage.json"):
+                try:
+                    _dv = _jvr.loads(_mj.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(_dv, dict) and _dv.get("va_ready"):
+                    _va_ready_stems.add(_mj.name[:-len(".montage.json")])
+        # PERF : pré-génère les thumbnails manquants en arrière-plan -> quand le
+        # navigateur les demande, ils sont déjà prêts (plus de ffmpeg bloquant).
+        try:
+            _pregen_thumbs_async([
+                (p, f"{selected}/{subdir}/{p.name}", p.suffix.lower() in VIDEO_EXTS)
+                for p in files])
+        except Exception:
+            pass
+        for idx, p in enumerate(files):
+            file_id = f"{selected}|{subdir}|{p.name}"
+            clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
+            ex_name = example_by_stem.get(p.stem)
+            if ex_name:
+                url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
+                second_url = clean_url
+            else:
+                url = clean_url
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
+                second_url = ""
+            # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
+            deferred = idx >= INITIAL_BATCH
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+        gallery = (
+            gallery_header
+            # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
+            # disponible (fenetre reduite, panneau ouvert a cote...). Avant :
+            # 3 colonnes FIGEES -> cartes minuscules sous des pastilles a
+            # taille fixe qui recouvraient tout.
+            + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px' id='vault-grid'>"
+            + "".join(cards_html)
+            + "</div>"
+        )
+        # Retour d'un upload de TEMPLATE : on enchaine directement sur l'editeur
+        # de montage du fichier qui vient d'etre depose (le plus recent = 1re
+        # carte). C'est le « je fais le montage et ca arrive » demande.
+        # NB : `request` n'est PAS global dans ce module (importé localement
+        # partout) — sans cet import, le NameError était avalé par le except
+        # et l'ouverture auto ne partait jamais, en silence.
+        _want_open = False
+        if subdir == "templates" and cards_html:
+            try:
+                from flask import request as _rq_open
+                _want_open = (_rq_open.args.get("openmontage") or "") == "1"
+            except Exception:
+                _want_open = False
+        if _want_open:
+            gallery += (
+                "<script>(function(){"
+                "var g=document.getElementById('vault-grid');if(!g)return;"
+                "var b=g.querySelector('.card-edit-btn[onclick*=nxMontageOpen]');"
+                "if(b)setTimeout(function(){b.click();},350);"
+                "})();</script>"
+            )
+        # Compteur en bas + auto-scroll trigger
+        if total_files > INITIAL_BATCH:
+            gallery += (
+                f"<div id='vault-load-status' style='text-align:center;padding:14px;color:#666;font-size:12px;margin-top:10px'>"
+                f"{INITIAL_BATCH} / {total_files} affiches — scroll pour charger plus"
+                f"</div>"
+            )
+
+    css = ""   # socle deplace dans _vault_core_html() (emis une fois)
 
     return (
         css
@@ -38123,6 +38142,8 @@ def _render_upload_inner(msg=None, error=None):
 
     html = (
         UPLOAD_HTML
+        # Socle des galeries : une seule fois pour toute la page.
+        .replace("{vault_core_html}", _vault_core_html())
         .replace("{markets_json}", _markets_json())
         .replace("{ident_opts}", opts)
         .replace("{pp_ident_opts}", pp_opts)
